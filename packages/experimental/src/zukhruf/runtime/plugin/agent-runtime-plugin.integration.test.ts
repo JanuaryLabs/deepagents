@@ -18,10 +18,11 @@ import {
   type AgentPluginDefinition,
   type AgentPluginHost,
   AgentRuntime,
-  type AgentRuntimeOptions,
+  type AgentStack,
   type SandboxContext,
   defineAgent,
   defineSandbox,
+  defineStack,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
 
@@ -30,7 +31,8 @@ const tool = defineTool({
   inputSchema: z.object({}).strict(),
   execute: () => Promise.resolve({ ok: true }),
 });
-const options = {} as AgentRuntimeOptions;
+const options = {} as Awaited<ReturnType<AgentStack>>;
+const stack = defineStack(async () => options);
 
 function plugin<Instance extends object>(
   name: string,
@@ -54,7 +56,7 @@ function declaration(
   });
 }
 
-test('one exported definition materializes fresh bound plugin instances per runtime', () => {
+test('one exported definition materializes fresh bound plugin instances per host', async () => {
   const value = new AgentPluginCapability<string>('test.value');
   const stateful = plugin(
     'stateful',
@@ -62,14 +64,18 @@ test('one exported definition materializes fresh bound plugin instances per runt
     [value],
   );
   const agent = declaration([stateful]);
-  const first = new AgentRuntime(agent, {
+  const firstSetup = new AgentRuntime(agent);
+  const firstStack = defineStack(async () => ({
     ...options,
     bindings: [value.bind('first')],
-  });
-  const second = new AgentRuntime(agent, {
+  }));
+  await using first = await firstSetup.initialize(firstStack);
+  const secondSetup = new AgentRuntime(agent);
+  const secondStack = defineStack(async () => ({
     ...options,
     bindings: [value.bind('second')],
-  });
+  }));
+  await using second = await secondSetup.initialize(secondStack);
 
   assert.notEqual(first.plugin(stateful), second.plugin(stateful));
   assert.notEqual(
@@ -80,7 +86,7 @@ test('one exported definition materializes fresh bound plugin instances per runt
   assert.equal(second.plugin(stateful).value, 'second');
 });
 
-test('AgentRuntime validates capability bindings during construction', () => {
+test('AgentRuntime validates capability bindings during initialization', async () => {
   const required = new AgentPluginCapability<string>('test.required');
   const unknown = new AgentPluginCapability<string>('test.unknown');
   const requiring = plugin(
@@ -90,29 +96,32 @@ test('AgentRuntime validates capability bindings during construction', () => {
   );
   const agent = declaration([requiring]);
 
-  assert.throws(
-    () => new AgentRuntime(agent, options),
+  const missingBindingRuntime = new AgentRuntime(agent);
+  await assert.rejects(
+    missingBindingRuntime.initialize(stack),
     /plugin "requiring" requires missing capability "test.required"/,
   );
-  assert.throws(
-    () =>
-      new AgentRuntime(agent, {
-        ...options,
-        bindings: [required.bind('one'), required.bind('two')],
-      }),
+  const duplicateBindingRuntime = new AgentRuntime(agent);
+  const duplicateBindingRuntimeStack = defineStack(async () => ({
+    ...options,
+    bindings: [required.bind('one'), required.bind('two')],
+  }));
+  await assert.rejects(
+    duplicateBindingRuntime.initialize(duplicateBindingRuntimeStack),
     /duplicate binding for capability "test.required"/,
   );
-  assert.throws(
-    () =>
-      new AgentRuntime(agent, {
-        ...options,
-        bindings: [required.bind('value'), unknown.bind('unused')],
-      }),
+  const unusedBindingRuntime = new AgentRuntime(agent);
+  const unusedBindingRuntimeStack = defineStack(async () => ({
+    ...options,
+    bindings: [required.bind('value'), unknown.bind('unused')],
+  }));
+  await assert.rejects(
+    unusedBindingRuntime.initialize(unusedBindingRuntimeStack),
     /unused binding for capability "test.unknown"/,
   );
 });
 
-test('one binding may satisfy several plugins requiring one capability', () => {
+test('one binding may satisfy several plugins requiring one capability', async () => {
   const shared = new AgentPluginCapability<object>('test.shared');
   const first = plugin(
     'first',
@@ -125,16 +134,18 @@ test('one binding may satisfy several plugins requiring one capability', () => {
     [shared],
   );
   const value = {};
-  const runtime = new AgentRuntime(declaration([first, second]), {
+  const runtimeSetup = new AgentRuntime(declaration([first, second]));
+  const stack = defineStack(async () => ({
     ...options,
     bindings: [shared.bind(value)],
-  });
+  }));
+  await using runtime = await runtimeSetup.initialize(stack);
 
   assert.equal(runtime.plugin(first).value, value);
   assert.equal(runtime.plugin(second).value, value);
 });
 
-test('missing bindings fail when their plugin is reached during construction', () => {
+test('missing bindings fail when their plugin is reached during initialization', async () => {
   const required = new AgentPluginCapability<string>('test.required');
   const created: string[] = [];
   const definitions = ['first', 'second', 'third'].map((name) =>
@@ -147,93 +158,91 @@ test('missing bindings fail when their plugin is reached during construction', (
       name === 'second' ? [required] : [],
     ),
   );
-  assert.throws(
-    () => new AgentRuntime(declaration(definitions), options),
+  const runtime = new AgentRuntime(declaration(definitions));
+  await assert.rejects(
+    runtime.initialize(stack),
     /plugin "second" requires missing capability "test.required"/,
   );
   assert.deepEqual(created, ['first']);
 });
 
-test('AgentRuntime rejects conflicting capability identities and undeclared access', () => {
+test('AgentRuntime rejects conflicting capability identities and undeclared access', async () => {
   const first = new AgentPluginCapability<string>('test.same');
   const second = new AgentPluginCapability<string>('test.same');
-  assert.throws(
-    () =>
-      new AgentRuntime(
-        declaration([
-          plugin('first', () => ({}), [first]),
-          plugin('second', () => ({}), [second]),
-        ]),
-        options,
-      ),
+  const conflictingCapabilitiesRuntime = new AgentRuntime(
+    declaration([
+      plugin('first', () => ({}), [first]),
+      plugin('second', () => ({}), [second]),
+    ]),
+  );
+  await assert.rejects(
+    conflictingCapabilitiesRuntime.initialize(stack),
     /capability "test.same" from plugin "second" conflicts with plugin "first"/,
   );
 
   const declared = new AgentPluginCapability<string>('test.declared');
   const undeclared = new AgentPluginCapability<string>('test.undeclared');
-  assert.throws(
-    () =>
-      new AgentRuntime(
-        declaration([
-          plugin(
-            'invalid',
-            (bindings) => ({ value: bindings.get(undeclared) }),
-            [declared],
-          ),
-        ]),
-        { ...options, bindings: [declared.bind('value')] },
-      ),
+  const undeclaredCapabilityRuntime = new AgentRuntime(
+    declaration([
+      plugin('invalid', (bindings) => ({ value: bindings.get(undeclared) }), [
+        declared,
+      ]),
+    ]),
+  );
+  const undeclaredCapabilityRuntimeStack = defineStack(async () => ({
+    ...options,
+    bindings: [declared.bind('value')],
+  }));
+  await assert.rejects(
+    undeclaredCapabilityRuntime.initialize(undeclaredCapabilityRuntimeStack),
     /plugin "invalid" did not declare capability "test.undeclared"/,
   );
 });
 
-test('AgentRuntime validates names and tool collisions on materialized plugins', () => {
-  assert.throws(
-    () => new AgentRuntime(declaration([plugin('', () => ({}))]), options),
+test('AgentRuntime validates names and tool collisions on materialized plugins', async () => {
+  const emptyNameRuntime = new AgentRuntime(
+    declaration([plugin('', () => ({}))]),
+  );
+  await assert.rejects(
+    emptyNameRuntime.initialize(stack),
     /plugin name cannot be empty/,
   );
-  assert.throws(
-    () =>
-      new AgentRuntime(
-        declaration([plugin('same', () => ({})), plugin('same', () => ({}))]),
-        options,
-      ),
+  const duplicateNamesRuntime = new AgentRuntime(
+    declaration([plugin('same', () => ({})), plugin('same', () => ({}))]),
+  );
+  await assert.rejects(
+    duplicateNamesRuntime.initialize(stack),
     /duplicate plugin name "same"/,
   );
-  assert.throws(
-    () =>
-      new AgentRuntime(
-        declaration([
-          plugin('one', () => ({ tools: { Echo: tool } })),
-          plugin('two', () => ({ tools: { Echo: tool } })),
-        ]),
-        options,
-      ),
+  const conflictingToolsRuntime = new AgentRuntime(
+    declaration([
+      plugin('one', () => ({ tools: { Echo: tool } })),
+      plugin('two', () => ({ tools: { Echo: tool } })),
+    ]),
+  );
+  await assert.rejects(
+    conflictingToolsRuntime.initialize(stack),
     /plugin tool "Echo" from "two" conflicts with plugin "one"/,
   );
-  assert.throws(
-    () =>
-      new AgentRuntime(
-        declaration([plugin('echo', () => ({ tools: { Echo: tool } }))], {
-          Echo: tool,
-        }),
-        options,
-      ),
+  const localToolConflictRuntime = new AgentRuntime(
+    declaration([plugin('echo', () => ({ tools: { Echo: tool } }))], {
+      Echo: tool,
+    }),
+  );
+  await assert.rejects(
+    localToolConflictRuntime.initialize(stack),
     /tool "Echo" on agent "root" conflicts with plugin "echo"/,
   );
-  assert.throws(
-    () =>
-      new AgentRuntime(
-        declaration([
-          plugin('spawn', () => ({ tools: { spawn_agent: tool } })),
-        ]),
-        options,
-      ),
+  const reservedToolConflictRuntime = new AgentRuntime(
+    declaration([plugin('spawn', () => ({ tools: { spawn_agent: tool } }))]),
+  );
+  await assert.rejects(
+    reservedToolConflictRuntime.initialize(stack),
     /plugin tool "spawn_agent" from "spawn" conflicts with the runtime/,
   );
 });
 
-test('static tool collisions fail before plugin configuration runs', () => {
+test('static tool collisions fail before plugin configuration runs', async () => {
   let configured = false;
   const first = plugin('first', () => ({
     tools: { Echo: tool },
@@ -243,14 +252,15 @@ test('static tool collisions fail before plugin configuration runs', () => {
     },
   }));
   const second = plugin('second', () => ({ tools: { Echo: tool } }));
-  assert.throws(
-    () => new AgentRuntime(declaration([first, second]), options),
+  const runtime = new AgentRuntime(declaration([first, second]));
+  await assert.rejects(
+    runtime.initialize(stack),
     /plugin tool "Echo" from "second" conflicts with plugin "first"/,
   );
   assert.equal(configured, false);
 });
 
-test('plugin configuration is ordered and cannot replace the root plugin composition', () => {
+test('plugin configuration is ordered and cannot replace the root plugin composition', async () => {
   const events: string[] = [];
   const first = plugin('first', () => ({
     configure(root) {
@@ -265,7 +275,8 @@ test('plugin configuration is ordered and cannot replace the root plugin composi
       return root;
     },
   }));
-  const runtime = new AgentRuntime(declaration([first, second]), options);
+  const runtimeSetup = new AgentRuntime(declaration([first, second]));
+  await using runtime = await runtimeSetup.initialize(stack);
   assert.deepEqual(events, ['first', 'second']);
   assert.equal(runtime.info.agents[0]?.description, 'configured');
   assert.throws(
@@ -275,8 +286,9 @@ test('plugin configuration is ordered and cannot replace the root plugin composi
   const replacing = plugin('replacing', () => ({
     configure: (root) => ({ ...root, plugins: [] }),
   }));
-  assert.throws(
-    () => new AgentRuntime(declaration([replacing]), options),
+  const replacingRuntime = new AgentRuntime(declaration([replacing]));
+  await assert.rejects(
+    replacingRuntime.initialize(stack),
     /plugins cannot change the root plugin composition/,
   );
 });
@@ -305,7 +317,8 @@ test('failed plugin workers close earlier workers while initialization resources
       },
     })),
   );
-  await using runtime = new AgentRuntime(declaration(definitions), options);
+  const runtimeSetup = new AgentRuntime(declaration(definitions));
+  await using runtime = await runtimeSetup.initialize(stack);
   await assert.rejects(runtime.work(), (error) => error === failing);
   assert.deepEqual(events, [
     'first:initialize',
@@ -323,20 +336,22 @@ test('failed plugin workers close earlier workers while initialization resources
   ]);
 });
 
-test('code_mode is reserved only when code mode is enabled', () => {
+test('code_mode is reserved only when code mode is enabled', async () => {
   const custom = plugin('custom', () => ({ tools: { code_mode: tool } }));
-  assert.doesNotThrow(() => new AgentRuntime(declaration([custom]), options));
-  assert.throws(
-    () =>
-      new AgentRuntime(declaration([custom]), {
-        ...options,
-        multiAgent: { nonCodeModeOnly: false },
-      }),
+  const runtime = new AgentRuntime(declaration([custom]));
+  await using host = await runtime.initialize(stack);
+  const codeModeRuntime = new AgentRuntime(declaration([custom]));
+  const codeModeRuntimeStack = defineStack(async () => ({
+    ...options,
+    multiAgent: { nonCodeModeOnly: false },
+  }));
+  await assert.rejects(
+    codeModeRuntime.initialize(codeModeRuntimeStack),
     /plugin tool "code_mode" from "custom" conflicts with the runtime/,
   );
 });
 
-test('AgentRuntime rejects duplicate plugin skills during construction', async () => {
+test('AgentRuntime rejects duplicate plugin skills during initialization', async () => {
   await using directory = await mkdtempDisposable(
     join(tmpdir(), 'zukhruf-plugin-skill-'),
   );
@@ -349,25 +364,25 @@ test('AgentRuntime rejects duplicate plugin skills during construction', async (
     ),
   );
 
-  assert.throws(
-    () =>
-      new AgentRuntime(
-        declaration([
-          plugin('one', () => ({ skills: [skillDirectory] })),
-          plugin('two', () => ({ skills: [skillDirectory] })),
-        ]),
-        options,
-      ),
+  const duplicateSkillsRuntime = new AgentRuntime(
+    declaration([
+      plugin('one', () => ({ skills: [skillDirectory] })),
+      plugin('two', () => ({ skills: [skillDirectory] })),
+    ]),
+  );
+  await assert.rejects(
+    duplicateSkillsRuntime.initialize(stack),
     /duplicate plugin skill "duplicate"/,
   );
 });
 
-test('AgentRuntime rejects unknown agent plugin skill selections', () => {
+test('AgentRuntime rejects unknown agent plugin skill selections', async () => {
   const agent = declaration();
   agent.skills = ['missing'];
 
-  assert.throws(
-    () => new AgentRuntime(agent, options),
+  const runtime = new AgentRuntime(agent);
+  await assert.rejects(
+    runtime.initialize(stack),
     /agent "root" references unknown plugin skill "missing"/,
   );
 });
@@ -392,9 +407,8 @@ test('skill composition collects directories before configure and loads their co
       },
     };
   });
-  assert.doesNotThrow(
-    () => new AgentRuntime(declaration([configured]), options),
-  );
+  const runtime = new AgentRuntime(declaration([configured]));
+  await using host = await runtime.initialize(stack);
 });
 
 test('agent composition reads configured sources and validates the graph before skill loading', async () => {
@@ -415,7 +429,8 @@ test('agent composition reads configured sources and validates the graph before 
       },
     };
   });
-  const runtime = new AgentRuntime(declaration([configured]), options);
+  const runtimeSetup = new AgentRuntime(declaration([configured]));
+  await using runtime = await runtimeSetup.initialize(stack);
   assert.deepEqual(
     runtime.info.agents.map(({ name }) => name),
     ['root', 'engineering:reviewer'],
@@ -423,17 +438,16 @@ test('agent composition reads configured sources and validates the graph before 
   const missingSkills = plugin('skills', () => ({
     skills: [join(directory.path, 'missing-skill')],
   }));
-  assert.throws(
-    () =>
-      new AgentRuntime(
-        defineAgent({
-          ...declaration([configured, missingSkills]),
-          subagents: [
-            defineAgent({ ...declaration(), name: 'engineering:reviewer' }),
-          ],
-        }),
-        options,
-      ),
+  const conflictingAgentsRuntime = new AgentRuntime(
+    defineAgent({
+      ...declaration([configured, missingSkills]),
+      subagents: [
+        defineAgent({ ...declaration(), name: 'engineering:reviewer' }),
+      ],
+    }),
+  );
+  await assert.rejects(
+    conflictingAgentsRuntime.initialize(stack),
     /duplicate agent declaration name "engineering:reviewer"/,
   );
 });
@@ -458,14 +472,14 @@ test('AgentRuntime loads deterministic plugin-scoped agents before startup', asy
     join(directory.path, 'linked.md'),
   );
 
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     declaration([
       plugin('engineering', () => ({
         agents: [pathToFileURL(directory.path)],
       })),
     ]),
-    options,
   );
+  await using runtime = await runtimeSetup.initialize(stack);
 
   assert.deepEqual(
     runtime.info.agents.map(({ name, plugin }) => [name, plugin]),
@@ -491,14 +505,11 @@ test('AgentRuntime rejects malformed and duplicate plugin agent declarations', a
     join(malformed.path, 'reviewer.md'),
     '---\nname: reviewer\ndescription: Reviewer.\ntools: []\n---\n\nReview.\n',
   );
-  assert.throws(
-    () =>
-      new AgentRuntime(
-        declaration([
-          plugin('engineering', () => ({ agents: [malformed.path] })),
-        ]),
-        options,
-      ),
+  const malformedAgentsRuntime = new AgentRuntime(
+    declaration([plugin('engineering', () => ({ agents: [malformed.path] }))]),
+  );
+  await assert.rejects(
+    malformedAgentsRuntime.initialize(stack),
     /unknown frontmatter field "tools"/,
   );
 
@@ -516,40 +527,37 @@ test('AgentRuntime rejects malformed and duplicate plugin agent declarations', a
     join(second.path, 'reviewer.md'),
     agentDeclaration('reviewer'),
   );
-  assert.throws(
-    () =>
-      new AgentRuntime(
-        declaration([
-          plugin('engineering', () => ({
-            agents: [first.path, second.path],
-          })),
-        ]),
-        options,
-      ),
+  const duplicateAgentsRuntime = new AgentRuntime(
+    declaration([
+      plugin('engineering', () => ({
+        agents: [first.path, second.path],
+      })),
+    ]),
+  );
+  await assert.rejects(
+    duplicateAgentsRuntime.initialize(stack),
     /duplicate agent declaration name "engineering:reviewer"/,
   );
 });
 
-test('AgentRuntime rejects context collisions and subagent plugins', () => {
-  assert.throws(
-    () =>
-      new AgentRuntime(
-        declaration([
-          plugin('one', () => ({ runtimeContext: { shared: 1 } })),
-          plugin('two', () => ({ runtimeContext: { shared: 2 } })),
-        ]),
-        options,
-      ),
+test('AgentRuntime rejects context collisions and subagent plugins', async () => {
+  const conflictingContextRuntime = new AgentRuntime(
+    declaration([
+      plugin('one', () => ({ runtimeContext: { shared: 1 } })),
+      plugin('two', () => ({ runtimeContext: { shared: 2 } })),
+    ]),
+  );
+  await assert.rejects(
+    conflictingContextRuntime.initialize(stack),
     /runtime context "shared" from plugin "two" conflicts with plugin "one"/,
   );
-  assert.throws(
-    () =>
-      new AgentRuntime(
-        declaration([
-          plugin('reserved', () => ({ runtimeContext: { zukhruf: true } })),
-        ]),
-        options,
-      ),
+  const reservedContextRuntime = new AgentRuntime(
+    declaration([
+      plugin('reserved', () => ({ runtimeContext: { zukhruf: true } })),
+    ]),
+  );
+  await assert.rejects(
+    reservedContextRuntime.initialize(stack),
     /runtime context "zukhruf" from plugin "reserved" conflicts with the runtime/,
   );
 
@@ -560,18 +568,17 @@ test('AgentRuntime rejects context collisions and subagent plugins', () => {
     instructions: [],
     plugins: [plugin('child-plugin', () => ({}))],
   });
-  assert.throws(
-    () =>
-      new AgentRuntime(
-        defineAgent({
-          name: 'root',
-          model: {} as AgentModel,
-          sandbox: async () => ({}) as AgentSandbox,
-          instructions: [],
-          subagents: [child],
-        }),
-        options,
-      ),
+  const childPluginsRuntime = new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: {} as AgentModel,
+      sandbox: async () => ({}) as AgentSandbox,
+      instructions: [],
+      subagents: [child],
+    }),
+  );
+  await assert.rejects(
+    childPluginsRuntime.initialize(stack),
     /subagent "child" cannot declare runtime plugins/,
   );
 });
@@ -603,9 +610,8 @@ test('host.sandbox attaches the configured root sandbox before the conversation 
       instructions: [],
       plugins: [capturing],
     }),
-    options,
   );
-  await runtime.initialize();
+  await using ready = await runtime.initialize(stack);
   const [host] = hosts;
   assert.ok(host);
 
@@ -616,12 +622,14 @@ test('host.sandbox attaches the configured root sandbox before the conversation 
   assert.equal(configuredAttaches, 1);
 });
 
-test('asynchronous initialization is shared and runtime disposal waits for it', async () => {
+test('each initialization creates an independent host with its own plugin resources', async () => {
   const gate = Promise.withResolvers<void>();
+  const connected = Promise.withResolvers<void>();
   const events: string[] = [];
   const asynchronous = plugin('async', () => ({
     async initialize() {
       events.push('connect');
+      if (events.length === 2) connected.resolve();
       await gate.promise;
       return {
         tools: { Echo: tool },
@@ -631,16 +639,20 @@ test('asynchronous initialization is shared and runtime disposal waits for it', 
       };
     },
   }));
-  const runtime = new AgentRuntime(declaration([asynchronous]), options);
-  const initialized = runtime.initialize();
-  assert.equal(runtime.initialize(), initialized);
-  const disposed = runtime[Symbol.asyncDispose]();
-  assert.equal(runtime[Symbol.asyncDispose](), disposed);
-  await assert.rejects(runtime.initialize(), /runtime is disposed/);
-  assert.deepEqual(events, ['connect']);
+  const runtime = new AgentRuntime(declaration([asynchronous]));
+  const firstInitializing = runtime.initialize(stack);
+  const secondInitializing = runtime.initialize(stack);
+  assert.notEqual(firstInitializing, secondInitializing);
+  await connected.promise;
+  assert.deepEqual(events, ['connect', 'connect']);
   gate.resolve();
-  await Promise.all([initialized, disposed]);
-  assert.deepEqual(events, ['connect', 'close']);
+  const first = await firstInitializing;
+  const second = await secondInitializing;
+  await Promise.all([
+    first[Symbol.asyncDispose](),
+    second[Symbol.asyncDispose](),
+  ]);
+  assert.deepEqual(events, ['connect', 'connect', 'close', 'close']);
 });
 
 test('later initialization failures dispose acquired resources in reverse order', async () => {
@@ -660,13 +672,10 @@ test('later initialization failures dispose acquired resources in reverse order'
       throw new Error('startup failed');
     },
   }));
-  await using runtime = new AgentRuntime(
+  const runtime = new AgentRuntime(
     declaration([acquired('one'), acquired('two'), failing]),
-    options,
   );
-  await assert.rejects(runtime.initialize(), /startup failed/);
-  assert.deepEqual(closed, ['two', 'one']);
-  await runtime[Symbol.asyncDispose]();
+  await assert.rejects(runtime.initialize(stack), /startup failed/);
   assert.deepEqual(closed, ['two', 'one']);
 });
 
@@ -716,8 +725,8 @@ test('asynchronously discovered tools retain every collision boundary', async (t
           defineAgent({ ...declaration([], { Echo: tool }), name: 'child' }),
         ];
       }
-      await using runtime = new AgentRuntime(root, options);
-      await assert.rejects(runtime.initialize(), /conflicts with/);
+      const runtime = new AgentRuntime(root);
+      await assert.rejects(runtime.initialize(stack), /conflicts with/);
       assert.equal(closed, 1);
     });
   }
@@ -737,20 +746,18 @@ test('a discovered tool collision stops later initialization and rolls back reso
         };
       },
     }));
-  await using runtime = new AgentRuntime(
+  const runtime = new AgentRuntime(
     declaration([
       discovered('first'),
       discovered('second'),
       discovered('third'),
     ]),
-    options,
   );
-  const initialization = runtime.initialize();
+  const initialization = runtime.initialize(stack);
   await assert.rejects(
     initialization,
     /plugin tool "Echo" from "second" conflicts with plugin "first"/,
   );
-  assert.equal(runtime.initialize(), initialization);
   assert.deepEqual(events, [
     'first:initialize',
     'second:initialize',
@@ -765,16 +772,15 @@ test('different agents may share local tool names before and after discovery', a
       return { tools: { Shared: tool }, async [Symbol.asyncDispose]() {} };
     },
   }));
-  await using runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       ...declaration([discovered], { Echo: tool }),
       subagents: [
         defineAgent({ ...declaration([], { Echo: tool }), name: 'child' }),
       ],
     }),
-    options,
   );
-  await runtime.initialize();
+  await using runtime = await runtimeSetup.initialize(stack);
 });
 
 function agentDeclaration(name: string): string {

@@ -34,7 +34,8 @@ results held by the root.
   `agent.ts` also installs the run's telemetry plugin.
 - `subagents/participant/` owns the shared parameterized participant
   declaration, instructions, and read-only sandbox.
-- `run.ts` owns runtime initialization and the executable scenario.
+- `stack.ts` defines the lazy in-memory stores and PGlite queue.
+- `run.ts` composes the runtime, starts its worker, and executes the scenario.
 - `environment.ts` holds run-local paths.
 - `channels/`, `connections/`, `schedules/`, `skills/`, and `tools/` are
   reserved declaration slots.

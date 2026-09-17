@@ -10,10 +10,11 @@ The smallest complete Zukhruf deployable unit.
 - `skills/<name>/SKILL.md` declares skills discovered from that sandbox once per
   conversation. Only each skill's name, description, and model-visible path are
   persisted; its files remain in the sandbox.
-- `run.ts` initializes and exports the runtime with its durable queue and stores.
-- `server.ts` is the top-level process: it imports the runtime, mounts the
-  authenticated Zukhruf protocol at `/zukhruf/v1` and the DevTool UI at
-  `/devtool`, and owns shutdown.
+- `stack.ts` defines the lazy queue and store composition.
+- `run.ts` constructs and exports `runtime`; `server.ts` initializes its disposable `host` from the stack.
+- `server.ts` is the top-level process: it initializes the runtime, starts its
+  worker, mounts the authenticated Zukhruf protocol at `/zukhruf/v1` and the
+  DevTool UI at `/devtool`, and owns shutdown.
 - `channels/`, `connections/`, and `schedules/` remain reserved declaration
   slots. `subagents/` and `tools/` hold declarations imported by `agent.ts`.
 
@@ -25,16 +26,16 @@ nx run @deepagents/devtool:build && node --env-file=.env demo/zukhruf-simple/ser
 
 Open the printed URL, `http://127.0.0.1:4317/devtool`. The declaration's
 `fileTelemetry()` plugin records telemetry and exposes authenticated traces;
-`server.ts` imports the initialized runtime and serves one Hono server. Ctrl+C
+`server.ts` initializes the runtime and serves one Hono server. Ctrl+C
 disposes the server, worker, browser connection, queue, and stores together.
 
 ## WebMCP
 
 Install Google Chrome 150 or newer. The demo launches its own visible Chrome
-window on the first browser tool call, with WebMCP enabled automatically. No Chrome
-flag or Codex MCP configuration is needed. Its temporary browser profile is shared
-across this local demo's chats and discarded when the browser closes. Sign in to
-websites in that window when needed.
+window on the first browser tool call, with WebMCP enabled automatically. No
+Chrome flag or Codex MCP configuration is needed. Its temporary browser profile
+is shared across this local demo's chats and discarded when the browser closes.
+Sign in to websites in that window when needed.
 
 Try this in the DevTool chat:
 

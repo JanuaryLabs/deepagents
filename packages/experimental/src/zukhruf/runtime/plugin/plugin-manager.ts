@@ -36,8 +36,6 @@ export class PluginManager implements AsyncDisposable {
   readonly #plugins: readonly MaterializedAgentPlugin[];
   readonly #toolComposition: PluginToolComposition;
   readonly #resources = new AsyncDisposableStack();
-  #initialization?: Promise<void>;
-  #disposal?: Promise<void>;
 
   constructor(
     root: AgentDeclaration,
@@ -92,26 +90,8 @@ export class PluginManager implements AsyncDisposable {
     this.#toolComposition = toolComposition;
   }
 
-  initialize(host: AgentPluginHost): Promise<void> {
-    if (this.#disposal) {
-      return Promise.reject(new Error('AgentRuntime: runtime is disposed'));
-    }
-    if (!this.#initialization) this.#initialization = this.#initialize(host);
-    return this.#initialization;
-  }
-
   [Symbol.asyncDispose](): Promise<void> {
-    if (!this.#disposal) {
-      this.#disposal = this.#dispose();
-    }
-    return this.#disposal;
-  }
-
-  async #dispose(): Promise<void> {
-    // Initialization reports its own failure and rolls back acquired resources.
-    // Disposal still waits for an in-flight connection before closing its scope.
-    await this.#initialization?.catch(() => {});
-    await this.#resources.disposeAsync();
+    return this.#resources.disposeAsync();
   }
 
   get<Instance extends object>(
@@ -150,19 +130,19 @@ export class PluginManager implements AsyncDisposable {
   async startWorkers(
     host: AgentPluginHost,
     workers: AsyncDisposableStack,
+    waitForActive: boolean,
   ): Promise<void> {
     // Share the queue worker's disposal scope to preserve error suppression order.
     for (const { instance } of this.#plugins) {
-      if (instance.work) workers.use(await instance.work(host));
+      if (instance.work) workers.use(await instance.work(host, waitForActive));
     }
   }
 
-  async #initialize(host: AgentPluginHost): Promise<void> {
-    await using resources = new AsyncDisposableStack();
+  async initialize(host: AgentPluginHost): Promise<void> {
     for (const { definition, instance } of this.#plugins) {
       const initialized = await instance.initialize?.(host);
       if (!initialized) continue;
-      resources.use(initialized);
+      this.#resources.use(initialized);
       if (initialized.tools) {
         this.#toolComposition.add(definition.name, initialized.tools);
       }
@@ -171,7 +151,6 @@ export class PluginManager implements AsyncDisposable {
       this.tools,
       this.#toolComposition.compose(this.declarations.values()),
     );
-    this.#resources.use(resources.move());
   }
 
   async conversationAvailable(

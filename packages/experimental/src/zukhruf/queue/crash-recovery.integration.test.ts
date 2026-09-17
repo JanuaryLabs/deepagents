@@ -23,6 +23,7 @@ import {
   AgentRuntime,
   PgBossTurnQueue,
   SqliteMailboxStore,
+  defineStack,
 } from '@deepagents/experimental/zukhruf';
 import { withPostgresContainer } from '@deepagents/test';
 
@@ -219,12 +220,14 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
         store: streamStore,
         changeSource: new PollingChangeSource({ reads: streamStore }),
       });
-      const runtime = new AgentRuntime(declaration(fastModel(calls)), {
+      const runtimeSetup = new AgentRuntime(declaration(fastModel(calls)));
+      const stack = defineStack(async () => ({
         store,
         streams,
         queue,
         mailboxStore,
-      });
+      }));
+      const runtime = await runtimeSetup.initialize(stack);
       const conversation = { chatId: 'crash-chat', userId: 'u1' };
 
       let child: ReturnType<typeof spawn> | undefined;

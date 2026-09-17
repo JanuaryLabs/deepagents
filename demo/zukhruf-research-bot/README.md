@@ -25,10 +25,11 @@ Nothing waits for a child agent. The runtime host only loads these declarations
 and keeps the worker alive; it does not create a conversation or submit a turn.
 
 The declaration's `fileTelemetry()` plugin records AI SDK OpenTelemetry spans
-as Halo-compatible JSONL in `./telemetry.json` and advertises the `traces` capability from
-`/zukhruf/v1/info`. `run.ts` starts the worker; `server.ts` serves one Hono
-server that imports the runtime, mounts the authenticated Zukhruf protocol at
-`/zukhruf/v1` and the `@deepagents/devtool` UI at `/devtool`, and owns shutdown.
+as Halo-compatible JSONL in `./telemetry.json` and advertises the `traces`
+capability from `/zukhruf/v1/info`. `server.ts` starts the worker and serves one
+Hono server that imports the runtime, mounts the authenticated Zukhruf protocol
+at `/zukhruf/v1` and the `@deepagents/devtool` UI at `/devtool`, and owns
+shutdown.
 Open the printed `/devtool` URL while the host is running to inspect persisted
 root conversations from the History sidebar. Each conversation's underlined
 **Traces** link opens its model steps, tool calls, timings, usage, inputs,
@@ -50,10 +51,10 @@ remain `running` until the continuation settles.
 - `subagents/researcher/` — a self-contained web researcher declaration that
   sends sourced findings directly to `/root`.
 - Each agent folder owns its declaration, instructions, and per-chat sandbox.
-- `run.ts` — initializes and exports the runtime, stores, queue, and concurrent
-  worker; it contains no turn submission.
-- `server.ts` — the top-level process that imports the runtime, mounts the
-  authenticated Zukhruf protocol at `/zukhruf/v1` and the DevTool UI at
+- `stack.ts` — declares the lazy queue and store composition.
+- `run.ts` — composes and exports the runtime; it contains no turn submission.
+- `server.ts` — the top-level process that starts the concurrent worker, mounts
+  the authenticated Zukhruf protocol at `/zukhruf/v1` and the DevTool UI at
   `/devtool`, and owns shutdown.
 - `channels/`, `connections/`, `schedules/`, `skills/`, and `tools/` are
   reserved declaration slots.

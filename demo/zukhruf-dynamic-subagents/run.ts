@@ -1,21 +1,9 @@
-import { PGlite } from '@electric-sql/pglite';
 import { parseArgs } from 'node:util';
-import { PgBoss, fromPglite } from 'pg-boss';
 
-import {
-  InMemoryContextStore,
-  PollingChangeSource,
-  SqliteStreamStore,
-  StreamManager,
-} from '@deepagents/context';
-import {
-  AgentRuntime,
-  PgBossTurnQueue,
-  SqliteMailboxStore,
-  renderTurn,
-} from '@deepagents/experimental/zukhruf';
+import { AgentRuntime, renderTurn } from '@deepagents/experimental/zukhruf';
 
 import { createCodingAgent } from './agent.ts';
+import stack from './stack.ts';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -34,36 +22,11 @@ if (!process.env.OPENAI_API_KEY) {
 }
 
 const root = createCodingAgent(values.workspace ?? process.cwd());
-await using resources = new AsyncDisposableStack();
-const database = resources.adopt(new PGlite(), (database) => database.close());
-const boss = resources.adopt(
-  new PgBoss({ db: fromPglite(database), backend: 'pglite' }),
-  (boss) => boss.stop(),
-);
-boss.on('error', (error) => console.error('[queue error]', error));
-await boss.start();
+const runtime = new AgentRuntime(root);
+await using host = await runtime.initialize(stack);
+await using worker = await host.work({ concurrency: 4 });
 
-const queue = new PgBossTurnQueue(boss, {
-  pollingIntervalSeconds: 0.5,
-  schema: 'pgboss',
-});
-await queue.initialize();
-const streamStore = resources.adopt(
-  new SqliteStreamStore(':memory:'),
-  (store) => store.close(),
-);
-const runtime = new AgentRuntime(root, {
-  store: new InMemoryContextStore(),
-  streams: new StreamManager({
-    store: streamStore,
-    changeSource: new PollingChangeSource({ reads: streamStore }),
-  }),
-  queue,
-  mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
-});
-resources.use(await runtime.work({ concurrency: 4 }));
-
-const turn = await runtime.enqueue(
+const turn = await host.enqueue(
   { chatId: crypto.randomUUID(), userId: process.env.USER ?? 'demo' },
   {
     message: {

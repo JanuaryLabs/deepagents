@@ -438,3 +438,33 @@ test('PgBossWakeScheduler retries after a PostgreSQL worker dies mid-handler', a
     }
   });
 });
+
+test('PgBossWakeScheduler can drain a claimed wake before releasing its resources', async () => {
+  await using h = await pgliteHarness();
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  await h.scheduler.schedule(dueWake('drain'));
+  const worker = await h.scheduler.consume(async () => {
+    entered.resolve();
+    await release.promise;
+  }, true);
+  let disposing: PromiseLike<void> | undefined;
+  try {
+    await entered.promise;
+    disposing = worker[Symbol.asyncDispose]();
+    assert.equal(
+      await Promise.race([
+        disposing.then(() => 'disposed'),
+        sleep(25).then(() => 'active'),
+      ]),
+      'active',
+    );
+    release.resolve();
+    await disposing;
+    assert.equal((await h.boss.findJobs(h.queue)).length, 0);
+  } finally {
+    release.resolve();
+    await disposing;
+    await worker[Symbol.asyncDispose]();
+  }
+});

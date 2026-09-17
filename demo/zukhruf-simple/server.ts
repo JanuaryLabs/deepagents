@@ -8,9 +8,11 @@ import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 import { uploadsHttp } from '@deepagents/experimental/zukhruf/uploads/http';
 
 import { imageUploads, traceTelemetry } from './agent.ts';
-import runtime, { resources } from './run.ts';
+import runtime from './run.ts';
+import stack from './stack.ts';
 
-await using runtimeResources = resources;
+await using host = await runtime.initialize(stack);
+await using worker = await host.work();
 
 const app = new Hono<HttpEnv>();
 const devtoolPath = '/devtool';
@@ -21,7 +23,7 @@ app.use('/zukhruf/v1/*', (context, next) => {
 app.route(
   '/zukhruf/v1',
   http(
-    runtime,
+    host,
     uploadsHttp(imageUploads, { maxBytes: 20 * 1024 * 1024 }),
     tracesHttp(traceTelemetry),
   ),
@@ -29,10 +31,10 @@ app.route(
 app.route(devtoolPath, devtool());
 
 const started = Promise.withResolvers<URL>();
-runtimeResources.use(
-  serve({ fetch: app.fetch, hostname: '127.0.0.1', port: 4317 }, ({ port }) =>
+await using server = serve(
+  { fetch: app.fetch, hostname: '127.0.0.1', port: 4317 },
+  ({ port }) =>
     started.resolve(new URL(devtoolPath, `http://127.0.0.1:${port}`)),
-  ),
 );
 console.log(styleText('bold', `Open ${(await started.promise).href}`));
 console.log(styleText('dim', 'Press Ctrl+C to stop.'));

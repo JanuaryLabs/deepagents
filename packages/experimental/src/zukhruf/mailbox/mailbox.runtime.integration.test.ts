@@ -25,6 +25,7 @@ import {
   SqliteMailboxStore,
   type TurnRef,
   createInterAgentCommunication,
+  defineStack,
 } from '@deepagents/experimental/zukhruf';
 
 function streamsFor(store: StreamStore): StreamManager {
@@ -79,12 +80,14 @@ async function runtimeHarness(
     });
   await turnQueue.initialize();
   const streamStore = new SqliteStreamStore(':memory:');
-  const runtime = new AgentRuntime(declaration, {
+  const runtimeSetup = new AgentRuntime(declaration);
+  const runtimeStack = defineStack(async () => ({
     store: new InMemoryContextStore(),
     streams: streamsFor(streamStore),
     queue: turnQueue,
     mailboxStore,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack);
   return {
     runtime,
     boss,

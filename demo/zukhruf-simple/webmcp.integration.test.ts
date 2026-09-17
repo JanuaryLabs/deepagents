@@ -22,6 +22,7 @@ import {
   SqliteMailboxStore,
   defineAgent,
   defineSandbox,
+  defineStack,
 } from '@deepagents/experimental/zukhruf';
 
 test('SimpleAgent discovers and executes a website tool through native WebMCP', async () => {
@@ -155,29 +156,28 @@ test('SimpleAgent discovers and executes a website tool through native WebMCP', 
     (plugin) => plugin.name === 'browser',
   );
   assert.ok(browser);
-  const runtime = resources.use(
-    new AgentRuntime(
-      defineAgent({
-        ...declaration,
-        model,
-        plugins: [browser],
-        sandbox: defineSandbox(async () =>
-          createVirtualSandbox({ fs: new InMemoryFs() }),
-        ),
-      }),
-      {
-        store: new InMemoryContextStore(),
-        streams: new StreamManager({
-          store: streamStore,
-          changeSource: new PollingChangeSource({ reads: streamStore }),
-        }),
-        queue,
-        mailboxStore,
-      },
-    ),
+  const runtime = new AgentRuntime(
+    defineAgent({
+      ...declaration,
+      model,
+      plugins: [browser],
+      sandbox: defineSandbox(async () =>
+        createVirtualSandbox({ fs: new InMemoryFs() }),
+      ),
+    }),
   );
-  resources.use(await runtime.work());
-  const { stream } = await runtime.enqueue(
+  const stack = defineStack(async () => ({
+    store: new InMemoryContextStore(),
+    streams: new StreamManager({
+      store: streamStore,
+      changeSource: new PollingChangeSource({ reads: streamStore }),
+    }),
+    queue,
+    mailboxStore,
+  }));
+  const host = resources.use(await runtime.initialize(stack));
+  resources.use(await host.work());
+  const { stream } = await host.enqueue(
     { chatId: 'webmcp', userId: 'test' },
     {
       message: {

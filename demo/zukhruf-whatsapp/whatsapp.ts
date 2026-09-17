@@ -9,9 +9,11 @@ import {
   StreamManager,
 } from '@deepagents/context';
 import {
+  type AgentHost,
   AgentRuntime,
   PgBossTurnQueue,
   SqliteMailboxStore,
+  defineStack,
 } from '@deepagents/experimental/zukhruf';
 
 import { type WhatsAppParticipant, createParticipantAgent } from './agent.ts';
@@ -33,7 +35,7 @@ export interface WhatsAppGroupOptions {
 interface RunningParticipant {
   name: string;
   conversation: { chatId: string; userId: string };
-  runtime: AgentRuntime;
+  runtime: AgentHost;
 }
 
 const HUMAN_AUTHOR = 'user';
@@ -81,9 +83,7 @@ export class WhatsAppGroup implements AsyncDisposable {
     WhatsAppGroup.#validate(options);
 
     await using resources = new AsyncDisposableStack();
-    const database = resources.adopt(new PGlite(), (database) =>
-      database.close(),
-    );
+    const database = resources.use(new PGlite());
     const boss = resources.adopt(
       new PgBoss({ db: fromPglite(database), backend: 'pglite' }),
       (boss) => boss.stop({ graceful: false }),
@@ -115,13 +115,14 @@ export class WhatsAppGroup implements AsyncDisposable {
         createParticipantAgent(participant, (message) =>
           replies.post(participant.name, message),
         ),
-        {
-          store,
-          streams,
-          queue,
-          mailboxStore,
-        },
       );
+      const stack = defineStack(async () => ({
+        store,
+        streams,
+        queue,
+        mailboxStore,
+      }));
+      const host = resources.use(await runtime.initialize(stack));
 
       participants.push({
         name: participant.name,
@@ -129,9 +130,9 @@ export class WhatsAppGroup implements AsyncDisposable {
           chatId: `whatsapp-${index}`,
           userId: options.userId,
         },
-        runtime,
+        runtime: host,
       });
-      resources.use(await runtime.work());
+      await host.work();
     }
 
     return new WhatsAppGroup(options, {

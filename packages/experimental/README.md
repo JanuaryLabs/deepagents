@@ -24,6 +24,7 @@ import {
   AgentRuntime,
   PgBossTurnQueue,
   defineAgent,
+  defineStack,
   renderTurn,
 } from '@deepagents/experimental/zukhruf';
 ```
@@ -34,13 +35,44 @@ The public experimental surface contains the pure declaration layer
 ports and adapters. The optional Hono transport plugin is a separate
 `@deepagents/experimental/zukhruf/http` entry point.
 Declarations have a types-only dependency on `@deepagents/context`.
-`AgentRuntime` exposes enqueue, host mailbox delivery, observation, approval,
-denial, worker lifecycle, and model-facing collaboration for declared
-subagents. Its control plane, executor, status projector, mailbox coordinator,
+The `AgentHost` returned by `AgentRuntime.initialize()` exposes enqueue, host
+mailbox delivery, observation, approval, denial, worker lifecycle, and
+model-facing collaboration for declared subagents. Its control plane, executor,
+status projector, mailbox coordinator,
 and injected collaboration-tool implementations are internal wiring. See
 [`src/zukhruf/DESIGN.md`](./src/zukhruf/DESIGN.md) for the decided semantics,
 [`TODO.md`](./src/zukhruf/TODO.md) for the convergence plan, and
 [`BUGS.md`](./src/zukhruf/BUGS.md) for known residue.
+
+Compose infrastructure in a reusable `defineStack(async (resources) => ...)`
+recipe returning `{ store, streams, queue, mailboxStore }`, plus any plugin
+`bindings` or host options. The callback receives JavaScript's native
+`AsyncDisposableStack`: use `resources.use()` for disposable adapters and
+`resources.adopt()` for adapters exposing a cleanup method. Backend choices
+and startup calls stay explicit; see
+[`demo/zukhruf-simple/stack.ts`](../../demo/zukhruf-simple/stack.ts).
+
+```ts
+import declaration from './agent.ts';
+import stack from './stack.ts';
+
+const runtime = new AgentRuntime(declaration);
+await using host = await runtime.initialize(stack);
+await using worker = await host.work();
+```
+
+Importing the recipe or constructing the runtime opens nothing.
+`runtime.initialize(stack)` opens and validates one stack, then returns the
+ready host without starting workers. `info`, `plugin()`, `observe()`, and HTTP
+plugin projection are available on that host. Host disposal waits for startup,
+drains active queue and plugin workers, closes plugins, then releases the
+registered adapters in reverse order. Startup failures roll back resources.
+Stopping a worker alone keeps its host and adapters available.
+
+Every host initializes from a `defineStack` recipe. A recipe can return shared
+adapters without registering them with `resources`; those adapters remain
+caller-owned. Host and worker disposal always wait for active work. Only
+registered adapters are released by host disposal.
 
 Zukhruf discovers immediate `skills/<name>/SKILL.md` children from each
 configured sandbox once per conversation. It persists only the ordered catalog
@@ -100,7 +132,7 @@ const root = defineAgent({
   plugins: [scheduled],
 });
 
-const runtime = new AgentRuntime(root, {
+const stack = defineStack(async () => ({
   store,
   streams,
   queue,
@@ -109,11 +141,12 @@ const runtime = new AgentRuntime(root, {
     schedulesCapabilities.boss.bind(boss),
     schedulesCapabilities.transaction.bind(transaction),
   ],
-});
+}));
+const runtime = new AgentRuntime(root);
+await using host = await runtime.initialize(stack);
 
-await runtime.initialize();
-const scheduleControl = runtime.plugin(scheduled);
-await using worker = await runtime.work();
+const scheduleControl = host.plugin(scheduled);
+await using worker = await host.work();
 ```
 
 Synchronization creates or updates present declarations, resumes present tasks
@@ -132,6 +165,11 @@ the sandbox paths to read. Every agent in the tree also gets a
 `publish_upload` tool that adopts a file it produced below the session's
 uploads directory and returns the link the user can open; pass `publicUrl`
 (the absolute mount of `http()`) so that link is absolute.
+
+The optional `@deepagents/experimental/zukhruf/mcp` plugin contributes tools
+from an AI SDK `MCPClient`. Provide `mcp({ name, connect })`; Zukhruf connects
+once during host initialization, snapshots the server's current tool catalog,
+and closes the client when that host is disposed.
 
 Runnable end-to-end showcases live in
 [`demo/zukhruf-simple`](../../demo/zukhruf-simple) (the smallest complete

@@ -28,16 +28,16 @@ const runtime = new AgentRuntime(
     ...declaration,
     plugins: [...declaration.plugins, traceTelemetry],
   }),
-  runtimeOptions,
 );
-await using worker = await runtime.work();
+await using host = await runtime.initialize(runtimeOptions);
+await using worker = await host.work();
 
 const app = new Hono<HttpEnv>();
 app.use('/zukhruf/v1/*', (context, next) => {
   context.set('userId', 'demo');
   return next();
 });
-app.route('/zukhruf/v1', http(runtime, tracesHttp(traceTelemetry)));
+app.route('/zukhruf/v1', http(host, tracesHttp(traceTelemetry)));
 app.route('/devtool', devtool({ protocolPath: '/zukhruf/v1' }));
 
 await using server = serve({
@@ -48,7 +48,7 @@ await using server = serve({
 console.info('http://127.0.0.1:4317/devtool');
 ```
 
-`http(runtime)` uses Hono's effective mount to produce discovery links. For the
+`http(host)` uses Hono's effective mount to produce discovery links. For the
 example mount, `GET /zukhruf/v1/info` returns:
 
 ```json
@@ -62,7 +62,7 @@ example mount, `GET /zukhruf/v1/info` returns:
 }
 ```
 
-`history`, `chat`, and `events` are always advertised by `http(runtime)`. **New Chat**,
+`history`, `chat`, and `events` are always advertised by `http(host)`. **New Chat**,
 conversation loading, streaming, and cancellation use the session protocol on
 the current origin, so the host's own authentication middleware guards every
 runtime request. The owner event stream keeps conversation status and child

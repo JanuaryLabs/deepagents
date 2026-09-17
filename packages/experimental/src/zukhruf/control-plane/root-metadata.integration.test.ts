@@ -24,6 +24,7 @@ import {
   type TurnRef,
   createInterAgentCommunication,
   defineAgent,
+  defineStack,
 } from '@deepagents/experimental/zukhruf';
 
 const userTurn = (id: string, text: string) => ({
@@ -172,7 +173,7 @@ test('enqueue only queues; worker execution initializes root metadata', async (t
     metadata: { application: 'preserved' },
   });
 
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4({
@@ -194,8 +195,14 @@ test('enqueue only queues; worker execution initializes root metadata', async (t
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack);
 
   const enqueued = await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
@@ -234,7 +241,7 @@ test('an existing chat can only be used by its stored owner', async (t) => {
 
   await store.upsertChat({ id: 'shared-chat', userId: 'alice' });
 
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4({
@@ -253,8 +260,14 @@ test('an existing chat can only be used by its stored owner', async (t) => {
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack2 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack2);
   const intruder = { chatId: 'shared-chat', userId: 'bob' };
 
   await assert.rejects(
@@ -279,15 +292,21 @@ test('caller turn ids are scoped to their owning conversation', async (t) => {
     streamStore.close();
     mailboxStore.close();
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: {} as AgentModel,
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack3 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack3);
 
   const alice = await runtime.enqueue(
     { chatId: 'alice-chat', userId: 'alice' },
@@ -311,15 +330,21 @@ test('explicit cancellation rejects a stream owned by another conversation', asy
     streamStore.close();
     mailboxStore.close();
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: {} as AgentModel,
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack4 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack4);
   const alice = await runtime.enqueue(
     { chatId: 'alice-chat', userId: 'alice' },
     userTurn('alice-turn', 'alice secret'),
@@ -353,15 +378,21 @@ test('reserved but malformed agent metadata fails closed at enqueue', async (t) 
       },
     },
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: {} as AgentModel,
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack5 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack5);
 
   await assert.rejects(
     runtime.enqueue(
@@ -383,15 +414,21 @@ test('enqueue rejects an empty conversation before registering a stream', async 
     streamStore.close();
     mailboxStore.close();
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: {} as AgentModel,
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack6 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack6);
 
   await assert.rejects(
     runtime.enqueue(
@@ -418,7 +455,7 @@ test('root initialization preserves a concurrent host metadata write', async (t)
     userId: 'user-1',
     metadata: { application: 'preserved' },
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4({
@@ -437,8 +474,14 @@ test('root initialization preserves a concurrent host metadata write', async (t)
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack7 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack7);
   await runtime.enqueue(
     { chatId: 'root-cas', userId: 'user-1' },
     userTurn('root-cas-turn', 'hello'),
@@ -488,15 +531,21 @@ test('a child must point to the immediate ancestor of its canonical path', async
       },
     },
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: {} as AgentModel,
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack8 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack8);
 
   await assert.rejects(
     runtime.enqueue(
@@ -519,15 +568,21 @@ test('host delivery rejects a recipient that does not own the stored chat', asyn
   });
 
   await store.upsertChat({ id: 'shared-chat', userId: 'alice' });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: {} as AgentModel,
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack9 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack9);
   const recipient = { chatId: 'shared-chat', userId: 'bob' };
 
   await assert.rejects(
@@ -556,15 +611,21 @@ test('explicit cancellation rejects a conversation that does not own the stored 
   });
 
   await store.upsertChat({ id: 'shared-chat', userId: 'alice' });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: {} as AgentModel,
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack10 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack10);
   const alice = await runtime.enqueue(
     { chatId: 'shared-chat', userId: 'alice' },
     userTurn('alice-turn', 'hello'),
@@ -592,7 +653,7 @@ test('cancelling during sandbox setup prevents model sampling', async (t) => {
     mailboxStore.close();
   });
 
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4({
@@ -618,8 +679,14 @@ test('cancelling during sandbox setup prevents model sampling', async (t) => {
       },
       instructions: [],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack11 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack11);
   const conversation = { chatId: 'cancel-setup', userId: 'user-1' };
   const enqueued = await runtime.enqueue(
     conversation,
@@ -650,7 +717,7 @@ test('cancellation that wins the execution claim prevents model sampling', async
     mailboxStore.close();
   });
 
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4({
@@ -675,8 +742,14 @@ test('cancellation that wins the execution claim prevents model sampling', async
       },
       instructions: [],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack12 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack12);
   const conversation = { chatId: 'cancel-claim', userId: 'user-1' };
   const enqueued = await runtime.enqueue(
     conversation,
@@ -704,7 +777,7 @@ test('cancellation after execution claim aborts pending provider setup', async (
     streamStore.close();
     mailboxStore.close();
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4({
@@ -728,8 +801,14 @@ test('cancellation after execution claim aborts pending provider setup', async (
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack13 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack13);
   const conversation = { chatId: 'cancel-provider', userId: 'user-1' };
   const enqueued = await runtime.enqueue(
     conversation,

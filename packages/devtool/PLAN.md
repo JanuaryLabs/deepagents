@@ -32,7 +32,7 @@ changes.
   `userId`. The Traces links stay hidden when discovery omits `traces`.
 - The root `@deepagents/experimental/zukhruf` entry point is transport-neutral.
   Runtime plugin definitions return typed transport-neutral instances;
-  `AgentRuntime.plugin(definition)` resolves the installed instance by exact
+  `AgentHost.plugin(definition)` resolves the installed instance by exact
   definition identity. The `/zukhruf/http` transport plugin owns Hono, auth,
   SSE, built-in routes, discovery, and `projectHttp()`. The host passes explicit,
   definition-bound projections to `http(runtime, ...projections)`; HTTP rejects
@@ -414,7 +414,7 @@ implementing, but the behavior is fixed:
 - [x] Remove Hono types, root HTTP exports, plugin protocol fields, and the
       aggregated protocol object from Zukhruf core with no compatibility shim.
 - [x] Bind projections directly to typed plugin definitions through
-      `AgentRuntime.plugin(definition)`; add no parallel capability registry.
+      `AgentHost.plugin(definition)`; add no parallel capability registry.
 - [x] Move auth, discovery, session routes, validation, and SSE to
       `@deepagents/experimental/zukhruf/http`.
 - [x] Add explicit HTTP projections and prove installed, absent,
@@ -467,7 +467,7 @@ implementing, but the behavior is fixed:
 ## Verification rules
 
 - Use package module specifiers in tests.
-- Drive behavior through `AgentRuntime`; no calls to private classes, test-only
+- Drive behavior through the `AgentHost` returned by `AgentRuntime.initialize()`; no calls to private classes, test-only
   aliases, exports, or entry points.
 - Prefer one integration flow over per-function unit suites.
 - Use `nx run <project>:typecheck` and `nx run <project>:test`.

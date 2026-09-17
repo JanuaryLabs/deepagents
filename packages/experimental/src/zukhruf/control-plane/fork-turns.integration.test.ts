@@ -20,6 +20,7 @@ import {
   TurnQueue,
   type TurnRef,
   defineAgent,
+  defineStack,
 } from '@deepagents/experimental/zukhruf';
 
 const userTurn = (id: string, text: string) => ({
@@ -238,7 +239,7 @@ async function spawnAfter(
     sandbox,
     instructions: [],
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: rootModel,
@@ -247,13 +248,14 @@ async function spawnAfter(
       tools: options.tools,
       subagents: [worker],
     }),
-    {
-      store,
-      streams: streamsFor(streamStore),
-      mailboxStore,
-      queue,
-    },
   );
+  const runtimeStack = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack);
   await using workerHandle = await runtime.work();
   void workerHandle;
 

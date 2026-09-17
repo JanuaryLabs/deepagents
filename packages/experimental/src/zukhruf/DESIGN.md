@@ -72,7 +72,7 @@ crash, then reconnect and resume an in-progress turn without re-running the mode
 
 `@deepagents/context` ships the machinery (`StreamManager`, `StreamStore` [sqlite/postgres],
 `ChangeSource` [polling / postgres-notify], `stream-buffer`) but it is **not wired into `chat()`** —
-so the host composes a `StreamManager`, `AgentRuntime` borrows it, and `AgentTurnExecutor`
+so the host composes a `StreamManager`, `AgentHost` uses it, and `AgentTurnExecutor`
 performs each model turn.
 
 Mechanism:
@@ -281,7 +281,7 @@ turn cancelled while queued never enters the chain at all.
   container engine is the registry (zero in-memory state); the workspace FS survives across turns,
   workers, and restarts. The runtime NEVER disposes it.
 - The host selects the `StreamStore` and `ChangeSource` when constructing the borrowed
-  `StreamManager`; `AgentRuntime` neither initializes nor disposes them.
+  `StreamManager`; the ready host neither initializes nor disposes borrowed adapters.
 
 ## Independent-thread mailbox foundation _(Built)_
 
@@ -291,10 +291,10 @@ explicitly. A pending item is an `InterAgentCommunication` envelope with an auth
 optional other recipients, explicit `MESSAGE | NEW_TASK | FINAL_ANSWER` type, content, metadata,
 stable ID, and a `triggerTurn` bit.
 
-`AgentRuntime` requires `mailboxStore` and exposes `deliver(communication, mode)` as the host-facing
-entry point. The store contract is deliberately small: begin/end the target's active-turn boundary,
-idempotent append, pending check, leading queue-only drain, and full FIFO drain. Mailbox lifetime
-remains caller-owned.
+`AgentRuntime.initialize()` requires `mailboxStore`; the returned `AgentHost` exposes
+`deliver(communication, mode)` as the host-facing entry point. The store contract is deliberately small: begin/end the target's active-turn boundary,
+idempotent append, pending check, leading queue-only drain, and full FIFO drain. Borrowed mailbox lifetime
+remains caller-owned; a stack recipe may register its mailbox store for host-owned disposal.
 
 The receive contract follows Codex's multi-agent contract:
 
@@ -379,19 +379,19 @@ instead of introducing a Runner or separate thread database:
   the current agent may spawn. `AgentTurnExecutor` injects the direct AI SDK `spawn_agent`,
   `send_message`, `followup_task`, `list_agents`, `wait_agent`, and `interrupt_agent` tools for every
   turn.
-- `AgentRuntimeOptions.multiAgent` is the host configuration surface for Codex-compatible
+- The stack recipe’s `multiAgent` field is the host configuration surface for Codex-compatible
   collaboration guidance and tool exposure. Root and subagent usage hints are separate complete
   overrides; empty strings disable them. The selected hint is injected as a non-persisted role
   fragment, so forked transcript history never copies a parent's hint into a child. `usageHintText`
   appends guidance to `spawn_agent`. `toolNamespace` applies a validated native OpenAI Responses
   namespace to all six collaboration tools. Reserved, padded, non-ASCII, and over-64-character
-  namespaces fail during runtime construction. Current upstream Codex also injects a dedicated
+  namespaces fail during host initialization. Current upstream Codex also injects a dedicated
   subagent developer instruction and inherits the spawning turn's ready-step environment. Zukhruf
   does not yet expose equivalents; they are tracked in TODO.md.
 - Collaboration tools are direct-model-only by default, matching Codex's
   `non_code_mode_only = true`. Setting `nonCodeModeOnly: false` exposes them through the AI SDK's
   provider-agnostic code-mode tool and removes them from the direct model surface.
-- `new AgentRuntime(root, options)` recursively compiles declarations by unique canonical names
+- `runtime.initialize(options)` recursively compiles declarations by unique canonical names
   without surrounding whitespace. Each worker turn loads the chat's reserved Zukhruf metadata and
   selects the matching declaration.
 - The first root execution initializes `{treeId, path: '/root', parentChatId: null,
@@ -641,7 +641,7 @@ const root = defineAgent({
   // model, sandbox, instructions, ...
   plugins: [scheduling],
 });
-const runtime = new AgentRuntime(root, {
+const stack = defineStack(async () => ({
   store,
   streams,
   queue,
@@ -650,8 +650,10 @@ const runtime = new AgentRuntime(root, {
     conversationSchedulingCapabilities.scheduler.bind(wakes),
     conversationSchedulingCapabilities.timezone.bind('UTC'),
   ],
-});
-await using worker = await runtime.work();
+}));
+const runtime = new AgentRuntime(root);
+await using host = await runtime.initialize(stack);
+await using worker = await host.work();
 ```
 
 ### Claude-compatible tool contract
@@ -752,7 +754,7 @@ const traceTelemetry: AgentPluginDefinition<TracePlugin> = {
 };
 ```
 
-- `AgentRuntime.plugin(definition)` returns the installed instance for that exact definition object
+- `AgentHost.plugin(definition)` returns the installed instance for that exact definition object
   and fails when the definition does not belong to the runtime. Core needs no second capability or
   projection registry.
 - Core knows neither Hono nor gRPC. The plugin instance exposes transport-neutral operations, not
@@ -776,8 +778,8 @@ const traceTelemetry: AgentPluginDefinition<TracePlugin> = {
   `PluginSkillComposition` for skill catalogs and per-agent selection, and
   `PluginAgentComposition` for contributed agents, provenance, and the combined declaration
   registry. Agent and skill loaders stay private to their composition modules.
-  `AgentRuntime` owns the host implementation, queues, stores, and conversation execution.
-  Construction composes static contributions; initialization receives the completed host.
+  `AgentRuntime.initialize()` constructs the host and composes static contributions before
+  initializing plugins. The returned `AgentHost` owns conversation execution and stack resources.
   Plugin workers join the queue worker's disposal scope, preserving cleanup and error order.
 - Plugin `create()` remains synchronous. Its asynchronous `initialize(host)` may return an
   `AgentPluginInitialization`: discovered `tools` and a `Symbol.asyncDispose` method. The runtime
@@ -788,17 +790,23 @@ const traceTelemetry: AgentPluginDefinition<TracePlugin> = {
   and returns a snapshot. `PluginManager` publishes each snapshot after validation succeeds.
   Different agents may reuse local tool names. These checks run during construction for static
   tools and during initialization for discovered tools.
-- `await using runtime = new AgentRuntime(...)` owns initialization resources. Declare workers
-  after the runtime so they stop before its resources close. Runtime disposal waits for pending
-  initialization, closes resources once, and prevents another initialization. Queues, stores,
-  and streams remain host-owned; stopping a worker alone leaves runtime resources available.
+- `defineStack(async (resources) => options)` is an explicit infrastructure recipe. The native
+  `AsyncDisposableStack` passed to it owns registered resources. Constructing
+  `new AgentRuntime(root)` acquires nothing; each `runtime.initialize(stack)` creates one ready
+  host and rolls back failed startup. Shared adapters returned without registering them
+  in the scope remain caller-owned.
+- `await using host = await runtime.initialize(stack)` owns workers and plugin
+  resources. `await using worker = await host.work()` controls worker lifetime independently.
+  Host shutdown waits for pending worker startup. All workers drain active handlers before
+  closing plugins and registered adapters; the outer owner shuts down shared infrastructure.
+  A stopped worker leaves its host usable.
 - `@deepagents/experimental/zukhruf/mcp` supplies `mcp({name, connect})`. The caller provides an
-  AI SDK `MCPClient` factory; the plugin discovers all tools once per runtime and closes the
-  client on discovery failure, later initialization failure, or runtime disposal. Browser,
+  AI SDK `MCPClient` factory; the plugin discovers all tools once per host and closes the
+  client on discovery failure, later initialization failure, or host disposal. Browser,
   transport, and authentication configuration stay with the caller. This is a startup snapshot;
-  changes to the server's tool catalog require a new runtime.
+  changes to the server's tool catalog require a new initialized host.
 
-## Stacks: one runtime, swappable (or absorbed) adapters _(Designed)_
+## Stacks: one runtime, explicit adapter composition
 
 A **stack** binds the runtime's needs to one platform (Cloudflare, Node+Postgres, …) and is the
 deploy target. Decision: **one runtime, swappable adapters** — write the orchestration once, supply
@@ -835,9 +843,9 @@ therefore a **per-conversation executor**: native as a DO, leased on Node.
 
 ## Built (implemented + verified)
 
-**Durable streams, reconnect, the background executor, and timed scheduling are now built** (see
-the executor and timed-scheduling sections). Still designed-not-built: the stacks (a real
-Node+Postgres bundle; the DO adapter).
+**Durable streams, reconnect, the background executor, timed scheduling, and explicit stack ownership
+are now built** (see the executor, timed-scheduling, and stack sections). Still designed-not-built:
+the full Node+Postgres and Durable Object platform bundles.
 
 - `agent.ts` — `defineAgent({name, model, sandbox, instructions, tools?, skills?, subagents?})`
   returns a pure declaration with caller tools and a normalized subagent list. `sandbox` is a
@@ -849,22 +857,22 @@ Node+Postgres bundle; the DO adapter).
   `uploadDirectory` option; proven over docker + virtual).
 - `instructions.ts` — `defineInstructions(...fragments) => fragments`.
 - `runtime/plugin/plugin-agents.ts` — snapshots each plugin's immediate Markdown agent files during
-  runtime construction. Agent frontmatter accepts `name`, `description`, and a `skills` list;
+  host initialization. Agent frontmatter accepts `name`, `description`, and a `skills` list;
   instructions remain the Markdown body.
 - `runtime/plugin/agent-skills.ts` — loads and validates plugin-contributed skill directories once
-  during runtime construction. Each declaration selects skill names explicitly, and the executor
+  during host initialization. Each declaration selects skill names explicitly, and the executor
   copies only those files into that agent's sandbox and prompt. Plugin skills never implicitly pass
   to subagents. Separately, it discovers preinstalled `skills/<name>/SKILL.md` children from a
   configured sandbox on the conversation's first executable turn, persists the ordered
   `{name, description, path}` catalog, and reconstructs the same stable `@deepagents/context` skills
   fragment on later turns without rediscovery.
 - `runtime/agent-runtime.ts` —
-  `new AgentRuntime(rootDeclaration, {store, streams, queue, mailboxStore, plugins?})` →
+  `const runtime = new AgentRuntime(rootDeclaration);` then
+  `await using host = await runtime.initialize(stack);` gives an `AgentHost` with
   `{ enqueue(conv, {message, trigger}) → {id, stream},
 deliver(communication, mode) → void,
 observe(conv) → AgentObservation {engine, resume, status(streamId?), conversationStatus(), cancel(streamId?)},
 subscribeConversationStatus(signal) → Promise<AsyncIterable<ConversationStatusEvent>>,
-initialize() → void,
 work({concurrency?}) → AsyncDisposable }`.
   It wires `AgentControlPlane`, `AgentTurnExecutor`, `ApprovalController`,
   `AgentStatusProjector`, and `MailboxCoordinator` once, then contributes plugin tools, lifecycle,
@@ -891,7 +899,7 @@ work({concurrency?}) → AsyncDisposable }`.
   Database triggers publish owner-scoped task/run change hints after commit, including worker-owned
   transitions; its HTTP projection contributes those hints to the shared `/events` stream.
   Its `scheduleFiles` source compiles top-level `agent/schedules/*.md` declarations during runtime
-  initialization; removed files pause rather than delete their durable tasks. The AgentRuntime
+  initialization; removed files pause rather than delete their durable tasks. The AgentHost
   adapter supports new- and existing-conversation targets; other execution targets remain
   application choices rather than scheduler concepts.
 - `control-plane/agent-path.ts`, `agent-thread.ts`, and `agent-directory.ts` — canonical rooted

@@ -20,6 +20,7 @@ import {
   TurnQueue,
   type TurnRef,
   defineAgent,
+  defineStack,
 } from '@deepagents/experimental/zukhruf';
 import {
   type SchedulingWake,
@@ -204,7 +205,7 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
     chatId: 'group:participant:B',
     userId: 'shared-user',
   };
-  const runtimeA = new AgentRuntime(
+  const runtimeASetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4({}),
@@ -212,21 +213,22 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      store,
-      streams: new StreamManager({
-        store: streamStoreA,
-        changeSource: new PollingChangeSource({ reads: streamStoreA }),
-      }),
-      queue: queueA,
-      mailboxStore: mailboxStoreA,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(schedulerA),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
-  const runtimeB = new AgentRuntime(
+  const runtimeAStack = defineStack(async () => ({
+    store,
+    streams: new StreamManager({
+      store: streamStoreA,
+      changeSource: new PollingChangeSource({ reads: streamStoreA }),
+    }),
+    queue: queueA,
+    mailboxStore: mailboxStoreA,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(schedulerA),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtimeA = await runtimeASetup.initialize(runtimeAStack);
+  const runtimeBSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: cronCreatingModel(),
@@ -234,20 +236,21 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      store,
-      streams: new StreamManager({
-        store: streamStoreB,
-        changeSource: new PollingChangeSource({ reads: streamStoreB }),
-      }),
-      queue: queueB,
-      mailboxStore: mailboxStoreB,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(schedulerB),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeBStack = defineStack(async () => ({
+    store,
+    streams: new StreamManager({
+      store: streamStoreB,
+      changeSource: new PollingChangeSource({ reads: streamStoreB }),
+    }),
+    queue: queueB,
+    mailboxStore: mailboxStoreB,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(schedulerB),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtimeB = await runtimeBSetup.initialize(runtimeBStack);
   let workerA: AsyncDisposable | undefined;
   let workerB: AsyncDisposable | undefined;
 

@@ -28,6 +28,7 @@ import {
   TurnQueue,
   type TurnRef,
   defineAgent,
+  defineStack,
 } from '@deepagents/experimental/zukhruf';
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 
@@ -119,21 +120,22 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
       instructions: [],
       plugins: [traceTelemetry],
     }),
-    {
-      store,
-      streams: new StreamManager({
-        store: streamStore,
-        changeSource: new PollingChangeSource({ reads: streamStore }),
-      }),
-      queue: new AcceptingTurnQueue(),
-      mailboxStore,
-    },
   );
-  await runtime.createSession(conversation);
+  const stack = defineStack(async () => ({
+    store,
+    streams: new StreamManager({
+      store: streamStore,
+      changeSource: new PollingChangeSource({ reads: streamStore }),
+    }),
+    queue: new AcceptingTurnQueue(),
+    mailboxStore,
+  }));
+  await using host = await runtime.initialize(stack);
+  await host.createSession(conversation);
   await store.updateChat(conversation.chatId, () => ({
     title: 'First conversation',
   }));
-  const turn = await runtime.enqueue(conversation, {
+  const turn = await host.enqueue(conversation, {
     message: {
       id: 'message-1',
       role: 'user',
@@ -142,7 +144,7 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
     trigger: 'submit-message',
   });
   await writeFile(telemetry, telemetryRecords(conversation, turn.id));
-  resources.use(await runtime.work());
+  resources.use(await host.work());
 
   const app = new Hono<HttpEnv>();
   app.use(`${ZUKHRUF_MOUNT_PATH}/*`, (context, next) => {
@@ -150,7 +152,7 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
     if (userId) context.set('userId', userId);
     return next();
   });
-  app.route(ZUKHRUF_MOUNT_PATH, http(runtime, tracesHttp(traceTelemetry)));
+  app.route(ZUKHRUF_MOUNT_PATH, http(host, tracesHttp(traceTelemetry)));
   app.route(DEVTOOL_PREFIX, devtool());
   const asUser = { headers: { [USER_HEADER]: conversation.userId } };
 
@@ -162,7 +164,7 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
   assert.equal(discovery.status, 200);
   const discoveryBody = await discovery.text();
   assert.deepEqual(JSON.parse(discoveryBody), {
-    ...runtime.info,
+    ...host.info,
     capabilities: {
       history: { href: HISTORY_URL },
       chat: { href: CREATE_SESSION_URL },

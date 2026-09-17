@@ -19,6 +19,7 @@ import {
 } from '@deepagents/context';
 import {
   type AgentDeclaration,
+  type AgentHost,
   AgentRuntime,
   type ConsumeContext,
   type ConsumeOptions,
@@ -27,6 +28,7 @@ import {
   TurnQueue,
   type TurnRef,
   createInterAgentCommunication,
+  defineStack,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
 
@@ -40,7 +42,7 @@ const userTurn = (id: string, text: string) => ({
 });
 
 async function submitApproval(
-  runtime: AgentRuntime,
+  runtime: AgentHost,
   conversation: { chatId: string; userId: string },
   toolCallId: string,
 ) {
@@ -222,7 +224,7 @@ class FailFirstHistoryWriteStore extends InMemoryContextStore {
   }
 }
 
-function runtimeHarness(options?: {
+async function runtimeHarness(options?: {
   model?: AgentDeclaration['model'];
   contextStore?: InMemoryContextStore;
   mailboxStore?: SqliteMailboxStore;
@@ -234,15 +236,16 @@ function runtimeHarness(options?: {
     options?.mailboxStore ?? new SqliteMailboxStore(':memory:');
   const streamStore = new SqliteStreamStore(':memory:');
   const queue = options?.queue ?? new ManualTurnQueue();
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     declaration(options?.model ?? textModel(), options?.tools),
-    {
-      store: contextStore,
-      streams: streamsFor(streamStore),
-      queue,
-      mailboxStore,
-    },
   );
+  const runtimeStack = defineStack(async () => ({
+    store: contextStore,
+    streams: streamsFor(streamStore),
+    queue,
+    mailboxStore,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack);
 
   return {
     runtime,
@@ -306,7 +309,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
         };
       },
     });
-    const h = runtimeHarness({ model });
+    const h = await runtimeHarness({ model });
     try {
       await using _worker = await h.runtime.work();
       void _worker;
@@ -391,7 +394,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
         };
       },
     });
-    const h = runtimeHarness({ model });
+    const h = await runtimeHarness({ model });
     try {
       await using _worker = await h.runtime.work();
       void _worker;
@@ -476,9 +479,12 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
       mailboxStore,
       queue,
     };
+    const runtimeStack = defineStack(async () => ({ ...runtimeOptions }));
     const agent = declaration(model);
-    const workerRuntime = new AgentRuntime(agent, runtimeOptions);
-    const senderRuntime = new AgentRuntime(agent, runtimeOptions);
+    const workerRuntimeSetup = new AgentRuntime(agent);
+    const workerRuntime = await workerRuntimeSetup.initialize(runtimeStack);
+    const senderRuntimeSetup = new AgentRuntime(agent);
+    const senderRuntime = await senderRuntimeSetup.initialize(runtimeStack);
     try {
       await using _worker = await workerRuntime.work();
       void _worker;
@@ -551,9 +557,12 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
       mailboxStore,
       queue,
     };
+    const runtimeStack = defineStack(async () => ({ ...runtimeOptions }));
     const agent = declaration(model);
-    const workerRuntime = new AgentRuntime(agent, runtimeOptions);
-    const senderRuntime = new AgentRuntime(agent, runtimeOptions);
+    const workerRuntimeSetup = new AgentRuntime(agent);
+    const workerRuntime = await workerRuntimeSetup.initialize(runtimeStack);
+    const senderRuntimeSetup = new AgentRuntime(agent);
+    const senderRuntime = await senderRuntimeSetup.initialize(runtimeStack);
     try {
       await using _worker = await workerRuntime.work();
       void _worker;
@@ -598,8 +607,11 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
       queue,
     };
     const agent = declaration(textModel());
-    const workerRuntime = new AgentRuntime(agent, runtimeOptions);
-    const senderRuntime = new AgentRuntime(agent, runtimeOptions);
+    const runtimeStack = defineStack(async () => runtimeOptions);
+    const workerRuntimeSetup = new AgentRuntime(agent);
+    const workerRuntime = await workerRuntimeSetup.initialize(runtimeStack);
+    const senderRuntimeSetup = new AgentRuntime(agent);
+    const senderRuntime = await senderRuntimeSetup.initialize(runtimeStack);
     try {
       await using _worker = await workerRuntime.work();
       void _worker;
@@ -631,8 +643,8 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
     }
   });
 
-  it('keeps destructive mailbox storage private while exposing host delivery', () => {
-    const h = runtimeHarness();
+  it('keeps destructive mailbox storage private while exposing host delivery', async () => {
+    const h = await runtimeHarness();
     try {
       assert.equal(
         'mailboxStore' in h.runtime,
@@ -648,7 +660,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
   it('does not leave a permanently queued stream receipt when wake scheduling fails', async () => {
     const queue = new ManualTurnQueue();
     queue.failPushes = 1;
-    const h = runtimeHarness({ queue });
+    const h = await runtimeHarness({ queue });
     try {
       await assert.rejects(
         h.runtime.deliver(mail('wake me'), MessageDeliveryMode.TriggerTurn),
@@ -713,7 +725,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
         };
       },
     });
-    const h = runtimeHarness({
+    const h = await runtimeHarness({
       model,
       tools: {
         sendEmail: defineTool({
@@ -751,7 +763,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
   });
 
   it('treats drain as consumption even when durable history writing fails', async () => {
-    const h = runtimeHarness({
+    const h = await runtimeHarness({
       contextStore: new FailFirstHistoryWriteStore(),
     });
     try {

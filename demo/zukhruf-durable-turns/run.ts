@@ -1,75 +1,28 @@
-import { PGlite } from '@electric-sql/pglite';
-import { PgBoss, fromPglite } from 'pg-boss';
-
 import { printer } from '@deepagents/agent';
-import {
-  PollingChangeSource,
-  SqliteContextStore,
-  SqliteStreamStore,
-  StreamManager,
-} from '@deepagents/context';
-import {
-  AgentRuntime,
-  PgBossTurnQueue,
-  SqliteMailboxStore,
-} from '@deepagents/experimental/zukhruf';
+import { AgentRuntime } from '@deepagents/experimental/zukhruf';
 
 import declaration from './agent.ts';
+import stack from './stack.ts';
 
 const input =
   process.argv.slice(2).join(' ') ||
   'Delegate to the specialist: list the numbers 1 through 20, one per line, each with a one-word note.';
 
-await using resources = new AsyncDisposableStack();
-
-const database = resources.adopt(new PGlite('./zukhruf.queue'), (database) =>
-  database.close(),
-);
-const boss = resources.adopt(
-  new PgBoss({
-    db: fromPglite(database),
-    backend: 'pglite',
-  }),
-  (boss) => boss.stop({ graceful: false }),
-);
-boss.on('error', (error) => console.error('[queue error]', error));
-await boss.start();
-const queue = new PgBossTurnQueue(boss, {
-  pollingIntervalSeconds: 0.5,
-  schema: 'pgboss',
-});
-await queue.initialize();
-const mailboxStore = resources.use(
-  new SqliteMailboxStore('./zukhruf.mailbox.sqlite'),
-);
-const streamStore = resources.adopt(
-  new SqliteStreamStore('./zukhruf.streams.sqlite'),
-  (store) => store.close(),
-);
-const streams = new StreamManager({
-  store: streamStore,
-  changeSource: new PollingChangeSource({ reads: streamStore }),
-});
-
-const runtime = new AgentRuntime(declaration, {
-  store: new SqliteContextStore('./zukhruf.sqlite'),
-  streams,
-  queue,
-  mailboxStore,
-});
+const runtime = new AgentRuntime(declaration);
+await using host = await runtime.initialize(stack);
 
 const conversation = {
   chatId: `cli-${crypto.randomUUID()}`,
   userId: process.env.USER ?? 'local',
 };
-resources.use(await runtime.work({ concurrency: 4 }));
+await using worker = await host.work({ concurrency: 4 });
 
 const statusAbort = new AbortController();
 const rootIdleAgain = Promise.withResolvers<void>();
 const statusLog = (async () => {
   let rootTurns = 0;
   try {
-    for await (const change of await runtime.subscribeConversationStatus(
+    for await (const change of await host.subscribeConversationStatus(
       statusAbort.signal,
     )) {
       if (change.type === 'reset') continue;
@@ -92,7 +45,7 @@ const statusLog = (async () => {
   }
 })();
 
-const first = await runtime.enqueue(conversation, {
+const first = await host.enqueue(conversation, {
   message: {
     id: crypto.randomUUID(),
     role: 'user',
@@ -119,7 +72,7 @@ console.log(
   `\n\n[detached after ${deltas} chunks] the root keeps running: it spawns the specialist in a separate chat and waits for its FINAL_ANSWER with wait_agent.\n`,
 );
 
-const resumed = await runtime.observe(conversation).resume();
+const resumed = await host.observe(conversation).resume();
 if (!resumed) {
   throw new Error('resume() found no active stream — durability broken');
 }

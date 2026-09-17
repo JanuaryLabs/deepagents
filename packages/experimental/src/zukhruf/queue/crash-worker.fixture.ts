@@ -22,6 +22,7 @@ import {
   AgentRuntime,
   PgBossTurnQueue,
   SqliteMailboxStore,
+  defineStack,
 } from '@deepagents/experimental/zukhruf';
 
 const connectionString = process.argv[2];
@@ -85,13 +86,15 @@ const streams = new StreamManager({
   changeSource: new PollingChangeSource({ reads: streamStore }),
 });
 
-const runtime = new AgentRuntime(declaration, {
+const runtime = new AgentRuntime(declaration);
+const stack = defineStack(async () => ({
   store,
   streams,
   queue,
   mailboxStore: new SqliteMailboxStore(':memory:'),
-});
-await runtime.work();
+}));
+const host = await runtime.initialize(stack);
+await host.work();
 console.log('WORKER READY');
 
 const ownerPid = process.ppid;

@@ -8,9 +8,11 @@ import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 import { schedulesHttp } from '@deepagents/experimental/zukhruf/schedules/http';
 
 import { scheduled, traceTelemetry } from './agent.ts';
-import runtime, { resources } from './run.ts';
+import runtime from './run.ts';
+import stack from './stack.ts';
 
-await using runtimeResources = resources;
+await using host = await runtime.initialize(stack);
+await using worker = await host.work();
 
 const ownerId = process.env.USER ?? 'local';
 
@@ -23,15 +25,15 @@ app.use('/zukhruf/v1/*', (context, next) => {
 
 app.route(
   '/zukhruf/v1',
-  http(runtime, schedulesHttp(scheduled), tracesHttp(traceTelemetry)),
+  http(host, schedulesHttp(scheduled), tracesHttp(traceTelemetry)),
 );
 app.route(devtoolPath, devtool());
 
 const started = Promise.withResolvers<URL>();
-runtimeResources.use(
-  serve({ fetch: app.fetch, hostname: '127.0.0.1', port: 4318 }, ({ port }) =>
+await using server = serve(
+  { fetch: app.fetch, hostname: '127.0.0.1', port: 4318 },
+  ({ port }) =>
     started.resolve(new URL(devtoolPath, `http://127.0.0.1:${port}`)),
-  ),
 );
 console.log(styleText('bold', `Open ${(await started.promise).href}`));
 console.log(

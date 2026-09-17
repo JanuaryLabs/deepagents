@@ -17,6 +17,7 @@ import {
   type StreamStore,
 } from '@deepagents/context';
 import {
+  type AgentHost,
   AgentRuntime,
   type ConsumeContext,
   type ConsumeOptions,
@@ -26,6 +27,7 @@ import {
   type TurnRef,
   createInterAgentCommunication,
   defineAgent,
+  defineStack,
 } from '@deepagents/experimental/zukhruf';
 
 const userTurn = (id: string, text: string) => ({
@@ -204,7 +206,7 @@ test('host config injects root guidance, spawn guidance, namespace, and wait bou
       return textResponse('done');
     },
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model,
@@ -226,20 +228,21 @@ test('host config injects root guidance, spawn guidance, namespace, and wait bou
         }),
       ],
     }),
-    {
-      ...h,
-      multiAgent: {
-        rootAgentUsageHintText: 'ROOT COLLABORATION GUIDANCE',
-        subagentUsageHintText: 'CHILD COLLABORATION GUIDANCE',
-        usageHintText: 'Prefer delegation for independent work.',
-        toolNamespace: 'agents',
-        minWaitTimeoutMs: 111,
-        defaultWaitTimeoutMs: 222,
-        maxWaitTimeoutMs: 333,
-        nonCodeModeOnly: true,
-      },
-    },
   );
+  const runtimeStack = defineStack(async () => ({
+    ...h,
+    multiAgent: {
+      rootAgentUsageHintText: 'ROOT COLLABORATION GUIDANCE',
+      subagentUsageHintText: 'CHILD COLLABORATION GUIDANCE',
+      usageHintText: 'Prefer delegation for independent work.',
+      toolNamespace: 'agents',
+      minWaitTimeoutMs: 111,
+      defaultWaitTimeoutMs: 222,
+      maxWaitTimeoutMs: 333,
+      nonCodeModeOnly: true,
+    },
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack);
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
     userTurn('root-turn', 'work'),
@@ -294,7 +297,7 @@ test('wait_agent clamps a below-minimum timeout and reports it to the model', as
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
   const conversation = { chatId: 'root-chat', userId: 'user-1' };
-  let runtime: AgentRuntime;
+  let runtime: AgentHost;
   let delivery: Promise<void> | undefined;
   let promptAfterWait: unknown;
   let calls = 0;
@@ -320,25 +323,26 @@ test('wait_agent clamps a below-minimum timeout and reports it to the model', as
   });
 
   try {
-    runtime = new AgentRuntime(
+    const runtimeSetup = new AgentRuntime(
       defineAgent({
         name: 'root',
         model,
         sandbox: async () => ({}) as AgentSandbox,
         instructions: [],
       }),
-      {
-        store,
-        streams,
-        mailboxStore,
-        queue,
-        multiAgent: {
-          minWaitTimeoutMs: 50,
-          defaultWaitTimeoutMs: 75,
-          maxWaitTimeoutMs: 100,
-        },
-      },
     );
+    const runtimeStack2 = defineStack(async () => ({
+      store,
+      streams,
+      mailboxStore,
+      queue,
+      multiAgent: {
+        minWaitTimeoutMs: 50,
+        defaultWaitTimeoutMs: 75,
+        maxWaitTimeoutMs: 100,
+      },
+    }));
+    runtime = await runtimeSetup.initialize(runtimeStack2);
     await runtime.enqueue(conversation, userTurn('short-wait', 'Wait briefly'));
     await using worker = await runtime.work();
     void worker;
@@ -377,7 +381,7 @@ test('subagent guidance replaces root guidance on a child turn', async (t) => {
     sandbox: async () => ({}) as AgentSandbox,
     instructions: [],
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: child.model,
@@ -385,14 +389,15 @@ test('subagent guidance replaces root guidance on a child turn', async (t) => {
       instructions: [],
       subagents: [child],
     }),
-    {
-      ...h,
-      multiAgent: {
-        rootAgentUsageHintText: 'ROOT COLLABORATION GUIDANCE',
-        subagentUsageHintText: 'CHILD COLLABORATION GUIDANCE',
-      },
-    },
   );
+  const runtimeStack3 = defineStack(async () => ({
+    ...h,
+    multiAgent: {
+      rootAgentUsageHintText: 'ROOT COLLABORATION GUIDANCE',
+      subagentUsageHintText: 'CHILD COLLABORATION GUIDANCE',
+    },
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack3);
   await h.store.createChat({
     id: 'root-chat',
     userId: 'user-1',
@@ -454,7 +459,7 @@ test('spawn output is the canonical task name without agent_path', async (t) => 
     sandbox: async () => ({}) as AgentSandbox,
     instructions: [],
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model,
@@ -462,8 +467,9 @@ test('spawn output is the canonical task name without agent_path', async (t) => 
       instructions: [],
       subagents: [child],
     }),
-    h,
   );
+  const runtimeStack = defineStack(async () => ({ ...h }));
+  const runtime = await runtimeSetup.initialize(runtimeStack);
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
     userTurn('root-turn', 'delegate'),
@@ -504,7 +510,7 @@ test('plugin-contributed subagent uses AI SDK code mode collaboration', async (t
       return textResponse('done');
     },
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model,
@@ -517,11 +523,12 @@ test('plugin-contributed subagent uses AI SDK code mode collaboration', async (t
         },
       ],
     }),
-    {
-      ...h,
-      multiAgent: { nonCodeModeOnly: false },
-    },
   );
+  const runtimeStack4 = defineStack(async () => ({
+    ...h,
+    multiAgent: { nonCodeModeOnly: false },
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack4);
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
@@ -569,15 +576,16 @@ test('interrupt_agent reports not_found for a missing target', async (t) => {
       return textResponse('done');
     },
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model,
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    h,
   );
+  const runtimeStack = defineStack(async () => ({ ...h }));
+  const runtime = await runtimeSetup.initialize(runtimeStack);
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
     userTurn('root-turn', 'interrupt missing'),
@@ -589,7 +597,7 @@ test('interrupt_agent reports not_found for a missing target', async (t) => {
   assert.match(JSON.stringify(prompt), /"previous_status":"not_found"/);
 });
 
-test('host config rejects invalid namespaces and wait bounds', () => {
+test('host config rejects invalid namespaces and wait bounds', async () => {
   const sandbox = async () => ({}) as AgentSandbox;
   const declaration = defineAgent({
     name: 'root',
@@ -607,40 +615,44 @@ test('host config rejects invalid namespaces and wait bounds', () => {
     queue: new ControlledTurnQueue(),
   };
   try {
-    assert.throws(
-      () =>
-        new AgentRuntime(declaration, {
-          ...h,
-          multiAgent: { toolNamespace: 'functions' },
-        }),
+    const reservedNamespaceSetup = new AgentRuntime(declaration);
+    const reservedNamespaceStack = defineStack(async () => ({
+      ...h,
+      multiAgent: { toolNamespace: 'functions' },
+    }));
+    await assert.rejects(
+      reservedNamespaceSetup.initialize(reservedNamespaceStack),
       /reserved tool namespace/,
     );
-    assert.throws(
-      () =>
-        new AgentRuntime(declaration, {
-          ...h,
-          multiAgent: { toolNamespace: ' agents ' },
-        }),
+    const paddedNamespaceSetup = new AgentRuntime(declaration);
+    const paddedNamespaceStack = defineStack(async () => ({
+      ...h,
+      multiAgent: { toolNamespace: ' agents ' },
+    }));
+    await assert.rejects(
+      paddedNamespaceSetup.initialize(paddedNamespaceStack),
       /cannot be empty or padded/,
     );
-    assert.throws(
-      () =>
-        new AgentRuntime(declaration, {
-          ...h,
-          multiAgent: {
-            minWaitTimeoutMs: 50,
-            defaultWaitTimeoutMs: 40,
-            maxWaitTimeoutMs: 100,
-          },
-        }),
+    const invalidWaitBoundsSetup = new AgentRuntime(declaration);
+    const invalidWaitBoundsStack = defineStack(async () => ({
+      ...h,
+      multiAgent: {
+        minWaitTimeoutMs: 50,
+        defaultWaitTimeoutMs: 40,
+        maxWaitTimeoutMs: 100,
+      },
+    }));
+    await assert.rejects(
+      invalidWaitBoundsSetup.initialize(invalidWaitBoundsStack),
       /defaultWaitTimeoutMs.*minWaitTimeoutMs/,
     );
-    assert.throws(
-      () =>
-        new AgentRuntime(declaration, {
-          ...h,
-          multiAgent: { maxConcurrentThreadsPerSession: 0 },
-        }),
+    const invalidConcurrencySetup = new AgentRuntime(declaration);
+    const invalidConcurrencyStack = defineStack(async () => ({
+      ...h,
+      multiAgent: { maxConcurrentThreadsPerSession: 0 },
+    }));
+    await assert.rejects(
+      invalidConcurrencySetup.initialize(invalidConcurrencyStack),
       /maxConcurrentThreadsPerSession must be a positive integer/,
     );
   } finally {
@@ -665,7 +677,7 @@ test('default guidance tells root and child agents the Codex concurrency slots',
     sandbox: async () => ({}) as AgentSandbox,
     instructions: [],
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: capturing('root'),
@@ -673,8 +685,9 @@ test('default guidance tells root and child agents the Codex concurrency slots',
       instructions: [],
       subagents: [child],
     }),
-    h,
   );
+  const runtimeStack = defineStack(async () => ({ ...h }));
+  const runtime = await runtimeSetup.initialize(runtimeStack);
   await h.store.createChat({
     id: 'root-chat',
     userId: 'user-1',

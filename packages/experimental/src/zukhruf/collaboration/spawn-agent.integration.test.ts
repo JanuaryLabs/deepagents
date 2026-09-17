@@ -19,6 +19,7 @@ import {
   TurnQueue,
   type TurnRef,
   defineAgent,
+  defineStack,
 } from '@deepagents/experimental/zukhruf';
 
 const userTurn = (id: string, text: string) => ({
@@ -209,12 +210,14 @@ test('concurrent identical spawn_agent calls reserve one canonical child path', 
     instructions: [],
     subagents: [worker],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack);
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
@@ -292,12 +295,14 @@ test('spawn_agent retries an enqueue gap but does not restart a completed child 
     instructions: [],
     subagents: [worker],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack2 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack2);
   await using _worker = await runtime.work();
   void _worker;
 

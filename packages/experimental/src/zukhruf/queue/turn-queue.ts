@@ -70,6 +70,8 @@ export interface ConsumeContext {
 export interface ConsumeOptions {
   /** Max turns processed concurrently by this consumer (across chats). */
   concurrency?: number;
+  /** Wait for active handlers and settlement on disposal; otherwise only stop new claims. */
+  waitForActive?: boolean;
   /**
    * Fires for a turn whose handler crashed or whose worker died mid-turn.
    * After it resolves, the turn's chat is unblocked and its next queued

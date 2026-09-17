@@ -99,7 +99,7 @@
       Codex-shaped communication envelope, queue-only/trigger-turn delivery, FIFO runtime
       consumption, transactional cross-worker active-turn handoff, conversation-scoped wake IDs,
       and SQLite contention handling.
-- [x] Root-tree topology + canonical paths: `new AgentRuntime(root, options)` compiles the
+- [x] Root-tree topology + canonical paths: `runtime.initialize(options)` compiles the
       declaration graph, `AgentThread` persists tree/path/parent/declaration identity, and
       `AgentDirectory` confines lookup to the sender's user and tree. No separate thread store is
       needed.

@@ -310,8 +310,14 @@ export class PgBossTurnQueue extends TurnQueue {
 
     return {
       [Symbol.asyncDispose]: async () => {
-        await this.#boss.offWork(this.#queue, { id: turnWorkerId });
-        await this.#boss.offWork(this.deadLetterQueue, { id: deadWorkerId });
+        await this.#boss.offWork(this.#queue, {
+          id: turnWorkerId,
+          wait: options.waitForActive,
+        });
+        await this.#boss.offWork(this.deadLetterQueue, {
+          id: deadWorkerId,
+          wait: options.waitForActive,
+        });
       },
     };
   }

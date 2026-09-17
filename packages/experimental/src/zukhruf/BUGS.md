@@ -8,7 +8,7 @@
 
 **Status:** Resolved for parked and completed turns by `deleteAfterSeconds: 0` plus commit-driven GC in `pg-boss.turn-queue.ts`, test-pinned by `pg-boss.turn-queue.retention.test.ts` and the runtime scenarios. A **parked** turn's job is `cancelled` and is never time-deleted; commit-GC removes a job only after its stream is terminal. **Remaining:** a `created`/queued job is still governed by `retentionSeconds` (14d, which cannot be zero). A sufficiently deep or repeatedly blocked backlog can therefore outlive retention even though each running turn is bounded by `expireInSeconds`, leaving the surviving stream row orphaned. The guard is tracked in **TODO §2 "Startup reconciliation sweep"**: fail every non-terminal stream row with no live or queued job.
 
-**Symptom.** `AgentRuntime.enqueue` returns a conversation-scoped durable `{ id, stream: watch(id) }`.
+**Symptom.** `AgentHost.enqueue` returns a conversation-scoped durable `{ id, stream: watch(id) }`.
 If the turn's queue job is deleted by pg-boss retention before it executes, the returned stream
 **never emits a chunk and never goes terminal** — the caller's consumer hangs forever.
 `observe().resume()` on that head behaves the same: non-terminal status, dead stream.

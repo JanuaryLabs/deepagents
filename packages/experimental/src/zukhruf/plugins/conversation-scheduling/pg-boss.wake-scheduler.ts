@@ -87,6 +87,7 @@ export class PgBossWakeScheduler<T extends object> extends WakeScheduler<T> {
 
   override async consume(
     handler: (wake: Wake<T>) => Promise<void>,
+    waitForActive?: boolean,
   ): Promise<AsyncDisposable> {
     const workerId = await this.#boss.work<
       T,
@@ -109,7 +110,7 @@ export class PgBossWakeScheduler<T extends object> extends WakeScheduler<T> {
     );
     return {
       [Symbol.asyncDispose]: () =>
-        this.#boss.offWork(this.#queue, { id: workerId, wait: false }),
+        this.#boss.offWork(this.#queue, { id: workerId, wait: waitForActive }),
     };
   }
 }

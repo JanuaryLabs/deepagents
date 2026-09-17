@@ -30,6 +30,7 @@ import {
   SqliteMailboxStore,
   defineAgent,
   defineSandbox,
+  defineStack,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
 import {
@@ -170,20 +171,24 @@ test(
         ],
       });
       const options = { store, streams, queue, mailboxStore };
-      const runtime = new AgentRuntime(root, {
+      const runtimeSetup = new AgentRuntime(root);
+      const stack = defineStack(async () => ({
         ...options,
         conversationStatusChanges: new PgBossConversationStatusChangeSource(
           boss,
         ),
-      });
+      }));
+      const runtime = await runtimeSetup.initialize(stack);
       // This host never executes a turn: every push must cross the database notification seam.
-      const observer = new AgentRuntime(root, {
+      const observerSetup = new AgentRuntime(root);
+      const observerStack = defineStack(async () => ({
         ...options,
         store: observerStore,
         conversationStatusChanges: new PgBossConversationStatusChangeSource(
           boss,
         ),
-      });
+      }));
+      const observer = await observerSetup.initialize(observerStack);
       const local: ConversationStatusChange[] = [];
       const subscription = await runtime.subscribeConversationStatus(
         abort.signal,
@@ -464,10 +469,13 @@ test(
       );
       using freshDb = new DatabaseSync(contextPath);
       const freshStore = new SqliteContextStore(freshDb);
-      const freshRuntime = new AgentRuntime(root, {
+      const freshRuntimeSetup = new AgentRuntime(root);
+      const freshRuntimeStack = defineStack(async () => ({
         ...options,
         store: freshStore,
-      });
+      }));
+      const freshRuntime =
+        await freshRuntimeSetup.initialize(freshRuntimeStack);
       assert.deepEqual(
         (await freshRuntime.listHistory('owner')).find(
           (item) => item.chatId === project.chatId,

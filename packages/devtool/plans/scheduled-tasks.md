@@ -24,9 +24,9 @@ implemented first useful core.
 - `@deepagents/experimental/zukhruf/schedules` owns PostgreSQL/PGlite task and
   run persistence, recurrence, workers, run review state, and lifecycle
   mutations.
-- `schedules()` returns a reusable plugin definition. Each `AgentRuntime`
+- `schedules()` returns a reusable plugin definition. Each initialized `AgentHost`
   materializes a fresh `ScheduleControl`, available through
-  `runtime.plugin(definition)`. It supports fresh-root and
+  `host.plugin(definition)`. It supports fresh-root and
   existing-conversation targets.
 - `@deepagents/devtool` is a mountable static UI app served by the host's one
   Hono server at a host-selected path (currently `/devtool` in both demos). It
@@ -104,15 +104,17 @@ const root = defineAgent({
   plugins: [scheduled],
 });
 
-const runtime = new AgentRuntime(root, {
+const stack = defineStack(async () => ({
   ...runtimeOptions,
   bindings: [
     schedulesCapabilities.boss.bind(boss),
     schedulesCapabilities.transaction.bind(transaction),
   ],
-});
+}));
+const runtime = new AgentRuntime(root);
+await using host = await runtime.initialize(stack);
 
-app.route('/zukhruf/v1', http(runtime, schedulesHttp(scheduled)));
+app.route('/zukhruf/v1', http(host, schedulesHttp(scheduled)));
 app.route('/devtool', devtool({ protocolPath: '/zukhruf/v1' }));
 ```
 

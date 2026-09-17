@@ -62,6 +62,10 @@ export default [
     files: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'],
     rules: {
       'no-unused-private-class-members': 'off',
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        { ignoreUsingDeclarations: true },
+      ],
       '@nx/enforce-module-boundaries': [
         'error',
         {

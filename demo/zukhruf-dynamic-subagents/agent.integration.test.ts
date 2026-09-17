@@ -2,19 +2,17 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createCodingAgent } from '@deepagents/demo-zukhruf-dynamic-subagents';
-import {
-  AgentRuntime,
-  type AgentRuntimeOptions,
-} from '@deepagents/experimental/zukhruf';
+import { AgentRuntime } from '@deepagents/experimental/zukhruf';
 
-test('builds the demo root in code and discovers its file agents through the runtime plugin', () => {
+import stack from './stack.ts';
+
+test('builds the demo root in code and discovers its file agents through the runtime plugin', async () => {
   const root = createCodingAgent(import.meta.dirname);
-  const runtime = new AgentRuntime(root, {
-    ...({} as AgentRuntimeOptions),
-  });
+  const runtime = new AgentRuntime(root);
+  await using host = await runtime.initialize(stack);
 
   assert.deepEqual(
-    runtime.info.agents.map(({ name, description, model }) => ({
+    host.info.agents.map(({ name, description, model }) => ({
       name,
       description,
       model: model.modelId,
@@ -23,25 +21,25 @@ test('builds the demo root in code and discovers its file agents through the run
       {
         name: 'coding-agent',
         description: 'Implements focused changes in an existing repository.',
-        model: runtime.info.agents[0].model.modelId,
+        model: host.info.agents[0].model.modelId,
       },
       {
         name: 'coding-team:code-architect',
         description:
           "Designs one small implementation that fits the repository's existing modules.",
-        model: runtime.info.agents[0].model.modelId,
+        model: host.info.agents[0].model.modelId,
       },
       {
         name: 'coding-team:code-explorer',
         description:
           'Traces existing behavior, call sites, conventions, and relevant tests.',
-        model: runtime.info.agents[0].model.modelId,
+        model: host.info.agents[0].model.modelId,
       },
       {
         name: 'coding-team:code-reviewer',
         description:
           'Reviews the current diff for correctness, regressions, and needless complexity.',
-        model: runtime.info.agents[0].model.modelId,
+        model: host.info.agents[0].model.modelId,
       },
     ],
   );

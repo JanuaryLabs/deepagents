@@ -7,8 +7,9 @@ import test from 'node:test';
 
 import {
   AgentRuntime,
-  type AgentRuntimeOptions,
+  type AgentStack,
   defineAgent,
+  defineStack,
 } from '@deepagents/experimental/zukhruf';
 import { mcp } from '@deepagents/experimental/zukhruf/mcp';
 
@@ -107,16 +108,12 @@ test('MCP uses real HTTP clients per runtime and closes them on failure or dispo
     },
     plugins: [connection],
   });
-  const options = {} as AgentRuntimeOptions;
-  await using first = new AgentRuntime(root, options);
-  await using second = new AgentRuntime(root, options);
-  assert.equal(
-    clients.length,
-    0,
-    'declaring and constructing does not connect',
-  );
-  await Promise.all([first.initialize(), first.initialize()]);
-  await second.initialize();
+  const options = {} as Awaited<ReturnType<AgentStack>>;
+  const stack = defineStack(async () => options);
+  const firstSetup = new AgentRuntime(root);
+  await using first = await firstSetup.initialize(stack);
+  const secondSetup = new AgentRuntime(root);
+  await using second = await secondSetup.initialize(stack);
   assert.equal(clients.length, 2);
   assert.equal(discoveryRequests, 2);
   assert.notEqual(sessions[0], sessions[1]);
@@ -132,12 +129,15 @@ test('MCP uses real HTTP clients per runtime and closes them on failure or dispo
   assert.deepEqual(closed, sessions);
 
   failDiscovery = true;
-  await using failed = new AgentRuntime(root, options);
-  await assert.rejects(failed.initialize(), /Method unavailable/);
+  const discoveryRuntime = new AgentRuntime(root);
+  await assert.rejects(
+    discoveryRuntime.initialize(stack),
+    /Method unavailable/,
+  );
   assert.deepEqual(closed, sessions, 'failed discovery closes its client');
 
   failDiscovery = false;
-  await using laterFailure = new AgentRuntime(
+  const failingRuntime = new AgentRuntime(
     defineAgent({
       ...root,
       plugins: [
@@ -152,9 +152,8 @@ test('MCP uses real HTTP clients per runtime and closes them on failure or dispo
         },
       ],
     }),
-    options,
   );
-  await assert.rejects(laterFailure.initialize(), /later failure/);
+  await assert.rejects(failingRuntime.initialize(stack), /later failure/);
   assert.deepEqual(
     closed,
     sessions,

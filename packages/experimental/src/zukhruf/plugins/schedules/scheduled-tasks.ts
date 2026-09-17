@@ -898,7 +898,10 @@ export class ScheduledTasks<ExecutionConfig extends object> {
     return this.#setReviewStatus(ownerId, runId, 'archived');
   }
 
-  async work(options?: JobPollingOptions): Promise<AsyncDisposable> {
+  async work(
+    options?: JobPollingOptions,
+    waitForActive?: boolean,
+  ): Promise<AsyncDisposable> {
     const workOptions = { ...options, includeMetadata: true as const };
     const workerId = await this.#boss.work<
       ScheduledJob,
@@ -913,7 +916,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
     );
     return {
       [Symbol.asyncDispose]: () =>
-        this.#boss.offWork(this.#queue, { id: workerId, wait: false }),
+        this.#boss.offWork(this.#queue, { id: workerId, wait: waitForActive }),
     };
   }
 

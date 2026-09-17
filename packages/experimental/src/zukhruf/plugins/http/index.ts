@@ -15,10 +15,10 @@ import { elementsSchema } from '@deepagents/elements';
 
 import type { ConversationId } from '../../mailbox/types.ts';
 import type {
+  AgentHost,
   AgentObservation,
   AgentPluginDefinition,
   AgentPluginInstance,
-  AgentRuntime,
 } from '../../runtime/agent-runtime.ts';
 import { validate } from './validator.ts';
 
@@ -114,7 +114,7 @@ const turnBodySchema = z.strictObject({
 });
 
 export interface HttpRuntime extends Pick<
-  AgentRuntime,
+  AgentHost,
   | 'createSession'
   | 'enqueue'
   | 'info'

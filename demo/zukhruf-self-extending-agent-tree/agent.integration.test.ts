@@ -19,6 +19,7 @@ import {
   PgBossTurnQueue,
   SqliteMailboxStore,
   defineSandbox,
+  defineStack,
 } from '@deepagents/experimental/zukhruf';
 
 const usage = {
@@ -154,7 +155,8 @@ test('authors a missing skill before a fresh general task agent uses it', async 
     new SqliteStreamStore(':memory:'),
     (store) => store.close(),
   );
-  const runtime = new AgentRuntime(root, {
+  const runtime = new AgentRuntime(root);
+  const stack = defineStack(async () => ({
     store: new InMemoryContextStore(),
     streams: new StreamManager({
       store: streamStore,
@@ -162,10 +164,11 @@ test('authors a missing skill before a fresh general task agent uses it', async 
     }),
     queue,
     mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
-  });
-  resources.use(await runtime.work({ concurrency: 4 }));
+  }));
+  const host = resources.use(await runtime.initialize(stack));
+  resources.use(await host.work({ concurrency: 4 }));
 
-  const turn = await runtime.enqueue(
+  const turn = await host.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
     {
       message: {

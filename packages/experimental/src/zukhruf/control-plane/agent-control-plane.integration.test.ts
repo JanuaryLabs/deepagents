@@ -13,6 +13,7 @@ import {
   type StreamStore,
 } from '@deepagents/context';
 import {
+  type AgentHost,
   AgentRuntime,
   type ConsumeContext,
   type ConsumeOptions,
@@ -25,6 +26,7 @@ import {
   type TurnRef,
   createInterAgentCommunication,
   defineAgent,
+  defineStack,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
 import { settleWithin } from '@deepagents/test';
@@ -39,7 +41,7 @@ const userTurn = (id: string, text: string) => ({
 });
 
 async function submitApprovals(
-  runtime: AgentRuntime,
+  runtime: AgentHost,
   conversation: ConversationId,
   decisions: ReadonlyMap<string, boolean>,
 ) {
@@ -499,12 +501,14 @@ test('worker dispatches a child chat to the declaration named by its metadata', 
     instructions: [],
     subagents: [researcher],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack);
 
   await store.createChat({
     id: 'root-chat',
@@ -566,15 +570,21 @@ test('a terminal duplicate cannot replace a newer latest turn', async (t) => {
     mailboxStore.close();
   });
   const modelCalls: unknown[] = [];
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: textModel('done', modelCalls),
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack2 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack2);
   const conversation = { chatId: 'root-chat', userId: 'user-1' };
   const first = await runtime.enqueue(
     conversation,
@@ -660,12 +670,14 @@ test('spawn_agent queues an independent child turn and returns before it runs', 
     instructions: [],
     subagents: [researcher],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack3 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack3);
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
@@ -741,12 +753,14 @@ test('a completed child queues its final answer to the parent without waking it'
     instructions: [],
     subagents: [researcher],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack4 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack4);
 
   await store.createChat({
     id: 'root-chat',
@@ -848,7 +862,7 @@ test('an approval-paused child sends one final answer only after continuation', 
       return textResponse('listed paused child');
     },
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: rootModel,
@@ -856,8 +870,14 @@ test('an approval-paused child sends one final answer only after continuation', 
       instructions: [],
       subagents: [researcher],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack5 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack5);
   await createAgentChats(store, [
     {
       id: 'root-chat',
@@ -960,7 +980,7 @@ test('a failed approval continuation reports failure instead of remaining paused
       }),
     },
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: listAgentsModel(listedPrompts),
@@ -968,8 +988,14 @@ test('a failed approval continuation reports failure instead of remaining paused
       instructions: [],
       subagents: [researcher],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack6 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack6);
   await createAgentChats(store, [
     {
       id: 'root-chat',
@@ -1057,7 +1083,7 @@ test('a cancelled approval continuation clears the gate and revives parked turns
     streamStore.close();
     mailboxStore.close();
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4({
@@ -1088,8 +1114,14 @@ test('a cancelled approval continuation clears the gate and revives parked turns
         }),
       },
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack7 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack7);
   const conversation = { chatId: 'cancelled-continuation', userId: 'user-1' };
   const initial = await runtime.enqueue(
     conversation,
@@ -1140,7 +1172,7 @@ test('failed continuation preserves denied sibling semantics', async (t) => {
     mailboxStore.close();
   });
   const inputSchema = z.object({ report: z.string() });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4({
@@ -1189,8 +1221,14 @@ test('failed continuation preserves denied sibling semantics', async (t) => {
         }),
       },
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack8 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack8);
   const conversation = { chatId: 'failed-siblings', userId: 'user-1' };
   const initial = await runtime.enqueue(
     conversation,
@@ -1242,12 +1280,14 @@ test('a terminal child completion survives a transient parent-mailbox failure', 
     instructions: [],
     subagents: [researcher],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack9 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack9);
 
   await store.createChat({
     id: 'root-chat',
@@ -1343,7 +1383,7 @@ test('a stale orphan retry cannot clear or supersede a successor turn', async (t
     sandbox: async () => ({}) as AgentSandbox,
     instructions: [],
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: textModel('root reply', []),
@@ -1351,8 +1391,14 @@ test('a stale orphan retry cannot clear or supersede a successor turn', async (t
       instructions: [],
       subagents: [researcher],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack10 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack10);
   await createAgentChats(store, [
     {
       id: 'root-chat',
@@ -1467,12 +1513,14 @@ test('terminal child recovery does not duplicate a completion committed before a
     instructions: [],
     subagents: [researcher],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack11 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack11);
 
   for (const chat of [
     {
@@ -1552,12 +1600,14 @@ test('a failed child asynchronously notifies its parent with the terminal status
     instructions: [],
     subagents: [researcher],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack12 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack12);
 
   for (const chat of [
     {
@@ -1642,12 +1692,14 @@ test('list_agents reports a child whose turn fails before setup completes', asyn
     instructions: [],
     subagents: [researcher],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack13 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack13);
 
   for (const chat of [
     {
@@ -1732,12 +1784,14 @@ test('a cancelled child asynchronously notifies its parent with the terminal sta
     instructions: [],
     subagents: [researcher],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack14 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack14);
 
   for (const chat of [
     {
@@ -1829,12 +1883,14 @@ test('a child cancelled while queued notifies its parent once without running th
     instructions: [],
     subagents: [researcher],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack15 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack15);
   for (const chat of [
     {
       id: 'root-chat',
@@ -1950,12 +2006,14 @@ test('send_message resolves a canonical sibling path and queues mail without wak
     instructions: [],
     subagents: [sender, reviewer],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack16 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack16);
 
   for (const chat of [
     {
@@ -2071,12 +2129,14 @@ test('followup_task wakes a non-root target with a new task', async (t) => {
     instructions: [],
     subagents: [researcher],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack17 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack17);
 
   for (const chat of [
     {
@@ -2178,7 +2238,7 @@ test('interrupt_agent cancels the oldest queued child turn and reports its prior
     sandbox,
     instructions: [],
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: rootModel,
@@ -2186,8 +2246,14 @@ test('interrupt_agent cancels the oldest queued child turn and reports its prior
       instructions: [],
       subagents: [researcher],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack18 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack18);
   await createAgentChats(store, [
     {
       id: 'root-chat',
@@ -2278,7 +2344,7 @@ test('interrupt_agent can retry terminal projection before deleting a queued chi
     sandbox,
     instructions: [],
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: rootModel,
@@ -2286,8 +2352,14 @@ test('interrupt_agent can retry terminal projection before deleting a queued chi
       instructions: [],
       subagents: [researcher],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack19 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack19);
   await createAgentChats(store, [
     {
       id: 'root-chat',
@@ -2410,18 +2482,22 @@ test('interrupt_agent aborts a running child across runtime instances without qu
       declarationName: 'researcher',
     },
   ]);
-  const rootRuntime = new AgentRuntime(root, {
+  const rootRuntimeSetup = new AgentRuntime(root);
+  const rootRuntimeStack = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue: rootQueue,
-  });
-  const childRuntime = new AgentRuntime(root, {
+  }));
+  const rootRuntime = await rootRuntimeSetup.initialize(rootRuntimeStack);
+  const childRuntimeSetup = new AgentRuntime(root);
+  const childRuntimeStack = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue: childQueue,
-  });
+  }));
+  const childRuntime = await childRuntimeSetup.initialize(childRuntimeStack);
   await using _rootWorker = await rootRuntime.work();
   void _rootWorker;
   await using _childWorker = await childRuntime.work();
@@ -2487,7 +2563,7 @@ test('interrupt_agent rejects root and self targets', async (t) => {
     sandbox: async () => ({}) as AgentSandbox,
     instructions: [],
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: textModel('root', []),
@@ -2495,8 +2571,14 @@ test('interrupt_agent rejects root and self targets', async (t) => {
       instructions: [],
       subagents: [caller],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
+  const runtimeStack20 = defineStack(async () => ({
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack20);
   await createAgentChats(store, [
     {
       id: 'root-chat',
@@ -2586,12 +2668,14 @@ test('interrupt_agent leaves terminal and approval-paused children unchanged', a
     instructions: [],
     subagents: [completed, paused],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack21 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack21);
   await createAgentChats(store, [
     {
       id: 'root-chat',
@@ -2687,12 +2771,14 @@ test('wait_agent returns for pending caller mail without consuming it', async (t
     sandbox: async () => ({}) as AgentSandbox,
     instructions: [],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack22 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack22);
 
   await runtime.enqueue(
     conversation,
@@ -2748,18 +2834,23 @@ test('wait_agent is released by cross-runtime mail that reaches the next model s
     sandbox: async () => ({}) as AgentSandbox,
     instructions: [],
   });
-  const callerRuntime = new AgentRuntime(root, {
+  const callerRuntimeSetup = new AgentRuntime(root);
+  const callerRuntimeStack = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue: callerQueue,
-  });
-  const deliveryRuntime = new AgentRuntime(root, {
+  }));
+  const callerRuntime = await callerRuntimeSetup.initialize(callerRuntimeStack);
+  const deliveryRuntimeSetup = new AgentRuntime(root);
+  const deliveryRuntimeStack = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue: deliveryQueue,
-  });
+  }));
+  const deliveryRuntime =
+    await deliveryRuntimeSetup.initialize(deliveryRuntimeStack);
   await using _callerWorker = await callerRuntime.work();
   void _callerWorker;
   await using _deliveryWorker = await deliveryRuntime.work();
@@ -2836,12 +2927,14 @@ test('wait_agent reports a bounded timeout when no mail arrives', async (t) => {
     sandbox: async () => ({}) as AgentSandbox,
     instructions: [],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack23 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack23);
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
@@ -2880,12 +2973,14 @@ test('cancelling the caller aborts an active wait_agent call', async (t) => {
     sandbox: async () => ({}) as AgentSandbox,
     instructions: [],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack24 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack24);
   const conversation = { chatId: 'root-chat', userId: 'user-1' };
   const enqueued = await runtime.enqueue(
     conversation,
@@ -2991,18 +3086,24 @@ test('send_message crosses runtime instances and reaches an active recipient at 
     },
   ]);
 
-  const senderRuntime = new AgentRuntime(root, {
+  const senderRuntimeSetup = new AgentRuntime(root);
+  const senderRuntimeStack = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue: senderQueue,
-  });
-  const recipientRuntime = new AgentRuntime(root, {
+  }));
+  const senderRuntime = await senderRuntimeSetup.initialize(senderRuntimeStack);
+  const recipientRuntimeSetup = new AgentRuntime(root);
+  const recipientRuntimeStack = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue: recipientQueue,
-  });
+  }));
+  const recipientRuntime = await recipientRuntimeSetup.initialize(
+    recipientRuntimeStack,
+  );
   await using _senderWorker = await senderRuntime.work();
   void _senderWorker;
   await using _recipientWorker = await recipientRuntime.work();
@@ -3113,18 +3214,25 @@ test('followup_task crosses runtime instances and wakes an idle recipient', asyn
     },
   ]);
 
-  const senderRuntime = new AgentRuntime(root, {
+  const senderRuntimeSetup = new AgentRuntime(root);
+  const senderRuntimeStack2 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue: senderQueue,
-  });
-  const recipientRuntime = new AgentRuntime(root, {
+  }));
+  const senderRuntime =
+    await senderRuntimeSetup.initialize(senderRuntimeStack2);
+  const recipientRuntimeSetup = new AgentRuntime(root);
+  const recipientRuntimeStack2 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue: recipientQueue,
-  });
+  }));
+  const recipientRuntime = await recipientRuntimeSetup.initialize(
+    recipientRuntimeStack2,
+  );
   await using _senderWorker = await senderRuntime.work();
   void _senderWorker;
   await using _recipientWorker = await recipientRuntime.work();
@@ -3206,12 +3314,14 @@ test('followup_task stays behind an unstarted initial ask as a distinct later tu
     instructions: [],
     subagents: [researcher],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack25 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack25);
 
   for (const chat of [
     {
@@ -3320,12 +3430,14 @@ test('followup_task rejects the root agent without storing mail or scheduling a 
     sandbox: async () => ({}) as AgentSandbox,
     instructions: [],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack26 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack26);
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
@@ -3399,12 +3511,14 @@ test('list_agents returns exact Codex items with canonical paths and current sta
     instructions: [],
     subagents: [researcher],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack27 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack27);
 
   await store.createChat({
     id: 'root-chat',
@@ -3516,12 +3630,14 @@ test('list_agents resolves a relative path prefix and returns only that subtree'
     instructions: [],
     subagents: [planner, reviewer],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack28 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack28);
 
   for (const chat of [
     {
@@ -3623,12 +3739,14 @@ test('list_agents reports a completed child with its result', async (t) => {
     instructions: [],
     subagents: [researcher],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack29 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack29);
 
   for (const chat of [
     {
@@ -3727,12 +3845,14 @@ test('list_agents reports a completed child with a queued follow-up as running',
     instructions: [],
     subagents: [researcher],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack30 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack30);
 
   for (const chat of [
     {
@@ -3881,12 +4001,14 @@ test('nested agents run independently, consume sibling mail, and remain visible 
     instructions: [],
     subagents: [planner, reviewer],
   });
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack31 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack31);
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
@@ -4049,11 +4171,18 @@ test('spawn_agent is rejected with the Codex limit error while the tree has no f
     mailboxStore,
     multiAgent: { maxConcurrentThreadsPerSession: 2 },
   };
-  const rootRuntime = new AgentRuntime(root, { ...options, queue: rootQueue });
-  const childRuntime = new AgentRuntime(root, {
+  const rootRuntimeSetup = new AgentRuntime(root);
+  const rootRuntimeStack2 = defineStack(async () => ({
+    ...options,
+    queue: rootQueue,
+  }));
+  const rootRuntime = await rootRuntimeSetup.initialize(rootRuntimeStack2);
+  const childRuntimeSetup = new AgentRuntime(root);
+  const childRuntimeStack2 = defineStack(async () => ({
     ...options,
     queue: childQueue,
-  });
+  }));
+  const childRuntime = await childRuntimeSetup.initialize(childRuntimeStack2);
   await using _rootWorker = await rootRuntime.work();
   void _rootWorker;
   await using _childWorker = await childRuntime.work();
@@ -4189,11 +4318,18 @@ test('followup_task is rejected with the Codex limit error while send_message st
     mailboxStore,
     multiAgent: { maxConcurrentThreadsPerSession: 2 },
   };
-  const rootRuntime = new AgentRuntime(root, { ...options, queue: rootQueue });
-  const childRuntime = new AgentRuntime(root, {
+  const rootRuntimeSetup = new AgentRuntime(root);
+  const rootRuntimeStack3 = defineStack(async () => ({
+    ...options,
+    queue: rootQueue,
+  }));
+  const rootRuntime = await rootRuntimeSetup.initialize(rootRuntimeStack3);
+  const childRuntimeSetup = new AgentRuntime(root);
+  const childRuntimeStack3 = defineStack(async () => ({
     ...options,
     queue: childQueue,
-  });
+  }));
+  const childRuntime = await childRuntimeSetup.initialize(childRuntimeStack3);
   await using _rootWorker = await rootRuntime.work();
   void _rootWorker;
   await using _childWorker = await childRuntime.work();
@@ -4292,13 +4428,15 @@ test('a settled child frees its execution slot for the next spawn', async (t) =>
       declarationName: 'researcher',
     },
   ]);
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack32 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue,
     multiAgent: { maxConcurrentThreadsPerSession: 2 },
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack32);
   await using _worker = await runtime.work();
   void _worker;
 
@@ -4390,13 +4528,15 @@ test('a host cannot start a sub-agent turn while the tree has no free execution 
       declarationName: 'researcher',
     },
   ]);
-  const runtime = new AgentRuntime(root, {
+  const runtimeSetup = new AgentRuntime(root);
+  const runtimeStack33 = defineStack(async () => ({
     store,
     streams: streamsFor(streamStore),
     mailboxStore,
     queue: childQueue,
     multiAgent: { maxConcurrentThreadsPerSession: 2 },
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack33);
   await using _worker = await runtime.work();
   void _worker;
 

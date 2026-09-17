@@ -25,6 +25,7 @@ import {
   StreamManager,
 } from '@deepagents/context';
 import {
+  type AgentHost,
   AgentRuntime,
   type ConsumeContext,
   type ConsumeOptions,
@@ -32,6 +33,7 @@ import {
   TurnQueue,
   type TurnRef,
   defineAgent,
+  defineStack,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
 import {
@@ -53,7 +55,7 @@ const userTurn = (id: string, text: string) => ({
 });
 
 async function submitApproval(
-  runtime: AgentRuntime,
+  runtime: AgentHost,
   conversation: { chatId: string; userId: string },
   toolCallId: string,
 ) {
@@ -446,7 +448,7 @@ function toolModel(
 }
 
 async function runTurn(
-  runtime: AgentRuntime,
+  runtime: AgentHost,
   queue: ControlledTurnQueue,
   conversation: { chatId: string; userId: string },
   input: string,
@@ -486,7 +488,7 @@ test('configured runtime injects top-level Claude-compatible scheduling tools', 
       };
     },
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model,
@@ -494,15 +496,16 @@ test('configured runtime injects top-level Claude-compatible scheduling tools', 
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      multiAgent: { toolNamespace: 'agents' },
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack = defineStack(async () => ({
+    ...h,
+    multiAgent: { toolNamespace: 'agents' },
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack);
 
   await runtime.enqueue(
     { chatId: 'scheduled-tools', userId: 'user-1' },
@@ -540,7 +543,7 @@ test('CronCreate, CronList, and CronDelete run through the model loop in one con
     ['list cron', { name: 'CronList', input: {} }],
   ]);
   const seenUserText: string[] = [];
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(commands, seenUserText),
@@ -548,14 +551,15 @@ test('CronCreate, CronList, and CronDelete run through the model loop in one con
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('Asia/Amman'),
-      ],
-    },
   );
+  const runtimeStack2 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('Asia/Amman'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack2);
   const conversation = { chatId: 'cron-tools', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
@@ -621,7 +625,7 @@ test('CronCreate reports the exact next run and timezone for a one-shot cron', a
       },
     ],
   ]);
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
@@ -629,14 +633,15 @@ test('CronCreate reports the exact next run and timezone for a one-shot cron', a
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('Asia/Amman'),
-      ],
-    },
   );
+  const runtimeStack3 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('Asia/Amman'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack3);
   const conversation = { chatId: 'passed-one-shot', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
@@ -721,7 +726,7 @@ test('parallel model tool calls preserve concurrent cron creates and deletes', a
       };
     },
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model,
@@ -729,14 +734,15 @@ test('parallel model tool calls preserve concurrent cron creates and deletes', a
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack4 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack4);
   const conversation = { chatId: 'parallel-cron', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
@@ -768,7 +774,7 @@ test('ScheduleWakeup fires an ask and persists scheduled provenance', async (t) 
     ],
   ]);
   const seenUserText: string[] = [];
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(commands, seenUserText),
@@ -776,14 +782,15 @@ test('ScheduleWakeup fires an ask and persists scheduled provenance', async (t) 
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack5 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack5);
   const conversation = { chatId: 'dynamic-tools', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
@@ -849,7 +856,7 @@ test('ScheduleWakeup rejects delays outside its supported window', async (t) => 
       },
     ],
   ]);
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
@@ -857,14 +864,15 @@ test('ScheduleWakeup rejects delays outside its supported window', async (t) => 
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack6 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack6);
   const conversation = { chatId: 'invalid-dynamic-delay', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
@@ -916,7 +924,7 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
       };
     },
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model,
@@ -924,14 +932,15 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack7 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack7);
   const conversation = { chatId: 'busy-cron', userId: 'user-1' };
   await runtime.createSession(conversation);
   await h.store.updateChat(conversation.chatId, ({ metadata }) => ({
@@ -1028,7 +1037,7 @@ test('unconfigured runtime exposes no scheduling tools', async (t) => {
   const scheduler = new RecordingWakeScheduler();
   const h = harness(t, scheduler);
   let toolNames: string[] = [];
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4({
@@ -1053,8 +1062,9 @@ test('unconfigured runtime exposes no scheduling tools', async (t) => {
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    h,
   );
+  const runtimeStack = defineStack(async () => ({ ...h }));
+  const runtime = await runtimeSetup.initialize(runtimeStack);
   await runtime.enqueue(
     { chatId: 'no-scheduling', userId: 'user-1' },
     userTurn('turn-1', 'show tools'),
@@ -1071,27 +1081,27 @@ test('unconfigured runtime exposes no scheduling tools', async (t) => {
   assert.equal(scheduler.handler, undefined);
 });
 
-test('runtime rejects an invalid scheduling timezone during construction', (t) => {
+test('runtime rejects an invalid scheduling timezone during initialization', async (t) => {
   const scheduler = new RecordingWakeScheduler();
   const h = harness(t, scheduler);
-  assert.throws(
-    () =>
-      new AgentRuntime(
-        defineAgent({
-          name: 'root',
-          model: new MockLanguageModelV4({}),
-          sandbox: async () => ({}) as AgentSandbox,
-          instructions: [],
-          plugins: [conversationScheduling()],
-        }),
-        {
-          ...h,
-          bindings: [
-            conversationSchedulingCapabilities.scheduler.bind(scheduler),
-            conversationSchedulingCapabilities.timezone.bind('Not/A_Timezone'),
-          ],
-        },
-      ),
+  const runtime = new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: new MockLanguageModelV4({}),
+      sandbox: async () => ({}) as AgentSandbox,
+      instructions: [],
+      plugins: [conversationScheduling()],
+    }),
+  );
+  const runtimeStack = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('Not/A_Timezone'),
+    ],
+  }));
+  await assert.rejects(
+    runtime.initialize(runtimeStack),
     /Invalid scheduling timezone/,
   );
 });
@@ -1108,15 +1118,18 @@ test('one conversation-scheduling definition creates a fresh instance per runtim
     plugins: [plugin],
   });
 
-  const first = new AgentRuntime(declaration, {
+  const firstSetup = new AgentRuntime(declaration);
+  const firstStack = defineStack(async () => ({
     ...h,
     bindings: schedulingBindings(scheduler, 'UTC'),
-  });
-  const second = new AgentRuntime(declaration, {
+  }));
+  await using first = await firstSetup.initialize(firstStack);
+  const secondSetup = new AgentRuntime(declaration);
+  const secondStack = defineStack(async () => ({
     ...h,
     bindings: schedulingBindings(scheduler, 'UTC'),
-  });
-  await Promise.all([first.initialize(), second.initialize()]);
+  }));
+  await using second = await secondSetup.initialize(secondStack);
   assert.notEqual(first.plugin(plugin), second.plugin(plugin));
 });
 
@@ -1124,7 +1137,7 @@ test('conversation availability reaches every plugin before reporting failures',
   const scheduler = new RecordingWakeScheduler();
   const h = harness(t, scheduler);
   const calls: string[] = [];
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(new Map(), []),
@@ -1150,8 +1163,9 @@ test('conversation availability reaches every plugin before reporting failures',
         },
       ],
     }),
-    h,
   );
+  const runtimeStack = defineStack(async () => ({ ...h }));
+  const runtime = await runtimeSetup.initialize(runtimeStack);
 
   await runtime.enqueue(
     { chatId: 'availability', userId: 'user-1' },
@@ -1175,7 +1189,7 @@ test('failed wake insertion does not commit a cron definition', async (t) => {
       },
     ],
   ]);
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
@@ -1183,14 +1197,15 @@ test('failed wake insertion does not commit a cron definition', async (t) => {
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack8 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack8);
   const conversation = { chatId: 'create-gap', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
@@ -1225,19 +1240,24 @@ test('retrying a completed CronCreate tool call reuses its definition and wake',
       plugins: [conversationScheduling()],
     });
   const conversation = { chatId: 'create-response-gap', userId: 'user-1' };
-  const firstRuntime = new AgentRuntime(root(toolModel(commands, [])), {
+  const firstRuntimeSetup = new AgentRuntime(root(toolModel(commands, [])));
+  const firstRuntimeStack = defineStack(async () => ({
     ...h,
     bindings: schedulingBindings(scheduler, 'UTC'),
-  });
+  }));
+  const firstRuntime = await firstRuntimeSetup.initialize(firstRuntimeStack);
   const firstWorker = await firstRuntime.work();
   await runTurn(firstRuntime, h.queue, conversation, 'retry create response');
   const firstWake = [...scheduler.wakes.values()][0];
   await firstWorker[Symbol.asyncDispose]();
 
-  const retriedRuntime = new AgentRuntime(root(toolModel(commands, [])), {
+  const retriedRuntimeSetup = new AgentRuntime(root(toolModel(commands, [])));
+  const retriedRuntimeStack = defineStack(async () => ({
     ...h,
     bindings: schedulingBindings(scheduler, 'UTC'),
-  });
+  }));
+  const retriedRuntime =
+    await retriedRuntimeSetup.initialize(retriedRuntimeStack);
   await using _retriedWorker = await retriedRuntime.work();
   void _retriedWorker;
   await runTurn(retriedRuntime, h.queue, conversation, 'retry create response');
@@ -1271,7 +1291,7 @@ test('retry after enqueue-before-dispatch-clear executes one scheduled turn', as
     ],
   ]);
   const seenUserText: string[] = [];
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(commands, seenUserText),
@@ -1279,14 +1299,15 @@ test('retry after enqueue-before-dispatch-clear executes one scheduled turn', as
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack9 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack9);
   const conversation = { chatId: 'advance-gap', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
@@ -1347,7 +1368,7 @@ test('retry after claim-before-enqueue executes one scheduled turn', async (t) =
     ],
   ]);
   const seenUserText: string[] = [];
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(commands, seenUserText),
@@ -1355,14 +1376,15 @@ test('retry after claim-before-enqueue executes one scheduled turn', async (t) =
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack10 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack10);
   const conversation = { chatId: 'claim-enqueue-gap', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
@@ -1394,7 +1416,7 @@ test('deleting a claimed cron before materialization prevents its scheduled ask'
       },
     ],
   ]);
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
@@ -1402,14 +1424,15 @@ test('deleting a claimed cron before materialization prevents its scheduled ask'
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack11 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack11);
   const conversation = { chatId: 'claimed-delete-race', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
@@ -1448,7 +1471,7 @@ test('deleting a claimed cron during successor insertion prevents its scheduled 
       },
     ],
   ]);
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
@@ -1456,14 +1479,15 @@ test('deleting a claimed cron during successor insertion prevents its scheduled 
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack12 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack12);
   const conversation = { chatId: 'successor-delete-race', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
@@ -1507,7 +1531,7 @@ test('failed successor insertion leaves the current cron retryable', async (t) =
     ],
   ]);
   const seenUserText: string[] = [];
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(commands, seenUserText),
@@ -1515,14 +1539,15 @@ test('failed successor insertion leaves the current cron retryable', async (t) =
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack13 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack13);
   const conversation = { chatId: 'successor-gap', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
@@ -1567,7 +1592,7 @@ test('pg-boss can retry successor insertion through a prolonged outage', async (
       },
     ],
   ]);
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
@@ -1575,14 +1600,15 @@ test('pg-boss can retry successor insertion through a prolonged outage', async (
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack14 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack14);
   const conversation = { chatId: 'prolonged-successor-gap', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
@@ -1635,7 +1661,7 @@ test('ScheduleWakeup replacement and stop leave cron definitions active', async 
     ],
     ['stop dynamic', { name: 'ScheduleWakeup', input: { stop: true } }],
   ]);
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
@@ -1643,14 +1669,15 @@ test('ScheduleWakeup replacement and stop leave cron definitions active', async 
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack15 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack15);
   const conversation = { chatId: 'replace-stop', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
@@ -1702,7 +1729,7 @@ test('a queued scheduled turn can be cancelled through AgentObservation', async 
     ],
   ]);
   const seenUserText: string[] = [];
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(commands, seenUserText),
@@ -1710,14 +1737,15 @@ test('a queued scheduled turn can be cancelled through AgentObservation', async 
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack16 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack16);
   const conversation = { chatId: 'scheduled-cancel', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
@@ -1747,7 +1775,7 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
       },
     ],
   ]);
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
@@ -1755,14 +1783,15 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack17 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack17);
   const conversation = { chatId: 'cancel-user-for-cron', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
@@ -1805,7 +1834,7 @@ test('an overdue occurrence waits for approval before materializing', async (t) 
     ],
     ['needs approval', { name: 'publish', input: {} }],
   ]);
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
@@ -1821,14 +1850,15 @@ test('an overdue occurrence waits for approval before materializing', async (t) 
       },
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack18 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack18);
   const conversation = { chatId: 'approval-cron', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
@@ -1867,7 +1897,7 @@ test('a non-recurring cron fires once and removes its definition', async (t) => 
       },
     ],
   ]);
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
@@ -1875,14 +1905,15 @@ test('a non-recurring cron fires once and removes its definition', async (t) => 
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack19 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack19);
   const conversation = { chatId: 'cron-one-shot', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
@@ -1921,19 +1952,23 @@ test('recurrence keeps the timezone persisted at creation across runtime restart
     plugins: [conversationScheduling()],
   });
   const conversation = { chatId: 'timezone-stability', userId: 'user-1' };
-  const firstRuntime = new AgentRuntime(declaration, {
+  const firstRuntimeSetup = new AgentRuntime(declaration);
+  const firstRuntimeStack2 = defineStack(async () => ({
     ...h,
     bindings: schedulingBindings(scheduler, 'Asia/Amman'),
-  });
+  }));
+  const firstRuntime = await firstRuntimeSetup.initialize(firstRuntimeStack2);
   const firstWorker = await firstRuntime.work();
   await runTurn(firstRuntime, h.queue, conversation, 'create zoned cron');
   const firstWake = [...scheduler.wakes.values()][0];
   await firstWorker[Symbol.asyncDispose]();
 
-  const restarted = new AgentRuntime(declaration, {
+  const restartedSetup = new AgentRuntime(declaration);
+  const restartedStack = defineStack(async () => ({
     ...h,
     bindings: schedulingBindings(scheduler, 'UTC'),
-  });
+  }));
+  const restarted = await restartedSetup.initialize(restartedStack);
   await using _restartedWorker = await restarted.work();
   void _restartedWorker;
   await scheduler.fire(firstWake.id);
@@ -1966,10 +2001,12 @@ test('cron definitions are isolated by conversation and user across runtimes', a
     instructions: [],
     plugins: [conversationScheduling()],
   });
-  const runtime = new AgentRuntime(declaration, {
+  const runtimeSetup = new AgentRuntime(declaration);
+  const runtimeStack20 = defineStack(async () => ({
     ...h,
     bindings: schedulingBindings(scheduler, 'UTC'),
-  });
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack20);
   const worker = await runtime.work();
   await runTurn(
     runtime,
@@ -1979,10 +2016,12 @@ test('cron definitions are isolated by conversation and user across runtimes', a
   );
   await worker[Symbol.asyncDispose]();
 
-  const otherRuntime = new AgentRuntime(declaration, {
+  const otherRuntimeSetup = new AgentRuntime(declaration);
+  const otherRuntimeStack = defineStack(async () => ({
     ...h,
     bindings: schedulingBindings(scheduler, 'UTC'),
-  });
+  }));
+  const otherRuntime = await otherRuntimeSetup.initialize(otherRuntimeStack);
   await using _otherWorker = await otherRuntime.work();
   void _otherWorker;
   const other = { chatId: 'private-b', userId: 'user-b' };
@@ -2039,7 +2078,7 @@ test('scheduling tools bind to the current root, child, and sibling conversation
     sandbox,
     instructions: [],
   });
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model,
@@ -2048,14 +2087,15 @@ test('scheduling tools bind to the current root, child, and sibling conversation
       subagents: [worker],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack21 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack21);
   const root = { chatId: 'scheduling-root', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
@@ -2105,7 +2145,7 @@ test('scheduling tools bind to the current root, child, and sibling conversation
 test('resume ignores scheduling metadata while scheduling tools fail closed', async (t) => {
   const scheduler = new RecordingWakeScheduler();
   const h = harness(t, scheduler);
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(
@@ -2116,14 +2156,15 @@ test('resume ignores scheduling metadata while scheduling tools fail closed', as
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack22 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack22);
   const conversation = { chatId: 'malformed-state', userId: 'user-1' };
   await runtime.createSession(conversation);
   await h.store.updateChat(conversation.chatId, ({ metadata }) => ({
@@ -2170,7 +2211,7 @@ test('CronCreate rejects six-field and unreachable expressions', async (t) => {
       },
     ],
   ]);
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
@@ -2178,14 +2219,15 @@ test('CronCreate rejects six-field and unreachable expressions', async (t) => {
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack23 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack23);
   const conversation = { chatId: 'invalid-cron', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
@@ -2211,7 +2253,7 @@ test('CronCreate enforces the 50-definition conversation cap', async (t) => {
       },
     ],
   ]);
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
@@ -2219,14 +2261,15 @@ test('CronCreate enforces the 50-definition conversation cap', async (t) => {
       instructions: [],
       plugins: [conversationScheduling()],
     }),
-    {
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    },
   );
+  const runtimeStack24 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack24);
   const conversation = { chatId: 'cron-cap', userId: 'user-1' };
   await runtime.createSession(conversation);
   const now = Date.now();
@@ -2301,10 +2344,12 @@ test('a dynamic wake remains usable across a context-store restart', async (t) =
     plugins: [conversationScheduling()],
   });
   const conversation = { chatId: 'dynamic-file-restart', userId: 'user-1' };
-  const firstRuntime = new AgentRuntime(declaration, {
+  const firstRuntimeSetup = new AgentRuntime(declaration);
+  const firstRuntimeStack3 = defineStack(async () => ({
     ...h,
     bindings: schedulingBindings(scheduler, 'UTC'),
-  });
+  }));
+  const firstRuntime = await firstRuntimeSetup.initialize(firstRuntimeStack3);
   const firstWorker = await firstRuntime.work();
   await runTurn(
     firstRuntime,
@@ -2317,11 +2362,13 @@ test('a dynamic wake remains usable across a context-store restart', async (t) =
 
   const secondDatabase = new DatabaseSync(databasePath);
   t.after(() => secondDatabase.close());
-  const restarted = new AgentRuntime(declaration, {
+  const restartedSetup = new AgentRuntime(declaration);
+  const restartedStack2 = defineStack(async () => ({
     ...h,
     store: new SqliteContextStore(secondDatabase),
     bindings: schedulingBindings(scheduler, 'UTC'),
-  });
+  }));
+  const restarted = await restartedSetup.initialize(restartedStack2);
   await using _restartedWorker = await restarted.work();
   void _restartedWorker;
   assert.equal(scheduler.wakes.size, 1);
@@ -2357,10 +2404,12 @@ test('a cron wake remains usable across a context-store restart', async (t) => {
     plugins: [conversationScheduling()],
   });
   const conversation = { chatId: 'file-restart', userId: 'user-1' };
-  const firstRuntime = new AgentRuntime(declaration, {
+  const firstRuntimeSetup = new AgentRuntime(declaration);
+  const firstRuntimeStack4 = defineStack(async () => ({
     ...h,
     bindings: schedulingBindings(scheduler, 'UTC'),
-  });
+  }));
+  const firstRuntime = await firstRuntimeSetup.initialize(firstRuntimeStack4);
   const firstWorker = await firstRuntime.work();
   await runTurn(firstRuntime, h.queue, conversation, 'create restart cron');
   await firstWorker[Symbol.asyncDispose]();
@@ -2369,11 +2418,13 @@ test('a cron wake remains usable across a context-store restart', async (t) => {
   const restartedDatabase = new DatabaseSync(databasePath);
   t.after(() => restartedDatabase.close());
   const restartedStore = new SqliteContextStore(restartedDatabase);
-  const restarted = new AgentRuntime(declaration, {
+  const restartedSetup = new AgentRuntime(declaration);
+  const restartedStack3 = defineStack(async () => ({
     ...h,
     store: restartedStore,
     bindings: schedulingBindings(scheduler, 'UTC'),
-  });
+  }));
+  const restarted = await restartedSetup.initialize(restartedStack3);
   await using _restartedWorker = await restarted.work();
   void _restartedWorker;
   assert.equal(scheduler.wakes.size, 1);
@@ -2406,7 +2457,7 @@ test('a recurring cron does not fire when its first occurrence is beyond its sev
       ],
       ['list sparse cron', { name: 'CronList', input: {} }],
     ]);
-    const runtime = new AgentRuntime(
+    const runtimeSetup = new AgentRuntime(
       defineAgent({
         name: 'root',
         model: toolModel(commands, []),
@@ -2414,14 +2465,15 @@ test('a recurring cron does not fire when its first occurrence is beyond its sev
         instructions: [],
         plugins: [conversationScheduling()],
       }),
-      {
-        ...h,
-        bindings: [
-          conversationSchedulingCapabilities.scheduler.bind(scheduler),
-          conversationSchedulingCapabilities.timezone.bind('UTC'),
-        ],
-      },
     );
+    const runtimeStack25 = defineStack(async () => ({
+      ...h,
+      bindings: [
+        conversationSchedulingCapabilities.scheduler.bind(scheduler),
+        conversationSchedulingCapabilities.timezone.bind('UTC'),
+      ],
+    }));
+    const runtime = await runtimeSetup.initialize(runtimeStack25);
     const conversation = { chatId: 'sparse-expiry', userId: 'user-1' };
     await using _worker = await runtime.work();
     void _worker;
@@ -2476,15 +2528,20 @@ test('duplicate wake delivery across runtimes advances PostgreSQL state once', a
       instructions: [],
       plugins: [conversationScheduling()],
     });
-    const firstRuntime = new AgentRuntime(declaration, {
+    const firstRuntimeSetup = new AgentRuntime(declaration);
+    const firstRuntimeStack5 = defineStack(async () => ({
       ...h,
       bindings: schedulingBindings(scheduler, 'UTC'),
-    });
-    const secondRuntime = new AgentRuntime(declaration, {
+    }));
+    const firstRuntime = await firstRuntimeSetup.initialize(firstRuntimeStack5);
+    const secondRuntimeSetup = new AgentRuntime(declaration);
+    const secondRuntimeStack = defineStack(async () => ({
       ...h,
       store: secondStore,
       bindings: schedulingBindings(scheduler, 'UTC'),
-    });
+    }));
+    const secondRuntime =
+      await secondRuntimeSetup.initialize(secondRuntimeStack);
     const conversation = {
       chatId: 'postgres-duplicate',
       userId: 'user-1',

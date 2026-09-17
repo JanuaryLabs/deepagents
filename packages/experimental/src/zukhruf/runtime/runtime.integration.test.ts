@@ -37,10 +37,11 @@ import {
 } from '@deepagents/context';
 import {
   type AgentDeclaration,
+  type AgentHost,
   type AgentPluginBinding,
   type AgentPluginDefinition,
   AgentRuntime,
-  type AgentRuntimeOptions,
+  type AgentStack,
   AgentThread,
   type ClientToolSet,
   type ConversationActiveFlag,
@@ -51,6 +52,7 @@ import {
   type TurnRef,
   defineAgent,
   defineSandbox,
+  defineStack,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
@@ -441,7 +443,7 @@ function clientToolSetup() {
 }
 
 async function submitApprovalResponses(
-  runtime: AgentRuntime,
+  runtime: AgentHost,
   conversation: { chatId: string; userId: string },
   ...responses: ApprovalResponse[]
 ) {
@@ -515,7 +517,7 @@ async function harness(
     queueFactory?: (boss: PgBoss) => PgBossTurnQueue;
     runtime?: (infrastructure: {
       boss: PgBoss;
-    }) => Partial<AgentRuntimeOptions>;
+    }) => Partial<Awaited<ReturnType<AgentStack>>>;
     declaration?: AgentDeclaration;
     composition?: (infrastructure: { boss: PgBoss; database: PGlite }) => {
       definitions: readonly AgentPluginDefinition[];
@@ -523,13 +525,17 @@ async function harness(
     };
   },
 ) {
-  const pglite = new PGlite();
+  await using resources = new AsyncDisposableStack();
+  const pglite = resources.adopt(new PGlite(), (database) => database.close());
   const store = new InMemoryContextStore();
-  const boss = new PgBoss({
-    db: fromPglite(pglite),
-    backend: 'pglite',
-    maintenanceIntervalSeconds: 1,
-  });
+  const boss = resources.adopt(
+    new PgBoss({
+      db: fromPglite(pglite),
+      backend: 'pglite',
+      maintenanceIntervalSeconds: 1,
+    }),
+    (value) => value.stop({ graceful: false }),
+  );
   boss.on('error', () => {});
   await boss.start();
   const queue =
@@ -539,30 +545,35 @@ async function harness(
       schema: 'pgboss',
     });
   await queue.initialize();
-  const streamStore = new SqliteStreamStore(':memory:');
+  const streamStore = resources.adopt(
+    new SqliteStreamStore(':memory:'),
+    (value) => value.close(),
+  );
   const streams = new StreamManager({
     store: streamStore,
     changeSource: new PollingChangeSource({ reads: streamStore }),
   });
-  const mailboxStore = new SqliteMailboxStore(':memory:');
+  const mailboxStore = resources.use(new SqliteMailboxStore(':memory:'));
   const composition = options?.composition?.({ boss, database: pglite });
   const root = options?.declaration ?? declaration(model, tools);
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     composition
       ? defineAgent({
           ...root,
           plugins: [...(root.plugins ?? []), ...composition.definitions],
         })
       : root,
-    {
-      store,
-      streams,
-      queue,
-      mailboxStore,
-      ...(composition?.bindings ? { bindings: composition.bindings } : {}),
-      ...options?.runtime?.({ boss }),
-    },
   );
+  const stack = defineStack(async () => ({
+    store,
+    streams,
+    queue,
+    mailboxStore,
+    ...(composition?.bindings ? { bindings: composition.bindings } : {}),
+    ...options?.runtime?.({ boss }),
+  }));
+  const runtime = resources.use(await runtimeSetup.initialize(stack));
+  const owned = resources.move();
   return {
     runtime,
     store,
@@ -572,12 +583,7 @@ async function harness(
     streamStore,
     boss,
     queue,
-    async [Symbol.asyncDispose]() {
-      await boss.stop({ graceful: false });
-      await pglite.close();
-      streamStore.close();
-      mailboxStore.close();
-    },
+    [Symbol.asyncDispose]: () => owned.disposeAsync(),
   };
 }
 
@@ -627,7 +633,7 @@ function messageText(message: UIMessage | undefined): string {
 }
 
 async function waitForConversation(
-  runtime: AgentRuntime,
+  runtime: AgentHost,
   conversation: { chatId: string; userId: string },
   predicate: (messages: UIMessage[]) => boolean,
   label: string,
@@ -644,7 +650,7 @@ async function waitForConversation(
 }
 
 async function waitForText(
-  runtime: AgentRuntime,
+  runtime: AgentHost,
   conversation: { chatId: string; userId: string },
   expected: string,
 ): Promise<void> {
@@ -724,7 +730,6 @@ describe('zukhruf runtime — host sessions', () => {
     });
     assert.ok(scheduled);
     const scheduleControl = h.runtime.plugin(scheduled);
-    await Promise.all([h.runtime.initialize(), h.runtime.initialize()]);
     const cancelledTask = await scheduleControl.create('user-1', {
       idempotencyKey: 'cancelled-task',
       name: 'Cancelled task',
@@ -887,7 +892,6 @@ describe('zukhruf runtime — host sessions', () => {
     });
     assert.ok(scheduled);
     const scheduleControl = h.runtime.plugin(scheduled);
-    await h.runtime.initialize();
     const task = await scheduleControl.create('user-1', {
       idempotencyKey: 'approval-task',
       name: 'Approval task',
@@ -969,7 +973,6 @@ Prepare the engineering report.
     });
     assert.ok(scheduled);
     const scheduleControl = h.runtime.plugin(scheduled);
-    await h.runtime.initialize();
     const [task] = await scheduleControl.list('user-1');
     assert.equal(task.name, 'Monday report');
     assert.equal(task.recurrence, '0 9 * * 1');
@@ -1062,31 +1065,25 @@ Missing a timezone.
     );
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     let scheduled: ReturnType<typeof schedules> | undefined;
-    await using h = await harness(scriptedModel(track), undefined, {
-      composition: ({ boss, database }) => {
-        scheduled = schedules({
-          queue: `scheduled-invalid-${crypto.randomUUID()}`,
-          reconciliationIntervalMs: 50,
-          sources: [
-            scheduleFiles({ directory: directory.path, ownerId: 'user-1' }),
-          ],
-        });
-        return {
-          definitions: [scheduled],
-          bindings: scheduleBindings(boss, database),
-        };
-      },
-    });
+    await assert.rejects(
+      harness(scriptedModel(track), undefined, {
+        composition: ({ boss, database }) => {
+          scheduled = schedules({
+            queue: `scheduled-invalid-${crypto.randomUUID()}`,
+            reconciliationIntervalMs: 50,
+            sources: [
+              scheduleFiles({ directory: directory.path, ownerId: 'user-1' }),
+            ],
+          });
+          return {
+            definitions: [scheduled],
+            bindings: scheduleBindings(boss, database),
+          };
+        },
+      }),
+      /Invalid schedule declaration invalid\.md/,
+    );
     assert.ok(scheduled);
-    await assert.rejects(
-      h.runtime.initialize(),
-      /Invalid schedule declaration invalid\.md/,
-    );
-    await assert.rejects(
-      h.runtime.work(),
-      /Invalid schedule declaration invalid\.md/,
-    );
-    assert.deepEqual(await h.runtime.plugin(scheduled).list('user-1'), []);
     assert.deepEqual(track.calls, []);
   });
 });
@@ -2812,7 +2809,7 @@ describe('zukhruf runtime — conversation status', () => {
   ): ConversationStatus => ({ type: 'active', activeFlags });
 
   function recordStatuses(
-    runtime: AgentRuntime,
+    runtime: AgentHost,
     conversation: { chatId: string; userId: string },
     signal: AbortSignal,
   ) {
@@ -3156,7 +3153,8 @@ describe('zukhruf runtime — cross-process conversation status', () => {
       schema: 'pgboss',
     });
     await observerQueue.initialize();
-    const observer = new AgentRuntime(declaration(model), {
+    const observerSetup = new AgentRuntime(declaration(model));
+    const observerStack = defineStack(async () => ({
       store: h.store,
       streams: h.streams,
       queue: observerQueue,
@@ -3164,7 +3162,8 @@ describe('zukhruf runtime — cross-process conversation status', () => {
       conversationStatusChanges: new PgBossConversationStatusChangeSource(
         h.boss,
       ),
-    });
+    }));
+    const observer = await observerSetup.initialize(observerStack);
     await using _worker = await h.runtime.work();
     void _worker;
     const conversation = { chatId: 'cross-process-status', userId: 'u1' };

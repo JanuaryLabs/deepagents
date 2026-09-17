@@ -13,7 +13,7 @@ agent, one tool, one streaming turn.
 | `instructions({ purpose, routine })`         | `instructions.ts` → `defineInstructions(role(…))`                                                                      |
 | `tool({ … })`                                | `tools.ts` → `defineTool({ … })`                                                                                       |
 | (no sandbox)                                 | `sandbox.ts` → `defineSandbox(() => createVirtualSandbox(…))` — required by zukhruf, satisfied by an in-memory sandbox |
-| `execute(generator, prompt)` → `printer`     | `run.ts` → `new AgentRuntime(declaration, options).enqueue(…)` → consume the durable stream                            |
+| `execute(generator, prompt)` → `printer`     | `run.ts` → construct `runtime`, initialize `host` → enqueue and consume the durable stream                             |
 
 Nothing in `@deepagents/experimental` had to change: the example is a single
 streaming agent with a tool, which sits entirely inside zukhruf's boundary.
@@ -22,8 +22,9 @@ Because it now runs on the runtime, the turn is durable and resumable for free
 that.
 
 `agent.ts`, `instructions.ts`, and `sandbox.ts` form the declaration while
-`run.ts` owns execution. `channels/`, `connections/`, `schedules/`, `skills/`,
-`subagents/`, and `tools/` are the standard reserved declaration slots.
+`stack.ts` defines its lazy persistent queue and stores; `run.ts` owns
+execution. `channels/`, `connections/`, `schedules/`, `skills/`, `subagents/`,
+and `tools/` are the standard reserved declaration slots.
 
 The one deviation from the original is the model: it uses
 `openrouter('deepseek/deepseek-v4-flash')` instead of the original's

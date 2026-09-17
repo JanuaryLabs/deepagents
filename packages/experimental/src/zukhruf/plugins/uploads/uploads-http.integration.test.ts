@@ -25,6 +25,7 @@ import {
   type TurnRef,
   defineAgent,
   defineSandbox,
+  defineStack,
 } from '@deepagents/experimental/zukhruf';
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 import {
@@ -198,7 +199,7 @@ async function harness(
   });
   const model = scriptedModel(options.script);
   const queue = new ControlledTurnQueue();
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'uploads-agent',
       model: model as unknown as AgentModel,
@@ -206,17 +207,17 @@ async function harness(
       instructions: [],
       plugins: [uploaded],
     }),
-    {
-      store: new InMemoryContextStore(),
-      streams: new StreamManager({
-        store: streamStore,
-        changeSource: new PollingChangeSource({ reads: streamStore }),
-      }),
-      queue,
-      mailboxStore,
-    },
   );
-  await runtime.initialize();
+  const stack = defineStack(async () => ({
+    store: new InMemoryContextStore(),
+    streams: new StreamManager({
+      store: streamStore,
+      changeSource: new PollingChangeSource({ reads: streamStore }),
+    }),
+    queue,
+    mailboxStore,
+  }));
+  const runtime = await runtimeSetup.initialize(stack);
   resources.use(await runtime.work());
 
   const app = new Hono<HttpEnv>();

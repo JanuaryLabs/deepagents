@@ -30,6 +30,7 @@ import {
 } from '@deepagents/devtool/traces';
 import {
   type AgentDeclaration,
+  type AgentHost,
   AgentRuntime,
   type ConsumeContext,
   type ConsumeOptions,
@@ -38,6 +39,7 @@ import {
   TurnQueue,
   type TurnRef,
   defineAgent,
+  defineStack,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
 import {
@@ -136,7 +138,7 @@ function createStores(resources: AsyncDisposableStack) {
   };
 }
 
-function createHost(runtime: AgentRuntime, ...projections: HttpProjection[]) {
+function createHost(runtime: AgentHost, ...projections: HttpProjection[]) {
   const app = new Hono<HttpEnv>();
   app.use(`${ZUKHRUF_MOUNT_PATH}/*`, (context, next) => {
     const userId = context.req.header(USER_HEADER);
@@ -296,7 +298,9 @@ test('fileTelemetry() composes plugin integrations with agent policy and serves 
     },
   );
   const queue = new ControlledTurnQueue();
-  const runtime = new AgentRuntime(root, { ...stores, queue });
+  const runtimeSetup = new AgentRuntime(root);
+  const stack = defineStack(async () => ({ ...stores, queue }));
+  const runtime = await runtimeSetup.initialize(stack);
   assert.equal(root.telemetry?.includeRuntimeContext, undefined);
   const worker = await runtime.work();
   const conversation = { chatId: 'chat-1', userId: 'user-1' };
@@ -475,10 +479,12 @@ test('fileTelemetry() composes plugin integrations with agent policy and serves 
 
   await worker[Symbol.asyncDispose]();
 
-  const restarted = new AgentRuntime(root, {
+  const restartedSetup = new AgentRuntime(root);
+  const restartedStack = defineStack(async () => ({
     ...stores,
     queue: new ControlledTurnQueue(),
-  });
+  }));
+  const restarted = await restartedSetup.initialize(restartedStack);
   const restartedWorker = await restarted.work();
   const restartedResponse = await createHost(
     restarted,
@@ -500,7 +506,7 @@ test('fileTelemetry() preserves cancellation and recording policy in exported tr
   });
   const queue = new ControlledTurnQueue();
   let started = false;
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     createDeclaration(
       [
         traceTelemetry,
@@ -518,8 +524,9 @@ test('fileTelemetry() preserves cancellation and recording policy in exported tr
       { isEnabled: true, recordInputs: true, recordOutputs: true },
       { model: createSlowTraceModel() },
     ),
-    { ...stores, queue },
   );
+  const stack = defineStack(async () => ({ ...stores, queue }));
+  const runtime = await runtimeSetup.initialize(stack);
   const worker = await runtime.work();
   const conversation = { chatId: 'chat-abort', userId: 'user-1' };
   await runtime.createSession(conversation);
@@ -620,10 +627,14 @@ test('fileTelemetry() advertises an empty file, omits absent telemetry, and reje
   const emptyTelemetry = fileTelemetry({
     path: join(directory.path, 'empty.jsonl'),
   });
-  const emptyRuntime = new AgentRuntime(createDeclaration([emptyTelemetry]), {
+  const emptyRuntimeSetup = new AgentRuntime(
+    createDeclaration([emptyTelemetry]),
+  );
+  const emptyStack = defineStack(async () => ({
     ...stores,
     queue: new ControlledTurnQueue(),
-  });
+  }));
+  const emptyRuntime = await emptyRuntimeSetup.initialize(emptyStack);
   await emptyRuntime.createSession(conversation);
   const emptyHost = createHost(emptyRuntime, tracesHttp(emptyTelemetry));
   const empty = await readCapabilities(emptyHost, 'user-1');
@@ -636,10 +647,12 @@ test('fileTelemetry() advertises an empty file, omits absent telemetry, and reje
   assert.equal(emptyList.status, 200);
   assert.deepEqual(await emptyList.json(), []);
 
-  const absentRuntime = new AgentRuntime(createDeclaration(), {
+  const absentRuntimeSetup = new AgentRuntime(createDeclaration());
+  const absentStack = defineStack(async () => ({
     ...stores,
     queue: new ControlledTurnQueue(),
-  });
+  }));
+  const absentRuntime = await absentRuntimeSetup.initialize(absentStack);
   const absentHost = createHost(absentRuntime);
   const absent = await readCapabilities(absentHost, 'user-1');
   assert.equal(absent.capabilities.traces, undefined);
@@ -651,10 +664,15 @@ test('fileTelemetry() advertises an empty file, omits absent telemetry, and reje
 
   const first = fileTelemetry({ path: join(directory.path, 'first.jsonl') });
   const second = fileTelemetry({ path: join(directory.path, 'second.jsonl') });
-  const duplicateRuntime = new AgentRuntime(
+  const duplicateRuntimeSetup = new AgentRuntime(
     createDeclaration([first, second]),
-    { ...stores, queue: new ControlledTurnQueue() },
   );
+  const duplicateStack = defineStack(async () => ({
+    ...stores,
+    queue: new ControlledTurnQueue(),
+  }));
+  const duplicateRuntime =
+    await duplicateRuntimeSetup.initialize(duplicateStack);
   assert.throws(
     () => createHost(duplicateRuntime, tracesHttp(first), tracesHttp(second)),
     /duplicate capability "traces"/,

@@ -128,13 +128,16 @@ class SchedulesPlugin implements Schedules {
     return this.#initialization;
   }
 
-  work(host: AgentPluginHost): Promise<AsyncDisposable> {
+  work(
+    host: AgentPluginHost,
+    waitForActive?: boolean,
+  ): Promise<AsyncDisposable> {
     if (this.#host !== host) {
       throw new Error(
         'schedules plugin must be initialized before work starts',
       );
     }
-    return this.#scheduled.work(this.#workerOptions);
+    return this.#scheduled.work(this.#workerOptions, waitForActive);
   }
 
   async create(

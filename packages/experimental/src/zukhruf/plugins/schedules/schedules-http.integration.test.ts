@@ -15,6 +15,7 @@ import {
   StreamManager,
 } from '@deepagents/context';
 import {
+  type AgentHost,
   AgentRuntime,
   type ConsumeContext,
   type ConsumeOptions,
@@ -23,6 +24,7 @@ import {
   TurnQueue,
   type TurnRef,
   defineAgent,
+  defineStack,
 } from '@deepagents/experimental/zukhruf';
 import {
   type HttpEnv,
@@ -136,7 +138,7 @@ function completingModel() {
 interface Harness extends AsyncDisposable {
   app: Hono<HttpEnv>;
   queue: ControlledTurnQueue;
-  runtime: AgentRuntime;
+  runtime: AgentHost;
 }
 
 /** One real runtime, one real scheduler, one real HTTP projection. */
@@ -165,7 +167,7 @@ async function harness(options: { withSchedules?: boolean } = {}) {
     workerOptions: FAST_POLLING,
   });
   const queue = new ControlledTurnQueue();
-  const runtime = new AgentRuntime(
+  const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'scheduled-agent',
       model: completingModel() as unknown as AgentModel,
@@ -173,23 +175,23 @@ async function harness(options: { withSchedules?: boolean } = {}) {
       instructions: [],
       plugins: [scheduled],
     }),
-    {
-      store: new InMemoryContextStore(),
-      streams: new StreamManager({
-        store: streamStore,
-        changeSource: new PollingChangeSource({ reads: streamStore }),
-      }),
-      queue,
-      mailboxStore,
-      bindings: [
-        schedulesCapabilities.boss.bind(boss),
-        schedulesCapabilities.transaction.bind((operation) =>
-          database.transaction((tx) => operation(fromPglite(tx))),
-        ),
-      ],
-    },
   );
-  await runtime.initialize();
+  const stack = defineStack(async () => ({
+    store: new InMemoryContextStore(),
+    streams: new StreamManager({
+      store: streamStore,
+      changeSource: new PollingChangeSource({ reads: streamStore }),
+    }),
+    queue,
+    mailboxStore,
+    bindings: [
+      schedulesCapabilities.boss.bind(boss),
+      schedulesCapabilities.transaction.bind((operation) =>
+        database.transaction((tx) => operation(fromPglite(tx))),
+      ),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(stack);
   resources.use(await runtime.work());
 
   const app = new Hono<HttpEnv>();

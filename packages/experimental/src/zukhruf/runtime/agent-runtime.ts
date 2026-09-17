@@ -122,7 +122,11 @@ export interface AgentPluginInstance {
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
   configure?(root: AgentDeclaration): AgentDeclaration;
   initialize?(host: AgentPluginHost): Promise<void | AgentPluginInitialization>;
-  work?(host: AgentPluginHost): Promise<AsyncDisposable>;
+  /** Hosts wait for active plugin work before releasing infrastructure. */
+  work?(
+    host: AgentPluginHost,
+    waitForActive?: boolean,
+  ): Promise<AsyncDisposable>;
   conversationAvailable?(
     host: AgentPluginHost,
     conversation: ConversationId,
@@ -133,24 +137,6 @@ export interface AgentPluginDefinition<Instance extends object = object> {
   readonly name: string;
   readonly capabilities?: readonly AgentPluginCapability<unknown>[];
   create(bindings: AgentPluginBindings): AgentPluginInstance & Instance;
-}
-
-export interface AgentRuntimeOptions {
-  store: ContextStore;
-  /** Borrowed stream subsystem; the caller owns its store, change source, and lifecycle. */
-  streams: StreamManager;
-  queue: TurnQueue;
-  /** Durable pending inter-agent input. Distinct from the TurnQueue scheduler. */
-  mailboxStore: MailboxStore;
-  /** Codex-compatible multi-agent host guidance and tool configuration. */
-  multiAgent?: MultiAgentHostConfig;
-  /** Host implementations for capabilities required by root-owned plugins. */
-  bindings?: readonly AgentPluginBinding[];
-  /**
-   * Cross-process conversation status hints. Without it, status changes are
-   * observed only by the process where the transition happened.
-   */
-  conversationStatusChanges?: ConversationStatusChangeSource;
 }
 
 export interface AgentRuntimeWorkOptions {
@@ -282,9 +268,60 @@ export class AgentObservation {
   }
 }
 
-/** Thin host-facing composition and lifecycle façade for a Zukhruf agent tree. */
-export class AgentRuntime implements AsyncDisposable {
+/** A reusable recipe. Register only resources the returned host should own. */
+export type AgentStack = (resources: AsyncDisposableStack) => Promise<{
+  store: ContextStore;
+  /** Stream subsystem backed by the adapters composed in this recipe. */
+  streams: StreamManager;
+  queue: TurnQueue;
+  /** Durable pending inter-agent input. Distinct from the TurnQueue scheduler. */
+  mailboxStore: MailboxStore;
+  /** Codex-compatible multi-agent host guidance and tool configuration. */
+  multiAgent?: MultiAgentHostConfig;
+  /** Host implementations for capabilities required by root-owned plugins. */
+  bindings?: readonly AgentPluginBinding[];
+  /**
+   * Cross-process conversation status hints. Without it, status changes are
+   * observed only by the process where the transition happened.
+   */
+  conversationStatusChanges?: ConversationStatusChangeSource;
+}>;
+
+/** Defines infrastructure without acquiring it; each initialization opens its own scope. */
+export function defineStack(create: AgentStack): AgentStack {
+  return create;
+}
+
+/** Ready operations and ownership, available only after initialize() succeeds. */
+export type AgentHost = Omit<RuntimeHost, 'initialize'>;
+
+/** Creates independent ready hosts from an agent declaration. */
+export class AgentRuntime {
+  readonly #root: AgentDeclaration;
+
+  constructor(root: AgentDeclaration) {
+    this.#root = root;
+  }
+
+  async initialize(stack: AgentStack): Promise<AgentHost> {
+    const resources = new AsyncDisposableStack();
+    try {
+      const options = await stack(resources);
+      const host = new RuntimeHost(this.#root, options, resources);
+      await host.initialize();
+      return host;
+    } catch (error) {
+      await using rollback = resources;
+      throw error;
+    }
+  }
+}
+
+/** Compiles an initialized adapter set and supplies the plugin host. */
+class RuntimeHost implements AsyncDisposable {
   readonly info: AgentRuntimeInfo;
+  readonly #resources: AsyncDisposableStack;
+  readonly #workers = new AsyncDisposableStack();
 
   readonly #store: ContextStore;
   readonly #queue: TurnQueue;
@@ -299,9 +336,16 @@ export class AgentRuntime implements AsyncDisposable {
   readonly #plugins: PluginManager;
   readonly #pluginHost: AgentPluginHost;
 
-  constructor(root: AgentDeclaration, options: AgentRuntimeOptions) {
+  constructor(
+    root: AgentDeclaration,
+    options: Awaited<ReturnType<AgentStack>>,
+    resources: AsyncDisposableStack,
+  ) {
+    this.#resources = resources;
     const multiAgent = resolveMultiAgentHostConfig(options.multiAgent);
-    const plugins = new PluginManager(root, options.bindings, multiAgent);
+    const plugins = resources.use(
+      new PluginManager(root, options.bindings, multiAgent),
+    );
     const declarations = plugins.declarations;
     const directory = new AgentDirectory(options.store);
     const streams = options.streams;
@@ -410,6 +454,7 @@ export class AgentRuntime implements AsyncDisposable {
           userId: conversation.userId,
         }),
     };
+    resources.use(this.#workers);
   }
 
   initialize(): Promise<void> {
@@ -417,7 +462,7 @@ export class AgentRuntime implements AsyncDisposable {
   }
 
   [Symbol.asyncDispose](): Promise<void> {
-    return this.#plugins[Symbol.asyncDispose]();
+    return this.#resources.disposeAsync();
   }
 
   plugin<Instance extends object>(
@@ -545,34 +590,43 @@ export class AgentRuntime implements AsyncDisposable {
     );
   }
 
-  async work(options?: AgentRuntimeWorkOptions): Promise<AsyncDisposable> {
-    await this.initialize();
-    const workers = new AsyncDisposableStack();
-    try {
-      await this.#plugins.startWorkers(this.#pluginHost, workers);
-      const reconcilesAvailability = this.#plugins.reconcilesAvailability;
-      workers.use(
-        await this.#queue.consume(this.#executor.execute.bind(this.#executor), {
-          concurrency: options?.concurrency,
-          onOrphaned: this.#onOrphaned.bind(this),
-          onSettled: async ({ chatId, userId }) => {
-            // Status first: a plugin reconciliation failure must not hide
-            // the settled transition from host subscribers.
-            await this.#conversationStatus.publish({ chatId, userId });
-            if (reconcilesAvailability) {
-              await this.#plugins.conversationAvailable(this.#pluginHost, {
-                chatId,
-                userId,
-              });
-            }
-          },
-        }),
-      );
-      return workers;
-    } catch (error) {
-      await workers.disposeAsync();
-      throw error;
-    }
+  work(options?: AgentRuntimeWorkOptions): Promise<AsyncDisposable> {
+    const starting = Promise.withResolvers<AsyncDisposable>();
+    this.#workers.defer(() =>
+      starting.promise.then(
+        (worker) => worker[Symbol.asyncDispose](),
+        () => {},
+      ),
+    );
+    void this.#startWorkers(options).then(starting.resolve, starting.reject);
+    return starting.promise;
+  }
+
+  async #startWorkers(
+    options: AgentRuntimeWorkOptions | undefined,
+  ): Promise<AsyncDisposable> {
+    await using workers = new AsyncDisposableStack();
+    await this.#plugins.startWorkers(this.#pluginHost, workers, true);
+    const reconcilesAvailability = this.#plugins.reconcilesAvailability;
+    workers.use(
+      await this.#queue.consume(this.#executor.execute.bind(this.#executor), {
+        concurrency: options?.concurrency,
+        waitForActive: true,
+        onOrphaned: this.#onOrphaned.bind(this),
+        onSettled: async ({ chatId, userId }) => {
+          // Status first: a plugin reconciliation failure must not hide
+          // the settled transition from host subscribers.
+          await this.#conversationStatus.publish({ chatId, userId });
+          if (reconcilesAvailability) {
+            await this.#plugins.conversationAvailable(this.#pluginHost, {
+              chatId,
+              userId,
+            });
+          }
+        },
+      }),
+    );
+    return workers.move();
   }
 
   async #onOrphaned(turn: TurnRef, error: string): Promise<void> {

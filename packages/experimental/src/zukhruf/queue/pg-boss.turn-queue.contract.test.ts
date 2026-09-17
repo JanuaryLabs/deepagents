@@ -641,6 +641,68 @@ for (const contract of turnQueueContracts) {
       assert.deepStrictEqual(settled, [first.streamId, second.streamId]);
     });
 
+    test('disposal returns during active work and stops new claims', async (t) => {
+      await using h = await contract.makeQueue();
+      const active = ref('dispose-active', 1);
+      const queued = ref('dispose-queued', 1);
+      const activeStarted = Promise.withResolvers<void>();
+      const releaseActive = Promise.withResolvers<void>();
+      const seen: string[] = [];
+      let consumer: AsyncDisposable | undefined;
+      let disposing: Promise<void> | undefined;
+      let replacement: AsyncDisposable | undefined;
+
+      try {
+        await h.queue.push(active);
+        consumer = await h.queue.consume(async (turn) => {
+          seen.push(turn.streamId);
+          activeStarted.resolve();
+          await releaseActive.promise;
+        }, noOrphans);
+        await activeStarted.promise;
+        await h.queue.push(queued);
+
+        disposing = Promise.resolve(consumer[Symbol.asyncDispose]());
+        assert.equal(
+          await Promise.race([
+            disposing.then(() => 'disposed'),
+            sleep(2_000).then(() => 'timed-out'),
+          ]),
+          'disposed',
+          'disposal does not wait for the active handler',
+        );
+        consumer = undefined;
+        await sleep(500);
+        assert.deepStrictEqual(
+          seen,
+          [active.streamId],
+          'the stopped consumer does not claim queued work',
+        );
+        assert.equal(
+          await h.queue.getTurnActivity(active),
+          'running',
+          'the active handler keeps its claim until it exits',
+        );
+
+        releaseActive.resolve();
+
+        replacement = await h.queue.consume(async (turn) => {
+          seen.push(turn.streamId);
+        }, noOrphans);
+        await waitFor(
+          t,
+          () => seen.length === 2,
+          'replacement consumes queued turn',
+        );
+        assert.deepStrictEqual(seen, [active.streamId, queued.streamId]);
+      } finally {
+        releaseActive.resolve();
+        await disposing;
+        await consumer?.[Symbol.asyncDispose]();
+        await replacement?.[Symbol.asyncDispose]();
+      }
+    });
+
     test('disposal stops delivery; a later consumer picks up the backlog', async (t) => {
       await using h = await contract.makeQueue();
       let executions = 0;
@@ -887,68 +949,6 @@ suite('PgBossTurnQueue real PostgreSQL scheduler regressions', () => {
       );
     } finally {
       release.resolve();
-    }
-  });
-
-  test('disposal returns during active work and stops new claims', async (t) => {
-    await using h = await postgresQueueHarness();
-    const active = ref('dispose-active', 1);
-    const queued = ref('dispose-queued', 1);
-    const activeStarted = Promise.withResolvers<void>();
-    const releaseActive = Promise.withResolvers<void>();
-    const seen: string[] = [];
-    let consumer: AsyncDisposable | undefined;
-    let disposing: Promise<void> | undefined;
-    let replacement: AsyncDisposable | undefined;
-
-    try {
-      await h.queue.push(active);
-      consumer = await h.queue.consume(async (turn) => {
-        seen.push(turn.streamId);
-        activeStarted.resolve();
-        await releaseActive.promise;
-      }, noOrphans);
-      await activeStarted.promise;
-      await h.queue.push(queued);
-
-      disposing = Promise.resolve(consumer[Symbol.asyncDispose]());
-      assert.equal(
-        await Promise.race([
-          disposing.then(() => 'disposed'),
-          sleep(2_000).then(() => 'timed-out'),
-        ]),
-        'disposed',
-        'disposal does not wait for the active handler',
-      );
-      consumer = undefined;
-      await sleep(500);
-      assert.deepStrictEqual(
-        seen,
-        [active.streamId],
-        'the stopped consumer does not claim queued work',
-      );
-      assert.equal(
-        await h.queue.getTurnActivity(active),
-        'running',
-        'the active handler keeps its claim until it exits',
-      );
-
-      releaseActive.resolve();
-
-      replacement = await h.queue.consume(async (turn) => {
-        seen.push(turn.streamId);
-      }, noOrphans);
-      await waitFor(
-        t,
-        () => seen.length === 2,
-        'replacement consumes queued turn',
-      );
-      assert.deepStrictEqual(seen, [active.streamId, queued.streamId]);
-    } finally {
-      releaseActive.resolve();
-      await disposing;
-      await consumer?.[Symbol.asyncDispose]();
-      await replacement?.[Symbol.asyncDispose]();
     }
   });
 });

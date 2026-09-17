@@ -9,7 +9,8 @@ The **durable-turns** showcase for the Zukhruf harness
 - `subagents/specialist/` — a self-contained independent `defineAgent()`
   declaration with its own instructions, skills, sandbox, durable chat,
   history, stream, mailbox, and TurnQueue key.
-- `run.ts` — the executor showcase: PGlite-backed pg-boss, concurrent
+- `stack.ts` — the lazy persistent PGlite queue and SQLite stores.
+- `run.ts` — the executor showcase: explicit runtime composition, concurrent
   in-process `work()`, detach/resume the root turn, and print every
   conversation status change the runtime publishes for the root and the
   specialist.

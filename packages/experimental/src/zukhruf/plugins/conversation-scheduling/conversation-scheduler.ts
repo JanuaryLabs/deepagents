@@ -279,8 +279,8 @@ export class ConversationScheduler {
     return 1;
   }
 
-  async work(): Promise<AsyncDisposable> {
-    return this.#scheduler.consume((wake) => this.#handle(wake));
+  async work(waitForActive?: boolean): Promise<AsyncDisposable> {
+    return this.#scheduler.consume((wake) => this.#handle(wake), waitForActive);
   }
 
   async materializeDueIfEligible(conversation: ConversationId): Promise<void> {

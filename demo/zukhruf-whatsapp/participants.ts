@@ -3,7 +3,7 @@ import { openai } from '@ai-sdk/openai';
 import type { WhatsAppParticipant } from './agent.ts';
 
 /** The five specialists the group is made of; every member runs the same model. */
-export default [
+const participants: WhatsAppParticipant[] = [
   {
     name: 'researcher',
     specialty:
@@ -34,4 +34,6 @@ export default [
       'You contribute useful alternatives and ideas that the others are unlikely to surface.',
     model: openai('gpt-5.6-terra'),
   },
-] satisfies WhatsAppParticipant[];
+];
+
+export default participants;

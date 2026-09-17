@@ -51,7 +51,7 @@ export function conversationScheduling(): AgentPluginDefinition {
         async initialize(runtimeHost) {
           host = runtimeHost;
         },
-        work: () => scheduler.work(),
+        work: (_host, waitForActive) => scheduler.work(waitForActive),
         conversationAvailable: (_host, conversation) =>
           scheduler.materializeDueIfEligible(conversation),
       };

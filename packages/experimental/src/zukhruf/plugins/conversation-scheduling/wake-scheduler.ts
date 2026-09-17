@@ -10,5 +10,6 @@ export abstract class WakeScheduler<T extends object> {
   abstract cancel(id: string): Promise<void>;
   abstract consume(
     handler: (wake: Wake<T>) => Promise<void>,
+    waitForActive?: boolean,
   ): Promise<AsyncDisposable>;
 }

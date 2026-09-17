@@ -744,3 +744,41 @@ function isTerminal(status: ExecutionState['status']): boolean {
     status === 'completed' || status === 'failed' || status === 'cancelled'
   );
 }
+
+test('ScheduledTasks can drain an active dispatch before releasing its resources', async () => {
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  await using h = await pgliteHarness(({ executor }) => {
+    executor.launchStarted = () => entered.resolve();
+    executor.launchGate = release.promise;
+  });
+  const task = await h.scheduled.create('owner', {
+    idempotencyKey: 'drain',
+    name: 'drain',
+    prompt: 'finish dispatching',
+    recurrence: futureRecurrence(60_000, 'FREQ=DAILY;COUNT=2'),
+    timezone: 'UTC',
+    executionConfig: { destination: 'reports' },
+  });
+  const run = await h.scheduled.runNow('owner', task.id, 'drain');
+  const worker = await h.scheduled.work(FAST_POLLING, true);
+  let disposing: PromiseLike<void> | undefined;
+  try {
+    await entered.promise;
+    disposing = worker[Symbol.asyncDispose]();
+    assert.equal(
+      await Promise.race([
+        disposing.then(() => 'disposed'),
+        sleep(25).then(() => 'active'),
+      ]),
+      'active',
+    );
+    release.resolve();
+    await disposing;
+    assert.equal((await h.scheduled.getRun('owner', run.id)).status, 'running');
+  } finally {
+    release.resolve();
+    await disposing;
+    await worker[Symbol.asyncDispose]();
+  }
+});
