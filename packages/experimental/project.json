@@ -12,6 +12,7 @@
         "additionalEntryPoints": [
           "packages/experimental/src/coding-agent-reminders/index.ts",
           "packages/experimental/src/providers/codex/index.ts",
+          "packages/experimental/src/providers/claude/index.ts",
           "packages/experimental/src/zukhruf/index.ts",
           "packages/experimental/src/zukhruf/plugins/mcp/index.ts",
           "packages/experimental/src/zukhruf/plugins/http/index.ts",

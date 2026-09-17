@@ -69,8 +69,9 @@ limits; do not rely on `maxOutputTokens` to cap a response.
 When managing history directly with AI SDK, append `result.responseMessages`
 to retain every tool step. Zukhruf persists and restores its own history.
 
-Only local ChatGPT login is implemented. Application-owned credentials and the
-Claude provider will follow after this API and behavior are reviewed.
+Only local ChatGPT login is implemented here. Application-owned credentials are
+not implemented yet. The [Claude provider](../claude/README.md) follows the same
+AI SDK protocol with its own native login transport.
 
 ## Adding another provider
 
@@ -86,8 +87,8 @@ AI SDK's `ProviderV4` / `LanguageModelV4`; there is no separate harness protocol
 3. Verify public calls through `generateText`, `streamText`, the provider registry,
    and Zukhruf's tool/history flow, alongside that provider's login behavior.
 
-For Claude, the native provider would be `createAnthropic`. Its credential store
-and refresh behavior belong in its adapter. Codex's forced `store: false` and
+Claude uses `createAnthropic`; its credential store and refresh behavior live in
+its adapter. Codex's forced `store: false` and
 stream-to-generate conversion remain Codex-specific. AI SDK's
 `defaultSettingsMiddleware` allows caller overrides, so it cannot enforce the
 Codex storage requirement. `simulateStreamingMiddleware` converts generation to

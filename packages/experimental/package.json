@@ -32,6 +32,11 @@
       "import": "./dist/providers/codex/index.js",
       "default": "./dist/providers/codex/index.js"
     },
+    "./providers/claude": {
+      "types": "./dist/providers/claude/index.d.ts",
+      "import": "./dist/providers/claude/index.js",
+      "default": "./dist/providers/claude/index.js"
+    },
     "./zukhruf": {
       "types": "./dist/zukhruf/index.d.ts",
       "import": "./dist/zukhruf/index.js",
@@ -83,6 +88,7 @@
     "access": "public"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.46",
     "@ai-sdk/code-mode": "^1.0.42",
     "@ai-sdk/mcp": "2.0.41",
     "@ai-sdk/openai": "^4.0.67",

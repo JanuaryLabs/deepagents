@@ -9,6 +9,12 @@ stable `@deepagents/*` surface. APIs here may change without notice.
 `codex login`. Zukhruf continues to own tools, history, and turn execution. See
 the [provider API and credential behavior](./src/providers/codex/README.md).
 
+## `@deepagents/experimental/providers/claude`
+
+`claude('claude-sonnet-4-6')` creates an AI SDK model using the existing Claude Code
+login. It follows the same provider protocol while Zukhruf owns task execution.
+See the [provider API and credential behavior](./src/providers/claude/README.md).
+
 ## `@deepagents/experimental/coding-agent-reminders`
 
 `coding-agent-reminders` is an experimental event-aware reminder and guard
