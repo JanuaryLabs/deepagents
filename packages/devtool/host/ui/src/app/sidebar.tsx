@@ -1,4 +1,9 @@
-import { CalendarClockIcon, HistoryIcon, SquarePenIcon } from 'lucide-react';
+import {
+  CalendarClockIcon,
+  GitBranchIcon,
+  HistoryIcon,
+  SquarePenIcon,
+} from 'lucide-react';
 import { useCallback } from 'react';
 import {
   NavLink,
@@ -143,36 +148,41 @@ function RunsNavigation() {
                 <History.Item
                   key={`${entry.userId}:${entry.chatId}`}
                   className={cn(
-                    'hover:bg-accent rounded-lg transition-colors',
+                    'hover:bg-accent flex items-center rounded-lg transition-colors',
                     active && 'bg-accent',
                   )}
                 >
                   <History.ItemTrigger
                     history={entry}
-                    className="pb-0 hover:bg-transparent"
+                    className="min-w-0 flex-1 hover:bg-transparent"
                   >
                     <ChatStatusIcon
                       chatId={entry.chatId}
                       status={entry.status}
                     />
-                    <span className="text-foreground truncate">
+                    <span
+                      className="text-foreground truncate"
+                      title={entry.title ?? entry.chatId}
+                    >
                       {entry.title ?? entry.chatId}
                     </span>
                   </History.ItemTrigger>
                   {discovery?.capabilities.traces ? (
                     <NavLink
+                      aria-label={`View traces for ${entry.title ?? entry.chatId}`}
+                      title="View traces"
                       to={generatePath('/history/:userId/:chatId/traces', {
                         chatId: entry.chatId,
                         userId: entry.userId,
                       })}
                       className={({ isActive }) =>
                         cn(
-                          'text-muted-foreground hover:text-foreground ml-8 block px-2 pb-1.5 text-[0.6875rem]',
+                          'text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex size-8 shrink-0 items-center justify-center rounded-lg focus-visible:ring-2 focus-visible:outline-none',
                           isActive && 'text-foreground',
                         )
                       }
                     >
-                      Traces
+                      <GitBranchIcon aria-hidden="true" className="size-3.5" />
                     </NavLink>
                   ) : null}
                 </History.Item>
