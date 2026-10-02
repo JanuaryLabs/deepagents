@@ -52,7 +52,6 @@ export function DevtoolSidebar() {
         <PrimaryNavigation />
         <RunsNavigation />
       </SidebarContent>
-      <SidebarRail />
     </Sidebar>
   );
 }
