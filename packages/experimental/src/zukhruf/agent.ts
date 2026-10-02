@@ -1,5 +1,6 @@
 import type { TelemetryOptions } from 'ai';
 
+import type { CompactOptions, CompactionTrigger } from '@deepagents/compaction';
 import type {
   AgentModel,
   AgentSandbox,
@@ -24,6 +25,15 @@ export type ZukhrufSandbox = AgentSandbox & {
   readonly workingDirectory?: string;
 };
 
+/** Estimated input budget includes messages, instructions and tools; reserve output separately. */
+export type AgentCompaction = Omit<
+  CompactOptions,
+  'messages' | 'abortSignal'
+> & {
+  /** Non-empty list, evaluated in order before each step. Any match requests compaction. */
+  triggers: readonly CompactionTrigger[];
+};
+
 export interface AgentDeclaration {
   /**
    * Stable declaration identity persisted in conversation metadata.
@@ -42,6 +52,8 @@ export interface AgentDeclaration {
   /** Runtime plugins owned by this declaration when it is the root agent. */
   plugins?: readonly AgentPluginDefinition[];
   telemetry?: Omit<TelemetryOptions, 'integrations'>;
+  /** Automatic compaction before model steps, with a durable conversation checkpoint. */
+  compaction?: AgentCompaction;
 }
 
 export interface DefinedAgentDeclaration extends AgentDeclaration {
@@ -53,6 +65,23 @@ export interface DefinedAgentDeclaration extends AgentDeclaration {
 export function defineAgent(
   declaration: AgentDeclaration,
 ): DefinedAgentDeclaration {
+  if (declaration.compaction) {
+    const { targetTokens, triggers } = declaration.compaction;
+    if (!Number.isSafeInteger(targetTokens) || targetTokens < 1) {
+      throw new RangeError(
+        'compaction targetTokens must be a positive safe integer.',
+      );
+    }
+    if (
+      !Array.isArray(triggers) ||
+      triggers.length === 0 ||
+      triggers.some((trigger) => typeof trigger !== 'function')
+    ) {
+      throw new TypeError(
+        'compaction triggers must be a non-empty array of functions.',
+      );
+    }
+  }
   return {
     ...declaration,
     tools: declaration.tools ?? {},

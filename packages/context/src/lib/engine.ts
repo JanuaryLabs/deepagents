@@ -508,6 +508,7 @@ export class ContextEngine {
       );
     }
     this.#branch = branch;
+    this.#branchName = branch.name;
 
     this.#initialized = true;
   }

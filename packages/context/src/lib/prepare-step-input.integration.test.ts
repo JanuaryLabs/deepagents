@@ -57,10 +57,14 @@ describe('prepare-step input integration', () => {
       userId: 'user-1',
     });
     const prompts: unknown[] = [];
+    const lifecycle: string[] = [];
     const model = new MockLanguageModelV4({
       doStream: async ({ prompt }) => {
         prompts.push(prompt);
         return {
+          request: {
+            body: { cache_control: { type: 'ephemeral', ttl: '1h' } },
+          },
           stream: simulateReadableStream({
             chunks: [
               { type: 'text-start', id: 'text-1' },
@@ -81,13 +85,53 @@ describe('prepare-step input integration', () => {
       context,
       model,
       sandbox,
+      telemetry: { isEnabled: false },
+      providerOptions: { anthropic: { cacheControl: { type: 'ephemeral' } } },
       prepareStepInput: async () => [message('mail before first request')],
+      prepareStep: ({ messages }) => {
+        assert.deepEqual(lifecycle, ['generation-start']);
+        assert.match(JSON.stringify(messages), /mail before first request/);
+        return {
+          messages: [
+            ...messages,
+            { role: 'user', content: 'model-only projection' },
+          ],
+        };
+      },
     });
 
     await context.continue(message('original request'));
-    await drain(await chat(chatAgent));
+    await drain(
+      await chat(chatAgent, {
+        include: { requestBody: true },
+        onStart: ({ tools, providerOptions }) => {
+          assert.equal(tools, chatAgent.tools);
+          assert.deepEqual(providerOptions, {
+            anthropic: { cacheControl: { type: 'ephemeral' } },
+          });
+          lifecycle.push('generation-start');
+        },
+        onStepStart: ({ messages }) => {
+          assert.match(JSON.stringify(messages), /model-only projection/);
+          lifecycle.push('start');
+        },
+        onStepEnd: ({ usage, request }) => {
+          assert.equal(usage.inputTokens, 1);
+          assert.deepEqual(request.body, {
+            cache_control: { type: 'ephemeral', ttl: '1h' },
+          });
+          lifecycle.push('end');
+        },
+      }),
+    );
+    assert.deepEqual(lifecycle, ['generation-start', 'start', 'end']);
 
     assert.match(JSON.stringify(prompts[0]), /mail before first request/);
+    assert.match(JSON.stringify(prompts[0]), /model-only projection/);
+    assert.doesNotMatch(
+      textOf(await context.getMessages()),
+      /model-only projection/,
+    );
     assert.match(
       textOf(await context.getMessages()),
       /mail before first request/,

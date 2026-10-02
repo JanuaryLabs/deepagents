@@ -322,6 +322,13 @@ describe('Branching', () => {
         await engine.rewind('msg-1');
 
         assert.ok(engine.branch.startsWith('main-v'));
+        const reopened = new ContextEngine({
+          userId: 'test-user',
+          store,
+          chatId: 'test-rewind-5',
+        });
+        await reopened.getMessages();
+        assert.strictEqual(reopened.branch, engine.branch);
       });
     });
 

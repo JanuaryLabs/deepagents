@@ -5,6 +5,7 @@
 
 /* nx-tailwind-sources:start */
 @source "../../../../agent";
+@source "../../../../compaction";
 @source "../../../../context";
 @source "../../../../elements";
 @source "../../../../experimental";

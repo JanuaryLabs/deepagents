@@ -109,6 +109,45 @@ function setup(mockText?: string) {
 }
 
 describe('context chat()', () => {
+  it('streams and persists native data parts without adding them to model input', async () => {
+    const { context, model } = setup('Ready');
+    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
+    await context.continue(userMessage('Hello'));
+    const stream = await chat(chatAgent, {
+      onStream(writer) {
+        writer.write({
+          type: 'data-progress',
+          id: 'work',
+          data: { status: 'started' },
+        });
+        writer.write({
+          type: 'data-progress',
+          id: 'work',
+          data: { status: 'completed' },
+        });
+      },
+    });
+    const chunks = await Array.fromAsync(stream);
+    assert.equal(chunks[0].type, 'start');
+    assert.equal(chunks.filter((chunk) => chunk.type === 'start').length, 1);
+    assert.equal(
+      chunks.filter((chunk) => chunk.type === 'data-progress').length,
+      2,
+    );
+    const messages = await context.getMessages();
+    assert.partialDeepStrictEqual(messages.at(-1), {
+      parts: [
+        { type: 'data-progress', id: 'work', data: { status: 'completed' } },
+      ],
+    });
+    await context.continue(userMessage('Continue'));
+    await drain(await chat(chatAgent));
+    assert.doesNotMatch(
+      JSON.stringify(model.doStreamCalls.at(-1)?.prompt),
+      /data-progress|completed/,
+    );
+  });
+
   it('saves user and assistant messages and tracks usage', async () => {
     const { store, context, model } = setup('First response');
     const firstUserMessage = userMessage('Hi there');

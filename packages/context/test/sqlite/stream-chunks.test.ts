@@ -508,6 +508,44 @@ describe('Stream Chunks', () => {
   });
 
   describe('Regression guards', () => {
+    it('flushes custom progress data while the producer is still running', async (t) => {
+      using database = new DatabaseSync(':memory:');
+      const store = new SqliteStreamStore(database);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
+      const progress = {
+        type: 'data-progress',
+        data: { status: 'started' },
+        transient: true,
+      } as const;
+      let controller!: ReadableStreamDefaultController<UIMessageChunk>;
+      const source = new ReadableStream<UIMessageChunk>({
+        start(value) {
+          controller = value;
+          controller.enqueue({ type: 'start', messageId: 'answer' });
+          controller.enqueue(progress);
+        },
+      });
+      const persisted = streams.persist(source, streamId);
+      try {
+        await t.waitFor(
+          async () => {
+            const chunks = await store.getChunks(streamId, -1);
+            assert.deepStrictEqual(
+              chunks.map(({ data }) => data),
+              [{ type: 'start', messageId: 'answer' }, progress],
+            );
+          },
+          { timeout: 1_000 },
+        );
+        assert.equal(await store.getStreamStatus(streamId), 'running');
+      } finally {
+        controller.close();
+        await persisted;
+      }
+    });
+
     it('should reject when aborted flush fails during persist', async () => {
       const store = new FlakyFlushStore();
       const streams = makeManager(store);

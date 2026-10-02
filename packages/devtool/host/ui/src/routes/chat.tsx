@@ -33,6 +33,7 @@ import { cn } from '@deepagents/react-shadcn';
 import { INTERACTIVE_ELEMENTS } from '../app/elements.tsx';
 import { loadRuntime } from '../app/runtime-data.ts';
 import { TOOL_REGISTRY } from '../app/tools.tsx';
+import { ChatCompaction } from './chat-compaction.tsx';
 
 export async function loader(args: LoaderFunctionArgs) {
   const { params, request } = args;
@@ -210,7 +211,16 @@ function ChatMessages() {
             {message.role === 'user' ? (
               <CompactMessages.UserBubble />
             ) : (
-              <CompactMessages.AssistantContent />
+              <>
+                <ChatCompaction
+                  message={message}
+                  running={
+                    index === messages.length - 1 &&
+                    (status === 'submitted' || status === 'streaming')
+                  }
+                />
+                <CompactMessages.AssistantContent />
+              </>
             )}
           </CompactMessages.Item>
         ))}

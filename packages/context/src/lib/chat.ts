@@ -7,6 +7,7 @@ import {
   type ToolSet,
   type UIMessage,
   type UIMessageStreamOptions,
+  type UIMessageStreamWriter,
   createUIMessageStream,
   isToolUIPart,
 } from 'ai';
@@ -18,6 +19,8 @@ import type { AgentSandbox } from './sandbox/types.ts';
 import { TitleGenerator } from './title.ts';
 
 type ChatConfig = Omit<StreamOptions, 'maxRetries'> & {
+  /** Native writer for data parts, available before the first model request. */
+  onStream?: (writer: UIMessageStreamWriter) => void;
   generateTitle?: boolean;
   onError?: (error: unknown) => string;
   messageMetadata?: ChatMessageMetadata;
@@ -97,30 +100,12 @@ export async function chat<const TOOLS extends ToolSet>(
   const initialAssistantMsgId = head.id;
   const uiMessages = await context.getMessages();
 
-  const [title, result] = await Promise.all([
-    makeTitle({
-      context,
-      model: agent.model,
-      generateTitle: options?.generateTitle,
-      abortSignal: options?.abortSignal,
-    }),
-    agent.stream(...args),
-  ]);
-
-  const uiStream = result.toUIMessageStream({
-    onError: options?.onError ?? formatChatError,
-    sendStart: true,
-    sendFinish: true,
-    sendReasoning: true,
-    sendSources: true,
-    originalMessages: uiMessages,
-    generateMessageId: () => initialAssistantMsgId,
-    messageMetadata: options?.messageMetadata ?? defaultChatMessageMetadata,
-  });
+  let result: Awaited<ReturnType<typeof agent.stream>> | undefined;
 
   return createUIMessageStream({
     originalMessages: uiMessages,
     generateId: () => initialAssistantMsgId,
+    onError: options?.onError ?? formatChatError,
     onStepEnd: async ({ responseMessage }) => {
       await context.writeAssistantSegment(responseMessage as UIMessage);
     },
@@ -140,7 +125,7 @@ export async function chat<const TOOLS extends ToolSet>(
       }
 
       await context.writeAssistantSegment(message);
-      const usage = await result.usage;
+      const usage = await result?.usage;
       // AI SDK v7 can resolve an aborted stream without usage data when the
       // provider never emitted a finish chunk.
       if (usage !== undefined) {
@@ -148,7 +133,30 @@ export async function chat<const TOOLS extends ToolSet>(
       }
     },
     execute: async ({ writer }) => {
-      writer.merge(uiStream);
+      writer.write({ type: 'start', messageId: initialAssistantMsgId });
+      options?.onStream?.(writer);
+      const [title, streamed] = await Promise.all([
+        makeTitle({
+          context,
+          model: agent.model,
+          generateTitle: options?.generateTitle,
+          abortSignal: options?.abortSignal,
+        }),
+        agent.stream(...args),
+      ]);
+      result = streamed;
+      writer.merge(
+        result.toUIMessageStream({
+          onError: options?.onError ?? formatChatError,
+          sendStart: false,
+          sendReasoning: true,
+          sendSources: true,
+          originalMessages: uiMessages,
+          generateMessageId: () => initialAssistantMsgId,
+          messageMetadata:
+            options?.messageMetadata ?? defaultChatMessageMetadata,
+        }),
+      );
       if (title) {
         writer.write({ type: 'data-chat-title', data: title, transient: true });
       }

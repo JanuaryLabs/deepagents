@@ -24,6 +24,7 @@
   "dependencies": {
     "@ai-sdk/mcp": "2.0.41",
     "@ai-sdk/openai": "^4.0.52",
+    "@deepagents/compaction": "6.2.0",
     "@deepagents/context": "6.2.0",
     "@deepagents/devtool": "6.2.0",
     "@deepagents/experimental": "6.2.0",

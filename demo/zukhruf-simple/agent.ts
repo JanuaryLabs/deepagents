@@ -4,6 +4,11 @@ import { openai } from '@ai-sdk/openai';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import {
+  cacheLikelyCold,
+  messagesExceed,
+  tokensExceed,
+} from '@deepagents/compaction';
 import { fileTelemetry } from '@deepagents/devtool/traces';
 import { defineAgent } from '@deepagents/experimental/zukhruf';
 import { mcp } from '@deepagents/experimental/zukhruf/mcp';
@@ -42,6 +47,12 @@ const browser = mcp({
 export default defineAgent({
   name: 'SimpleAgent',
   model: openai('gpt-5.6-luna'),
+  compaction: {
+    model: openai('gpt-5.6-terra'),
+    triggers: [tokensExceed(24_000), messagesExceed(40), cacheLikelyCold()],
+    targetTokens: 16_000,
+    keepLastMessages: 4,
+  },
   sandbox,
   instructions,
   plugins: [imageUploads, traceTelemetry, browser],

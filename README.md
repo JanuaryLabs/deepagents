@@ -8,6 +8,7 @@ chat flows, local retrieval, and Text2SQL assistants.
 | Package                        | Purpose                                                                                                                             |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `@deepagents/agent`            | Compose AI agents with tools, handoffs, streaming, and structured output.                                                           |
+| `@deepagents/compaction`       | Compact AI SDK conversation snapshots into bounded summaries with explicit budgets and provenance.                                  |
 | `@deepagents/context`          | Store, render, and resolve context fragments; persist chat history; run agent bash tools in virtual, Docker, or Agent OS sandboxes. |
 | `@deepagents/elements`         | Define, validate, and serialize interactive-element catalogs shared by server runtimes and React renderers.                         |
 | `@deepagents/text2sql`         | Convert natural language to SQL, index database schemas, and run validated SQL through the package `sql` CLI inside a sandbox.      |

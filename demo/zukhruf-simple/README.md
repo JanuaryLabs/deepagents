@@ -29,6 +29,25 @@ Open the printed URL, `http://127.0.0.1:4317/devtool`. The declaration's
 `server.ts` initializes the runtime and serves one Hono server. Ctrl+C
 disposes the server, worker, browser connection, queue, and stores together.
 
+## Compaction
+
+The agent automatically requests compaction when estimated request input exceeds
+24,000 tokens, the model message count exceeds 40, or prompt-cache evidence
+reaches its inferred retention window. OpenAI `gpt-5.6-terra` summarizes older
+history toward a 16,000-token estimated input target while retaining at least the
+last four messages. Triggers decide when to compact; the target only caps the
+resulting model context.
+
+DevTool shows inline compaction progress and expandable saved results alongside
+the original transcript. The saved checkpoint is reused on later turns and
+server restarts. Token estimates include instructions and tools. A 2026-09-22
+probe with the real sandbox, skills, and 41-tool catalog measured about 11,400
+input tokens for a short greeting, so the target leaves roughly 4,600 estimated
+tokens for retained history and the summary. Actual provider framing can differ.
+Measured main-model input improves subsequent estimates while the request
+prefix/settings match; output headroom is separate. No native provider
+compaction is enabled.
+
 ## WebMCP
 
 Install Google Chrome 150 or newer. The demo launches its own visible Chrome

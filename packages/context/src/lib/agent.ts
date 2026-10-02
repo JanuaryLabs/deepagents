@@ -85,7 +85,10 @@ type GenerateOptions = {
   abortSignal?: AbortSignal;
 };
 
-export type StreamOptions = {
+export type StreamOptions = Pick<
+  Parameters<typeof streamText>[0],
+  'onStart' | 'onStepStart' | 'onStepEnd' | 'include'
+> & {
   abortSignal?: AbortSignal;
   transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
   maxRetries?: number;
@@ -129,6 +132,8 @@ export interface CreateAgent<TOOLS extends ToolSet = {}> {
   maxGuardrailRetries?: number;
   /** Supplies durable user input before sampling and at safe step boundaries. */
   prepareStepInput?: PrepareStepInputProvider;
+  /** Native AI SDK step overrides, applied after context reminders and host input. */
+  prepareStep?: PrepareStepFunction<AgentModelTools<TOOLS>>;
 }
 
 /**
@@ -190,10 +195,12 @@ class Agent<TOOLS extends ToolSet> {
         tools: this.tools,
       }),
       stopWhen: this.#options.stopWhen ?? DEFAULT_STOP_WHEN,
-      prepareStep: this.#options.context.createPrepareStep({
-        steer: false,
-        sandbox: this.#options.sandbox,
-      }),
+      prepareStep: this.#withPrepareStep(
+        this.#options.context.createPrepareStep({
+          steer: false,
+          sandbox: this.#options.sandbox,
+        }),
+      ),
       tools: this.tools,
       toolsContext: options?.toolsContext,
       experimental_toolCallers: this.#options.experimental_toolCallers,
@@ -232,10 +239,12 @@ class Agent<TOOLS extends ToolSet> {
       throw new Error(`Agent ${this.#options.name} is missing a model.`);
     }
 
-    const prepareStep = this.#options.context.createPrepareStep({
-      additionalInput: this.#options.prepareStepInput,
-      sandbox: this.#options.sandbox,
-    });
+    const prepareStep = this.#withPrepareStep(
+      this.#options.context.createPrepareStep({
+        additionalInput: this.#options.prepareStepInput,
+        sandbox: this.#options.sandbox,
+      }),
+    );
     const result = await this.#createRawStream(
       options?.toolsContext as InferToolSetContext<AgentModelTools<TOOLS>>,
       options,
@@ -254,16 +263,28 @@ class Agent<TOOLS extends ToolSet> {
     );
   }
 
+  #withPrepareStep(
+    prepareContext: PrepareStepFunction<AgentModelTools<TOOLS>>,
+  ): PrepareStepFunction<AgentModelTools<TOOLS>> {
+    const prepareStep = this.#options.prepareStep;
+    if (!prepareStep) return prepareContext;
+    return async (input) => {
+      const context = await prepareContext(input);
+      const overrides = await prepareStep({
+        ...input,
+        ...context,
+      });
+      return { ...context, ...overrides };
+    };
+  }
+
   /**
    * Create a raw stream without guardrail processing.
    */
   async #createRawStream(
     toolsContext: InferToolSetContext<AgentModelTools<TOOLS>>,
-    config?: {
-      abortSignal?: AbortSignal;
-      transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
-    },
-    prepareStep?: PrepareStepFunction<ToolSet>,
+    config?: StreamOptions,
+    prepareStep?: PrepareStepFunction<AgentModelTools<TOOLS>>,
   ) {
     const context = this.#options.context;
     if (!context) {
@@ -282,6 +303,10 @@ class Agent<TOOLS extends ToolSet> {
 
     return streamText({
       abortSignal: config?.abortSignal,
+      onStart: config?.onStart,
+      onStepStart: config?.onStepStart,
+      onStepEnd: config?.onStepEnd,
+      include: config?.include,
       providerOptions: this.#options.providerOptions,
       telemetry: this.#options.telemetry,
       runtimeContext: this.#options.runtimeContext,
@@ -293,9 +318,11 @@ class Agent<TOOLS extends ToolSet> {
       }),
       repairToolCall: createRepairToolCall(model, config?.abortSignal),
       stopWhen: this.#options.stopWhen ?? DEFAULT_STOP_WHEN,
-      prepareStep:
-        prepareStep ??
-        context.createPrepareStep({ sandbox: this.#options.sandbox }),
+      // Streaming erases the tool-set type; the callback still receives this.tools.
+      prepareStep: (prepareStep ??
+        context.createPrepareStep<AgentModelTools<TOOLS>>({
+          sandbox: this.#options.sandbox,
+        })) as PrepareStepFunction<ToolSet>,
       experimental_transform: config?.transform ?? smoothStream(),
       tools: this.tools,
       // Generic wrappers cannot reduce AI SDK's conditional context or caller maps.
@@ -316,12 +343,8 @@ class Agent<TOOLS extends ToolSet> {
   #wrapWithGuardrails(
     result: StreamTextResult<ToolSet, any, any>,
     toolsContext: InferToolSetContext<AgentModelTools<TOOLS>>,
-    config?: {
-      abortSignal?: AbortSignal;
-      transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
-      maxRetries?: number;
-    },
-    prepareStep?: PrepareStepFunction<ToolSet>,
+    config?: StreamOptions,
+    prepareStep?: PrepareStepFunction<AgentModelTools<TOOLS>>,
   ): StreamTextResult<ToolSet, any, any> {
     const maxRetries =
       config?.maxRetries ?? this.#options.maxGuardrailRetries ?? 3;

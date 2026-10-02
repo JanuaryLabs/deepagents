@@ -65,6 +65,87 @@ Three roles: **enqueue** (on a user message — store input, register stream, re
 nothing) → **work** (a persistent executor drives the turn, persists, commits, marks terminal) →
 **observe** (client watches the durable stream; comes and goes freely).
 
+## Automatic compaction
+
+Zukhruf owns the compaction lifecycle; `@deepagents/compaction` owns the AI SDK
+message transformation. Configure `compaction` on `defineAgent`, alongside
+`instructions`, with an explicit summarization `model`, a non-empty `triggers`
+array, and `targetTokens`. Import `tokensExceed`, `messagesExceed`, and
+`cacheLikelyCold` from `@deepagents/compaction`. Triggers are evaluated in
+order; the first match requests compaction. The threshold helpers match strictly
+above their positive integer thresholds. Set token thresholds above the target
+so later steps have headroom. The package's `keepLastMessages`, `countTokens`,
+and summary `instructions` options are also available. Omitting the
+configuration disables automatic compaction.
+
+Before each model step, the context agent resolves reminders and mailbox input,
+then calls Zukhruf through the native AI SDK `prepareStep` hook. Zukhruf applies
+the saved checkpoint and supplies each trigger the same
+`{ messages, tokens, cacheAgeMs, cacheRetentionMs }` snapshot of the current
+model context. Custom triggers may be async; errors stop sampling. Message
+counts include summaries and tool messages. A matching trigger requests
+summarization even below `targetTokens`, which only caps the result. SDK message
+overrides carry forward during the tool loop; the displayed transcript continues
+to receive the original assistant and tool output.
+
+`cacheLikelyCold()` requests compaction when prompt-cache evidence reaches its
+inferred provider retention window. Native SDK step callbacks record positive
+cache reads/writes under `chat.metadata.zukhruf.promptCache`, independently of telemetry.
+The observation uses request-start time and is reused only for the same branch,
+model, instructions, tool definitions, SDK request settings, and matching message
+prefix. The native `onStart` hook captures tools and settings before `prepareStep`;
+tool input schemas use the SDK's `asSchema` conversion. Missing evidence, a backward
+clock, or a changed scope yields an undefined `cacheAgeMs`, so the trigger does
+not match. A successful response without cache reads/writes clears the observation.
+Native `include.requestBody` exposes the effective provider cache configuration,
+including middleware settings. OpenAI and Anthropic policies are inferred from
+that request and the response model; OpenRouter additionally requires a known
+upstream provider. Anthropic's observed cache-write TTLs take precedence over
+requested breakpoints; ambiguous mixed windows stay unknown. The inferred window
+is persisted with the observation. Unknown policies remain inactive. Custom
+providers can use `cacheLikelyCold({ retentionMs })`. This remains an age
+heuristic rather than provider cache-status detection; see the compaction
+package README for policies.
+
+The checkpoint is stored under `chat.metadata.zukhruf.compaction`. It contains the
+covered source-message count, a SHA-256 fingerprint of that model-message prefix,
+and its replacement. Persistence happens before adoption. Each fresh turn checks
+the fingerprint against its original history before reusing the checkpoint, so
+rewinds and changed history cannot inherit a summary of an incompatible prefix.
+An incompatible checkpoint falls back to the original transcript. Queued turns
+serialize per conversation, and metadata updates preserve sibling runtime fields.
+
+Provider errors, cancellation, or an unusable summary stop sampling. The original
+transcript and the last successfully stored checkpoint survive. Summary usage is
+tracked on the conversation. Runtime token triggers and targets cover estimated
+message content, instructions, tools, and structured-output schema. Standalone `compact()`
+covers only messages: runtime subtracts its envelope before calling it and
+reports the combined estimate afterward. Output headroom is reserved separately.
+An envelope at or above the target fails before a summary call.
+
+The runtime stores per-step measured input under `chat.metadata.zukhruf.inputUsage`.
+An unchanged scope and projected prefix reuse that measurement plus the estimate
+of appended messages. Cached input is included; output/summary usage is not added
+again. The baseline survives restarts without telemetry, resets with changed
+settings/history or applied summaries, and rejects native-compaction/aggregate
+usage. Explicit custom counters take precedence and receive only messages.
+The default character estimate is approximate across models, languages and provider
+framing. This integration does not enable native provider compaction.
+Summarizer input sizing and real-model preservation evaluations remain tracked in
+[compaction problems](../../../compaction/problems.md).
+
+The native writer exposed by `chat(agent, { onStream })` emits persistent
+`data-compaction` parts (`started`, `completed`, `failed`, `restored`), typed by
+the public `CompactionEvent` union. The chat stream saves them through its existing
+step/end callbacks; no separate event store or outer stream wrapper is needed.
+AI SDK `onData` receives them, while native model-message conversion excludes
+them. `completed` follows the checkpoint write. Custom data chunks flush without
+waiting for a full text batch. DevTool displays expandable entries in the transcript,
+including after reopening. New events mark `tokenScope: "request"` and show estimated
+input tokens; historical unmarked events remain message estimates. Cancellation
+remains the turn's durable `cancelled` status, since it can close the stream
+before a terminal compaction event.
+
 ## Durability = stream durability _(Built)_
 
 "Durability" here means **resumable streams**: a consumer can disconnect / reload / have its host

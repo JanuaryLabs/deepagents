@@ -1,11 +1,20 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import type { UIMessage } from 'ai';
+import {
+  type UIMessage,
+  type UIMessageChunk,
+  createUIMessageStreamResponse,
+} from 'ai';
 import { RouterProvider, createMemoryRouter } from 'react-router';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
+
+import type { CompactionEvent } from '@deepagents/experimental/zukhruf';
 
 import { Component as ChatRoute } from './chat.tsx';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const messages = [
   {
@@ -89,4 +98,174 @@ it('renders the Devtool transcript through the compact trajectory', async () => 
   expect(document.querySelector('[data-slot="agent"]')?.className).toContain(
     "**:data-[slot='content']:max-w-3xl",
   );
+});
+
+const started = {
+  id: 'compact-1',
+  status: 'started',
+  tokenScope: 'request',
+  triggerIndex: 1,
+  tokensBefore: 2_000,
+  targetTokens: 4_000,
+  messageCount: 41,
+} satisfies CompactionEvent;
+const completed = {
+  id: 'compact-1',
+  status: 'completed',
+  tokenScope: 'request',
+  tokens: { before: 2_000, after: 900 },
+  replacedRange: { start: 0, end: 37 },
+  usage: undefined,
+} satisfies CompactionEvent;
+const eventPart = (data: CompactionEvent) => ({
+  type: 'data-compaction' as const,
+  id: `${data.id}:${data.status}`,
+  data,
+});
+
+function renderConversation(
+  initialMessages: UIMessage[],
+  sessionExists: boolean,
+) {
+  const router = createMemoryRouter(
+    [
+      {
+        path: '/chat',
+        Component: ChatRoute,
+        loader: () => ({
+          chatId: 'chat-compaction',
+          discovery: { capabilities: { chat: { href: '/api/chat' } } },
+          initialMessages,
+          sessionExists,
+          sessionError: false,
+        }),
+      },
+    ],
+    { initialEntries: ['/chat'] },
+  );
+  return render(<RouterProvider router={router} />);
+}
+
+it('shows live compaction, one completed entry on replay, and its details after reopening', async () => {
+  const { readable, writable } = new TransformStream<UIMessageChunk>();
+  const writer = writable.getWriter();
+  const request = vi
+    .fn<typeof fetch>()
+    .mockResolvedValue(createUIMessageStreamResponse({ stream: readable }));
+  vi.stubGlobal('fetch', request);
+  const initial: UIMessage[] = [
+    {
+      id: 'request',
+      role: 'user',
+      parts: [{ type: 'text', text: 'Continue' }],
+    },
+  ];
+  const view = renderConversation(initial, true);
+  await writer.write({ type: 'start', messageId: 'response' });
+  await writer.write(eventPart(started));
+  expect(await screen.findByText('Compacting context…')).toBeTruthy();
+  expect(
+    screen.getByRole('status', { name: 'Compacting context' }),
+  ).toBeTruthy();
+  await writer.write(eventPart(completed));
+  await writer.write(eventPart(completed));
+  await writer.write({ type: 'finish' });
+  await writer.close();
+  const compacted = await screen.findByRole('button', {
+    name: /Context compacted/,
+  });
+  expect(screen.getAllByText('Context compacted')).toHaveLength(1);
+  expect(screen.getByText('2,000 → 900 estimated input tokens')).toBeTruthy();
+  fireEvent.click(compacted);
+  expect(await screen.findByText('41')).toBeTruthy();
+  expect(screen.getByText('4,000 tokens')).toBeTruthy();
+  expect(screen.getByText('Estimated input target')).toBeTruthy();
+  expect(screen.getByText('#2')).toBeTruthy();
+  expect(screen.getByText('Saved')).toBeTruthy();
+  view.unmount();
+  renderConversation(
+    [
+      ...initial,
+      {
+        id: 'response',
+        role: 'assistant',
+        parts: [eventPart(started), eventPart(completed)],
+      },
+    ],
+    false,
+  );
+  expect(
+    await screen.findByRole('button', { name: /Context compacted/ }),
+  ).toBeTruthy();
+  expect(
+    screen.queryByRole('status', { name: 'Compacting context' }),
+  ).toBeNull();
+});
+
+it('shows failed, interrupted, and restored compactions from the saved transcript', async () => {
+  renderConversation(
+    [
+      {
+        id: 'failed',
+        role: 'assistant',
+        parts: [
+          eventPart(started),
+          eventPart({
+            id: started.id,
+            status: 'failed',
+            phase: 'compact',
+            reason: 'empty-summary',
+          }),
+        ],
+      },
+      {
+        id: 'interrupted',
+        role: 'assistant',
+        parts: [eventPart(started)],
+      },
+      {
+        id: 'restored',
+        role: 'assistant',
+        parts: [
+          eventPart({
+            id: 'restore',
+            status: 'restored',
+            sourceMessages: 37,
+            replacementMessages: 1,
+          }),
+        ],
+      },
+    ],
+    false,
+  );
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Compaction failed' }),
+  );
+  expect((await screen.findByRole('alert')).textContent).toContain(
+    'compact: empty-summary',
+  );
+  expect(screen.getByText('Compaction interrupted')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Using saved summary' }));
+  expect(await screen.findByText('37 → 1 messages')).toBeTruthy();
+});
+
+it('keeps historical message counts distinct from new input estimates', async () => {
+  const { tokenScope: _startedScope, ...historicalStarted } = started;
+  const { tokenScope: _completedScope, ...historicalCompleted } = completed;
+  renderConversation(
+    [
+      {
+        id: 'historical',
+        role: 'assistant',
+        parts: [eventPart(historicalStarted), eventPart(historicalCompleted)],
+      },
+    ],
+    false,
+  );
+  fireEvent.click(
+    await screen.findByRole('button', { name: /Context compacted/ }),
+  );
+  expect(screen.getByText('2,000 → 900 estimated message tokens')).toBeTruthy();
+  expect(screen.getByText('Estimated message target')).toBeTruthy();
+  expect(screen.queryByText('Estimated input target')).toBeNull();
 });

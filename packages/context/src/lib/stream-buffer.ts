@@ -11,7 +11,7 @@ export interface PersistedWriterOptions {
   streamId: string;
   /**
    * How chunks are persisted relative to the stream:
-   * - 'buffered' (default): batch up to `flushSize` chunks, flush on threshold or when stream ends
+   * - 'buffered' (default): batch up to `flushSize` chunks; data events flush promptly
    * - 'immediate': persist each chunk before forwarding (higher latency, no data loss)
    */
   strategy?: 'buffered' | 'immediate';
@@ -84,7 +84,8 @@ export async function persistedWriter(
       await appendBatch([chunk]);
     } else {
       buffer.push(chunk);
-      if (buffer.length >= flushSize) {
+      // Custom data carries progress even while model output is paused.
+      if (buffer.length >= flushSize || chunk.data.type.startsWith('data-')) {
         await flush();
       }
     }

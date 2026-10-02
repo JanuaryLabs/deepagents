@@ -1,5 +1,10 @@
 import { experimental_codeModeTool } from '@ai-sdk/code-mode';
-import { type UIMessage, jsonSchema, tool } from 'ai';
+import {
+  type UIMessage,
+  type UIMessageStreamWriter,
+  jsonSchema,
+  tool,
+} from 'ai';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
@@ -32,6 +37,7 @@ import type { ResolvedMultiAgentHostConfig } from '../multi-agent-config.ts';
 import type { ConsumeContext, TurnRef } from '../queue/turn-queue.ts';
 import type { AgentPluginToolContext } from './agent-runtime.ts';
 import type { ApprovalController } from './approval-controller.ts';
+import { createCompaction } from './compaction.ts';
 import {
   type AgentSkills,
   createAgentSkills,
@@ -255,28 +261,42 @@ export class AgentTurnExecutor {
     const onWorkerAbort = () => abort.abort();
     signal.addEventListener('abort', onWorkerAbort, { once: true });
     try {
-      const setupCancellation = this.#streams.monitorCancellation(
-        turn.streamId,
-        () => abort.abort(),
-      );
-      let stream: Awaited<ReturnType<typeof chat>>;
-      try {
-        stream = await chat(
-          agent({
-            ...agentOptions,
-            tools: modelTools,
-          }),
-          {
-            abortSignal: abort.signal,
-            toolsContext: collaborationToolsContext,
-            ...(elements.length > 0
-              ? { transform: [elementsStreamTransform] }
-              : {}),
+      let writer: UIMessageStreamWriter;
+      const compaction = declaration.compaction
+        ? createCompaction(
+            declaration.compaction,
+            engine,
+            this.#store,
+            abort.signal,
+            (data) =>
+              writer.write({
+                type: 'data-compaction',
+                id: `${data.id}:${data.status}`,
+                data,
+              }),
+          )
+        : undefined;
+      const stream = await chat(
+        agent({
+          ...agentOptions,
+          tools: modelTools,
+          prepareStep: compaction?.prepareStep,
+        }),
+        {
+          onStream: (streamWriter) => {
+            writer = streamWriter;
           },
-        );
-      } finally {
-        await setupCancellation[Symbol.asyncDispose]();
-      }
+          abortSignal: abort.signal,
+          onStart: compaction?.onStart,
+          onStepStart: compaction?.onStepStart,
+          onStepEnd: compaction?.onStepEnd,
+          include: compaction?.include,
+          toolsContext: collaborationToolsContext,
+          ...(elements.length > 0
+            ? { transform: [elementsStreamTransform] }
+            : {}),
+        },
+      );
       await this.#streams.persist(stream, turn.streamId, {
         preclaimed: true,
         onCancelDetected: () => abort.abort(),
