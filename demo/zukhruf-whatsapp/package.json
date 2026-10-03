@@ -22,7 +22,7 @@
     }
   },
   "dependencies": {
-    "@ai-sdk/openai": "^4.0.52",
+    "@ai-sdk/openai": "^4.0.83",
     "@deepagents/context": "*",
     "@deepagents/experimental": "*",
     "@electric-sql/pglite": "^0.5.4",

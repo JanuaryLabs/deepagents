@@ -22,8 +22,8 @@
     }
   },
   "dependencies": {
-    "@ai-sdk/mcp": "2.0.41",
-    "@ai-sdk/openai": "^4.0.52",
+    "@ai-sdk/mcp": "2.0.66",
+    "@ai-sdk/openai": "^4.0.83",
     "@deepagents/compaction": "*",
     "@deepagents/context": "*",
     "@deepagents/devtool": "*",
@@ -35,7 +35,7 @@
   },
   "devDependencies": {
     "@hono/node-server": "^2.0.10",
-    "ai": "^7.0.85",
+    "ai": "^7.0.127",
     "hono": "^4.12.33",
     "just-bash": "^3.2.0"
   }
