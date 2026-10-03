@@ -3,7 +3,7 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/devtool/host/src",
   "projectType": "library",
-  "tags": ["scope:public"],
+  "tags": ["scope:public", "test:node"],
   "targets": {
     "build": {
       "executor": "@nx/esbuild:esbuild",
@@ -27,14 +27,6 @@
         "includeIgnoredAssetFiles": true
       }
     },
-    "test": {
-      "dependsOn": ["build"],
-      "inputs": ["default", "^production"],
-      "outputs": ["{workspaceRoot}/test-results/devtool.xml"],
-      "options": {
-        "command": "node ../../../tools/src/run-node-tests.ts ../../../test-results/devtool.xml",
-        "cwd": "{projectRoot}"
-      }
-    }
+    "test": {}
   }
 }

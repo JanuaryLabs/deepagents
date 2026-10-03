@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/experimental/src",
   "projectType": "library",
-  "tags": ["scope:public"],
+  "tags": ["scope:public", "test:node", "test:postgres"],
   "targets": {
     "build": {
       "executor": "@nx/esbuild:esbuild",
@@ -26,10 +26,8 @@
       }
     },
     "test": {
-      "inputs": ["default", "^production"],
-      "outputs": ["{workspaceRoot}/test-results/experimental.xml"],
       "options": {
-        "command": "node ../../tools/src/run-node-tests.ts ../../test-results/experimental.xml --experimental-test-module-mocks --test-global-setup=test/global-setup.ts --test-force-exit"
+        "args": ["--test-force-exit"]
       }
     }
   }

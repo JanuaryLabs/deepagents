@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/evals/src",
   "projectType": "library",
-  "tags": ["scope:public"],
+  "tags": ["scope:public", "test:node"],
   "targets": {
     "build": {
       "executor": "@nx/esbuild:esbuild",
@@ -20,12 +20,6 @@
         ]
       }
     },
-    "test": {
-      "inputs": ["default", "^production"],
-      "outputs": ["{workspaceRoot}/test-results/evals.xml"],
-      "options": {
-        "command": "node ../../tools/src/run-node-tests.ts ../../test-results/evals.xml"
-      }
-    }
+    "test": {}
   }
 }

@@ -16,10 +16,12 @@
 node --test --no-warnings --test-timeout=60000 path/to/package/test/file.test.ts
 ```
 
-- **Always pass `--test-timeout=<ms>` to direct `node --test` runs.** Neither `node --test` nor
-  `tools/src/run-node-tests.ts` (behind `nx run <project>:test`) bounds a single test, so a hung
-  stream or an unresolved wait runs until the outer tool timeout instead of failing in seconds.
-  Pick the bound from the slowest legitimate test in the file (Docker-backed suites need more).
+- Nx Node test targets share the command in `nx.json`, including a 60-second per-test
+  timeout and module mocks. Pass `--args="--test-timeout=<ms> path/to/file.test.ts"`
+  to narrow a run or adjust its timeout. Compaction and devtool-history keep 10 seconds.
+- **Always pass `--test-timeout=<ms>` to direct `node --test` runs.** Database tests
+  should run through Nx so its task hooks provision and clean up shared servers.
+  See [TEST_PRIMITIVES.md](./TEST_PRIMITIVES.md) for the lifecycle and project tags.
 
 ### Test Import Rules
 

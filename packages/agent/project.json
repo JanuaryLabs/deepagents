@@ -3,20 +3,12 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/agent/src",
   "projectType": "library",
-  "tags": ["scope:public"],
+  "tags": ["scope:public", "test:node"],
   "targets": {
     "build": {
       "executor": "@nx/esbuild:esbuild",
       "outputs": ["{options.outputPath}"]
     },
-    "test": {
-      "dependsOn": ["build"],
-      "inputs": ["default", "^production"],
-      "outputs": ["{workspaceRoot}/test-results/agent.xml"],
-      "options": {
-        "command": "node ../../tools/src/run-node-tests.ts ../../test-results/agent.xml",
-        "cwd": "{projectRoot}"
-      }
-    }
+    "test": {}
   }
 }

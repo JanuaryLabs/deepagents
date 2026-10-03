@@ -113,3 +113,6 @@ test-results/
 /backlog.sqlite
 /backlog.sqlite-shm
 /backlog.sqlite-wal
+
+# Node test runner JUnit reports
+test-results.xml

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 
-test('database container helpers fail closed when Docker is unavailable', () => {
+test('database helpers require provisioning and explicit startup requires Docker', () => {
   const result = spawnSync(
     process.execPath,
     [
@@ -14,8 +14,12 @@ test('database container helpers fail closed when Docker is unavailable', () => 
           withMysqlContainer,
           withPostgresContainer,
           withSqlServerContainer,
+          startMysqlContainer,
+          startPostgresContainer,
+          startSqlServerContainer,
         } from '@deepagents/test';
 
+        delete process.env.DEEPAGENTS_TEST_SERVERS;
         for (const withContainer of [
           withMysqlContainer,
           withPostgresContainer,
@@ -23,8 +27,11 @@ test('database container helpers fail closed when Docker is unavailable', () => 
         ]) {
           await assert.rejects(
             withContainer(async () => assert.fail('callback must not run')),
-            /Docker is required/,
+            /No provisioned/,
           );
+        }
+        for (const startContainer of [startMysqlContainer, startPostgresContainer, startSqlServerContainer]) {
+          await assert.rejects(startContainer(), /Docker is required/);
         }
       `,
     ],

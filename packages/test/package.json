@@ -37,7 +37,8 @@
   "dependencies": {
     "nano-spawn": "^2.1.0",
     "mssql": "^12.7.0",
-    "p-retry": "^8.0.0"
+    "p-retry": "^8.0.0",
+    "@nx/devkit": "23.2.1"
   },
   "peerDependencies": {},
   "devDependencies": {

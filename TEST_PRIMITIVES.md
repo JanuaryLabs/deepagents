@@ -61,3 +61,38 @@ await settleWithin(workerFinished, 'worker finishes', 5_000);
 If an operation accepts a signal, pass `AbortSignal.timeout(ms)` to it so the
 operation itself is cancelled. Keep races where timeout means success or
 returns a fallback value local because they have different semantics.
+
+## Database servers and Nx
+
+Node test projects declare `test:node` and a `test` target. `nx.json` owns their
+common command, reporters, module mocks, timeout, and build dependency. JUnit
+reports are written to each project's `test-results.xml`.
+
+Add `test:postgres`, `test:mysql`, `test:sqlserver`, or `test:sqlserver-full` to a
+project's tags when its tests use the corresponding `with*Container` helper.
+Nx's pre-task hook starts one server for each required engine/image across the
+selected test projects. It uses Nx's native task graph, including `run-many`
+selection and `affected` exclusions. Builds and projects without database tags
+provision no servers. Selection is per project, including when filtering files.
+
+Each helper call creates a fresh database and drops it in `finally`. Test
+processes receive server coordinates through the environment; they never start
+an implicit fallback container. Missing provisioning or incompatible options
+fail explicitly. The post-task hook stops the servers after all tasks finish,
+including task failure, SIGINT, and SIGTERM. SIGKILL or a machine crash cannot
+run teardown. Separate Nx invocations own separate servers.
+
+Ownership is stored in Docker's `dev.deepagents.test.nx-run` label. Cleanup
+does not depend on plugin memory: Nx can unload a plugin worker after one
+invocation finishes while another invocation still has running tasks.
+
+Use `nx run <project>:test --args="path/to/file.test.ts"` for a focused test.
+Explicit `start*Container()` APIs remain for tests of container startup itself;
+the caller owns disposal. The exported `*GlobalSetup` / `globalTeardown` helpers
+remain available for a standalone Node runner, with ownership limited to that
+runner invocation. Nx projects do not use those per-project setup files.
+
+When a test launches a separate `node --test` runner, clear `NODE_TEST_CONTEXT`
+in the child's environment. Inheriting that worker marker makes Node treat the
+new runner as recursive and skip its files. Assert that child tests actually
+ran, as well as checking their exit code.

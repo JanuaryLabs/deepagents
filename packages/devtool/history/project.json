@@ -3,11 +3,11 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/devtool/history/src",
   "projectType": "library",
-  "tags": ["scope:public"],
+  "tags": ["scope:public", "test:node"],
   "targets": {
     "test": {
       "options": {
-        "command": "node ../../../tools/src/run-node-tests.ts ../../../test-results/devtool-history.xml --test-timeout=10000 src/child-progress.integration.test.ts"
+        "args": ["--test-timeout=10000"]
       }
     },
     "build": {

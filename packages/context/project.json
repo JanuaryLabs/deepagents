@@ -3,7 +3,13 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/context/src",
   "projectType": "library",
-  "tags": ["scope:public"],
+  "tags": [
+    "scope:public",
+    "test:node",
+    "test:postgres",
+    "test:sqlserver",
+    "test:sqlserver-full"
+  ],
   "targets": {
     "build": {
       "executor": "@nx/esbuild:esbuild",
@@ -20,10 +26,8 @@
       }
     },
     "test": {
-      "inputs": ["default", "^production"],
-      "outputs": ["{workspaceRoot}/test-results/context.xml"],
       "options": {
-        "command": "node ../../tools/src/run-node-tests.ts ../../test-results/context.xml --test-global-setup=test/global-setup.ts --experimental-test-module-mocks --test-force-exit"
+        "args": ["--test-force-exit"]
       }
     }
   }

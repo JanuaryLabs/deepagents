@@ -12,22 +12,6 @@
   },
   "homepage": "https://github.com/JanuaryLabs/deepagents#readme",
   "type": "module",
-  "nx": {
-    "targets": {
-      "test": {
-        "inputs": [
-          "default",
-          "^production"
-        ],
-        "outputs": [
-          "{workspaceRoot}/test-results/elements.xml"
-        ],
-        "options": {
-          "command": "node ../../tools/src/run-node-tests.ts ../../test-results/elements.xml"
-        }
-      }
-    }
-  },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",

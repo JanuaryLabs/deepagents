@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/elements/src",
   "projectType": "library",
-  "tags": ["scope:public"],
+  "tags": ["scope:public", "test:node"],
   "targets": {
     "build": {
       "executor": "@nx/esbuild:esbuild",
@@ -12,6 +12,7 @@
         "additionalEntryPoints": ["packages/elements/src/context/index.ts"],
         "assets": []
       }
-    }
+    },
+    "test": {}
   }
 }

@@ -6,6 +6,8 @@ export interface ContainerConfig {
   name: string;
   env: Record<string, string>;
   internalPort: number;
+  /** Docker metadata used by lifecycle owners to find their containers. */
+  labels?: Record<string, string>;
   tmpfs?: string[];
   ipcHost?: boolean;
   memorySwappiness?: number;
@@ -98,6 +100,11 @@ export async function createContainer(
     config.memorySwappiness !== undefined
       ? [`--memory-swappiness=${config.memorySwappiness}`]
       : [];
+  const labelArgs: string[] = [];
+  if (config.labels) {
+    for (const [key, value] of Object.entries(config.labels))
+      labelArgs.push('--label', `${key}=${value}`);
+  }
 
   const runResult = await spawn('docker', [
     'run',
@@ -105,6 +112,7 @@ export async function createContainer(
     '--rm',
     '--name',
     config.name,
+    ...labelArgs,
     ...envArgs,
     ...tmpfsArgs,
     ...ipcArgs,

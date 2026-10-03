@@ -1,8 +1,12 @@
 import sql from 'mssql';
-import { execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
 import { startContainer } from './container.ts';
+import {
+  type ServerCoordinates,
+  publishServer,
+  requireServer,
+} from './provisioned-servers.ts';
 import { timebox } from './timebox.ts';
 
 export const SQL_SERVER_FULL_IMAGE =
@@ -24,6 +28,8 @@ function isAzureSqlEdge(image: string): boolean {
  * SQL Server container configuration.
  */
 export interface SqlServerContainerConfig {
+  /** Docker metadata for the lifecycle owner. */
+  labels?: Record<string, string>;
   /**
    * SQL Server image to use. Defaults to Azure SQL Edge on Apple Silicon
    * (native ARM64 — no QEMU emulation) and full SQL Server elsewhere.
@@ -167,7 +173,8 @@ async function createDatabase(
  * Helper to run a test function with a SQL Server container.
  * Automatically handles setup and cleanup.
  *
- * Docker is required. If it is unavailable, the test fails explicitly.
+ * Uses a provisioned server and creates and drops a fresh database per call.
+ * Missing provisioning or a configuration mismatch fails explicitly.
  *
  * @example
  * ```typescript
@@ -183,7 +190,7 @@ export async function withSqlServerContainer<T>(
   fn: (container: SqlServerContainer) => Promise<T>,
   config?: SqlServerContainerConfig,
 ): Promise<T> {
-  const shared = await resolveSharedSqlServer(config);
+  const shared = requireServer('sqlserver', config);
   const database = `test_${randomUUID().replace(/-/g, '')}`;
   await createDatabase(shared.host, shared.port, shared.password, database);
 
@@ -207,7 +214,7 @@ export async function withSqlServerContainer<T>(
 }
 
 async function dropSqlServerDatabase(
-  container: SqlServerContainer,
+  container: ServerCoordinates,
   database: string,
 ): Promise<void> {
   const pool = new sql.ConnectionPool(
@@ -227,115 +234,9 @@ async function dropSqlServerDatabase(
   }
 }
 
-const SQLSERVER_ENV = {
-  host: 'TEST_SQLSERVER_HOST',
-  port: 'TEST_SQLSERVER_PORT',
-  password: 'TEST_SQLSERVER_PASSWORD',
-  database: 'TEST_SQLSERVER_DB',
-  image: 'TEST_SQLSERVER_IMAGE',
-  containerId: 'TEST_SQLSERVER_CONTAINER_ID',
-} as const;
-
-/**
- * Publish a running container's coordinates to the environment so that
- * {@link withSqlServerContainer} in child test processes reuses it instead of
- * booting their own. Call from a `globalSetup`; see {@link sqlServerGlobalSetup}.
- */
+/** Publish a server owned by the caller to child test processes. */
 export function publishSqlServerEnv(container: SqlServerContainer): void {
-  process.env[SQLSERVER_ENV.host] = container.host;
-  process.env[SQLSERVER_ENV.port] = String(container.port);
-  process.env[SQLSERVER_ENV.password] = container.password;
-  process.env[SQLSERVER_ENV.database] = container.database;
-  process.env[SQLSERVER_ENV.image] = container.image;
-  process.env[SQLSERVER_ENV.containerId] = container.containerId;
-}
-
-function sqlServerFromEnv(): SqlServerContainer | undefined {
-  const containerId = process.env[SQLSERVER_ENV.containerId];
-  const port = process.env[SQLSERVER_ENV.port];
-  if (!containerId || !port) {
-    return undefined;
-  }
-  const host = process.env[SQLSERVER_ENV.host] ?? 'localhost';
-  const password = process.env[SQLSERVER_ENV.password] ?? 'StrongP@ssw0rd123!';
-  const database = process.env[SQLSERVER_ENV.database] ?? 'testdb';
-  const image = process.env[SQLSERVER_ENV.image] ?? defaultSqlServerImage();
-  const ownedByGlobalTeardown = async () => {};
-  return {
-    connectionString: sqlServerConnectionString(
-      Number(port),
-      password,
-      database,
-    ),
-    image,
-    containerId,
-    host,
-    port: Number(port),
-    user: 'sa',
-    password,
-    database,
-    cleanup: ownedByGlobalTeardown,
-    [Symbol.asyncDispose]: ownedByGlobalTeardown,
-  };
-}
-
-function sqlServerConfigMatches(
-  container: SqlServerContainer,
-  config?: SqlServerContainerConfig,
-): boolean {
-  return (
-    (config?.image ?? container.image) === container.image &&
-    (config?.password ?? container.password) === container.password
-  );
-}
-
-function resolveSharedSqlServer(
-  config?: SqlServerContainerConfig,
-): Promise<SqlServerContainer> {
-  const provisioned = sqlServerFromEnv();
-  if (provisioned && sqlServerConfigMatches(provisioned, config)) {
-    return Promise.resolve(provisioned);
-  }
-  return sharedSqlServerContainer(config);
-}
-
-const sharedSqlServerContainers = new Map<
-  string,
-  Promise<SqlServerContainer>
->();
-const sharedSqlServerContainerIds = new Set<string>();
-let sqlServerExitHookRegistered = false;
-
-function sharedSqlServerContainer(
-  config?: SqlServerContainerConfig,
-): Promise<SqlServerContainer> {
-  const key = JSON.stringify(config ?? {});
-  let pending = sharedSqlServerContainers.get(key);
-  if (!pending) {
-    pending = startSqlServerContainer(config).then((container) => {
-      sharedSqlServerContainerIds.add(container.containerId);
-      registerSqlServerExitCleanup();
-      return container;
-    });
-    sharedSqlServerContainers.set(key, pending);
-  }
-  return pending;
-}
-
-function registerSqlServerExitCleanup(): void {
-  if (sqlServerExitHookRegistered) {
-    return;
-  }
-  sqlServerExitHookRegistered = true;
-  process.on('exit', () => {
-    for (const id of sharedSqlServerContainerIds) {
-      try {
-        execSync(`docker kill ${id}`, { stdio: 'ignore' });
-      } catch {
-        // best-effort teardown — the process is exiting anyway
-      }
-    }
-  });
+  publishServer('sqlserver', container);
 }
 
 /**
@@ -360,6 +261,7 @@ export async function startSqlServerContainer(
   }
 
   const container = await startContainer({
+    labels: config?.labels,
     image,
     env,
     internalPort: 1433,

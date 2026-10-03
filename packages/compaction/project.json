@@ -3,20 +3,18 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/compaction/src",
   "projectType": "library",
-  "tags": ["scope:public"],
+  "tags": ["scope:public", "test:node"],
   "targets": {
     "build": {
       "executor": "@nx/esbuild:esbuild",
       "outputs": ["{options.outputPath}"],
-      "options": { "external": ["ai"] }
+      "options": {
+        "external": ["ai"]
+      }
     },
     "test": {
-      "executor": "nx:run-commands",
-      "inputs": ["default", "^production"],
-      "outputs": ["{workspaceRoot}/test-results/compaction.xml"],
       "options": {
-        "command": "node ../../tools/src/run-node-tests.ts ../../test-results/compaction.xml --test-timeout=10000 src/compact.integration.test.ts",
-        "cwd": "{projectRoot}"
+        "args": ["--test-timeout=10000"]
       }
     },
     "format": {
