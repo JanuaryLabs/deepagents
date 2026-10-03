@@ -5,9 +5,9 @@
   "type": "module",
   "main": "dist/server.js",
   "dependencies": {
-    "@deepagents/agent": "6.2.0",
-    "@deepagents/evals": "6.2.0",
-    "@deepagents/text2sql": "6.2.0",
+    "@deepagents/agent": "*",
+    "@deepagents/evals": "*",
+    "@deepagents/text2sql": "*",
     "@hono/node-server": "^2.0.10",
     "hono": "^4.12.30",
     "mssql": "^12.7.0",

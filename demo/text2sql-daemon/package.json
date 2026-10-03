@@ -8,8 +8,8 @@
     "./host": "./host.ts"
   },
   "dependencies": {
-    "@deepagents/context": "6.2.0",
-    "@deepagents/text2sql": "6.2.0",
+    "@deepagents/context": "*",
+    "@deepagents/text2sql": "*",
     "@hono/node-server": "^2.0.10",
     "cac": "^7.0.0",
     "hono": "^4.12.30",

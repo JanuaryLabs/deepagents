@@ -7,10 +7,10 @@
   "dependencies": {
     "@ai-sdk/openai": "^4.0.52",
     "@daytona/sdk": "^0.198.0",
-    "@deepagents/agent": "6.2.0",
-    "@deepagents/context": "6.2.0",
+    "@deepagents/agent": "*",
+    "@deepagents/context": "*",
     "@deepagents/demo-text2sql-daemon": "6.2.0",
-    "@deepagents/text2sql": "6.2.0",
+    "@deepagents/text2sql": "*",
     "nano-spawn": "^2.1.0"
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/devtool-history",
-  "version": "6.2.0",
+  "version": "7.0.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -29,8 +29,8 @@
     }
   },
   "dependencies": {
-    "@deepagents/experimental": "6.2.0",
-    "@deepagents/react-shadcn": "6.2.0",
+    "@deepagents/experimental": "7.0.0",
+    "@deepagents/react-shadcn": "7.0.0",
     "lucide-react": "^1.33.0"
   },
   "peerDependencies": {

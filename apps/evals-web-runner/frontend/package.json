@@ -9,7 +9,7 @@
     "name": "playground"
   },
   "dependencies": {
-    "@deepagents/react-shadcn": "6.2.0",
+    "@deepagents/react-shadcn": "*",
     "@tanstack/react-query": "^5.101.2",
     "@tanstack/react-table": "^8.21.3",
     "html-to-image": "^1.11.13",

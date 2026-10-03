@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/devtool",
-  "version": "6.2.0",
+  "version": "7.0.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -48,17 +48,17 @@
     "hono": "^4.12.33"
   },
   "peerDependencies": {
-    "@deepagents/context": "6.2.0",
-    "@deepagents/experimental": "6.2.0"
+    "@deepagents/context": "7.0.0",
+    "@deepagents/experimental": "7.0.0"
   },
   "devDependencies": {
     "@ai-sdk/provider": "4.0.9",
-    "@deepagents/react-input": "6.2.0",
-    "@deepagents/context": "6.2.0",
-    "@deepagents/devtool-history": "6.2.0",
-    "@deepagents/experimental": "6.2.0",
-    "@deepagents/react-genai": "6.2.0",
-    "@deepagents/react-shadcn": "6.2.0",
+    "@deepagents/react-input": "7.0.0",
+    "@deepagents/context": "7.0.0",
+    "@deepagents/devtool-history": "7.0.0",
+    "@deepagents/experimental": "7.0.0",
+    "@deepagents/react-genai": "7.0.0",
+    "@deepagents/react-shadcn": "7.0.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-query": "^5.101.2",
     "@types/react": "19.2.18",

@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/react-input",
-  "version": "6.2.0",
+  "version": "7.0.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -40,7 +40,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
-    "@deepagents/react-shadcn": "6.2.0",
+    "@deepagents/react-shadcn": "7.0.0",
     "@tiptap/core": "^3.27.1",
     "@tiptap/extension-link": "^3.27.1",
     "@tiptap/pm": "^3.27.1",
