@@ -1923,11 +1923,11 @@ describe('Stream Chunks', () => {
         });
         const streamId = crypto.randomUUID();
         await streams.register(streamId);
-        let source!: ReadableStreamDefaultController<UIMessageChunk>;
+        const sourceCancelled = Promise.withResolvers<void>();
         const persist = streams.persist(
           new ReadableStream<UIMessageChunk>({
-            start(controller) {
-              source = controller;
+            cancel() {
+              sourceCancelled.resolve();
             },
           }),
           streamId,
@@ -1936,8 +1936,9 @@ describe('Stream Chunks', () => {
         await watcherSleeping.promise;
 
         await streams.cancel(streamId);
-        source.close();
+        await sourceCancelled.promise;
         await persist;
+        await store.updateStreamStatus(streamId, 'completed');
         await store.updateStreamStatus(streamId, 'failed', {
           error: 'late failure',
         });

@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/experimental",
-  "version": "7.0.0",
+  "version": "7.0.2",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -91,17 +91,17 @@
     "access": "public"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^4.0.46",
-    "@ai-sdk/code-mode": "^1.0.42",
-    "@ai-sdk/mcp": "^2.0.41",
-    "@ai-sdk/openai": "^4.0.67",
-    "@deepagents/context": "7.0.0",
-    "@deepagents/compaction": "7.0.0",
-    "@deepagents/elements": "7.0.0",
+    "@ai-sdk/anthropic": "^4.0.71",
+    "@ai-sdk/code-mode": "^1.0.84",
+    "@ai-sdk/mcp": "^2.0.66",
+    "@ai-sdk/openai": "^4.0.83",
+    "@deepagents/context": "7.0.2",
+    "@deepagents/compaction": "7.0.2",
+    "@deepagents/elements": "7.0.2",
     "@iarna/toml": "^2.2.5",
     "@napi-rs/keyring": "^2.1.0",
     "@opencoredev/loginwithchatgpt-core": "^0.2.0",
-    "ai": "^7.0.85",
+    "ai": "^7.0.127",
     "atomically": "^2.1.1",
     "cron-parser": "5.6.2",
     "cronstrue": "^3.24.0",
@@ -115,11 +115,11 @@
     "uuid": "^14.0.1",
     "yaml": "^2.9.0",
     "zod": "^4.4.3",
-    "@ai-sdk/provider-utils": "^5.0.34",
-    "@ai-sdk/provider": "^4.0.9"
+    "@ai-sdk/provider-utils": "^5.0.53",
+    "@ai-sdk/provider": "^4.0.21"
   },
   "devDependencies": {
-    "@ai-sdk/provider": "^4.0.9",
+    "@ai-sdk/provider": "^4.0.21",
     "@electric-sql/pglite": "^0.5.4",
     "@types/proper-lockfile": "^4.1.4",
     "just-bash": "^3.2.0"

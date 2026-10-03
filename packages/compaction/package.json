@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/compaction",
-  "version": "7.0.0",
+  "version": "7.0.2",
   "license": "MIT",
   "description": "AI SDK-native conversation compaction with explicit budgets and provenance.",
   "repository": {
@@ -30,9 +30,9 @@
     "access": "public"
   },
   "peerDependencies": {
-    "ai": "^7.0.85"
+    "ai": "^7.0.127"
   },
   "devDependencies": {
-    "ai": "^7.0.85"
+    "ai": "^7.0.127"
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/devtool",
-  "version": "7.0.0",
+  "version": "7.0.2",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -39,7 +39,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@ai-sdk/otel": "1.0.85",
+    "@ai-sdk/otel": "1.0.127",
     "@hono/node-server": "^2.0.10",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/core": "2.11.0",
@@ -48,23 +48,23 @@
     "hono": "^4.12.33"
   },
   "peerDependencies": {
-    "@deepagents/context": "7.0.0",
-    "@deepagents/experimental": "7.0.0"
+    "@deepagents/context": "7.0.2",
+    "@deepagents/experimental": "7.0.2"
   },
   "devDependencies": {
-    "@ai-sdk/provider": "4.0.9",
-    "@deepagents/react-input": "7.0.0",
-    "@deepagents/context": "7.0.0",
-    "@deepagents/devtool-history": "7.0.0",
-    "@deepagents/experimental": "7.0.0",
-    "@deepagents/react-genai": "7.0.0",
-    "@deepagents/react-shadcn": "7.0.0",
+    "@ai-sdk/provider": "4.0.21",
+    "@deepagents/react-input": "7.0.2",
+    "@deepagents/context": "7.0.2",
+    "@deepagents/devtool-history": "7.0.2",
+    "@deepagents/experimental": "7.0.2",
+    "@deepagents/react-genai": "7.0.2",
+    "@deepagents/react-shadcn": "7.0.2",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-query": "^5.101.2",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
     "@vitejs/plugin-react": "6.0.3",
-    "ai": "7.0.85",
+    "ai": "7.0.127",
     "cronstrue": "^3.24.0",
     "lucide-react": "^1.33.0",
     "react": "19.2.8",
