@@ -470,8 +470,9 @@ describe('Docker Sandbox', () => {
         );
       });
 
-      it('creates and removes a managed Docker volume on dispose', async () => {
+      it('creates and removes a managed Docker volume on dispose', async (t) => {
         const volumeName = testVolumeName('deepagents-managed');
+        t.after(() => removeDockerVolume(volumeName));
         const sandbox = await createDockerSandbox({
           volumes: [
             {
@@ -485,6 +486,12 @@ describe('Docker Sandbox', () => {
         });
 
         try {
+          // Root filesystem cleanup keeps Docker's auto-removal in progress
+          // after stop returns, while it still holds the volume reference.
+          const files = await sandbox.executeCommand(
+            'mkdir -p /tmp/disposal-files; for file in {1..5000}; do : > /tmp/disposal-files/$file; done',
+          );
+          assert.strictEqual(files.exitCode, 0);
           const writeResult = await sandbox.executeCommand(
             'echo "managed" > /data/file.txt',
           );

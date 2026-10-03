@@ -1,0 +1,203 @@
+import { PGlite } from '@electric-sql/pglite';
+import { simulateReadableStream } from 'ai';
+import { MockLanguageModelV4 } from 'ai/test';
+import { Hono } from 'hono';
+import { InMemoryFs } from 'just-bash';
+import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
+import test from 'node:test';
+import { PgBoss, fromPglite } from 'pg-boss';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+
+import { compact, tokensExceed } from '@deepagents/compaction';
+import {
+  PollingChangeSource,
+  SqliteContextStore,
+  SqliteStreamStore,
+  StreamManager,
+  createVirtualSandbox,
+} from '@deepagents/context';
+import { devtool } from '@deepagents/devtool';
+import { fileTelemetry, tracesHttp } from '@deepagents/devtool/traces';
+import {
+  AgentPluginCapability,
+  type AgentPluginDefinition,
+  AgentRuntime,
+  PgBossTurnQueue,
+  SqliteMailboxStore,
+  defineAgent,
+  defineSandbox,
+  defineStack,
+} from '@deepagents/experimental/zukhruf';
+import {
+  type SchedulingWake,
+  WakeScheduler,
+  conversationScheduling,
+  conversationSchedulingCapabilities,
+} from '@deepagents/experimental/zukhruf/conversation-scheduling';
+import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
+import {
+  schedules,
+  schedulesCapabilities,
+} from '@deepagents/experimental/zukhruf/schedules';
+import { schedulesHttp } from '@deepagents/experimental/zukhruf/schedules/http';
+import { uploads } from '@deepagents/experimental/zukhruf/uploads';
+import { uploadsHttp } from '@deepagents/experimental/zukhruf/uploads/http';
+import { ZukhrufChatTransport } from '@deepagents/react-genai';
+import { Button } from '@deepagents/react-shadcn';
+import sqlite from '@deepagents/text2sql/sqlite';
+
+test('packed packages support consumer composition, durable turns, HTTP and UI', async () => {
+  await using resources = new AsyncDisposableStack();
+  const database = resources.use(new PGlite());
+  const boss = resources.adopt(
+    new PgBoss({ db: fromPglite(database), backend: 'pglite' }),
+    (boss) => boss.stop({ graceful: false }),
+  );
+  boss.on('error', (error) => {
+    throw error;
+  });
+  await boss.start();
+  const queue = new PgBossTurnQueue(boss, {
+    pollingIntervalSeconds: 0.5,
+    schema: 'pgboss',
+  });
+  await queue.initialize();
+  class ConsumerWakeScheduler extends WakeScheduler<SchedulingWake> {
+    async schedule() {}
+    async cancel() {}
+    async consume(): Promise<AsyncDisposable> {
+      return { async [Symbol.asyncDispose]() {} };
+    }
+  }
+  const capability = new AgentPluginCapability<string>('consumer.value');
+  const custom: AgentPluginDefinition<{ value: string }> = {
+    name: 'consumer',
+    capabilities: [capability],
+    create: (bindings) => ({ value: bindings.get(capability) }),
+  };
+  const conversation = conversationScheduling();
+  const scheduled = schedules({
+    queue: 'packed-schedules',
+    reconciliationIntervalMs: 1000,
+  });
+  const traces = fileTelemetry({ path: './traces.jsonl' });
+  const model = new MockLanguageModelV4({
+    doStream: async () => ({
+      stream: simulateReadableStream({
+        chunks: [
+          { type: 'text-start', id: 'answer' },
+          { type: 'text-delta', id: 'answer', delta: 'packed consumer works' },
+          { type: 'text-end', id: 'answer' },
+          {
+            type: 'finish',
+            finishReason: { unified: 'stop', raw: undefined },
+            usage: {
+              inputTokens: {
+                total: 1,
+                noCache: 1,
+                cacheRead: undefined,
+                cacheWrite: undefined,
+              },
+              outputTokens: { total: 1, text: 1, reasoning: undefined },
+            },
+          },
+        ],
+      }),
+    }),
+  });
+  const declaration = defineAgent({
+    name: 'packed-consumer',
+    model,
+    instructions: [],
+    sandbox: defineSandbox(() =>
+      createVirtualSandbox({ fs: new InMemoryFs() }),
+    ),
+    plugins: [custom, conversation, scheduled, traces],
+    compaction: {
+      model,
+      triggers: [tokensExceed(100_000)],
+      targetTokens: 50_000,
+    },
+  });
+  const stack = (value: string) =>
+    defineStack(async (scope) => {
+      const streamStore = new SqliteStreamStore(
+        scope.use(new DatabaseSync(':memory:')),
+      );
+      return {
+        store: new SqliteContextStore(scope.use(new DatabaseSync(':memory:'))),
+        streams: new StreamManager({
+          store: streamStore,
+          changeSource: new PollingChangeSource({ reads: streamStore }),
+        }),
+        queue,
+        mailboxStore: scope.use(new SqliteMailboxStore(':memory:')),
+        bindings: [
+          capability.bind(value),
+          conversationSchedulingCapabilities.scheduler.bind(
+            new ConsumerWakeScheduler(),
+          ),
+          conversationSchedulingCapabilities.timezone.bind('UTC'),
+          schedulesCapabilities.boss.bind(boss),
+          schedulesCapabilities.transaction.bind((operation) =>
+            database.transaction((tx) => operation(fromPglite(tx))),
+          ),
+        ],
+      };
+    });
+  const runtime = new AgentRuntime(declaration);
+  const first = resources.use(await runtime.initialize(stack('first')));
+  const second = resources.use(await runtime.initialize(stack('second')));
+  for (const plugin of [custom, conversation, scheduled, traces])
+    assert.notEqual(first.plugin(plugin), second.plugin(plugin));
+  assert.equal(first.plugin(custom).value, 'first');
+  assert.equal(second.plugin(custom).value, 'second');
+  const app = new Hono<HttpEnv>();
+  app.use((c, next) => {
+    c.set('userId', 'consumer');
+    return next();
+  });
+  app.route('/api', http(first, tracesHttp(traces), schedulesHttp(scheduled)));
+  const info = await app.request('/api/info');
+  assert.equal(info.status, 200);
+  assert.match(await info.text(), /schedules/);
+  assert.equal(
+    (await devtool({ protocolPath: '/api' }).request('/')).status,
+    200,
+  );
+  resources.use(await first.work());
+  const chat = { chatId: 'packed-turn', userId: 'consumer' };
+  const turn = await first.enqueue(chat, {
+    message: {
+      id: 'user-1',
+      role: 'user',
+      parts: [{ type: 'text', text: 'Hello' }],
+    },
+    trigger: 'submit-message',
+  });
+  const chunks = await Array.fromAsync(turn.stream);
+  assert.equal(
+    chunks
+      .filter((chunk) => chunk.type === 'text-delta')
+      .map((chunk) => chunk.delta)
+      .join(''),
+    'packed consumer works',
+  );
+  assert.equal(
+    (await first.observe(chat).status(turn.id))?.status,
+    'completed',
+  );
+  assert.equal((await first.listHistory('consumer')).length, 1);
+  assert.equal(await second.sessionExists(chat), false);
+  assert.equal(typeof compact, 'function');
+  assert.equal(typeof uploads, 'function');
+  assert.equal(typeof uploadsHttp, 'function');
+  assert.equal(typeof ZukhrufChatTransport, 'function');
+  assert.equal(typeof sqlite.Sqlite, 'function');
+  assert.match(
+    renderToStaticMarkup(createElement(Button, null, 'Packed button')),
+    /Packed button/,
+  );
+});

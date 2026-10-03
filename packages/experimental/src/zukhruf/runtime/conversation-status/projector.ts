@@ -76,7 +76,11 @@ export class ConversationStatusProjector {
   readonly #last = new Map<string, ConversationStatusChange>();
   readonly #publishing = new Map<string, Promise<void>>();
   #subscribers = 0;
-  #remote?: { abort: AbortController; ready: Promise<void> };
+  #remote?: {
+    abort: AbortController;
+    ready: Promise<void>;
+    done: Promise<void>;
+  };
 
   constructor(options: ConversationStatusProjectorOptions) {
     this.#store = options.store;
@@ -235,7 +239,7 @@ export class ConversationStatusProjector {
             yield projected;
           }
         } finally {
-          detach();
+          await detach();
         }
       },
     };
@@ -295,23 +299,25 @@ export class ConversationStatusProjector {
     if (!this.#remote) {
       const abort = new AbortController();
       const ready = Promise.withResolvers<void>();
-      const remote = { abort, ready: ready.promise };
+      const remote = { abort, ready: ready.promise, done: Promise.resolve() };
       this.#remote = remote;
-      void this.#consumeRemote(source, remote, ready);
+      remote.done = this.#consumeRemote(source, remote, ready);
     }
     try {
       await this.#remote.ready;
     } catch (error) {
-      this.#detachRemote();
+      await this.#detachRemote();
       throw error;
     }
   }
 
-  #detachRemote(): void {
+  async #detachRemote(): Promise<void> {
     this.#subscribers -= 1;
     if (this.#subscribers > 0 || !this.#remote) return;
-    this.#remote.abort.abort();
+    const remote = this.#remote;
+    remote.abort.abort();
     this.#remote = undefined;
+    await remote.done;
   }
 
   async #consumeRemote(

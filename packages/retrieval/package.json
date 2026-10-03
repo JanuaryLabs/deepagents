@@ -23,7 +23,6 @@
       "default": "./dist/lib/connectors/index.js"
     },
     ".": {
-      "development": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
@@ -53,6 +52,7 @@
     "ai": "^7.0.85",
     "sqlite-vec": "^0.1.9",
     "dedent": "1.7.2",
-    "lodash-es": "^4.18.1"
+    "lodash-es": "^4.18.1",
+    "@langchain/core": "^1.2.3"
   }
 }

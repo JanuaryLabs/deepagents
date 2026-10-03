@@ -17,7 +17,7 @@ import { mkdir, mkdtempDisposable, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import { setTimeout as sleep } from 'node:timers/promises';
+import { setImmediate, setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
@@ -3138,6 +3138,62 @@ describe('zukhruf runtime — conversation status', () => {
 });
 
 describe('zukhruf runtime — cross-process conversation status', () => {
+  it('awaits the database listener cleanup when the last subscriber exits', async () => {
+    const closing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const closed = Promise.withResolvers<void>();
+    await using h = await harness(new MockLanguageModelV4(), undefined, {
+      runtime: ({ boss }) => {
+        const db = boss.getDb();
+        const listen = db.listen!.bind(db);
+        db.listen = async (...args) => {
+          const handle = await listen(...args);
+          return {
+            async close() {
+              closing.resolve();
+              await release.promise;
+              await handle.close();
+              closed.resolve();
+            },
+          };
+        };
+        return {
+          conversationStatusChanges: new PgBossConversationStatusChangeSource(
+            boss,
+          ),
+        };
+      },
+    });
+    const abort = new AbortController();
+    const subscription = await h.runtime.subscribeConversationStatus(
+      abort.signal,
+    );
+    let finished = false;
+    const consume = (async () => {
+      try {
+        for await (const event of subscription) void event;
+      } catch (error) {
+        assert.equal((error as Error).name, 'AbortError');
+      } finally {
+        finished = true;
+      }
+    })();
+    abort.abort();
+    try {
+      await closing.promise;
+      await setImmediate();
+      assert.equal(
+        finished,
+        false,
+        'subscription must await UNLISTEN before its database can close',
+      );
+    } finally {
+      release.resolve();
+      await closed.promise;
+      await consume;
+    }
+  });
+
   it('a runtime without a worker observes turns executed by another runtime over the shared database', async (t) => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     const model = scriptedModel(track);

@@ -18,49 +18,41 @@
   "exports": {
     "./package.json": "./package.json",
     ".": {
-      "development": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./engine": {
-      "development": "./src/engine/index.ts",
       "types": "./dist/engine/index.d.ts",
       "import": "./dist/engine/index.js",
       "default": "./dist/engine/index.js"
     },
     "./scorers": {
-      "development": "./src/scorers/index.ts",
       "types": "./dist/scorers/index.d.ts",
       "import": "./dist/scorers/index.js",
       "default": "./dist/scorers/index.js"
     },
     "./store": {
-      "development": "./src/store/index.ts",
       "types": "./dist/store/index.d.ts",
       "import": "./dist/store/index.js",
       "default": "./dist/store/index.js"
     },
     "./dataset": {
-      "development": "./src/dataset/index.ts",
       "types": "./dist/dataset/index.d.ts",
       "import": "./dist/dataset/index.js",
       "default": "./dist/dataset/index.js"
     },
     "./comparison": {
-      "development": "./src/comparison/index.ts",
       "types": "./dist/comparison/index.d.ts",
       "import": "./dist/comparison/index.js",
       "default": "./dist/comparison/index.js"
     },
     "./reporters": {
-      "development": "./src/reporters/index.ts",
       "types": "./dist/reporters/index.d.ts",
       "import": "./dist/reporters/index.js",
       "default": "./dist/reporters/index.js"
     },
     "./evaluate": {
-      "development": "./src/evaluate/index.ts",
       "types": "./dist/evaluate/index.d.ts",
       "import": "./dist/evaluate/index.js",
       "default": "./dist/evaluate/index.js"

@@ -205,7 +205,7 @@ function formatChatError(error: unknown): string {
     console.error('Upstream API call failed:', error);
     return `Upstream API call failed with status ${error.statusCode}: ${error.message}`;
   }
-  return JSON.stringify(error);
+  return error instanceof Error ? 'An error occurred.' : JSON.stringify(error);
 }
 
 async function makeTitle(options: {

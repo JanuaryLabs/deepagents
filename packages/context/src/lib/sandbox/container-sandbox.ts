@@ -367,7 +367,7 @@ export abstract class ContainerSandboxStrategy<
     const volumes = [...this.createdVolumes].reverse();
     for (const volume of volumes) {
       try {
-        await spawn(this.engine.cli, ['volume', 'rm', volume]);
+        await this.engine.removeVolume(volume);
         this.createdVolumes.delete(volume);
       } catch (error) {
         const reason = this.engineErrorMessage(error);

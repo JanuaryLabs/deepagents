@@ -146,6 +146,7 @@ export interface ContainerEngine<
   inspectArgs(containerId: string): string[];
   parseStatus(status: string): 'running' | 'stopped' | 'absent';
   volumeCreateArgs(volume: SandboxNamedVolume): string[];
+  removeVolume(name: string): Promise<void>;
   errorMessage(error: unknown): string;
   isServiceDown(message: string): boolean;
   isMissingContainer(message: string): boolean;

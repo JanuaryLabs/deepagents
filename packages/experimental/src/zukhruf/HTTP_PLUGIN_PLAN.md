@@ -181,7 +181,7 @@ nx run @deepagents/devtool:typecheck
 nx run @deepagents/devtool:test
 nx run @deepagents/demo-zukhruf-simple:lint
 nx run @deepagents/demo-zukhruf-research-bot:lint
-node tools/src/verify-definition-owned-plugins.ts
+node tools/src/verify-packages.ts
 git diff --check
 ```
 

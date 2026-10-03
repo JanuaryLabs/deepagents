@@ -23,7 +23,6 @@
       "default": "./dist/index.js"
     },
     "./traces": {
-      "development": "./src/traces/index.ts",
       "types": "./dist/traces/index.d.ts",
       "import": "./dist/traces/index.js",
       "default": "./dist/traces/index.js"

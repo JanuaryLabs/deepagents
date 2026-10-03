@@ -160,7 +160,7 @@
     }
   },
   "release": {
-    "projects": ["*", "!packages/test", "!@deepagents/devtool-ui"],
+    "projects": ["tag:scope:public"],
     "conventionalCommits": {
       "types": {
         "chore": {
@@ -179,7 +179,7 @@
       }
     },
     "version": {
-      "preVersionCommand": "npx nx run-many -t build --prod --verbose",
+      "preVersionCommand": "npm run verify:packages",
       "conventionalCommits": true
     },
     "releaseTag": {

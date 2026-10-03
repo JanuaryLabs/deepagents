@@ -492,6 +492,25 @@ export const dockerEngine: ContainerEngine<DockerCommonOptions> = {
     return err.stderr || err.stdout || err.message || String(error);
   },
 
+  async removeVolume(name) {
+    // Docker's --rm cleanup releases volume references after stop returns.
+    const deadline = performance.now() + 30_000;
+    while (true) {
+      try {
+        await spawn('docker', ['volume', 'rm', name]);
+        return;
+      } catch (error) {
+        if (
+          !this.errorMessage(error).includes('volume is in use') ||
+          performance.now() >= deadline
+        ) {
+          throw error;
+        }
+        await delay(25);
+      }
+    }
+  },
+
   isServiceDown(message: string): boolean {
     return (
       message.includes('Cannot connect') || message.includes('docker daemon')

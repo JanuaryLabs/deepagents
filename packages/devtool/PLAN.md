@@ -59,7 +59,7 @@ changes.
   `devtool({ protocolPath: '/zukhruf/v1' })` at `/devtool`, and owns the one listener on
   `127.0.0.1:4317`), returns the `/devtool` URL, and `run.ts` disposes worker and
   server through the existing `AsyncDisposableStack`.
-  `tools/src/verify-definition-owned-plugins.ts` packs `@deepagents/devtool`
+  `tools/src/verify-packages.ts` packs `@deepagents/devtool`
   and imports `fileTelemetry()` from its `/traces` subpath.
 - Obsolete and removed: the embedded `devtool()` runtime plugin, `DevtoolOptions`,
   loopback listener ownership, `runtime.url`, runtime headers, `hono/proxy`,

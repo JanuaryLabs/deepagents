@@ -44,7 +44,9 @@
     "nano-spawn": "^2.1.0",
     "zod": "^4.4.3",
     "fast-glob": "^3.3.3",
-    "@deepagents/retrieval": "6.2.0"
+    "@deepagents/retrieval": "6.2.0",
+    "@ai-sdk/provider-utils": "^5.0.34",
+    "@ai-sdk/provider": "^4.0.9"
   },
   "devDependencies": {
     "@types/debug": "^4.1.13"

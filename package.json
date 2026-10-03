@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "prepare": "husky",
-    "verify:packed-plugins": "nx run-many -t build --projects=@deepagents/agent,@deepagents/context,@deepagents/experimental,@deepagents/devtool && node tools/src/verify-definition-owned-plugins.ts"
+    "verify:packages": "nx run-many -t build --projects=tag:scope:public && node tools/src/verify-packages.ts"
   },
   "repository": "https://github.com/JanuaryLabs/deepagents",
   "private": true,

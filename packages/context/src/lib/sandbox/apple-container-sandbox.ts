@@ -283,6 +283,10 @@ export const appleEngine: ContainerEngine<AppleContainerCommonOptions> = {
     return ['volume', 'create', volume.name];
   },
 
+  async removeVolume(name) {
+    await spawn(CLI, ['volume', 'rm', name]);
+  },
+
   errorMessage: getCliErrorMessage,
 
   isServiceDown(message) {
