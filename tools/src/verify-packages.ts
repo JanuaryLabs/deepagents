@@ -169,7 +169,8 @@ try {
         '@types/node': '^26.1.1',
         '@types/react': '19.2.18',
         '@types/react-dom': '19.2.5',
-        ai: '7.0.85',
+        ai: '^7.0.85',
+        '@ai-sdk/mcp': '^2.0.41',
         react: '19.2.8',
         'react-dom': '19.2.8',
       },
@@ -204,6 +205,15 @@ try {
     join(consumer, 'consumer.test.ts'),
     readFileSync(join(workspace, 'tools/src/packed-consumer.test.ts.txt')),
   );
+  writeFileSync(
+    join(consumer, 'mcp-consumer.test.ts'),
+    readFileSync(
+      join(
+        workspace,
+        'packages/experimental/src/zukhruf/plugins/mcp/mcp.integration.test.ts',
+      ),
+    ),
+  );
   // Browser consumers use bundler resolution; server entry points also support NodeNext.
   const nodeImports = imports.filter(
     (name) =>
@@ -222,8 +232,15 @@ try {
   for (const nodeNext of [false, true]) {
     const program = ts.createProgram(
       nodeNext
-        ? [join(consumer, 'node-imports.ts')]
-        : [join(consumer, 'imports.ts'), join(consumer, 'consumer.test.ts')],
+        ? [
+            join(consumer, 'node-imports.ts'),
+            join(consumer, 'mcp-consumer.test.ts'),
+          ]
+        : [
+            join(consumer, 'imports.ts'),
+            join(consumer, 'consumer.test.ts'),
+            join(consumer, 'mcp-consumer.test.ts'),
+          ],
       {
         target: ts.ScriptTarget.ESNext,
         module: nodeNext ? ts.ModuleKind.NodeNext : ts.ModuleKind.ESNext,
@@ -283,7 +300,12 @@ try {
   });
   execFileSync(
     process.execPath,
-    ['--test', '--test-timeout=60000', join(consumer, 'consumer.test.ts')],
+    [
+      '--test',
+      '--test-timeout=60000',
+      join(consumer, 'consumer.test.ts'),
+      join(consumer, 'mcp-consumer.test.ts'),
+    ],
     { cwd: consumer, stdio: 'inherit', timeout: 90_000 },
   );
   execFileSync(join(consumer, 'node_modules/.bin/sql'), ['--help'], {

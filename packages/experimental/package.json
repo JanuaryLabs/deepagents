@@ -93,7 +93,7 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.46",
     "@ai-sdk/code-mode": "^1.0.42",
-    "@ai-sdk/mcp": "2.0.41",
+    "@ai-sdk/mcp": "^2.0.41",
     "@ai-sdk/openai": "^4.0.67",
     "@deepagents/context": "7.0.0",
     "@deepagents/compaction": "7.0.0",
