@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/text2sql",
-  "version": "7.0.0",
+  "version": "7.0.1",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -93,8 +93,8 @@
   },
   "dependencies": {
     "@ai-sdk/groq": "^4.0.35",
-    "@deepagents/agent": "7.0.0",
-    "@deepagents/context": "7.0.0",
+    "@deepagents/agent": "7.0.1",
+    "@deepagents/context": "7.0.1",
     "@google-cloud/bigquery": "8.3.1",
     "ai": "^7.0.85",
     "cac": "7.0.0",
@@ -113,7 +113,7 @@
   "devDependencies": {
     "@ai-sdk/openai": "^4.0.52",
     "@ai-sdk/react": "^4.0.88",
-    "@deepagents/evals": "7.0.0",
+    "@deepagents/evals": "7.0.1",
     "@duckdb/node-api": "^1.5.5-r.3",
     "@google-cloud/bigquery": "^8.3.1",
     "@types/proper-lockfile": "^4.1.4",
