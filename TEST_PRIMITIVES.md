@@ -86,6 +86,21 @@ WAL files, on success or failure. Close any additional connections before that
 scope exits. SQLite requires no Docker or global setup and does not share files
 across acquisitions. Product stores and schema setup stay in their own tests.
 
+DuckDB owns an in-memory instance and its native connection:
+
+```ts
+import { DuckDB } from '@deepagents/test';
+
+const duckdb = new DuckDB();
+await using database = await duckdb.database();
+await database.connection.run('CREATE TABLE records (id INTEGER)');
+```
+
+Each `DuckDB.database()` call creates an independent database without Docker or
+global setup. The handle exposes the native `DuckDBConnection` and bound
+`cleanup()`. Disposal closes the connection before the instance, including on
+failure. SQL fixtures and product adapter wiring stay in their own tests.
+
 ### Database servers
 
 Node test projects declare `test:node` and a `test` target. `nx.json` owns their

@@ -10,6 +10,7 @@ test('the public API exposes only the instance API and independent test primitiv
     [
       'Container',
       'Docker',
+      'DuckDB',
       'Mysql',
       'Postgres',
       'SQL_SERVER_EDGE_IMAGE',
