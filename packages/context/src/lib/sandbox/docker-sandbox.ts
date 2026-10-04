@@ -147,7 +147,7 @@ export interface DockerNetwork {
 export interface DockerCommonOptions extends CommonSandboxOptions {
   volumes?: SandboxVolume[];
   resources?: DockerResources;
-  /** Per-command timeout in milliseconds for `executeCommand` and `spawn`. */
+  /** Container execution timeout in milliseconds; excludes Docker/SSH connection setup. */
   commandTimeout?: number;
   /**
    * `--platform` (e.g. `'linux/amd64'`) — emulated when it differs from the host
@@ -181,7 +181,7 @@ export interface DockerCommonOptions extends CommonSandboxOptions {
   devices?: string[];
   /** `--init` — run an init process as PID 1 that reaps zombie subprocesses. */
   init?: boolean;
-  /** `--label` — container metadata, emitted as `key=value` per entry. */
+  /** `--label` metadata on the container and any managed volumes it creates. */
   labels?: Record<string, string>;
   /** `--sysctl` — kernel parameters, emitted as `key=value` per entry. */
   sysctls?: Record<string, string>;
@@ -217,7 +217,7 @@ export interface ComposeSandboxOptions {
   compose: string;
   service: string;
   resources?: DockerResources;
-  /** Per-command timeout in milliseconds for `executeCommand` and `spawn`. */
+  /** Container execution timeout in milliseconds; excludes Docker/SSH connection setup. */
   commandTimeout?: number;
 }
 
@@ -307,6 +307,18 @@ function runDockerBuild(
 
 export const dockerEngine: ContainerEngine<DockerCommonOptions> = {
   cli: 'docker',
+  bindMountsOnClient: false,
+  isMissingBindSource(message, source) {
+    const marker = `bind source path does not exist: ${source}`;
+    const index = message.indexOf(marker);
+    if (index < 0) return false;
+    const remainder = message.slice(index + marker.length);
+    return (
+      remainder === '' ||
+      remainder.startsWith('\n') ||
+      remainder.startsWith('\r\n')
+    );
+  },
 
   runArgs(
     image: string,
@@ -475,8 +487,13 @@ export const dockerEngine: ContainerEngine<DockerCommonOptions> = {
     return status === 'running' ? 'running' : 'stopped';
   },
 
-  volumeCreateArgs(volume: SandboxNamedVolume): string[] {
+  volumeCreateArgs(
+    volume: SandboxNamedVolume,
+    opts: DockerCommonOptions,
+  ): string[] {
     const args = ['volume', 'create'];
+    for (const [key, value] of Object.entries(opts.labels ?? {}))
+      args.push('--label', `${key}=${value}`);
     if (volume.driver) {
       args.push('--driver', volume.driver);
     }
@@ -598,17 +615,38 @@ function buildDockerExecFlags(options?: SpawnOptions): string[] {
 
 type DockerExecArgs = (command: string, options?: SpawnOptions) => string[];
 
-function managedDockerCommand(command: string, controlPath: string): string {
+function managedDockerCommand(
+  command: string,
+  controlPath: string,
+  commandTimeout?: number,
+): string {
   return [
     'set -m',
     `control=${shellQuote(controlPath)}`,
     ': > "$control" || exit 1',
-    'trap \'rm -f "$control"\' EXIT',
+    'timer=',
+    'trap \'if [ -n "$timer" ]; then kill -TERM "$timer" 2>/dev/null || :; wait "$timer" 2>/dev/null || :; fi; rm -f "$control" "$control.timeout"\' EXIT',
     `bash -lc ${shellQuote(command)} &`,
     'pid=$!',
     'printf \'%s\\n\' "$pid" > "$control"',
+    ...(commandTimeout
+      ? [
+          // Keep the deadline on the engine host: SSH setup/round trips must not
+          // let the command run past its execution budget.
+          '(',
+          `sleep ${commandTimeout / 1000} &`,
+          'alarm=$!',
+          'trap \'kill "$alarm" 2>/dev/null || :; wait "$alarm" 2>/dev/null || :; exit 0\' TERM',
+          'wait "$alarm" || exit',
+          'if kill -0 -- "-$pid" 2>/dev/null; then : > "$control.timeout"; kill -KILL -- "-$pid" 2>/dev/null || :; fi',
+          ') &',
+          'timer=$!',
+        ]
+      : []),
     'wait "$pid"',
-    'exit "$?"',
+    'status=$?',
+    '[ ! -e "$control.timeout" ] || exit 124',
+    'exit "$status"',
   ].join('\n');
 }
 
@@ -683,32 +721,26 @@ function spawnDockerProcess(
   const localProcess = toSandboxProcess(
     childSpawn(
       'docker',
-      execArgs(managedDockerCommand(command, controlPath), options),
+      execArgs(
+        managedDockerCommand(command, controlPath, commandTimeout),
+        options,
+      ),
     ),
     undefined,
   );
-  let termination:
-    | {
-        reason: 'abort' | 'timeout';
-        confirmed: Promise<boolean>;
-      }
-    | undefined;
-  const terminate = (reason: 'abort' | 'timeout') => {
-    termination ??= {
-      reason,
-      confirmed: terminateDockerExec(execArgs, controlPath, localProcess.exit),
-    };
+  let termination: Promise<boolean> | undefined;
+  const onAbort = () => {
+    termination ??= terminateDockerExec(
+      execArgs,
+      controlPath,
+      localProcess.exit,
+    );
+    // Observe transport failures immediately; the exit promise still reports
+    // the original rejection once the command's transport finishes.
+    void termination.catch(() => {});
   };
-  const onAbort = () => terminate('abort');
-
   if (options.signal?.aborted) onAbort();
   else options.signal?.addEventListener('abort', onAbort, { once: true });
-
-  let timeout: NodeJS.Timeout | undefined;
-  if (commandTimeout) {
-    timeout = setTimeout(() => terminate('timeout'), commandTimeout);
-    timeout.unref();
-  }
 
   return {
     stdout: localProcess.stdout,
@@ -716,15 +748,12 @@ function spawnDockerProcess(
     exit: localProcess.exit
       .then(async (info) => {
         const activeTermination = termination;
-        if (!activeTermination || !(await activeTermination.confirmed)) {
+        if (!activeTermination || !(await activeTermination)) {
           return info;
         }
-        return activeTermination.reason === 'timeout'
-          ? { code: 124, signal: null, success: false }
-          : { code: null, signal: 'SIGKILL' as const, success: false };
+        return { code: null, signal: 'SIGKILL' as const, success: false };
       })
       .finally(() => {
-        clearTimeout(timeout);
         options.signal?.removeEventListener('abort', onAbort);
       }),
   };

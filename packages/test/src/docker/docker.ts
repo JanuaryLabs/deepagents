@@ -1,8 +1,10 @@
-import spawn, { SubprocessError } from 'nano-spawn';
+import { SubprocessError } from 'nano-spawn';
 import { createHash, randomUUID } from 'node:crypto';
 
 import { timebox } from '../async/timebox.ts';
 import { Container } from './container.ts';
+import { DockerDirectory } from './directory.ts';
+import { DockerHost } from './host.ts';
 
 export interface ContainerOptions {
   image: string;
@@ -13,6 +15,8 @@ export interface ContainerOptions {
   labels?: Record<string, string>;
   tmpfs?: string[];
   ipcHost?: boolean;
+  memory?: string;
+  cpus?: number;
   memorySwappiness?: number;
   /** Runs on every acquisition. Throw until ready, using timebox for polling. */
   healthy?: (container: Container) => unknown;
@@ -27,6 +31,42 @@ interface InspectedContainer {
 /** Docker owns cross-process coordination; this instance holds no server cache. */
 export class Docker {
   #availability: Promise<boolean> | undefined;
+  #host: Promise<DockerHost> | undefined;
+  #failure: unknown;
+
+  /** Defaults for disposable test containers, including external launchers. */
+  get defaults(): {
+    resources: { memory: string; cpus: number };
+    labels: Record<string, string>;
+  } {
+    return {
+      resources: { memory: '1g', cpus: 1 },
+      labels: process.env.DEEPAGENTS_TEST_RUN_ID
+        ? { 'dev.deepagents.test.run': process.env.DEEPAGENTS_TEST_RUN_ID }
+        : {},
+    };
+  }
+
+  #connection(): Promise<DockerHost> {
+    return (this.#host ??= DockerHost.resolve());
+  }
+
+  async info(): Promise<{ architecture: string; endpoint: string }> {
+    const host = await this.#connection();
+    const { stdout } = await host.command([
+      'info',
+      '--format',
+      '{{.Architecture}}',
+    ]);
+    return { architecture: stdout.trim(), endpoint: host.endpoint };
+  }
+
+  async directory(): Promise<DockerDirectory> {
+    return DockerDirectory.create(await this.#connection());
+  }
+
+  readonly command = async (args: string[]) =>
+    (await this.#connection()).command(args);
 
   isAvailable(): Promise<boolean> {
     return (this.#availability ??= this.#probe());
@@ -34,16 +74,19 @@ export class Docker {
 
   async #probe(): Promise<boolean> {
     try {
-      await spawn('docker', ['info']);
+      await this.command(['info']);
       return true;
-    } catch {
+    } catch (error) {
+      this.#failure = error;
       return false;
     }
   }
 
   async #require(): Promise<void> {
     if (!(await this.isAvailable())) {
-      throw new Error('Docker is required for container-backed tests');
+      throw new Error('Docker is required for container-backed tests', {
+        cause: this.#failure,
+      });
     }
   }
 
@@ -53,19 +96,31 @@ export class Docker {
     const name =
       options.name ??
       `test-${options.image.replace(/[^a-zA-Z0-9_.-]/g, '-')}-${randomUUID()}`;
-    const { stdout, stderr } = await spawn('docker', [
+    const { stdout, stderr } = await this.command([
       'run',
       '-d',
-      ...this.#args({ ...options, name }),
+      ...this.#args({
+        ...options,
+        name,
+        labels: {
+          ...options.labels,
+          ...this.defaults.labels,
+        },
+      }),
     ]);
     const id = stdout.trim();
     if (!id) throw new Error(`Failed to start container: ${stderr}`);
     try {
       const container = await this.#handle(id, options.internalPort);
-      await options.healthy?.(container);
-      return container;
+      try {
+        await options.healthy?.(container);
+        return container;
+      } catch (error) {
+        await container.disconnect();
+        throw error;
+      }
     } catch (error) {
-      await spawn('docker', ['stop', id]).catch(() => {});
+      await this.command(['stop', id]).catch(() => {});
       throw error;
     }
   }
@@ -82,7 +137,7 @@ export class Docker {
     let inspected = await this.#inspect(name);
     if (!inspected) {
       try {
-        await spawn('docker', [
+        await this.command([
           'create',
           ...this.#args({
             ...options,
@@ -122,17 +177,26 @@ export class Docker {
       );
     }
     if (inspected.State.Status !== 'running') {
-      await spawn('docker', ['start', inspected.Id]);
+      await this.command(['start', inspected.Id]);
     }
     const container = await this.#handle(inspected.Id, options.internalPort);
-    await options.healthy?.(container);
-    return container;
+    try {
+      await options.healthy?.(container);
+      return container;
+    } catch (error) {
+      await container.disconnect();
+      throw error;
+    }
   }
 
   #fingerprint(options: ContainerOptions): string {
+    const { resources } = this.defaults;
     return createHash('sha256')
       .update(
         JSON.stringify({
+          transportVersion: 2,
+          memory: options.memory ?? resources.memory,
+          cpus: options.cpus ?? resources.cpus,
           image: options.image,
           internalPort: options.internalPort,
           env: Object.entries(options.env ?? {}).sort(([a], [b]) =>
@@ -150,6 +214,7 @@ export class Docker {
   }
 
   #args(options: ContainerOptions & { name: string }): string[] {
+    const { resources } = this.defaults;
     const args = ['--rm', '--name', options.name];
     for (const [key, value] of Object.entries(options.labels ?? {})) {
       args.push('--label', `${key}=${value}`);
@@ -162,12 +227,21 @@ export class Docker {
     if (options.memorySwappiness !== undefined) {
       args.push(`--memory-swappiness=${options.memorySwappiness}`);
     }
-    return [...args, '-P', options.image];
+    return [
+      ...args,
+      '--memory',
+      options.memory ?? resources.memory,
+      '--cpus',
+      String(options.cpus ?? resources.cpus),
+      '-p',
+      `127.0.0.1::${options.internalPort}`,
+      options.image,
+    ];
   }
 
   async #inspect(name: string): Promise<InspectedContainer | undefined> {
     try {
-      const { stdout } = await spawn('docker', ['container', 'inspect', name]);
+      const { stdout } = await this.command(['container', 'inspect', name]);
       const [container]: InspectedContainer[] = JSON.parse(stdout);
       return container;
     } catch (error) {
@@ -181,16 +255,14 @@ export class Docker {
   }
 
   async #handle(id: string, internalPort: number): Promise<Container> {
-    const { stdout } = await spawn('docker', [
-      'port',
-      id,
-      String(internalPort),
-    ]);
+    const { stdout } = await this.command(['port', id, String(internalPort)]);
     const match = stdout.trim().match(/:(\d+)$/);
     if (!match)
       throw new Error(
         `Failed to get mapped port for container ${id}: ${stdout}`,
       );
-    return new Container(id, Number.parseInt(match[1], 10));
+    const host = await this.#connection();
+    const connection = await host.forward(Number.parseInt(match[1], 10));
+    return new Container(id, connection.port, this.command, connection.close);
   }
 }

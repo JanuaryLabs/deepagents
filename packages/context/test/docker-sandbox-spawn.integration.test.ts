@@ -1,4 +1,5 @@
 import assert from 'node:assert';
+import { text as streamText } from 'node:stream/consumers';
 import { after, before, describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -8,18 +9,9 @@ import {
   createBashTool,
   createDockerSandbox,
 } from '@deepagents/context';
+import { Docker } from '@deepagents/test';
 
-async function readAllText(
-  stream: ReadableStream<Uint8Array>,
-): Promise<string> {
-  const decoder = new TextDecoder();
-  let text = '';
-  for await (const chunk of stream) {
-    text += decoder.decode(chunk, { stream: true });
-  }
-  text += decoder.decode();
-  return text;
-}
+const docker = new Docker();
 
 async function readFirstChunk(
   stream: ReadableStream<Uint8Array>,
@@ -39,7 +31,7 @@ describe('Docker Sandbox — spawn', () => {
   let dockerSpawn: NonNullable<DisposableSandbox['spawn']>;
 
   before(async () => {
-    sandbox = await createDockerSandbox();
+    sandbox = await createDockerSandbox(docker.defaults);
     assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
     dockerSpawn = sandbox.spawn;
   });
@@ -51,13 +43,13 @@ describe('Docker Sandbox — spawn', () => {
   describe('failure modes', () => {
     it('exit resolves with signal info when aborted mid-stream', async () => {
       const controller = new AbortController();
-      const child = dockerSpawn('printf hi; sleep 5; printf bye', {
+      const child = dockerSpawn('printf hi; while :; do sleep 1; done', {
         signal: controller.signal,
       });
 
       assert.strictEqual(await readFirstChunk(child.stdout), 'hi');
 
-      const drained = readAllText(child.stdout);
+      const drained = streamText(child.stdout);
       controller.abort();
 
       assert.deepStrictEqual(await child.exit, {
@@ -70,8 +62,8 @@ describe('Docker Sandbox — spawn', () => {
 
     it('exit resolves with non-zero code on command failure', async () => {
       const child = dockerSpawn('exit 42');
-      await readAllText(child.stdout);
-      await readAllText(child.stderr);
+      await streamText(child.stdout);
+      await streamText(child.stderr);
       assert.deepStrictEqual(await child.exit, {
         code: 42,
         signal: null,
@@ -82,8 +74,8 @@ describe('Docker Sandbox — spawn', () => {
     it('stdout and stderr both close after the child exits', async () => {
       const child = dockerSpawn('echo hi; echo err >&2');
       const [out, err, info] = await Promise.all([
-        readAllText(child.stdout),
-        readAllText(child.stderr),
+        streamText(child.stdout),
+        streamText(child.stderr),
         child.exit,
       ]);
       assert.strictEqual(out.trim(), 'hi');
@@ -106,7 +98,7 @@ describe('Docker Sandbox — spawn', () => {
         'first stdout chunk must arrive before the child exits (proves live streaming)',
       );
 
-      const rest = await readAllText(child.stdout);
+      const rest = await streamText(child.stdout);
       const info = await child.exit;
       assert.strictEqual(rest, 'bye');
       assert.strictEqual(info.success, true);
@@ -117,8 +109,8 @@ describe('Docker Sandbox — spawn', () => {
         'echo "to stdout"; echo "to stderr" >&2; echo "also stdout"',
       );
       const [out, err] = await Promise.all([
-        readAllText(child.stdout),
-        readAllText(child.stderr),
+        streamText(child.stdout),
+        streamText(child.stderr),
         child.exit,
       ]);
       assert.deepStrictEqual(out.trim().split('\n'), [
@@ -134,7 +126,7 @@ describe('Docker Sandbox — spawn', () => {
       const child = dockerSpawn('printf "%s" "$MY_VAR"', {
         env: { MY_VAR: 'hello-from-host' },
       });
-      const text = await readAllText(child.stdout);
+      const text = await streamText(child.stdout);
       const info = await child.exit;
       assert.strictEqual(text, 'hello-from-host');
       assert.strictEqual(info.success, true);
@@ -142,7 +134,7 @@ describe('Docker Sandbox — spawn', () => {
 
     it('forwards cwd into the child via docker exec -w', async () => {
       const child = dockerSpawn('pwd', { cwd: '/tmp' });
-      const text = await readAllText(child.stdout);
+      const text = await streamText(child.stdout);
       const info = await child.exit;
       assert.strictEqual(text.trim(), '/tmp');
       assert.strictEqual(info.success, true);
@@ -168,6 +160,7 @@ describe('Docker Sandbox — spawn', () => {
   describe('guest process termination', () => {
     it('enforces commandTimeout for executeCommand and spawn without delayed writes', async () => {
       await using timedSandbox = await createDockerSandbox({
+        ...docker.defaults,
         commandTimeout: 100,
       });
 
@@ -182,8 +175,8 @@ describe('Docker Sandbox — spawn', () => {
         { cwd: '/tmp', env: { MANAGED: 'yes' } },
       );
       const [stdout, stderr, exit] = await Promise.all([
-        readAllText(child.stdout),
-        readAllText(child.stderr),
+        streamText(child.stdout),
+        streamText(child.stderr),
         child.exit,
       ]);
       assert.strictEqual(stdout, 'yes:/tmp');
@@ -203,12 +196,13 @@ describe('Docker Sandbox — spawn', () => {
 
     it('keeps caller abort distinct from the configured deadline', async () => {
       await using abortableSandbox = await createDockerSandbox({
-        commandTimeout: 5_000,
+        ...docker.defaults,
+        commandTimeout: 60_000,
       });
       assert.ok(abortableSandbox.spawn);
       const controller = new AbortController();
       const child = abortableSandbox.spawn(
-        'printf ready; sleep 0.5; printf leaked > /workspace/abort-leaked',
+        'printf ready; while [ ! -e /workspace/release-aborted-command ]; do sleep 0.05; done; printf leaked > /workspace/abort-leaked',
         { signal: controller.signal },
       );
 
@@ -220,9 +214,8 @@ describe('Docker Sandbox — spawn', () => {
         success: false,
       });
 
-      await sleep(700);
       const sentinel = await abortableSandbox.executeCommand(
-        'test ! -e /workspace/abort-leaked',
+        'touch /workspace/release-aborted-command; sleep 0.2; test ! -e /workspace/abort-leaked',
       );
       assert.strictEqual(sentinel.exitCode, 0);
     });
@@ -233,7 +226,7 @@ describe('Docker Sandbox — spawn', () => {
 
     before(async () => {
       agent = await createBashTool({
-        sandbox: await createDockerSandbox(),
+        sandbox: await createDockerSandbox(docker.defaults),
         destination: '/workspace',
       });
       await agent.sandbox.executeCommand('mkdir -p /workspace');
@@ -264,7 +257,7 @@ describe('Docker Sandbox — spawn', () => {
         'first stdout chunk must arrive before exit through createBashTool',
       );
 
-      const rest = await readAllText(child.stdout);
+      const rest = await streamText(child.stdout);
       const info = await child.exit;
       assert.strictEqual(rest, 'bye');
       assert.strictEqual(info.success, true);

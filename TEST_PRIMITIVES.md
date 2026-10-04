@@ -235,3 +235,54 @@ When a test launches a separate `node --test` runner, clear `NODE_TEST_CONTEXT`
 in the child's environment. Inheriting that worker marker makes Node treat the
 new runner as recursive and skip its files. Assert that child tests actually
 ran, as well as checking their exit code.
+
+### Local and remote Docker tests
+
+The same tests use the Docker CLI's selected endpoint. For example:
+
+```sh
+DOCKER_CONTEXT=limerence-dokploy nx run @deepagents/context:test
+# Keep project execution serial on a shared remote server:
+DOCKER_CONTEXT=limerence-dokploy nx run-many -t test --projects=@deepagents/test,@deepagents/context,@deepagents/text2sql,@deepagents/experimental --parallel=1
+```
+
+Projects tagged `test:docker` use `tools/src/run-docker-tests.ts`. It pins the
+endpoint for the run and disables Nx test caching. SSH endpoints default to one
+test file at a time; an explicit `--test-concurrency` overrides that limit.
+Other Node projects keep the standard Node test command.
+
+`Docker`, `Postgres`, `Mysql`, and `SqlServer` support local Unix sockets and SSH
+endpoints. Published test ports bind to the engine host's loopback interface.
+For SSH, each handle exposes a local loopback port forwarded with OpenSSH.
+Use `handle.host`, `handle.port`, or `handle.connectionString`; do not construct
+`localhost` URLs from a port returned by `docker port`. Forwarded ports belong
+to the acquiring process and expire when its handle is disposed. SSH uses the
+normal SSH configuration, agent, jump hosts, and host-key checks. It needs both
+remote Docker access and permission to forward TCP connections.
+
+`await using fixture = await new Docker().directory()` creates a fixture on the
+Docker host. Pass `fixture.path` to a bind mount, then use `mkdir`, `writeFile`,
+`readFile`, `chmod`, and `symlink` on the fixture. Build contexts, Dockerfiles,
+and seccomp files read by the Docker CLI remain local. SQL Server image choices
+and architecture-specific tests use `Docker.info().architecture`.
+
+Container helpers default to one CPU and 1 GiB RAM, SQL Server to 3 GiB, and
+ClickHouse tests to 2 GiB. Database containers use private IPC. When testing
+another container API, pass `new Docker().defaults` directly to that API. It
+provides `resources` and the current run's ownership `labels`. Spread these
+defaults before explicit options; merge nested `resources` or `labels` when
+overriding individual settings. Sandbox tests import their public APIs directly.
+
+Normal disposal closes SSH connections and removes owned resources. The Nx
+supervisor also cleans labeled disposable containers, labeled volumes, and
+recorded directories after failures, timeouts, and interruption. Managed Docker
+sandbox volumes inherit the sandbox labels. Shared database servers remain
+running under the existing explicit-cleanup contract; images and build caches
+also remain. If the host is unreachable, cleanup reports the ownership record
+under `.nx/docker-test-runs/`. The next run on that endpoint retries cleanup
+once the recorded processes have exited. Never delete those records to hide a
+cleanup failure. A forcibly killed supervisor may require the surviving test
+process to exit before recovery can run.
+
+GitHub CI explicitly uses the runner's Unix socket. It requires no personal
+server or Hetzner secrets.

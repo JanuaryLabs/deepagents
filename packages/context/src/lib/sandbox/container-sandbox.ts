@@ -269,7 +269,7 @@ export abstract class ContainerSandboxStrategy<
 
       if (volume.type === 'bind') {
         this.validateMountValue('hostPath', volume.hostPath, volume);
-        if (!existsSync(volume.hostPath)) {
+        if (this.engine.bindMountsOnClient && !existsSync(volume.hostPath)) {
           throw this.engine.errors.volumePath(
             volume.hostPath,
             volume.containerPath,
@@ -350,7 +350,7 @@ export abstract class ContainerSandboxStrategy<
   }
 
   private async createVolume(volume: SandboxNamedVolume): Promise<void> {
-    const args = this.engine.volumeCreateArgs(volume);
+    const args = this.engine.volumeCreateArgs(volume, this.opts);
 
     try {
       await spawn(this.engine.cli, args);
@@ -412,6 +412,18 @@ export abstract class ContainerSandboxStrategy<
       const message = this.engineErrorMessage(error);
       if (this.isServiceDown(message)) {
         throw this.engine.errors.serviceNotAvailable();
+      }
+      for (const volume of this.volumes) {
+        if (
+          volume.type === 'bind' &&
+          this.engine.isMissingBindSource?.(message, volume.hostPath)
+        ) {
+          throw this.engine.errors.volumePath(
+            volume.hostPath,
+            volume.containerPath,
+            'hostPath does not exist on host',
+          );
+        }
       }
       throw this.engine.errors.creation(message, image, error as Error);
     }

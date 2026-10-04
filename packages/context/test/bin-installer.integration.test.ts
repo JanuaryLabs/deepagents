@@ -1,21 +1,20 @@
 import assert from 'node:assert';
-import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
-import { mkdir } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
 import {
-  type DockerSandboxOptions,
   type DockerSandboxVolume,
   InstallError,
-  type Installer,
   bin,
   createDockerSandbox,
   pkg,
+  useSandbox,
 } from '@deepagents/context';
+import { Docker } from '@deepagents/test';
+
+const docker = new Docker();
 
 describe('bin installer', () => {
+  let fixture: Awaited<ReturnType<Docker['directory']>>;
   let tempDir: string;
   const HELLO_BINARY = '/mnt/bin/hello.js';
 
@@ -26,43 +25,29 @@ describe('bin installer', () => {
     readOnly: true,
   };
 
-  async function withSandbox(
-    installers: Installer[],
-    extra: Partial<DockerSandboxOptions>,
-    body: (
-      sandbox: Awaited<ReturnType<typeof createDockerSandbox>>,
-    ) => Promise<void>,
-  ): Promise<void> {
-    const sandbox = await createDockerSandbox({
-      image: 'node:lts-alpine',
-      installers: [pkg(['bash']), ...installers],
-      ...extra,
-    });
-    try {
-      await body(sandbox);
-    } finally {
-      await sandbox.dispose();
-    }
-  }
-
   before(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'bin-installer-'));
-    await mkdir(join(tempDir, 'bin'), { recursive: true });
-    await writeFile(
-      join(tempDir, 'bin', 'hello.js'),
+    fixture = await new Docker().directory();
+    tempDir = fixture.path;
+    await fixture.mkdir('bin');
+    await fixture.writeFile(
+      'bin/hello.js',
       `#!/usr/bin/env node\nconsole.log('linked');\n`,
-      { mode: 0o755 },
+      0o755,
     );
   });
 
   after(async () => {
-    await rm(tempDir, { recursive: true, force: true });
+    await fixture[Symbol.asyncDispose]();
   });
 
   it('symlinks a bind-mounted binary onto PATH using the basename', async () => {
-    await withSandbox(
-      [bin(HELLO_BINARY)],
-      { volumes: [{ ...tempMount, hostPath: tempDir }] },
+    await useSandbox(
+      {
+        ...docker.defaults,
+        image: 'node:lts-alpine',
+        installers: [pkg(['bash']), bin(HELLO_BINARY)],
+        volumes: [{ ...tempMount, hostPath: tempDir }],
+      },
       async (sandbox) => {
         const result = await sandbox.executeCommand('hello');
         assert.strictEqual(result.exitCode, 0);
@@ -72,10 +57,14 @@ describe('bin installer', () => {
   });
 
   it('follows a symlink whose target is a regular file', async () => {
-    await symlink('hello.js', join(tempDir, 'bin', 'hello-shim.js'));
-    await withSandbox(
-      [bin('/mnt/bin/hello-shim.js')],
-      { volumes: [{ ...tempMount, hostPath: tempDir }] },
+    await fixture.symlink('hello.js', 'bin/hello-shim.js');
+    await useSandbox(
+      {
+        ...docker.defaults,
+        image: 'node:lts-alpine',
+        installers: [pkg(['bash']), bin('/mnt/bin/hello-shim.js')],
+        volumes: [{ ...tempMount, hostPath: tempDir }],
+      },
       async (sandbox) => {
         const result = await sandbox.executeCommand('hello-shim');
         assert.strictEqual(result.exitCode, 0);
@@ -85,9 +74,16 @@ describe('bin installer', () => {
   });
 
   it('honors custom name and target', async () => {
-    await withSandbox(
-      [bin(HELLO_BINARY, { name: 'greet', target: '/opt/bin/greet' })],
-      { volumes: [{ ...tempMount, hostPath: tempDir }] },
+    await useSandbox(
+      {
+        ...docker.defaults,
+        image: 'node:lts-alpine',
+        installers: [
+          pkg(['bash']),
+          bin(HELLO_BINARY, { name: 'greet', target: '/opt/bin/greet' }),
+        ],
+        volumes: [{ ...tempMount, hostPath: tempDir }],
+      },
       async (sandbox) => {
         const result = await sandbox.executeCommand('/opt/bin/greet');
         assert.strictEqual(result.exitCode, 0);
@@ -97,40 +93,39 @@ describe('bin installer', () => {
   });
 
   it('reports actionable error when binary is non-executable on read-only mount', async () => {
-    const nonExecDir = await mkdtemp(join(tmpdir(), 'bin-installer-noexec-'));
-    await mkdir(join(nonExecDir, 'bin'), { recursive: true });
-    await writeFile(
-      join(nonExecDir, 'bin', 'noexec.js'),
+    await using nonExec = await new Docker().directory();
+    const nonExecDir = nonExec.path;
+    await nonExec.mkdir('bin');
+    await nonExec.writeFile(
+      'bin/noexec.js',
       `#!/usr/bin/env node\nconsole.log('noexec');\n`,
-      { mode: 0o644 },
+      0o644,
     );
 
-    try {
-      await assert.rejects(
-        createDockerSandbox({
-          image: 'node:lts-alpine',
-          installers: [pkg(['bash']), bin('/mnt/bin/noexec.js')],
-          volumes: [{ ...tempMount, hostPath: nonExecDir }],
-        }),
-        (err) => {
-          assert.ok(err instanceof InstallError, 'expected InstallError');
-          assert.strictEqual(err.source, 'bin');
-          assert.match(
-            err.reason,
-            /not executable.*read-only|chmod.*on host/i,
-            'reason should hint at host-side chmod; got: ' + err.reason,
-          );
-          return true;
-        },
-      );
-    } finally {
-      await rm(nonExecDir, { recursive: true, force: true });
-    }
+    await assert.rejects(
+      createDockerSandbox({
+        ...docker.defaults,
+        image: 'node:lts-alpine',
+        installers: [pkg(['bash']), bin('/mnt/bin/noexec.js')],
+        volumes: [{ ...tempMount, hostPath: nonExecDir }],
+      }),
+      (err) => {
+        assert.ok(err instanceof InstallError, 'expected InstallError');
+        assert.strictEqual(err.source, 'bin');
+        assert.match(
+          err.reason,
+          /not executable.*read-only|chmod.*on host/i,
+          'reason should hint at host-side chmod; got: ' + err.reason,
+        );
+        return true;
+      },
+    );
   });
 
   it('throws InstallError when the binary is missing', async () => {
     await assert.rejects(
       createDockerSandbox({
+        ...docker.defaults,
         image: 'node:lts-alpine',
         installers: [pkg(['bash']), bin('/var/empty/does-not-exist.js')],
       }),

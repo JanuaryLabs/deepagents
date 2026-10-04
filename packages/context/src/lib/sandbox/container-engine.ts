@@ -127,6 +127,9 @@ export interface ContainerEngine<
   TOpts extends CommonSandboxOptions = CommonSandboxOptions,
 > {
   readonly cli: string;
+  /** Docker validates bind sources on the daemon host; Apple uses this host. */
+  readonly bindMountsOnClient: boolean;
+  isMissingBindSource?(message: string, source: string): boolean;
   /**
    * Build the `<cli> run` argv from resolved options. The shared skeleton
    * supplies `image`, `containerId`, and `workdir`; every other flag is the
@@ -145,7 +148,7 @@ export interface ContainerEngine<
   ): string[];
   inspectArgs(containerId: string): string[];
   parseStatus(status: string): 'running' | 'stopped' | 'absent';
-  volumeCreateArgs(volume: SandboxNamedVolume): string[];
+  volumeCreateArgs(volume: SandboxNamedVolume, opts: TOpts): string[];
   removeVolume(name: string): Promise<void>;
   errorMessage(error: unknown): string;
   isServiceDown(message: string): boolean;

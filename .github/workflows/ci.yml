@@ -13,6 +13,9 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    env:
+      DOCKER_CONTEXT: ''
+      DOCKER_HOST: unix:///var/run/docker.sock
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -35,6 +38,9 @@ jobs:
 
       - name: Lint affected
         run: npx nx affected -t lint
+
+      - name: Check runner Docker
+        run: docker info
 
       - name: Test affected
         run: npx nx affected -t test

@@ -1,13 +1,6 @@
 import spawn from 'nano-spawn';
 import assert from 'node:assert';
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  readFile,
-  rm,
-  writeFile,
-} from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
@@ -32,6 +25,9 @@ import {
   urlBinary,
   useSandbox,
 } from '@deepagents/context';
+import { Docker } from '@deepagents/test';
+
+const docker = new Docker();
 
 function testVolumeName(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -71,7 +67,7 @@ describe('Docker Sandbox', () => {
   describe('createDockerSandbox', () => {
     describe('container creation', () => {
       it('creates container with default settings', async () => {
-        const sandbox = await createDockerSandbox();
+        const sandbox = await createDockerSandbox(docker.defaults);
 
         try {
           const result = await sandbox.executeCommand('echo hello');
@@ -83,7 +79,7 @@ describe('Docker Sandbox', () => {
       });
 
       it('creates container with Alpine image (default)', async () => {
-        const sandbox = await createDockerSandbox();
+        const sandbox = await createDockerSandbox(docker.defaults);
 
         try {
           // The official Bash image is Alpine-based.
@@ -97,13 +93,14 @@ describe('Docker Sandbox', () => {
 
       it('fails clearly when the image does not contain Bash', async () => {
         await assert.rejects(
-          createDockerSandbox({ image: 'alpine:latest' }),
+          createDockerSandbox({ ...docker.defaults, image: 'alpine:latest' }),
           /Bash is required to execute sandbox commands/,
         );
       });
 
       it('creates container with custom Debian image', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           image: 'debian:stable-slim',
         });
 
@@ -117,7 +114,7 @@ describe('Docker Sandbox', () => {
       });
 
       it('sets /workspace as working directory', async () => {
-        const sandbox = await createDockerSandbox();
+        const sandbox = await createDockerSandbox(docker.defaults);
 
         try {
           const result = await sandbox.executeCommand('pwd');
@@ -132,6 +129,7 @@ describe('Docker Sandbox', () => {
     describe('package installation', () => {
       it('installs packages with apk on Alpine', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           installers: [pkg(['curl'])],
         });
 
@@ -146,6 +144,7 @@ describe('Docker Sandbox', () => {
 
       it('installs packages with apt-get on Debian', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           image: 'debian:stable-slim',
           installers: [pkg(['curl'])],
         });
@@ -161,6 +160,7 @@ describe('Docker Sandbox', () => {
 
       it('creates sandbox without packages when array is empty', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           installers: [],
         });
 
@@ -176,6 +176,7 @@ describe('Docker Sandbox', () => {
       it('throws error for non-existent package', async () => {
         await assert.rejects(
           createDockerSandbox({
+            ...docker.defaults,
             installers: [pkg(['nonexistent-pkg-xyz-12345'])],
           }),
           /Package installation failed/,
@@ -187,7 +188,7 @@ describe('Docker Sandbox', () => {
       let sandbox: DisposableSandbox;
 
       before(async () => {
-        sandbox = await createDockerSandbox();
+        sandbox = await createDockerSandbox(docker.defaults);
       });
 
       after(async () => {
@@ -237,7 +238,7 @@ describe('Docker Sandbox', () => {
       let sandbox: DisposableSandbox;
 
       before(async () => {
-        sandbox = await createDockerSandbox();
+        sandbox = await createDockerSandbox(docker.defaults);
       });
 
       after(async () => {
@@ -295,7 +296,7 @@ describe('Docker Sandbox', () => {
 
     describe('binary reads and existence checks', () => {
       it('reads raw bytes with the binary encoding', async () => {
-        const sandbox = await createDockerSandbox();
+        const sandbox = await createDockerSandbox(docker.defaults);
         try {
           const bytes = Buffer.from([0x89, 0x50, 0x00, 0xff]);
           await sandbox.writeFiles([{ path: '/tmp/blob.bin', content: bytes }]);
@@ -311,7 +312,7 @@ describe('Docker Sandbox', () => {
       });
 
       it('reports whether a path exists', async () => {
-        const sandbox = await createDockerSandbox();
+        const sandbox = await createDockerSandbox(docker.defaults);
         try {
           await sandbox.writeFiles([
             { path: '/tmp/present.txt', content: 'x' },
@@ -327,20 +328,22 @@ describe('Docker Sandbox', () => {
     });
 
     describe('volumes', () => {
+      let fixture: Awaited<ReturnType<Docker['directory']>>;
       let tempDir: string;
 
       before(async () => {
-        tempDir = join(tmpdir(), `docker-sandbox-test-${Date.now()}`);
-        await mkdir(tempDir, { recursive: true });
-        await writeFile(join(tempDir, 'host-file.txt'), 'from host');
+        fixture = await new Docker().directory();
+        tempDir = fixture.path;
+        await fixture.writeFile('host-file.txt', 'from host');
       });
 
       after(async () => {
-        await rm(tempDir, { recursive: true, force: true });
+        await fixture[Symbol.asyncDispose]();
       });
 
       it('attaches bind volume as read-only by default', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           volumes: [
             {
               type: 'bind',
@@ -371,6 +374,7 @@ describe('Docker Sandbox', () => {
 
       it('attaches bind volume as read-write when specified', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           volumes: [
             {
               type: 'bind',
@@ -389,10 +393,7 @@ describe('Docker Sandbox', () => {
           assert.strictEqual(writeResult.exitCode, 0);
 
           // Verify file exists on host
-          const hostContent = await readFile(
-            join(tempDir, 'container-file.txt'),
-            'utf-8',
-          );
+          const hostContent = await fixture.readFile('container-file.txt');
           assert.strictEqual(hostContent.trim(), 'container wrote this');
         } finally {
           await sandbox.dispose();
@@ -401,10 +402,19 @@ describe('Docker Sandbox', () => {
 
       it('attaches an existing Docker volume and keeps it after dispose', async () => {
         const volumeName = testVolumeName('deepagents-external');
-        await spawn('docker', ['volume', 'create', volumeName]);
+        await spawn('docker', [
+          'volume',
+          'create',
+          ...Object.entries(docker.defaults.labels).flatMap(([key, value]) => [
+            '--label',
+            `${key}=${value}`,
+          ]),
+          volumeName,
+        ]);
 
         try {
           const writer = await createDockerSandbox({
+            ...docker.defaults,
             volumes: [
               {
                 type: 'volume',
@@ -425,6 +435,7 @@ describe('Docker Sandbox', () => {
           }
 
           const reader = await createDockerSandbox({
+            ...docker.defaults,
             volumes: [
               {
                 type: 'volume',
@@ -452,6 +463,7 @@ describe('Docker Sandbox', () => {
 
         await assert.rejects(
           createDockerSandbox({
+            ...docker.defaults,
             volumes: [
               {
                 type: 'volume',
@@ -474,6 +486,7 @@ describe('Docker Sandbox', () => {
         const volumeName = testVolumeName('deepagents-managed');
         t.after(() => removeDockerVolume(volumeName));
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           volumes: [
             {
               type: 'volume',
@@ -512,6 +525,7 @@ describe('Docker Sandbox', () => {
       it('attaches managed Docker volume as read-only by default', async () => {
         const volumeName = testVolumeName('deepagents-managed-ro');
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           volumes: [
             {
               type: 'volume',
@@ -535,11 +549,20 @@ describe('Docker Sandbox', () => {
 
       it('throws VolumeCreateError when managed volume already exists', async () => {
         const volumeName = testVolumeName('deepagents-existing-managed');
-        await spawn('docker', ['volume', 'create', volumeName]);
+        await spawn('docker', [
+          'volume',
+          'create',
+          ...Object.entries(docker.defaults.labels).flatMap(([key, value]) => [
+            '--label',
+            `${key}=${value}`,
+          ]),
+          volumeName,
+        ]);
 
         try {
           await assert.rejects(
             createDockerSandbox({
+              ...docker.defaults,
               volumes: [
                 {
                   type: 'volume',
@@ -567,6 +590,7 @@ describe('Docker Sandbox', () => {
 
         await assert.rejects(
           createDockerSandbox({
+            ...docker.defaults,
             volumes: [
               {
                 type: 'volume',
@@ -585,6 +609,7 @@ describe('Docker Sandbox', () => {
     describe('environment variables', () => {
       it('sets env vars in the container', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           env: { MY_VAR: 'hello', ANOTHER: 'world' },
         });
 
@@ -601,6 +626,7 @@ describe('Docker Sandbox', () => {
 
       it('env vars persist across exec calls', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           env: { PERSIST_TEST: 'sticky' },
         });
 
@@ -616,6 +642,7 @@ describe('Docker Sandbox', () => {
 
       it('handles env values with spaces', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           env: { SPACED: 'hello world foo' },
         });
 
@@ -630,6 +657,7 @@ describe('Docker Sandbox', () => {
 
       it('handles env values containing equals signs', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           env: { DB_URL: 'host=localhost;port=5432' },
         });
 
@@ -643,6 +671,7 @@ describe('Docker Sandbox', () => {
 
       it('works with empty env object', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           env: {},
         });
 
@@ -658,6 +687,7 @@ describe('Docker Sandbox', () => {
       it('rejects env keys containing equals sign', async () => {
         await assert.rejects(
           createDockerSandbox({
+            ...docker.defaults,
             env: { 'FOO=BAR': 'val' },
           }),
           /Invalid environment variable key/,
@@ -667,10 +697,14 @@ describe('Docker Sandbox', () => {
 
     describe('resource limits', () => {
       it('applies custom memory and CPU limits', async () => {
+        const name = `limits-${crypto.randomUUID()}`;
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
+          name,
           resources: {
+            ...docker.defaults.resources,
             memory: '256m',
-            cpus: 1,
+            cpus: 0.5,
           },
         });
 
@@ -679,6 +713,13 @@ describe('Docker Sandbox', () => {
           const result = await sandbox.executeCommand('echo "limited"');
           assert.strictEqual(result.exitCode, 0);
           assert.strictEqual(result.stdout.trim(), 'limited');
+          const { stdout } = await docker.command([
+            'inspect',
+            `sandbox-${name}`,
+          ]);
+          const [container] = JSON.parse(stdout);
+          assert.strictEqual(container.HostConfig.Memory, 256 * 1024 ** 2);
+          assert.strictEqual(container.HostConfig.NanoCpus, 500_000_000);
         } finally {
           await sandbox.dispose();
         }
@@ -686,7 +727,8 @@ describe('Docker Sandbox', () => {
 
       it('sizes /dev/shm via shmSize', async () => {
         const sandbox = await createDockerSandbox({
-          resources: { shmSize: '64m' },
+          ...docker.defaults,
+          resources: { ...docker.defaults.resources, shmSize: '64m' },
         });
 
         try {
@@ -700,7 +742,11 @@ describe('Docker Sandbox', () => {
 
       it('applies a file-descriptor ulimit to PID 1', async () => {
         const sandbox = await createDockerSandbox({
-          resources: { ulimits: ['nofile=512:512'] },
+          ...docker.defaults,
+          resources: {
+            ...docker.defaults.resources,
+            ulimits: ['nofile=512:512'],
+          },
         });
 
         try {
@@ -714,7 +760,8 @@ describe('Docker Sandbox', () => {
 
       it('caps the process count via pidsLimit', async () => {
         const sandbox = await createDockerSandbox({
-          resources: { pidsLimit: 42 },
+          ...docker.defaults,
+          resources: { ...docker.defaults.resources, pidsLimit: 42 },
         });
 
         try {
@@ -732,6 +779,7 @@ describe('Docker Sandbox', () => {
     describe('container runtime', () => {
       it('runs the container under the default runtime when runtime is omitted', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           runtime: 'runc',
         });
 
@@ -748,7 +796,7 @@ describe('Docker Sandbox', () => {
         const bogusRuntime = 'sandbox-nonexistent-runtime';
 
         await assert.rejects(
-          createDockerSandbox({ runtime: bogusRuntime }),
+          createDockerSandbox({ ...docker.defaults, runtime: bogusRuntime }),
           (error: unknown) => {
             assert.ok(error instanceof ContainerCreationError);
             assert.match(error.message, new RegExp(bogusRuntime));
@@ -761,6 +809,7 @@ describe('Docker Sandbox', () => {
     describe('networking', () => {
       it('isolates the container with network mode none', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           network: { mode: 'none' },
         });
 
@@ -780,6 +829,7 @@ describe('Docker Sandbox', () => {
 
       it('sets a custom hostname', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           network: { hostname: 'sandbox-host' },
         });
 
@@ -794,6 +844,7 @@ describe('Docker Sandbox', () => {
 
       it('sets custom DNS servers', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           network: { dns: ['1.2.3.4'] },
         });
 
@@ -808,6 +859,7 @@ describe('Docker Sandbox', () => {
 
       it('adds host-to-IP mappings with addHost', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           network: { addHost: ['myhost:10.1.2.3'] },
         });
 
@@ -823,7 +875,10 @@ describe('Docker Sandbox', () => {
 
     describe('process and workspace', () => {
       it('runs an init process as PID 1 with init:true', async () => {
-        const sandbox = await createDockerSandbox({ init: true });
+        const sandbox = await createDockerSandbox({
+          ...docker.defaults,
+          init: true,
+        });
 
         try {
           const result = await sandbox.executeCommand('cat /proc/1/comm');
@@ -835,7 +890,10 @@ describe('Docker Sandbox', () => {
       });
 
       it('uses a custom workdir', async () => {
-        const sandbox = await createDockerSandbox({ workdir: '/srv' });
+        const sandbox = await createDockerSandbox({
+          ...docker.defaults,
+          workdir: '/srv',
+        });
 
         try {
           const result = await sandbox.executeCommand('pwd');
@@ -848,6 +906,7 @@ describe('Docker Sandbox', () => {
 
       it('overrides the image entrypoint', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           entrypoint: '/bin/sleep',
           command: ['infinity'],
         });
@@ -863,6 +922,7 @@ describe('Docker Sandbox', () => {
 
       it('sets kernel parameters via sysctls', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           sysctls: { 'net.ipv4.ip_forward': '1' },
         });
 
@@ -880,18 +940,29 @@ describe('Docker Sandbox', () => {
       it('attaches container labels', async () => {
         const name = `label-${Date.now()}-${Math.random().toString(16).slice(2)}`;
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           name,
-          labels: { 'com.example.role': 'sandbox-test' },
+          labels: {
+            ...docker.defaults.labels,
+            'com.example.role': 'sandbox-test',
+          },
         });
 
         try {
-          const inspect = await spawn('docker', [
+          const { stdout } = await docker.command([
             'inspect',
-            '--format',
-            '{{index .Config.Labels "com.example.role"}}',
             `sandbox-${name}`,
           ]);
-          assert.strictEqual(inspect.stdout.trim(), 'sandbox-test');
+          const [container] = JSON.parse(stdout);
+          assert.strictEqual(
+            container.Config.Labels['com.example.role'],
+            'sandbox-test',
+          );
+          for (const [key, value] of Object.entries(docker.defaults.labels)) {
+            assert.strictEqual(container.Config.Labels[key], value);
+          }
+          assert.strictEqual(container.HostConfig.Memory, 1024 ** 3);
+          assert.strictEqual(container.HostConfig.NanoCpus, 1_000_000_000);
         } finally {
           await sandbox.dispose();
         }
@@ -906,6 +977,7 @@ describe('Docker Sandbox', () => {
     describe('security hardening', () => {
       it('runs as a non-root user', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           security: { user: '1000:1000' },
         });
 
@@ -920,6 +992,7 @@ describe('Docker Sandbox', () => {
 
       it('mounts a read-only rootfs with a writable tmpfs workspace', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           security: { readOnly: true, tmpfs: ['/workspace', '/tmp'] },
         });
 
@@ -944,6 +1017,7 @@ describe('Docker Sandbox', () => {
 
       it('drops Linux capabilities', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           security: { capDrop: ['ALL'] },
         });
 
@@ -961,6 +1035,7 @@ describe('Docker Sandbox', () => {
 
       it('re-grants a capability with capAdd', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           security: { capDrop: ['ALL'], capAdd: ['CHOWN'] },
         });
 
@@ -979,6 +1054,7 @@ describe('Docker Sandbox', () => {
     describe('Dockerfile strategy', () => {
       it('builds an image from an inline Dockerfile', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           dockerfile:
             'FROM bash:5.3-alpine3.24\nRUN echo inline-build > /built-marker\n',
         });
@@ -1001,6 +1077,7 @@ describe('Docker Sandbox', () => {
 
         try {
           const sandbox = await createDockerSandbox({
+            ...docker.defaults,
             dockerfile: join(dir, 'Dockerfile'),
             context: dir,
           });
@@ -1019,7 +1096,7 @@ describe('Docker Sandbox', () => {
 
     describe('cleanup', () => {
       it('dispose stops and removes container', async () => {
-        const sandbox = await createDockerSandbox();
+        const sandbox = await createDockerSandbox(docker.defaults);
 
         // Verify container is running
         const beforeResult = await sandbox.executeCommand('echo alive');
@@ -1040,7 +1117,7 @@ describe('Docker Sandbox', () => {
       });
 
       it('dispose is idempotent (can call multiple times)', async () => {
-        const sandbox = await createDockerSandbox();
+        const sandbox = await createDockerSandbox(docker.defaults);
 
         await sandbox.dispose();
         await sandbox.dispose(); // Should not throw
@@ -1063,7 +1140,7 @@ describe('Docker Sandbox', () => {
 
       it('names the container `sandbox-<name>`', async () => {
         const name = uniqueName();
-        const sandbox = await createDockerSandbox({ name });
+        const sandbox = await createDockerSandbox({ ...docker.defaults, name });
 
         try {
           const inspect = await spawn('docker', [
@@ -1083,6 +1160,7 @@ describe('Docker Sandbox', () => {
       it('attaches to an existing running container and skips installers', async () => {
         const name = uniqueName();
         const first = await createDockerSandbox({
+          ...docker.defaults,
           name,
           installers: [pkg(['curl'])],
         });
@@ -1092,6 +1170,7 @@ describe('Docker Sandbox', () => {
           await first.executeCommand('echo first-run > /workspace/marker');
 
           second = await createDockerSandbox({
+            ...docker.defaults,
             name,
             // Different installers would normally rerun; attach must skip them.
             installers: [pkg(['nonexistent-package-should-not-install'])],
@@ -1128,8 +1207,8 @@ describe('Docker Sandbox', () => {
           // If recovery were broken, the losing create would reject and this
           // Promise.all would reject — failing the test.
           [a, b] = await Promise.all([
-            createDockerSandbox({ name }),
-            createDockerSandbox({ name }),
+            createDockerSandbox({ ...docker.defaults, name }),
+            createDockerSandbox({ ...docker.defaults, name }),
           ]);
 
           // One handle writes; the other must read it back — proving both
@@ -1177,7 +1256,10 @@ describe('Docker Sandbox', () => {
         await spawn('docker', ['stop', containerId]);
 
         try {
-          const sandbox = await createDockerSandbox({ name });
+          const sandbox = await createDockerSandbox({
+            ...docker.defaults,
+            name,
+          });
           const result = await sandbox.executeCommand('echo back-online');
           assert.strictEqual(result.exitCode, 0);
           assert.strictEqual(result.stdout.trim(), 'back-online');
@@ -1190,15 +1272,15 @@ describe('Docker Sandbox', () => {
 
       it('rejects names that are not Docker-legal', async () => {
         await assert.rejects(
-          createDockerSandbox({ name: '' }),
+          createDockerSandbox({ ...docker.defaults, name: '' }),
           /Invalid container name/,
         );
         await assert.rejects(
-          createDockerSandbox({ name: 'has spaces' }),
+          createDockerSandbox({ ...docker.defaults, name: 'has spaces' }),
           /Invalid container name/,
         );
         await assert.rejects(
-          createDockerSandbox({ name: 'has/slash' }),
+          createDockerSandbox({ ...docker.defaults, name: 'has/slash' }),
           /Invalid container name/,
         );
       });
@@ -1215,8 +1297,8 @@ describe('Docker Sandbox', () => {
 
         try {
           const [a, b] = await Promise.all([
-            createDockerSandbox({ name }),
-            createDockerSandbox({ name }),
+            createDockerSandbox({ ...docker.defaults, name }),
+            createDockerSandbox({ ...docker.defaults, name }),
           ]);
 
           const ra = await a.executeCommand('echo a');
@@ -1244,8 +1326,8 @@ describe('Docker Sandbox', () => {
       });
 
       it('falls back to random naming when no name is provided', async () => {
-        const a = await createDockerSandbox();
-        const b = await createDockerSandbox();
+        const a = await createDockerSandbox(docker.defaults);
+        const b = await createDockerSandbox(docker.defaults);
         try {
           await a.executeCommand('echo a');
           await b.executeCommand('echo b');
@@ -1259,7 +1341,10 @@ describe('Docker Sandbox', () => {
 
   describe('createDockerSandbox + createBashTool', () => {
     it('returns bash tool and sandbox', async () => {
-      const backend = await createDockerSandbox({ installers: [] });
+      const backend = await createDockerSandbox({
+        ...docker.defaults,
+        installers: [],
+      });
       const { bash, tools, sandbox } = await createBashTool({
         sandbox: backend,
       });
@@ -1278,7 +1363,7 @@ describe('Docker Sandbox', () => {
     });
 
     it('bash tool executes commands in container', async () => {
-      const backend = await createDockerSandbox();
+      const backend = await createDockerSandbox(docker.defaults);
       const { sandbox } = await createBashTool({ sandbox: backend });
 
       try {
@@ -1292,6 +1377,7 @@ describe('Docker Sandbox', () => {
 
     it('respects installers option', async () => {
       const backend = await createDockerSandbox({
+        ...docker.defaults,
         installers: [pkg(['curl'])],
       });
       const { sandbox } = await createBashTool({ sandbox: backend });
@@ -1307,6 +1393,7 @@ describe('Docker Sandbox', () => {
 
     it('passes env vars through to container', async () => {
       const backend = await createDockerSandbox({
+        ...docker.defaults,
         env: { TOOL_VAR: 'via-tool' },
       });
       const { sandbox } = await createBashTool({ sandbox: backend });
@@ -1320,11 +1407,12 @@ describe('Docker Sandbox', () => {
     });
 
     it('respects volumes option', async () => {
-      const tempDir = join(tmpdir(), `container-tool-test-${Date.now()}`);
-      await mkdir(tempDir, { recursive: true });
-      await writeFile(join(tempDir, 'test.txt'), 'mounted content');
+      await using fixture = await new Docker().directory();
+      const tempDir = fixture.path;
+      await fixture.writeFile('test.txt', 'mounted content');
 
       const backend = await createDockerSandbox({
+        ...docker.defaults,
         volumes: [
           {
             type: 'bind',
@@ -1342,7 +1430,6 @@ describe('Docker Sandbox', () => {
         assert.strictEqual(result.stdout.trim(), 'mounted content');
       } finally {
         await sandbox.dispose();
-        await rm(tempDir, { recursive: true, force: true });
       }
     });
   });
@@ -1351,7 +1438,7 @@ describe('Docker Sandbox', () => {
     it('auto-disposes sandbox on successful completion', async () => {
       let sandboxRef: DisposableSandbox | null = null;
 
-      const result = await useSandbox({}, async (sandbox) => {
+      const result = await useSandbox(docker.defaults, async (sandbox) => {
         sandboxRef = sandbox;
         const output = await sandbox.executeCommand(
           'echo "hello from useSandbox"',
@@ -1377,7 +1464,7 @@ describe('Docker Sandbox', () => {
       let sandboxRef: DisposableSandbox | null = null;
 
       await assert.rejects(
-        useSandbox({}, async (sandbox) => {
+        useSandbox(docker.defaults, async (sandbox) => {
           sandboxRef = sandbox;
           // Verify container is running
           const result = await sandbox.executeCommand('echo alive');
@@ -1401,7 +1488,7 @@ describe('Docker Sandbox', () => {
 
     it('returns the value from the callback', async () => {
       const result = await useSandbox(
-        { installers: [pkg(['curl'])] },
+        { ...docker.defaults, installers: [pkg(['curl'])] },
         async (sandbox) => {
           const output = await sandbox.executeCommand('curl --version');
           return {
@@ -1420,7 +1507,10 @@ describe('Docker Sandbox', () => {
     describe('npm', () => {
       it('throws MissingRuntimeError on alpine without ensureRuntime', async () => {
         await assert.rejects(
-          createDockerSandbox({ installers: [npm('prettier')] }),
+          createDockerSandbox({
+            ...docker.defaults,
+            installers: [npm('prettier')],
+          }),
           (err: Error) => {
             assert.ok(err instanceof MissingRuntimeError);
             assert.ok(err instanceof DockerSandboxError);
@@ -1434,6 +1524,7 @@ describe('Docker Sandbox', () => {
 
       it('auto-installs nodejs+npm when ensureRuntime is true', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           installers: [npm('cowsay', { ensureRuntime: true })],
         });
         try {
@@ -1448,6 +1539,7 @@ describe('Docker Sandbox', () => {
 
       it('skips ensureRuntime when node base image already has node+npm', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           image: 'node:lts-bookworm-slim',
           installers: [npm('cowsay')],
         });
@@ -1463,7 +1555,10 @@ describe('Docker Sandbox', () => {
     describe('pip', () => {
       it('throws MissingRuntimeError on alpine without ensureRuntime', async () => {
         await assert.rejects(
-          createDockerSandbox({ installers: [pip('requests')] }),
+          createDockerSandbox({
+            ...docker.defaults,
+            installers: [pip('requests')],
+          }),
           (err: Error) => {
             assert.ok(err instanceof MissingRuntimeError);
             const missing = err as MissingRuntimeError;
@@ -1476,6 +1571,7 @@ describe('Docker Sandbox', () => {
 
       it('auto-installs python3+pip when ensureRuntime is true', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           installers: [pip('requests', { ensureRuntime: true })],
         });
         try {
@@ -1493,6 +1589,7 @@ describe('Docker Sandbox', () => {
     describe('urlBinary', () => {
       it('auto-ensures curl on a fresh alpine image', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           installers: [
             urlBinary({
               name: 'yq',
@@ -1519,6 +1616,7 @@ describe('Docker Sandbox', () => {
     describe('apt-get update is run only once across installers', () => {
       it('multiple ensureTool / pkg calls do not re-run apt-get update', async () => {
         const sandbox = await createDockerSandbox({
+          ...docker.defaults,
           image: 'debian:stable-slim',
           installers: [pkg(['curl']), pkg(['jq'])],
         });
@@ -1537,6 +1635,7 @@ describe('Docker Sandbox', () => {
       it('throws InstallError for an invalid url-binary URL', async () => {
         await assert.rejects(
           createDockerSandbox({
+            ...docker.defaults,
             installers: [
               urlBinary({
                 name: 'bogus',
@@ -1558,9 +1657,32 @@ describe('Docker Sandbox', () => {
 
   describe('error classes', () => {
     describe('VolumePathError', () => {
+      it('identifies the missing bind source when another source is its prefix', async () => {
+        await using fixture = await new Docker().directory();
+        const missing = `${fixture.path}/missing`;
+        await assert.rejects(
+          createDockerSandbox({
+            ...docker.defaults,
+            volumes: [
+              {
+                type: 'bind',
+                hostPath: fixture.path,
+                containerPath: '/present',
+              },
+              { type: 'bind', hostPath: missing, containerPath: '/missing' },
+            ],
+          }),
+          (error) =>
+            error instanceof VolumePathError &&
+            error.source === missing &&
+            error.containerPath === '/missing',
+        );
+      });
+
       it('throws VolumePathError for non-existent bind host path', async () => {
         await assert.rejects(
           createDockerSandbox({
+            ...docker.defaults,
             volumes: [
               {
                 type: 'bind',
@@ -1595,6 +1717,7 @@ describe('Docker Sandbox', () => {
         try {
           await assert.rejects(
             createDockerSandbox({
+              ...docker.defaults,
               volumes: [
                 {
                   type: 'bind',
@@ -1622,6 +1745,7 @@ describe('Docker Sandbox', () => {
       it('throws VolumePathError for container paths containing commas', async () => {
         await assert.rejects(
           createDockerSandbox({
+            ...docker.defaults,
             volumes: [
               {
                 type: 'volume',
@@ -1646,6 +1770,7 @@ describe('Docker Sandbox', () => {
       it('throws VolumePathError for volume subpaths containing commas', async () => {
         await assert.rejects(
           createDockerSandbox({
+            ...docker.defaults,
             volumes: [
               {
                 type: 'volume',
@@ -1699,6 +1824,7 @@ describe('Docker Sandbox', () => {
         try {
           await assert.rejects(
             createDockerSandbox({
+              ...docker.defaults,
               volumes: [
                 {
                   type: 'volume',
@@ -1729,6 +1855,7 @@ describe('Docker Sandbox', () => {
       it('throws PackageInstallError for invalid package', async () => {
         await assert.rejects(
           createDockerSandbox({
+            ...docker.defaults,
             installers: [pkg(['nonexistent-package-xyz-12345'])],
           }),
           (err: Error) => {

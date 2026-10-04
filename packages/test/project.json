@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/test/src",
   "projectType": "library",
-  "tags": ["scope:private", "test:node"],
+  "tags": ["scope:private", "test:node", "test:docker"],
   "targets": {
     "build": {
       "executor": "@nx/esbuild:esbuild",

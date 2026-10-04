@@ -24,9 +24,7 @@ export class SqlServer {
   readonly #options;
 
   constructor({
-    image = process.platform === 'darwin' && process.arch === 'arm64'
-      ? SQL_SERVER_EDGE_IMAGE
-      : SQL_SERVER_FULL_IMAGE,
+    image,
     password = 'StrongP@ssw0rd123!',
     database = 'testdb',
     labels,
@@ -38,10 +36,19 @@ export class SqlServer {
   async database(): Promise<SqlServerDatabase> {
     const container = await this.#acquire('reuse');
     const database = `test_${randomUUID().replaceAll('-', '')}`;
-    await this.#createDatabase(container, database);
-    return this.#handle(container, database, () =>
-      this.#dropDatabase(container, database),
-    );
+    try {
+      await this.#createDatabase(container, database);
+      return this.#handle(container, database, async () => {
+        try {
+          await this.#dropDatabase(container, database);
+        } finally {
+          await container.disconnect();
+        }
+      });
+    } catch (error) {
+      await container.disconnect();
+      throw error;
+    }
   }
 
   /** Start a dedicated server; the returned handle owns its container. */
@@ -107,8 +114,10 @@ export class SqlServer {
     }
   }
 
-  #acquire(mode: 'start' | 'reuse'): Promise<Container> {
-    const { image, password, labels } = this.#options;
+  async #acquire(mode: 'start' | 'reuse'): Promise<Container> {
+    const { password, labels } = this.#options;
+    await this.#resolveImage();
+    const image = this.#options.image!;
     const env: Record<string, string> = {
       ACCEPT_EULA: 'Y',
       MSSQL_SA_PASSWORD: password,
@@ -121,11 +130,21 @@ export class SqlServer {
       env,
       internalPort: 1433,
       tmpfs: ['/var/opt/mssql:rw,size=2g,mode=1777'],
-      ipcHost: true,
+      memory: '3g',
       memorySwappiness: 0,
       healthy: (container) =>
         timebox(() => this.#ping(container), { maxRetryTime: 180_000 }),
     });
+  }
+
+  async #resolveImage(): Promise<void> {
+    if (this.#options.image) return;
+    if (!(await this.#docker.isAvailable()))
+      throw new Error('Docker is required for container-backed tests');
+    const { architecture } = await this.#docker.info();
+    this.#options.image = ['arm64', 'aarch64'].includes(architecture)
+      ? SQL_SERVER_EDGE_IMAGE
+      : SQL_SERVER_FULL_IMAGE;
   }
 
   async #waitForFtsReady(
@@ -161,7 +180,7 @@ export class SqlServer {
     const connectionString = this.#connectionString(container, database);
     return {
       connectionString,
-      image,
+      image: image!,
       user: 'sa',
       password,
       database,

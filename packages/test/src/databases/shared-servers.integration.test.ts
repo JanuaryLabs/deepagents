@@ -253,9 +253,16 @@ for (const [engine, helper, config] of [
         assert.equal(stdout.trim(), '0');
       } else {
         const { default: sql } = await import('mssql');
+        // Worker-local forwarded ports expire with their scope. Acquire a
+        // connection in this process to inspect the same persistent server.
+        await using inspector = await new SqlServer({
+          ...config,
+          labels,
+        }).database();
+        assert.equal(inspector.containerId, server.containerId);
         const pool = new sql.ConnectionPool({
-          server: 'localhost',
-          port: server.port,
+          server: inspector.host,
+          port: inspector.port,
           user: server.user,
           password: server.password,
           database: 'master',

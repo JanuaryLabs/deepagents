@@ -209,6 +209,7 @@ function readContainerStatus(entry: unknown): 'running' | 'stopped' {
  */
 export const appleEngine: ContainerEngine<AppleContainerCommonOptions> = {
   cli: CLI,
+  bindMountsOnClient: true,
 
   runArgs(
     image: string,

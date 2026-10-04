@@ -28,7 +28,12 @@ export class Postgres {
   async database(): Promise<Database> {
     const container = await this.#acquire('postgres', 'reuse');
     const database = `test_${randomUUID().replaceAll('-', '')}`;
-    await this.#sql(container, `CREATE DATABASE ${database}`);
+    try {
+      await this.#sql(container, `CREATE DATABASE ${database}`);
+    } catch (error) {
+      await container.disconnect();
+      throw error;
+    }
     return this.#handle(container, database, async () => {
       await this.#sql(
         container,
@@ -36,6 +41,7 @@ export class Postgres {
       ).catch(() => {
         /* Best-effort cleanup after external removal. */
       });
+      await container.disconnect();
     });
   }
 
@@ -70,7 +76,6 @@ export class Postgres {
         POSTGRES_USER: user,
       },
       tmpfs: ['/var/lib/postgresql:rw,size=512m'],
-      ipcHost: true,
       memorySwappiness: 0,
       healthy: (container) => this.#ready(container, database),
     });
@@ -105,7 +110,7 @@ export class Postgres {
   ): Database {
     const { image, user, password } = this.#options;
     return {
-      connectionString: `postgresql://${user}:${password}@localhost:${container.port}/${database}`,
+      connectionString: `postgresql://${user}:${password}@${container.host}:${container.port}/${database}`,
       image,
       user,
       password,

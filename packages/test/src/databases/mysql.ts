@@ -31,7 +31,12 @@ export class Mysql {
   async database(): Promise<MysqlDatabase> {
     const container = await this.#acquire('app', 'reuse');
     const database = `test_${randomUUID().replaceAll('-', '')}`;
-    await this.#sql(container, `CREATE DATABASE \`${database}\``);
+    try {
+      await this.#sql(container, `CREATE DATABASE \`${database}\``);
+    } catch (error) {
+      await container.disconnect();
+      throw error;
+    }
     return this.#handle(container, database, async () => {
       await this.#sql(
         container,
@@ -39,6 +44,7 @@ export class Mysql {
       ).catch(() => {
         /* Best-effort cleanup after external removal. */
       });
+      await container.disconnect();
     });
   }
 
@@ -135,7 +141,7 @@ export class Mysql {
   ): MysqlDatabase {
     const { image, user, password } = this.#options;
     return {
-      connectionString: `mysql://${user}:${password}@localhost:${container.port}/${database}`,
+      connectionString: `mysql://${user}:${password}@${container.host}:${container.port}/${database}`,
       image,
       user,
       password,

@@ -164,6 +164,15 @@
         "options": {
           "command": "node --test --no-warnings --test-timeout=60000 --experimental-test-module-mocks --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=test-results.xml"
         }
+      },
+      {
+        "filter": {
+          "projects": ["tag:test:docker"]
+        },
+        "options": {
+          "command": "node ../../tools/src/run-docker-tests.ts --no-warnings --test-timeout=60000 --experimental-test-module-mocks --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=test-results.xml"
+        },
+        "cache": false
       }
     ],
     "lint": {
