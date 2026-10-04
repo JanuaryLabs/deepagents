@@ -62,6 +62,52 @@ If an operation accepts a signal, pass `AbortSignal.timeout(ms)` to it so the
 operation itself is cancelled. Keep races where timeout means success or
 returns a fallback value local because they have different semantics.
 
+## Streams
+
+Use `ReadableStream.from(chunks)` for a fixed sequence, `Array.fromAsync(stream)`
+to collect a successful stream, and `text` from `node:stream/consumers` to decode
+text. Keep pull-driven sources local when a test observes backpressure or a
+custom cancellation hook.
+
+`StreamHarness` provides controlled producers and disposable readers:
+
+```ts
+import { StreamHarness } from '@deepagents/test';
+
+const streams = new StreamHarness();
+
+it('reads a controlled response', async () => {
+  using source = streams.source<string>();
+  await using reader = streams.reader(source.stream);
+  const first = reader.read();
+  source.enqueue('first');
+  assert.deepEqual(await first, { done: false, value: 'first' });
+
+  source.enqueue('second');
+  source.close();
+  assert.deepEqual(await reader.collectUntilError(), {
+    status: 'completed',
+    chunks: ['second'],
+  });
+});
+```
+
+Each `source<T>()` returns an independent stream with `enqueue`, `close`, `error`,
+and a read-only `state`: `open`, `closed`, `errored`, or `cancelled`. `closed`
+means the producer requested closure; queued chunks still drain. Native stream
+rules apply: enqueue or close after closure throws, and an error discards unread
+chunks, including those queued before closure. Disposal closes only an open
+source and is safe after cancellation or failure.
+
+`reader(stream)` immediately acquires the native reader lock without reading or
+buffering ahead. `read()` preserves native results and errors. `collectUntilError()`
+collects only the remaining chunks and returns either `{ status: 'completed', chunks }`
+or `{ status: 'errored', chunks, error }`, including when the error is `undefined`.
+Disposal cancels unfinished consumption through the locked reader and releases
+the lock. It does not rethrow an existing stream failure, but a failing cancellation
+hook still rejects disposal. Use `settleWithin` separately when a test needs a
+deadline. AI message chunks, transport behavior, and runtime fixtures stay local.
+
 ## Databases
 
 All database engines use instance acquisition and disposable handles. SQLite

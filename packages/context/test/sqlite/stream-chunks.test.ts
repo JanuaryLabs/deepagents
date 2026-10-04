@@ -23,9 +23,10 @@ import {
   createAdaptivePollingState,
   nextAdaptivePollingDelay,
 } from '@deepagents/context';
-import { Sqlite } from '@deepagents/test';
+import { Sqlite, StreamHarness } from '@deepagents/test';
 
 const sqlite = new Sqlite();
+const streamHarness = new StreamHarness();
 
 function createStream(overrides?: Partial<StreamData>): StreamData {
   return {
@@ -483,15 +484,10 @@ describe('Stream Chunks', () => {
         data: { status: 'started' },
         transient: true,
       } as const;
-      let controller!: ReadableStreamDefaultController<UIMessageChunk>;
-      const source = new ReadableStream<UIMessageChunk>({
-        start(value) {
-          controller = value;
-          controller.enqueue({ type: 'start', messageId: 'answer' });
-          controller.enqueue(progress);
-        },
-      });
-      const persisted = streams.persist(source, streamId);
+      using source = streamHarness.source<UIMessageChunk>();
+      source.enqueue({ type: 'start', messageId: 'answer' });
+      source.enqueue(progress);
+      const persisted = streams.persist(source.stream, streamId);
       try {
         await t.waitFor(
           async () => {
@@ -505,7 +501,7 @@ describe('Stream Chunks', () => {
         );
         assert.equal(await store.getStreamStatus(streamId), 'running');
       } finally {
-        controller.close();
+        source[Symbol.dispose]();
         await persisted;
       }
     });
@@ -2075,14 +2071,9 @@ describe('Stream Chunks', () => {
       const streamId = crypto.randomUUID();
       await workerStreams.register(streamId);
 
-      let closeSource!: () => void;
-      const source = new ReadableStream({
-        start(controller) {
-          closeSource = () => controller.close();
-        },
-      });
+      using source = streamHarness.source<UIMessageChunk>();
       let cancellationDetections = 0;
-      const persist = workerStreams.persist(source, streamId, {
+      const persist = workerStreams.persist(source.stream, streamId, {
         onCancelDetected: () => {
           cancellationDetections++;
         },
@@ -2111,11 +2102,7 @@ describe('Stream Chunks', () => {
         assert.ok(changeSource.attempts >= 1);
         assert.equal(cancellationDetections, 1);
       } finally {
-        try {
-          closeSource();
-        } catch {
-          // persist may already have cancelled and closed the source.
-        }
+        source[Symbol.dispose]();
         await persist;
       }
     });
@@ -2127,13 +2114,8 @@ describe('Stream Chunks', () => {
         const streamId = crypto.randomUUID();
         await streams.register(streamId);
 
-        let closeSource!: () => void;
-        const source = new ReadableStream({
-          start(controller) {
-            closeSource = () => controller.close();
-          },
-        });
-        const persist = streams.persist(source, streamId);
+        using source = streamHarness.source<UIMessageChunk>();
+        const persist = streams.persist(source.stream, streamId);
         try {
           await waitForStatus(store, streamId, 'running');
           store.failNextStreamRead();
@@ -2153,11 +2135,7 @@ describe('Stream Chunks', () => {
           assert.equal(stoppedAfterCancel, true);
           assert.equal(await store.getStreamStatus(streamId), 'cancelled');
         } finally {
-          try {
-            closeSource();
-          } catch {
-            // persist may already have cancelled and closed the source.
-          }
+          source[Symbol.dispose]();
           await streams.cancel(streamId).catch(() => undefined);
           await persist.catch(() => undefined);
         }

@@ -20,6 +20,7 @@ import {
   createVirtualSandbox,
   errorRecoveryGuardrail,
 } from '@deepagents/context';
+import { StreamHarness } from '@deepagents/test';
 import {
   Adapter,
   AdapterIndexer,
@@ -238,33 +239,6 @@ function chatStream(args: {
   });
 }
 
-async function collect(stream: ReadableStream): Promise<unknown[]> {
-  const reader = stream.getReader();
-  const chunks: unknown[] = [];
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-  }
-  return chunks;
-}
-
-async function collectUntilError(
-  stream: ReadableStream,
-): Promise<{ chunks: unknown[]; error?: unknown }> {
-  const reader = stream.getReader();
-  const chunks: unknown[] = [];
-  while (true) {
-    try {
-      const { done, value } = await reader.read();
-      if (done) return { chunks };
-      chunks.push(value);
-    } catch (error) {
-      return { chunks, error };
-    }
-  }
-}
-
 function isProgressChunk(chunk: unknown): chunk is {
   type: typeof TEXT2SQL_INDEX_PROGRESS_CHUNK;
   data: Text2SqlIndexProgressEvent;
@@ -320,7 +294,7 @@ describe('Text2Sql index progress events', () => {
 
       await engine.continue(userMessage('How many users?'));
       const stream = chatStream({ engine, adapters, cache, model });
-      const chunks = await collect(stream);
+      const chunks = await Array.fromAsync(stream);
       const events = progressEvents(chunks);
 
       assert.ok(events.length > 0, 'expected index progress events');
@@ -402,11 +376,11 @@ describe('Text2Sql index progress events', () => {
       const cache = new FileIndexCache({ namespace: `cache-${generateId()}` });
 
       await engine.continue(userMessage('First question'));
-      const first = await collect(
+      const first = await Array.fromAsync(
         chatStream({ engine, adapters, cache, model }),
       );
       await engine.continue(userMessage('Second question'));
-      const second = await collect(
+      const second = await Array.fromAsync(
         chatStream({ engine, adapters, cache, model }),
       );
       const firstEvents = progressEvents(first);
@@ -514,9 +488,10 @@ describe('Text2Sql index progress events', () => {
     const adapters = { failing, slow };
 
     await engine.continue(userMessage('This should fail'));
-    const { chunks } = await collectUntilError(
+    await using reader = new StreamHarness().reader(
       chatStream({ engine, adapters, model }),
     );
+    const { chunks } = await reader.collectUntilError();
     const events = progressEvents(chunks);
     assertTimestamped(events);
     const slowFinishedIndex = events.findIndex(

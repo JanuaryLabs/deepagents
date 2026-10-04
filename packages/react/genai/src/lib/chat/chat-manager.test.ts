@@ -11,6 +11,8 @@ import type {
 import { useEffect } from 'react';
 import { describe, expect, it } from 'vitest';
 
+import { StreamHarness, type StreamSource } from '@deepagents/test';
+
 import {
   ChatManager,
   type ChatManagerOptions,
@@ -22,43 +24,7 @@ type TestUIMessage = UIMessage<unknown, UIDataTypes, UITools>;
 type TestChatHelpers = UseChatHelpers<TestUIMessage>;
 
 const PREFILL_STORAGE_KEY = 'pending-chat-prefill';
-
-/**
- * A single in-flight response stream the test controls by hand. The chat stays
- * busy ('submitted'/'streaming') while a stream is open and transitions to
- * 'ready' once it is closed, mirroring how a real network response drives the
- * AI SDK's status machine.
- */
-interface OpenStream {
-  readonly stream: ReadableStream<UIMessageChunk>;
-  readonly closed: boolean;
-  emit(chunk: UIMessageChunk): void;
-  close(): void;
-}
-
-function openStream(): OpenStream {
-  let controller!: ReadableStreamDefaultController<UIMessageChunk>;
-  const stream = new ReadableStream<UIMessageChunk>({
-    start(c) {
-      controller = c;
-    },
-  });
-  let closed = false;
-  return {
-    stream,
-    get closed() {
-      return closed;
-    },
-    emit(chunk) {
-      if (!closed) controller.enqueue(chunk);
-    },
-    close() {
-      if (closed) return;
-      closed = true;
-      controller.close();
-    },
-  };
-}
+const streamHarness = new StreamHarness();
 
 /**
  * The ONLY stubbed seam: the network transport. Every `sendMessages` returns a
@@ -67,17 +33,19 @@ function openStream(): OpenStream {
  * `ChatManager` — runs for real.
  */
 class ControllableTransport implements ChatTransport<TestUIMessage> {
-  readonly streams: OpenStream[] = [];
+  readonly streams: StreamSource<UIMessageChunk>[] = [];
   sendCount = 0;
   reconnectCount = 0;
 
   sendMessages: ChatTransport<TestUIMessage>['sendMessages'] = (options) => {
     this.sendCount++;
-    const handle = openStream();
+    const handle = streamHarness.source<UIMessageChunk>();
     this.streams.push(handle);
-    options.abortSignal?.addEventListener('abort', () => handle.close(), {
-      once: true,
-    });
+    options.abortSignal?.addEventListener(
+      'abort',
+      () => handle[Symbol.dispose](),
+      { once: true },
+    );
     return Promise.resolve(handle.stream);
   };
 
@@ -86,21 +54,23 @@ class ControllableTransport implements ChatTransport<TestUIMessage> {
     return Promise.resolve(null);
   };
 
-  get latest(): OpenStream | undefined {
+  get latest(): StreamSource<UIMessageChunk> | undefined {
     return this.streams[this.streams.length - 1];
   }
 
   /** Push a text chunk so the latest open stream advances 'submitted' → 'streaming'. */
   beginStreaming(id = 'text-0'): void {
-    this.latest?.emit({ type: 'text-start', id });
+    if (this.latest?.state === 'open') {
+      this.latest.enqueue({ type: 'text-start', id });
+    }
   }
 
   closeOldestOpen(): void {
-    this.streams.find((s) => !s.closed)?.close();
+    this.streams.find((s) => s.state === 'open')?.close();
   }
 
   closeAll(): void {
-    for (const handle of [...this.streams]) handle.close();
+    for (const handle of [...this.streams]) handle[Symbol.dispose]();
   }
 }
 

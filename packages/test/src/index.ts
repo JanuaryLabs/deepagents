@@ -9,3 +9,4 @@ export * from './databases/sqlite.ts';
 export * from './databases/sqlserver.ts';
 export * from './docker/container.ts';
 export * from './docker/docker.ts';
+export * from './streams/stream-harness.ts';
