@@ -107,7 +107,8 @@ Node test projects declare `test:node` and a `test` target. `nx.json` owns their
 common command, reporters, module mocks, timeout, and build dependency. JUnit
 reports are written to each project's `test-results.xml`.
 
-Create an engine instance and acquire a disposable database for each test:
+For PostgreSQL, MySQL, and SQL Server, create an engine instance and acquire a
+disposable database for each test:
 
 ```ts
 import { Postgres } from '@deepagents/test';
@@ -160,6 +161,23 @@ instance's `start(options)` or `reuse(options)` methods. Both return a
 a reused container stops it for every caller. Engine `database()` handles only
 drop their isolated database. MySQL handles provide `query()`; SQL Server handles
 provide `waitForFtsReady()` for context-store catalogs.
+
+ClickHouse uses a dedicated server so tests can create server-wide users, roles,
+and functions without sharing them with another suite. Select the image explicitly:
+
+```ts
+import { ClickHouse } from '@deepagents/test';
+
+const clickhouse = new ClickHouse({
+  image: 'clickhouse/clickhouse-server:25.8.28.1',
+});
+await using server = await clickhouse.start();
+await server.exec(['clickhouse-client', '--query', 'SELECT 1']);
+```
+
+`start()` waits for a successful query and returns the existing `Container` handle
+with `host`, `port`, `exec()` and disposal. It retains the 2 GiB memory limit.
+Database schemas, users, grants and read-only settings belong to each test suite.
 
 When a harness returns a resource to its caller, use native
 `AsyncDisposableStack`: register dependencies with `use()` or `defer()`, then

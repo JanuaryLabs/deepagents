@@ -1,5 +1,6 @@
 export * from './async/settle-within.ts';
 export * from './async/timebox.ts';
+export * from './databases/clickhouse.ts';
 export * from './databases/database.ts';
 export * from './databases/duckdb.ts';
 export * from './databases/mysql.ts';
