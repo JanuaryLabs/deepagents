@@ -2,13 +2,15 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import pg from 'pg';
 
-import { withPostgresContainer } from '@deepagents/test';
+import { Postgres as TestPostgres } from '@deepagents/test';
 import {
   Postgres,
   columnValues,
   constraints,
   tables,
 } from '@deepagents/text2sql/postgres';
+
+const testPostgres = new TestPostgres();
 
 type ColumnData = { name: string; values?: string[] };
 type ColumnFragment = { name: 'column'; data: ColumnData };
@@ -34,21 +36,21 @@ async function withPgAdapter(
   ddl: string,
   fn: (fragments: readonly Fragment[]) => Promise<void>,
 ): Promise<void> {
-  await withPostgresContainer(async (container) => {
-    const pool = new pg.Pool({
-      connectionString: container.connectionString,
-    });
-    try {
-      await pool.query(ddl);
-      const adapter = new Postgres({
-        execute: (sql: string) => pool.query(sql),
-        grounding: [tables(), constraints(), columnValues()],
-      });
-      await fn(await adapter.introspect());
-    } finally {
-      await pool.end();
-    }
+  await using container = await testPostgres.database();
+
+  const pool = new pg.Pool({
+    connectionString: container.connectionString,
   });
+  try {
+    await pool.query(ddl);
+    const adapter = new Postgres({
+      execute: (sql: string) => pool.query(sql),
+      grounding: [tables(), constraints(), columnValues()],
+    });
+    await fn(await adapter.introspect());
+  } finally {
+    await pool.end();
+  }
 }
 
 describe('PostgresColumnValuesGrounding', () => {

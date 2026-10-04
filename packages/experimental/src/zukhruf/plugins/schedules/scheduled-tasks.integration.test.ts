@@ -10,7 +10,9 @@ import {
   type ScheduledTaskTransaction,
   ScheduledTasks,
 } from '@deepagents/experimental/zukhruf/schedules';
-import { withPostgresContainer } from '@deepagents/test';
+import { Postgres } from '@deepagents/test';
+
+const testPostgres = new Postgres();
 
 const FAST_POLLING = {
   batchSize: 3,
@@ -570,144 +572,146 @@ test('a queued run survives coordinator and pg-boss restart', async (t) => {
 });
 
 test('real PostgreSQL competing workers launch one execution for one run', async (t) => {
-  await withPostgresContainer(async ({ connectionString }) => {
-    const pool = new Pool({ connectionString });
-    const firstBoss = new PgBoss({ connectionString, schedule: false });
-    const secondBoss = new PgBoss({ connectionString, schedule: false });
-    firstBoss.on('error', () => {});
-    secondBoss.on('error', () => {});
-    await firstBoss.start();
-    await secondBoss.start();
-    const transaction: ScheduledTaskTransaction = async (operation) => {
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-        const database: Db = {
-          executeSql: (text, values) => client.query(text, values),
-        };
-        const result = await operation(database);
-        await client.query('COMMIT');
-        return result;
-      } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-      } finally {
-        client.release();
-      }
-    };
-    const executor = new TestExecutor();
-    const queue = `scheduled-workers-${randomUUID()}`;
-    const first = new ScheduledTasks({
-      boss: firstBoss,
-      queue,
-      reconciliationIntervalMs: 50,
-      transaction,
-      executor,
-    });
-    const second = new ScheduledTasks({
-      boss: secondBoss,
-      queue,
-      reconciliationIntervalMs: 50,
-      transaction,
-      executor,
-    });
-    await first.initialize();
-    await second.initialize();
-    try {
-      await using _firstWorker = await first.work(FAST_POLLING);
-      void _firstWorker;
-      await using _secondWorker = await second.work(FAST_POLLING);
-      void _secondWorker;
-      const task = await first.create('owner-1', {
-        idempotencyKey: 'competing-workers',
-        name: 'Competing workers',
-        prompt: 'Launch once',
-        recurrence: futureRecurrence(60_000, 'FREQ=DAILY;COUNT=2'),
-        timezone: 'UTC',
-        executionConfig: { destination: 'postgres' },
-      });
-      const run = await first.runNow('owner-1', task.id, 'one-run');
+  await using testDatabase = await testPostgres.database();
+  const { connectionString } = testDatabase;
 
-      await waitForRun(t, first, 'owner-1', run.id, 'running');
-      assert.equal(executor.launches.length, 1);
-      assert.equal(executor.executions.size, 1);
+  const pool = new Pool({ connectionString });
+  const firstBoss = new PgBoss({ connectionString, schedule: false });
+  const secondBoss = new PgBoss({ connectionString, schedule: false });
+  firstBoss.on('error', () => {});
+  secondBoss.on('error', () => {});
+  await firstBoss.start();
+  await secondBoss.start();
+  const transaction: ScheduledTaskTransaction = async (operation) => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const database: Db = {
+        executeSql: (text, values) => client.query(text, values),
+      };
+      const result = await operation(database);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
     } finally {
-      await secondBoss.stop({ graceful: false });
-      await firstBoss.stop({ graceful: false });
-      await pool.end();
+      client.release();
     }
+  };
+  const executor = new TestExecutor();
+  const queue = `scheduled-workers-${randomUUID()}`;
+  const first = new ScheduledTasks({
+    boss: firstBoss,
+    queue,
+    reconciliationIntervalMs: 50,
+    transaction,
+    executor,
   });
+  const second = new ScheduledTasks({
+    boss: secondBoss,
+    queue,
+    reconciliationIntervalMs: 50,
+    transaction,
+    executor,
+  });
+  await first.initialize();
+  await second.initialize();
+  try {
+    await using _firstWorker = await first.work(FAST_POLLING);
+    void _firstWorker;
+    await using _secondWorker = await second.work(FAST_POLLING);
+    void _secondWorker;
+    const task = await first.create('owner-1', {
+      idempotencyKey: 'competing-workers',
+      name: 'Competing workers',
+      prompt: 'Launch once',
+      recurrence: futureRecurrence(60_000, 'FREQ=DAILY;COUNT=2'),
+      timezone: 'UTC',
+      executionConfig: { destination: 'postgres' },
+    });
+    const run = await first.runNow('owner-1', task.id, 'one-run');
+
+    await waitForRun(t, first, 'owner-1', run.id, 'running');
+    assert.equal(executor.launches.length, 1);
+    assert.equal(executor.executions.size, 1);
+  } finally {
+    await secondBoss.stop({ graceful: false });
+    await firstBoss.stop({ graceful: false });
+    await pool.end();
+  }
 });
 
 test('real PostgreSQL commits duplicate management calls as one schedule and run', async () => {
-  await withPostgresContainer(async ({ connectionString }) => {
-    const pool = new Pool({ connectionString });
-    const boss = new PgBoss({ connectionString, schedule: false });
-    boss.on('error', () => {});
-    await boss.start();
-    const transaction: ScheduledTaskTransaction = async (operation) => {
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-        const database: Db = {
-          executeSql: (text, values) => client.query(text, values),
-        };
-        const result = await operation(database);
-        await client.query('COMMIT');
-        return result;
-      } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-      } finally {
-        client.release();
-      }
-    };
-    const executor = new TestExecutor();
-    const queue = `scheduled-postgres-${randomUUID()}`;
-    const scheduled = new ScheduledTasks({
-      boss,
-      queue,
-      reconciliationIntervalMs: 50,
-      transaction,
-      executor,
-    });
-    await scheduled.initialize();
+  await using testDatabase = await testPostgres.database();
+  const { connectionString } = testDatabase;
+
+  const pool = new Pool({ connectionString });
+  const boss = new PgBoss({ connectionString, schedule: false });
+  boss.on('error', () => {});
+  await boss.start();
+  const transaction: ScheduledTaskTransaction = async (operation) => {
+    const client = await pool.connect();
     try {
-      const input = {
-        idempotencyKey: 'same-create',
-        name: 'Same create',
-        prompt: 'Persist once',
-        recurrence: futureRecurrence(60_000, 'FREQ=DAILY;COUNT=2'),
-        timezone: 'UTC',
-        executionConfig: { destination: 'postgres' },
+      await client.query('BEGIN');
+      const database: Db = {
+        executeSql: (text, values) => client.query(text, values),
       };
-      const [first, second] = await Promise.all([
-        scheduled.create('owner-1', input),
-        scheduled.create('owner-1', input),
-      ]);
-      assert.equal(first.id, second.id);
-      const [firstRun, secondRun] = await Promise.all([
-        scheduled.runNow('owner-1', first.id, 'same-run'),
-        scheduled.runNow('owner-1', first.id, 'same-run'),
-      ]);
-      assert.equal(firstRun.id, secondRun.id);
-      const jobs = await boss.findJobs<{ kind: string }>(queue);
-      const claimable = jobs.filter(
-        ({ state }) => state !== 'cancelled' && state !== 'failed',
-      );
-      assert.equal(
-        claimable.filter(({ data }) => data.kind === 'occurrence').length,
-        1,
-      );
-      assert.equal(
-        claimable.filter(({ data }) => data.kind === 'dispatch').length,
-        1,
-      );
+      const result = await operation(database);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
     } finally {
-      await boss.stop({ graceful: false });
-      await pool.end();
+      client.release();
     }
+  };
+  const executor = new TestExecutor();
+  const queue = `scheduled-postgres-${randomUUID()}`;
+  const scheduled = new ScheduledTasks({
+    boss,
+    queue,
+    reconciliationIntervalMs: 50,
+    transaction,
+    executor,
   });
+  await scheduled.initialize();
+  try {
+    const input = {
+      idempotencyKey: 'same-create',
+      name: 'Same create',
+      prompt: 'Persist once',
+      recurrence: futureRecurrence(60_000, 'FREQ=DAILY;COUNT=2'),
+      timezone: 'UTC',
+      executionConfig: { destination: 'postgres' },
+    };
+    const [first, second] = await Promise.all([
+      scheduled.create('owner-1', input),
+      scheduled.create('owner-1', input),
+    ]);
+    assert.equal(first.id, second.id);
+    const [firstRun, secondRun] = await Promise.all([
+      scheduled.runNow('owner-1', first.id, 'same-run'),
+      scheduled.runNow('owner-1', first.id, 'same-run'),
+    ]);
+    assert.equal(firstRun.id, secondRun.id);
+    const jobs = await boss.findJobs<{ kind: string }>(queue);
+    const claimable = jobs.filter(
+      ({ state }) => state !== 'cancelled' && state !== 'failed',
+    );
+    assert.equal(
+      claimable.filter(({ data }) => data.kind === 'occurrence').length,
+      1,
+    );
+    assert.equal(
+      claimable.filter(({ data }) => data.kind === 'dispatch').length,
+      1,
+    );
+  } finally {
+    await boss.stop({ graceful: false });
+    await pool.end();
+  }
 });
 
 async function waitForRun(

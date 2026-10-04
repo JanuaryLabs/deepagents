@@ -11,7 +11,9 @@ import {
   createVirtualSandbox,
   user,
 } from '@deepagents/context';
-import { withPostgresContainer } from '@deepagents/test';
+import { Postgres } from '@deepagents/test';
+
+const testPostgres = new Postgres();
 
 async function createVirtualAgentSandbox() {
   return createBashTool({
@@ -23,644 +25,656 @@ const renderer = new XmlRenderer();
 
 describe('Delete Chat', () => {
   describe('Basic Deletion', () => {
-    it('should delete an existing chat and return true', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
+    it('should delete an existing chat and return true', async () => {
+      await using container = await testPostgres.database();
+
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        const engine = new ContextEngine({
+          store,
+          chatId: 'chat-to-delete',
+          userId: 'alice',
         });
-        await store.initialize();
-        try {
-          const engine = new ContextEngine({
-            store,
-            chatId: 'chat-to-delete',
-            userId: 'alice',
-          });
-          await engine.resolve({
-            renderer,
-            sandbox: await createVirtualAgentSandbox(),
-          });
-
-          const result = await store.deleteChat('chat-to-delete');
-
-          assert.strictEqual(result, true);
-          const chat = await store.getChat('chat-to-delete');
-          assert.strictEqual(chat, undefined);
-        } finally {
-          await store.close();
-        }
-      }));
-
-    it('should return false when deleting non-existent chat', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
+        await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
         });
-        await store.initialize();
-        try {
-          const result = await store.deleteChat('non-existent-chat-12345');
 
-          assert.strictEqual(result, false);
-        } finally {
-          await store.close();
-        }
-      }));
+        const result = await store.deleteChat('chat-to-delete');
 
-    it('should return false when deleting already-deleted chat', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
+        assert.strictEqual(result, true);
+        const chat = await store.getChat('chat-to-delete');
+        assert.strictEqual(chat, undefined);
+      } finally {
+        await store.close();
+      }
+    });
+
+    it('should return false when deleting non-existent chat', async () => {
+      await using container = await testPostgres.database();
+
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        const result = await store.deleteChat('non-existent-chat-12345');
+
+        assert.strictEqual(result, false);
+      } finally {
+        await store.close();
+      }
+    });
+
+    it('should return false when deleting already-deleted chat', async () => {
+      await using container = await testPostgres.database();
+
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        const engine = new ContextEngine({
+          store,
+          chatId: 'chat-double-delete',
+          userId: 'alice',
         });
-        await store.initialize();
-        try {
-          const engine = new ContextEngine({
-            store,
-            chatId: 'chat-double-delete',
-            userId: 'alice',
-          });
-          await engine.resolve({
-            renderer,
-            sandbox: await createVirtualAgentSandbox(),
-          });
-
-          const firstResult = await store.deleteChat('chat-double-delete');
-          assert.strictEqual(firstResult, true);
-
-          const secondResult = await store.deleteChat('chat-double-delete');
-          assert.strictEqual(secondResult, false);
-        } finally {
-          await store.close();
-        }
-      }));
-
-    it('should not affect other chats when deleting one', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
+        await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
         });
-        await store.initialize();
-        try {
-          const engine1 = new ContextEngine({
-            store,
-            chatId: 'chat-keep-1',
-            userId: 'alice',
-          });
-          engine1.set(user('Hello from chat 1'));
-          await engine1.save();
 
-          const engine2 = new ContextEngine({
-            store,
-            chatId: 'chat-keep-2',
-            userId: 'alice',
-          });
-          engine2.set(user('Hello from chat 2'));
-          await engine2.save();
+        const firstResult = await store.deleteChat('chat-double-delete');
+        assert.strictEqual(firstResult, true);
 
-          await store.deleteChat('chat-keep-1');
+        const secondResult = await store.deleteChat('chat-double-delete');
+        assert.strictEqual(secondResult, false);
+      } finally {
+        await store.close();
+      }
+    });
 
-          const chat2 = await store.getChat('chat-keep-2');
-          assert.ok(chat2);
-          assert.strictEqual(chat2.id, 'chat-keep-2');
-        } finally {
-          await store.close();
-        }
-      }));
+    it('should not affect other chats when deleting one', async () => {
+      await using container = await testPostgres.database();
+
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        const engine1 = new ContextEngine({
+          store,
+          chatId: 'chat-keep-1',
+          userId: 'alice',
+        });
+        engine1.set(user('Hello from chat 1'));
+        await engine1.save();
+
+        const engine2 = new ContextEngine({
+          store,
+          chatId: 'chat-keep-2',
+          userId: 'alice',
+        });
+        engine2.set(user('Hello from chat 2'));
+        await engine2.save();
+
+        await store.deleteChat('chat-keep-1');
+
+        const chat2 = await store.getChat('chat-keep-2');
+        assert.ok(chat2);
+        assert.strictEqual(chat2.id, 'chat-keep-2');
+      } finally {
+        await store.close();
+      }
+    });
   });
 
   describe('Cascading Deletes', () => {
-    it('should delete all messages when chat is deleted', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
+    it('should delete all messages when chat is deleted', async () => {
+      await using container = await testPostgres.database();
+
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        const engine = new ContextEngine({
+          store,
+          chatId: 'chat-with-messages',
+          userId: 'alice',
         });
-        await store.initialize();
-        try {
-          const engine = new ContextEngine({
-            store,
-            chatId: 'chat-with-messages',
-            userId: 'alice',
-          });
-          engine.set(user('Message 1'));
-          engine.set(assistantText('Response 1'));
-          engine.set(user('Message 2'));
-          engine.set(assistantText('Response 2'));
-          await engine.save();
+        engine.set(user('Message 1'));
+        engine.set(assistantText('Response 1'));
+        engine.set(user('Message 2'));
+        engine.set(assistantText('Response 2'));
+        await engine.save();
 
-          const branch = await store.getActiveBranch('chat-with-messages');
-          assert.ok(branch?.headMessageId);
+        const branch = await store.getActiveBranch('chat-with-messages');
+        assert.ok(branch?.headMessageId);
 
-          const messagesBefore = await store.getMessageChain(
-            branch.headMessageId,
-          );
-          assert.strictEqual(messagesBefore.length, 4);
+        const messagesBefore = await store.getMessageChain(
+          branch.headMessageId,
+        );
+        assert.strictEqual(messagesBefore.length, 4);
 
-          await store.deleteChat('chat-with-messages');
+        await store.deleteChat('chat-with-messages');
 
-          const messagesAfter = await store.getMessageChain(
-            branch.headMessageId,
-          );
-          assert.strictEqual(messagesAfter.length, 0);
-        } finally {
-          await store.close();
-        }
-      }));
+        const messagesAfter = await store.getMessageChain(branch.headMessageId);
+        assert.strictEqual(messagesAfter.length, 0);
+      } finally {
+        await store.close();
+      }
+    });
 
-    it('should delete all branches when chat is deleted', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
+    it('should delete all branches when chat is deleted', async () => {
+      await using container = await testPostgres.database();
+
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        const engine = new ContextEngine({
+          store,
+          chatId: 'chat-with-branches',
+          userId: 'alice',
         });
-        await store.initialize();
-        try {
-          const engine = new ContextEngine({
-            store,
-            chatId: 'chat-with-branches',
-            userId: 'alice',
-          });
-          engine.set(user('Message 1'));
-          await engine.save();
+        engine.set(user('Message 1'));
+        await engine.save();
 
-          await engine.checkpoint('before-branch');
-          engine.set(user('Message on main'));
-          await engine.save();
+        await engine.checkpoint('before-branch');
+        engine.set(user('Message on main'));
+        await engine.save();
 
-          await engine.restore('before-branch');
-          engine.set(user('Message on new branch'));
-          await engine.save();
+        await engine.restore('before-branch');
+        engine.set(user('Message on new branch'));
+        await engine.save();
 
-          const branchesBefore = await store.listBranches('chat-with-branches');
-          assert.strictEqual(branchesBefore.length, 2);
+        const branchesBefore = await store.listBranches('chat-with-branches');
+        assert.strictEqual(branchesBefore.length, 2);
 
-          await store.deleteChat('chat-with-branches');
+        await store.deleteChat('chat-with-branches');
 
-          const branchesAfter = await store.listBranches('chat-with-branches');
-          assert.strictEqual(branchesAfter.length, 0);
-        } finally {
-          await store.close();
-        }
-      }));
+        const branchesAfter = await store.listBranches('chat-with-branches');
+        assert.strictEqual(branchesAfter.length, 0);
+      } finally {
+        await store.close();
+      }
+    });
 
-    it('should delete all checkpoints when chat is deleted', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
+    it('should delete all checkpoints when chat is deleted', async () => {
+      await using container = await testPostgres.database();
+
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        const engine = new ContextEngine({
+          store,
+          chatId: 'chat-with-checkpoints',
+          userId: 'alice',
         });
-        await store.initialize();
-        try {
-          const engine = new ContextEngine({
-            store,
-            chatId: 'chat-with-checkpoints',
-            userId: 'alice',
-          });
-          engine.set(user('Message 1'));
-          await engine.save();
-          await engine.checkpoint('cp-1');
+        engine.set(user('Message 1'));
+        await engine.save();
+        await engine.checkpoint('cp-1');
 
-          engine.set(user('Message 2'));
-          await engine.save();
-          await engine.checkpoint('cp-2');
+        engine.set(user('Message 2'));
+        await engine.save();
+        await engine.checkpoint('cp-2');
 
-          engine.set(user('Message 3'));
-          await engine.save();
-          await engine.checkpoint('cp-3');
+        engine.set(user('Message 3'));
+        await engine.save();
+        await engine.checkpoint('cp-3');
 
-          const checkpointsBefore = await store.listCheckpoints(
-            'chat-with-checkpoints',
-          );
-          assert.strictEqual(checkpointsBefore.length, 3);
+        const checkpointsBefore = await store.listCheckpoints(
+          'chat-with-checkpoints',
+        );
+        assert.strictEqual(checkpointsBefore.length, 3);
 
-          await store.deleteChat('chat-with-checkpoints');
+        await store.deleteChat('chat-with-checkpoints');
 
-          const checkpointsAfter = await store.listCheckpoints(
-            'chat-with-checkpoints',
-          );
-          assert.strictEqual(checkpointsAfter.length, 0);
-        } finally {
-          await store.close();
-        }
-      }));
+        const checkpointsAfter = await store.listCheckpoints(
+          'chat-with-checkpoints',
+        );
+        assert.strictEqual(checkpointsAfter.length, 0);
+      } finally {
+        await store.close();
+      }
+    });
 
-    it('should handle chat with multiple branches', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
+    it('should handle chat with multiple branches', async () => {
+      await using container = await testPostgres.database();
+
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        const engine = new ContextEngine({
+          store,
+          chatId: 'multi-branch-chat',
+          userId: 'alice',
         });
-        await store.initialize();
-        try {
-          const engine = new ContextEngine({
-            store,
-            chatId: 'multi-branch-chat',
-            userId: 'alice',
-          });
 
-          engine.set(user('Initial message'));
-          await engine.save();
-          await engine.checkpoint('fork-point');
+        engine.set(user('Initial message'));
+        await engine.save();
+        await engine.checkpoint('fork-point');
 
-          engine.set(user('Branch 1 message'));
-          await engine.save();
+        engine.set(user('Branch 1 message'));
+        await engine.save();
 
-          await engine.restore('fork-point');
-          engine.set(user('Branch 2 message'));
-          await engine.save();
+        await engine.restore('fork-point');
+        engine.set(user('Branch 2 message'));
+        await engine.save();
 
-          await engine.restore('fork-point');
-          engine.set(user('Branch 3 message'));
-          await engine.save();
+        await engine.restore('fork-point');
+        engine.set(user('Branch 3 message'));
+        await engine.save();
 
-          const branchesBefore = await store.listBranches('multi-branch-chat');
-          assert.strictEqual(branchesBefore.length, 3);
+        const branchesBefore = await store.listBranches('multi-branch-chat');
+        assert.strictEqual(branchesBefore.length, 3);
 
-          const result = await store.deleteChat('multi-branch-chat');
-          assert.strictEqual(result, true);
+        const result = await store.deleteChat('multi-branch-chat');
+        assert.strictEqual(result, true);
 
-          const chat = await store.getChat('multi-branch-chat');
-          assert.strictEqual(chat, undefined);
+        const chat = await store.getChat('multi-branch-chat');
+        assert.strictEqual(chat, undefined);
 
-          const branchesAfter = await store.listBranches('multi-branch-chat');
-          assert.strictEqual(branchesAfter.length, 0);
-        } finally {
-          await store.close();
-        }
-      }));
+        const branchesAfter = await store.listBranches('multi-branch-chat');
+        assert.strictEqual(branchesAfter.length, 0);
+      } finally {
+        await store.close();
+      }
+    });
 
-    it('should handle chat with deep message chains (50+ messages)', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
+    it('should handle chat with deep message chains (50+ messages)', async () => {
+      await using container = await testPostgres.database();
+
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        const engine = new ContextEngine({
+          store,
+          chatId: 'deep-chain-chat',
+          userId: 'alice',
         });
-        await store.initialize();
-        try {
-          const engine = new ContextEngine({
-            store,
-            chatId: 'deep-chain-chat',
-            userId: 'alice',
-          });
 
-          for (let i = 0; i < 25; i++) {
-            engine.set(user(`User message ${i}`));
-            engine.set(assistantText(`Assistant response ${i}`));
-          }
-          await engine.save();
-
-          const result = await store.deleteChat('deep-chain-chat');
-          assert.strictEqual(result, true);
-
-          const chatAfter = await store.getChat('deep-chain-chat');
-          assert.strictEqual(chatAfter, undefined);
-        } finally {
-          await store.close();
+        for (let i = 0; i < 25; i++) {
+          engine.set(user(`User message ${i}`));
+          engine.set(assistantText(`Assistant response ${i}`));
         }
-      }));
+        await engine.save();
+
+        const result = await store.deleteChat('deep-chain-chat');
+        assert.strictEqual(result, true);
+
+        const chatAfter = await store.getChat('deep-chain-chat');
+        assert.strictEqual(chatAfter, undefined);
+      } finally {
+        await store.close();
+      }
+    });
   });
 
   describe('User Authorization', () => {
-    it('should delete chat when userId matches', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
+    it('should delete chat when userId matches', async () => {
+      await using container = await testPostgres.database();
+
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        const engine = new ContextEngine({
+          store,
+          chatId: 'alice-chat-auth',
+          userId: 'alice',
         });
-        await store.initialize();
-        try {
-          const engine = new ContextEngine({
-            store,
-            chatId: 'alice-chat-auth',
-            userId: 'alice',
-          });
-          await engine.resolve({
-            renderer,
-            sandbox: await createVirtualAgentSandbox(),
-          });
-
-          const result = await store.deleteChat('alice-chat-auth', {
-            userId: 'alice',
-          });
-
-          assert.strictEqual(result, true);
-          const chat = await store.getChat('alice-chat-auth');
-          assert.strictEqual(chat, undefined);
-        } finally {
-          await store.close();
-        }
-      }));
-
-    it('should return false when userId does not match', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
+        await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
         });
-        await store.initialize();
-        try {
-          const engine = new ContextEngine({
-            store,
-            chatId: 'alice-only-chat',
-            userId: 'alice',
-          });
-          await engine.resolve({
-            renderer,
-            sandbox: await createVirtualAgentSandbox(),
-          });
 
-          const result = await store.deleteChat('alice-only-chat', {
-            userId: 'bob',
-          });
-
-          assert.strictEqual(result, false);
-
-          const chat = await store.getChat('alice-only-chat');
-          assert.ok(chat);
-          assert.strictEqual(chat.userId, 'alice');
-        } finally {
-          await store.close();
-        }
-      }));
-
-    it('should delete any chat when userId not provided (admin mode)', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
+        const result = await store.deleteChat('alice-chat-auth', {
+          userId: 'alice',
         });
-        await store.initialize();
-        try {
-          const engine = new ContextEngine({
-            store,
-            chatId: 'any-user-chat',
-            userId: 'someuser',
-          });
-          await engine.resolve({
-            renderer,
-            sandbox: await createVirtualAgentSandbox(),
-          });
 
-          const result = await store.deleteChat('any-user-chat');
+        assert.strictEqual(result, true);
+        const chat = await store.getChat('alice-chat-auth');
+        assert.strictEqual(chat, undefined);
+      } finally {
+        await store.close();
+      }
+    });
 
-          assert.strictEqual(result, true);
-          const chat = await store.getChat('any-user-chat');
-          assert.strictEqual(chat, undefined);
-        } finally {
-          await store.close();
-        }
-      }));
+    it('should return false when userId does not match', async () => {
+      await using container = await testPostgres.database();
 
-    it('should not delete other users chats', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        const engine = new ContextEngine({
+          store,
+          chatId: 'alice-only-chat',
+          userId: 'alice',
         });
-        await store.initialize();
-        try {
-          const aliceEngine = new ContextEngine({
-            store,
-            chatId: 'alice-private',
-            userId: 'alice',
-          });
-          aliceEngine.set(user('Alice secret message'));
-          await aliceEngine.save();
-
-          const bobEngine = new ContextEngine({
-            store,
-            chatId: 'bob-private',
-            userId: 'bob',
-          });
-          bobEngine.set(user('Bob secret message'));
-          await bobEngine.save();
-
-          const result = await store.deleteChat('bob-private', {
-            userId: 'alice',
-          });
-          assert.strictEqual(result, false);
-
-          const bobChat = await store.getChat('bob-private');
-          assert.ok(bobChat);
-
-          const aliceChat = await store.getChat('alice-private');
-          assert.ok(aliceChat);
-        } finally {
-          await store.close();
-        }
-      }));
-
-    it('should handle case-sensitive userId comparison', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
+        await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
         });
-        await store.initialize();
-        try {
-          const engine = new ContextEngine({
-            store,
-            chatId: 'case-sensitive-chat',
-            userId: 'Alice',
-          });
-          await engine.resolve({
-            renderer,
-            sandbox: await createVirtualAgentSandbox(),
-          });
 
-          const result1 = await store.deleteChat('case-sensitive-chat', {
-            userId: 'alice',
-          });
-          assert.strictEqual(result1, false);
+        const result = await store.deleteChat('alice-only-chat', {
+          userId: 'bob',
+        });
 
-          const result2 = await store.deleteChat('case-sensitive-chat', {
-            userId: 'ALICE',
-          });
-          assert.strictEqual(result2, false);
+        assert.strictEqual(result, false);
 
-          const result3 = await store.deleteChat('case-sensitive-chat', {
-            userId: 'Alice',
-          });
-          assert.strictEqual(result3, true);
-        } finally {
-          await store.close();
-        }
-      }));
+        const chat = await store.getChat('alice-only-chat');
+        assert.ok(chat);
+        assert.strictEqual(chat.userId, 'alice');
+      } finally {
+        await store.close();
+      }
+    });
+
+    it('should delete any chat when userId not provided (admin mode)', async () => {
+      await using container = await testPostgres.database();
+
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        const engine = new ContextEngine({
+          store,
+          chatId: 'any-user-chat',
+          userId: 'someuser',
+        });
+        await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        });
+
+        const result = await store.deleteChat('any-user-chat');
+
+        assert.strictEqual(result, true);
+        const chat = await store.getChat('any-user-chat');
+        assert.strictEqual(chat, undefined);
+      } finally {
+        await store.close();
+      }
+    });
+
+    it('should not delete other users chats', async () => {
+      await using container = await testPostgres.database();
+
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        const aliceEngine = new ContextEngine({
+          store,
+          chatId: 'alice-private',
+          userId: 'alice',
+        });
+        aliceEngine.set(user('Alice secret message'));
+        await aliceEngine.save();
+
+        const bobEngine = new ContextEngine({
+          store,
+          chatId: 'bob-private',
+          userId: 'bob',
+        });
+        bobEngine.set(user('Bob secret message'));
+        await bobEngine.save();
+
+        const result = await store.deleteChat('bob-private', {
+          userId: 'alice',
+        });
+        assert.strictEqual(result, false);
+
+        const bobChat = await store.getChat('bob-private');
+        assert.ok(bobChat);
+
+        const aliceChat = await store.getChat('alice-private');
+        assert.ok(aliceChat);
+      } finally {
+        await store.close();
+      }
+    });
+
+    it('should handle case-sensitive userId comparison', async () => {
+      await using container = await testPostgres.database();
+
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        const engine = new ContextEngine({
+          store,
+          chatId: 'case-sensitive-chat',
+          userId: 'Alice',
+        });
+        await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        });
+
+        const result1 = await store.deleteChat('case-sensitive-chat', {
+          userId: 'alice',
+        });
+        assert.strictEqual(result1, false);
+
+        const result2 = await store.deleteChat('case-sensitive-chat', {
+          userId: 'ALICE',
+        });
+        assert.strictEqual(result2, false);
+
+        const result3 = await store.deleteChat('case-sensitive-chat', {
+          userId: 'Alice',
+        });
+        assert.strictEqual(result3, true);
+      } finally {
+        await store.close();
+      }
+    });
   });
 
   describe('Edge Cases', () => {
-    it('should handle deleting chat with no messages', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
+    it('should handle deleting chat with no messages', async () => {
+      await using container = await testPostgres.database();
+
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        const engine = new ContextEngine({
+          store,
+          chatId: 'empty-chat',
+          userId: 'alice',
         });
-        await store.initialize();
-        try {
-          const engine = new ContextEngine({
-            store,
-            chatId: 'empty-chat',
-            userId: 'alice',
-          });
-          await engine.resolve({
-            renderer,
-            sandbox: await createVirtualAgentSandbox(),
-          });
-
-          const result = await store.deleteChat('empty-chat');
-
-          assert.strictEqual(result, true);
-          const chat = await store.getChat('empty-chat');
-          assert.strictEqual(chat, undefined);
-        } finally {
-          await store.close();
-        }
-      }));
-
-    it('should handle chatId with special characters', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
+        await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
         });
-        await store.initialize();
-        try {
-          const specialIds = [
-            'chat-with-dashes-pg',
-            'chat_with_underscores_pg',
-            'chat.with.dots.pg',
-            'uuid-550e8400-e29b-41d4-a716-446655440000',
-          ];
 
-          for (const chatId of specialIds) {
-            await store.upsertChat({ id: chatId, userId: 'alice' });
+        const result = await store.deleteChat('empty-chat');
 
-            const result = await store.deleteChat(chatId);
-            assert.strictEqual(result, true, `Failed for chatId: ${chatId}`);
+        assert.strictEqual(result, true);
+        const chat = await store.getChat('empty-chat');
+        assert.strictEqual(chat, undefined);
+      } finally {
+        await store.close();
+      }
+    });
 
-            const chat = await store.getChat(chatId);
-            assert.strictEqual(
-              chat,
-              undefined,
-              `Chat not deleted for chatId: ${chatId}`,
-            );
-          }
-        } finally {
-          await store.close();
+    it('should handle chatId with special characters', async () => {
+      await using container = await testPostgres.database();
+
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        const specialIds = [
+          'chat-with-dashes-pg',
+          'chat_with_underscores_pg',
+          'chat.with.dots.pg',
+          'uuid-550e8400-e29b-41d4-a716-446655440000',
+        ];
+
+        for (const chatId of specialIds) {
+          await store.upsertChat({ id: chatId, userId: 'alice' });
+
+          const result = await store.deleteChat(chatId);
+          assert.strictEqual(result, true, `Failed for chatId: ${chatId}`);
+
+          const chat = await store.getChat(chatId);
+          assert.strictEqual(
+            chat,
+            undefined,
+            `Chat not deleted for chatId: ${chatId}`,
+          );
         }
-      }));
+      } finally {
+        await store.close();
+      }
+    });
 
-    it('should handle very long chatId', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
-        });
-        await store.initialize();
-        try {
-          const longChatId = 'c'.repeat(200);
+    it('should handle very long chatId', async () => {
+      await using container = await testPostgres.database();
 
-          await store.upsertChat({ id: longChatId, userId: 'alice' });
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        const longChatId = 'c'.repeat(200);
 
-          const result = await store.deleteChat(longChatId);
+        await store.upsertChat({ id: longChatId, userId: 'alice' });
 
-          assert.strictEqual(result, true);
-          const chat = await store.getChat(longChatId);
-          assert.strictEqual(chat, undefined);
-        } finally {
-          await store.close();
-        }
-      }));
+        const result = await store.deleteChat(longChatId);
+
+        assert.strictEqual(result, true);
+        const chat = await store.getChat(longChatId);
+        assert.strictEqual(chat, undefined);
+      } finally {
+        await store.close();
+      }
+    });
   });
 
   describe('Concurrent Operations', () => {
-    it('should handle concurrent deletion of different chats', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
-        });
-        await store.initialize();
-        try {
-          for (let i = 0; i < 10; i++) {
-            await store.upsertChat({
-              id: `concurrent-del-${i}`,
-              userId: 'alice',
-            });
-          }
+    it('should handle concurrent deletion of different chats', async () => {
+      await using container = await testPostgres.database();
 
-          const deletePromises = Array.from({ length: 10 }, (_, i) =>
-            store.deleteChat(`concurrent-del-${i}`),
-          );
-
-          const results = await Promise.all(deletePromises);
-
-          assert.ok(results.every((r) => r === true));
-        } finally {
-          await store.close();
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        for (let i = 0; i < 10; i++) {
+          await store.upsertChat({
+            id: `concurrent-del-${i}`,
+            userId: 'alice',
+          });
         }
-      }));
 
-    it('should handle concurrent deletion of same chat (one succeeds)', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
-        });
-        await store.initialize();
-        try {
-          await store.upsertChat({ id: 'race-chat', userId: 'alice' });
+        const deletePromises = Array.from({ length: 10 }, (_, i) =>
+          store.deleteChat(`concurrent-del-${i}`),
+        );
 
-          const deletePromises = Array.from({ length: 5 }, () =>
-            store.deleteChat('race-chat'),
-          );
+        const results = await Promise.all(deletePromises);
 
-          const results = await Promise.all(deletePromises);
+        assert.ok(results.every((r) => r === true));
+      } finally {
+        await store.close();
+      }
+    });
 
-          const successCount = results.filter((r) => r === true).length;
-          const failCount = results.filter((r) => r === false).length;
+    it('should handle concurrent deletion of same chat (one succeeds)', async () => {
+      await using container = await testPostgres.database();
 
-          assert.strictEqual(
-            successCount,
-            1,
-            'Exactly one delete should succeed',
-          );
-          assert.strictEqual(failCount, 4, 'Other deletes should return false');
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        await store.upsertChat({ id: 'race-chat', userId: 'alice' });
 
-          const chat = await store.getChat('race-chat');
-          assert.strictEqual(chat, undefined);
-        } finally {
-          await store.close();
+        const deletePromises = Array.from({ length: 5 }, () =>
+          store.deleteChat('race-chat'),
+        );
+
+        const results = await Promise.all(deletePromises);
+
+        const successCount = results.filter((r) => r === true).length;
+        const failCount = results.filter((r) => r === false).length;
+
+        assert.strictEqual(
+          successCount,
+          1,
+          'Exactly one delete should succeed',
+        );
+        assert.strictEqual(failCount, 4, 'Other deletes should return false');
+
+        const chat = await store.getChat('race-chat');
+        assert.strictEqual(chat, undefined);
+      } finally {
+        await store.close();
+      }
+    });
+
+    it('should not affect concurrent reads of other chats', async () => {
+      await using container = await testPostgres.database();
+
+      const store = new PostgresContextStore({
+        pool: container.connectionString,
+      });
+      await store.initialize();
+      try {
+        for (let i = 0; i < 5; i++) {
+          const engine = new ContextEngine({
+            store,
+            chatId: `reader-chat-${i}`,
+            userId: 'alice',
+          });
+          engine.set(user(`Message for chat ${i}`));
+          await engine.save();
         }
-      }));
 
-    it('should not affect concurrent reads of other chats', async () =>
-      await withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
-          pool: container.connectionString,
-        });
-        await store.initialize();
-        try {
-          for (let i = 0; i < 5; i++) {
-            const engine = new ContextEngine({
-              store,
-              chatId: `reader-chat-${i}`,
-              userId: 'alice',
-            });
-            engine.set(user(`Message for chat ${i}`));
-            await engine.save();
-          }
+        const operations = [
+          store.deleteChat('reader-chat-0'),
+          store.deleteChat('reader-chat-1'),
+          store.getChat('reader-chat-2'),
+          store.getChat('reader-chat-3'),
+          store.deleteChat('reader-chat-4'),
+        ];
 
-          const operations = [
-            store.deleteChat('reader-chat-0'),
-            store.deleteChat('reader-chat-1'),
-            store.getChat('reader-chat-2'),
-            store.getChat('reader-chat-3'),
-            store.deleteChat('reader-chat-4'),
-          ];
+        const results = await Promise.all(operations);
 
-          const results = await Promise.all(operations);
+        assert.strictEqual(results[0], true);
+        assert.strictEqual(results[1], true);
+        assert.strictEqual(results[4], true);
 
-          assert.strictEqual(results[0], true);
-          assert.strictEqual(results[1], true);
-          assert.strictEqual(results[4], true);
-
-          assert.ok(results[2]);
-          assert.strictEqual(
-            (results[2] as { id: string }).id,
-            'reader-chat-2',
-          );
-          assert.ok(results[3]);
-          assert.strictEqual(
-            (results[3] as { id: string }).id,
-            'reader-chat-3',
-          );
-        } finally {
-          await store.close();
-        }
-      }));
+        assert.ok(results[2]);
+        assert.strictEqual((results[2] as { id: string }).id, 'reader-chat-2');
+        assert.ok(results[3]);
+        assert.strictEqual((results[3] as { id: string }).id, 'reader-chat-3');
+      } finally {
+        await store.close();
+      }
+    });
   });
 });

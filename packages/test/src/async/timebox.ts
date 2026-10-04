@@ -23,8 +23,7 @@ const READINESS_DEFAULTS = {
  * Defaults are tuned for polling a service into existence: a fixed 250ms
  * interval (no exponential backoff) and a 30s wall-clock budget. The retry
  * timer is deliberately NOT unref'd — a readiness wait must keep the event loop
- * alive until it resolves, or it would never settle in a `globalSetup` or a
- * standalone script. On timeout it rejects with the operation's last error (so
+ * alive until it resolves, or it would never settle in a standalone script. On timeout it rejects with the operation's last error (so
  * the failure says *why* the service never came up). Note: p-retry does not
  * retry a non-network `TypeError`, so a bug in the probe aborts immediately
  * instead of looping out the budget.

@@ -7,7 +7,7 @@ The virtual filesystem layer (`packages/text2sql/src/lib/fs/`) currently has SQL
 - New `PostgresFs` class implementing `IFileSystem` (from `just-bash`), following the same two-table schema pattern (`fs_entries` + `fs_chunks`) used by `SqliteFs` and `MssqlFs`
 - New DDL file for PostgreSQL-specific table creation (using `BYTEA` for chunk data, `ON CONFLICT` for upserts)
 - Async API surface matching `MssqlFs` (connection pool lifecycle, explicit `initialize()`, `getAllPathsAsync()`)
-- Integration tests using the existing `withPostgresContainer` test helper from `@deepagents/test`
+- Integration tests using a `Postgres` instance’s `database()` method from `@deepagents/test`
 - Export from `packages/text2sql/src/lib/fs/index.ts`
 
 ## Capabilities

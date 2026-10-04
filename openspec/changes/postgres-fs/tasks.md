@@ -21,7 +21,7 @@
 
 ## 4. Integration Tests
 
-- [x] 4.1 Create `packages/text2sql/test/fs/postgres-fs.integration.test.ts` using `withPostgresContainer` from `@deepagents/test`. Import `PostgresFs` from `@deepagents/text2sql`.
+- [x] 4.1 Create `packages/text2sql/test/fs/postgres-fs.integration.test.ts` using a `Postgres` instance’s `database()` method from `@deepagents/test`. Import `PostgresFs` from `@deepagents/text2sql`.
 - [x] 4.2 Test file operations: write/read string, write/read binary, overwrite, append, read non-existent throws ENOENT, auto-create parent dirs.
 - [x] 4.3 Test chunking: file larger than chunk size writes and reads correctly.
 - [x] 4.4 Test directory operations: mkdir, mkdir recursive, readdir, readdirWithFileTypes.

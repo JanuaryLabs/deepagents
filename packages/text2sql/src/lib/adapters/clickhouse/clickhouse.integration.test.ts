@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
 
-import { type Container, startContainer, timebox } from '@deepagents/test';
+import { type Container, Docker, timebox } from '@deepagents/test';
 import {
   ClickHouse,
   constraints,
@@ -36,7 +36,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
     const databaseQueries: string[] = [];
 
     before(async () => {
-      container = await startContainer({
+      container = await new Docker().start({
         image: CLICKHOUSE_IMAGE,
         internalPort: 8123,
         env: { CLICKHOUSE_SKIP_USER_SETUP: '1' },

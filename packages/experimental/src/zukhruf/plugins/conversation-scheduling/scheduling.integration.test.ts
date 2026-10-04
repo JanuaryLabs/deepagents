@@ -43,7 +43,9 @@ import {
   conversationScheduling,
   conversationSchedulingCapabilities,
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
-import { withPostgresContainer } from '@deepagents/test';
+import { Postgres } from '@deepagents/test';
+
+const testPostgres = new Postgres();
 
 const userTurn = (id: string, text: string) => ({
   message: {
@@ -2496,85 +2498,84 @@ test('a recurring cron does not fire when its first occurrence is beyond its sev
 });
 
 test('duplicate wake delivery across runtimes advances PostgreSQL state once', async (t) => {
-  await withPostgresContainer(async (container) => {
-    const firstStore = new PostgresContextStore({
-      pool: container.connectionString,
-    });
-    const secondStore = new PostgresContextStore({
-      pool: container.connectionString,
-    });
-    await firstStore.initialize();
-    await secondStore.initialize();
-    const scheduler = new RecordingWakeScheduler();
-    const h = harness(t, scheduler, firstStore);
-    const commands = new Map<string, { name: string; input: unknown }>([
-      [
-        'schedule postgres duplicate',
-        {
-          name: 'ScheduleWakeup',
-          input: {
-            delaySeconds: 60,
-            reason: 'concurrency proof',
-            prompt: 'postgres scheduled prompt',
-          },
-        },
-      ],
-    ]);
-    const seenUserText: string[] = [];
-    const declaration = defineAgent({
-      name: 'root',
-      model: toolModel(commands, seenUserText),
-      sandbox: async () => ({}) as AgentSandbox,
-      instructions: [],
-      plugins: [conversationScheduling()],
-    });
-    const firstRuntimeSetup = new AgentRuntime(declaration);
-    const firstRuntimeStack5 = defineStack(async () => ({
-      ...h,
-      bindings: schedulingBindings(scheduler, 'UTC'),
-    }));
-    const firstRuntime = await firstRuntimeSetup.initialize(firstRuntimeStack5);
-    const secondRuntimeSetup = new AgentRuntime(declaration);
-    const secondRuntimeStack = defineStack(async () => ({
-      ...h,
-      store: secondStore,
-      bindings: schedulingBindings(scheduler, 'UTC'),
-    }));
-    const secondRuntime =
-      await secondRuntimeSetup.initialize(secondRuntimeStack);
-    const conversation = {
-      chatId: 'postgres-duplicate',
-      userId: 'user-1',
-    };
-    const firstWorker = await firstRuntime.work();
-    let secondWorker: AsyncDisposable | undefined;
-    try {
-      await runTurn(
-        firstRuntime,
-        h.queue,
-        conversation,
-        'schedule postgres duplicate',
-      );
-      secondWorker = await secondRuntime.work();
-      assert.equal(scheduler.handlers.size, 2);
-      const wake = [...scheduler.wakes.values()][0];
-      await scheduler.deliverAcrossConsumers(wake.id);
-      assert.equal(h.queue.turns.length, 2);
+  await using container = await testPostgres.database();
 
-      await h.queue.runNext();
-      await h.queue.runNext();
-      assert.equal(
-        seenUserText.filter((text) => text === 'postgres scheduled prompt')
-          .length,
-        1,
-      );
-      const chat = await secondStore.getChat(conversation.chatId);
-      assert.equal(dynamicState(chat?.metadata), undefined);
-    } finally {
-      await secondWorker?.[Symbol.asyncDispose]();
-      await firstWorker[Symbol.asyncDispose]();
-      await secondStore.close();
-      await firstStore.close();
-    }
+  const firstStore = new PostgresContextStore({
+    pool: container.connectionString,
   });
+  const secondStore = new PostgresContextStore({
+    pool: container.connectionString,
+  });
+  await firstStore.initialize();
+  await secondStore.initialize();
+  const scheduler = new RecordingWakeScheduler();
+  const h = harness(t, scheduler, firstStore);
+  const commands = new Map<string, { name: string; input: unknown }>([
+    [
+      'schedule postgres duplicate',
+      {
+        name: 'ScheduleWakeup',
+        input: {
+          delaySeconds: 60,
+          reason: 'concurrency proof',
+          prompt: 'postgres scheduled prompt',
+        },
+      },
+    ],
+  ]);
+  const seenUserText: string[] = [];
+  const declaration = defineAgent({
+    name: 'root',
+    model: toolModel(commands, seenUserText),
+    sandbox: async () => ({}) as AgentSandbox,
+    instructions: [],
+    plugins: [conversationScheduling()],
+  });
+  const firstRuntimeSetup = new AgentRuntime(declaration);
+  const firstRuntimeStack5 = defineStack(async () => ({
+    ...h,
+    bindings: schedulingBindings(scheduler, 'UTC'),
+  }));
+  const firstRuntime = await firstRuntimeSetup.initialize(firstRuntimeStack5);
+  const secondRuntimeSetup = new AgentRuntime(declaration);
+  const secondRuntimeStack = defineStack(async () => ({
+    ...h,
+    store: secondStore,
+    bindings: schedulingBindings(scheduler, 'UTC'),
+  }));
+  const secondRuntime = await secondRuntimeSetup.initialize(secondRuntimeStack);
+  const conversation = {
+    chatId: 'postgres-duplicate',
+    userId: 'user-1',
+  };
+  const firstWorker = await firstRuntime.work();
+  let secondWorker: AsyncDisposable | undefined;
+  try {
+    await runTurn(
+      firstRuntime,
+      h.queue,
+      conversation,
+      'schedule postgres duplicate',
+    );
+    secondWorker = await secondRuntime.work();
+    assert.equal(scheduler.handlers.size, 2);
+    const wake = [...scheduler.wakes.values()][0];
+    await scheduler.deliverAcrossConsumers(wake.id);
+    assert.equal(h.queue.turns.length, 2);
+
+    await h.queue.runNext();
+    await h.queue.runNext();
+    assert.equal(
+      seenUserText.filter((text) => text === 'postgres scheduled prompt')
+        .length,
+      1,
+    );
+    const chat = await secondStore.getChat(conversation.chatId);
+    assert.equal(dynamicState(chat?.metadata), undefined);
+  } finally {
+    await secondWorker?.[Symbol.asyncDispose]();
+    await firstWorker[Symbol.asyncDispose]();
+    await secondStore.close();
+    await firstStore.close();
+  }
 });

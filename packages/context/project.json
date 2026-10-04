@@ -3,13 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/context/src",
   "projectType": "library",
-  "tags": [
-    "scope:public",
-    "test:node",
-    "test:postgres",
-    "test:sqlserver",
-    "test:sqlserver-full"
-  ],
+  "tags": ["scope:public", "test:node"],
   "targets": {
     "build": {
       "executor": "@nx/esbuild:esbuild",

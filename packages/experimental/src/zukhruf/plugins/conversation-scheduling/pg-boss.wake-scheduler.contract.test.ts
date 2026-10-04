@@ -8,7 +8,9 @@ import {
   PgBossWakeScheduler,
   type Wake,
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
-import { withPostgresContainer } from '@deepagents/test';
+import { Postgres } from '@deepagents/test';
+
+const testPostgres = new Postgres();
 
 test('PgBossWakeScheduler delivers opaque data at or after its due time', async () => {
   const database = new PGlite();
@@ -266,131 +268,142 @@ test('PgBossWakeScheduler keeps a future wake across a pg-boss restart', async (
 });
 
 test('PgBossWakeScheduler preserves deduplication, retry, cancellation, and restart on PostgreSQL', async (t) => {
-  await withPostgresContainer(async (container) => {
-    const queue = 'wake-scheduler-contract';
-    const firstBoss = new PgBoss({
-      connectionString: container.connectionString,
-      schedule: false,
-    });
-    firstBoss.on('error', () => {});
-    await firstBoss.start();
-    const firstScheduler = new PgBossWakeScheduler<{ value: string }>(
-      firstBoss,
+  await using container = await testPostgres.database();
+
+  const queue = 'wake-scheduler-contract';
+  const firstBoss = new PgBoss({
+    connectionString: container.connectionString,
+    schedule: false,
+  });
+  firstBoss.on('error', () => {});
+  await firstBoss.start();
+  const firstScheduler = new PgBossWakeScheduler<{ value: string }>(firstBoss, {
+    queue,
+    pollingIntervalSeconds: 0.5,
+  });
+  await firstScheduler.initialize();
+
+  const retried = dueWake('postgres-retry');
+  await firstScheduler.schedule(retried);
+  await firstScheduler.schedule(retried);
+  const attempts: string[] = [];
+  const consumer = await firstScheduler.consume(async ({ data }) => {
+    attempts.push(data.value);
+    if (attempts.length === 1) throw new Error('retry on postgres');
+  });
+  await waitForCount(t, attempts, 2, 'postgres retries one deduplicated wake');
+  await consumer[Symbol.asyncDispose]();
+
+  const claimed = dueWake('postgres-claim-race');
+  const claimedStarted = Promise.withResolvers<void>();
+  const releaseClaimed = Promise.withResolvers<void>();
+  const claimedAttempts: string[] = [];
+  await firstScheduler.schedule(claimed);
+  const claimedConsumer = await firstScheduler.consume(async ({ data }) => {
+    claimedAttempts.push(data.value);
+    claimedStarted.resolve();
+    await releaseClaimed.promise;
+  });
+  await claimedStarted.promise;
+  await firstScheduler.cancel(claimed.id);
+  releaseClaimed.resolve();
+  await waitForCount(t, claimedAttempts, 1, 'claimed postgres wake runs once');
+  await claimedConsumer[Symbol.asyncDispose]();
+
+  const cancelled = {
+    ...dueWake('postgres-cancel'),
+    runAt: new Date(Date.now() + 300),
+  };
+  await firstScheduler.schedule(cancelled);
+  await firstScheduler.cancel(cancelled.id);
+
+  const restart = {
+    ...dueWake('postgres-restart'),
+    runAt: new Date(Date.now() + 500),
+  };
+  await firstScheduler.schedule(restart);
+  const afterDispose = dueWake('postgres-after-dispose');
+  await firstScheduler.schedule(afterDispose);
+  await firstBoss.stop({ graceful: false });
+
+  const secondBoss = new PgBoss({
+    connectionString: container.connectionString,
+    schedule: false,
+  });
+  secondBoss.on('error', () => {});
+  try {
+    await secondBoss.start();
+    const secondScheduler = new PgBossWakeScheduler<{ value: string }>(
+      secondBoss,
       { queue, pollingIntervalSeconds: 0.5 },
     );
-    await firstScheduler.initialize();
-
-    const retried = dueWake('postgres-retry');
-    await firstScheduler.schedule(retried);
-    await firstScheduler.schedule(retried);
-    const attempts: string[] = [];
-    const consumer = await firstScheduler.consume(async ({ data }) => {
-      attempts.push(data.value);
-      if (attempts.length === 1) throw new Error('retry on postgres');
-    });
-    await waitForCount(
-      t,
-      attempts,
-      2,
-      'postgres retries one deduplicated wake',
+    await secondScheduler.initialize();
+    const seen: string[] = [];
+    await using _replacement = await secondScheduler.consume(
+      async ({ data }) => {
+        seen.push(data.value);
+      },
     );
-    await consumer[Symbol.asyncDispose]();
-
-    const claimed = dueWake('postgres-claim-race');
-    const claimedStarted = Promise.withResolvers<void>();
-    const releaseClaimed = Promise.withResolvers<void>();
-    const claimedAttempts: string[] = [];
-    await firstScheduler.schedule(claimed);
-    const claimedConsumer = await firstScheduler.consume(async ({ data }) => {
-      claimedAttempts.push(data.value);
-      claimedStarted.resolve();
-      await releaseClaimed.promise;
-    });
-    await claimedStarted.promise;
-    await firstScheduler.cancel(claimed.id);
-    releaseClaimed.resolve();
-    await waitForCount(
-      t,
-      claimedAttempts,
-      1,
-      'claimed postgres wake runs once',
+    void _replacement;
+    await waitForCount(t, seen, 2, 'replacement receives restart backlog');
+    await sleep(700);
+    assert.deepEqual(seen.toSorted(), [
+      'postgres-after-dispose',
+      'postgres-restart',
+    ]);
+    await t.waitFor(
+      async () =>
+        assert.equal(
+          (
+            await secondBoss.findJobs(queue, {
+              id: afterDispose.id,
+            })
+          ).length,
+          0,
+        ),
+      { interval: 25, timeout: 6_000 },
     );
-    await claimedConsumer[Symbol.asyncDispose]();
-
-    const cancelled = {
-      ...dueWake('postgres-cancel'),
-      runAt: new Date(Date.now() + 300),
-    };
-    await firstScheduler.schedule(cancelled);
-    await firstScheduler.cancel(cancelled.id);
-
-    const restart = {
-      ...dueWake('postgres-restart'),
-      runAt: new Date(Date.now() + 500),
-    };
-    await firstScheduler.schedule(restart);
-    const afterDispose = dueWake('postgres-after-dispose');
-    await firstScheduler.schedule(afterDispose);
-    await firstBoss.stop({ graceful: false });
-
-    const secondBoss = new PgBoss({
-      connectionString: container.connectionString,
-      schedule: false,
-    });
-    secondBoss.on('error', () => {});
-    try {
-      await secondBoss.start();
-      const secondScheduler = new PgBossWakeScheduler<{ value: string }>(
-        secondBoss,
-        { queue, pollingIntervalSeconds: 0.5 },
-      );
-      await secondScheduler.initialize();
-      const seen: string[] = [];
-      await using _replacement = await secondScheduler.consume(
-        async ({ data }) => {
-          seen.push(data.value);
-        },
-      );
-      void _replacement;
-      await waitForCount(t, seen, 2, 'replacement receives restart backlog');
-      await sleep(700);
-      assert.deepEqual(seen.toSorted(), [
-        'postgres-after-dispose',
-        'postgres-restart',
-      ]);
-      await t.waitFor(
-        async () =>
-          assert.equal(
-            (
-              await secondBoss.findJobs(queue, {
-                id: afterDispose.id,
-              })
-            ).length,
-            0,
-          ),
-        { interval: 25, timeout: 6_000 },
-      );
-    } finally {
-      await secondBoss.stop({ graceful: false });
-    }
-  });
+  } finally {
+    await secondBoss.stop({ graceful: false });
+  }
 });
 
 test('PgBossWakeScheduler retries after a PostgreSQL worker dies mid-handler', async (t) => {
-  await withPostgresContainer(async (container) => {
-    const queue = 'wake-scheduler-worker-death';
-    const bossOptions = {
-      connectionString: container.connectionString,
-      schedule: false as const,
-      monitorIntervalSeconds: 1,
-      superviseIntervalSeconds: 1,
-      maintenanceIntervalSeconds: 1,
-    };
-    const firstBoss = new PgBoss(bossOptions);
-    firstBoss.on('error', () => {});
-    await firstBoss.start();
-    const firstScheduler = new PgBossWakeScheduler<{ value: string }>(
-      firstBoss,
+  await using container = await testPostgres.database();
+
+  const queue = 'wake-scheduler-worker-death';
+  const bossOptions = {
+    connectionString: container.connectionString,
+    schedule: false as const,
+    monitorIntervalSeconds: 1,
+    superviseIntervalSeconds: 1,
+    maintenanceIntervalSeconds: 1,
+  };
+  const firstBoss = new PgBoss(bossOptions);
+  firstBoss.on('error', () => {});
+  await firstBoss.start();
+  const firstScheduler = new PgBossWakeScheduler<{ value: string }>(firstBoss, {
+    queue,
+    pollingIntervalSeconds: 0.5,
+    heartbeatSeconds: 10,
+    expireInSeconds: 60,
+  });
+  await firstScheduler.initialize();
+  await firstScheduler.schedule(dueWake('worker-death'));
+  const started = Promise.withResolvers<void>();
+  await firstScheduler.consume(async () => {
+    started.resolve();
+    await new Promise<never>(() => {});
+  });
+  await started.promise;
+  await firstBoss.stop({ graceful: false });
+
+  const secondBoss = new PgBoss(bossOptions);
+  secondBoss.on('error', () => {});
+  try {
+    await secondBoss.start();
+    const secondScheduler = new PgBossWakeScheduler<{ value: string }>(
+      secondBoss,
       {
         queue,
         pollingIntervalSeconds: 0.5,
@@ -398,45 +411,21 @@ test('PgBossWakeScheduler retries after a PostgreSQL worker dies mid-handler', a
         expireInSeconds: 60,
       },
     );
-    await firstScheduler.initialize();
-    await firstScheduler.schedule(dueWake('worker-death'));
-    const started = Promise.withResolvers<void>();
-    await firstScheduler.consume(async () => {
-      started.resolve();
-      await new Promise<never>(() => {});
+    await secondScheduler.initialize();
+    const seen: string[] = [];
+    await using _replacement = await secondScheduler.consume(
+      async ({ data }) => {
+        seen.push(data.value);
+      },
+    );
+    void _replacement;
+    await t.waitFor(() => assert.deepEqual(seen, ['worker-death']), {
+      interval: 100,
+      timeout: 20_000,
     });
-    await started.promise;
-    await firstBoss.stop({ graceful: false });
-
-    const secondBoss = new PgBoss(bossOptions);
-    secondBoss.on('error', () => {});
-    try {
-      await secondBoss.start();
-      const secondScheduler = new PgBossWakeScheduler<{ value: string }>(
-        secondBoss,
-        {
-          queue,
-          pollingIntervalSeconds: 0.5,
-          heartbeatSeconds: 10,
-          expireInSeconds: 60,
-        },
-      );
-      await secondScheduler.initialize();
-      const seen: string[] = [];
-      await using _replacement = await secondScheduler.consume(
-        async ({ data }) => {
-          seen.push(data.value);
-        },
-      );
-      void _replacement;
-      await t.waitFor(() => assert.deepEqual(seen, ['worker-death']), {
-        interval: 100,
-        timeout: 20_000,
-      });
-    } finally {
-      await secondBoss.stop({ graceful: false });
-    }
-  });
+  } finally {
+    await secondBoss.stop({ graceful: false });
+  }
 });
 
 test('PgBossWakeScheduler can drain a claimed wake before releasing its resources', async () => {

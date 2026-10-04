@@ -17,10 +17,10 @@ import {
 import pg from 'pg';
 
 import {
-  type MysqlContainer,
-  startMysqlContainer,
-  startPostgresContainer,
-  startSqlServerContainer,
+  type MysqlDatabase,
+  Mysql as TestMysql,
+  Postgres as TestPostgres,
+  SqlServer as TestSqlServer,
 } from '@deepagents/test';
 import type { GroundingFn, SQLScopeErrorPayload } from '@deepagents/text2sql';
 import {
@@ -349,7 +349,7 @@ function createPostgresScope(pool: pg.Pool, options: PolicyTestOptions = {}) {
 }
 
 function createMysqlScope(
-  container: MysqlContainer,
+  container: MysqlDatabase,
   options: PolicyTestOptions = {},
 ) {
   const executeProbe = mock.fn();
@@ -563,7 +563,7 @@ const adapterCases: AdapterCase[] = [
   {
     name: 'postgres',
     setup: async () => {
-      const container = await startPostgresContainer();
+      const container = await new TestPostgres().start();
       const pool = new pg.Pool({
         connectionString: container.connectionString,
       });
@@ -592,7 +592,7 @@ const adapterCases: AdapterCase[] = [
   {
     name: 'mysql',
     setup: async () => {
-      const container = await startMysqlContainer();
+      const container = await new TestMysql().start();
       try {
         await container.query(policyMysqlDdl);
       } catch (error) {
@@ -615,7 +615,7 @@ const adapterCases: AdapterCase[] = [
   {
     name: 'sqlserver',
     setup: async () => {
-      const container = await startSqlServerContainer();
+      const container = await new TestSqlServer().start();
       const pool = new sql.ConnectionPool(container.connectionString);
       try {
         await pool.connect();

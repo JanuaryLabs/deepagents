@@ -11,9 +11,11 @@ import {
   StreamManager,
   type StreamStatus,
 } from '@deepagents/context';
-import { settleWithin, withPostgresContainer } from '@deepagents/test';
+import { Postgres, settleWithin } from '@deepagents/test';
 
 const POSTGRES_18 = { image: 'postgres:18-alpine' };
+
+const testPostgres = new Postgres(POSTGRES_18);
 
 function testSchema(): string {
   return `stream_test_${crypto.randomUUID().replaceAll('-', '_')}`;
@@ -54,16 +56,16 @@ function createChunk(
 
 async function withStore<T>(
   fn: (store: PostgresStreamStore) => Promise<T>,
-): Promise<T | undefined> {
-  return await withPostgresContainer(async (container) => {
-    const schema = testSchema();
-    const store = await openStoreWithRetry(container.connectionString, schema);
-    try {
-      return await fn(store);
-    } finally {
-      await store.close();
-    }
-  }, POSTGRES_18);
+): Promise<T> {
+  await using container = await testPostgres.database();
+
+  const schema = testSchema();
+  const store = await openStoreWithRetry(container.connectionString, schema);
+  try {
+    return await fn(store);
+  } finally {
+    await store.close();
+  }
 }
 
 async function openStoreWithRetry(
@@ -115,21 +117,22 @@ async function waitForStatus(
 }
 
 describe('PostgreSQL StreamStore Integration', () => {
-  it('should require initialize before querying', async () =>
-    await withPostgresContainer(async (container) => {
-      const store = new PostgresStreamStore({
-        pool: container.connectionString,
-        schema: testSchema(),
-      });
-      try {
-        await assert.rejects(
-          () => store.getStream('missing'),
-          /PostgresStreamStore not initialized/,
-        );
-      } finally {
-        await store.close();
-      }
-    }, POSTGRES_18));
+  it('should require initialize before querying', async () => {
+    await using container = await testPostgres.database();
+
+    const store = new PostgresStreamStore({
+      pool: container.connectionString,
+      schema: testSchema(),
+    });
+    try {
+      await assert.rejects(
+        () => store.getStream('missing'),
+        /PostgresStreamStore not initialized/,
+      );
+    } finally {
+      await store.close();
+    }
+  });
 
   it('should create, upsert, retrieve, update, and list streams', async () =>
     await withStore(async (store) => {

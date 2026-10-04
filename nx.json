@@ -71,8 +71,7 @@
         "testTargetName": "test",
         "testMode": "run"
       }
-    },
-    "./packages/test/src/nx-plugin.ts"
+    }
   ],
   "workspaceLayout": {
     "appsDir": "apps",

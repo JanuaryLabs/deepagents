@@ -2,1206 +2,1250 @@ import sql from 'mssql';
 import * as assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { withSqlServerContainer } from '@deepagents/test';
+import { SqlServer } from '@deepagents/test';
 import { MssqlFs } from '@deepagents/text2sql';
+
+const testSqlServer = new SqlServer();
 
 describe('MssqlFs', () => {
   describe('file operations', () => {
-    it('should write and read a file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/test.txt', 'Hello, World!');
+    it('should write and read a file', async () => {
+      await using container = await testSqlServer.database();
 
-          const result = await fs.readFile('/test.txt');
-          assert.strictEqual(result, 'Hello, World!');
-        } finally {
-          await fs.close();
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/test.txt', 'Hello, World!');
+
+        const result = await fs.readFile('/test.txt');
+        assert.strictEqual(result, 'Hello, World!');
+      } finally {
+        await fs.close();
+      }
+    });
+
+    it('should write and read binary content', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        const content = new Uint8Array([0x00, 0x01, 0x02, 0xff, 0xfe]);
+        await fs.writeFile('/binary.bin', content);
+
+        const result = await fs.readFileBuffer('/binary.bin');
+        assert.deepStrictEqual(result, content);
+      } finally {
+        await fs.close();
+      }
+    });
+
+    it('should overwrite existing file', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/overwrite.txt', 'original');
+        await fs.writeFile('/overwrite.txt', 'updated');
+
+        const result = await fs.readFile('/overwrite.txt');
+        assert.strictEqual(result, 'updated');
+      } finally {
+        await fs.close();
+      }
+    });
+
+    it('should append to file', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/append.txt', 'Hello');
+        await fs.appendFile('/append.txt', ', World!');
+
+        const result = await fs.readFile('/append.txt');
+        assert.strictEqual(result, 'Hello, World!');
+      } finally {
+        await fs.close();
+      }
+    });
+
+    it('should accumulate data across multiple appends', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/multi.txt', '');
+        for (let i = 0; i < 5; i++) {
+          await fs.appendFile('/multi.txt', `[${i}]`);
         }
-      }));
 
-    it('should write and read binary content', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          const content = new Uint8Array([0x00, 0x01, 0x02, 0xff, 0xfe]);
-          await fs.writeFile('/binary.bin', content);
+        const result = await fs.readFile('/multi.txt');
+        assert.strictEqual(result, '[0][1][2][3][4]');
+      } finally {
+        await fs.close();
+      }
+    });
 
-          const result = await fs.readFileBuffer('/binary.bin');
-          assert.deepStrictEqual(result, content);
-        } finally {
-          await fs.close();
-        }
-      }));
+    it('should throw on reading non-existent file', async () => {
+      await using container = await testSqlServer.database();
 
-    it('should overwrite existing file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/overwrite.txt', 'original');
-          await fs.writeFile('/overwrite.txt', 'updated');
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await assert.rejects(() => fs.readFile('/nonexistent.txt'), /ENOENT/);
+      } finally {
+        await fs.close();
+      }
+    });
 
-          const result = await fs.readFile('/overwrite.txt');
-          assert.strictEqual(result, 'updated');
-        } finally {
-          await fs.close();
-        }
-      }));
+    it('should write and read empty file', async () => {
+      await using container = await testSqlServer.database();
 
-    it('should append to file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/append.txt', 'Hello');
-          await fs.appendFile('/append.txt', ', World!');
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/empty.txt', '');
 
-          const result = await fs.readFile('/append.txt');
-          assert.strictEqual(result, 'Hello, World!');
-        } finally {
-          await fs.close();
-        }
-      }));
+        const result = await fs.readFile('/empty.txt');
+        assert.strictEqual(result, '');
 
-    it('should accumulate data across multiple appends', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/multi.txt', '');
-          for (let i = 0; i < 5; i++) {
-            await fs.appendFile('/multi.txt', `[${i}]`);
-          }
+        const stat = await fs.stat('/empty.txt');
+        assert.strictEqual(stat.size, 0);
+      } finally {
+        await fs.close();
+      }
+    });
 
-          const result = await fs.readFile('/multi.txt');
-          assert.strictEqual(result, '[0][1][2][3][4]');
-        } finally {
-          await fs.close();
-        }
-      }));
+    it('should throw EISDIR when reading a directory', async () => {
+      await using container = await testSqlServer.database();
 
-    it('should throw on reading non-existent file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await assert.rejects(() => fs.readFile('/nonexistent.txt'), /ENOENT/);
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.mkdir('/adir');
 
-    it('should write and read empty file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/empty.txt', '');
+        await assert.rejects(() => fs.readFile('/adir'), /EISDIR/);
+      } finally {
+        await fs.close();
+      }
+    });
 
-          const result = await fs.readFile('/empty.txt');
-          assert.strictEqual(result, '');
+    it('should append to non-existent file creating it', async () => {
+      await using container = await testSqlServer.database();
 
-          const stat = await fs.stat('/empty.txt');
-          assert.strictEqual(stat.size, 0);
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.appendFile('/brand-new.txt', 'created via append');
 
-    it('should throw EISDIR when reading a directory', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.mkdir('/adir');
+        const result = await fs.readFile('/brand-new.txt');
+        assert.strictEqual(result, 'created via append');
+      } finally {
+        await fs.close();
+      }
+    });
 
-          await assert.rejects(() => fs.readFile('/adir'), /EISDIR/);
-        } finally {
-          await fs.close();
-        }
-      }));
+    it('should throw when appending to a directory', async () => {
+      await using container = await testSqlServer.database();
 
-    it('should append to non-existent file creating it', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.appendFile('/brand-new.txt', 'created via append');
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.mkdir('/appenddir');
 
-          const result = await fs.readFile('/brand-new.txt');
-          assert.strictEqual(result, 'created via append');
-        } finally {
-          await fs.close();
-        }
-      }));
+        await assert.rejects(
+          () => fs.appendFile('/appenddir', 'data'),
+          /not a file/,
+        );
+      } finally {
+        await fs.close();
+      }
+    });
 
-    it('should throw when appending to a directory', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.mkdir('/appenddir');
+    it('should auto-create parent directories on write', async () => {
+      await using container = await testSqlServer.database();
 
-          await assert.rejects(
-            () => fs.appendFile('/appenddir', 'data'),
-            /not a file/,
-          );
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/deep/nested/path/file.txt', 'content');
 
-    it('should auto-create parent directories on write', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/deep/nested/path/file.txt', 'content');
+        const result = await fs.readFile('/deep/nested/path/file.txt');
+        assert.strictEqual(result, 'content');
 
-          const result = await fs.readFile('/deep/nested/path/file.txt');
-          assert.strictEqual(result, 'content');
-
-          assert.strictEqual(await fs.exists('/deep'), true);
-          assert.strictEqual(await fs.exists('/deep/nested'), true);
-          assert.strictEqual(await fs.exists('/deep/nested/path'), true);
-        } finally {
-          await fs.close();
-        }
-      }));
+        assert.strictEqual(await fs.exists('/deep'), true);
+        assert.strictEqual(await fs.exists('/deep/nested'), true);
+        assert.strictEqual(await fs.exists('/deep/nested/path'), true);
+      } finally {
+        await fs.close();
+      }
+    });
   });
 
   describe('large file chunking', () => {
-    it('should handle files larger than chunk size', async () =>
-      await withSqlServerContainer(async (container) => {
-        const chunkSize = 1024;
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-          chunkSize,
-        });
-        await fs.initialize();
-        try {
-          const size = chunkSize * 3 + 500;
-          const content = new Uint8Array(size);
-          for (let i = 0; i < size; i++) {
-            content[i] = i % 256;
-          }
+    it('should handle files larger than chunk size', async () => {
+      await using container = await testSqlServer.database();
 
-          await fs.writeFile('/large.bin', content);
-
-          const result = await fs.readFileBuffer('/large.bin');
-          assert.strictEqual(result.length, size);
-          assert.deepStrictEqual(result, content);
-        } finally {
-          await fs.close();
+      const chunkSize = 1024;
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+        chunkSize,
+      });
+      await fs.initialize();
+      try {
+        const size = chunkSize * 3 + 500;
+        const content = new Uint8Array(size);
+        for (let i = 0; i < size; i++) {
+          content[i] = i % 256;
         }
-      }));
+
+        await fs.writeFile('/large.bin', content);
+
+        const result = await fs.readFileBuffer('/large.bin');
+        assert.strictEqual(result.length, size);
+        assert.deepStrictEqual(result, content);
+      } finally {
+        await fs.close();
+      }
+    });
   });
 
   describe('directory operations', () => {
-    it('should create directory', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.mkdir('/newdir');
-          const stat = await fs.stat('/newdir');
-          assert.strictEqual(stat.isDirectory, true);
-        } finally {
-          await fs.close();
-        }
-      }));
+    it('should create directory', async () => {
+      await using container = await testSqlServer.database();
 
-    it('should create directory recursively', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.mkdir('/a/b/c/d', { recursive: true });
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.mkdir('/newdir');
+        const stat = await fs.stat('/newdir');
+        assert.strictEqual(stat.isDirectory, true);
+      } finally {
+        await fs.close();
+      }
+    });
 
-          assert.strictEqual(await fs.exists('/a'), true);
-          assert.strictEqual(await fs.exists('/a/b'), true);
-          assert.strictEqual(await fs.exists('/a/b/c'), true);
-          assert.strictEqual(await fs.exists('/a/b/c/d'), true);
-        } finally {
-          await fs.close();
-        }
-      }));
+    it('should create directory recursively', async () => {
+      await using container = await testSqlServer.database();
 
-    it('should list directory contents', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.mkdir('/listdir');
-          await fs.writeFile('/listdir/file1.txt', 'content1');
-          await fs.writeFile('/listdir/file2.txt', 'content2');
-          await fs.mkdir('/listdir/subdir');
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.mkdir('/a/b/c/d', { recursive: true });
 
-          const entries = await fs.readdir('/listdir');
-          assert.deepStrictEqual(
-            entries.sort(),
-            ['file1.txt', 'file2.txt', 'subdir'].sort(),
-          );
-        } finally {
-          await fs.close();
-        }
-      }));
+        assert.strictEqual(await fs.exists('/a'), true);
+        assert.strictEqual(await fs.exists('/a/b'), true);
+        assert.strictEqual(await fs.exists('/a/b/c'), true);
+        assert.strictEqual(await fs.exists('/a/b/c/d'), true);
+      } finally {
+        await fs.close();
+      }
+    });
 
-    it('should list directory with file types', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.mkdir('/typedir');
-          await fs.writeFile('/typedir/file.txt', 'content');
-          await fs.mkdir('/typedir/subdir');
+    it('should list directory contents', async () => {
+      await using container = await testSqlServer.database();
 
-          const entries = await fs.readdirWithFileTypes('/typedir');
-          const fileEntry = entries.find((e) => e.name === 'file.txt');
-          const dirEntry = entries.find((e) => e.name === 'subdir');
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.mkdir('/listdir');
+        await fs.writeFile('/listdir/file1.txt', 'content1');
+        await fs.writeFile('/listdir/file2.txt', 'content2');
+        await fs.mkdir('/listdir/subdir');
 
-          assert.strictEqual(fileEntry?.isFile, true);
-          assert.strictEqual(fileEntry?.isDirectory, false);
-          assert.strictEqual(dirEntry?.isFile, false);
-          assert.strictEqual(dirEntry?.isDirectory, true);
-        } finally {
-          await fs.close();
-        }
-      }));
+        const entries = await fs.readdir('/listdir');
+        assert.deepStrictEqual(
+          entries.sort(),
+          ['file1.txt', 'file2.txt', 'subdir'].sort(),
+        );
+      } finally {
+        await fs.close();
+      }
+    });
 
-    it('should throw EEXIST on non-recursive mkdir of existing path', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.mkdir('/existing');
+    it('should list directory with file types', async () => {
+      await using container = await testSqlServer.database();
 
-          await assert.rejects(() => fs.mkdir('/existing'), /EEXIST/);
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.mkdir('/typedir');
+        await fs.writeFile('/typedir/file.txt', 'content');
+        await fs.mkdir('/typedir/subdir');
 
-    it('should throw ENOENT on readdir of non-existent path', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await assert.rejects(() => fs.readdir('/ghost'), /ENOENT/);
-        } finally {
-          await fs.close();
-        }
-      }));
+        const entries = await fs.readdirWithFileTypes('/typedir');
+        const fileEntry = entries.find((e) => e.name === 'file.txt');
+        const dirEntry = entries.find((e) => e.name === 'subdir');
 
-    it('should throw ENOTDIR on readdir of a file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/notadir.txt', 'content');
+        assert.strictEqual(fileEntry?.isFile, true);
+        assert.strictEqual(fileEntry?.isDirectory, false);
+        assert.strictEqual(dirEntry?.isFile, false);
+        assert.strictEqual(dirEntry?.isDirectory, true);
+      } finally {
+        await fs.close();
+      }
+    });
 
-          await assert.rejects(() => fs.readdir('/notadir.txt'), /ENOTDIR/);
-        } finally {
-          await fs.close();
-        }
-      }));
+    it('should throw EEXIST on non-recursive mkdir of existing path', async () => {
+      await using container = await testSqlServer.database();
 
-    it('should return empty array for readdir of empty directory', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.mkdir('/emptydir');
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.mkdir('/existing');
 
-          const entries = await fs.readdir('/emptydir');
-          assert.deepStrictEqual(entries, []);
-        } finally {
-          await fs.close();
-        }
-      }));
+        await assert.rejects(() => fs.mkdir('/existing'), /EEXIST/);
+      } finally {
+        await fs.close();
+      }
+    });
+
+    it('should throw ENOENT on readdir of non-existent path', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await assert.rejects(() => fs.readdir('/ghost'), /ENOENT/);
+      } finally {
+        await fs.close();
+      }
+    });
+
+    it('should throw ENOTDIR on readdir of a file', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/notadir.txt', 'content');
+
+        await assert.rejects(() => fs.readdir('/notadir.txt'), /ENOTDIR/);
+      } finally {
+        await fs.close();
+      }
+    });
+
+    it('should return empty array for readdir of empty directory', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.mkdir('/emptydir');
+
+        const entries = await fs.readdir('/emptydir');
+        assert.deepStrictEqual(entries, []);
+      } finally {
+        await fs.close();
+      }
+    });
   });
 
   describe('remove operations', () => {
-    it('should remove file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/toremove.txt', 'content');
-          assert.strictEqual(await fs.exists('/toremove.txt'), true);
+    it('should remove file', async () => {
+      await using container = await testSqlServer.database();
 
-          await fs.rm('/toremove.txt');
-          assert.strictEqual(await fs.exists('/toremove.txt'), false);
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/toremove.txt', 'content');
+        assert.strictEqual(await fs.exists('/toremove.txt'), true);
 
-    it('should remove directory recursively', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.mkdir('/rmdir');
-          await fs.writeFile('/rmdir/file.txt', 'content');
-          await fs.mkdir('/rmdir/subdir');
-          await fs.writeFile('/rmdir/subdir/nested.txt', 'nested');
+        await fs.rm('/toremove.txt');
+        assert.strictEqual(await fs.exists('/toremove.txt'), false);
+      } finally {
+        await fs.close();
+      }
+    });
 
-          await fs.rm('/rmdir', { recursive: true });
-          assert.strictEqual(await fs.exists('/rmdir'), false);
-        } finally {
-          await fs.close();
-        }
-      }));
+    it('should remove directory recursively', async () => {
+      await using container = await testSqlServer.database();
 
-    it('should not throw on force remove of non-existent', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.rm('/nonexistent', { force: true });
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.mkdir('/rmdir');
+        await fs.writeFile('/rmdir/file.txt', 'content');
+        await fs.mkdir('/rmdir/subdir');
+        await fs.writeFile('/rmdir/subdir/nested.txt', 'nested');
 
-    it('should throw ENOTEMPTY on rm non-empty dir without recursive', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.mkdir('/notempty');
-          await fs.writeFile('/notempty/child.txt', 'data');
+        await fs.rm('/rmdir', { recursive: true });
+        assert.strictEqual(await fs.exists('/rmdir'), false);
+      } finally {
+        await fs.close();
+      }
+    });
 
-          await assert.rejects(() => fs.rm('/notempty'), /ENOTEMPTY/);
-        } finally {
-          await fs.close();
-        }
-      }));
+    it('should not throw on force remove of non-existent', async () => {
+      await using container = await testSqlServer.database();
 
-    it('should throw ENOENT on rm non-existent without force', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await assert.rejects(() => fs.rm('/does-not-exist'), /ENOENT/);
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.rm('/nonexistent', { force: true });
+      } finally {
+        await fs.close();
+      }
+    });
+
+    it('should throw ENOTEMPTY on rm non-empty dir without recursive', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.mkdir('/notempty');
+        await fs.writeFile('/notempty/child.txt', 'data');
+
+        await assert.rejects(() => fs.rm('/notempty'), /ENOTEMPTY/);
+      } finally {
+        await fs.close();
+      }
+    });
+
+    it('should throw ENOENT on rm non-existent without force', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await assert.rejects(() => fs.rm('/does-not-exist'), /ENOENT/);
+      } finally {
+        await fs.close();
+      }
+    });
   });
 
   describe('copy and move operations', () => {
-    it('should copy file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/original.txt', 'original content');
-          await fs.cp('/original.txt', '/copied.txt');
+    it('should copy file', async () => {
+      await using container = await testSqlServer.database();
 
-          const result = await fs.readFile('/copied.txt');
-          assert.strictEqual(result, 'original content');
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/original.txt', 'original content');
+        await fs.cp('/original.txt', '/copied.txt');
 
-    it('should copy directory recursively', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.mkdir('/srcdir');
-          await fs.writeFile('/srcdir/file.txt', 'content');
-          await fs.mkdir('/srcdir/nested');
-          await fs.writeFile('/srcdir/nested/deep.txt', 'deep');
+        const result = await fs.readFile('/copied.txt');
+        assert.strictEqual(result, 'original content');
+      } finally {
+        await fs.close();
+      }
+    });
 
-          await fs.cp('/srcdir', '/destdir', { recursive: true });
+    it('should copy directory recursively', async () => {
+      await using container = await testSqlServer.database();
 
-          assert.strictEqual(await fs.exists('/destdir'), true);
-          assert.strictEqual(await fs.readFile('/destdir/file.txt'), 'content');
-          assert.strictEqual(
-            await fs.readFile('/destdir/nested/deep.txt'),
-            'deep',
-          );
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.mkdir('/srcdir');
+        await fs.writeFile('/srcdir/file.txt', 'content');
+        await fs.mkdir('/srcdir/nested');
+        await fs.writeFile('/srcdir/nested/deep.txt', 'deep');
 
-    it('should move file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/tomove.txt', 'moving');
-          await fs.mv('/tomove.txt', '/moved.txt');
+        await fs.cp('/srcdir', '/destdir', { recursive: true });
 
-          assert.strictEqual(await fs.exists('/tomove.txt'), false);
-          assert.strictEqual(await fs.readFile('/moved.txt'), 'moving');
-        } finally {
-          await fs.close();
-        }
-      }));
+        assert.strictEqual(await fs.exists('/destdir'), true);
+        assert.strictEqual(await fs.readFile('/destdir/file.txt'), 'content');
+        assert.strictEqual(
+          await fs.readFile('/destdir/nested/deep.txt'),
+          'deep',
+        );
+      } finally {
+        await fs.close();
+      }
+    });
 
-    it('should overwrite existing file on move', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/src.txt', 'new content');
-          await fs.writeFile('/dest.txt', 'old content');
-          await fs.mv('/src.txt', '/dest.txt');
+    it('should move file', async () => {
+      await using container = await testSqlServer.database();
 
-          assert.strictEqual(await fs.exists('/src.txt'), false);
-          assert.strictEqual(await fs.readFile('/dest.txt'), 'new content');
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/tomove.txt', 'moving');
+        await fs.mv('/tomove.txt', '/moved.txt');
 
-    it('should overwrite existing directory on move', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.mkdir('/src');
-          await fs.writeFile('/src/a.txt', 'alpha');
+        assert.strictEqual(await fs.exists('/tomove.txt'), false);
+        assert.strictEqual(await fs.readFile('/moved.txt'), 'moving');
+      } finally {
+        await fs.close();
+      }
+    });
 
-          await fs.mkdir('/dest');
-          await fs.writeFile('/dest/old.txt', 'stale');
+    it('should overwrite existing file on move', async () => {
+      await using container = await testSqlServer.database();
 
-          await fs.mv('/src', '/dest');
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/src.txt', 'new content');
+        await fs.writeFile('/dest.txt', 'old content');
+        await fs.mv('/src.txt', '/dest.txt');
 
-          assert.strictEqual(await fs.exists('/src'), false);
-          assert.strictEqual(await fs.readFile('/dest/a.txt'), 'alpha');
-          assert.strictEqual(await fs.exists('/dest/old.txt'), false);
-        } finally {
-          await fs.close();
-        }
-      }));
+        assert.strictEqual(await fs.exists('/src.txt'), false);
+        assert.strictEqual(await fs.readFile('/dest.txt'), 'new content');
+      } finally {
+        await fs.close();
+      }
+    });
 
-    it('should throw ENOENT when copying non-existent source', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await assert.rejects(
-            () => fs.cp('/ghost.txt', '/dest.txt'),
-            /ENOENT/,
-          );
-        } finally {
-          await fs.close();
-        }
-      }));
+    it('should overwrite existing directory on move', async () => {
+      await using container = await testSqlServer.database();
 
-    it('should throw when copying directory without recursive', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.mkdir('/cpdir');
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.mkdir('/src');
+        await fs.writeFile('/src/a.txt', 'alpha');
 
-          await assert.rejects(
-            () => fs.cp('/cpdir', '/cpdir2'),
-            /not specified/,
-          );
-        } finally {
-          await fs.close();
-        }
-      }));
+        await fs.mkdir('/dest');
+        await fs.writeFile('/dest/old.txt', 'stale');
 
-    it('should copy file overwriting existing destination', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/src-cp.txt', 'new data');
-          await fs.writeFile('/dest-cp.txt', 'old data');
-          await fs.cp('/src-cp.txt', '/dest-cp.txt');
+        await fs.mv('/src', '/dest');
 
-          assert.strictEqual(await fs.readFile('/dest-cp.txt'), 'new data');
-          assert.strictEqual(await fs.readFile('/src-cp.txt'), 'new data');
-        } finally {
-          await fs.close();
-        }
-      }));
+        assert.strictEqual(await fs.exists('/src'), false);
+        assert.strictEqual(await fs.readFile('/dest/a.txt'), 'alpha');
+        assert.strictEqual(await fs.exists('/dest/old.txt'), false);
+      } finally {
+        await fs.close();
+      }
+    });
 
-    it('should throw ENOENT when moving non-existent source', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await assert.rejects(
-            () => fs.mv('/ghost.txt', '/dest.txt'),
-            /ENOENT/,
-          );
-        } finally {
-          await fs.close();
-        }
-      }));
+    it('should throw ENOENT when copying non-existent source', async () => {
+      await using container = await testSqlServer.database();
 
-    it('should move directory to new path', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.mkdir('/mvdir');
-          await fs.writeFile('/mvdir/file.txt', 'inside');
-          await fs.mkdir('/mvdir/sub');
-          await fs.writeFile('/mvdir/sub/nested.txt', 'deep');
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await assert.rejects(() => fs.cp('/ghost.txt', '/dest.txt'), /ENOENT/);
+      } finally {
+        await fs.close();
+      }
+    });
 
-          await fs.mv('/mvdir', '/moved-dir');
+    it('should throw when copying directory without recursive', async () => {
+      await using container = await testSqlServer.database();
 
-          assert.strictEqual(await fs.exists('/mvdir'), false);
-          assert.strictEqual(
-            await fs.readFile('/moved-dir/file.txt'),
-            'inside',
-          );
-          assert.strictEqual(
-            await fs.readFile('/moved-dir/sub/nested.txt'),
-            'deep',
-          );
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.mkdir('/cpdir');
+
+        await assert.rejects(() => fs.cp('/cpdir', '/cpdir2'), /not specified/);
+      } finally {
+        await fs.close();
+      }
+    });
+
+    it('should copy file overwriting existing destination', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/src-cp.txt', 'new data');
+        await fs.writeFile('/dest-cp.txt', 'old data');
+        await fs.cp('/src-cp.txt', '/dest-cp.txt');
+
+        assert.strictEqual(await fs.readFile('/dest-cp.txt'), 'new data');
+        assert.strictEqual(await fs.readFile('/src-cp.txt'), 'new data');
+      } finally {
+        await fs.close();
+      }
+    });
+
+    it('should throw ENOENT when moving non-existent source', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await assert.rejects(() => fs.mv('/ghost.txt', '/dest.txt'), /ENOENT/);
+      } finally {
+        await fs.close();
+      }
+    });
+
+    it('should move directory to new path', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.mkdir('/mvdir');
+        await fs.writeFile('/mvdir/file.txt', 'inside');
+        await fs.mkdir('/mvdir/sub');
+        await fs.writeFile('/mvdir/sub/nested.txt', 'deep');
+
+        await fs.mv('/mvdir', '/moved-dir');
+
+        assert.strictEqual(await fs.exists('/mvdir'), false);
+        assert.strictEqual(await fs.readFile('/moved-dir/file.txt'), 'inside');
+        assert.strictEqual(
+          await fs.readFile('/moved-dir/sub/nested.txt'),
+          'deep',
+        );
+      } finally {
+        await fs.close();
+      }
+    });
   });
 
   describe('stat operations', () => {
-    it('should return file stats', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/statfile.txt', 'content');
-          const stat = await fs.stat('/statfile.txt');
+    it('should return file stats', async () => {
+      await using container = await testSqlServer.database();
 
-          assert.strictEqual(stat.isFile, true);
-          assert.strictEqual(stat.isDirectory, false);
-          assert.strictEqual(stat.size, 7);
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/statfile.txt', 'content');
+        const stat = await fs.stat('/statfile.txt');
 
-    it('should return directory stats', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.mkdir('/statdir');
-          const stat = await fs.stat('/statdir');
+        assert.strictEqual(stat.isFile, true);
+        assert.strictEqual(stat.isDirectory, false);
+        assert.strictEqual(stat.size, 7);
+      } finally {
+        await fs.close();
+      }
+    });
 
-          assert.strictEqual(stat.isFile, false);
-          assert.strictEqual(stat.isDirectory, true);
-        } finally {
-          await fs.close();
-        }
-      }));
+    it('should return directory stats', async () => {
+      await using container = await testSqlServer.database();
 
-    it('should change file mode', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/modefile.txt', 'content');
-          await fs.chmod('/modefile.txt', 0o755);
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.mkdir('/statdir');
+        const stat = await fs.stat('/statdir');
 
-          const stat = await fs.stat('/modefile.txt');
-          assert.strictEqual(stat.mode, 0o755);
-        } finally {
-          await fs.close();
-        }
-      }));
+        assert.strictEqual(stat.isFile, false);
+        assert.strictEqual(stat.isDirectory, true);
+      } finally {
+        await fs.close();
+      }
+    });
+
+    it('should change file mode', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/modefile.txt', 'content');
+        await fs.chmod('/modefile.txt', 0o755);
+
+        const stat = await fs.stat('/modefile.txt');
+        assert.strictEqual(stat.mode, 0o755);
+      } finally {
+        await fs.close();
+      }
+    });
   });
 
   describe('symlink operations', () => {
-    it('should create and read symlink', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/target.txt', 'target content');
-          await fs.symlink('/target.txt', '/link.txt');
+    it('should create and read symlink', async () => {
+      await using container = await testSqlServer.database();
 
-          const target = await fs.readlink('/link.txt');
-          assert.strictEqual(target, '/target.txt');
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/target.txt', 'target content');
+        await fs.symlink('/target.txt', '/link.txt');
 
-          const content = await fs.readFile('/link.txt');
-          assert.strictEqual(content, 'target content');
-        } finally {
-          await fs.close();
-        }
-      }));
+        const target = await fs.readlink('/link.txt');
+        assert.strictEqual(target, '/target.txt');
 
-    it('should distinguish lstat from stat for symlinks', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/lstat-target.txt', 'content');
-          await fs.symlink('/lstat-target.txt', '/lstat-link.txt');
+        const content = await fs.readFile('/link.txt');
+        assert.strictEqual(content, 'target content');
+      } finally {
+        await fs.close();
+      }
+    });
 
-          const stat = await fs.stat('/lstat-link.txt');
-          assert.strictEqual(stat.isSymbolicLink, false);
+    it('should distinguish lstat from stat for symlinks', async () => {
+      await using container = await testSqlServer.database();
 
-          const lstat = await fs.lstat('/lstat-link.txt');
-          assert.strictEqual(lstat.isSymbolicLink, true);
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/lstat-target.txt', 'content');
+        await fs.symlink('/lstat-target.txt', '/lstat-link.txt');
+
+        const stat = await fs.stat('/lstat-link.txt');
+        assert.strictEqual(stat.isSymbolicLink, false);
+
+        const lstat = await fs.lstat('/lstat-link.txt');
+        assert.strictEqual(lstat.isSymbolicLink, true);
+      } finally {
+        await fs.close();
+      }
+    });
   });
 
   describe('root option', () => {
-    it('should prefix paths with root', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/prefix',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/file.txt', 'prefixed content');
+    it('should prefix paths with root', async () => {
+      await using container = await testSqlServer.database();
 
-          const content = await fs.readFile('/file.txt');
-          assert.strictEqual(content, 'prefixed content');
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/prefix',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/file.txt', 'prefixed content');
 
-          const allPaths = await fs.getAllPathsAsync();
-          assert.ok(
-            allPaths.includes('/prefix'),
-            'Should have /prefix directory',
-          );
-          assert.ok(
-            allPaths.includes('/prefix/file.txt'),
-            'Should have /prefix/file.txt',
-          );
-        } finally {
-          await fs.close();
-        }
-      }));
+        const content = await fs.readFile('/file.txt');
+        assert.strictEqual(content, 'prefixed content');
 
-    it('should create root directory structure on initialization', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/chat/123/results',
-        });
-        await fs.initialize();
-        try {
-          const allPaths = await fs.getAllPathsAsync();
+        const allPaths = await fs.getAllPathsAsync();
+        assert.ok(
+          allPaths.includes('/prefix'),
+          'Should have /prefix directory',
+        );
+        assert.ok(
+          allPaths.includes('/prefix/file.txt'),
+          'Should have /prefix/file.txt',
+        );
+      } finally {
+        await fs.close();
+      }
+    });
 
-          assert.ok(allPaths.includes('/chat'), 'Should have /chat');
-          assert.ok(allPaths.includes('/chat/123'), 'Should have /chat/123');
-          assert.ok(
-            allPaths.includes('/chat/123/results'),
-            'Should have /chat/123/results',
-          );
-        } finally {
-          await fs.close();
-        }
-      }));
+    it('should create root directory structure on initialization', async () => {
+      await using container = await testSqlServer.database();
 
-    it('should isolate two instances with different roots', async () =>
-      await withSqlServerContainer(async (container) => {
-        const pool = new sql.ConnectionPool(container.connectionString);
-        await pool.connect();
-        try {
-          const fs1 = new MssqlFs({ pool, root: '/chat-1' });
-          await fs1.initialize();
-          const fs2 = new MssqlFs({ pool, root: '/chat-2' });
-          await fs2.initialize();
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/chat/123/results',
+      });
+      await fs.initialize();
+      try {
+        const allPaths = await fs.getAllPathsAsync();
 
-          await fs1.writeFile('/data.json', '{"chat": 1}');
-          await fs2.writeFile('/data.json', '{"chat": 2}');
+        assert.ok(allPaths.includes('/chat'), 'Should have /chat');
+        assert.ok(allPaths.includes('/chat/123'), 'Should have /chat/123');
+        assert.ok(
+          allPaths.includes('/chat/123/results'),
+          'Should have /chat/123/results',
+        );
+      } finally {
+        await fs.close();
+      }
+    });
 
-          assert.strictEqual(await fs1.readFile('/data.json'), '{"chat": 1}');
-          assert.strictEqual(await fs2.readFile('/data.json'), '{"chat": 2}');
+    it('should isolate two instances with different roots', async () => {
+      await using container = await testSqlServer.database();
 
-          await fs1.close();
-          await fs2.close();
-        } finally {
-          await pool.close();
-        }
-      }));
+      const pool = new sql.ConnectionPool(container.connectionString);
+      await pool.connect();
+      try {
+        const fs1 = new MssqlFs({ pool, root: '/chat-1' });
+        await fs1.initialize();
+        const fs2 = new MssqlFs({ pool, root: '/chat-2' });
+        await fs2.initialize();
+
+        await fs1.writeFile('/data.json', '{"chat": 1}');
+        await fs2.writeFile('/data.json', '{"chat": 2}');
+
+        assert.strictEqual(await fs1.readFile('/data.json'), '{"chat": 1}');
+        assert.strictEqual(await fs2.readFile('/data.json'), '{"chat": 2}');
+
+        await fs1.close();
+        await fs2.close();
+      } finally {
+        await pool.close();
+      }
+    });
   });
 
   describe('pool injection', () => {
-    it('should accept a pre-existing ConnectionPool', async () =>
-      await withSqlServerContainer(async (container) => {
-        const pool = new sql.ConnectionPool(container.connectionString);
-        await pool.connect();
+    it('should accept a pre-existing ConnectionPool', async () => {
+      await using container = await testSqlServer.database();
+
+      const pool = new sql.ConnectionPool(container.connectionString);
+      await pool.connect();
+      try {
+        const fs = new MssqlFs({ pool, root: '/' });
+        await fs.initialize();
         try {
-          const fs = new MssqlFs({ pool, root: '/' });
-          await fs.initialize();
-          try {
-            await fs.writeFile('/pool-test.txt', 'injected pool');
+          await fs.writeFile('/pool-test.txt', 'injected pool');
 
-            const content = await fs.readFile('/pool-test.txt');
-            assert.strictEqual(content, 'injected pool');
-          } finally {
-            await fs.close();
-          }
-
-          assert.strictEqual(pool.connected, true);
+          const content = await fs.readFile('/pool-test.txt');
+          assert.strictEqual(content, 'injected pool');
         } finally {
-          await pool.close();
-        }
-      }));
-
-    it('should not close external pool on close()', async () =>
-      await withSqlServerContainer(async (container) => {
-        const pool = new sql.ConnectionPool(container.connectionString);
-        await pool.connect();
-        try {
-          const fs = new MssqlFs({ pool, root: '/' });
-          await fs.initialize();
-          await fs.writeFile('/no-close.txt', 'data');
           await fs.close();
-
-          assert.strictEqual(pool.connected, true);
-
-          const result = await pool.request().query('SELECT 1 AS val');
-          assert.strictEqual(result.recordset[0].val, 1);
-        } finally {
-          await pool.close();
         }
-      }));
+
+        assert.strictEqual(pool.connected, true);
+      } finally {
+        await pool.close();
+      }
+    });
+
+    it('should not close external pool on close()', async () => {
+      await using container = await testSqlServer.database();
+
+      const pool = new sql.ConnectionPool(container.connectionString);
+      await pool.connect();
+      try {
+        const fs = new MssqlFs({ pool, root: '/' });
+        await fs.initialize();
+        await fs.writeFile('/no-close.txt', 'data');
+        await fs.close();
+
+        assert.strictEqual(pool.connected, true);
+
+        const result = await pool.request().query('SELECT 1 AS val');
+        assert.strictEqual(result.recordset[0].val, 1);
+      } finally {
+        await pool.close();
+      }
+    });
   });
 
   describe('schema support', () => {
-    it('should create tables in a custom schema', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-          schema: 'custom_fs_schema',
-        });
-        await fs.initialize();
+    it('should create tables in a custom schema', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+        schema: 'custom_fs_schema',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/schema-test.txt', 'custom schema data');
+
+        const content = await fs.readFile('/schema-test.txt');
+        assert.strictEqual(content, 'custom schema data');
+
+        const pool = new sql.ConnectionPool(container.connectionString);
+        await pool.connect();
         try {
-          await fs.writeFile('/schema-test.txt', 'custom schema data');
-
-          const content = await fs.readFile('/schema-test.txt');
-          assert.strictEqual(content, 'custom schema data');
-
-          const pool = new sql.ConnectionPool(container.connectionString);
-          await pool.connect();
-          try {
-            const result = await pool.request().query(`
+          const result = await pool.request().query(`
               SELECT TABLE_SCHEMA, TABLE_NAME
               FROM INFORMATION_SCHEMA.TABLES
               WHERE TABLE_SCHEMA = 'custom_fs_schema'
             `);
-            assert.ok(result.recordset.length > 0);
-            assert.ok(
-              result.recordset.every(
-                (r: { TABLE_SCHEMA: string }) =>
-                  r.TABLE_SCHEMA === 'custom_fs_schema',
-              ),
-            );
-          } finally {
-            await pool.close();
-          }
+          assert.ok(result.recordset.length > 0);
+          assert.ok(
+            result.recordset.every(
+              (r: { TABLE_SCHEMA: string }) =>
+                r.TABLE_SCHEMA === 'custom_fs_schema',
+            ),
+          );
         } finally {
-          await fs.close();
+          await pool.close();
         }
-      }));
+      } finally {
+        await fs.close();
+      }
+    });
 
-    it('should create schema in sys.schemas', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-          schema: 'ddl_created_fs_schema',
-        });
-        await fs.initialize();
+    it('should create schema in sys.schemas', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+        schema: 'ddl_created_fs_schema',
+      });
+      await fs.initialize();
+      try {
+        const pool = new sql.ConnectionPool(container.connectionString);
+        await pool.connect();
         try {
-          const pool = new sql.ConnectionPool(container.connectionString);
-          await pool.connect();
-          try {
-            const result = await pool.request().query(`
+          const result = await pool.request().query(`
               SELECT name FROM sys.schemas WHERE name = 'ddl_created_fs_schema'
             `);
-            assert.strictEqual(result.recordset.length, 1);
-            assert.strictEqual(
-              result.recordset[0].name,
-              'ddl_created_fs_schema',
-            );
-          } finally {
-            await pool.close();
-          }
+          assert.strictEqual(result.recordset.length, 1);
+          assert.strictEqual(result.recordset[0].name, 'ddl_created_fs_schema');
         } finally {
-          await fs.close();
+          await pool.close();
         }
-      }));
+      } finally {
+        await fs.close();
+      }
+    });
 
-    it('should handle idempotent initialization', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-          schema: 'idempotent_fs_schema',
-        });
-        await fs.initialize();
-        await fs.initialize();
-        try {
-          await fs.writeFile('/test.txt', 'idempotent');
-          const content = await fs.readFile('/test.txt');
-          assert.strictEqual(content, 'idempotent');
-        } finally {
-          await fs.close();
-        }
-      }));
+    it('should handle idempotent initialization', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+        schema: 'idempotent_fs_schema',
+      });
+      await fs.initialize();
+      await fs.initialize();
+      try {
+        await fs.writeFile('/test.txt', 'idempotent');
+        const content = await fs.readFile('/test.txt');
+        assert.strictEqual(content, 'idempotent');
+      } finally {
+        await fs.close();
+      }
+    });
   });
 
   describe('link operations', () => {
-    it('should create hard link and read from both paths', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/link-src.txt', 'shared content');
-          await fs.link('/link-src.txt', '/link-dest.txt');
+    it('should create hard link and read from both paths', async () => {
+      await using container = await testSqlServer.database();
 
-          assert.strictEqual(
-            await fs.readFile('/link-dest.txt'),
-            'shared content',
-          );
-          assert.strictEqual(
-            await fs.readFile('/link-src.txt'),
-            'shared content',
-          );
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/link-src.txt', 'shared content');
+        await fs.link('/link-src.txt', '/link-dest.txt');
 
-    it('should throw ENOENT when link source does not exist', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await assert.rejects(
-            () => fs.link('/no-source.txt', '/link-dest.txt'),
-            /ENOENT/,
-          );
-        } finally {
-          await fs.close();
-        }
-      }));
+        assert.strictEqual(
+          await fs.readFile('/link-dest.txt'),
+          'shared content',
+        );
+        assert.strictEqual(
+          await fs.readFile('/link-src.txt'),
+          'shared content',
+        );
+      } finally {
+        await fs.close();
+      }
+    });
 
-    it('should throw EEXIST when link destination already exists', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/link-a.txt', 'a');
-          await fs.writeFile('/link-b.txt', 'b');
+    it('should throw ENOENT when link source does not exist', async () => {
+      await using container = await testSqlServer.database();
 
-          await assert.rejects(
-            () => fs.link('/link-a.txt', '/link-b.txt'),
-            /EEXIST/,
-          );
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await assert.rejects(
+          () => fs.link('/no-source.txt', '/link-dest.txt'),
+          /ENOENT/,
+        );
+      } finally {
+        await fs.close();
+      }
+    });
 
-    it('should throw when linking a directory', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.mkdir('/linkdir');
+    it('should throw EEXIST when link destination already exists', async () => {
+      await using container = await testSqlServer.database();
 
-          await assert.rejects(
-            () => fs.link('/linkdir', '/linkdir2'),
-            /not supported for directories/,
-          );
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/link-a.txt', 'a');
+        await fs.writeFile('/link-b.txt', 'b');
+
+        await assert.rejects(
+          () => fs.link('/link-a.txt', '/link-b.txt'),
+          /EEXIST/,
+        );
+      } finally {
+        await fs.close();
+      }
+    });
+
+    it('should throw when linking a directory', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.mkdir('/linkdir');
+
+        await assert.rejects(
+          () => fs.link('/linkdir', '/linkdir2'),
+          /not supported for directories/,
+        );
+      } finally {
+        await fs.close();
+      }
+    });
   });
 
   describe('realpath and utimes', () => {
-    it('should return canonical path for a file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/real.txt', 'content');
+    it('should return canonical path for a file', async () => {
+      await using container = await testSqlServer.database();
 
-          const resolved = await fs.realpath('/real.txt');
-          assert.strictEqual(resolved, '/real.txt');
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/real.txt', 'content');
 
-    it('should resolve symlink to physical path', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/real-target.txt', 'data');
-          await fs.symlink('/real-target.txt', '/real-link.txt');
+        const resolved = await fs.realpath('/real.txt');
+        assert.strictEqual(resolved, '/real.txt');
+      } finally {
+        await fs.close();
+      }
+    });
 
-          const resolved = await fs.realpath('/real-link.txt');
-          assert.strictEqual(resolved, '/real-target.txt');
-        } finally {
-          await fs.close();
-        }
-      }));
+    it('should resolve symlink to physical path', async () => {
+      await using container = await testSqlServer.database();
 
-    it('should throw ENOENT for realpath of non-existent path', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await assert.rejects(() => fs.realpath('/nope.txt'), /ENOENT/);
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/real-target.txt', 'data');
+        await fs.symlink('/real-target.txt', '/real-link.txt');
 
-    it('should set mtime via utimes and verify via stat', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/timed.txt', 'content');
+        const resolved = await fs.realpath('/real-link.txt');
+        assert.strictEqual(resolved, '/real-target.txt');
+      } finally {
+        await fs.close();
+      }
+    });
 
-          const targetDate = new Date('2024-06-15T12:00:00Z');
-          await fs.utimes('/timed.txt', new Date(), targetDate);
+    it('should throw ENOENT for realpath of non-existent path', async () => {
+      await using container = await testSqlServer.database();
 
-          const stat = await fs.stat('/timed.txt');
-          assert.strictEqual(stat.mtime.getTime(), targetDate.getTime());
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await assert.rejects(() => fs.realpath('/nope.txt'), /ENOENT/);
+      } finally {
+        await fs.close();
+      }
+    });
 
-    it('should throw ENOENT on utimes of non-existent path', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await assert.rejects(
-            () => fs.utimes('/nope.txt', new Date(), new Date()),
-            /ENOENT/,
-          );
-        } finally {
-          await fs.close();
-        }
-      }));
+    it('should set mtime via utimes and verify via stat', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/timed.txt', 'content');
+
+        const targetDate = new Date('2024-06-15T12:00:00Z');
+        await fs.utimes('/timed.txt', new Date(), targetDate);
+
+        const stat = await fs.stat('/timed.txt');
+        assert.strictEqual(stat.mtime.getTime(), targetDate.getTime());
+      } finally {
+        await fs.close();
+      }
+    });
+
+    it('should throw ENOENT on utimes of non-existent path', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await assert.rejects(
+          () => fs.utimes('/nope.txt', new Date(), new Date()),
+          /ENOENT/,
+        );
+      } finally {
+        await fs.close();
+      }
+    });
   });
 
   describe('symlink edge cases', () => {
-    it('should throw EEXIST when creating symlink at existing path', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/sym-target.txt', 'data');
-          await fs.writeFile('/sym-existing.txt', 'occupied');
+    it('should throw EEXIST when creating symlink at existing path', async () => {
+      await using container = await testSqlServer.database();
 
-          await assert.rejects(
-            () => fs.symlink('/sym-target.txt', '/sym-existing.txt'),
-            /EEXIST/,
-          );
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/sym-target.txt', 'data');
+        await fs.writeFile('/sym-existing.txt', 'occupied');
 
-    it('should throw when readlink on a regular file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await fs.writeFile('/regular.txt', 'not a link');
+        await assert.rejects(
+          () => fs.symlink('/sym-target.txt', '/sym-existing.txt'),
+          /EEXIST/,
+        );
+      } finally {
+        await fs.close();
+      }
+    });
 
-          await assert.rejects(
-            () => fs.readlink('/regular.txt'),
-            /not a symbolic link/,
-          );
-        } finally {
-          await fs.close();
-        }
-      }));
+    it('should throw when readlink on a regular file', async () => {
+      await using container = await testSqlServer.database();
 
-    it('should throw ENOENT on stat of non-existent path', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-        });
-        await fs.initialize();
-        try {
-          await assert.rejects(
-            () => fs.stat('/nonexistent-stat.txt'),
-            /ENOENT/,
-          );
-        } finally {
-          await fs.close();
-        }
-      }));
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await fs.writeFile('/regular.txt', 'not a link');
+
+        await assert.rejects(
+          () => fs.readlink('/regular.txt'),
+          /not a symbolic link/,
+        );
+      } finally {
+        await fs.close();
+      }
+    });
+
+    it('should throw ENOENT on stat of non-existent path', async () => {
+      await using container = await testSqlServer.database();
+
+      const fs = new MssqlFs({
+        pool: container.connectionString,
+        root: '/',
+      });
+      await fs.initialize();
+      try {
+        await assert.rejects(() => fs.stat('/nonexistent-stat.txt'), /ENOENT/);
+      } finally {
+        await fs.close();
+      }
+    });
   });
 });

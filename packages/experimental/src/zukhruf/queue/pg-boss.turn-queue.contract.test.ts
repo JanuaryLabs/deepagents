@@ -17,7 +17,9 @@ import type {
   TurnRef,
 } from '@deepagents/experimental/zukhruf';
 import { PgBossTurnQueue } from '@deepagents/experimental/zukhruf';
-import { withPostgresContainer } from '@deepagents/test';
+import { Postgres } from '@deepagents/test';
+
+const testPostgres = new Postgres();
 
 /**
  * Behavioral contract every TurnQueue implementation must pass.
@@ -956,46 +958,26 @@ suite('PgBossTurnQueue real PostgreSQL scheduler regressions', () => {
 async function postgresQueueHarness(
   options: PostgresQueueHarnessOptions = {},
 ): Promise<PostgresQueueHarness> {
-  const ready = Promise.withResolvers<PostgresQueueHarness>();
-  const release = Promise.withResolvers<void>();
-  const lifecycle = withPostgresContainer(async (container) => {
-    const boss = new PgBoss({
-      connectionString: container.connectionString,
-      ...options.boss,
-    });
-    boss.on('error', () => {});
-    try {
-      await boss.start();
-      const queue = new PgBossTurnQueue(boss, {
-        pollingIntervalSeconds: 0.5,
-        ...options.queue,
-      });
-      await queue.initialize();
-      ready.resolve({
-        connectionString: container.connectionString,
-        queue,
-        async [Symbol.asyncDispose]() {
-          release.resolve();
-          await lifecycle;
-        },
-      });
-      await release.promise;
-    } catch (error) {
-      ready.reject(error);
-      throw error;
-    } finally {
-      await boss.stop({ graceful: false });
-    }
+  await using resources = new AsyncDisposableStack();
+  const database = resources.use(await testPostgres.database());
+  const boss = new PgBoss({
+    connectionString: database.connectionString,
+    ...options.boss,
   });
-  void lifecycle.then(
-    (result) => {
-      if (result === undefined) {
-        ready.reject(new Error('PostgreSQL test container is unavailable'));
-      }
-    },
-    (error: unknown) => ready.reject(error),
-  );
-  return ready.promise;
+  resources.defer(() => boss.stop({ graceful: false }));
+  boss.on('error', () => {});
+  await boss.start();
+  const queue = new PgBossTurnQueue(boss, {
+    pollingIntervalSeconds: 0.5,
+    ...options.queue,
+  });
+  await queue.initialize();
+  const owned = resources.move();
+  return {
+    connectionString: database.connectionString,
+    queue,
+    [Symbol.asyncDispose]: () => owned.disposeAsync(),
+  };
 }
 
 async function pgliteQueueHarness(): Promise<TurnQueueHarness> {

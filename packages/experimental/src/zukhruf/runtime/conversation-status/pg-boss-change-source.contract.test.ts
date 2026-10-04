@@ -9,7 +9,9 @@ import {
   type ConversationStatusChangeSource,
   PgBossConversationStatusChangeSource,
 } from '@deepagents/experimental/zukhruf';
-import { settleWithin, withPostgresContainer } from '@deepagents/test';
+import { Postgres, settleWithin } from '@deepagents/test';
+
+const testPostgres = new Postgres();
 
 interface ChangeSourceHarness extends AsyncDisposable {
   /** Two pg-boss instances over one database: the subscriber and the notifier. */
@@ -43,48 +45,33 @@ async function pgliteHarness(): Promise<ChangeSourceHarness> {
 }
 
 async function postgresHarness(): Promise<ChangeSourceHarness> {
-  const ready = Promise.withResolvers<ChangeSourceHarness>();
-  const release = Promise.withResolvers<void>();
-  const lifecycle = withPostgresContainer(async (container) => {
-    const listening = new PgBoss({
-      connectionString: container.connectionString,
-    });
-    const notifying = new PgBoss({
-      connectionString: container.connectionString,
-    });
-    listening.on('error', () => {});
-    notifying.on('error', () => {});
-    try {
-      await listening.start();
-      await notifying.start();
-      ready.resolve({
-        subscriber: new PgBossConversationStatusChangeSource(listening, {
-          channel: CHANNEL,
-        }),
-        notifier: new PgBossConversationStatusChangeSource(notifying, {
-          channel: CHANNEL,
-        }),
-        raw: async (payload) => {
-          await notifying
-            .getDb()
-            .executeSql('SELECT pg_notify($1, $2)', [CHANNEL, payload]);
-        },
-        async [Symbol.asyncDispose]() {
-          release.resolve();
-          await lifecycle;
-        },
-      });
-      await release.promise;
-    } catch (error) {
-      ready.reject(error);
-      throw error;
-    } finally {
-      await notifying.stop({ graceful: false });
-      await listening.stop({ graceful: false });
-    }
+  await using resources = new AsyncDisposableStack();
+  const database = resources.use(await testPostgres.database());
+  const listening = new PgBoss({ connectionString: database.connectionString });
+  resources.defer(() => listening.stop({ graceful: false }));
+  const notifying = new PgBoss({ connectionString: database.connectionString });
+  resources.defer(() => notifying.stop({ graceful: false }));
+  listening.on('error', () => {});
+  notifying.on('error', () => {});
+  await listening.start();
+  await notifying.start();
+  const subscriber = new PgBossConversationStatusChangeSource(listening, {
+    channel: CHANNEL,
   });
-  void lifecycle.catch((error: unknown) => ready.reject(error));
-  return ready.promise;
+  const notifier = new PgBossConversationStatusChangeSource(notifying, {
+    channel: CHANNEL,
+  });
+  const owned = resources.move();
+  return {
+    subscriber,
+    notifier,
+    raw: async (payload) => {
+      await notifying
+        .getDb()
+        .executeSql('SELECT pg_notify($1, $2)', [CHANNEL, payload]);
+    },
+    [Symbol.asyncDispose]: () => owned.disposeAsync(),
+  };
 }
 
 async function collect(

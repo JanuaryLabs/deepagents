@@ -17,7 +17,7 @@ PostgreSQL is already used elsewhere in the project (`PostgresContextStore` in `
 - Match `MssqlFs` API surface: async operations, explicit `initialize()`, pool injection, `close()` semantics, `getAllPathsAsync()`
 - Support PostgreSQL schema scoping (equivalent to MSSQL's `[schema].[table]` pattern)
 - Support root path isolation and composability with `ScopedFs`/`TrackedFs` decorators
-- Integration tests using `withPostgresContainer` from `@deepagents/test`
+- Integration tests using a `Postgres` instance’s `database()` method from `@deepagents/test`
 
 **Non-Goals:**
 

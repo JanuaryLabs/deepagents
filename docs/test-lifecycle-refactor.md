@@ -1,5 +1,10 @@
 # Nx test lifecycle refactor — 2026-10-03
 
+Historical record: the Nx-owned lifecycle below was implemented in `a685aaad`
+and is superseded by persistent sharing inside the test helpers. See
+[the portable lifecycle report](./portable-test-servers.md) and
+[Test Primitives](../TEST_PRIMITIVES.md) for the current contract.
+
 Status: the lifecycle refactor is implemented and verified. All ten changed Node
 test targets were executed. The broad run found one unrelated SQLite stream-test
 failure; concurrent work fixed it and a focused Nx rerun passed. The full context

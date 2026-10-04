@@ -8,7 +8,7 @@
 
 `packages/context/src/lib/stream/polling-change-source.ts:L122`: timer helper swallows every delay error. Only swallow abort errors.
 
-`packages/test/src/postgres-container.ts:L102`: default test image is PostgreSQL 17. PG stream tests must explicitly use `postgres:18-alpine`, or the helper default must move to 18.
+`packages/test/src/databases/postgres.ts`: the `Postgres` class now defaults to `postgres:18-alpine`. Stream tests acquire isolated databases through its `database()` instance method.
 
 `packages/context/src/lib/stream/change-source.ts:L1`: `StreamChange` is intentionally payload-light. Keep notification payload parsing inside `PostgresNotifyChangeSource`; `StreamManager` should only receive `chunks`, `status`, or `tick`.
 
@@ -92,7 +92,7 @@ const manager = new StreamManager({
 - `packages/context/src/index.ts`
 - `packages/context/src/lib/stream/stream-manager.ts`
 - `packages/context/src/lib/stream/polling-change-source.ts`
-- `packages/test/src/postgres-container.ts` only if we decide to move the shared default to PG18. Otherwise pass `{ image: 'postgres:18-alpine' }` in the new stream tests.
+- `packages/test/src/databases/postgres.ts` owns the PostgreSQL 18 default. Tests may pass an explicit image to the `Postgres` constructor.
 
 ## Base Store Schema
 

@@ -327,7 +327,7 @@ is already the turn's permanent state machine.
 `queue/pg-boss.turn-queue.contract.test.ts`: durability across consumers, duplicate-push safety
 (at-least-once: never lost, never concurrent, never out of order), strict FIFO per chat,
 cross-chat overlap, concurrency cap, orphan-exactly-once chat unblock, and dispose/backlog-pickup.
-It runs against PGlite and, when Docker is available, real Postgres through `withPostgresContainer`.
+It runs against PGlite and real Docker-backed Postgres through a `Postgres` instance’s `database()` method.
 The real-Postgres concurrent same-chat cases are active regressions and pass on pg-boss 12.29.0.
 The suite also caught one real coupling: pg-boss fetch orders by `created_on, id`, so
 same-millisecond pushes scrambled under random ids on ms-resolution clocks (PGlite) — which is why
