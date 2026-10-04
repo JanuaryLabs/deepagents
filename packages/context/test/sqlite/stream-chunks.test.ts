@@ -1,8 +1,5 @@
 import { type UIMessageChunk, simulateReadableStream } from 'ai';
 import assert from 'node:assert';
-import { mkdtemp, rm } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, it, mock } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -26,35 +23,9 @@ import {
   createAdaptivePollingState,
   nextAdaptivePollingDelay,
 } from '@deepagents/context';
+import { Sqlite } from '@deepagents/test';
 
-async function withStreamStore<T>(
-  fn: (store: SqliteStreamStore) => Promise<T>,
-): Promise<T> {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'stream-test-'));
-  const dbPath = path.join(dir, 'test.sqlite');
-  const store = new SqliteStreamStore(dbPath);
-  try {
-    return await fn(store);
-  } finally {
-    try {
-      (store as { close?: () => void }).close?.();
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  }
-}
-
-async function withStreamStorePath<T>(
-  fn: (dbPath: string) => Promise<T>,
-): Promise<T> {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'stream-test-'));
-  const dbPath = path.join(dir, 'test.sqlite');
-  try {
-    return await fn(dbPath);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
+const sqlite = new Sqlite();
 
 function createStream(overrides?: Partial<StreamData>): StreamData {
   return {
@@ -379,131 +350,124 @@ function makeManager(
 describe('Stream Chunks', () => {
   describe('createStream / getStream', () => {
     it('should create and retrieve a stream', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream();
-        await store.createStream(stream);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream();
+      await store.createStream(stream);
 
-        const retrieved = await store.getStream(stream.id);
-        assert.ok(retrieved);
-        assert.strictEqual(retrieved.id, stream.id);
-        assert.strictEqual(retrieved.status, 'queued');
-        assert.strictEqual(retrieved.startedAt, null);
-        assert.strictEqual(retrieved.finishedAt, null);
-        assert.strictEqual(retrieved.cancelRequestedAt, null);
-        assert.strictEqual(retrieved.error, null);
-      });
+      const retrieved = await store.getStream(stream.id);
+      assert.ok(retrieved);
+      assert.strictEqual(retrieved.id, stream.id);
+      assert.strictEqual(retrieved.status, 'queued');
+      assert.strictEqual(retrieved.startedAt, null);
+      assert.strictEqual(retrieved.finishedAt, null);
+      assert.strictEqual(retrieved.cancelRequestedAt, null);
+      assert.strictEqual(retrieved.error, null);
     });
 
     it('should return undefined for non-existent stream', async () => {
-      await withStreamStore(async (store) => {
-        const result = await store.getStream('non-existent');
-        assert.strictEqual(result, undefined);
-      });
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const result = await store.getStream('non-existent');
+      assert.strictEqual(result, undefined);
     });
   });
 
   describe('listStreamIds', () => {
     it('returns stream IDs filtered by status', async () => {
-      await withStreamStore(async (store) => {
-        await store.createStream(
-          createStream({
-            id: 'stream-queued',
-            status: 'queued',
-            createdAt: 1,
-          }),
-        );
-        await store.createStream(
-          createStream({
-            id: 'stream-running-1',
-            status: 'running',
-            createdAt: 2,
-          }),
-        );
-        await store.createStream(
-          createStream({
-            id: 'stream-running-2',
-            status: 'running',
-            createdAt: 3,
-          }),
-        );
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      await store.createStream(
+        createStream({
+          id: 'stream-queued',
+          status: 'queued',
+          createdAt: 1,
+        }),
+      );
+      await store.createStream(
+        createStream({
+          id: 'stream-running-1',
+          status: 'running',
+          createdAt: 2,
+        }),
+      );
+      await store.createStream(
+        createStream({
+          id: 'stream-running-2',
+          status: 'running',
+          createdAt: 3,
+        }),
+      );
 
-        const running = await store.listStreamIds({ status: 'running' });
-        assert.deepStrictEqual(running, [
-          'stream-running-1',
-          'stream-running-2',
-        ]);
-      });
+      const running = await store.listStreamIds({ status: 'running' });
+      assert.deepStrictEqual(running, ['stream-running-1', 'stream-running-2']);
     });
 
     it('returns all stream IDs when no filter is provided', async () => {
-      await withStreamStore(async (store) => {
-        await store.createStream(
-          createStream({
-            id: 'stream-a',
-            status: 'queued',
-            createdAt: 10,
-          }),
-        );
-        await store.createStream(
-          createStream({
-            id: 'stream-b',
-            status: 'completed',
-            createdAt: 20,
-          }),
-        );
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      await store.createStream(
+        createStream({
+          id: 'stream-a',
+          status: 'queued',
+          createdAt: 10,
+        }),
+      );
+      await store.createStream(
+        createStream({
+          id: 'stream-b',
+          status: 'completed',
+          createdAt: 20,
+        }),
+      );
 
-        const streamIds = await store.listStreamIds();
-        assert.deepStrictEqual(streamIds, ['stream-a', 'stream-b']);
-      });
+      const streamIds = await store.listStreamIds();
+      assert.deepStrictEqual(streamIds, ['stream-a', 'stream-b']);
     });
 
     it('provides listRunningStreamIds as a store instance method', async () => {
-      await withStreamStore(async (store) => {
-        await store.createStream(
-          createStream({
-            id: 'stream-running',
-            status: 'running',
-            createdAt: 1,
-          }),
-        );
-        await store.createStream(
-          createStream({
-            id: 'stream-completed',
-            status: 'completed',
-            createdAt: 2,
-          }),
-        );
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      await store.createStream(
+        createStream({
+          id: 'stream-running',
+          status: 'running',
+          createdAt: 1,
+        }),
+      );
+      await store.createStream(
+        createStream({
+          id: 'stream-completed',
+          status: 'completed',
+          createdAt: 2,
+        }),
+      );
 
-        const running = await store.listRunningStreamIds();
-        assert.deepStrictEqual(running, ['stream-running']);
-      });
+      const running = await store.listRunningStreamIds();
+      assert.deepStrictEqual(running, ['stream-running']);
     });
   });
 
   describe('Schema indexes', () => {
     it('creates indexes required for ordered stream listing queries', async () => {
-      await withStreamStorePath(async (dbPath) => {
-        const store = new SqliteStreamStore(dbPath);
-        store.close();
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      store.close();
 
-        const db = new DatabaseSync(dbPath, { readOnly: true });
-        try {
-          const rows = db
-            .prepare(
-              `SELECT name
+      using db = new DatabaseSync(database.path, { readOnly: true });
+
+      const rows = db
+        .prepare(
+          `SELECT name
                FROM sqlite_master
                WHERE type = 'index'
                  AND tbl_name = 'streams'`,
-            )
-            .all() as Array<{ name: string }>;
+        )
+        .all() as Array<{ name: string }>;
 
-          const indexNames = new Set(rows.map((row) => row.name));
-          assert.ok(indexNames.has('idx_streams_created_at_id'));
-          assert.ok(indexNames.has('idx_streams_status_created_at_id'));
-        } finally {
-          db.close();
-        }
-      });
+      const indexNames = new Set(rows.map((row) => row.name));
+      assert.ok(indexNames.has('idx_streams_created_at_id'));
+      assert.ok(indexNames.has('idx_streams_status_created_at_id'));
     });
   });
 
@@ -601,24 +565,24 @@ describe('Stream Chunks', () => {
     });
 
     it('should record a stream that ended by abort as cancelled', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const streamId = crypto.randomUUID();
-        await streams.register(streamId);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
 
-        await streams.persist(
-          simulateReadableStream<UIMessageChunk>({
-            chunks: [
-              { type: 'text-start', id: 'part-1' },
-              { type: 'text-delta', id: 'part-1', delta: 'partial' },
-              { type: 'abort' },
-            ],
-          }),
-          streamId,
-        );
+      await streams.persist(
+        simulateReadableStream<UIMessageChunk>({
+          chunks: [
+            { type: 'text-start', id: 'part-1' },
+            { type: 'text-delta', id: 'part-1', delta: 'partial' },
+            { type: 'abort' },
+          ],
+        }),
+        streamId,
+      );
 
-        assert.strictEqual(await store.getStreamStatus(streamId), 'cancelled');
-      });
+      assert.strictEqual(await store.getStreamStatus(streamId), 'cancelled');
     });
 
     it('should keep adaptive jitter delay within configured bounds', () => {
@@ -643,646 +607,633 @@ describe('Stream Chunks', () => {
 
     it('should expose explicit close() for sqlite stream store lifecycle', () => {
       const store = new SqliteStreamStore(':memory:');
-      const close = (store as SqliteStreamStore & { close?: () => void }).close;
-      assert.strictEqual(typeof close, 'function');
-      (
-        store as SqliteStreamStore & {
-          close: () => void;
-        }
-      ).close();
-      (
-        store as SqliteStreamStore & {
-          close: () => void;
-        }
-      ).close();
+      assert.strictEqual(typeof store.close, 'function');
+      store.close();
+      store.close();
     });
   });
 
   describe('upsertStream', () => {
     it('should create a new stream and return created: true', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream();
-        const result = await store.upsertStream(stream);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream();
+      const result = await store.upsertStream(stream);
 
-        assert.strictEqual(result.created, true);
-        assert.strictEqual(result.stream.id, stream.id);
-        assert.strictEqual(result.stream.status, 'queued');
-        assert.strictEqual(result.stream.createdAt, stream.createdAt);
-      });
+      assert.strictEqual(result.created, true);
+      assert.strictEqual(result.stream.id, stream.id);
+      assert.strictEqual(result.stream.status, 'queued');
+      assert.strictEqual(result.stream.createdAt, stream.createdAt);
     });
 
     it('should return existing stream unchanged with created: false on conflict', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream();
-        const first = await store.upsertStream(stream);
-        assert.strictEqual(first.created, true);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream();
+      const first = await store.upsertStream(stream);
+      assert.strictEqual(first.created, true);
 
-        await store.updateStreamStatus(stream.id, 'running');
+      await store.updateStreamStatus(stream.id, 'running');
 
-        const second = await store.upsertStream({
-          ...stream,
-          createdAt: Date.now() + 1000,
-        });
-
-        assert.strictEqual(second.created, false);
-        assert.strictEqual(second.stream.status, 'running');
-        assert.strictEqual(second.stream.createdAt, stream.createdAt);
+      const second = await store.upsertStream({
+        ...stream,
+        createdAt: Date.now() + 1000,
       });
+
+      assert.strictEqual(second.created, false);
+      assert.strictEqual(second.stream.status, 'running');
+      assert.strictEqual(second.stream.createdAt, stream.createdAt);
     });
 
     it('should not overwrite existing stream data with conflicting input', async () => {
-      await withStreamStore(async (store) => {
-        const original = createStream();
-        await store.upsertStream(original);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const original = createStream();
+      await store.upsertStream(original);
 
-        const conflicting = {
-          ...original,
-          status: 'running' as const,
-          createdAt: Date.now() + 9999,
-        };
-        const result = await store.upsertStream(conflicting);
+      const conflicting = {
+        ...original,
+        status: 'running' as const,
+        createdAt: Date.now() + 9999,
+      };
+      const result = await store.upsertStream(conflicting);
 
-        assert.strictEqual(result.created, false);
-        assert.strictEqual(result.stream.status, 'queued');
-        assert.strictEqual(result.stream.createdAt, original.createdAt);
-      });
+      assert.strictEqual(result.created, false);
+      assert.strictEqual(result.stream.status, 'queued');
+      assert.strictEqual(result.stream.createdAt, original.createdAt);
     });
 
     it('should preserve completed stream with finishedAt on conflict', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream();
-        await store.upsertStream(stream);
-        await store.updateStreamStatus(stream.id, 'running');
-        await store.updateStreamStatus(stream.id, 'completed');
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream();
+      await store.upsertStream(stream);
+      await store.updateStreamStatus(stream.id, 'running');
+      await store.updateStreamStatus(stream.id, 'completed');
 
-        const result = await store.upsertStream({
-          ...stream,
-          createdAt: Date.now() + 1000,
-        });
-
-        assert.strictEqual(result.created, false);
-        assert.strictEqual(result.stream.status, 'completed');
-        assert.ok(result.stream.finishedAt);
+      const result = await store.upsertStream({
+        ...stream,
+        createdAt: Date.now() + 1000,
       });
+
+      assert.strictEqual(result.created, false);
+      assert.strictEqual(result.stream.status, 'completed');
+      assert.ok(result.stream.finishedAt);
     });
 
     it('should preserve failed stream with error field on conflict', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream();
-        await store.upsertStream(stream);
-        await store.updateStreamStatus(stream.id, 'running');
-        await store.updateStreamStatus(stream.id, 'failed', {
-          error: 'something broke',
-        });
-
-        const result = await store.upsertStream({
-          ...stream,
-          createdAt: Date.now() + 1000,
-        });
-
-        assert.strictEqual(result.created, false);
-        assert.strictEqual(result.stream.status, 'failed');
-        assert.strictEqual(result.stream.error, 'something broke');
-        assert.ok(result.stream.finishedAt);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream();
+      await store.upsertStream(stream);
+      await store.updateStreamStatus(stream.id, 'running');
+      await store.updateStreamStatus(stream.id, 'failed', {
+        error: 'something broke',
       });
+
+      const result = await store.upsertStream({
+        ...stream,
+        createdAt: Date.now() + 1000,
+      });
+
+      assert.strictEqual(result.created, false);
+      assert.strictEqual(result.stream.status, 'failed');
+      assert.strictEqual(result.stream.error, 'something broke');
+      assert.ok(result.stream.finishedAt);
     });
 
     it('should preserve cancelled stream with cancelRequestedAt on conflict', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream();
-        await store.upsertStream(stream);
-        await store.updateStreamStatus(stream.id, 'cancelled');
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream();
+      await store.upsertStream(stream);
+      await store.updateStreamStatus(stream.id, 'cancelled');
 
-        const result = await store.upsertStream({
-          ...stream,
-          createdAt: Date.now() + 1000,
-        });
-
-        assert.strictEqual(result.created, false);
-        assert.strictEqual(result.stream.status, 'cancelled');
-        assert.ok(result.stream.cancelRequestedAt);
-        assert.ok(result.stream.finishedAt);
+      const result = await store.upsertStream({
+        ...stream,
+        createdAt: Date.now() + 1000,
       });
+
+      assert.strictEqual(result.created, false);
+      assert.strictEqual(result.stream.status, 'cancelled');
+      assert.ok(result.stream.cancelRequestedAt);
+      assert.ok(result.stream.finishedAt);
     });
 
     it('should treat deleted stream as fresh insert on re-upsert', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream();
-        await store.upsertStream(stream);
-        await store.deleteStream(stream.id);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream();
+      await store.upsertStream(stream);
+      await store.deleteStream(stream.id);
 
-        const result = await store.upsertStream({
-          ...stream,
-          createdAt: Date.now() + 5000,
-        });
-
-        assert.strictEqual(result.created, true);
-        assert.strictEqual(result.stream.status, 'queued');
+      const result = await store.upsertStream({
+        ...stream,
+        createdAt: Date.now() + 5000,
       });
+
+      assert.strictEqual(result.created, true);
+      assert.strictEqual(result.stream.status, 'queued');
     });
 
     it('should not disturb existing chunks on conflict', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream();
-        await store.upsertStream(stream);
-        await store.updateStreamStatus(stream.id, 'running');
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream();
+      await store.upsertStream(stream);
+      await store.updateStreamStatus(stream.id, 'running');
 
-        const chunks = [
-          createChunk(stream.id, 0),
-          createChunk(stream.id, 1),
-          createChunk(stream.id, 2),
-        ];
-        await store.appendChunks(chunks);
+      const chunks = [
+        createChunk(stream.id, 0),
+        createChunk(stream.id, 1),
+        createChunk(stream.id, 2),
+      ];
+      await store.appendChunks(chunks);
 
-        await store.upsertStream({
-          ...stream,
-          createdAt: Date.now() + 1000,
-        });
-
-        const retrieved = await store.getChunks(stream.id);
-        assert.strictEqual(retrieved.length, 3);
-        assert.strictEqual(retrieved[0].seq, 0);
-        assert.strictEqual(retrieved[1].seq, 1);
-        assert.strictEqual(retrieved[2].seq, 2);
+      await store.upsertStream({
+        ...stream,
+        createdAt: Date.now() + 1000,
       });
+
+      const retrieved = await store.getChunks(stream.id);
+      assert.strictEqual(retrieved.length, 3);
+      assert.strictEqual(retrieved[0].seq, 0);
+      assert.strictEqual(retrieved[1].seq, 1);
+      assert.strictEqual(retrieved[2].seq, 2);
     });
   });
 
   describe('StreamManager.register() idempotency', () => {
     it('should return created: true on first call', async () => {
-      await withStreamStore(async (store) => {
-        const manager = makeManager(store);
-        const streamId = crypto.randomUUID();
-        const result = await manager.register(streamId);
-        assert.strictEqual(result.created, true);
-        assert.strictEqual(result.stream.id, streamId);
-        assert.strictEqual(result.stream.status, 'queued');
-      });
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const manager = makeManager(store);
+      const streamId = crypto.randomUUID();
+      const result = await manager.register(streamId);
+      assert.strictEqual(result.created, true);
+      assert.strictEqual(result.stream.id, streamId);
+      assert.strictEqual(result.stream.status, 'queued');
     });
 
     it('should return created: false on duplicate call', async () => {
-      await withStreamStore(async (store) => {
-        const manager = makeManager(store);
-        const streamId = crypto.randomUUID();
-        await manager.register(streamId);
-        const result = await manager.register(streamId);
-        assert.strictEqual(result.created, false);
-      });
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const manager = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await manager.register(streamId);
+      const result = await manager.register(streamId);
+      assert.strictEqual(result.created, false);
     });
 
     it('should not overwrite status of existing stream', async () => {
-      await withStreamStore(async (store) => {
-        const manager = makeManager(store);
-        const streamId = crypto.randomUUID();
-        await manager.register(streamId);
-        await store.updateStreamStatus(streamId, 'running');
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const manager = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await manager.register(streamId);
+      await store.updateStreamStatus(streamId, 'running');
 
-        const result = await manager.register(streamId);
-        assert.strictEqual(result.stream.status, 'running');
-      });
+      const result = await manager.register(streamId);
+      assert.strictEqual(result.stream.status, 'running');
     });
 
     it('should not reset completed stream to queued', async () => {
-      await withStreamStore(async (store) => {
-        const manager = makeManager(store);
-        const streamId = crypto.randomUUID();
-        await manager.register(streamId);
-        await store.updateStreamStatus(streamId, 'running');
-        await store.updateStreamStatus(streamId, 'completed');
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const manager = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await manager.register(streamId);
+      await store.updateStreamStatus(streamId, 'running');
+      await store.updateStreamStatus(streamId, 'completed');
 
-        const result = await manager.register(streamId);
-        assert.strictEqual(result.created, false);
-        assert.strictEqual(result.stream.status, 'completed');
-        assert.ok(result.stream.finishedAt);
-      });
+      const result = await manager.register(streamId);
+      assert.strictEqual(result.created, false);
+      assert.strictEqual(result.stream.status, 'completed');
+      assert.ok(result.stream.finishedAt);
     });
 
     it('should not reset failed stream to queued', async () => {
-      await withStreamStore(async (store) => {
-        const manager = makeManager(store);
-        const streamId = crypto.randomUUID();
-        await manager.register(streamId);
-        await store.updateStreamStatus(streamId, 'running');
-        await store.updateStreamStatus(streamId, 'failed', {
-          error: 'timeout',
-        });
-
-        const result = await manager.register(streamId);
-        assert.strictEqual(result.created, false);
-        assert.strictEqual(result.stream.status, 'failed');
-        assert.strictEqual(result.stream.error, 'timeout');
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const manager = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await manager.register(streamId);
+      await store.updateStreamStatus(streamId, 'running');
+      await store.updateStreamStatus(streamId, 'failed', {
+        error: 'timeout',
       });
+
+      const result = await manager.register(streamId);
+      assert.strictEqual(result.created, false);
+      assert.strictEqual(result.stream.status, 'failed');
+      assert.strictEqual(result.stream.error, 'timeout');
     });
 
     it('should not reset cancelled stream to queued', async () => {
-      await withStreamStore(async (store) => {
-        const manager = makeManager(store);
-        const streamId = crypto.randomUUID();
-        await manager.register(streamId);
-        await store.updateStreamStatus(streamId, 'cancelled');
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const manager = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await manager.register(streamId);
+      await store.updateStreamStatus(streamId, 'cancelled');
 
-        const result = await manager.register(streamId);
-        assert.strictEqual(result.created, false);
-        assert.strictEqual(result.stream.status, 'cancelled');
-        assert.ok(result.stream.cancelRequestedAt);
-      });
+      const result = await manager.register(streamId);
+      assert.strictEqual(result.created, false);
+      assert.strictEqual(result.stream.status, 'cancelled');
+      assert.ok(result.stream.cancelRequestedAt);
     });
   });
 
   describe('updateStreamStatus', () => {
     it('should transition to running and set startedAt', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream();
-        await store.createStream(stream);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream();
+      await store.createStream(stream);
 
-        await store.updateStreamStatus(stream.id, 'running');
+      await store.updateStreamStatus(stream.id, 'running');
 
-        const updated = await store.getStream(stream.id);
-        assert.ok(updated);
-        assert.strictEqual(updated.status, 'running');
-        assert.ok(typeof updated.startedAt === 'number');
-        assert.strictEqual(updated.finishedAt, null);
-      });
+      const updated = await store.getStream(stream.id);
+      assert.ok(updated);
+      assert.strictEqual(updated.status, 'running');
+      assert.ok(typeof updated.startedAt === 'number');
+      assert.strictEqual(updated.finishedAt, null);
     });
 
     it('should transition to completed and set finishedAt', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-
-        await store.updateStreamStatus(stream.id, 'completed');
-
-        const updated = await store.getStream(stream.id);
-        assert.ok(updated);
-        assert.strictEqual(updated.status, 'completed');
-        assert.ok(typeof updated.finishedAt === 'number');
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
       });
+      await store.createStream(stream);
+
+      await store.updateStreamStatus(stream.id, 'completed');
+
+      const updated = await store.getStream(stream.id);
+      assert.ok(updated);
+      assert.strictEqual(updated.status, 'completed');
+      assert.ok(typeof updated.finishedAt === 'number');
     });
 
     it('should transition to failed with error message', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-
-        await store.updateStreamStatus(stream.id, 'failed', {
-          error: 'connection timeout',
-        });
-
-        const updated = await store.getStream(stream.id);
-        assert.ok(updated);
-        assert.strictEqual(updated.status, 'failed');
-        assert.ok(typeof updated.finishedAt === 'number');
-        assert.strictEqual(updated.error, 'connection timeout');
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
       });
+      await store.createStream(stream);
+
+      await store.updateStreamStatus(stream.id, 'failed', {
+        error: 'connection timeout',
+      });
+
+      const updated = await store.getStream(stream.id);
+      assert.ok(updated);
+      assert.strictEqual(updated.status, 'failed');
+      assert.ok(typeof updated.finishedAt === 'number');
+      assert.strictEqual(updated.error, 'connection timeout');
     });
 
     it('should transition to cancelled and set both cancelRequestedAt and finishedAt', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-
-        await store.updateStreamStatus(stream.id, 'cancelled');
-
-        const updated = await store.getStream(stream.id);
-        assert.ok(updated);
-        assert.strictEqual(updated.status, 'cancelled');
-        assert.ok(typeof updated.cancelRequestedAt === 'number');
-        assert.ok(typeof updated.finishedAt === 'number');
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
       });
+      await store.createStream(stream);
+
+      await store.updateStreamStatus(stream.id, 'cancelled');
+
+      const updated = await store.getStream(stream.id);
+      assert.ok(updated);
+      assert.strictEqual(updated.status, 'cancelled');
+      assert.ok(typeof updated.cancelRequestedAt === 'number');
+      assert.ok(typeof updated.finishedAt === 'number');
     });
   });
 
   describe('updateStream', () => {
     it('allows exactly one caller to transition a queued stream', async () => {
-      await withStreamStorePath(async (dbPath) => {
-        const first = new SqliteStreamStore(dbPath);
-        const second = new SqliteStreamStore(dbPath);
-        const stream = createStream();
-        try {
-          await first.createStream(stream);
-          const transition = (store: SqliteStreamStore) =>
-            store.updateStream(stream.id, ({ status }) =>
-              status === 'queued'
-                ? { status: 'running', startedAt: Date.now() }
-                : undefined,
-            );
+      await using database = await sqlite.database();
+      const first = new SqliteStreamStore(database.connection);
+      using secondConnection = new DatabaseSync(database.path);
+      const second = new SqliteStreamStore(secondConnection);
+      const stream = createStream();
 
-          const results = await Promise.all([
-            transition(first),
-            transition(second),
-          ]);
+      await first.createStream(stream);
+      const transition = (store: SqliteStreamStore) =>
+        store.updateStream(stream.id, ({ status }) =>
+          status === 'queued'
+            ? { status: 'running', startedAt: Date.now() }
+            : undefined,
+        );
 
-          assert.equal(results.filter(({ updated }) => updated).length, 1);
-          assert.equal(await first.getStreamStatus(stream.id), 'running');
-        } finally {
-          first.close();
-          second.close();
-        }
-      });
+      const results = await Promise.all([
+        transition(first),
+        transition(second),
+      ]);
+
+      assert.equal(results.filter(({ updated }) => updated).length, 1);
+      assert.equal(await first.getStreamStatus(stream.id), 'running');
     });
   });
 
   describe('appendChunks / getChunks', () => {
     it('should append and retrieve chunks in order', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream();
-        await store.createStream(stream);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream();
+      await store.createStream(stream);
 
-        await store.appendChunks([createChunk(stream.id, 0)]);
-        await store.appendChunks([createChunk(stream.id, 1)]);
-        await store.appendChunks([createChunk(stream.id, 2)]);
+      await store.appendChunks([createChunk(stream.id, 0)]);
+      await store.appendChunks([createChunk(stream.id, 1)]);
+      await store.appendChunks([createChunk(stream.id, 2)]);
 
-        const chunks = await store.getChunks(stream.id);
-        assert.strictEqual(chunks.length, 3);
-        assert.strictEqual(chunks[0].seq, 0);
-        assert.strictEqual(chunks[1].seq, 1);
-        assert.strictEqual(chunks[2].seq, 2);
-      });
+      const chunks = await store.getChunks(stream.id);
+      assert.strictEqual(chunks.length, 3);
+      assert.strictEqual(chunks[0].seq, 0);
+      assert.strictEqual(chunks[1].seq, 1);
+      assert.strictEqual(chunks[2].seq, 2);
     });
 
     it('should retrieve chunks from a given sequence', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream();
-        await store.createStream(stream);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream();
+      await store.createStream(stream);
 
-        for (let i = 0; i < 10; i++) {
-          await store.appendChunks([createChunk(stream.id, i)]);
-        }
+      for (let i = 0; i < 10; i++) {
+        await store.appendChunks([createChunk(stream.id, i)]);
+      }
 
-        const chunks = await store.getChunks(stream.id, 5);
-        assert.strictEqual(chunks.length, 5);
-        assert.strictEqual(chunks[0].seq, 5);
-        assert.strictEqual(chunks[4].seq, 9);
-      });
+      const chunks = await store.getChunks(stream.id, 5);
+      assert.strictEqual(chunks.length, 5);
+      assert.strictEqual(chunks[0].seq, 5);
+      assert.strictEqual(chunks[4].seq, 9);
     });
 
     it('should respect limit parameter', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream();
-        await store.createStream(stream);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream();
+      await store.createStream(stream);
 
-        for (let i = 0; i < 10; i++) {
-          await store.appendChunks([createChunk(stream.id, i)]);
-        }
+      for (let i = 0; i < 10; i++) {
+        await store.appendChunks([createChunk(stream.id, i)]);
+      }
 
-        const chunks = await store.getChunks(stream.id, 0, 3);
-        assert.strictEqual(chunks.length, 3);
-        assert.strictEqual(chunks[0].seq, 0);
-        assert.strictEqual(chunks[2].seq, 2);
-      });
+      const chunks = await store.getChunks(stream.id, 0, 3);
+      assert.strictEqual(chunks.length, 3);
+      assert.strictEqual(chunks[0].seq, 0);
+      assert.strictEqual(chunks[2].seq, 2);
     });
 
     it('should preserve chunk data through serialization', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream();
-        await store.createStream(stream);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream();
+      await store.createStream(stream);
 
-        const complexData: StreamChunkData['data'] = {
-          type: 'tool-output-available',
-          toolCallId: 'tool-1',
-          output: { query: 'hello world', limit: 10 },
-        };
-        await store.appendChunks([createChunk(stream.id, 0, complexData)]);
+      const complexData: StreamChunkData['data'] = {
+        type: 'tool-output-available',
+        toolCallId: 'tool-1',
+        output: { query: 'hello world', limit: 10 },
+      };
+      await store.appendChunks([createChunk(stream.id, 0, complexData)]);
 
-        const chunks = await store.getChunks(stream.id);
-        assert.deepStrictEqual(chunks[0].data, complexData);
-      });
+      const chunks = await store.getChunks(stream.id);
+      assert.deepStrictEqual(chunks[0].data, complexData);
     });
 
     it('should return empty array for stream with no chunks', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream();
-        await store.createStream(stream);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream();
+      await store.createStream(stream);
 
-        const chunks = await store.getChunks(stream.id);
-        assert.strictEqual(chunks.length, 0);
-      });
+      const chunks = await store.getChunks(stream.id);
+      assert.strictEqual(chunks.length, 0);
     });
   });
 
   describe('appendChunks (batch)', () => {
     it('should append multiple chunks in a single batch', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream();
-        await store.createStream(stream);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream();
+      await store.createStream(stream);
 
-        const chunks = Array.from({ length: 20 }, (_, i) =>
-          createChunk(stream.id, i),
-        );
-        await store.appendChunks(chunks);
+      const chunks = Array.from({ length: 20 }, (_, i) =>
+        createChunk(stream.id, i),
+      );
+      await store.appendChunks(chunks);
 
-        const retrieved = await store.getChunks(stream.id);
-        assert.strictEqual(retrieved.length, 20);
-        assert.strictEqual(retrieved[0].seq, 0);
-        assert.strictEqual(retrieved[19].seq, 19);
-      });
+      const retrieved = await store.getChunks(stream.id);
+      assert.strictEqual(retrieved.length, 20);
+      assert.strictEqual(retrieved[0].seq, 0);
+      assert.strictEqual(retrieved[19].seq, 19);
     });
 
     it('should handle empty batch', async () => {
-      await withStreamStore(async (store) => {
-        await store.appendChunks([]);
-      });
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      await store.appendChunks([]);
     });
 
     it('should atomically append chunks and fail a stream', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-
-        const errorChunk: StreamChunkData['data'] = {
-          type: 'error',
-          errorText: 'direct failure',
-        };
-
-        await store.appendChunks([createChunk(stream.id, 0, errorChunk)]);
-
-        const updated = await store.getStream(stream.id);
-        assert.ok(updated);
-        assert.strictEqual(updated.status, 'failed');
-        assert.strictEqual(updated.error, 'direct failure');
-        assert.ok(typeof updated.finishedAt === 'number');
-
-        const chunks = await store.getChunks(stream.id);
-        assert.strictEqual(chunks.length, 1);
-        assert.deepStrictEqual(chunks[0].data, errorChunk);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
       });
+      await store.createStream(stream);
+
+      const errorChunk: StreamChunkData['data'] = {
+        type: 'error',
+        errorText: 'direct failure',
+      };
+
+      await store.appendChunks([createChunk(stream.id, 0, errorChunk)]);
+
+      const updated = await store.getStream(stream.id);
+      assert.ok(updated);
+      assert.strictEqual(updated.status, 'failed');
+      assert.strictEqual(updated.error, 'direct failure');
+      assert.ok(typeof updated.finishedAt === 'number');
+
+      const chunks = await store.getChunks(stream.id);
+      assert.strictEqual(chunks.length, 1);
+      assert.deepStrictEqual(chunks[0].data, errorChunk);
     });
 
     it('should not fail a stream for tool error chunks', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-
-        const toolInputError: StreamChunkData['data'] = {
-          type: 'tool-input-error',
-          toolCallId: 'tool-1',
-          toolName: 'search',
-          input: { query: 'bad' },
-          errorText: 'invalid input',
-        };
-        const toolOutputError: StreamChunkData['data'] = {
-          type: 'tool-output-error',
-          toolCallId: 'tool-1',
-          errorText: 'tool failed',
-        };
-
-        await store.appendChunks([
-          createChunk(stream.id, 0, toolInputError),
-          createChunk(stream.id, 1, toolOutputError),
-        ]);
-
-        const updated = await store.getStream(stream.id);
-        assert.ok(updated);
-        assert.strictEqual(updated.status, 'running');
-        assert.strictEqual(updated.error, null);
-        assert.deepStrictEqual(
-          (await store.getChunks(stream.id)).map((chunk) => chunk.data),
-          [toolInputError, toolOutputError],
-        );
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
       });
+      await store.createStream(stream);
+
+      const toolInputError: StreamChunkData['data'] = {
+        type: 'tool-input-error',
+        toolCallId: 'tool-1',
+        toolName: 'search',
+        input: { query: 'bad' },
+        errorText: 'invalid input',
+      };
+      const toolOutputError: StreamChunkData['data'] = {
+        type: 'tool-output-error',
+        toolCallId: 'tool-1',
+        errorText: 'tool failed',
+      };
+
+      await store.appendChunks([
+        createChunk(stream.id, 0, toolInputError),
+        createChunk(stream.id, 1, toolOutputError),
+      ]);
+
+      const updated = await store.getStream(stream.id);
+      assert.ok(updated);
+      assert.strictEqual(updated.status, 'running');
+      assert.strictEqual(updated.error, null);
+      assert.deepStrictEqual(
+        (await store.getChunks(stream.id)).map((chunk) => chunk.data),
+        [toolInputError, toolOutputError],
+      );
     });
 
     it('should reject missing-stream error chunks without storing chunks', async () => {
-      await withStreamStore(async (store) => {
-        await assert.rejects(
-          () =>
-            store.appendChunks([
-              createChunk('missing-stream', 0, {
-                type: 'error',
-                errorText: 'missing target',
-              }),
-            ]),
-          /foreign key|constraint|not found/i,
-        );
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      await assert.rejects(
+        () =>
+          store.appendChunks([
+            createChunk('missing-stream', 0, {
+              type: 'error',
+              errorText: 'missing target',
+            }),
+          ]),
+        /foreign key|constraint|not found/i,
+      );
 
-        assert.deepStrictEqual(await store.getChunks('missing-stream'), []);
-      });
+      assert.deepStrictEqual(await store.getChunks('missing-stream'), []);
     });
 
     it('should roll back failed status when atomic append fails', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-        await store.appendChunks([createChunk(stream.id, 0)]);
-
-        await assert.rejects(
-          () =>
-            store.appendChunks([
-              createChunk(stream.id, 0, {
-                type: 'error',
-                errorText: 'should roll back',
-              }),
-            ]),
-          /UNIQUE|constraint/i,
-        );
-
-        const updated = await store.getStream(stream.id);
-        assert.ok(updated);
-        assert.strictEqual(updated.status, 'running');
-        assert.strictEqual(updated.error, null);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
       });
+      await store.createStream(stream);
+      await store.appendChunks([createChunk(stream.id, 0)]);
+
+      await assert.rejects(
+        () =>
+          store.appendChunks([
+            createChunk(stream.id, 0, {
+              type: 'error',
+              errorText: 'should roll back',
+            }),
+          ]),
+        /UNIQUE|constraint/i,
+      );
+
+      const updated = await store.getStream(stream.id);
+      assert.ok(updated);
+      assert.strictEqual(updated.status, 'running');
+      assert.strictEqual(updated.error, null);
     });
   });
 
   describe('deleteStream', () => {
     it('should delete stream and cascade to chunks', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream();
-        await store.createStream(stream);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream();
+      await store.createStream(stream);
 
-        for (let i = 0; i < 5; i++) {
-          await store.appendChunks([createChunk(stream.id, i)]);
-        }
+      for (let i = 0; i < 5; i++) {
+        await store.appendChunks([createChunk(stream.id, i)]);
+      }
 
-        await store.deleteStream(stream.id);
+      await store.deleteStream(stream.id);
 
-        const deleted = await store.getStream(stream.id);
-        assert.strictEqual(deleted, undefined);
+      const deleted = await store.getStream(stream.id);
+      assert.strictEqual(deleted, undefined);
 
-        const chunks = await store.getChunks(stream.id);
-        assert.strictEqual(chunks.length, 0);
-      });
+      const chunks = await store.getChunks(stream.id);
+      assert.strictEqual(chunks.length, 0);
     });
 
     it('should not affect other streams when deleting one', async () => {
-      await withStreamStore(async (store) => {
-        const stream1 = createStream();
-        const stream2 = createStream();
-        await store.createStream(stream1);
-        await store.createStream(stream2);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream1 = createStream();
+      const stream2 = createStream();
+      await store.createStream(stream1);
+      await store.createStream(stream2);
 
-        await store.appendChunks([createChunk(stream1.id, 0)]);
-        await store.appendChunks([createChunk(stream2.id, 0)]);
+      await store.appendChunks([createChunk(stream1.id, 0)]);
+      await store.appendChunks([createChunk(stream2.id, 0)]);
 
-        await store.deleteStream(stream1.id);
+      await store.deleteStream(stream1.id);
 
-        const remaining = await store.getStream(stream2.id);
-        assert.ok(remaining);
+      const remaining = await store.getStream(stream2.id);
+      assert.ok(remaining);
 
-        const remainingChunks = await store.getChunks(stream2.id);
-        assert.strictEqual(remainingChunks.length, 1);
-      });
+      const remainingChunks = await store.getChunks(stream2.id);
+      assert.strictEqual(remainingChunks.length, 1);
     });
   });
 
   describe('Full lifecycle', () => {
     it('should handle queued → running → append → complete → cleanup flow', async () => {
-      await withStreamStore(async (store) => {
-        const stream = createStream();
-        await store.createStream(stream);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream();
+      await store.createStream(stream);
 
-        await store.updateStreamStatus(stream.id, 'running');
+      await store.updateStreamStatus(stream.id, 'running');
 
-        const running = await store.getStream(stream.id);
-        assert.ok(running);
-        assert.strictEqual(running.status, 'running');
+      const running = await store.getStream(stream.id);
+      assert.ok(running);
+      assert.strictEqual(running.status, 'running');
 
-        const chunkTypes: StreamChunkData['data'][] = [
-          { type: 'text-start', id: 'part-1' },
-          { type: 'text-delta', id: 'part-1', delta: 'Hello ' },
-          { type: 'text-delta', id: 'part-1', delta: 'world' },
-          { type: 'text-end', id: 'part-1' },
-          { type: 'finish' },
-        ];
+      const chunkTypes: StreamChunkData['data'][] = [
+        { type: 'text-start', id: 'part-1' },
+        { type: 'text-delta', id: 'part-1', delta: 'Hello ' },
+        { type: 'text-delta', id: 'part-1', delta: 'world' },
+        { type: 'text-end', id: 'part-1' },
+        { type: 'finish' },
+      ];
 
-        for (let i = 0; i < chunkTypes.length; i++) {
-          await store.appendChunks([createChunk(stream.id, i, chunkTypes[i])]);
-        }
+      for (let i = 0; i < chunkTypes.length; i++) {
+        await store.appendChunks([createChunk(stream.id, i, chunkTypes[i])]);
+      }
 
-        await store.updateStreamStatus(stream.id, 'completed');
+      await store.updateStreamStatus(stream.id, 'completed');
 
-        const updated = await store.getStream(stream.id);
-        assert.ok(updated);
-        assert.ok(typeof updated.startedAt === 'number');
-        assert.ok(typeof updated.finishedAt === 'number');
+      const updated = await store.getStream(stream.id);
+      assert.ok(updated);
+      assert.ok(typeof updated.startedAt === 'number');
+      assert.ok(typeof updated.finishedAt === 'number');
 
-        const allChunks = await store.getChunks(stream.id);
-        assert.strictEqual(allChunks.length, 5);
-        assert.deepStrictEqual(allChunks[4].data, { type: 'finish' });
+      const allChunks = await store.getChunks(stream.id);
+      assert.strictEqual(allChunks.length, 5);
+      assert.deepStrictEqual(allChunks[4].data, { type: 'finish' });
 
-        await store.deleteStream(stream.id);
+      await store.deleteStream(stream.id);
 
-        const afterCleanup = await store.getChunks(stream.id);
-        assert.strictEqual(afterCleanup.length, 0);
-      });
+      const afterCleanup = await store.getChunks(stream.id);
+      assert.strictEqual(afterCleanup.length, 0);
     });
   });
 
@@ -1325,224 +1276,224 @@ describe('Stream Chunks', () => {
 
   describe('StreamManager.register', () => {
     it('should create a queued stream', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const streamId = crypto.randomUUID();
-        await streams.register(streamId);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
 
-        const stream = await store.getStream(streamId);
-        assert.ok(stream);
-        assert.strictEqual(stream.status, 'queued');
-        assert.strictEqual(stream.startedAt, null);
-      });
+      const stream = await store.getStream(streamId);
+      assert.ok(stream);
+      assert.strictEqual(stream.status, 'queued');
+      assert.strictEqual(stream.startedAt, null);
     });
   });
 
   describe('StreamManager.listStreamIds', () => {
     it('returns IDs with status filtering and ordering', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        await store.createStream(
-          createStream({
-            id: 'manager-stream-queued',
-            status: 'queued',
-            createdAt: 1,
-          }),
-        );
-        await store.createStream(
-          createStream({
-            id: 'manager-stream-running-1',
-            status: 'running',
-            createdAt: 2,
-          }),
-        );
-        await store.createStream(
-          createStream({
-            id: 'manager-stream-running-2',
-            status: 'running',
-            createdAt: 3,
-          }),
-        );
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      await store.createStream(
+        createStream({
+          id: 'manager-stream-queued',
+          status: 'queued',
+          createdAt: 1,
+        }),
+      );
+      await store.createStream(
+        createStream({
+          id: 'manager-stream-running-1',
+          status: 'running',
+          createdAt: 2,
+        }),
+      );
+      await store.createStream(
+        createStream({
+          id: 'manager-stream-running-2',
+          status: 'running',
+          createdAt: 3,
+        }),
+      );
 
-        const all = await streams.listStreamIds();
-        const running = await streams.listStreamIds({ status: 'running' });
+      const all = await streams.listStreamIds();
+      const running = await streams.listStreamIds({ status: 'running' });
 
-        assert.deepStrictEqual(all, [
-          'manager-stream-queued',
-          'manager-stream-running-1',
-          'manager-stream-running-2',
-        ]);
-        assert.deepStrictEqual(running, [
-          'manager-stream-running-1',
-          'manager-stream-running-2',
-        ]);
-      });
+      assert.deepStrictEqual(all, [
+        'manager-stream-queued',
+        'manager-stream-running-1',
+        'manager-stream-running-2',
+      ]);
+      assert.deepStrictEqual(running, [
+        'manager-stream-running-1',
+        'manager-stream-running-2',
+      ]);
     });
   });
 
   describe('StreamManager.watch()', () => {
     it('should throw when stream does not exist', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
 
-        const readable = streams.watch('non-existent');
-        const reader = readable.getReader();
-        await assert.rejects(
-          () => reader.read(),
-          /Stream "non-existent" not found/,
-        );
-      });
+      const readable = streams.watch('non-existent');
+      const reader = readable.getReader();
+      await assert.rejects(
+        () => reader.read(),
+        /Stream "non-existent" not found/,
+      );
     });
 
     // Load-bearing: the exact-length assertion here doubles as negative-case
     // coverage for the watch:error-emitted path — only 'failed' streams emit
     // an error chunk, completed streams must not.
     it('should replay all chunks from a completed stream', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
 
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-
-        for (let i = 0; i < 5; i++) {
-          await store.appendChunks([createChunk(stream.id, i)]);
-        }
-        await store.updateStreamStatus(stream.id, 'completed');
-
-        const received: unknown[] = [];
-        const readable = streams.watch(stream.id);
-        for await (const chunk of readable) {
-          received.push(chunk);
-        }
-
-        assert.strictEqual(received.length, 5);
-        assert.deepStrictEqual(received[0], textDeltaChunk(0));
-        assert.deepStrictEqual(received[4], textDeltaChunk(4));
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
       });
+      await store.createStream(stream);
+
+      for (let i = 0; i < 5; i++) {
+        await store.appendChunks([createChunk(stream.id, i)]);
+      }
+      await store.updateStreamStatus(stream.id, 'completed');
+
+      const received: unknown[] = [];
+      const readable = streams.watch(stream.id);
+      for await (const chunk of readable) {
+        received.push(chunk);
+      }
+
+      assert.strictEqual(received.length, 5);
+      assert.deepStrictEqual(received[0], textDeltaChunk(0));
+      assert.deepStrictEqual(received[4], textDeltaChunk(4));
     });
 
     it('should catchup then live-tail until stream completes', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
 
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-
-        await store.appendChunks([createChunk(stream.id, 0)]);
-        await store.appendChunks([createChunk(stream.id, 1)]);
-
-        const received: unknown[] = [];
-        const readable = streams.watch(stream.id);
-        const consume = (async () => {
-          for await (const chunk of readable) received.push(chunk);
-        })();
-
-        await store.appendChunks([createChunk(stream.id, 2)]);
-        await store.appendChunks([createChunk(stream.id, 3)]);
-        await store.updateStreamStatus(stream.id, 'completed');
-
-        await consume;
-
-        assert.strictEqual(received.length, 4);
-        assert.deepStrictEqual(received[0], textDeltaChunk(0));
-        assert.deepStrictEqual(received[3], textDeltaChunk(3));
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
       });
+      await store.createStream(stream);
+
+      await store.appendChunks([createChunk(stream.id, 0)]);
+      await store.appendChunks([createChunk(stream.id, 1)]);
+
+      const received: unknown[] = [];
+      const readable = streams.watch(stream.id);
+      const consume = (async () => {
+        for await (const chunk of readable) received.push(chunk);
+      })();
+
+      await store.appendChunks([createChunk(stream.id, 2)]);
+      await store.appendChunks([createChunk(stream.id, 3)]);
+      await store.updateStreamStatus(stream.id, 'completed');
+
+      await consume;
+
+      assert.strictEqual(received.length, 4);
+      assert.deepStrictEqual(received[0], textDeltaChunk(0));
+      assert.deepStrictEqual(received[3], textDeltaChunk(3));
     });
 
     it('should emit error chunk before close on terminal failed status', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
 
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-
-        await store.appendChunks([createChunk(stream.id, 0)]);
-
-        const received: unknown[] = [];
-        const readable = streams.watch(stream.id);
-        const consume = (async () => {
-          for await (const chunk of readable) received.push(chunk);
-        })();
-
-        await store.appendChunks([createChunk(stream.id, 1)]);
-        await store.updateStreamStatus(stream.id, 'failed', {
-          error: 'test error',
-        });
-
-        await consume;
-
-        assert.strictEqual(received.length, 3);
-        assert.deepStrictEqual(received[0], textDeltaChunk(0));
-        assert.deepStrictEqual(received[1], textDeltaChunk(1));
-        assert.deepStrictEqual(received[2], {
-          type: 'error',
-          errorText: 'test error',
-        });
-
-        const updated = await store.getStream(stream.id);
-        assert.ok(updated);
-        assert.strictEqual(updated.error, 'test error');
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
       });
+      await store.createStream(stream);
+
+      await store.appendChunks([createChunk(stream.id, 0)]);
+
+      const received: unknown[] = [];
+      const readable = streams.watch(stream.id);
+      const consume = (async () => {
+        for await (const chunk of readable) received.push(chunk);
+      })();
+
+      await store.appendChunks([createChunk(stream.id, 1)]);
+      await store.updateStreamStatus(stream.id, 'failed', {
+        error: 'test error',
+      });
+
+      await consume;
+
+      assert.strictEqual(received.length, 3);
+      assert.deepStrictEqual(received[0], textDeltaChunk(0));
+      assert.deepStrictEqual(received[1], textDeltaChunk(1));
+      assert.deepStrictEqual(received[2], {
+        type: 'error',
+        errorText: 'test error',
+      });
+
+      const updated = await store.getStream(stream.id);
+      assert.ok(updated);
+      assert.strictEqual(updated.error, 'test error');
     });
 
     it('should emit fallback error chunk when failed stream has no error message', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
 
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-        await store.updateStreamStatus(stream.id, 'failed', { error: '' });
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
+      });
+      await store.createStream(stream);
+      await store.updateStreamStatus(stream.id, 'failed', { error: '' });
 
-        const received: unknown[] = [];
-        const readable = streams.watch(stream.id);
-        for await (const chunk of readable) {
-          received.push(chunk);
-        }
+      const received: unknown[] = [];
+      const readable = streams.watch(stream.id);
+      for await (const chunk of readable) {
+        received.push(chunk);
+      }
 
-        assert.strictEqual(received.length, 1);
-        assert.deepStrictEqual(received[0], {
-          type: 'error',
-          errorText: 'Stream failed',
-        });
+      assert.strictEqual(received.length, 1);
+      assert.deepStrictEqual(received[0], {
+        type: 'error',
+        errorText: 'Stream failed',
       });
     });
 
     it('should emit error chunk for late-attached watcher on already-failed stream', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
 
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-        await store.updateStreamStatus(stream.id, 'failed', {
-          error: 'boom',
-        });
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
+      });
+      await store.createStream(stream);
+      await store.updateStreamStatus(stream.id, 'failed', {
+        error: 'boom',
+      });
 
-        const received: unknown[] = [];
-        const readable = streams.watch(stream.id);
-        for await (const chunk of readable) {
-          received.push(chunk);
-        }
+      const received: unknown[] = [];
+      const readable = streams.watch(stream.id);
+      for await (const chunk of readable) {
+        received.push(chunk);
+      }
 
-        assert.strictEqual(received.length, 1);
-        assert.deepStrictEqual(received[0], {
-          type: 'error',
-          errorText: 'boom',
-        });
+      assert.strictEqual(received.length, 1);
+      assert.deepStrictEqual(received[0], {
+        type: 'error',
+        errorText: 'boom',
       });
     });
 
@@ -1550,627 +1501,623 @@ describe('Stream Chunks', () => {
     // guard for cancelled streams — they must close silently without an
     // error chunk (only 'failed' status emits).
     it('should close when stream is cancelled', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
 
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-
-        await store.appendChunks([createChunk(stream.id, 0)]);
-        await store.updateStreamStatus(stream.id, 'cancelled');
-
-        const received: unknown[] = [];
-        const readable = streams.watch(stream.id);
-        for await (const chunk of readable) {
-          received.push(chunk);
-        }
-
-        assert.strictEqual(received.length, 1);
-
-        const updated = await store.getStream(stream.id);
-        assert.ok(updated);
-        assert.strictEqual(updated.status, 'cancelled');
-        assert.ok(typeof updated.cancelRequestedAt === 'number');
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
       });
+      await store.createStream(stream);
+
+      await store.appendChunks([createChunk(stream.id, 0)]);
+      await store.updateStreamStatus(stream.id, 'cancelled');
+
+      const received: unknown[] = [];
+      const readable = streams.watch(stream.id);
+      for await (const chunk of readable) {
+        received.push(chunk);
+      }
+
+      assert.strictEqual(received.length, 1);
+
+      const updated = await store.getStream(stream.id);
+      assert.ok(updated);
+      assert.strictEqual(updated.status, 'cancelled');
+      assert.ok(typeof updated.cancelRequestedAt === 'number');
     });
 
     it('should watch a queued stream that transitions to running then completed', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
 
-        const stream = createStream({ status: 'queued' });
-        await store.createStream(stream);
+      const stream = createStream({ status: 'queued' });
+      await store.createStream(stream);
 
-        const received: unknown[] = [];
-        const readable = streams.watch(stream.id);
-        const consume = (async () => {
-          for await (const chunk of readable) received.push(chunk);
-        })();
+      const received: unknown[] = [];
+      const readable = streams.watch(stream.id);
+      const consume = (async () => {
+        for await (const chunk of readable) received.push(chunk);
+      })();
 
-        await store.updateStreamStatus(stream.id, 'running');
-        await store.appendChunks([createChunk(stream.id, 0)]);
-        await store.appendChunks([createChunk(stream.id, 1)]);
-        await store.updateStreamStatus(stream.id, 'completed');
+      await store.updateStreamStatus(stream.id, 'running');
+      await store.appendChunks([createChunk(stream.id, 0)]);
+      await store.appendChunks([createChunk(stream.id, 1)]);
+      await store.updateStreamStatus(stream.id, 'completed');
 
-        await consume;
+      await consume;
 
-        assert.strictEqual(received.length, 2);
-        assert.deepStrictEqual(received[0], textDeltaChunk(0));
-        assert.deepStrictEqual(received[1], textDeltaChunk(1));
-      });
+      assert.strictEqual(received.length, 2);
+      assert.deepStrictEqual(received[0], textDeltaChunk(0));
+      assert.deepStrictEqual(received[1], textDeltaChunk(1));
     });
 
     it('should close gracefully when stream is deleted during watch', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-        await store.appendChunks([createChunk(stream.id, 0)]);
-
-        const received: unknown[] = [];
-        const readable = streams.watch(stream.id);
-        const consume = (async () => {
-          for await (const chunk of readable) {
-            received.push(chunk);
-            if (received.length === 1) {
-              await store.deleteStream(stream.id);
-            }
-          }
-        })();
-
-        await consume;
-        assert.strictEqual(received.length, 1);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
       });
+      await store.createStream(stream);
+      await store.appendChunks([createChunk(stream.id, 0)]);
+
+      const received: unknown[] = [];
+      const readable = streams.watch(stream.id);
+      const consume = (async () => {
+        for await (const chunk of readable) {
+          received.push(chunk);
+          if (received.length === 1) {
+            await store.deleteStream(stream.id);
+          }
+        }
+      })();
+
+      await consume;
+      assert.strictEqual(received.length, 1);
     });
 
     it('should support live tailing across separate sqlite connections', async () => {
-      await withStreamStorePath(async (dbPath) => {
-        const writerStore = new SqliteStreamStore(dbPath);
-        const watcherStore = new SqliteStreamStore(dbPath);
-        try {
-          const streams = makeManager(watcherStore);
-          const stream = createStream({
-            status: 'running',
-            startedAt: Date.now(),
-          });
-          await writerStore.createStream(stream);
-          await writerStore.appendChunks([createChunk(stream.id, 0)]);
+      await using database = await sqlite.database();
+      const writerStore = new SqliteStreamStore(database.connection);
+      using secondConnection = new DatabaseSync(database.path);
+      const watcherStore = new SqliteStreamStore(secondConnection);
 
-          const received: unknown[] = [];
-          const readable = streams.watch(stream.id);
-          const consume = (async () => {
-            for await (const chunk of readable) {
-              received.push(chunk);
-            }
-          })();
-
-          await writerStore.appendChunks([createChunk(stream.id, 1)]);
-          await writerStore.appendChunks([createChunk(stream.id, 2)]);
-          await writerStore.updateStreamStatus(stream.id, 'completed');
-
-          await consume;
-          assert.strictEqual(received.length, 3);
-          assert.deepStrictEqual(received[0], textDeltaChunk(0));
-          assert.deepStrictEqual(received[2], textDeltaChunk(2));
-        } finally {
-          (writerStore as { close?: () => void }).close?.();
-          (watcherStore as { close?: () => void }).close?.();
-        }
+      const streams = makeManager(watcherStore);
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
       });
-    });
+      await writerStore.createStream(stream);
+      await writerStore.appendChunks([createChunk(stream.id, 0)]);
 
-    it('should keep adaptive delays within configured bounds', async () => {
-      await withStreamStore(async (store) => {
-        const pollEvents: PollingTelemetryEvent[] = [];
-        const streams = makeManager(store, {
-          config: {
-            minMs: 10,
-            maxMs: 40,
-            multiplier: 2,
-            jitterRatio: 0,
-            statusCheckEvery: 1,
-          },
-          onPoll: (event) => {
-            pollEvents.push(event);
-          },
-        });
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-
-        const readable = streams.watch(stream.id);
-        const consume = (async () => {
-          for await (const _chunk of readable) {
-            /* consume stream */
-          }
-        })();
-
-        const idleCount = () =>
-          pollEvents.filter((e) => e.type === 'idle').length;
-        await waitFor(() => idleCount() >= 3, { label: 'idleCount >= 3' });
-        await store.appendChunks([createChunk(stream.id, 0)]);
-        await waitFor(() => idleCount() >= 5, { label: 'idleCount >= 5' });
-        await store.updateStreamStatus(stream.id, 'completed');
-        await consume;
-
-        const idleDelays = pollEvents
-          .filter((event) => event.type === 'idle')
-          .map((event) => event.delayMs);
-        assert.ok(idleDelays.length >= 2);
-        assert.ok(idleDelays.every((d) => d >= 10 && d <= 40));
-        const max = Math.max(...idleDelays);
-        assert.ok(
-          max >= 20,
-          `expected backoff to ramp past minMs; observed delays: ${idleDelays.join(',')}`,
-        );
-      });
-    });
-
-    it('should reset adaptive delays on queued→running transition', async () => {
-      await withStreamStore(async (store) => {
-        const pollEvents: PollingTelemetryEvent[] = [];
-        const streams = makeManager(store, {
-          config: {
-            minMs: 10,
-            maxMs: 40,
-            multiplier: 2,
-            jitterRatio: 0,
-            statusCheckEvery: 1,
-          },
-          onPoll: (event) => {
-            pollEvents.push(event);
-          },
-        });
-        const stream = createStream({ status: 'queued' });
-        await store.createStream(stream);
-
-        const readable = streams.watch(stream.id);
-        const consume = (async () => {
-          for await (const _chunk of readable) {
-            /* consume stream */
-          }
-        })();
-
-        await waitFor(
-          () => pollEvents.filter((e) => e.type === 'idle').length >= 3,
-          { label: 'queued idle count >= 3' },
-        );
-        await store.updateStreamStatus(stream.id, 'running');
-        await waitFor(
-          () =>
-            pollEvents.some((e) => e.type === 'poll' && e.status === 'running'),
-          { label: 'observed running poll' },
-        );
-        await store.updateStreamStatus(stream.id, 'completed');
-        await consume;
-
-        const transitionIndex = pollEvents.findIndex(
-          (event) => event.type === 'poll' && event.status === 'running',
-        );
-        assert.ok(transitionIndex >= 0, 'expected to observe running status');
-        const idleAtMaxBeforeTransition = pollEvents
-          .slice(0, transitionIndex)
-          .some((e) => e.type === 'idle' && e.delayMs >= 40);
-        assert.ok(
-          idleAtMaxBeforeTransition,
-          'expected backoff to have reached cap before running transition',
-        );
-        const nextIdle = pollEvents
-          .slice(transitionIndex + 1)
-          .find((event) => event.type === 'idle');
-        assert.ok(nextIdle && nextIdle.type === 'idle');
-        assert.ok(
-          nextIdle.delayMs <= 20,
-          `expected reset after running transition (delay ≤ minMs*multiplier=20); got ${nextIdle.delayMs}`,
-        );
-      });
-    });
-
-    it('should page chunk reads and preserve ordering for large completed streams', async () => {
-      await withStreamStore(async (store) => {
-        const watchEvents: StreamWatchTelemetryEvent[] = [];
-        const streams = makeManager(store, {
-          config: {
-            minMs: 5,
-            maxMs: 5,
-            multiplier: 2,
-            jitterRatio: 0,
-            statusCheckEvery: 1,
-          },
-          chunkPageSize: 32,
-          onWatchEvent: (event) => {
-            watchEvents.push(event);
-          },
-        });
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-
-        const totalChunks = 300;
-        const chunks = Array.from({ length: totalChunks }, (_, idx) =>
-          createChunk(stream.id, idx),
-        );
-        await store.appendChunks(chunks);
-        await store.updateStreamStatus(stream.id, 'completed');
-
-        const received: unknown[] = [];
-        const readable = streams.watch(stream.id);
+      const received: unknown[] = [];
+      const readable = streams.watch(stream.id);
+      const consume = (async () => {
         for await (const chunk of readable) {
           received.push(chunk);
         }
+      })();
 
-        assert.strictEqual(received.length, totalChunks);
-        assert.deepStrictEqual(received[0], textDeltaChunk(0));
-        assert.deepStrictEqual(
-          received[totalChunks - 1],
-          textDeltaChunk(totalChunks - 1),
-        );
+      await writerStore.appendChunks([createChunk(stream.id, 1)]);
+      await writerStore.appendChunks([createChunk(stream.id, 2)]);
+      await writerStore.updateStreamStatus(stream.id, 'completed');
 
-        const chunkBatches = watchEvents.filter(
-          (event) => event.type === 'watch:chunks',
-        );
-        assert.ok(
-          chunkBatches.length >= 2,
-          `expected multiple chunk batches with page size 32, got ${chunkBatches.length}`,
-        );
+      await consume;
+      assert.strictEqual(received.length, 3);
+      assert.deepStrictEqual(received[0], textDeltaChunk(0));
+      assert.deepStrictEqual(received[2], textDeltaChunk(2));
+    });
+
+    it('should keep adaptive delays within configured bounds', async () => {
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const pollEvents: PollingTelemetryEvent[] = [];
+      const streams = makeManager(store, {
+        config: {
+          minMs: 10,
+          maxMs: 40,
+          multiplier: 2,
+          jitterRatio: 0,
+          statusCheckEvery: 1,
+        },
+        onPoll: (event) => {
+          pollEvents.push(event);
+        },
       });
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
+      });
+      await store.createStream(stream);
+
+      const readable = streams.watch(stream.id);
+      const consume = (async () => {
+        for await (const _chunk of readable) {
+          /* consume stream */
+        }
+      })();
+
+      const idleCount = () =>
+        pollEvents.filter((e) => e.type === 'idle').length;
+      await waitFor(() => idleCount() >= 3, { label: 'idleCount >= 3' });
+      await store.appendChunks([createChunk(stream.id, 0)]);
+      await waitFor(() => idleCount() >= 5, { label: 'idleCount >= 5' });
+      await store.updateStreamStatus(stream.id, 'completed');
+      await consume;
+
+      const idleDelays = pollEvents
+        .filter((event) => event.type === 'idle')
+        .map((event) => event.delayMs);
+      assert.ok(idleDelays.length >= 2);
+      assert.ok(idleDelays.every((d) => d >= 10 && d <= 40));
+      const max = Math.max(...idleDelays);
+      assert.ok(
+        max >= 20,
+        `expected backoff to ramp past minMs; observed delays: ${idleDelays.join(',')}`,
+      );
+    });
+
+    it('should reset adaptive delays on queued→running transition', async () => {
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const pollEvents: PollingTelemetryEvent[] = [];
+      const streams = makeManager(store, {
+        config: {
+          minMs: 10,
+          maxMs: 40,
+          multiplier: 2,
+          jitterRatio: 0,
+          statusCheckEvery: 1,
+        },
+        onPoll: (event) => {
+          pollEvents.push(event);
+        },
+      });
+      const stream = createStream({ status: 'queued' });
+      await store.createStream(stream);
+
+      const readable = streams.watch(stream.id);
+      const consume = (async () => {
+        for await (const _chunk of readable) {
+          /* consume stream */
+        }
+      })();
+
+      await waitFor(
+        () => pollEvents.filter((e) => e.type === 'idle').length >= 3,
+        { label: 'queued idle count >= 3' },
+      );
+      await store.updateStreamStatus(stream.id, 'running');
+      await waitFor(
+        () =>
+          pollEvents.some((e) => e.type === 'poll' && e.status === 'running'),
+        { label: 'observed running poll' },
+      );
+      await store.updateStreamStatus(stream.id, 'completed');
+      await consume;
+
+      const transitionIndex = pollEvents.findIndex(
+        (event) => event.type === 'poll' && event.status === 'running',
+      );
+      assert.ok(transitionIndex >= 0, 'expected to observe running status');
+      const idleAtMaxBeforeTransition = pollEvents
+        .slice(0, transitionIndex)
+        .some((e) => e.type === 'idle' && e.delayMs >= 40);
+      assert.ok(
+        idleAtMaxBeforeTransition,
+        'expected backoff to have reached cap before running transition',
+      );
+      const nextIdle = pollEvents
+        .slice(transitionIndex + 1)
+        .find((event) => event.type === 'idle');
+      assert.ok(nextIdle && nextIdle.type === 'idle');
+      assert.ok(
+        nextIdle.delayMs <= 20,
+        `expected reset after running transition (delay ≤ minMs*multiplier=20); got ${nextIdle.delayMs}`,
+      );
+    });
+
+    it('should page chunk reads and preserve ordering for large completed streams', async () => {
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const watchEvents: StreamWatchTelemetryEvent[] = [];
+      const streams = makeManager(store, {
+        config: {
+          minMs: 5,
+          maxMs: 5,
+          multiplier: 2,
+          jitterRatio: 0,
+          statusCheckEvery: 1,
+        },
+        chunkPageSize: 32,
+        onWatchEvent: (event) => {
+          watchEvents.push(event);
+        },
+      });
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
+      });
+      await store.createStream(stream);
+
+      const totalChunks = 300;
+      const chunks = Array.from({ length: totalChunks }, (_, idx) =>
+        createChunk(stream.id, idx),
+      );
+      await store.appendChunks(chunks);
+      await store.updateStreamStatus(stream.id, 'completed');
+
+      const received: unknown[] = [];
+      const readable = streams.watch(stream.id);
+      for await (const chunk of readable) {
+        received.push(chunk);
+      }
+
+      assert.strictEqual(received.length, totalChunks);
+      assert.deepStrictEqual(received[0], textDeltaChunk(0));
+      assert.deepStrictEqual(
+        received[totalChunks - 1],
+        textDeltaChunk(totalChunks - 1),
+      );
+
+      const chunkBatches = watchEvents.filter(
+        (event) => event.type === 'watch:chunks',
+      );
+      assert.ok(
+        chunkBatches.length >= 2,
+        `expected multiple chunk batches with page size 32, got ${chunkBatches.length}`,
+      );
     });
   });
 
   describe('StreamManager.watch() detach is passive', () => {
     it('should NOT change stream status when reader detaches', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
 
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-
-        await store.appendChunks([createChunk(stream.id, 0)]);
-
-        const readable = streams.watch(stream.id);
-        const reader = readable.getReader();
-
-        const first = await reader.read();
-        assert.ok(!first.done);
-
-        await reader.cancel();
-
-        const updated = await store.getStream(stream.id);
-        assert.ok(updated);
-        assert.strictEqual(updated.status, 'running');
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
       });
+      await store.createStream(stream);
+
+      await store.appendChunks([createChunk(stream.id, 0)]);
+
+      const readable = streams.watch(stream.id);
+      const reader = readable.getReader();
+
+      const first = await reader.read();
+      assert.ok(!first.done);
+
+      await reader.cancel();
+
+      const updated = await store.getStream(stream.id);
+      assert.ok(updated);
+      assert.strictEqual(updated.status, 'running');
     });
   });
 
   describe('StreamManager.cancel()', () => {
     it('should set stream status to cancelled', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
 
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-
-        await streams.cancel(stream.id);
-
-        const updated = await store.getStream(stream.id);
-        assert.ok(updated);
-        assert.strictEqual(updated.status, 'cancelled');
-        assert.ok(typeof updated.cancelRequestedAt === 'number');
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
       });
+      await store.createStream(stream);
+
+      await streams.cancel(stream.id);
+
+      const updated = await store.getStream(stream.id);
+      assert.ok(updated);
+      assert.strictEqual(updated.status, 'cancelled');
+      assert.ok(typeof updated.cancelRequestedAt === 'number');
     });
 
     it('should cause watcher to close after cancel', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
 
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-
-        await store.appendChunks([createChunk(stream.id, 0)]);
-
-        const received: unknown[] = [];
-        const readable = streams.watch(stream.id);
-        const consume = (async () => {
-          for await (const chunk of readable) received.push(chunk);
-        })();
-
-        await store.appendChunks([createChunk(stream.id, 1)]);
-        await streams.cancel(stream.id);
-
-        await consume;
-
-        assert.strictEqual(received.length, 2);
-
-        const updated = await store.getStream(stream.id);
-        assert.ok(updated);
-        assert.strictEqual(updated.status, 'cancelled');
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
       });
+      await store.createStream(stream);
+
+      await store.appendChunks([createChunk(stream.id, 0)]);
+
+      const received: unknown[] = [];
+      const readable = streams.watch(stream.id);
+      const consume = (async () => {
+        for await (const chunk of readable) received.push(chunk);
+      })();
+
+      await store.appendChunks([createChunk(stream.id, 1)]);
+      await streams.cancel(stream.id);
+
+      await consume;
+
+      assert.strictEqual(received.length, 2);
+
+      const updated = await store.getStream(stream.id);
+      assert.ok(updated);
+      assert.strictEqual(updated.status, 'cancelled');
     });
 
     it('should not let completion overwrite a cancellation that committed first', async () => {
-      await withStreamStore(async (store) => {
-        const watcherSleeping = Promise.withResolvers<void>();
-        const streams = makeManager(store, {
-          config: {
-            minMs: 1_000,
-            maxMs: 1_000,
-            multiplier: 2,
-            jitterRatio: 0,
-            statusCheckEvery: 1,
-          },
-          onPoll: (event) => {
-            if (event.type === 'idle') watcherSleeping.resolve();
-          },
-        });
-        const streamId = crypto.randomUUID();
-        await streams.register(streamId);
-        const sourceCancelled = Promise.withResolvers<void>();
-        const persist = streams.persist(
-          new ReadableStream<UIMessageChunk>({
-            cancel() {
-              sourceCancelled.resolve();
-            },
-          }),
-          streamId,
-        );
-        await waitForStatus(store, streamId, 'running');
-        await watcherSleeping.promise;
-
-        await streams.cancel(streamId);
-        await sourceCancelled.promise;
-        await persist;
-        await store.updateStreamStatus(streamId, 'completed');
-        await store.updateStreamStatus(streamId, 'failed', {
-          error: 'late failure',
-        });
-        await store.updateStreamStatus(streamId, 'queued');
-        await store.appendChunks([
-          {
-            streamId,
-            seq: 0,
-            data: { type: 'error', errorText: 'late error chunk' },
-            createdAt: Date.now(),
-          },
-        ]);
-
-        assert.equal(await store.getStreamStatus(streamId), 'cancelled');
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const watcherSleeping = Promise.withResolvers<void>();
+      const streams = makeManager(store, {
+        config: {
+          minMs: 1_000,
+          maxMs: 1_000,
+          multiplier: 2,
+          jitterRatio: 0,
+          statusCheckEvery: 1,
+        },
+        onPoll: (event) => {
+          if (event.type === 'idle') watcherSleeping.resolve();
+        },
       });
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
+      const sourceCancelled = Promise.withResolvers<void>();
+      const persist = streams.persist(
+        new ReadableStream<UIMessageChunk>({
+          cancel() {
+            sourceCancelled.resolve();
+          },
+        }),
+        streamId,
+      );
+      await waitForStatus(store, streamId, 'running');
+      await watcherSleeping.promise;
+
+      await streams.cancel(streamId);
+      await sourceCancelled.promise;
+      await persist;
+      await store.updateStreamStatus(streamId, 'completed');
+      await store.updateStreamStatus(streamId, 'failed', {
+        error: 'late failure',
+      });
+      await store.updateStreamStatus(streamId, 'queued');
+      await store.appendChunks([
+        {
+          streamId,
+          seq: 0,
+          data: { type: 'error', errorText: 'late error chunk' },
+          createdAt: Date.now(),
+        },
+      ]);
+
+      assert.equal(await store.getStreamStatus(streamId), 'cancelled');
     });
   });
 
   describe('Failure-mode coverage', () => {
     it('should continue watch loop when onWatchEvent callback throws', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store, {
-          onWatchEvent: () => {
-            throw new Error('telemetry exploded');
-          },
-        });
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-        await store.appendChunks([
-          createChunk(stream.id, 0),
-          createChunk(stream.id, 1),
-        ]);
-        await store.updateStreamStatus(stream.id, 'completed');
-
-        const received: unknown[] = [];
-        for await (const chunk of streams.watch(stream.id)) {
-          received.push(chunk);
-        }
-
-        assert.strictEqual(received.length, 2);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store, {
+        onWatchEvent: () => {
+          throw new Error('telemetry exploded');
+        },
       });
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
+      });
+      await store.createStream(stream);
+      await store.appendChunks([
+        createChunk(stream.id, 0),
+        createChunk(stream.id, 1),
+      ]);
+      await store.updateStreamStatus(stream.id, 'completed');
+
+      const received: unknown[] = [];
+      for await (const chunk of streams.watch(stream.id)) {
+        received.push(chunk);
+      }
+
+      assert.strictEqual(received.length, 2);
     });
 
     it('should await source cleanup when reader cancels watch', async () => {
-      await withStreamStore(async (store) => {
-        const slowSource = new TestChangeSource();
-        slowSource.cleanupDelayMs = 100;
-        const streams = new StreamManager({
-          store,
-          changeSource: slowSource,
-        });
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-
-        const reader = streams.watch(stream.id).getReader();
-        const readPromise = reader.read();
-        await sleep(2);
-
-        const startedAt = Date.now();
-        await reader.cancel();
-        const elapsedMs = Date.now() - startedAt;
-        await readPromise.catch(() => undefined);
-
-        assert.ok(
-          elapsedMs >= 80,
-          `cancel should await ~100ms cleanup, elapsed=${elapsedMs}ms`,
-        );
-        assert.strictEqual(slowSource.cleanupCount, 1);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const slowSource = new TestChangeSource();
+      slowSource.cleanupDelayMs = 100;
+      const streams = new StreamManager({
+        store,
+        changeSource: slowSource,
       });
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
+      });
+      await store.createStream(stream);
+
+      const reader = streams.watch(stream.id).getReader();
+      const readPromise = reader.read();
+      await sleep(2);
+
+      const startedAt = Date.now();
+      await reader.cancel();
+      const elapsedMs = Date.now() - startedAt;
+      await readPromise.catch(() => undefined);
+
+      assert.ok(
+        elapsedMs >= 80,
+        `cancel should await ~100ms cleanup, elapsed=${elapsedMs}ms`,
+      );
+      assert.strictEqual(slowSource.cleanupCount, 1);
     });
 
     it('should run source cleanup when iterator throws mid-stream', async () => {
-      await withStreamStore(async (store) => {
-        const faultySource = new TestChangeSource();
-        faultySource.throwAfterFirstYield = true;
-        const streams = new StreamManager({
-          store,
-          changeSource: faultySource,
-        });
-        const stream = createStream({
-          status: 'running',
-          startedAt: Date.now(),
-        });
-        await store.createStream(stream);
-
-        const readable = streams.watch(stream.id);
-        const consume = (async () => {
-          for await (const _chunk of readable) {
-            /* consume */
-          }
-        })();
-
-        await assert.rejects(() => consume, /mid-stream failure/);
-
-        assert.strictEqual(
-          faultySource.cleanupCount,
-          1,
-          'iterator finally must run when generator throws',
-        );
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const faultySource = new TestChangeSource();
+      faultySource.throwAfterFirstYield = true;
+      const streams = new StreamManager({
+        store,
+        changeSource: faultySource,
       });
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
+      });
+      await store.createStream(stream);
+
+      const readable = streams.watch(stream.id);
+      const consume = (async () => {
+        for await (const _chunk of readable) {
+          /* consume */
+        }
+      })();
+
+      await assert.rejects(() => consume, /mid-stream failure/);
+
+      assert.strictEqual(
+        faultySource.cleanupCount,
+        1,
+        'iterator finally must run when generator throws',
+      );
     });
 
     it('should not mask persist success when cancel watcher source throws', async () => {
-      await withStreamStore(async (store) => {
-        const faultySource = new TestChangeSource();
-        faultySource.throwOnSubscribe = true;
-        const streams = new StreamManager({
-          store,
-          changeSource: faultySource,
-        });
-        const streamId = crypto.randomUUID();
-        await streams.register(streamId);
-
-        const source = new ReadableStream({
-          start(controller) {
-            controller.enqueue({ type: 'text-start', id: 'p1' });
-            controller.enqueue({
-              type: 'text-delta',
-              id: 'p1',
-              delta: 'hello',
-            });
-            controller.close();
-          },
-        });
-
-        await streams.persist(source, streamId);
-
-        const final = await store.getStream(streamId);
-        assert.ok(final);
-        assert.strictEqual(final.status, 'completed');
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const faultySource = new TestChangeSource();
+      faultySource.throwOnSubscribe = true;
+      const streams = new StreamManager({
+        store,
+        changeSource: faultySource,
       });
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
+
+      const source = new ReadableStream({
+        start(controller) {
+          controller.enqueue({ type: 'text-start', id: 'p1' });
+          controller.enqueue({
+            type: 'text-delta',
+            id: 'p1',
+            delta: 'hello',
+          });
+          controller.close();
+        },
+      });
+
+      await streams.persist(source, streamId);
+
+      const final = await store.getStream(streamId);
+      assert.ok(final);
+      assert.strictEqual(final.status, 'completed');
     });
   });
 
   describe('StreamManager.persist() onCancelDetected', () => {
     it('should invoke onCancelDetected exactly once when cancelled', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const streamId = crypto.randomUUID();
-        await streams.register(streamId);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
 
-        const source = new ReadableStream({
-          start(controller) {
-            controller.enqueue({ type: 'text-start', id: 'part-1' });
-            controller.enqueue({
-              type: 'text-delta',
-              id: 'part-1',
-              delta: 'hello',
-            });
-          },
-        });
-
-        const calls: { streamId: string; latencyMs: number | null }[] = [];
-        const persistPromise = streams.persist(source, streamId, {
-          onCancelDetected: (info) => {
-            calls.push(info);
-          },
-        });
-
-        await waitForStatus(store, streamId, 'running');
-        void streams.cancel(streamId);
-
-        await persistPromise;
-
-        assert.strictEqual(
-          calls.length,
-          1,
-          'onCancelDetected should be called exactly once',
-        );
-        assert.strictEqual(calls[0].streamId, streamId);
-        assert.strictEqual(typeof calls[0].latencyMs, 'number');
+      const source = new ReadableStream({
+        start(controller) {
+          controller.enqueue({ type: 'text-start', id: 'part-1' });
+          controller.enqueue({
+            type: 'text-delta',
+            id: 'part-1',
+            delta: 'hello',
+          });
+        },
       });
+
+      const calls: { streamId: string; latencyMs: number | null }[] = [];
+      const persistPromise = streams.persist(source, streamId, {
+        onCancelDetected: (info) => {
+          calls.push(info);
+        },
+      });
+
+      await waitForStatus(store, streamId, 'running');
+      void streams.cancel(streamId);
+
+      await persistPromise;
+
+      assert.strictEqual(
+        calls.length,
+        1,
+        'onCancelDetected should be called exactly once',
+      );
+      assert.strictEqual(calls[0].streamId, streamId);
+      assert.strictEqual(typeof calls[0].latencyMs, 'number');
     });
 
     it('should recover after a transient source failure and detect remote cancellation', async () => {
-      await withStreamStore(async (store) => {
-        const changeSource = new FailFirstThenPollingChangeSource(store);
-        const workerStreams = new StreamManager({ store, changeSource });
-        const controllingStreams = makeManager(store);
-        const streamId = crypto.randomUUID();
-        await workerStreams.register(streamId);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const changeSource = new FailFirstThenPollingChangeSource(store);
+      const workerStreams = new StreamManager({ store, changeSource });
+      const controllingStreams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await workerStreams.register(streamId);
 
-        let closeSource!: () => void;
-        const source = new ReadableStream({
-          start(controller) {
-            closeSource = () => controller.close();
-          },
-        });
-        let cancellationDetections = 0;
-        const persist = workerStreams.persist(source, streamId, {
-          onCancelDetected: () => {
-            cancellationDetections++;
-          },
-        });
-        try {
-          await waitForStatus(store, streamId, 'running');
-          assert.equal(
-            await Promise.race([
-              changeSource.firstFailure.promise.then(() => true),
-              sleep(2_000).then(() => false),
-            ]),
-            true,
-            'cancellation watcher subscribes',
-          );
-          await controllingStreams.cancel(streamId);
-          const stoppedAfterRemoteCancel = await Promise.race([
-            persist.then(() => true),
-            sleep(300).then(() => false),
-          ]);
-
-          assert.equal(
-            stoppedAfterRemoteCancel,
-            true,
-            'persist stops even when its first cancellation subscription fails',
-          );
-          assert.ok(changeSource.attempts >= 1);
-          assert.equal(cancellationDetections, 1);
-        } finally {
-          try {
-            closeSource();
-          } catch {
-            // persist may already have cancelled and closed the source.
-          }
-          await persist;
-        }
+      let closeSource!: () => void;
+      const source = new ReadableStream({
+        start(controller) {
+          closeSource = () => controller.close();
+        },
       });
+      let cancellationDetections = 0;
+      const persist = workerStreams.persist(source, streamId, {
+        onCancelDetected: () => {
+          cancellationDetections++;
+        },
+      });
+      try {
+        await waitForStatus(store, streamId, 'running');
+        assert.equal(
+          await Promise.race([
+            changeSource.firstFailure.promise.then(() => true),
+            sleep(2_000).then(() => false),
+          ]),
+          true,
+          'cancellation watcher subscribes',
+        );
+        await controllingStreams.cancel(streamId);
+        const stoppedAfterRemoteCancel = await Promise.race([
+          persist.then(() => true),
+          sleep(300).then(() => false),
+        ]);
+
+        assert.equal(
+          stoppedAfterRemoteCancel,
+          true,
+          'persist stops even when its first cancellation subscription fails',
+        );
+        assert.ok(changeSource.attempts >= 1);
+        assert.equal(cancellationDetections, 1);
+      } finally {
+        try {
+          closeSource();
+        } catch {
+          // persist may already have cancelled and closed the source.
+        }
+        await persist;
+      }
     });
 
     it('should abort persistence when cancellation telemetry cannot read the stream', async () => {
@@ -2220,531 +2167,531 @@ describe('Stream Chunks', () => {
     });
 
     it('should back off repeated cancellation-source failures and stop retrying on disposal', async () => {
-      await withStreamStore(async (store) => {
-        const changeSource = new AlwaysFailingChangeSource();
-        const streams = new StreamManager({ store, changeSource });
-        const streamId = crypto.randomUUID();
-        await streams.register(streamId);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const changeSource = new AlwaysFailingChangeSource();
+      const streams = new StreamManager({ store, changeSource });
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
 
-        const watcher = streams.monitorCancellation(streamId, () => {});
-        try {
-          assert.equal(
-            await Promise.race([
-              changeSource.thirdAttempt.promise.then(() => true),
-              sleep(2_000).then(() => false),
-            ]),
-            true,
-            'watcher retries a repeatedly failing source',
-          );
-          await sleep(120);
-          assert.equal(
-            changeSource.attemptTimes.length,
-            3,
-            'adaptive delay prevents a fixed-rate retry loop',
-          );
-        } finally {
-          await watcher[Symbol.asyncDispose]();
-        }
-        const attemptsAtDisposal = changeSource.attemptTimes.length;
-        await sleep(150);
-        assert.equal(changeSource.attemptTimes.length, attemptsAtDisposal);
-      });
+      const watcher = streams.monitorCancellation(streamId, () => {});
+      try {
+        assert.equal(
+          await Promise.race([
+            changeSource.thirdAttempt.promise.then(() => true),
+            sleep(2_000).then(() => false),
+          ]),
+          true,
+          'watcher retries a repeatedly failing source',
+        );
+        await sleep(120);
+        assert.equal(
+          changeSource.attemptTimes.length,
+          3,
+          'adaptive delay prevents a fixed-rate retry loop',
+        );
+      } finally {
+        await watcher[Symbol.asyncDispose]();
+      }
+      const attemptsAtDisposal = changeSource.attemptTimes.length;
+      await sleep(150);
+      assert.equal(changeSource.attemptTimes.length, attemptsAtDisposal);
     });
 
     it('should preserve reconnect backoff when a failing source yields its initial tick', async () => {
-      await withStreamStore(async (store) => {
-        const changeSource = new YieldThenFailChangeSource();
-        const streams = new StreamManager({ store, changeSource });
-        const streamId = crypto.randomUUID();
-        await streams.register(streamId);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const changeSource = new YieldThenFailChangeSource();
+      const streams = new StreamManager({ store, changeSource });
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
 
-        const watcher = streams.monitorCancellation(streamId, () => {});
-        try {
-          assert.equal(
-            await Promise.race([
-              changeSource.thirdAttempt.promise.then(() => true),
-              sleep(2_000).then(() => false),
-            ]),
-            true,
-            'watcher reconnects after a source fails just after subscribing',
-          );
-          await sleep(120);
-          assert.equal(
-            changeSource.attemptTimes.length,
-            3,
-            'an initial tick cannot reset reconnect backoff',
-          );
-        } finally {
-          await watcher[Symbol.asyncDispose]();
-        }
-      });
+      const watcher = streams.monitorCancellation(streamId, () => {});
+      try {
+        assert.equal(
+          await Promise.race([
+            changeSource.thirdAttempt.promise.then(() => true),
+            sleep(2_000).then(() => false),
+          ]),
+          true,
+          'watcher reconnects after a source fails just after subscribing',
+        );
+        await sleep(120);
+        assert.equal(
+          changeSource.attemptTimes.length,
+          3,
+          'an initial tick cannot reset reconnect backoff',
+        );
+      } finally {
+        await watcher[Symbol.asyncDispose]();
+      }
     });
 
     it('should not fail persist when onCancelDetected throws', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const streamId = crypto.randomUUID();
-        await streams.register(streamId);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
 
-        const source = new ReadableStream({
-          start(controller) {
-            controller.enqueue({ type: 'text-start', id: 'part-1' });
-            controller.enqueue({
-              type: 'text-delta',
-              id: 'part-1',
-              delta: 'hello',
-            });
-          },
-        });
-
-        const persistPromise = streams.persist(source, streamId, {
-          onCancelDetected: () => {
-            throw new Error('callback exploded');
-          },
-        });
-
-        await waitForStatus(store, streamId, 'running');
-        void streams.cancel(streamId);
-
-        await persistPromise;
-
-        const stream = await store.getStream(streamId);
-        assert.ok(stream);
-        assert.strictEqual(stream.status, 'cancelled');
+      const source = new ReadableStream({
+        start(controller) {
+          controller.enqueue({ type: 'text-start', id: 'part-1' });
+          controller.enqueue({
+            type: 'text-delta',
+            id: 'part-1',
+            delta: 'hello',
+          });
+        },
       });
+
+      const persistPromise = streams.persist(source, streamId, {
+        onCancelDetected: () => {
+          throw new Error('callback exploded');
+        },
+      });
+
+      await waitForStatus(store, streamId, 'running');
+      void streams.cancel(streamId);
+
+      await persistPromise;
+
+      const stream = await store.getStream(streamId);
+      assert.ok(stream);
+      assert.strictEqual(stream.status, 'cancelled');
     });
 
     it('should work unchanged when no onCancelDetected is provided', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const streamId = crypto.randomUUID();
-        await streams.register(streamId);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
 
-        const source = new ReadableStream({
-          start(controller) {
-            controller.enqueue({ type: 'text-start', id: 'part-1' });
-            controller.enqueue({
-              type: 'text-delta',
-              id: 'part-1',
-              delta: 'hello',
-            });
-          },
-        });
-
-        const persistPromise = streams.persist(source, streamId);
-
-        await waitForStatus(store, streamId, 'running');
-        void streams.cancel(streamId);
-
-        await persistPromise;
-
-        const stream = await store.getStream(streamId);
-        assert.ok(stream);
-        assert.strictEqual(stream.status, 'cancelled');
+      const source = new ReadableStream({
+        start(controller) {
+          controller.enqueue({ type: 'text-start', id: 'part-1' });
+          controller.enqueue({
+            type: 'text-delta',
+            id: 'part-1',
+            delta: 'hello',
+          });
+        },
       });
+
+      const persistPromise = streams.persist(source, streamId);
+
+      await waitForStatus(store, streamId, 'running');
+      void streams.cancel(streamId);
+
+      await persistPromise;
+
+      const stream = await store.getStream(streamId);
+      assert.ok(stream);
+      assert.strictEqual(stream.status, 'cancelled');
     });
   });
 
   describe('StreamManager.persist() error chunks', () => {
     it('should fail the stream when a top-level error chunk is persisted', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const streamId = crypto.randomUUID();
-        await streams.register(streamId);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
 
-        const errorText = 'model stream failed';
-        const source = simulateReadableStream<UIMessageChunk>({
-          chunks: [
-            { type: 'text-start', id: 'part-1' },
-            { type: 'text-delta', id: 'part-1', delta: 'before' },
-            { type: 'error', errorText },
-            { type: 'finish' },
-          ],
-          initialDelayInMs: null,
-          chunkDelayInMs: 25,
-        });
-
-        const persistPromise = streams.persist(source, streamId, {
-          strategy: 'immediate',
-        });
-
-        await waitForStatus(store, streamId, 'failed');
-        await persistPromise;
-
-        const updated = await store.getStream(streamId);
-        assert.ok(updated);
-        assert.strictEqual(updated.status, 'failed');
-        assert.strictEqual(updated.error, errorText);
-
-        const chunks = await store.getChunks(streamId);
-        assert.deepStrictEqual(
-          chunks.map((chunk) => chunk.data),
-          [
-            { type: 'text-start', id: 'part-1' },
-            { type: 'text-delta', id: 'part-1', delta: 'before' },
-            { type: 'error', errorText },
-            { type: 'finish' },
-          ],
-        );
+      const errorText = 'model stream failed';
+      const source = simulateReadableStream<UIMessageChunk>({
+        chunks: [
+          { type: 'text-start', id: 'part-1' },
+          { type: 'text-delta', id: 'part-1', delta: 'before' },
+          { type: 'error', errorText },
+          { type: 'finish' },
+        ],
+        initialDelayInMs: null,
+        chunkDelayInMs: 25,
       });
+
+      const persistPromise = streams.persist(source, streamId, {
+        strategy: 'immediate',
+      });
+
+      await waitForStatus(store, streamId, 'failed');
+      await persistPromise;
+
+      const updated = await store.getStream(streamId);
+      assert.ok(updated);
+      assert.strictEqual(updated.status, 'failed');
+      assert.strictEqual(updated.error, errorText);
+
+      const chunks = await store.getChunks(streamId);
+      assert.deepStrictEqual(
+        chunks.map((chunk) => chunk.data),
+        [
+          { type: 'text-start', id: 'part-1' },
+          { type: 'text-delta', id: 'part-1', delta: 'before' },
+          { type: 'error', errorText },
+          { type: 'finish' },
+        ],
+      );
     });
 
     it('should not fail the stream for tool error chunks', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const streamId = crypto.randomUUID();
-        await streams.register(streamId);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
 
-        const source = simulateReadableStream<UIMessageChunk>({
-          chunks: [
-            {
-              type: 'tool-input-error',
-              toolCallId: 'tool-1',
-              toolName: 'search',
-              input: { query: 'bad' },
-              errorText: 'invalid input',
-            },
-            {
-              type: 'tool-output-error',
-              toolCallId: 'tool-1',
-              errorText: 'tool failed',
-            },
-            { type: 'finish' },
-          ],
-          initialDelayInMs: null,
-          chunkDelayInMs: null,
-        });
-
-        await streams.persist(source, streamId, { strategy: 'immediate' });
-
-        const updated = await store.getStream(streamId);
-        assert.ok(updated);
-        assert.strictEqual(updated.status, 'completed');
-        assert.strictEqual(updated.error, null);
-
-        const chunks = await store.getChunks(streamId);
-        assert.deepStrictEqual(
-          chunks.map((chunk) => chunk.data),
-          [
-            {
-              type: 'tool-input-error',
-              toolCallId: 'tool-1',
-              toolName: 'search',
-              input: { query: 'bad' },
-              errorText: 'invalid input',
-            },
-            {
-              type: 'tool-output-error',
-              toolCallId: 'tool-1',
-              errorText: 'tool failed',
-            },
-            { type: 'finish' },
-          ],
-        );
+      const source = simulateReadableStream<UIMessageChunk>({
+        chunks: [
+          {
+            type: 'tool-input-error',
+            toolCallId: 'tool-1',
+            toolName: 'search',
+            input: { query: 'bad' },
+            errorText: 'invalid input',
+          },
+          {
+            type: 'tool-output-error',
+            toolCallId: 'tool-1',
+            errorText: 'tool failed',
+          },
+          { type: 'finish' },
+        ],
+        initialDelayInMs: null,
+        chunkDelayInMs: null,
       });
+
+      await streams.persist(source, streamId, { strategy: 'immediate' });
+
+      const updated = await store.getStream(streamId);
+      assert.ok(updated);
+      assert.strictEqual(updated.status, 'completed');
+      assert.strictEqual(updated.error, null);
+
+      const chunks = await store.getChunks(streamId);
+      assert.deepStrictEqual(
+        chunks.map((chunk) => chunk.data),
+        [
+          {
+            type: 'tool-input-error',
+            toolCallId: 'tool-1',
+            toolName: 'search',
+            input: { query: 'bad' },
+            errorText: 'invalid input',
+          },
+          {
+            type: 'tool-output-error',
+            toolCallId: 'tool-1',
+            errorText: 'tool failed',
+          },
+          { type: 'finish' },
+        ],
+      );
     });
   });
 
   describe('StreamManager.persist() terminal state guard', () => {
     it('should return early without changing status when stream is cancelled', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const stream = createStream({
-          status: 'cancelled',
-          startedAt: Date.now(),
-          finishedAt: Date.now(),
-          cancelRequestedAt: Date.now(),
-        });
-        await store.createStream(stream);
-
-        const dummy = new ReadableStream({
-          start(c) {
-            c.close();
-          },
-        });
-        const result = await streams.persist(dummy, stream.id);
-
-        assert.strictEqual(result.streamId, stream.id);
-        const after = await store.getStream(stream.id);
-        assert.ok(after);
-        assert.strictEqual(after.status, 'cancelled');
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const stream = createStream({
+        status: 'cancelled',
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+        cancelRequestedAt: Date.now(),
       });
+      await store.createStream(stream);
+
+      const dummy = new ReadableStream({
+        start(c) {
+          c.close();
+        },
+      });
+      const result = await streams.persist(dummy, stream.id);
+
+      assert.strictEqual(result.streamId, stream.id);
+      const after = await store.getStream(stream.id);
+      assert.ok(after);
+      assert.strictEqual(after.status, 'cancelled');
     });
 
     it('should return early without changing status when stream is completed', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const stream = createStream({
-          status: 'completed',
-          startedAt: Date.now(),
-          finishedAt: Date.now(),
-        });
-        await store.createStream(stream);
-
-        const dummy = new ReadableStream({
-          start(c) {
-            c.close();
-          },
-        });
-        const result = await streams.persist(dummy, stream.id);
-
-        assert.strictEqual(result.streamId, stream.id);
-        const after = await store.getStream(stream.id);
-        assert.ok(after);
-        assert.strictEqual(after.status, 'completed');
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const stream = createStream({
+        status: 'completed',
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
       });
+      await store.createStream(stream);
+
+      const dummy = new ReadableStream({
+        start(c) {
+          c.close();
+        },
+      });
+      const result = await streams.persist(dummy, stream.id);
+
+      assert.strictEqual(result.streamId, stream.id);
+      const after = await store.getStream(stream.id);
+      assert.ok(after);
+      assert.strictEqual(after.status, 'completed');
     });
 
     it('should return early without changing status when stream is failed', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const stream = createStream({
-          status: 'failed',
-          startedAt: Date.now(),
-          finishedAt: Date.now(),
-          error: 'previous error',
-        });
-        await store.createStream(stream);
-
-        const dummy = new ReadableStream({
-          start(c) {
-            c.close();
-          },
-        });
-        const result = await streams.persist(dummy, stream.id);
-
-        assert.strictEqual(result.streamId, stream.id);
-        const after = await store.getStream(stream.id);
-        assert.ok(after);
-        assert.strictEqual(after.status, 'failed');
-        assert.strictEqual(after.error, 'previous error');
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const stream = createStream({
+        status: 'failed',
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+        error: 'previous error',
       });
+      await store.createStream(stream);
+
+      const dummy = new ReadableStream({
+        start(c) {
+          c.close();
+        },
+      });
+      const result = await streams.persist(dummy, stream.id);
+
+      assert.strictEqual(result.streamId, stream.id);
+      const after = await store.getStream(stream.id);
+      assert.ok(after);
+      assert.strictEqual(after.status, 'failed');
+      assert.strictEqual(after.error, 'previous error');
     });
 
     it('should not wait for full cancel polling interval when stream finishes quickly', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store, {
-          config: {
-            minMs: 1_000,
-            maxMs: 1_000,
-            multiplier: 2,
-            jitterRatio: 0,
-            statusCheckEvery: 1,
-          },
-        });
-        const streamId = crypto.randomUUID();
-        await streams.register(streamId);
-
-        const dummy = new ReadableStream({
-          start(c) {
-            c.close();
-          },
-        });
-
-        const startedAt = Date.now();
-        await streams.persist(dummy, streamId);
-        const elapsedMs = Date.now() - startedAt;
-
-        assert.ok(
-          elapsedMs < 500,
-          `persist should not block on long cancel poll sleep; elapsed=${elapsedMs}ms (1000ms cancel poll configured)`,
-        );
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store, {
+        config: {
+          minMs: 1_000,
+          maxMs: 1_000,
+          multiplier: 2,
+          jitterRatio: 0,
+          statusCheckEvery: 1,
+        },
       });
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
+
+      const dummy = new ReadableStream({
+        start(c) {
+          c.close();
+        },
+      });
+
+      const startedAt = Date.now();
+      await streams.persist(dummy, streamId);
+      const elapsedMs = Date.now() - startedAt;
+
+      assert.ok(
+        elapsedMs < 500,
+        `persist should not block on long cancel poll sleep; elapsed=${elapsedMs}ms (1000ms cancel poll configured)`,
+      );
     });
   });
 
   describe('StreamManager.cleanup', () => {
     it('should delete stream and all chunks', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const streamId = crypto.randomUUID();
-        await streams.register(streamId);
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
 
-        await store.appendChunks([createChunk(streamId, 0)]);
-        await store.appendChunks([createChunk(streamId, 1)]);
+      await store.appendChunks([createChunk(streamId, 0)]);
+      await store.appendChunks([createChunk(streamId, 1)]);
 
-        await streams.cleanup(streamId);
+      await streams.cleanup(streamId);
 
-        const deleted = await store.getStream(streamId);
-        assert.strictEqual(deleted, undefined);
-        const chunks = await store.getChunks(streamId);
-        assert.strictEqual(chunks.length, 0);
-      });
+      const deleted = await store.getStream(streamId);
+      assert.strictEqual(deleted, undefined);
+      const chunks = await store.getChunks(streamId);
+      assert.strictEqual(chunks.length, 0);
     });
   });
 
   describe('StreamManager.reopen()', () => {
     it('should reopen a completed stream as queued with no old chunks', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const streamId = crypto.randomUUID();
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
 
-        await streams.register(streamId);
-        await store.updateStreamStatus(streamId, 'running');
-        await store.appendChunks([
-          createChunk(streamId, 0),
-          createChunk(streamId, 1),
-        ]);
-        await store.updateStreamStatus(streamId, 'completed');
+      await streams.register(streamId);
+      await store.updateStreamStatus(streamId, 'running');
+      await store.appendChunks([
+        createChunk(streamId, 0),
+        createChunk(streamId, 1),
+      ]);
+      await store.updateStreamStatus(streamId, 'completed');
 
-        const result = await streams.reopen(streamId);
+      const result = await streams.reopen(streamId);
 
-        assert.strictEqual(result.created, true);
-        assert.strictEqual(result.stream.status, 'queued');
-        assert.strictEqual(result.stream.startedAt, null);
-        assert.strictEqual(result.stream.finishedAt, null);
-        assert.strictEqual(result.stream.error, null);
+      assert.strictEqual(result.created, true);
+      assert.strictEqual(result.stream.status, 'queued');
+      assert.strictEqual(result.stream.startedAt, null);
+      assert.strictEqual(result.stream.finishedAt, null);
+      assert.strictEqual(result.stream.error, null);
 
-        const chunks = await store.getChunks(streamId);
-        assert.strictEqual(chunks.length, 0);
-      });
+      const chunks = await store.getChunks(streamId);
+      assert.strictEqual(chunks.length, 0);
     });
 
     it('should reopen a failed stream', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const streamId = crypto.randomUUID();
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
 
-        await streams.register(streamId);
-        await store.updateStreamStatus(streamId, 'running');
-        await store.appendChunks([createChunk(streamId, 0)]);
-        await store.updateStreamStatus(streamId, 'failed', {
-          error: 'API timeout',
-        });
-
-        const result = await streams.reopen(streamId);
-
-        assert.strictEqual(result.created, true);
-        assert.strictEqual(result.stream.status, 'queued');
-        assert.strictEqual(result.stream.error, null);
-
-        const chunks = await store.getChunks(streamId);
-        assert.strictEqual(chunks.length, 0);
+      await streams.register(streamId);
+      await store.updateStreamStatus(streamId, 'running');
+      await store.appendChunks([createChunk(streamId, 0)]);
+      await store.updateStreamStatus(streamId, 'failed', {
+        error: 'API timeout',
       });
+
+      const result = await streams.reopen(streamId);
+
+      assert.strictEqual(result.created, true);
+      assert.strictEqual(result.stream.status, 'queued');
+      assert.strictEqual(result.stream.error, null);
+
+      const chunks = await store.getChunks(streamId);
+      assert.strictEqual(chunks.length, 0);
     });
 
     it('should reopen a cancelled stream', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const streamId = crypto.randomUUID();
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
 
-        await streams.register(streamId);
-        await store.updateStreamStatus(streamId, 'cancelled');
+      await streams.register(streamId);
+      await store.updateStreamStatus(streamId, 'cancelled');
 
-        const result = await streams.reopen(streamId);
+      const result = await streams.reopen(streamId);
 
-        assert.strictEqual(result.created, true);
-        assert.strictEqual(result.stream.status, 'queued');
-        assert.strictEqual(result.stream.cancelRequestedAt, null);
-      });
+      assert.strictEqual(result.created, true);
+      assert.strictEqual(result.stream.status, 'queued');
+      assert.strictEqual(result.stream.cancelRequestedAt, null);
     });
 
     it('should throw when trying to reopen a running stream', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const streamId = crypto.randomUUID();
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
 
-        await streams.register(streamId);
-        await store.updateStreamStatus(streamId, 'running');
+      await streams.register(streamId);
+      await store.updateStreamStatus(streamId, 'running');
 
-        await assert.rejects(
-          () => streams.reopen(streamId),
-          /Cannot reopen stream .* with status "running"/,
-        );
+      await assert.rejects(
+        () => streams.reopen(streamId),
+        /Cannot reopen stream .* with status "running"/,
+      );
 
-        const unchanged = await store.getStream(streamId);
-        assert.ok(unchanged);
-        assert.strictEqual(unchanged.status, 'running');
-      });
+      const unchanged = await store.getStream(streamId);
+      assert.ok(unchanged);
+      assert.strictEqual(unchanged.status, 'running');
     });
 
     it('should throw when trying to reopen a queued stream', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const streamId = crypto.randomUUID();
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
 
-        await streams.register(streamId);
+      await streams.register(streamId);
 
-        await assert.rejects(
-          () => streams.reopen(streamId),
-          /Cannot reopen stream .* with status "queued"/,
-        );
-      });
+      await assert.rejects(
+        () => streams.reopen(streamId),
+        /Cannot reopen stream .* with status "queued"/,
+      );
     });
 
     it('should throw for a non-existent stream', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const streamId = crypto.randomUUID();
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
 
-        await assert.rejects(
-          () => streams.reopen(streamId),
-          /Stream .* not found/,
-        );
-      });
+      await assert.rejects(
+        () => streams.reopen(streamId),
+        /Stream .* not found/,
+      );
     });
 
     it('should throw on double reopen (second call sees queued status)', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const streamId = crypto.randomUUID();
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
 
-        await streams.register(streamId);
-        await store.updateStreamStatus(streamId, 'running');
-        await store.updateStreamStatus(streamId, 'completed');
+      await streams.register(streamId);
+      await store.updateStreamStatus(streamId, 'running');
+      await store.updateStreamStatus(streamId, 'completed');
 
-        await streams.reopen(streamId);
+      await streams.reopen(streamId);
 
-        await assert.rejects(
-          () => streams.reopen(streamId),
-          /Cannot reopen stream .* with status "queued"/,
-        );
-      });
+      await assert.rejects(
+        () => streams.reopen(streamId),
+        /Cannot reopen stream .* with status "queued"/,
+      );
     });
 
     it('should allow persist() after reopen()', async () => {
-      await withStreamStore(async (store) => {
-        const streams = makeManager(store);
-        const streamId = crypto.randomUUID();
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
 
-        await streams.register(streamId);
-        await store.updateStreamStatus(streamId, 'running');
-        await store.appendChunks([createChunk(streamId, 0)]);
-        await store.updateStreamStatus(streamId, 'completed');
+      await streams.register(streamId);
+      await store.updateStreamStatus(streamId, 'running');
+      await store.appendChunks([createChunk(streamId, 0)]);
+      await store.updateStreamStatus(streamId, 'completed');
 
-        await streams.reopen(streamId);
+      await streams.reopen(streamId);
 
-        const newStream = new ReadableStream({
-          start(controller) {
-            controller.enqueue({
-              type: 'text-start',
-              id: 'new-part',
-            });
-            controller.enqueue({
-              type: 'text-delta',
-              id: 'new-part',
-              delta: 'reopened content',
-            });
-            controller.enqueue({
-              type: 'text-end',
-              id: 'new-part',
-            });
-            controller.close();
-          },
-        });
+      const newStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue({
+            type: 'text-start',
+            id: 'new-part',
+          });
+          controller.enqueue({
+            type: 'text-delta',
+            id: 'new-part',
+            delta: 'reopened content',
+          });
+          controller.enqueue({
+            type: 'text-end',
+            id: 'new-part',
+          });
+          controller.close();
+        },
+      });
 
-        await streams.persist(newStream, streamId, { strategy: 'immediate' });
+      await streams.persist(newStream, streamId, { strategy: 'immediate' });
 
-        const after = await store.getStream(streamId);
-        assert.ok(after);
-        assert.strictEqual(after.status, 'completed');
+      const after = await store.getStream(streamId);
+      assert.ok(after);
+      assert.strictEqual(after.status, 'completed');
 
-        const chunks = await store.getChunks(streamId);
-        assert.ok(chunks.length >= 3);
-        assert.deepStrictEqual(chunks[0].data, {
-          type: 'text-start',
-          id: 'new-part',
-        });
+      const chunks = await store.getChunks(streamId);
+      assert.ok(chunks.length >= 3);
+      assert.deepStrictEqual(chunks[0].data, {
+        type: 'text-start',
+        id: 'new-part',
       });
     });
   });

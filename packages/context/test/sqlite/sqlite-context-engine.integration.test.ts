@@ -18,7 +18,9 @@ import {
   reminder,
   user,
 } from '@deepagents/context';
-import { settleWithin } from '@deepagents/test';
+import { Sqlite, settleWithin } from '@deepagents/test';
+
+const sqlite = new Sqlite();
 
 async function createVirtualAgentSandbox() {
   return createBashTool({
@@ -39,21 +41,6 @@ class DiskImageUnavailableError extends Error {
 
 function sanitizeLabel(label: string) {
   return label.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-}
-
-async function withTempDb<T>(
-  label: string,
-  fn: (dbPath: string) => Promise<T>,
-) {
-  const dir = await mkdtemp(
-    path.join(os.tmpdir(), `context-${sanitizeLabel(label)}-`),
-  );
-  const dbPath = path.join(dir, 'context.sqlite');
-  try {
-    return await fn(dbPath);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
 }
 
 async function withDiskImage<T>(
@@ -187,243 +174,243 @@ function getPragmaNumber(db: DatabaseSync, name: string): number {
 
 describe('Sqlite ContextEngine Integration', () => {
   it('resolves an empty chat without hanging', async () => {
-    await withTempDb('empty-chat', async (dbPath) => {
-      const store = new SqliteContextStore(dbPath);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-empty',
-        userId: 'user-1',
-      });
-
-      const result = await settleWithin(
-        engine.resolve({
-          renderer,
-          sandbox: await createVirtualAgentSandbox(),
-        }),
-        'resolve empty chat',
-        10_000,
-      );
-      assert.strictEqual(result.messages.length, 0);
-
-      const emptyResult = await settleWithin(
-        engine.save(),
-        'save empty chat',
-        10_000,
-      );
-      assert.strictEqual(
-        emptyResult.headMessageId,
-        undefined,
-        'Empty save should return undefined headMessageId',
-      );
+    await using database = await sqlite.database();
+    const store = new SqliteContextStore(database.connection);
+    const engine = new ContextEngine({
+      store,
+      chatId: 'chat-empty',
+      userId: 'user-1',
     });
+
+    const result = await settleWithin(
+      engine.resolve({
+        renderer,
+        sandbox: await createVirtualAgentSandbox(),
+      }),
+      'resolve empty chat',
+      10_000,
+    );
+    assert.strictEqual(result.messages.length, 0);
+
+    const emptyResult = await settleWithin(
+      engine.save(),
+      'save empty chat',
+      10_000,
+    );
+    assert.strictEqual(
+      emptyResult.headMessageId,
+      undefined,
+      'Empty save should return undefined headMessageId',
+    );
   });
 
   it('resolves when an empty sqlite file already exists', async () => {
-    await withTempDb('empty-file', async (dbPath) => {
-      await writeFile(dbPath, '');
+    await using database = await sqlite.database();
+    database.connection.close();
+    await writeFile(database.path, '');
 
-      const store = new SqliteContextStore(dbPath);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-empty-file',
-        userId: 'user-1',
-      });
-
-      const result = await settleWithin(
-        engine.resolve({
-          renderer,
-          sandbox: await createVirtualAgentSandbox(),
-        }),
-        'resolve empty sqlite file',
-        10_000,
-      );
-      assert.strictEqual(result.messages.length, 0);
+    using connection = new DatabaseSync(database.path);
+    const store = new SqliteContextStore(connection);
+    const engine = new ContextEngine({
+      store,
+      chatId: 'chat-empty-file',
+      userId: 'user-1',
     });
+
+    const result = await settleWithin(
+      engine.resolve({
+        renderer,
+        sandbox: await createVirtualAgentSandbox(),
+      }),
+      'resolve empty sqlite file',
+      10_000,
+    );
+    assert.strictEqual(result.messages.length, 0);
   });
 
   it('does not hang with a dangling parent chain', async () => {
-    await withTempDb('dangling-parent', async (dbPath) => {
-      const store = new SqliteContextStore(dbPath);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-dangling',
-        userId: 'user-1',
-      });
+    await using database = await sqlite.database();
+    const store = new SqliteContextStore(database.connection);
+    const engine = new ContextEngine({
+      store,
+      chatId: 'chat-dangling',
+      userId: 'user-1',
+    });
 
-      engine.set(user(makeUserMessage('msg-1', 'Root')));
-      engine.set(assistantText('Middle', { id: 'msg-2' }));
-      engine.set(user(makeUserMessage('msg-3', 'Leaf')));
-      await settleWithin(engine.save(), 'save dangling chain setup', 10_000);
+    engine.set(user(makeUserMessage('msg-1', 'Root')));
+    engine.set(assistantText('Middle', { id: 'msg-2' }));
+    engine.set(user(makeUserMessage('msg-3', 'Leaf')));
+    await settleWithin(engine.save(), 'save dangling chain setup', 10_000);
 
-      const db = new DatabaseSync(dbPath);
+    {
+      using db = new DatabaseSync(database.path);
       db.exec('PRAGMA foreign_keys = OFF');
       db.prepare('DELETE FROM messages WHERE id = ?').run('msg-2');
       db.prepare('DELETE FROM messages_fts WHERE messageId = ?').run('msg-2');
-      db.close();
+    }
 
-      const result = await settleWithin(
-        (async () => {
-          try {
-            return await engine.resolve({
-              renderer,
-              sandbox: await createVirtualAgentSandbox(),
-            });
-          } catch (error) {
-            return { error } as { error: unknown };
-          }
-        })(),
-        'resolve dangling parent',
-        10_000,
-      );
+    const result = await settleWithin(
+      (async () => {
+        try {
+          return await engine.resolve({
+            renderer,
+            sandbox: await createVirtualAgentSandbox(),
+          });
+        } catch (error) {
+          return { error } as { error: unknown };
+        }
+      })(),
+      'resolve dangling parent',
+      10_000,
+    );
 
-      if ('messages' in result) {
-        assert.ok(result.messages.length >= 1);
-      }
-    });
+    if ('messages' in result) {
+      assert.ok(result.messages.length >= 1);
+    }
   });
 
   it('does not hang when the active branch row is missing', async () => {
-    await withTempDb('missing-branch', async (dbPath) => {
-      const store = new SqliteContextStore(dbPath);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-branch-missing',
-        userId: 'user-1',
-      });
+    await using database = await sqlite.database();
+    const store = new SqliteContextStore(database.connection);
+    const engine = new ContextEngine({
+      store,
+      chatId: 'chat-branch-missing',
+      userId: 'user-1',
+    });
 
-      engine.set(user(makeUserMessage('msg-1', 'Hello')));
-      await settleWithin(engine.save(), 'save branch setup', 10_000);
+    engine.set(user(makeUserMessage('msg-1', 'Hello')));
+    await settleWithin(engine.save(), 'save branch setup', 10_000);
 
-      const db = new DatabaseSync(dbPath);
+    {
+      using db = new DatabaseSync(database.path);
       db.prepare('DELETE FROM branches WHERE chatId = ?').run(
         'chat-branch-missing',
       );
-      db.close();
+    }
 
-      const nextEngine = new ContextEngine({
-        store,
-        chatId: 'chat-branch-missing',
-        userId: 'user-1',
-      });
-
-      await settleWithin(
-        (async () => {
-          try {
-            await nextEngine.resolve({
-              renderer,
-              sandbox: await createVirtualAgentSandbox(),
-            });
-          } catch {
-            // No hang is the requirement for this edge case.
-          }
-        })(),
-        'resolve missing branch',
-        10_000,
-      );
+    const nextEngine = new ContextEngine({
+      store,
+      chatId: 'chat-branch-missing',
+      userId: 'user-1',
     });
+
+    await settleWithin(
+      (async () => {
+        try {
+          await nextEngine.resolve({
+            renderer,
+            sandbox: await createVirtualAgentSandbox(),
+          });
+        } catch {
+          // No hang is the requirement for this edge case.
+        }
+      })(),
+      'resolve missing branch',
+      10_000,
+    );
   });
 
   it('does not hang when branch head points to a missing message', async () => {
-    await withTempDb('missing-head', async (dbPath) => {
-      const store = new SqliteContextStore(dbPath);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-missing-head',
-        userId: 'user-1',
-      });
+    await using database = await sqlite.database();
+    const store = new SqliteContextStore(database.connection);
+    const engine = new ContextEngine({
+      store,
+      chatId: 'chat-missing-head',
+      userId: 'user-1',
+    });
 
-      engine.set(user(makeUserMessage('msg-1', 'Hello')));
-      await settleWithin(engine.save(), 'save head setup', 10_000);
+    engine.set(user(makeUserMessage('msg-1', 'Hello')));
+    await settleWithin(engine.save(), 'save head setup', 10_000);
 
-      const db = new DatabaseSync(dbPath);
+    {
+      using db = new DatabaseSync(database.path);
       db.exec('PRAGMA foreign_keys = OFF');
       db.prepare('UPDATE branches SET headMessageId = ? WHERE chatId = ?').run(
         'missing-message',
         'chat-missing-head',
       );
-      db.close();
+    }
 
-      const nextEngine = new ContextEngine({
-        store,
-        chatId: 'chat-missing-head',
-        userId: 'user-1',
-      });
-
-      const result = await settleWithin(
-        nextEngine.resolve({
-          renderer,
-          sandbox: await createVirtualAgentSandbox(),
-        }),
-        'resolve missing head',
-        10_000,
-      );
-      assert.strictEqual(result.messages.length, 0);
+    const nextEngine = new ContextEngine({
+      store,
+      chatId: 'chat-missing-head',
+      userId: 'user-1',
     });
+
+    const result = await settleWithin(
+      nextEngine.resolve({
+        renderer,
+        sandbox: await createVirtualAgentSandbox(),
+      }),
+      'resolve missing head',
+      10_000,
+    );
+    assert.strictEqual(result.messages.length, 0);
   });
 
   it('rejects self-referential messages (circular reference protection)', async () => {
-    await withTempDb('tool-cycle', async (dbPath) => {
-      const store = new SqliteContextStore(dbPath);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-tool-cycle',
-        userId: 'user-1',
-      });
-
-      engine.set(
-        user(makeUserMessage('msg-1', "let's create comprehensive report")),
-      );
-      await settleWithin(engine.save(), 'save tool user message', 10_000);
-
-      const toolMessage = makeToolClarificationMessage('msg-2');
-
-      // Attempting to add a message where parentId === id should be rejected
-      await assert.rejects(async () => {
-        await store.addMessage({
-          id: toolMessage.id,
-          chatId: 'chat-tool-cycle',
-          parentId: toolMessage.id, // Self-referential - should be rejected
-          name: 'user',
-          type: 'message',
-          data: toolMessage,
-          createdAt: Date.now(),
-        });
-      }, /cannot be its own parent/);
-
-      // The original message should still be accessible
-      const result = await settleWithin(
-        engine.resolve({
-          renderer,
-          sandbox: await createVirtualAgentSandbox(),
-        }),
-        'resolve after rejection',
-        10_000,
-      );
-      assert.strictEqual(result.messages.length, 1);
+    await using database = await sqlite.database();
+    const store = new SqliteContextStore(database.connection);
+    const engine = new ContextEngine({
+      store,
+      chatId: 'chat-tool-cycle',
+      userId: 'user-1',
     });
+
+    engine.set(
+      user(makeUserMessage('msg-1', "let's create comprehensive report")),
+    );
+    await settleWithin(engine.save(), 'save tool user message', 10_000);
+
+    const toolMessage = makeToolClarificationMessage('msg-2');
+
+    // Attempting to add a message where parentId === id should be rejected
+    await assert.rejects(async () => {
+      await store.addMessage({
+        id: toolMessage.id,
+        chatId: 'chat-tool-cycle',
+        parentId: toolMessage.id, // Self-referential - should be rejected
+        name: 'user',
+        type: 'message',
+        data: toolMessage,
+        createdAt: Date.now(),
+      });
+    }, /cannot be its own parent/);
+
+    // The original message should still be accessible
+    const result = await settleWithin(
+      engine.resolve({
+        renderer,
+        sandbox: await createVirtualAgentSandbox(),
+      }),
+      'resolve after rejection',
+      10_000,
+    );
+    assert.strictEqual(result.messages.length, 1);
   });
 
   it('surfaces corruption errors without hanging', async () => {
-    await withTempDb('corrupt-db', async (dbPath) => {
-      await writeFile(dbPath, Buffer.from('not-a-database'));
+    await using database = await sqlite.database();
+    database.connection.close();
+    await writeFile(database.path, Buffer.from('not-a-database'));
 
-      await settleWithin(
-        assert.rejects(async () => {
-          const store = new SqliteContextStore(dbPath);
-          const engine = new ContextEngine({
-            store,
-            chatId: 'chat-corrupt',
-            userId: 'user-1',
-          });
-          await engine.resolve({
-            renderer,
-            sandbox: await createVirtualAgentSandbox(),
-          });
-        }, /database|file/i),
-        'corrupt db open',
-        10_000,
-      );
-    });
+    await settleWithin(
+      assert.rejects(async () => {
+        using connection = new DatabaseSync(database.path);
+        const store = new SqliteContextStore(connection);
+        const engine = new ContextEngine({
+          store,
+          chatId: 'chat-corrupt',
+          userId: 'user-1',
+        });
+        await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        });
+      }, /database|file/i),
+      'corrupt db open',
+      10_000,
+    );
   });
 
   it(
@@ -485,333 +472,323 @@ describe('Sqlite ContextEngine Integration', () => {
     'resolves a large chain without hanging',
     { timeout: 180000 },
     async () => {
-      await withTempDb('large-chain', async (dbPath) => {
-        const store = new SqliteContextStore(dbPath);
-        const engine = new ContextEngine({
-          store,
-          chatId: 'chat-large',
-          userId: 'user-1',
-        });
-
-        const totalMessages = 25000;
-        const batchSize = 500;
-
-        for (let index = 0; index < totalMessages; index += 1) {
-          engine.set(user(`message-${index}`));
-          if ((index + 1) % batchSize === 0) {
-            await settleWithin(
-              engine.save(),
-              `save batch ${(index + 1) / batchSize}`,
-              60_000,
-            );
-          }
-        }
-
-        if (totalMessages % batchSize !== 0) {
-          await settleWithin(engine.save(), 'save final batch', 60_000);
-        }
-
-        const result = await settleWithin(
-          engine.resolve({
-            renderer,
-            sandbox: await createVirtualAgentSandbox(),
-          }),
-          'resolve large chain',
-          120_000,
-        );
-        assert.strictEqual(result.messages.length, totalMessages);
+      await using database = await sqlite.database();
+      const store = new SqliteContextStore(database.connection);
+      const engine = new ContextEngine({
+        store,
+        chatId: 'chat-large',
+        userId: 'user-1',
       });
+
+      const totalMessages = 25000;
+      const batchSize = 500;
+
+      for (let index = 0; index < totalMessages; index += 1) {
+        engine.set(user(`message-${index}`));
+        if ((index + 1) % batchSize === 0) {
+          await settleWithin(
+            engine.save(),
+            `save batch ${(index + 1) / batchSize}`,
+            60_000,
+          );
+        }
+      }
+
+      if (totalMessages % batchSize !== 0) {
+        await settleWithin(engine.save(), 'save final batch', 60_000);
+      }
+
+      const result = await settleWithin(
+        engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        }),
+        'resolve large chain',
+        120_000,
+      );
+      assert.strictEqual(result.messages.length, totalMessages);
     },
   );
 
   it('creates new branch when saving message with existing ID (tool result scenario)', async () => {
-    await withTempDb('tool-result-branch', async (dbPath) => {
-      const store = new SqliteContextStore(dbPath);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-tool-result',
-        userId: 'user-1',
-      });
-
-      // 1. User message → save
-      engine.set(user(makeUserMessage('user-msg-1', 'What is the weather?')));
-      const userSaveResult = await engine.save();
-      assert.strictEqual(
-        userSaveResult.headMessageId,
-        'user-msg-1',
-        'headMessageId should be the saved message ID',
-      );
-
-      // 2. Assistant message with pending tool → save (head = assistant-pending)
-      const pendingToolMessage = {
-        id: 'assistant-pending',
-        role: 'assistant' as const,
-        parts: [
-          { type: 'step-start' as const },
-          {
-            type: 'tool-render_ask_user_question' as const,
-            toolCallId: 'fc_123',
-            state: 'pending' as const,
-            input: { questions: [{ question: 'Which city?', type: 'text' }] },
-          },
-        ],
-      };
-      engine.set(
-        assistantText(JSON.stringify(pendingToolMessage), {
-          id: 'assistant-pending',
-        }),
-      );
-      await engine.save();
-
-      // Verify we're on main branch with 2 messages
-      assert.strictEqual(engine.branch, 'main');
-      const beforeBranches = await store.listBranches('chat-tool-result');
-      assert.strictEqual(beforeBranches.length, 1);
-
-      // 3. Tool result comes back - set fragment with SAME ID (answered version)
-      const answeredToolMessage = {
-        id: 'assistant-pending',
-        role: 'assistant' as const,
-        parts: [
-          { type: 'step-start' as const },
-          {
-            type: 'tool-render_ask_user_question' as const,
-            toolCallId: 'fc_123',
-            state: 'output-available' as const,
-            input: { questions: [{ question: 'Which city?', type: 'text' }] },
-            output: { answers: [{ type: 'text', answer: 'New York' }] },
-          },
-        ],
-      };
-      engine.set(
-        assistantText(JSON.stringify(answeredToolMessage), {
-          id: 'assistant-pending',
-        }),
-      );
-      const branchSaveResult = await engine.save();
-      assert.notStrictEqual(
-        branchSaveResult.headMessageId,
-        'assistant-pending',
-        'headMessageId should differ after branching',
-      );
-
-      // 4. Verify new branch was created
-      const afterBranches = await store.listBranches('chat-tool-result');
-      assert.strictEqual(afterBranches.length, 2, 'Should have 2 branches now');
-      assert.strictEqual(engine.branch, 'main-v2', 'Should be on new branch');
-
-      // 5. Verify main-v2 chain: user → new_assistant (2 messages)
-      const result = await engine.resolve({
-        renderer,
-        sandbox: await createVirtualAgentSandbox(),
-      });
-      assert.strictEqual(result.messages.length, 2);
-
-      // 6. Verify main branch is preserved with original assistant message
-      await engine.switchBranch('main');
-      const mainResult = await engine.resolve({
-        renderer,
-        sandbox: await createVirtualAgentSandbox(),
-      });
-      assert.strictEqual(mainResult.messages.length, 2);
-      const mainAssistant = mainResult.messages[1] as { id?: string };
-      assert.strictEqual(mainAssistant.id, 'assistant-pending');
+    await using database = await sqlite.database();
+    const store = new SqliteContextStore(database.connection);
+    const engine = new ContextEngine({
+      store,
+      chatId: 'chat-tool-result',
+      userId: 'user-1',
     });
+
+    // 1. User message → save
+    engine.set(user(makeUserMessage('user-msg-1', 'What is the weather?')));
+    const userSaveResult = await engine.save();
+    assert.strictEqual(
+      userSaveResult.headMessageId,
+      'user-msg-1',
+      'headMessageId should be the saved message ID',
+    );
+
+    // 2. Assistant message with pending tool → save (head = assistant-pending)
+    const pendingToolMessage = {
+      id: 'assistant-pending',
+      role: 'assistant' as const,
+      parts: [
+        { type: 'step-start' as const },
+        {
+          type: 'tool-render_ask_user_question' as const,
+          toolCallId: 'fc_123',
+          state: 'pending' as const,
+          input: { questions: [{ question: 'Which city?', type: 'text' }] },
+        },
+      ],
+    };
+    engine.set(
+      assistantText(JSON.stringify(pendingToolMessage), {
+        id: 'assistant-pending',
+      }),
+    );
+    await engine.save();
+
+    // Verify we're on main branch with 2 messages
+    assert.strictEqual(engine.branch, 'main');
+    const beforeBranches = await store.listBranches('chat-tool-result');
+    assert.strictEqual(beforeBranches.length, 1);
+
+    // 3. Tool result comes back - set fragment with SAME ID (answered version)
+    const answeredToolMessage = {
+      id: 'assistant-pending',
+      role: 'assistant' as const,
+      parts: [
+        { type: 'step-start' as const },
+        {
+          type: 'tool-render_ask_user_question' as const,
+          toolCallId: 'fc_123',
+          state: 'output-available' as const,
+          input: { questions: [{ question: 'Which city?', type: 'text' }] },
+          output: { answers: [{ type: 'text', answer: 'New York' }] },
+        },
+      ],
+    };
+    engine.set(
+      assistantText(JSON.stringify(answeredToolMessage), {
+        id: 'assistant-pending',
+      }),
+    );
+    const branchSaveResult = await engine.save();
+    assert.notStrictEqual(
+      branchSaveResult.headMessageId,
+      'assistant-pending',
+      'headMessageId should differ after branching',
+    );
+
+    // 4. Verify new branch was created
+    const afterBranches = await store.listBranches('chat-tool-result');
+    assert.strictEqual(afterBranches.length, 2, 'Should have 2 branches now');
+    assert.strictEqual(engine.branch, 'main-v2', 'Should be on new branch');
+
+    // 5. Verify main-v2 chain: user → new_assistant (2 messages)
+    const result = await engine.resolve({
+      renderer,
+      sandbox: await createVirtualAgentSandbox(),
+    });
+    assert.strictEqual(result.messages.length, 2);
+
+    // 6. Verify main branch is preserved with original assistant message
+    await engine.switchBranch('main');
+    const mainResult = await engine.resolve({
+      renderer,
+      sandbox: await createVirtualAgentSandbox(),
+    });
+    assert.strictEqual(mainResult.messages.length, 2);
+    const mainAssistant = mainResult.messages[1] as { id?: string };
+    assert.strictEqual(mainAssistant.id, 'assistant-pending');
   });
 
   it('persists reminder metadata and text parts across save/resolve roundtrip', async () => {
-    await withTempDb('reminder-roundtrip', async (dbPath) => {
-      const partMode = true;
-      const store = new SqliteContextStore(dbPath);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-reminder-roundtrip',
-        userId: 'user-1',
-      });
-
-      engine.set(
-        reminder('inline'),
-        reminder('part-reminder', { asPart: partMode }),
-        user('body'),
-      );
-      await engine.save();
-
-      const afterSave = await engine.resolve({
-        renderer,
-        sandbox: await createVirtualAgentSandbox(),
-      });
-      const message = afterSave.messages[0] as {
-        parts: Array<{ type: string; text?: string }>;
-        metadata?: {
-          reminders?: Array<{
-            id: string;
-            text: string;
-            partIndex: number;
-            start: number;
-            end: number;
-            mode: string;
-          }>;
-        };
-      };
-
-      assert.deepStrictEqual(
-        message.parts.map((part) =>
-          part.type === 'text' ? part.text : part.type,
-        ),
-        [`body${taggedReminder('inline')}`, taggedReminder('part-reminder')],
-      );
-      assert.strictEqual(message.metadata?.reminders?.length, 2);
-
-      const roundtrip = await engine.resolve({
-        renderer,
-        sandbox: await createVirtualAgentSandbox(),
-      });
-      const messageAgain = roundtrip.messages[0] as {
-        parts: Array<{ type: string; text?: string }>;
-        metadata?: unknown;
-      };
-
-      assert.deepStrictEqual(
-        messageAgain.parts,
-        message.parts,
-        'Reminder text parts should survive save/resolve',
-      );
-      assert.deepStrictEqual(
-        messageAgain.metadata,
-        message.metadata,
-        'Reminder metadata should survive save/resolve',
-      );
+    await using database = await sqlite.database();
+    const partMode = true;
+    const store = new SqliteContextStore(database.connection);
+    const engine = new ContextEngine({
+      store,
+      chatId: 'chat-reminder-roundtrip',
+      userId: 'user-1',
     });
+
+    engine.set(
+      reminder('inline'),
+      reminder('part-reminder', { asPart: partMode }),
+      user('body'),
+    );
+    await engine.save();
+
+    const afterSave = await engine.resolve({
+      renderer,
+      sandbox: await createVirtualAgentSandbox(),
+    });
+    const message = afterSave.messages[0] as {
+      parts: Array<{ type: string; text?: string }>;
+      metadata?: {
+        reminders?: Array<{
+          id: string;
+          text: string;
+          partIndex: number;
+          start: number;
+          end: number;
+          mode: string;
+        }>;
+      };
+    };
+
+    assert.deepStrictEqual(
+      message.parts.map((part) =>
+        part.type === 'text' ? part.text : part.type,
+      ),
+      [`body${taggedReminder('inline')}`, taggedReminder('part-reminder')],
+    );
+    assert.strictEqual(message.metadata?.reminders?.length, 2);
+
+    const roundtrip = await engine.resolve({
+      renderer,
+      sandbox: await createVirtualAgentSandbox(),
+    });
+    const messageAgain = roundtrip.messages[0] as {
+      parts: Array<{ type: string; text?: string }>;
+      metadata?: unknown;
+    };
+
+    assert.deepStrictEqual(
+      messageAgain.parts,
+      message.parts,
+      'Reminder text parts should survive save/resolve',
+    );
+    assert.deepStrictEqual(
+      messageAgain.metadata,
+      message.metadata,
+      'Reminder metadata should survive save/resolve',
+    );
   });
 
   it('save({ branch: false }) updates message in place without creating a branch', async () => {
-    await withTempDb('branch-false-update', async (dbPath) => {
-      const store = new SqliteContextStore(dbPath);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-bf-1',
-        userId: 'user-1',
-      });
-
-      engine.set(user(makeUserMessage('u1', 'Hello')));
-      await engine.save();
-
-      engine.set(assistantText('First version', { id: 'a1' }));
-      await engine.save();
-
-      assert.strictEqual(engine.branch, 'main');
-      const branchesBefore = await store.listBranches('chat-bf-1');
-      assert.strictEqual(branchesBefore.length, 1);
-
-      engine.set(assistantText('Updated version', { id: 'a1' }));
-      const inPlaceResult = await engine.save({ branch: false });
-      assert.strictEqual(
-        inPlaceResult.headMessageId,
-        'a1',
-        'headMessageId should remain same ID after in-place update',
-      );
-
-      const branchesAfter = await store.listBranches('chat-bf-1');
-      assert.strictEqual(branchesAfter.length, 1, 'Should still have 1 branch');
-      assert.strictEqual(engine.branch, 'main', 'Should still be on main');
-
-      const msg = await store.getMessage('a1');
-      assert.ok(msg, 'Message a1 should exist');
-      const data = msg.data as {
-        parts?: Array<{ type: string; text?: string }>;
-      };
-      assert.ok(
-        data.parts?.[0]?.text?.includes('Updated version'),
-        'Should have updated content',
-      );
-
-      const activeBranch = await store.getActiveBranch('chat-bf-1');
-      assert.strictEqual(
-        activeBranch?.headMessageId,
-        'a1',
-        'Branch head should still be a1',
-      );
+    await using database = await sqlite.database();
+    const store = new SqliteContextStore(database.connection);
+    const engine = new ContextEngine({
+      store,
+      chatId: 'chat-bf-1',
+      userId: 'user-1',
     });
+
+    engine.set(user(makeUserMessage('u1', 'Hello')));
+    await engine.save();
+
+    engine.set(assistantText('First version', { id: 'a1' }));
+    await engine.save();
+
+    assert.strictEqual(engine.branch, 'main');
+    const branchesBefore = await store.listBranches('chat-bf-1');
+    assert.strictEqual(branchesBefore.length, 1);
+
+    engine.set(assistantText('Updated version', { id: 'a1' }));
+    const inPlaceResult = await engine.save({ branch: false });
+    assert.strictEqual(
+      inPlaceResult.headMessageId,
+      'a1',
+      'headMessageId should remain same ID after in-place update',
+    );
+
+    const branchesAfter = await store.listBranches('chat-bf-1');
+    assert.strictEqual(branchesAfter.length, 1, 'Should still have 1 branch');
+    assert.strictEqual(engine.branch, 'main', 'Should still be on main');
+
+    const msg = await store.getMessage('a1');
+    assert.ok(msg, 'Message a1 should exist');
+    const data = msg.data as {
+      parts?: Array<{ type: string; text?: string }>;
+    };
+    assert.ok(
+      data.parts?.[0]?.text?.includes('Updated version'),
+      'Should have updated content',
+    );
+
+    const activeBranch = await store.getActiveBranch('chat-bf-1');
+    assert.strictEqual(
+      activeBranch?.headMessageId,
+      'a1',
+      'Branch head should still be a1',
+    );
   });
 
   it('save({ branch: false }) preserves original parentId (self-reference guard)', async () => {
-    await withTempDb('branch-false-parent', async (dbPath) => {
-      const store = new SqliteContextStore(dbPath);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-bf-2',
-        userId: 'user-1',
-      });
-
-      engine.set(user(makeUserMessage('u1', 'Hello')));
-      await engine.save();
-
-      engine.set(assistantText('Original', { id: 'a1' }));
-      await engine.save();
-
-      const beforeMsg = await store.getMessage('a1');
-      assert.strictEqual(
-        beforeMsg?.parentId,
-        'u1',
-        'parentId should be user msg before update',
-      );
-
-      engine.set(assistantText('Corrected', { id: 'a1' }));
-      await engine.save({ branch: false });
-
-      const afterMsg = await store.getMessage('a1');
-      assert.strictEqual(
-        afterMsg?.parentId,
-        'u1',
-        'parentId should still be user msg after update',
-      );
+    await using database = await sqlite.database();
+    const store = new SqliteContextStore(database.connection);
+    const engine = new ContextEngine({
+      store,
+      chatId: 'chat-bf-2',
+      userId: 'user-1',
     });
+
+    engine.set(user(makeUserMessage('u1', 'Hello')));
+    await engine.save();
+
+    engine.set(assistantText('Original', { id: 'a1' }));
+    await engine.save();
+
+    const beforeMsg = await store.getMessage('a1');
+    assert.strictEqual(
+      beforeMsg?.parentId,
+      'u1',
+      'parentId should be user msg before update',
+    );
+
+    engine.set(assistantText('Corrected', { id: 'a1' }));
+    await engine.save({ branch: false });
+
+    const afterMsg = await store.getMessage('a1');
+    assert.strictEqual(
+      afterMsg?.parentId,
+      'u1',
+      'parentId should still be user msg after update',
+    );
   });
 
   it('save({ branch: false }) works across multiple incremental saves', async () => {
-    await withTempDb('branch-false-incremental', async (dbPath) => {
-      const store = new SqliteContextStore(dbPath);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-bf-3',
-        userId: 'user-1',
-      });
-
-      engine.set(user(makeUserMessage('u1', 'Hello')));
-      await engine.save();
-
-      engine.set(assistantText('Step 1', { id: 'a1' }));
-      await engine.save({ branch: false });
-
-      engine.set(assistantText('Step 1 + Step 2', { id: 'a1' }));
-      await engine.save({ branch: false });
-
-      engine.set(assistantText('Step 1 + Step 2 + Step 3', { id: 'a1' }));
-      await engine.save({ branch: false });
-
-      const branches = await store.listBranches('chat-bf-3');
-      assert.strictEqual(branches.length, 1, 'Should still have 1 branch');
-
-      const chain = await store.getMessageChain('a1');
-      assert.strictEqual(
-        chain.length,
-        2,
-        'Should have 2 messages: user + assistant',
-      );
-
-      const msg = await store.getMessage('a1');
-      const data = msg!.data as {
-        parts?: Array<{ type: string; text?: string }>;
-      };
-      assert.ok(
-        data.parts?.[0]?.text?.includes('Step 3'),
-        'Should have final content from 3rd save',
-      );
-      assert.strictEqual(
-        msg!.parentId,
-        'u1',
-        'parentId should remain user msg',
-      );
+    await using database = await sqlite.database();
+    const store = new SqliteContextStore(database.connection);
+    const engine = new ContextEngine({
+      store,
+      chatId: 'chat-bf-3',
+      userId: 'user-1',
     });
+
+    engine.set(user(makeUserMessage('u1', 'Hello')));
+    await engine.save();
+
+    engine.set(assistantText('Step 1', { id: 'a1' }));
+    await engine.save({ branch: false });
+
+    engine.set(assistantText('Step 1 + Step 2', { id: 'a1' }));
+    await engine.save({ branch: false });
+
+    engine.set(assistantText('Step 1 + Step 2 + Step 3', { id: 'a1' }));
+    await engine.save({ branch: false });
+
+    const branches = await store.listBranches('chat-bf-3');
+    assert.strictEqual(branches.length, 1, 'Should still have 1 branch');
+
+    const chain = await store.getMessageChain('a1');
+    assert.strictEqual(
+      chain.length,
+      2,
+      'Should have 2 messages: user + assistant',
+    );
+
+    const msg = await store.getMessage('a1');
+    const data = msg!.data as {
+      parts?: Array<{ type: string; text?: string }>;
+    };
+    assert.ok(
+      data.parts?.[0]?.text?.includes('Step 3'),
+      'Should have final content from 3rd save',
+    );
+    assert.strictEqual(msg!.parentId, 'u1', 'parentId should remain user msg');
   });
 });

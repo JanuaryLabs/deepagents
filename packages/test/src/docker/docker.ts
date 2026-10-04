@@ -1,6 +1,7 @@
 import spawn, { SubprocessError } from 'nano-spawn';
 import { createHash, randomUUID } from 'node:crypto';
 
+import { timebox } from '../async/timebox.ts';
 import { Container } from './container.ts';
 
 export interface ContainerOptions {
@@ -100,15 +101,24 @@ export class Docker {
         )
           throw error;
       }
-      inspected = await this.#inspect(name);
+      // A competing create reserves the name before Docker registers it for
+      // inspection. Retry only that absence, not daemon or permission errors.
+      const pending = new Error(`Container ${name} is not visible yet`);
+      inspected = await timebox(
+        async () => {
+          const container = await this.#inspect(name);
+          if (!container) throw pending;
+          return container;
+        },
+        { shouldRetry: ({ error }) => error === pending },
+      );
     }
     if (
-      !inspected ||
       inspected.Config.Labels?.['dev.deepagents.test.shared'] !== '1' ||
       inspected.Config.Labels['dev.deepagents.test.config'] !== fingerprint
     ) {
       throw new Error(
-        `Container ${name} is missing or does not match the shared test configuration`,
+        `Container ${name} does not match the shared test configuration`,
       );
     }
     if (inspected.State.Status !== 'running') {
