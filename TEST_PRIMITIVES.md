@@ -132,6 +132,20 @@ WAL files, on success or failure. Close any additional connections before that
 scope exits. SQLite requires no Docker or global setup and does not share files
 across acquisitions. Product stores and schema setup stay in their own tests.
 
+To test contention against an existing SQLite file, acquire a timed write lock:
+
+```ts
+await using lock = await sqlite.writeLock(database.path, 200);
+// Exercise a caller that must wait for the other writer to finish.
+```
+
+`writeLock(path, durationMs)` returns after a separate Node process acquires
+`BEGIN IMMEDIATE`. That process releases the lock after the explicit duration,
+even when the caller blocks in a synchronous SQLite operation. Disposing the
+handle stops and awaits the process early; acquisition failures reject with the
+child's error. The process also exits when its parent disconnects. The helper
+does not change the caller's busy timeout, schema, or data.
+
 DuckDB owns an in-memory instance and its native connection:
 
 ```ts
