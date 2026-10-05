@@ -84,27 +84,25 @@ describe('pickFromArray', () => {
 });
 
 describe('filterRecordsByIndex', () => {
-  async function collect<T>(source: AsyncIterable<T>): Promise<T[]> {
-    const result: T[] = [];
-    for await (const item of source) result.push(item);
-    return result;
-  }
-
   it('empty set yields all items', async () => {
     const source = dataset([1, 2, 3]);
-    const result = await collect(filterRecordsByIndex(source, new Set()));
+    const result = await Array.fromAsync(
+      filterRecordsByIndex(source, new Set()),
+    );
     assert.deepStrictEqual(result, [1, 2, 3]);
   });
 
   it('filters to specified indexes', async () => {
     const source = dataset(['a', 'b', 'c', 'd', 'e']);
-    const result = await collect(filterRecordsByIndex(source, new Set([1, 3])));
+    const result = await Array.fromAsync(
+      filterRecordsByIndex(source, new Set([1, 3])),
+    );
     assert.deepStrictEqual(result, ['b', 'd']);
   });
 
   it('out-of-range indexes are silently skipped', async () => {
     const source = dataset([10, 20, 30]);
-    const result = await collect(
+    const result = await Array.fromAsync(
       filterRecordsByIndex(source, new Set([0, 10])),
     );
     assert.deepStrictEqual(result, [10]);

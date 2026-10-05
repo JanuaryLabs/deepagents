@@ -10,6 +10,9 @@ import {
   createAgentOsSandbox,
   useAgentOsSandbox,
 } from '@deepagents/context';
+import { StreamHarness } from '@deepagents/test';
+
+const streamHarness = new StreamHarness();
 
 async function isAgentOsAvailable(): Promise<boolean> {
   try {
@@ -235,10 +238,9 @@ describe('Agent OS Sandbox', async () => {
         const proc = sandbox.spawn!('echo unreached', {
           signal: controller.signal,
         });
-        const reader = proc.stdout.getReader();
+        await using reader = streamHarness.reader(proc.stdout);
         const first = await reader.read();
         assert.strictEqual(first.done, true);
-        reader.releaseLock();
         const exit = await proc.exit;
         assert.deepStrictEqual(exit, {
           code: null,
@@ -254,7 +256,7 @@ describe('Agent OS Sandbox', async () => {
         });
 
         const decoder = new TextDecoder();
-        const reader = proc.stdout.getReader();
+        await using reader = streamHarness.reader(proc.stdout);
         const first = await reader.read();
         assert.strictEqual(first.done, false);
         assert.match(decoder.decode(first.value), /before/);
@@ -266,7 +268,6 @@ describe('Agent OS Sandbox', async () => {
           if (chunk.done) break;
           remaining.push(decoder.decode(chunk.value));
         }
-        reader.releaseLock();
         const exit = await proc.exit;
 
         assert.deepStrictEqual(exit, {

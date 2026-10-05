@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import { randomUUID } from 'node:crypto';
+import { text as streamText } from 'node:stream/consumers';
 import { describe, it } from 'node:test';
 
 import {
@@ -52,17 +53,6 @@ async function deleteByName(
 ): Promise<void> {
   const sandbox = await client.get(name).catch(() => undefined);
   await sandbox?.delete?.();
-}
-
-async function readAllText(
-  stream: ReadableStream<Uint8Array>,
-): Promise<string> {
-  const decoder = new TextDecoder();
-  let text = '';
-  for await (const chunk of stream) {
-    text += decoder.decode(chunk, { stream: true });
-  }
-  return text + decoder.decode();
 }
 
 async function readFirstChunk(
@@ -191,8 +181,8 @@ describe('Daytona Bash contract (live)', { skip: !liveAvailable }, () => {
       // Act
       const child = spawn(literalHeredoc(43));
       const [stdout, stderr, exit] = await Promise.all([
-        readAllText(child.stdout),
-        readAllText(child.stderr),
+        streamText(child.stdout),
+        streamText(child.stderr),
         child.exit,
       ]);
 
@@ -235,8 +225,8 @@ describe('Daytona Bash contract (live)', { skip: !liveAvailable }, () => {
         env: { TRICKY_VALUE: envValue },
       });
       const [stdout, stderr, exit] = await Promise.all([
-        readAllText(child.stdout),
-        readAllText(child.stderr),
+        streamText(child.stdout),
+        streamText(child.stderr),
         child.exit,
       ]);
 
@@ -278,7 +268,7 @@ describe('Daytona Bash contract (live)', { skip: !liveAvailable }, () => {
         'first stdout chunk must arrive before process exit',
       );
       assert.strictEqual(winner.kind === 'chunk' ? winner.text : '', 'first\n');
-      const rest = await readAllText(child.stdout);
+      const rest = await streamText(child.stdout);
       assert.strictEqual(rest, 'second\n');
       assert.deepStrictEqual(await child.exit, {
         code: 0,

@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import { randomUUID } from 'node:crypto';
+import { text as streamText } from 'node:stream/consumers';
 import { describe, it } from 'node:test';
 
 import {
@@ -50,18 +51,6 @@ async function isMicrosandboxUsable(): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-async function readAllText(
-  stream: ReadableStream<Uint8Array>,
-): Promise<string> {
-  const decoder = new TextDecoder();
-  let text = '';
-  for await (const chunk of stream) {
-    text += decoder.decode(chunk, { stream: true });
-  }
-  text += decoder.decode();
-  return text;
 }
 
 async function readFirstChunk(
@@ -240,7 +229,7 @@ describe('Microsandbox Sandbox', async () => {
 
         assert.match(await readFirstChunk(child.stdout), /hi/);
 
-        const drained = readAllText(child.stdout);
+        const drained = streamText(child.stdout);
         controller.abort();
 
         const info = await child.exit;
@@ -253,8 +242,8 @@ describe('Microsandbox Sandbox', async () => {
         await using sandbox = await createMicrosandboxSandbox();
         assert.ok(sandbox.spawn);
         const child = sandbox.spawn('exit 42');
-        await readAllText(child.stdout);
-        await readAllText(child.stderr);
+        await streamText(child.stdout);
+        await streamText(child.stderr);
         assert.deepStrictEqual(await child.exit, {
           code: 42,
           signal: null,
@@ -267,8 +256,8 @@ describe('Microsandbox Sandbox', async () => {
         assert.ok(sandbox.spawn);
         const child = sandbox.spawn('echo hi; echo err >&2');
         const [out, err, info] = await Promise.all([
-          readAllText(child.stdout),
-          readAllText(child.stderr),
+          streamText(child.stdout),
+          streamText(child.stderr),
           child.exit,
         ]);
         assert.strictEqual(out.trim(), 'hi');
@@ -293,7 +282,7 @@ describe('Microsandbox Sandbox', async () => {
           'first stdout chunk must arrive before the child exits (proves live streaming)',
         );
 
-        const rest = await readAllText(child.stdout);
+        const rest = await streamText(child.stdout);
         const info = await child.exit;
         assert.match(rest, /bye/);
         assert.strictEqual(info.success, true);
@@ -306,8 +295,8 @@ describe('Microsandbox Sandbox', async () => {
           'echo "to stdout"; echo "to stderr" >&2; echo "also stdout"',
         );
         const [out, err] = await Promise.all([
-          readAllText(child.stdout),
-          readAllText(child.stderr),
+          streamText(child.stdout),
+          streamText(child.stderr),
           child.exit,
         ]);
         assert.deepStrictEqual(out.trim().split('\n'), [
@@ -325,7 +314,7 @@ describe('Microsandbox Sandbox', async () => {
         const child = sandbox.spawn('printf "%s\\n" "$MY_VAR"', {
           env: { MY_VAR: 'hello-from-host' },
         });
-        const text = await readAllText(child.stdout);
+        const text = await streamText(child.stdout);
         const info = await child.exit;
         assert.strictEqual(text.trim(), 'hello-from-host');
         assert.strictEqual(info.success, true);
@@ -339,7 +328,7 @@ describe('Microsandbox Sandbox', async () => {
         assert.strictEqual(mkdir.exitCode, 0);
 
         const child = sandbox.spawn('pwd', { cwd });
-        const text = await readAllText(child.stdout);
+        const text = await streamText(child.stdout);
         const info = await child.exit;
         assert.strictEqual(text.trim(), cwd);
         assert.strictEqual(info.success, true);
@@ -655,7 +644,7 @@ describe('Microsandbox Sandbox', async () => {
             'first stdout chunk must arrive before exit through createBashTool',
           );
 
-          const rest = await readAllText(child.stdout);
+          const rest = await streamText(child.stdout);
           const info = await child.exit;
           assert.match(rest, /bye/);
           assert.strictEqual(info.success, true);

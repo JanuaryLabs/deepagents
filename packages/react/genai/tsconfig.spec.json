@@ -2,7 +2,7 @@
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./out-tsc/vitest",
-    "lib": ["DOM", "DOM.Iterable", "DOM.AsyncIterable"],
+    "lib": ["ESNext", "DOM", "DOM.Iterable", "DOM.AsyncIterable"],
     "jsx": "react-jsx",
     "types": [
       "vitest/globals",

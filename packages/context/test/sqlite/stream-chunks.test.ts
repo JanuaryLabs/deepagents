@@ -1334,7 +1334,7 @@ describe('Stream Chunks', () => {
       const streams = makeManager(store);
 
       const readable = streams.watch('non-existent');
-      const reader = readable.getReader();
+      await using reader = streamHarness.reader(readable);
       await assert.rejects(
         () => reader.read(),
         /Stream "non-existent" not found/,

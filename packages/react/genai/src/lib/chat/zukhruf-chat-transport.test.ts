@@ -19,16 +19,6 @@ const tools = {
   },
 } satisfies SerializedToolRegistry;
 
-async function collect<T>(stream: ReadableStream<T>) {
-  const values: T[] = [];
-  const reader = stream.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) return values;
-    values.push(value);
-  }
-}
-
 it('creates, continues, streams, and cancels a session', async () => {
   const requests: Array<{
     url: string;
@@ -91,7 +81,7 @@ it('creates, continues, streams, and cancels a session', async () => {
     messages: [message],
     trigger: 'submit-message',
   });
-  expect(await collect(first)).toEqual([
+  expect(await Array.fromAsync(first)).toEqual([
     {
       type: 'text-delta',
       id: 'text-1',
