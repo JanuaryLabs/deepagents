@@ -28,8 +28,8 @@ resolved on each request from `CLAUDE_CONFIG_DIR`, or `~/.claude` when unset:
 
 The login must contain Claude inference scopes. API-key environment variables and
 `ANTHROPIC_BASE_URL` do not redirect this provider; requests go to Anthropic's
-Messages endpoint using the native login. Application-owned credentials are not
-implemented yet.
+Messages endpoint using the native login. For credentials your application owns,
+see [Application-owned accounts](#application-owned-accounts).
 
 Tokens within one minute of expiry are refreshed and persisted to the same store,
 preserving other fields. File writes are atomic with mode `0600`. Concurrent
@@ -37,6 +37,46 @@ provider processes coordinate refresh through a lock and recheck the saved login
 before writing. The native CLI does not share that lock, so a simultaneous
 CLI/provider rotation can still race (backlog #1812). Cancellation reaches both
 refresh and model requests.
+
+## Application-owned accounts
+
+```ts
+import { createClaudeAccounts } from '@deepagents/experimental/providers/claude';
+
+const accounts = createClaudeAccounts({
+  store, // KeyValueStore<ClaudeTokens>, keyed by owner
+  onChange: (owner, state) => notify(owner, state),
+});
+
+const pending = await accounts.connect(userId);
+// Open pending.authorizationUrl; the user pastes the code Claude shows.
+await accounts.complete(userId, pastedCode);
+
+const model = accounts.provider(userId)('claude-sonnet-5-5');
+const modelIds = await accounts.listModels(userId);
+```
+
+Each owner (for example your user id) connects a Claude Pro or Max account
+through PKCE sign-in; neither Claude Code nor a local login is involved. The
+store is the `KeyValueStore` from `@opencoredev/loginwithchatgpt-core`
+(`get`/`set`/`delete`), so any encrypted backend works. Values that do not parse
+as tokens read as `unauthenticated`.
+
+`state(owner)` and `onChange` report `unauthenticated`, `pending`
+(`authorizationUrl`, `expiresAt`, an optional retry `message`), `connected`
+(`user` from the token response or Anthropic's profile), or `error`. A sign-in
+expires after ten minutes; a throttled or failed code exchange stays pending,
+while a rejected code ends it. `cancel(owner)` abandons a sign-in, and
+`disconnect(owner)` also deletes the tokens.
+
+Create one instance per store. Revisions and refresh serialization live in the
+instance, so a late refresh or sign-in cannot overwrite a disconnect, and
+rotated refresh tokens are used once. Refresh ignores request cancellation so a
+rotated token is never dropped. A 401 forces one refresh and retries the
+request; a rejected refresh token deletes the tokens and reports
+`unauthenticated`. Failures throw `ClaudeAuthError` with a `code`; token
+endpoint response bodies never appear in messages. `listModels` returns the
+account's models from Anthropic's model list.
 
 ## Model behavior
 
@@ -51,7 +91,9 @@ all tool steps. Zukhruf persists that history itself.
 
 Native subscription access uses a private compatibility protocol: the OAuth beta
 header and a prepended Claude Agent SDK identity instruction. These are isolated
-in `index.ts`; the application instructions follow them. This is experimental,
+in `provider.ts`, shared by both credential sources; the application
+instructions follow them. Without the identity instruction Anthropic answers
+`429 rate_limit_error`. This is experimental,
 not an official third-party subscription API, and server acceptance can change.
 No tool-name, SSE, billing-body, or user-agent rewriting is needed by the
 live-verified flow.

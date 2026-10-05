@@ -69,9 +69,34 @@ limits; do not rely on `maxOutputTokens` to cap a response.
 When managing history directly with AI SDK, append `result.responseMessages`
 to retain every tool step. Zukhruf persists and restores its own history.
 
-Only local ChatGPT login is implemented here. Application-owned credentials are
-not implemented yet. The [Claude provider](../claude/README.md) follows the same
-AI SDK protocol with its own native login transport.
+The [Claude provider](../claude/README.md) follows the same AI SDK protocol with
+its own native login transport.
+
+## Application-owned accounts
+
+```ts
+import { createCodexAccounts } from '@deepagents/experimental/providers/codex';
+
+const accounts = createCodexAccounts({
+  store, // KeyValueStore<ChatGPTTokens>, keyed by owner
+  onChange: (owner, state) => notify(owner, state),
+});
+
+const pending = await accounts.connect(userId);
+// Show pending.userCode and open pending.verificationUrl; completion arrives
+// through onChange as `connected` (or `error`).
+
+const model = accounts.provider(userId)('gpt-5.5');
+const modelIds = await accounts.listModels(userId);
+```
+
+Each owner connects a ChatGPT account through device sign-in; the Codex CLI is
+not involved. `connect` resolves with the pending code and polls in the
+background until the code expires (15 minutes), the owner authorizes, or
+`cancel`/`disconnect` abandons it. The store, states, single-instance rule,
+refresh, and 401 behavior match the [Claude accounts](../claude/README.md#application-owned-accounts);
+`connected.user` comes from the id token (`accountId`, `email`, `plan`). Failures
+throw `CodexAuthError` with a `code`, including `missing-account-id`.
 
 ## Adding another provider
 

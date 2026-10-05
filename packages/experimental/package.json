@@ -122,6 +122,7 @@
     "@ai-sdk/provider": "^4.0.21",
     "@electric-sql/pglite": "^0.5.4",
     "@types/proper-lockfile": "^4.1.4",
-    "just-bash": "^3.2.0"
+    "just-bash": "^3.2.0",
+    "nock": "^14.0.16"
   }
 }

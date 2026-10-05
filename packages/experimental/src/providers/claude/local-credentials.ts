@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { lock } from 'proper-lockfile';
 import { z } from 'zod';
 
+import { CLAUDE_CLIENT_ID, CLAUDE_TOKEN_URL } from './oauth.ts';
+
 const nativeLogin = z.looseObject({
   claudeAiOauth: z.looseObject({
     accessToken: z.string().min(1),
@@ -55,23 +57,20 @@ export async function getLocalClaudeAuth(
       if (tokens.expiresAt > Date.now() + 60_000) return tokens.accessToken;
       let fresh;
       try {
-        const response = await globalThis.fetch(
-          'https://platform.claude.com/v1/oauth/token',
-          {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              grant_type: 'refresh_token',
-              refresh_token: tokens.refreshToken,
-              client_id: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
-              scope: tokens.scopes.join(' '),
-            }),
-            signal: AbortSignal.any([
-              AbortSignal.timeout(30_000),
-              ...(signal ? [signal] : []),
-            ]),
-          },
-        );
+        const response = await globalThis.fetch(CLAUDE_TOKEN_URL, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            grant_type: 'refresh_token',
+            refresh_token: tokens.refreshToken,
+            client_id: CLAUDE_CLIENT_ID,
+            scope: tokens.scopes.join(' '),
+          }),
+          signal: AbortSignal.any([
+            AbortSignal.timeout(30_000),
+            ...(signal ? [signal] : []),
+          ]),
+        });
         if (!response.ok) {
           await response.body?.cancel();
           throw new Error('Token refresh rejected');
