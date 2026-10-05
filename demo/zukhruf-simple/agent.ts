@@ -36,6 +36,7 @@ const browser = mcp({
           '--categoryExperimentalWebmcp=true',
           '--chrome-arg=--enable-features=WebMCP',
           '--isolated',
+          ...(process.env.CI ? ['--headless'] : []),
           '--no-usage-statistics',
           '--no-performance-crux',
         ],

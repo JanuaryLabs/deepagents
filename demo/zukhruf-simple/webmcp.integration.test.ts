@@ -94,7 +94,10 @@ test('SimpleAgent discovers and executes a website tool through native WebMCP', 
         const page = JSON.stringify(results[0]).match(
           /(\d+): WebMCP integration/,
         );
-        assert(page, 'opening the page returns its real browser page ID');
+        assert(
+          page,
+          `opening the page returns its real browser page ID: ${JSON.stringify(results[0])}`,
+        );
         const pageId = Number(page[1]);
         if (results.length === 1) {
           toolName = 'list_webmcp_tools';
