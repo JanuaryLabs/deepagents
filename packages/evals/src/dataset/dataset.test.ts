@@ -1,26 +1,12 @@
 import assert from 'node:assert';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtempDisposable, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { after, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 import { Dataset, dataset } from '@deepagents/evals/dataset';
 
 describe('dataset', () => {
-  const tempDirs: string[] = [];
-
-  async function makeTempDir(): Promise<string> {
-    const dir = await mkdtemp(join(tmpdir(), 'evals-dataset-'));
-    tempDirs.push(dir);
-    return dir;
-  }
-
-  after(async () => {
-    await Promise.all(
-      tempDirs.map((dir) => rm(dir, { recursive: true, force: true })),
-    );
-  });
-
   it('inline array yields all elements in order', async () => {
     const items = [1, 2, 3, 4, 5];
     const ds = dataset(items);
@@ -32,8 +18,8 @@ describe('dataset', () => {
   });
 
   it('JSON file loads correctly', async () => {
-    const dir = await makeTempDir();
-    const filePath = join(dir, 'data.json');
+    await using dir = await mkdtempDisposable(join(tmpdir(), 'evals-dataset-'));
+    const filePath = join(dir.path, 'data.json');
     const data = [
       { id: 1, name: 'alice' },
       { id: 2, name: 'bob' },
@@ -47,8 +33,8 @@ describe('dataset', () => {
   });
 
   it('JSONL file loads correctly', async () => {
-    const dir = await makeTempDir();
-    const filePath = join(dir, 'data.jsonl');
+    await using dir = await mkdtempDisposable(join(tmpdir(), 'evals-dataset-'));
+    const filePath = join(dir.path, 'data.jsonl');
     const lines = [
       JSON.stringify({ q: 'hello', a: 'world' }),
       JSON.stringify({ q: 'foo', a: 'bar' }),
@@ -66,8 +52,8 @@ describe('dataset', () => {
   });
 
   it('CSV file loads with headers', async () => {
-    const dir = await makeTempDir();
-    const filePath = join(dir, 'data.csv');
+    await using dir = await mkdtempDisposable(join(tmpdir(), 'evals-dataset-'));
+    const filePath = join(dir.path, 'data.csv');
     const csv = ['name,age,city', 'alice,30,nyc', 'bob,25,sf'].join('\n');
     await writeFile(filePath, csv);
 

@@ -1,8 +1,8 @@
 import assert from 'node:assert';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtempDisposable, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 import {
   csvReporter,
@@ -13,16 +13,11 @@ import {
 import type { CaseResult, RunEndData } from '@deepagents/evals/reporters';
 
 describe('reporters serialization', () => {
-  let outputDir = '';
-
-  afterEach(async () => {
-    if (outputDir) {
-      await rm(outputDir, { recursive: true, force: true });
-    }
-  });
-
   it('serializes reporter payloads with plain JSON.stringify behavior', async () => {
-    outputDir = await mkdtemp(join(tmpdir(), 'eval-reporters-'));
+    await using directory = await mkdtempDisposable(
+      join(tmpdir(), 'eval-reporters-'),
+    );
+    const outputDir = directory.path;
 
     const caseResult: CaseResult = {
       runId: '12345678-aaaa-aaaa-aaaa-aaaaaaaaaaaa',

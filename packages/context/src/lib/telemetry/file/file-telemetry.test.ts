@@ -1,10 +1,10 @@
 import { type Telemetry, generateText } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtempDisposable, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 
 import { createFileTelemetry } from '@deepagents/context/telemetry/file';
@@ -13,25 +13,6 @@ const usage = {
   inputTokens: { total: 3, noCache: 3, cacheRead: 0, cacheWrite: 0 },
   outputTokens: { total: 1, text: 1, reasoning: 0 },
 } as const;
-
-const temporaryDirectories: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(
-    temporaryDirectories.splice(0).map((path) =>
-      rm(path, {
-        recursive: true,
-        force: true,
-      }),
-    ),
-  );
-});
-
-async function temporaryLogPath(): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), 'deepagents-telemetry-'));
-  temporaryDirectories.push(directory);
-  return join(directory, 'nested', 'ai.jsonl');
-}
 
 function createTextModel(): MockLanguageModelV4 {
   return new MockLanguageModelV4({
@@ -51,7 +32,10 @@ describe('createFileTelemetry()', () => {
     const timestamp = '2026-07-12T10:00:00.000Z';
     t.mock.timers.enable({ apis: ['Date'] });
     t.mock.timers.setTime(Date.parse(timestamp));
-    const path = await temporaryLogPath();
+    await using directory = await mkdtempDisposable(
+      join(tmpdir(), 'deepagents-telemetry-'),
+    );
+    const path = join(directory.path, 'nested', 'ai.jsonl');
     const telemetry = createFileTelemetry({ path });
     assert.deepEqual(telemetry.traces, { path: pathToFileURL(path).href });
 
@@ -92,7 +76,10 @@ describe('createFileTelemetry()', () => {
   });
 
   it('redacts runtime context when inputs are not recorded', async () => {
-    const path = await temporaryLogPath();
+    await using directory = await mkdtempDisposable(
+      join(tmpdir(), 'deepagents-telemetry-'),
+    );
+    const path = join(directory.path, 'nested', 'ai.jsonl');
     const telemetry = createFileTelemetry({ path });
 
     await telemetry.onStart?.({
@@ -113,7 +100,10 @@ describe('createFileTelemetry()', () => {
   });
 
   it('writes every AI SDK telemetry lifecycle callback', async () => {
-    const path = await temporaryLogPath();
+    await using directory = await mkdtempDisposable(
+      join(tmpdir(), 'deepagents-telemetry-'),
+    );
+    const path = join(directory.path, 'nested', 'ai.jsonl');
     const telemetry = createFileTelemetry({ path });
     const callbackNames = [
       'onStart',
@@ -153,7 +143,10 @@ describe('createFileTelemetry()', () => {
   });
 
   it('preserves existing records and serializes concurrent writes', async () => {
-    const path = await temporaryLogPath();
+    await using directory = await mkdtempDisposable(
+      join(tmpdir(), 'deepagents-telemetry-'),
+    );
+    const path = join(directory.path, 'nested', 'ai.jsonl');
     await generateText({
       model: createTextModel(),
       prompt: 'before-restart',
@@ -196,9 +189,10 @@ describe('createFileTelemetry()', () => {
   });
 
   it('reports write failures without rejecting telemetry callbacks', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'deepagents-telemetry-'));
-    temporaryDirectories.push(directory);
-    const blockingFile = join(directory, 'not-a-directory');
+    await using directory = await mkdtempDisposable(
+      join(tmpdir(), 'deepagents-telemetry-'),
+    );
+    const blockingFile = join(directory.path, 'not-a-directory');
     await writeFile(blockingFile, 'content');
     const errors: unknown[] = [];
     const telemetry = createFileTelemetry({
@@ -220,9 +214,10 @@ describe('createFileTelemetry()', () => {
   });
 
   it('handles initialization failures before any telemetry event', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'deepagents-telemetry-'));
-    temporaryDirectories.push(directory);
-    const blockingFile = join(directory, 'not-a-directory');
+    await using directory = await mkdtempDisposable(
+      join(tmpdir(), 'deepagents-telemetry-'),
+    );
+    const blockingFile = join(directory.path, 'not-a-directory');
     await writeFile(blockingFile, 'content');
     let reportError!: (error: unknown) => void;
     const errorReported = new Promise<unknown>((resolve) => {

@@ -6,7 +6,7 @@ import {
 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtempDisposable, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -78,68 +78,66 @@ async function streakFired(
   turns: number,
   withNoise: boolean,
 ): Promise<boolean> {
-  const directory = await mkdtemp(join(tmpdir(), 'deepagents-reply-'));
-  const path = join(directory, 'ai.jsonl');
-  try {
-    const context = new ContextEngine({
-      store: new InMemoryContextStore(),
-      chatId: `reply-${turns}-${withNoise}`,
-      userId: 'u1',
-    });
-    const chatAgent = agent({
-      name: 'reply',
-      context,
-      model: scriptedModel(),
-      sandbox: await createBashTool({
-        sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+  await using directory = await mkdtempDisposable(
+    join(tmpdir(), 'deepagents-reply-'),
+  );
+  const path = join(directory.path, 'ai.jsonl');
+  const context = new ContextEngine({
+    store: new InMemoryContextStore(),
+    chatId: `reply-${turns}-${withNoise}`,
+    userId: 'u1',
+  });
+  const chatAgent = agent({
+    name: 'reply',
+    context,
+    model: scriptedModel(),
+    sandbox: await createBashTool({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    }),
+    tools: {
+      bash: tool({
+        description: 'run a shell command',
+        inputSchema: z.object({ cmd: z.string() }),
+        execute: async (): Promise<{ ok: boolean }> => {
+          throw new Error('bash: not found');
+        },
       }),
-      tools: {
-        bash: tool({
-          description: 'run a shell command',
-          inputSchema: z.object({ cmd: z.string() }),
-          execute: async (): Promise<{ ok: boolean }> => {
-            throw new Error('bash: not found');
-          },
-        }),
-      },
-      telemetry: {
-        integrations: createFileTelemetry({ path }),
-      },
-    });
+    },
+    telemetry: {
+      integrations: createFileTelemetry({ path }),
+    },
+  });
 
+  context.set(
+    reminder(STREAK, {
+      when: everyOfLastN(3, toolFailed('bash')),
+      target: 'steer',
+    }),
+  );
+  if (withNoise) {
     context.set(
-      reminder(STREAK, {
-        when: everyOfLastN(3, toolFailed('bash')),
-        target: 'steer',
+      reminder('UNRELATED-NOISE', {
+        when: toolOutput({ name: 'bash', state: 'output-error' }),
+        target: 'tool-output',
       }),
     );
-    if (withNoise) {
-      context.set(
-        reminder('UNRELATED-NOISE', {
-          when: toolOutput({ name: 'bash', state: 'output-error' }),
-          target: 'tool-output',
-        }),
-      );
-    }
-
-    for (let turn = 0; turn < turns; turn++) {
-      await context.continue({
-        id: generateId(),
-        role: 'user',
-        parts: [{ type: 'text', text: `turn ${turn}` }],
-      } satisfies UIMessage);
-      await drain(await chat(chatAgent));
-    }
-
-    return (await readFile(path, 'utf8'))
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line) as { event: string; data: unknown })
-      .filter((record) => record.event === 'onLanguageModelCallStart')
-      .some((record) => JSON.stringify(record.data).includes(STREAK));
-  } finally {
-    await rm(directory, { recursive: true, force: true });
   }
+
+  for (let turn = 0; turn < turns; turn++) {
+    await context.continue({
+      id: generateId(),
+      role: 'user',
+      parts: [{ type: 'text', text: `turn ${turn}` }],
+    } satisfies UIMessage);
+    await drain(await chat(chatAgent));
+  }
+
+  return (await readFile(path, 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as { event: string; data: unknown })
+    .filter((record) => record.event === 'onLanguageModelCallStart')
+    .some((record) => JSON.stringify(record.data).includes(STREAK));
 }
 
 describe('window predicates count replies, not segments', () => {

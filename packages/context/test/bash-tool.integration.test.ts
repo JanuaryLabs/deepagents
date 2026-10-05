@@ -4,7 +4,7 @@ import { asSchema, generateText, isStepCount } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtempDisposable, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -126,16 +126,17 @@ function toolResultOutputs(prompt: LanguageModelV4Prompt) {
 }
 
 describe('bash toolkit', () => {
-  it('uploads dotfiles and lets inline files override directory files', async (t) => {
-    const source = await mkdtemp(join(tmpdir(), 'deepagents-bash-tool-'));
-    t.after(() => rm(source, { recursive: true, force: true }));
-    await writeFile(join(source, '.env'), 'MODE=test');
-    await writeFile(join(source, 'shared.txt'), 'from directory');
+  it('uploads dotfiles and lets inline files override directory files', async () => {
+    await using source = await mkdtempDisposable(
+      join(tmpdir(), 'deepagents-bash-tool-'),
+    );
+    await writeFile(join(source.path, '.env'), 'MODE=test');
+    await writeFile(join(source.path, 'shared.txt'), 'from directory');
 
     const { tools } = await createBashTool({
       sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
       files: { 'shared.txt': 'from inline files' },
-      uploadDirectory: { source, include: '**/*' },
+      uploadDirectory: { source: source.path, include: '**/*' },
     });
 
     assert.deepStrictEqual(
@@ -159,15 +160,16 @@ describe('bash toolkit', () => {
     );
   });
 
-  it('applies the upload filter before enforcing the file limit', async (t) => {
-    const source = await mkdtemp(join(tmpdir(), 'deepagents-bash-tool-'));
-    t.after(() => rm(source, { recursive: true, force: true }));
-    await writeFile(join(source, 'included.txt'), 'included');
-    await writeFile(join(source, 'excluded.log'), 'excluded');
+  it('applies the upload filter before enforcing the file limit', async () => {
+    await using source = await mkdtempDisposable(
+      join(tmpdir(), 'deepagents-bash-tool-'),
+    );
+    await writeFile(join(source.path, 'included.txt'), 'included');
+    await writeFile(join(source.path, 'excluded.log'), 'excluded');
 
     const { tools } = await createBashTool({
       sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      uploadDirectory: { source, include: '**/*.txt' },
+      uploadDirectory: { source: source.path, include: '**/*.txt' },
       maxFiles: 1,
     });
     assert.deepStrictEqual(
@@ -187,17 +189,18 @@ describe('bash toolkit', () => {
     );
   });
 
-  it('rejects an over-limit upload before writing any files', async (t) => {
-    const source = await mkdtemp(join(tmpdir(), 'deepagents-bash-tool-'));
-    t.after(() => rm(source, { recursive: true, force: true }));
-    await writeFile(join(source, 'first.txt'), 'first');
-    await writeFile(join(source, 'second.txt'), 'second');
+  it('rejects an over-limit upload before writing any files', async () => {
+    await using source = await mkdtempDisposable(
+      join(tmpdir(), 'deepagents-bash-tool-'),
+    );
+    await writeFile(join(source.path, 'first.txt'), 'first');
+    await writeFile(join(source.path, 'second.txt'), 'second');
     const backend = new RecordingSandbox();
 
     await assert.rejects(
       createBashTool({
         sandbox: backend,
-        uploadDirectory: { source },
+        uploadDirectory: { source: source.path },
         maxFiles: 1,
       }),
       /2 files exceeds the limit of 1/,
