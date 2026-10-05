@@ -1,5 +1,5 @@
 /** Live adapter contract tests for SQL policy enforcement. */
-import { BigQuery as BigQueryClient } from '@google-cloud/bigquery';
+import type { Dataset } from '@google-cloud/bigquery';
 import sql from 'mssql';
 import assert from 'node:assert';
 import * as fs from 'node:fs/promises';
@@ -18,9 +18,11 @@ import pg from 'pg';
 
 import {
   type MysqlDatabase,
+  BigQuery as TestBigQuery,
   Mysql as TestMysql,
   Postgres as TestPostgres,
   SqlServer as TestSqlServer,
+  Sqlite as TestSqlite,
 } from '@deepagents/test';
 import type { GroundingFn, SQLScopeErrorPayload } from '@deepagents/text2sql';
 import {
@@ -40,6 +42,7 @@ import {
 } from '@deepagents/text2sql/postgres';
 import { Spreadsheet } from '@deepagents/text2sql/spreadsheet';
 import {
+  Sqlite,
   columnStats as sqliteColumnStats,
   columnValues as sqliteColumnValues,
   constraints as sqliteConstraints,
@@ -54,8 +57,6 @@ import {
   tables as sqlServerTables,
   views as sqlServerViews,
 } from '@deepagents/text2sql/sqlserver';
-
-import { init_db } from '../../tests/sqlite.ts';
 
 function parseScopePayload(payload: string): SQLScopeErrorPayload {
   return JSON.parse(payload) as SQLScopeErrorPayload;
@@ -152,7 +153,11 @@ const policySqliteDdl = `
   INSERT INTO users (id, name) VALUES (1, 'Ada');
 `;
 
-async function createSqlitePolicyAdapter(options: PolicyTestOptions = {}) {
+async function createSqlitePolicyAdapter(options: PolicyTestOptions) {
+  await using resources = new AsyncDisposableStack();
+  const database = resources.use(await new TestSqlite().database());
+  const db = database.connection;
+  db.exec(policySqliteDdl);
   const executeProbe = mock.fn();
   const groundingProbe = mock.fn();
   const validateProbe = mock.fn();
@@ -163,12 +168,9 @@ async function createSqlitePolicyAdapter(options: PolicyTestOptions = {}) {
       includeDefinition: false,
     }),
   ];
-  // eslint-disable-next-line prefer-const
-  let db: Awaited<ReturnType<typeof init_db>>['db'] | undefined;
-  const initialized = await init_db(policySqliteDdl, {
+  const adapter = new Sqlite({
     grounding,
     execute: async (sql) => {
-      if (!db) throw new Error('SQLite test database was not initialized.');
       if (isSqliteGroundingQuery(sql)) {
         groundingProbe(sql);
       } else {
@@ -180,13 +182,12 @@ async function createSqlitePolicyAdapter(options: PolicyTestOptions = {}) {
         .map((row) => ({ ...row }));
     },
     validate: async (sql) => {
-      if (!db) throw new Error('SQLite test database was not initialized.');
       validateProbe(sql);
       db.prepare(`EXPLAIN ${sql}`).all();
       return undefined;
     },
   });
-  db = initialized.db;
+  const owned = resources.move();
 
   return {
     probes: {
@@ -194,7 +195,8 @@ async function createSqlitePolicyAdapter(options: PolicyTestOptions = {}) {
       grounding: groundingProbe,
       validate: validateProbe,
     },
-    adapter: initialized.adapter,
+    adapter,
+    [Symbol.asyncDispose]: () => owned.disposeAsync(),
   };
 }
 
@@ -430,9 +432,8 @@ function createSqlServerScope(
 }
 
 type BigQueryRuntime = {
-  client: BigQueryClient;
+  dataset: Dataset;
   datasetId: string;
-  location: string;
   projectId: string;
   cleanup: () => Promise<void>;
 };
@@ -443,16 +444,15 @@ async function startBigQueryRuntime(): Promise<BigQueryRuntime | undefined> {
     process.env['GOOGLE_CLOUD_PROJECT'] ??
     'january-9f554';
   const location = process.env['TEXT2SQL_BIGQUERY_LOCATION'] ?? 'US';
-  const datasetId = `text2sql_runtime_scope_${Date.now()}_${Math.random()
-    .toString(36)
-    .slice(2, 8)}`;
-  const client = new BigQueryClient({ projectId });
-  const dataset = client.dataset(datasetId);
+  await using resources = new AsyncDisposableStack();
 
   try {
-    await client.createDataset(datasetId, { location });
-    await client.query({
-      location,
+    const { dataset } = resources.use(
+      await new TestBigQuery({ projectId, location }).dataset(),
+    );
+    assert.ok(dataset.id);
+    const datasetId = dataset.id;
+    await dataset.query({
       query: `
         CREATE TABLE \`${projectId}.${datasetId}.users\` (
           id INT64,
@@ -468,11 +468,18 @@ async function startBigQueryRuntime(): Promise<BigQueryRuntime | undefined> {
         SELECT id, name FROM \`${projectId}.${datasetId}.users\`;
       `,
     });
+    const owned = resources.move();
+    return {
+      dataset,
+      datasetId,
+      projectId,
+      cleanup: () => owned.disposeAsync(),
+    };
   } catch (error) {
     try {
-      await dataset.delete({ force: true });
+      await resources.disposeAsync();
     } catch {
-      // Ignore cleanup failure for a dataset that may not have been created.
+      // Preserve the fixture's skip policy even if cleanup also fails.
     }
     console.log(
       `Skipping BigQuery SQL policy tests: ${
@@ -481,16 +488,6 @@ async function startBigQueryRuntime(): Promise<BigQueryRuntime | undefined> {
     );
     return undefined;
   }
-
-  return {
-    client,
-    datasetId,
-    location,
-    projectId,
-    cleanup: async () => {
-      await dataset.delete({ force: true });
-    },
-  };
 }
 
 function createBigQueryScope(
@@ -509,11 +506,6 @@ function createBigQueryScope(
       includeDefinition: false,
     }),
   ];
-  const defaultDataset = {
-    datasetId: runtime.datasetId,
-    projectId: runtime.projectId,
-  };
-
   return {
     adapter: new BigQuery({
       datasets: [runtime.datasetId],
@@ -525,19 +517,13 @@ function createBigQueryScope(
         } else {
           executeProbe(sql);
         }
-        const [rows] = await runtime.client.query({
-          defaultDataset,
-          location: runtime.location,
-          query: sql,
-        });
+        const [rows] = await runtime.dataset.query(sql);
         return rows;
       },
       validate: async (sql) => {
         validateProbe(sql);
-        await runtime.client.createQueryJob({
-          defaultDataset,
+        await runtime.dataset.createQueryJob({
           dryRun: true,
-          location: runtime.location,
           query: sql,
         });
         return undefined;
@@ -554,11 +540,16 @@ function createBigQueryScope(
 const adapterCases: AdapterCase[] = [
   {
     name: 'sqlite',
-    setup: async () => ({
-      create: () => createSqlitePolicyAdapter(),
-      createEmptyScope: () => createSqlitePolicyAdapter({ grounding: [] }),
-      queries: defaultPolicyQueries,
-    }),
+    setup: async () => {
+      const resources = new AsyncDisposableStack();
+      return {
+        create: async () => resources.use(await createSqlitePolicyAdapter({})),
+        createEmptyScope: async () =>
+          resources.use(await createSqlitePolicyAdapter({ grounding: [] })),
+        cleanup: () => resources.disposeAsync(),
+        queries: defaultPolicyQueries,
+      };
+    },
   },
   {
     name: 'postgres',
@@ -912,10 +903,11 @@ for (const adapterCase of adapterCases) {
 
 describe('sqlite SQL policy traversal', () => {
   it('uses the closest supported parser dialect for sqlite reserved identifiers', async () => {
-    const { adapter, probes } = await createSqlitePolicyAdapter({
+    await using fixture = await createSqlitePolicyAdapter({
       tables: ['persist', 'integers'],
       views: [],
     });
+    const { adapter, probes } = fixture;
 
     assert.strictEqual(
       await adapter.validate('SELECT * FROM persist'),
@@ -930,10 +922,11 @@ describe('sqlite SQL policy traversal', () => {
   });
 
   it('parses sqlite-only syntax (json_each, dotted quoted identifiers)', async () => {
-    const { adapter, probes } = await createSqlitePolicyAdapter({
+    await using fixture = await createSqlitePolicyAdapter({
       tables: ['BoardGames'],
       views: [],
     });
+    const { adapter, probes } = fixture;
 
     const sql = `WITH base AS (
         SELECT "details.name" AS game_name, "stats.average" AS rating
@@ -952,9 +945,10 @@ describe('sqlite SQL policy traversal', () => {
   });
 
   it('allows traversal-expanded grounded tables', async () => {
-    const { adapter, probes } = await createSqlitePolicyAdapter({
+    await using fixture = await createSqlitePolicyAdapter({
       grounding: [sqliteTables({ filter: ['posts'], forward: true })],
     });
+    const { adapter, probes } = fixture;
 
     const result = await adapter.validate('SELECT * FROM users');
 
@@ -1021,7 +1015,8 @@ describe('scope enforcement edge cases', () => {
   }
 
   it('allows multiple allowed tables via JOIN', async () => {
-    const { adapter, probes } = await createSqlite(['users', 'orders']);
+    await using fixture = await createSqlite(['users', 'orders']);
+    const { adapter, probes } = fixture;
     const result = await adapter.validate(
       'SELECT u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id',
     );
@@ -1031,7 +1026,8 @@ describe('scope enforcement edge cases', () => {
   });
 
   it('blocks when one of multiple JOINed tables is unauthorized', async () => {
-    const { adapter } = await createSqlite(['users']);
+    await using fixture = await createSqlite(['users']);
+    const { adapter } = fixture;
     const result = await adapter.validate(
       'SELECT * FROM users JOIN secrets ON users.id = secrets.user_id',
     );
@@ -1042,13 +1038,15 @@ describe('scope enforcement edge cases', () => {
   });
 
   it('matches table names case-insensitively', async () => {
-    const { adapter } = await createSqlite(['users']);
+    await using fixture = await createSqlite(['users']);
+    const { adapter } = fixture;
     const result = await adapter.validate('SELECT * FROM USERS');
     assert.strictEqual(result, undefined);
   });
 
   it('blocks subquery referencing unauthorized table', async () => {
-    const { adapter } = await createSqlite(['users']);
+    await using fixture = await createSqlite(['users']);
+    const { adapter } = fixture;
     const result = await adapter.validate(
       'SELECT * FROM users WHERE id IN (SELECT user_id FROM secrets)',
     );
@@ -1059,7 +1057,8 @@ describe('scope enforcement edge cases', () => {
   });
 
   it('lists all unauthorized tables in error payload', async () => {
-    const { adapter } = await createSqlite(['users']);
+    await using fixture = await createSqlite(['users']);
+    const { adapter } = fixture;
     const result = await adapter.validate(
       'SELECT * FROM secrets JOIN passwords ON secrets.id = passwords.secret_id',
     );
@@ -1070,7 +1069,8 @@ describe('scope enforcement edge cases', () => {
   });
 
   it('blocks UNION query when one table is unauthorized', async () => {
-    const { adapter } = await createSqlite(['users']);
+    await using fixture = await createSqlite(['users']);
+    const { adapter } = fixture;
     const result = await adapter.validate(
       'SELECT name FROM users UNION SELECT name FROM secrets',
     );
@@ -1081,7 +1081,8 @@ describe('scope enforcement edge cases', () => {
   });
 
   it('normalizes mixed-case entries in grounding', async () => {
-    const { adapter } = await createSqlite(['Users', 'ORDERS']);
+    await using fixture = await createSqlite(['Users', 'ORDERS']);
+    const { adapter } = fixture;
     const result = await adapter.validate(
       'SELECT * FROM users JOIN orders ON users.id = orders.user_id',
     );
@@ -1089,7 +1090,8 @@ describe('scope enforcement edge cases', () => {
   });
 
   it('passes through entity-free query even with empty allowed set', async () => {
-    const { adapter } = await createSqlite([]);
+    await using fixture = await createSqlite([]);
+    const { adapter } = fixture;
     const result = await adapter.validate('SELECT 1 + 1');
     assert.strictEqual(result, undefined);
   });
@@ -1157,7 +1159,7 @@ describe('bigquery scope normalization', () => {
 
 describe('scope resolution grounding cost (sqlite)', () => {
   it('resolves the allowlist through entity-producing groundings only', async () => {
-    const { adapter, probes } = await createSqlitePolicyAdapter({
+    await using fixture = await createSqlitePolicyAdapter({
       grounding: [
         sqliteInfo(),
         sqliteTables({ filter: ['users'] }),
@@ -1169,6 +1171,7 @@ describe('scope resolution grounding cost (sqlite)', () => {
         sqliteColumnValues(),
       ],
     });
+    const { adapter, probes } = fixture;
 
     const result = await adapter.validate('SELECT id FROM users');
 

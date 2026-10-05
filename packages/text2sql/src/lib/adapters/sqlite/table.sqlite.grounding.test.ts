@@ -1,14 +1,17 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { constraints, tables } from '@deepagents/text2sql/sqlite';
+import { Sqlite as TestSqlite } from '@deepagents/test';
+import { Sqlite, constraints, tables } from '@deepagents/text2sql/sqlite';
 
-import { init_db } from '../../../tests/sqlite.ts';
+const sqlite = new TestSqlite();
 
 describe('SqliteTableGrounding', () => {
   describe('Suite 1: Edge Cases', () => {
     it('should return empty fragments for empty database', async () => {
-      const { adapter } = await init_db('', {
+      await using database = await sqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables()],
       });
 
@@ -27,7 +30,10 @@ describe('SqliteTableGrounding', () => {
         );
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await sqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables({ forward: true, backward: true })],
       });
 
@@ -50,7 +56,10 @@ describe('SqliteTableGrounding', () => {
         'CREATE TABLE b (id INTEGER PRIMARY KEY, a_id INTEGER REFERENCES a(id));',
       ];
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await sqlite.database();
+      for (const statement of ddl) database.connection.exec(statement);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables({ forward: true, backward: true })],
       });
 
@@ -89,7 +98,10 @@ describe('SqliteTableGrounding', () => {
         );
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await sqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables(), constraints()],
       });
 
@@ -112,7 +124,10 @@ describe('SqliteTableGrounding', () => {
         CREATE TABLE categories (id INTEGER PRIMARY KEY, label TEXT);
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await sqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables()],
       });
 
@@ -151,7 +166,10 @@ describe('SqliteTableGrounding', () => {
         );
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await sqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables({ forward: true })],
       });
 
@@ -194,7 +212,10 @@ describe('SqliteTableGrounding', () => {
         );
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await sqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables({ forward: true })],
       });
 
@@ -234,7 +255,10 @@ describe('SqliteTableGrounding', () => {
         );
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await sqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables({ forward: true })],
       });
 
@@ -276,7 +300,10 @@ describe('SqliteTableGrounding', () => {
         CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parent(id));
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await sqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables({ filter: ['child'] })],
       });
 
@@ -304,7 +331,10 @@ describe('SqliteTableGrounding', () => {
         CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parent(id));
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await sqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables({ filter: ['child'], forward: true })],
       });
 
@@ -345,7 +375,10 @@ describe('SqliteTableGrounding', () => {
         CREATE TABLE child2 (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parent(id));
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await sqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables({ filter: ['parent'], backward: true })],
       });
 
@@ -386,7 +419,10 @@ describe('SqliteTableGrounding', () => {
         CREATE TABLE c (id INTEGER PRIMARY KEY, b_id INTEGER REFERENCES b(id));
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await sqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables({ filter: ['c'], forward: 1 })],
       });
 
@@ -423,7 +459,10 @@ describe('SqliteTableGrounding', () => {
         CREATE TABLE spoke2 (id INTEGER PRIMARY KEY, hub_id INTEGER REFERENCES hub(id));
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await sqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables({ filter: ['hub'], forward: true, backward: true })],
       });
 
@@ -473,7 +512,10 @@ describe('SqliteTableGrounding', () => {
         CREATE TABLE comments (id INTEGER PRIMARY KEY);
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await sqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables({ filter: ['users', 'posts'] })],
       });
 
@@ -506,7 +548,10 @@ describe('SqliteTableGrounding', () => {
         CREATE TABLE products (id INTEGER PRIMARY KEY);
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await sqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables({ filter: /^order/ })],
       });
 
@@ -539,7 +584,10 @@ describe('SqliteTableGrounding', () => {
         CREATE TABLE products (id INTEGER PRIMARY KEY);
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await sqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables({ filter: (name) => name.startsWith('user_') })],
       });
 

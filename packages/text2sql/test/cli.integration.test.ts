@@ -20,6 +20,9 @@ import {
   InMemoryContextStore,
   XmlRenderer,
 } from '@deepagents/context';
+import { Sqlite as TestSqlite } from '@deepagents/test';
+
+const sqlite = new TestSqlite();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(__dirname, '..');
@@ -152,10 +155,6 @@ function writeMultiAdapters(cwd: string): string {
 
 function distFileUrl(...parts: string[]): string {
   return pathToFileURL(path.join(PKG_ROOT, 'dist', ...parts)).href;
-}
-
-function sourceFileUrl(...parts: string[]): string {
-  return pathToFileURL(path.join(PKG_ROOT, 'src', ...parts)).href;
 }
 
 function parseIndexManifest(result: SpawnResult): IndexManifest {
@@ -987,18 +986,25 @@ describe('sql binary', () => {
   });
 
   it('validate: SQL policy rejects out-of-scope tables', async () => {
+    await using database = await sqlite.database();
+    database.connection.exec(
+      'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);',
+    );
     const cwd = makeTmpDir();
     const adaptersPath = writeAdaptersModule(
       cwd,
-      `import { tables } from '${distFileUrl('lib/adapters/sqlite/index.js')}';
-       import { init_db } from '${sourceFileUrl('tests/sqlite.ts')}';
+      `import { Sqlite, tables } from '${distFileUrl('lib/adapters/sqlite/index.js')}';
+       import { DatabaseSync } from 'node:sqlite';
 
-       const { adapter: mem } = await init_db(
-         'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);',
-         { grounding: [tables({ filter: ['users'] })] },
-       );
-
-       export default { mem };`,
+       export default {
+         mem: new Sqlite({
+           execute: (sql) => {
+             using connection = new DatabaseSync(${JSON.stringify(database.path)});
+             return connection.prepare(sql).all();
+           },
+           grounding: [tables({ filter: ['users'] })],
+         }),
+       };`,
       'scoped-adapters.ts',
     );
 

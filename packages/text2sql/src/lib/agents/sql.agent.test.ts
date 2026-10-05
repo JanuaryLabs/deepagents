@@ -12,10 +12,11 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import { fragment } from '@deepagents/context';
+import { Sqlite as TestSqlite } from '@deepagents/test';
 import { Adapter, SQLValidationError, toSql } from '@deepagents/text2sql';
-import { tables } from '@deepagents/text2sql/sqlite';
+import { Sqlite, tables } from '@deepagents/text2sql/sqlite';
 
-import { init_db } from '../../tests/sqlite.ts';
+const testSqlite = new TestSqlite();
 
 type MockModelResponse =
   | { result: { sql: string; reasoning: string } }
@@ -119,7 +120,12 @@ class ClickHouseFormatterAdapter extends Adapter {
 describe('toSql', () => {
   it('returns SQL on first attempt success', async () => {
     // Arrange
-    const { adapter } = await init_db('', { validate: () => undefined });
+    await using database = await testSqlite.database();
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+      validate: () => undefined,
+    });
     const model = createMockModel({
       result: { sql: 'SELECT 1', reasoning: 'test' },
     });
@@ -141,7 +147,10 @@ describe('toSql', () => {
   it('retries on SQL validation error and passes previousError to model', async () => {
     // Arrange
     const validateResponses = ['syntax error', undefined];
-    const { adapter } = await init_db('', {
+    await using database = await testSqlite.database();
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
       validate: () => validateResponses.shift(),
     });
     const model = createCapturingModel([
@@ -173,16 +182,17 @@ describe('toSql', () => {
   });
 
   it('retries when the generated query references an out-of-scope entity', async () => {
-    const { adapter } = await init_db(
-      [
-        'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)',
-        'CREATE TABLE secrets (id INTEGER PRIMARY KEY, value TEXT)',
-      ],
-      {
-        grounding: [tables({ filter: ['users'] })],
-        validate: () => undefined,
-      },
-    );
+    await using database = await testSqlite.database();
+    for (const statement of [
+      'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)',
+      'CREATE TABLE secrets (id INTEGER PRIMARY KEY, value TEXT)',
+    ])
+      database.connection.exec(statement);
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [tables({ filter: ['users'] })],
+      validate: () => undefined,
+    });
     const model = createCapturingModel([
       { result: { sql: 'SELECT * FROM secrets', reasoning: 'test' } },
       { result: { sql: 'SELECT * FROM users', reasoning: 'test' } },
@@ -212,7 +222,12 @@ describe('toSql', () => {
 
   it('retries on JSON validation error', async () => {
     // Arrange
-    const { adapter } = await init_db('', { validate: () => undefined });
+    await using database = await testSqlite.database();
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+      validate: () => undefined,
+    });
     const model = new MockLanguageModelV4({
       doGenerate: async () => {
         if (model.doGenerateCalls.length === 1) {
@@ -254,7 +269,12 @@ describe('toSql', () => {
   });
 
   it('does not retry when model is not found', async () => {
-    const { adapter } = await init_db('', { validate: () => undefined });
+    await using database = await testSqlite.database();
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+      validate: () => undefined,
+    });
     const model = new MockLanguageModelV4({
       doGenerate: async () => {
         throw new APICallError({
@@ -294,7 +314,10 @@ describe('toSql', () => {
   it('throws SQLValidationError when retries exhausted', async () => {
     // Arrange
     const validateResponses = ['error', 'error', 'error'];
-    const { adapter } = await init_db('', {
+    await using database = await testSqlite.database();
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
       validate: () => validateResponses.shift(),
     });
     const model = createMockModel({
@@ -317,7 +340,10 @@ describe('toSql', () => {
   it('throws SQLValidationError after exhausting custom maxRetries', async () => {
     // Arrange
     const validateResponses = ['error', 'error', 'error', 'error', 'error'];
-    const { adapter } = await init_db('', {
+    await using database = await testSqlite.database();
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
       validate: () => validateResponses.shift(),
     });
     const model = createMockModel({
@@ -342,7 +368,12 @@ describe('toSql', () => {
   });
 
   it('throws TypeError when maxRetries is 0 (invalid for p-retry)', async () => {
-    const { adapter } = await init_db('', { validate: () => 'error' });
+    await using database = await testSqlite.database();
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+      validate: () => 'error',
+    });
     const model = createMockModel({
       result: { sql: 'SELECT 1', reasoning: 'test' },
     });
@@ -365,7 +396,10 @@ describe('toSql', () => {
   });
 
   it('throws SQLValidationError after single attempt when maxRetries is 1', async () => {
-    const { adapter } = await init_db('', {
+    await using database = await testSqlite.database();
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
       validate: () => 'validation error',
     });
     const model = createMockModel({
@@ -391,7 +425,10 @@ describe('toSql', () => {
 
   it('uses fallback temperature when maxRetries exceeds RETRY_TEMPERATURES length', async () => {
     const validateResponses = ['e1', 'e2', 'e3', 'e4', 'e5', undefined];
-    const { adapter } = await init_db('', {
+    await using database = await testSqlite.database();
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
       validate: () => validateResponses.shift(),
     });
 
@@ -431,7 +468,10 @@ describe('toSql', () => {
   it('handles mixed error types', async () => {
     // Arrange
     const validateResponses = ['SQL error', undefined];
-    const { adapter } = await init_db('', {
+    await using database = await testSqlite.database();
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
       validate: () => validateResponses.shift(),
     });
     const model = new MockLanguageModelV4({
@@ -475,7 +515,12 @@ describe('toSql', () => {
 
   it('uses best-effort fallback when first response is unanswerable', async () => {
     // Arrange
-    const { adapter } = await init_db('', { validate: () => undefined });
+    await using database = await testSqlite.database();
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+      validate: () => undefined,
+    });
     const model = createCapturingModel([
       { result: { error: 'No matching table' } },
       { sql: 'SELECT 1', reasoning: 'best effort fallback' },
@@ -504,7 +549,11 @@ describe('toSql', () => {
 
   it('throws APICallError on json_validate_failed error', async () => {
     // Arrange
-    const { adapter } = await init_db('');
+    await using database = await testSqlite.database();
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+    });
     const model = createThrowingModel(
       () =>
         new APICallError({
@@ -539,7 +588,11 @@ describe('toSql', () => {
 
   it('throws APICallError on response schema mismatch error', async () => {
     // Arrange
-    const { adapter } = await init_db('');
+    await using database = await testSqlite.database();
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+    });
     const model = createThrowingModel(
       () =>
         new APICallError({
@@ -571,7 +624,11 @@ describe('toSql', () => {
 
   it('rethrows non-JSON-validation errors', async () => {
     // Arrange
-    const { adapter } = await init_db('');
+    await using database = await testSqlite.database();
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+    });
     const model = createThrowingModel(() => new Error('Network timeout'));
 
     // Act & Assert
@@ -588,16 +645,17 @@ describe('toSql', () => {
   });
 
   it('extracts SQL from markdown code block in response', async () => {
-    const { adapter } = await init_db(
-      [
-        'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)',
-        'CREATE TABLE "table" ("column" TEXT)',
-      ],
-      {
-        grounding: [tables({ filter: ['users', 'table'] })],
-        validate: () => undefined,
-      },
-    );
+    await using database = await testSqlite.database();
+    for (const statement of [
+      'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)',
+      'CREATE TABLE "table" ("column" TEXT)',
+    ])
+      database.connection.exec(statement);
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [tables({ filter: ['users', 'table'] })],
+      validate: () => undefined,
+    });
 
     const testCases = [
       {
@@ -633,7 +691,12 @@ describe('toSql', () => {
   });
 
   it('rejects markdown responses that do not extract to valid SQL', async () => {
-    const { adapter } = await init_db('', { validate: () => undefined });
+    await using database = await testSqlite.database();
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+      validate: () => undefined,
+    });
     const invalidCases = [
       '```SQL\nSELECT * FROM users\n```',
       '```\nSELECT * FROM users\n```',
@@ -716,7 +779,11 @@ describe('toSql', () => {
 
   it('returns formatted SQL', async () => {
     // Arrange
-    const { adapter } = await init_db('');
+    await using database = await testSqlite.database();
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+    });
     const model = createMockModel({
       result: { sql: 'SELECT 1', reasoning: 'test' },
     });
@@ -736,7 +803,12 @@ describe('toSql', () => {
 
   describe('previous error injection', () => {
     it('does not include validation_error on first attempt', async () => {
-      const { adapter } = await init_db('', { validate: () => undefined });
+      await using database = await testSqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [],
+        validate: () => undefined,
+      });
       const model = createCapturingModel([
         { result: { sql: 'SELECT 1', reasoning: 'test' } },
       ]);
@@ -760,13 +832,15 @@ describe('toSql', () => {
 
   describe('output schema handling', () => {
     it('handles response with reasoning field', async () => {
-      const { adapter } = await init_db(
+      await using database = await testSqlite.database();
+      database.connection.exec(
         'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)',
-        {
-          grounding: [tables({ filter: ['users'] })],
-          validate: () => undefined,
-        },
       );
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [tables({ filter: ['users'] })],
+        validate: () => undefined,
+      });
       const model = createMockModel({
         result: {
           sql: 'SELECT * FROM users',
@@ -787,7 +861,12 @@ describe('toSql', () => {
     });
 
     it('handles empty sql string in response', async () => {
-      const { adapter } = await init_db('', { validate: () => undefined });
+      await using database = await testSqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [],
+        validate: () => undefined,
+      });
       const model = createMockModel({ result: { sql: '', reasoning: 'test' } });
 
       const result = await toSql({
@@ -805,7 +884,10 @@ describe('toSql', () => {
 
   describe('adapter error handling', () => {
     it('throws SQLValidationError when adapter.validate throws an exception', async () => {
-      const { adapter } = await init_db('', {
+      await using database = await testSqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [],
         validate: () => {
           throw new Error('Database connection lost');
         },
@@ -836,7 +918,10 @@ describe('toSql', () => {
     });
 
     it('handles adapter.validate returning undefined', async () => {
-      const { adapter } = await init_db('', {
+      await using database = await testSqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [],
         validate: () => undefined,
       });
       const model = createMockModel({
@@ -858,7 +943,12 @@ describe('toSql', () => {
 
   describe('input edge cases', () => {
     it('handles empty input string', async () => {
-      const { adapter } = await init_db('', { validate: () => undefined });
+      await using database = await testSqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [],
+        validate: () => undefined,
+      });
       const model = createMockModel({
         result: { sql: 'SELECT 1', reasoning: 'test' },
       });
@@ -876,13 +966,15 @@ describe('toSql', () => {
     });
 
     it('handles input with special characters', async () => {
-      const { adapter } = await init_db(
+      await using database = await testSqlite.database();
+      database.connection.exec(
         'CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)',
-        {
-          grounding: [tables({ filter: ['users'] })],
-          validate: () => undefined,
-        },
       );
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [tables({ filter: ['users'] })],
+        validate: () => undefined,
+      });
       const model = createCapturingModel([
         { result: { sql: 'SELECT email FROM users', reasoning: 'test' } },
       ]);
@@ -903,7 +995,12 @@ describe('toSql', () => {
     });
 
     it('handles very long input', async () => {
-      const { adapter } = await init_db('', { validate: () => undefined });
+      await using database = await testSqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [],
+        validate: () => undefined,
+      });
       const model = createMockModel({
         result: { sql: 'SELECT 1', reasoning: 'test' },
       });
@@ -924,7 +1021,12 @@ describe('toSql', () => {
 
   describe('concurrency and isolation', () => {
     it('handles concurrent toSql calls independently', async () => {
-      const { adapter } = await init_db('', { validate: () => undefined });
+      await using database = await testSqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [],
+        validate: () => undefined,
+      });
 
       const model1 = createMockModel({
         result: { sql: 'SELECT 1', reasoning: 'test' },
@@ -968,7 +1070,12 @@ describe('toSql', () => {
 
   describe('retryable AI SDK errors', () => {
     it('retries on JSONParseError and succeeds on next attempt', async () => {
-      const { adapter } = await init_db('', { validate: () => undefined });
+      await using database = await testSqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [],
+        validate: () => undefined,
+      });
       const model = createCapturingModel([
         new JSONParseError({
           text: '{ bad json',
@@ -991,7 +1098,12 @@ describe('toSql', () => {
     });
 
     it('retries on TypeValidationError and succeeds on next attempt', async () => {
-      const { adapter } = await init_db('', { validate: () => undefined });
+      await using database = await testSqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [],
+        validate: () => undefined,
+      });
       const model = createCapturingModel([
         new TypeValidationError({
           value: { invalid: true },
@@ -1014,7 +1126,12 @@ describe('toSql', () => {
     });
 
     it('retries on NoObjectGeneratedError and succeeds on next attempt', async () => {
-      const { adapter } = await init_db('', { validate: () => undefined });
+      await using database = await testSqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [],
+        validate: () => undefined,
+      });
       const model = createCapturingModel([
         new NoObjectGeneratedError({
           response: { id: 'r1', timestamp: new Date(), modelId: 'test' },
@@ -1051,7 +1168,12 @@ describe('toSql', () => {
     });
 
     it('retries on NoOutputGeneratedError and succeeds on next attempt', async () => {
-      const { adapter } = await init_db('', { validate: () => undefined });
+      await using database = await testSqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [],
+        validate: () => undefined,
+      });
       const model = createCapturingModel([
         new NoOutputGeneratedError(),
         { result: { sql: 'SELECT 1', reasoning: 'test' } },
@@ -1071,7 +1193,12 @@ describe('toSql', () => {
     });
 
     it('retries on NoContentGeneratedError and succeeds on next attempt', async () => {
-      const { adapter } = await init_db('', { validate: () => undefined });
+      await using database = await testSqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [],
+        validate: () => undefined,
+      });
       const model = createCapturingModel([
         new NoContentGeneratedError(),
         { result: { sql: 'SELECT 1', reasoning: 'test' } },
@@ -1093,7 +1220,12 @@ describe('toSql', () => {
 
   describe('non-retryable errors', () => {
     it('does not retry on unknown error types and makes only one attempt', async () => {
-      const { adapter } = await init_db('', { validate: () => undefined });
+      await using database = await testSqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [],
+        validate: () => undefined,
+      });
       const model = createCapturingModel([
         new Error('Unknown internal failure'),
         { result: { sql: 'SELECT 1', reasoning: 'test' } },
@@ -1119,7 +1251,12 @@ describe('toSql', () => {
     });
 
     it('uses fallback prompt after unanswerable and succeeds without pRetry rerun', async () => {
-      const { adapter } = await init_db('', { validate: () => undefined });
+      await using database = await testSqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [],
+        validate: () => undefined,
+      });
       const model = createCapturingModel([
         { result: { error: 'No table matches this question' } },
         { sql: 'SELECT 1', reasoning: 'best effort fallback' },
@@ -1141,7 +1278,12 @@ describe('toSql', () => {
 
   describe('prompt assembly', () => {
     it('includes schema fragments in model prompt', async () => {
-      const { adapter } = await init_db('', { validate: () => undefined });
+      await using database = await testSqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [],
+        validate: () => undefined,
+      });
       const model = createCapturingModel([
         { result: { sql: 'SELECT 1', reasoning: 'test' } },
       ]);
@@ -1163,7 +1305,12 @@ describe('toSql', () => {
     });
 
     it('includes instruction fragments in model prompt', async () => {
-      const { adapter } = await init_db('', { validate: () => undefined });
+      await using database = await testSqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [],
+        validate: () => undefined,
+      });
       const model = createCapturingModel([
         { result: { sql: 'SELECT 1', reasoning: 'test' } },
       ]);
@@ -1185,7 +1332,11 @@ describe('toSql', () => {
 
   describe('format', () => {
     it('pretty-prints SQL with line breaks and indentation', async () => {
-      const { adapter } = await init_db('');
+      await using database = await testSqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [],
+      });
       const formatted = adapter.format(
         'SELECT id, name FROM users WHERE active = 1',
       );
@@ -1204,13 +1355,21 @@ describe('toSql', () => {
     });
 
     it('returns original on unparseable input', async () => {
-      const { adapter } = await init_db('');
+      await using database = await testSqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [],
+      });
       const garbage = '{{not sql at all}}';
       assert.strictEqual(adapter.format(garbage), garbage);
     });
 
     it('handles empty string', async () => {
-      const { adapter } = await init_db('');
+      await using database = await testSqlite.database();
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
+        grounding: [],
+      });
       assert.strictEqual(adapter.format(''), '');
     });
   });

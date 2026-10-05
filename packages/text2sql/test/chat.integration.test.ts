@@ -18,6 +18,7 @@ import {
   reminder,
   user,
 } from '@deepagents/context';
+import { Sqlite as TestSqlite } from '@deepagents/test';
 import {
   AdapterIndexer,
   FileIndexCache,
@@ -25,8 +26,9 @@ import {
   type IndexCache,
   instructions,
 } from '@deepagents/text2sql';
+import { Sqlite } from '@deepagents/text2sql/sqlite';
 
-import { init_db } from '../src/tests/sqlite.ts';
+const sqlite = new TestSqlite();
 
 const sandbox = await createBashTool({
   sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
@@ -67,10 +69,14 @@ function userMessage(text: string): UIMessage {
 }
 
 async function setup(mockText?: string) {
+  await using resources = new AsyncDisposableStack();
+  const database = resources.use(await sqlite.database());
   const store = new InMemoryContextStore();
-  const { adapter } = await init_db(
-    'CREATE TABLE users (id INTEGER, name TEXT)',
-  );
+  database.connection.exec('CREATE TABLE users (id INTEGER, name TEXT)');
+  const adapter = new Sqlite({
+    execute: (sql) => database.connection.prepare(sql).all(),
+    grounding: [],
+  });
   const model = createMockModel(mockText);
   const engine = new ContextEngine({
     store,
@@ -81,13 +87,18 @@ async function setup(mockText?: string) {
   const adapters = { main: adapter };
   const cache = new FileIndexCache({ namespace: `test-${generateId()}` });
 
-  return { store, adapters, cache, engine, model };
+  const owned = resources.move();
+  return {
+    store,
+    adapters,
+    cache,
+    engine,
+    model,
+    [Symbol.asyncDispose]: () => owned.disposeAsync(),
+  };
 }
 
-function indexFragments(
-  adapters: Record<string, Awaited<ReturnType<typeof init_db>>['adapter']>,
-  cache?: IndexCache,
-) {
+function indexFragments(adapters: Record<string, Sqlite>, cache?: IndexCache) {
   return new AdapterIndexer({
     adapters,
     cache,
@@ -97,7 +108,8 @@ function indexFragments(
 
 describe('Text2Sql user-constructed chat', () => {
   it('saves user message to context store', async () => {
-    const { store, adapters, cache, engine, model } = await setup();
+    await using fixture = await setup();
+    const { store, adapters, cache, engine, model } = fixture;
     const msg = userMessage('How many users are there?');
 
     engine.set(...instructions(), ...(await indexFragments(adapters, cache)));
@@ -129,9 +141,8 @@ describe('Text2Sql user-constructed chat', () => {
   });
 
   it('saves assistant response to context store after stream is consumed', async () => {
-    const { store, adapters, cache, engine, model } = await setup(
-      'SELECT count(*) FROM users',
-    );
+    await using fixture = await setup('SELECT count(*) FROM users');
+    const { store, adapters, cache, engine, model } = fixture;
     const msg = userMessage('How many users?');
 
     engine.set(...instructions(), ...(await indexFragments(adapters, cache)));
@@ -165,7 +176,8 @@ describe('Text2Sql user-constructed chat', () => {
   });
 
   it('does not create extra branches during streaming (branch: false)', async () => {
-    const { store, adapters, cache, engine, model } = await setup();
+    await using fixture = await setup();
+    const { store, adapters, cache, engine, model } = fixture;
     const msg = userMessage('List all users');
 
     engine.set(...instructions(), ...(await indexFragments(adapters, cache)));
@@ -194,7 +206,8 @@ describe('Text2Sql user-constructed chat', () => {
   });
 
   it('tracks token usage in chat metadata', async () => {
-    const { store, adapters, cache, engine, model } = await setup();
+    await using fixture = await setup();
+    const { store, adapters, cache, engine, model } = fixture;
     const msg = userMessage('Count users');
 
     engine.set(...instructions(), ...(await indexFragments(adapters, cache)));
@@ -224,7 +237,8 @@ describe('Text2Sql user-constructed chat', () => {
   });
 
   it('updates assistant message in place for tool result scenario', async () => {
-    const { store, adapters, cache, engine, model } = await setup();
+    await using fixture = await setup();
+    const { store, adapters, cache, engine, model } = fixture;
 
     engine.set(...instructions(), ...(await indexFragments(adapters, cache)));
     const ai = agent({
@@ -285,7 +299,8 @@ describe('Text2Sql user-constructed chat', () => {
   });
 
   it('grows chain correctly across multiple normal user turns', async () => {
-    const { store, adapters, cache, engine, model } = await setup();
+    await using fixture = await setup();
+    const { store, adapters, cache, engine, model } = fixture;
 
     engine.set(...instructions(), ...(await indexFragments(adapters, cache)));
     const ai = agent({
@@ -334,7 +349,8 @@ describe('Text2Sql user-constructed chat', () => {
   });
 
   it('does not branch when assistant message ID is not in store', async () => {
-    const { store, adapters, cache, engine, model } = await setup();
+    await using fixture = await setup();
+    const { store, adapters, cache, engine, model } = fixture;
 
     engine.set(...instructions(), ...(await indexFragments(adapters, cache)));
     const ai = agent({
@@ -369,7 +385,8 @@ describe('Text2Sql user-constructed chat', () => {
   });
 
   it('handles multiple consecutive tool-result rounds correctly', async () => {
-    const { store, adapters, cache, engine, model } = await setup();
+    await using fixture = await setup();
+    const { store, adapters, cache, engine, model } = fixture;
 
     engine.set(...instructions(), ...(await indexFragments(adapters, cache)));
     const ai = agent({
@@ -447,9 +464,12 @@ describe('Text2Sql user-constructed chat', () => {
 
   it('forwards abortSignal to agent stream', async () => {
     const store = new InMemoryContextStore();
-    const { adapter } = await init_db(
-      'CREATE TABLE users (id INTEGER, name TEXT)',
-    );
+    await using database = await sqlite.database();
+    database.connection.exec('CREATE TABLE users (id INTEGER, name TEXT)');
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+    });
 
     const model = new MockLanguageModelV4({
       doStream: {
@@ -507,7 +527,8 @@ describe('Text2Sql user-constructed chat', () => {
   });
 
   it('accepts MessageFragment with reminders and persists reminder metadata', async () => {
-    const { store, adapters, cache, engine, model } = await setup();
+    await using fixture = await setup();
+    const { store, adapters, cache, engine, model } = fixture;
     const fragment = user('How many users are there?');
 
     engine.set(

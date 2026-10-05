@@ -147,6 +147,27 @@ global setup. The handle exposes the native `DuckDBConnection` and bound
 `cleanup()`. Disposal closes the connection before the instance, including on
 failure. SQL fixtures and product adapter wiring stay in their own tests.
 
+BigQuery owns an isolated dataset in an explicitly selected cloud project:
+
+```ts
+import { BigQuery } from '@deepagents/test';
+
+const bigquery = new BigQuery({ projectId, location });
+await using database = await bigquery.dataset();
+await database.dataset.query('CREATE TABLE records AS SELECT 1 AS id');
+const [rows] = await database.dataset.query('SELECT * FROM records');
+```
+
+Each `BigQuery.dataset()` call creates a unique dataset and exposes the native
+Google Cloud `Dataset` as `dataset`. Its `query()` and `createQueryJob()` methods
+already supply the dataset and location. Bound `cleanup()` and asynchronous
+disposal delete the dataset and its contents once, including tables and views.
+Acquisition and cleanup errors reject; callers own credentials, project/location
+selection, fixtures, adapter wiring, and any skip policy. No Docker is involved.
+The primitive's live integration tests require both
+`TEXT2SQL_BIGQUERY_PROJECT_ID` and `TEXT2SQL_BIGQUERY_LOCATION`; the SDK resolves
+credentials through its normal authentication configuration.
+
 ### Database servers
 
 Node test projects declare `test:node` and a `test` target. `nx.json` owns their

@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
+import { Sqlite as TestSqlite } from '@deepagents/test';
 import {
   type Adapter,
   AdapterIndexer,
@@ -14,8 +15,9 @@ import {
   type IndexLock,
   type Text2SqlIndexProgressEvent,
 } from '@deepagents/text2sql';
+import { Sqlite } from '@deepagents/text2sql/sqlite';
 
-import { init_db } from '../tests/sqlite.ts';
+const testSqlite = new TestSqlite();
 
 /**
  * A real per-key mutex standing in for a host-supplied distributed lock
@@ -71,10 +73,14 @@ async function tempCacheDir(): Promise<string> {
 
 describe('AdapterIndexer with an injected cache and lock', () => {
   it('runs a single introspection for concurrent index calls on the same adapter', async () => {
-    const { adapter, db } = await init_db(
+    await using database = await testSqlite.database();
+    database.connection.exec(
       'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);',
     );
-    after(() => db.close());
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+    });
 
     const introspections = countIntrospections(adapter);
     const cache = new FileIndexCache({ dir: await tempCacheDir() });
@@ -116,10 +122,12 @@ describe('AdapterIndexer with an injected cache and lock', () => {
   });
 
   it('fails closed when the lock store is unavailable', async () => {
-    const { adapter, db } = await init_db(
-      'CREATE TABLE users (id INTEGER PRIMARY KEY);',
-    );
-    after(() => db.close());
+    await using database = await testSqlite.database();
+    database.connection.exec('CREATE TABLE users (id INTEGER PRIMARY KEY);');
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+    });
 
     const introspections = countIntrospections(adapter);
     const failingLock: IndexLock = {
@@ -146,10 +154,14 @@ describe('AdapterIndexer with an injected cache and lock', () => {
 
 describe('AdapterIndexer with a cache', () => {
   it('introspects on miss then serves a warm cache hit', async () => {
-    const { adapter, db } = await init_db(
+    await using database = await testSqlite.database();
+    database.connection.exec(
       'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);',
     );
-    after(() => db.close());
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+    });
 
     const introspections = countIntrospections(adapter);
     const cache = new FileIndexCache({ dir: await tempCacheDir() });
@@ -184,10 +196,12 @@ describe('AdapterIndexer with a cache', () => {
 
 describe('AdapterIndexer with a lock but no cache', () => {
   it('introspects every call and emits no cache events', async () => {
-    const { adapter, db } = await init_db(
-      'CREATE TABLE users (id INTEGER PRIMARY KEY);',
-    );
-    after(() => db.close());
+    await using database = await testSqlite.database();
+    database.connection.exec('CREATE TABLE users (id INTEGER PRIMARY KEY);');
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+    });
 
     const introspections = countIntrospections(adapter);
     const indexer = new AdapterIndexer({
@@ -210,27 +224,33 @@ describe('FileIndexCache shared across indexers', () => {
     const dir = await tempCacheDir();
     const lock = new KeyMutexLock();
 
-    const hostA = await init_db(
+    await using hostADatabase = await testSqlite.database();
+    hostADatabase.connection.exec(
       'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);',
     );
-    const hostB = await init_db(
+    const hostA = new Sqlite({
+      execute: (sql) => hostADatabase.connection.prepare(sql).all(),
+      grounding: [],
+    });
+    await using hostBDatabase = await testSqlite.database();
+    hostBDatabase.connection.exec(
       'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);',
     );
-    after(() => {
-      hostA.db.close();
-      hostB.db.close();
+    const hostB = new Sqlite({
+      execute: (sql) => hostBDatabase.connection.prepare(sql).all(),
+      grounding: [],
     });
 
-    const introA = countIntrospections(hostA.adapter);
-    const introB = countIntrospections(hostB.adapter);
+    const introA = countIntrospections(hostA);
+    const introB = countIntrospections(hostB);
 
     const indexerA = new AdapterIndexer({
-      adapters: { main: hostA.adapter },
+      adapters: { main: hostA },
       cache: new FileIndexCache({ dir }),
       lock,
     });
     const indexerB = new AdapterIndexer({
-      adapters: { main: hostB.adapter },
+      adapters: { main: hostB },
       cache: new FileIndexCache({ dir }),
       lock,
     });
@@ -266,10 +286,12 @@ describe('FileIndexCache shared across indexers', () => {
 
 describe('FileIndexCache corrupt-file resilience', () => {
   it('re-introspects when the cache file is unparseable instead of throwing', async () => {
-    const { adapter, db } = await init_db(
-      'CREATE TABLE users (id INTEGER PRIMARY KEY);',
-    );
-    after(() => db.close());
+    await using database = await testSqlite.database();
+    database.connection.exec('CREATE TABLE users (id INTEGER PRIMARY KEY);');
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+    });
 
     const dir = await tempCacheDir();
     const introspections = countIntrospections(adapter);
@@ -305,27 +327,33 @@ describe('FileIndexLock serializes concurrent introspection', () => {
   it('runs a single introspection for concurrent indexers sharing a dir + FileIndexLock', async () => {
     const dir = await tempCacheDir();
 
-    const hostA = await init_db(
+    await using hostADatabase = await testSqlite.database();
+    hostADatabase.connection.exec(
       'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);',
     );
-    const hostB = await init_db(
+    const hostA = new Sqlite({
+      execute: (sql) => hostADatabase.connection.prepare(sql).all(),
+      grounding: [],
+    });
+    await using hostBDatabase = await testSqlite.database();
+    hostBDatabase.connection.exec(
       'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);',
     );
-    after(() => {
-      hostA.db.close();
-      hostB.db.close();
+    const hostB = new Sqlite({
+      execute: (sql) => hostBDatabase.connection.prepare(sql).all(),
+      grounding: [],
     });
 
-    const introA = countIntrospections(hostA.adapter);
-    const introB = countIntrospections(hostB.adapter);
+    const introA = countIntrospections(hostA);
+    const introB = countIntrospections(hostB);
 
     const indexerA = new AdapterIndexer({
-      adapters: { main: hostA.adapter },
+      adapters: { main: hostA },
       cache: new FileIndexCache({ dir }),
       lock: new FileIndexLock({ dir }),
     });
     const indexerB = new AdapterIndexer({
-      adapters: { main: hostB.adapter },
+      adapters: { main: hostB },
       cache: new FileIndexCache({ dir }),
       lock: new FileIndexLock({ dir }),
     });
@@ -369,9 +397,14 @@ describe('FileIndexLock run() contract', () => {
 
 describe('AdapterIndexer.indexAdapter (single-adapter entry point)', () => {
   it('introspects once on a cache miss then serves a warm cache hit', async () => {
-    const { adapter, db } = await init_db(
+    await using database = await testSqlite.database();
+    database.connection.exec(
       'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);',
     );
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+    });
     const dir = await mkdtemp(path.join(tmpdir(), 'text2sql-cache-'));
     try {
       const introspections = countIntrospections(adapter);
@@ -406,15 +439,19 @@ describe('AdapterIndexer.indexAdapter (single-adapter entry point)', () => {
       assert.ok(!eventTypes(secondEvents).includes('adapter:cache-miss'));
       assert.deepStrictEqual(second, JSON.parse(JSON.stringify(first)));
     } finally {
-      db.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
   it('runs a single introspection for two concurrent indexAdapter calls on the same adapter', async () => {
-    const { adapter, db } = await init_db(
+    await using database = await testSqlite.database();
+    database.connection.exec(
       'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);',
     );
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+    });
     const dir = await mkdtemp(path.join(tmpdir(), 'text2sql-cache-'));
     try {
       const introspections = countIntrospections(adapter);
@@ -461,15 +498,19 @@ describe('AdapterIndexer.indexAdapter (single-adapter entry point)', () => {
       );
       assert.deepStrictEqual(second, JSON.parse(JSON.stringify(first)));
     } finally {
-      db.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
   it('returns raw adapter fragments without the <database> wrapper that index() adds', async () => {
-    const { adapter, db } = await init_db(
+    await using database = await testSqlite.database();
+    database.connection.exec(
       'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);',
     );
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+    });
     const dir = await mkdtemp(path.join(tmpdir(), 'text2sql-cache-'));
     try {
       const indexer = new AdapterIndexer({
@@ -507,33 +548,32 @@ describe('AdapterIndexer.indexAdapter (single-adapter entry point)', () => {
         'the wrapper body minus the database leaf is exactly the raw fragments',
       );
     } finally {
-      db.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
   it('rejects an unknown adapter name and lists the available adapters', async () => {
-    const { adapter, db } = await init_db(
-      'CREATE TABLE users (id INTEGER PRIMARY KEY);',
-    );
-    try {
-      const introspections = countIntrospections(adapter);
-      const indexer = new AdapterIndexer({
-        adapters: { main: adapter },
-        lock: new KeyMutexLock(),
-      });
+    await using database = await testSqlite.database();
+    database.connection.exec('CREATE TABLE users (id INTEGER PRIMARY KEY);');
+    const adapter = new Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
+      grounding: [],
+    });
 
-      await assert.rejects(
-        () => indexer.indexAdapter('orders'),
-        /unknown adapter "orders"\. Available: main/,
-      );
-      assert.strictEqual(
-        introspections.count(),
-        0,
-        'an unknown adapter name never triggers introspection',
-      );
-    } finally {
-      db.close();
-    }
+    const introspections = countIntrospections(adapter);
+    const indexer = new AdapterIndexer({
+      adapters: { main: adapter },
+      lock: new KeyMutexLock(),
+    });
+
+    await assert.rejects(
+      () => indexer.indexAdapter('orders'),
+      /unknown adapter "orders"\. Available: main/,
+    );
+    assert.strictEqual(
+      introspections.count(),
+      0,
+      'an unknown adapter name never triggers introspection',
+    );
   });
 });

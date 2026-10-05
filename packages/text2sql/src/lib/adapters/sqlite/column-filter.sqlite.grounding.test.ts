@@ -1,6 +1,7 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
+import { Sqlite as TestSqlite } from '@deepagents/test';
 import { createGroundingContext } from '@deepagents/text2sql/grounding';
 import {
   Sqlite,
@@ -11,7 +12,7 @@ import {
   views,
 } from '@deepagents/text2sql/sqlite';
 
-import { init_db } from '../../../tests/sqlite.ts';
+const testSqlite = new TestSqlite();
 
 describe('Column restriction', () => {
   describe('table column filtering', () => {
@@ -26,7 +27,10 @@ describe('Column restriction', () => {
         );
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [
           tables({
             columns: {
@@ -60,7 +64,10 @@ describe('Column restriction', () => {
         );
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [
           tables({
             columns: {
@@ -94,7 +101,10 @@ describe('Column restriction', () => {
         );
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [
           tables({
             columns: {
@@ -123,7 +133,10 @@ describe('Column restriction', () => {
         CREATE TABLE posts (id INTEGER PRIMARY KEY, title TEXT, body TEXT);
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [
           tables({
             columns: {
@@ -175,7 +188,10 @@ describe('Column restriction', () => {
         CREATE INDEX idx_ssn ON users(ssn);
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [
           tables({
             columns: {
@@ -215,7 +231,10 @@ describe('Column restriction', () => {
         );
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [
           tables({
             filter: ['users', 'departments'],
@@ -248,7 +267,10 @@ describe('Column restriction', () => {
         );
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [
           tables({
             filter: ['users', 'departments'],
@@ -277,7 +299,10 @@ describe('Column restriction', () => {
         );
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [
           tables({
             filter: ['users'],
@@ -352,7 +377,10 @@ describe('Column restriction', () => {
         CREATE INDEX idx_user_email_tenant ON users(email, tenant_id);
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [
           tables({
             columns: {
@@ -388,7 +416,10 @@ describe('Column restriction', () => {
         INSERT INTO orders VALUES (3, 'active', 'GHI');
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [
           tables({
             columns: {
@@ -424,7 +455,10 @@ describe('Column restriction', () => {
         CREATE VIEW v_users AS SELECT id, name, email, ssn FROM users;
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [
           tables(),
           views({
@@ -457,7 +491,10 @@ describe('Column restriction', () => {
         );
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [
           tables({
             filter: ['books'],

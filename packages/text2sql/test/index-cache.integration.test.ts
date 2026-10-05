@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import { getFragmentData } from '@deepagents/context';
+import { Sqlite as TestSqlite } from '@deepagents/test';
 import {
   AdapterIndexer,
   FileIndexCache,
@@ -11,10 +12,10 @@ import {
 } from '@deepagents/text2sql';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
-import { init_db } from '../src/tests/sqlite.ts';
+const testSqlite = new TestSqlite();
 
 function indexTestAdapters(
-  adapters: Record<string, Awaited<ReturnType<typeof init_db>>['adapter']>,
+  adapters: Record<string, sqlite.Sqlite>,
   cache?: IndexCache,
 ) {
   return new AdapterIndexer({
@@ -30,10 +31,12 @@ describe('AdapterIndexer — cache isolation', () => {
       namespace: `cache-iso-${generateId()}`,
     });
 
-    const { adapter: mainAdapter } = await init_db(
-      `CREATE TABLE users (id INTEGER);`,
-      { grounding: [sqlite.tables()] },
-    );
+    await using mainDatabase = await testSqlite.database();
+    mainDatabase.connection.exec(`CREATE TABLE users (id INTEGER);`);
+    const mainAdapter = new sqlite.Sqlite({
+      execute: (sql) => mainDatabase.connection.prepare(sql).all(),
+      grounding: [sqlite.tables()],
+    });
 
     let mainIntrospectCalls = 0;
     const originalIntrospect = mainAdapter.introspect.bind(mainAdapter);
@@ -45,10 +48,12 @@ describe('AdapterIndexer — cache isolation', () => {
     await indexTestAdapters({ main: mainAdapter }, cache);
     assert.strictEqual(mainIntrospectCalls, 1, 'warmed main cache');
 
-    const { adapter: analyticsAdapter } = await init_db(
-      `CREATE TABLE events (id INTEGER);`,
-      { grounding: [sqlite.tables()] },
-    );
+    await using analyticsDatabase = await testSqlite.database();
+    analyticsDatabase.connection.exec(`CREATE TABLE events (id INTEGER);`);
+    const analyticsAdapter = new sqlite.Sqlite({
+      execute: (sql) => analyticsDatabase.connection.prepare(sql).all(),
+      grounding: [sqlite.tables()],
+    });
 
     const fragments = await indexTestAdapters(
       {
@@ -69,7 +74,10 @@ describe('AdapterIndexer — cache isolation', () => {
   });
 
   it('wraps each adapter fragment tree under a parent fragment named after the adapter key', async () => {
-    const { adapter } = await init_db(`CREATE TABLE users (id INTEGER);`, {
+    await using database = await testSqlite.database();
+    database.connection.exec(`CREATE TABLE users (id INTEGER);`);
+    const adapter = new sqlite.Sqlite({
+      execute: (sql) => database.connection.prepare(sql).all(),
       grounding: [sqlite.tables()],
     });
 
@@ -91,13 +99,18 @@ describe('AdapterIndexer — cache isolation', () => {
 
 describe('AdapterIndexer — error annotation', () => {
   it('annotates introspection errors with the failing adapter name', async () => {
-    const { adapter: goodAdapter } = await init_db(
-      `CREATE TABLE t (n INTEGER);`,
-      { grounding: [sqlite.tables()] },
-    );
-    const { adapter: badAdapter } = await init_db(
-      `CREATE TABLE t (n INTEGER);`,
-    );
+    await using goodDatabase = await testSqlite.database();
+    goodDatabase.connection.exec(`CREATE TABLE t (n INTEGER);`);
+    const goodAdapter = new sqlite.Sqlite({
+      execute: (sql) => goodDatabase.connection.prepare(sql).all(),
+      grounding: [sqlite.tables()],
+    });
+    await using badDatabase = await testSqlite.database();
+    badDatabase.connection.exec(`CREATE TABLE t (n INTEGER);`);
+    const badAdapter = new sqlite.Sqlite({
+      execute: (sql) => badDatabase.connection.prepare(sql).all(),
+      grounding: [],
+    });
     badAdapter.introspect = async () => {
       throw new Error('connection refused');
     };

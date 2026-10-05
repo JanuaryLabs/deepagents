@@ -1,9 +1,15 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { columnValues, constraints, tables } from '@deepagents/text2sql/sqlite';
+import { Sqlite as TestSqlite } from '@deepagents/test';
+import {
+  Sqlite,
+  columnValues,
+  constraints,
+  tables,
+} from '@deepagents/text2sql/sqlite';
 
-import { init_db } from '../../../tests/sqlite.ts';
+const testSqlite = new TestSqlite();
 
 describe('SqliteColumnValuesGrounding', () => {
   describe('Low cardinality detection', () => {
@@ -16,7 +22,10 @@ describe('SqliteColumnValuesGrounding', () => {
         INSERT INTO orders (status) VALUES ('pending'), ('shipped'), ('delivered');
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables(), columnValues()],
       });
 
@@ -50,7 +59,11 @@ describe('SqliteColumnValuesGrounding', () => {
         );
       `;
 
-      const { adapter, db } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const db = database.connection;
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables(), columnValues({ lowCardinalityLimit: 5 })],
       });
 
@@ -81,7 +94,10 @@ describe('SqliteColumnValuesGrounding', () => {
         INSERT INTO products (category) VALUES ('electronics'), (NULL), ('books');
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables(), columnValues()],
       });
 
@@ -116,7 +132,10 @@ describe('SqliteColumnValuesGrounding', () => {
         );
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables(), columnValues()],
       });
 
@@ -144,7 +163,10 @@ describe('SqliteColumnValuesGrounding', () => {
         INSERT INTO mixed (flag, amount, label) VALUES (0, 10.5, 'A'), (1, 20.0, 'B');
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables(), columnValues()],
       });
 
@@ -184,7 +206,10 @@ describe('SqliteColumnValuesGrounding', () => {
         );
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables(), constraints(), columnValues()],
       });
 
@@ -227,7 +252,10 @@ describe('SqliteColumnValuesGrounding', () => {
         INSERT INTO orders (status) VALUES ('pending'), ('completed');
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables(), constraints(), columnValues()],
       });
 
@@ -273,7 +301,10 @@ describe('SqliteColumnValuesGrounding', () => {
         );
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables(), constraints(), columnValues()],
       });
 
@@ -315,7 +346,10 @@ describe('SqliteColumnValuesGrounding', () => {
         );
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables(), constraints(), columnValues()],
       });
 
@@ -357,7 +391,10 @@ describe('SqliteColumnValuesGrounding', () => {
         );
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables(), constraints(), columnValues()],
       });
 
@@ -396,7 +433,10 @@ describe('SqliteColumnValuesGrounding', () => {
       `;
 
       // With limit of 3, 5 values should not be detected
-      const { adapter: adapter1 } = await init_db(ddl, {
+      await using database1 = await testSqlite.database();
+      database1.connection.exec(ddl);
+      const adapter1 = new Sqlite({
+        execute: (sql) => database1.connection.prepare(sql).all(),
         grounding: [tables(), columnValues({ lowCardinalityLimit: 3 })],
       });
 
@@ -412,7 +452,10 @@ describe('SqliteColumnValuesGrounding', () => {
       });
 
       // With limit of 10, 5 values should be detected
-      const { adapter: adapter2 } = await init_db(ddl, {
+      await using database2 = await testSqlite.database();
+      database2.connection.exec(ddl);
+      const adapter2 = new Sqlite({
+        execute: (sql) => database2.connection.prepare(sql).all(),
         grounding: [tables(), columnValues({ lowCardinalityLimit: 10 })],
       });
 
@@ -454,7 +497,10 @@ describe('SqliteColumnValuesGrounding', () => {
         INSERT INTO docs (category) VALUES ('short'), ('${longValue}');
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables(), columnValues({ maxValueLength: 100 })],
       });
 
@@ -482,7 +528,10 @@ describe('SqliteColumnValuesGrounding', () => {
         INSERT INTO tags (label) VALUES ('frontend'), ('backend'), ('devops');
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables(), columnValues({ maxValueLength: 100 })],
       });
 
@@ -522,7 +571,10 @@ describe('SqliteColumnValuesGrounding', () => {
         INSERT INTO notes (content) VALUES ('${longValue}');
       `;
 
-      const { adapter } = await init_db(ddl, {
+      await using database = await testSqlite.database();
+      database.connection.exec(ddl);
+      const adapter = new Sqlite({
+        execute: (sql) => database.connection.prepare(sql).all(),
         grounding: [tables(), columnValues()],
       });
 
