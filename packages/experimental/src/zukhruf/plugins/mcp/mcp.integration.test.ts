@@ -1,8 +1,6 @@
 import { type MCPClient, createMCPClient } from '@ai-sdk/mcp';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
-import { once } from 'node:events';
-import { createServer } from 'node:http';
 import test from 'node:test';
 
 import {
@@ -12,86 +10,85 @@ import {
   defineStack,
 } from '@deepagents/experimental/zukhruf';
 import { mcp } from '@deepagents/experimental/zukhruf/mcp';
+import { HttpServer } from '@deepagents/test';
 
 test('MCP uses real HTTP clients per runtime and closes them on failure or disposal', async () => {
   let failDiscovery = false;
   let discoveryRequests = 0;
   const sessions: string[] = [];
   const closed: string[] = [];
-  await using server = createServer(async (request, response) => {
-    if (request.method === 'DELETE') {
-      closed.push(String(request.headers['mcp-session-id']));
-      response.writeHead(200).end();
-      return;
-    }
-    if (request.method !== 'POST') {
-      response.writeHead(405).end();
-      return;
-    }
-    const chunks: Buffer[] = [];
-    for await (const chunk of request) chunks.push(chunk);
-    const message = JSON.parse(Buffer.concat(chunks).toString());
-    if (message.id === undefined) {
-      response.writeHead(202).end();
-      return;
-    }
-    response.setHeader('content-type', 'application/json');
-    const reply = (result: unknown) =>
-      response.end(
-        JSON.stringify({
-          jsonrpc: '2.0',
-          id: message.id,
-          result,
-        }),
-      );
-    if (message.method === 'initialize') {
-      const session = crypto.randomUUID();
-      sessions.push(session);
-      response.setHeader('mcp-session-id', session);
-      reply({
-        protocolVersion: message.params.protocolVersion,
-        capabilities: { tools: {} },
-        serverInfo: { name: 'http-fixture', version: '1.0.0' },
-      });
-    } else if (message.method === 'tools/list' && !failDiscovery) {
-      discoveryRequests++;
-      reply({
-        tools: [
-          {
-            name: 'echo',
-            description: 'Echo text',
-            inputSchema: {
-              type: 'object',
-              properties: { text: { type: 'string' } },
-              required: ['text'],
+  await using server = await new HttpServer().start(
+    async (request, response) => {
+      if (request.method === 'DELETE') {
+        closed.push(String(request.headers['mcp-session-id']));
+        response.writeHead(200).end();
+        return;
+      }
+      if (request.method !== 'POST') {
+        response.writeHead(405).end();
+        return;
+      }
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(chunk);
+      const message = JSON.parse(Buffer.concat(chunks).toString());
+      if (message.id === undefined) {
+        response.writeHead(202).end();
+        return;
+      }
+      response.setHeader('content-type', 'application/json');
+      const reply = (result: unknown) =>
+        response.end(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            result,
+          }),
+        );
+      if (message.method === 'initialize') {
+        const session = crypto.randomUUID();
+        sessions.push(session);
+        response.setHeader('mcp-session-id', session);
+        reply({
+          protocolVersion: message.params.protocolVersion,
+          capabilities: { tools: {} },
+          serverInfo: { name: 'http-fixture', version: '1.0.0' },
+        });
+      } else if (message.method === 'tools/list' && !failDiscovery) {
+        discoveryRequests++;
+        reply({
+          tools: [
+            {
+              name: 'echo',
+              description: 'Echo text',
+              inputSchema: {
+                type: 'object',
+                properties: { text: { type: 'string' } },
+                required: ['text'],
+              },
             },
-          },
-        ],
-      });
-    } else if (message.method === 'tools/call') {
-      reply({
-        content: [{ type: 'text', text: message.params.arguments.text }],
-      });
-    } else {
-      response.end(
-        JSON.stringify({
-          jsonrpc: '2.0',
-          id: message.id,
-          error: { code: -32601, message: 'Method unavailable' },
-        }),
-      );
-    }
-  });
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const address = server.address();
-  assert(address && typeof address === 'object');
+          ],
+        });
+      } else if (message.method === 'tools/call') {
+        reply({
+          content: [{ type: 'text', text: message.params.arguments.text }],
+        });
+      } else {
+        response.end(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            error: { code: -32601, message: 'Method unavailable' },
+          }),
+        );
+      }
+    },
+  );
   const clients: MCPClient[] = [];
   const connection = mcp({
     name: 'http-tools',
     async connect() {
       const client = await createMCPClient({
-        transport: { type: 'http', url: `http://127.0.0.1:${address.port}` },
+        transport: { type: 'http', url: server.origin },
         initializationOptions: { timeout: 5_000 },
       });
       clients.push(client);

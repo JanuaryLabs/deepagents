@@ -108,6 +108,27 @@ the lock. It does not rethrow an existing stream failure, but a failing cancella
 hook still rejects disposal. Use `settleWithin` separately when a test needs a
 deadline. AI message chunks, transport behavior, and runtime fixtures stay local.
 
+## HTTP servers
+
+Use `HttpServer` for a disposable loopback server with a native request handler:
+
+```ts
+import { HttpServer } from '@deepagents/test';
+
+await using server = await new HttpServer().start((_request, response) => {
+  response.end('hello');
+});
+const response = await fetch(server.origin);
+```
+
+Each `start(handler)` binds `127.0.0.1` on an available port and resolves after
+listening. The handle exposes `origin`, the native HTTP `server`, and bound
+`cleanup()`. Use handle cleanup to stop early; repeated cleanup is safe. Disposal
+stops accepting requests, closes active HTTP connections, and awaits shutdown,
+including after scope failure. Upgraded connections and work started by handlers
+remain caller-owned. Bind and cleanup errors reject. Routes, body parsing, error
+responses, request recording, and protocol assertions stay in the tests.
+
 ## Databases
 
 All database engines use instance acquisition and disposable handles. SQLite

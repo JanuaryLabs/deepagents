@@ -1,15 +1,15 @@
 import type { LanguageModelV4GenerateResult } from '@ai-sdk/provider';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
-import {
-  type IncomingMessage,
-  type ServerResponse,
-  createServer,
+import type {
+  IncomingMessage,
+  RequestListener,
+  ServerResponse,
 } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
+import { HttpServer } from '@deepagents/test';
 import { type IndexLock, Text2Sql } from '@deepagents/text2sql';
 import {
   PostHog,
@@ -37,126 +37,125 @@ it('uses the native HTTP transport with rotating bearer tokens and local paginat
     authorization?: string;
     body: unknown;
   }> = [];
-  const server = await startServer(async (request, response) => {
-    const body = await readJsonBody(request);
-    requests.push({
-      method: request.method,
-      url: request.url,
-      authorization: request.headers.authorization,
-      body,
-    });
+  await using server = await new HttpServer().start(
+    jsonErrors(async (request, response) => {
+      const body = await readJsonBody(request);
+      requests.push({
+        method: request.method,
+        url: request.url,
+        authorization: request.headers.authorization,
+        body,
+      });
 
-    const url = new URL(request.url ?? '/', 'http://localhost');
-    if (url.pathname.endsWith('/query/')) {
-      return json(response, { results: [[1]], columns: ['value'] });
-    }
-    if (url.pathname.endsWith('/event_definitions/')) {
-      const offset = url.searchParams.get('offset');
-      return json(
-        response,
-        offset === '0'
-          ? { next: 'https://attacker.invalid/page', results: [{ name: 'a' }] }
-          : { next: null, results: [{ name: 'b' }] },
-      );
-    }
-    if (url.pathname.endsWith('/property_definitions/')) {
-      return json(response, { next: null, results: [{ name: 'company' }] });
-    }
-    response.writeHead(404).end();
-  });
+      const url = new URL(request.url ?? '/', 'http://localhost');
+      if (url.pathname.endsWith('/query/')) {
+        return json(response, { results: [[1]], columns: ['value'] });
+      }
+      if (url.pathname.endsWith('/event_definitions/')) {
+        const offset = url.searchParams.get('offset');
+        return json(
+          response,
+          offset === '0'
+            ? {
+                next: 'https://attacker.invalid/page',
+                results: [{ name: 'a' }],
+              }
+            : { next: null, results: [{ name: 'b' }] },
+        );
+      }
+      if (url.pathname.endsWith('/property_definitions/')) {
+        return json(response, { next: null, results: [{ name: 'company' }] });
+      }
+      response.writeHead(404).end();
+    }),
+  );
 
   let tokenCalls = 0;
-  try {
-    const transport = createPostHogTransport({
-      host: server.origin,
-      projectId: 'project/1',
-      getAccessToken: () => `token-${++tokenCalls}`,
-    });
+  const transport = createPostHogTransport({
+    host: server.origin,
+    projectId: 'project/1',
+    getAccessToken: () => `token-${++tokenCalls}`,
+  });
 
-    assert.deepEqual(
-      await transport.query({
-        query: { kind: 'HogQLQuery', query: 'SELECT 1' },
-        name: 'smoke',
-      }),
-      { results: [[1]], columns: ['value'] },
-    );
-    assert.deepEqual(
-      (await transport.listEventDefinitions()).map(({ name }) => name),
-      ['a', 'b'],
-    );
-    assert.deepEqual(
-      (
-        await transport.listPropertyDefinitions({
-          type: 'group',
-          groupTypeIndex: 2,
-        })
-      ).map(({ name }) => name),
-      ['company'],
-    );
-
-    assert.equal(tokenCalls, 4);
-    assert.deepEqual(
-      requests.map(({ authorization }) => authorization),
-      ['Bearer token-1', 'Bearer token-2', 'Bearer token-3', 'Bearer token-4'],
-    );
-    assert.equal(requests[0]?.method, 'POST');
-    assert.equal(requests[0]?.url, '/api/projects/project%2F1/query/');
-    assert.deepEqual(requests[0]?.body, {
+  assert.deepEqual(
+    await transport.query({
       query: { kind: 'HogQLQuery', query: 'SELECT 1' },
       name: 'smoke',
-    });
-    assert.match(requests[1]?.url ?? '', /exclude_hidden=true/);
-    assert.match(requests[1]?.url ?? '', /exclude_stale=true/);
-    assert.match(requests[2]?.url ?? '', /offset=1/);
-    assert.match(requests[3]?.url ?? '', /group_type_index=2/);
-  } finally {
-    await server.close();
-  }
+    }),
+    { results: [[1]], columns: ['value'] },
+  );
+  assert.deepEqual(
+    (await transport.listEventDefinitions()).map(({ name }) => name),
+    ['a', 'b'],
+  );
+  assert.deepEqual(
+    (
+      await transport.listPropertyDefinitions({
+        type: 'group',
+        groupTypeIndex: 2,
+      })
+    ).map(({ name }) => name),
+    ['company'],
+  );
+
+  assert.equal(tokenCalls, 4);
+  assert.deepEqual(
+    requests.map(({ authorization }) => authorization),
+    ['Bearer token-1', 'Bearer token-2', 'Bearer token-3', 'Bearer token-4'],
+  );
+  assert.equal(requests[0]?.method, 'POST');
+  assert.equal(requests[0]?.url, '/api/projects/project%2F1/query/');
+  assert.deepEqual(requests[0]?.body, {
+    query: { kind: 'HogQLQuery', query: 'SELECT 1' },
+    name: 'smoke',
+  });
+  assert.match(requests[1]?.url ?? '', /exclude_hidden=true/);
+  assert.match(requests[1]?.url ?? '', /exclude_stale=true/);
+  assert.match(requests[2]?.url ?? '', /offset=1/);
+  assert.match(requests[3]?.url ?? '', /group_type_index=2/);
 });
 
 it('sends named HogQL values unchanged in the query request body', async () => {
   const bodies: unknown[] = [];
-  const server = await startServer(async (request, response) => {
-    const body = await readJsonBody(request);
-    bodies.push(body);
-    const query = (body as PostHogQueryRequest).query;
-    json(
-      response,
-      query.kind === 'HogQLMetadata'
-        ? validMetadata()
-        : { results: [[1]], columns: ['value'] },
-    );
+  await using server = await new HttpServer().start(
+    jsonErrors(async (request, response) => {
+      const body = await readJsonBody(request);
+      bodies.push(body);
+      const query = (body as PostHogQueryRequest).query;
+      json(
+        response,
+        query.kind === 'HogQLMetadata'
+          ? validMetadata()
+          : { results: [[1]], columns: ['value'] },
+      );
+    }),
+  );
+
+  const adapter = new PostHog({
+    transport: createPostHogTransport({
+      host: server.origin,
+      projectId: 42,
+      getAccessToken: () => 'token',
+    }),
   });
+  const sql = 'SELECT {needle} AS value';
+  const needle = "x' OR 1 = 1 --";
 
-  try {
-    const adapter = new PostHog({
-      transport: createPostHogTransport({
-        host: server.origin,
-        projectId: 42,
-        getAccessToken: () => 'token',
-      }),
-    });
-    const sql = 'SELECT {needle} AS value';
-    const needle = "x' OR 1 = 1 --";
-
-    assert.deepEqual(await adapter.execute(sql, { needle }), [{ value: 1 }]);
-    assert.deepEqual(bodies, [
-      {
-        query: { kind: 'HogQLMetadata', language: 'hogQL', query: sql },
-        name: 'deepagents_text2sql_validate',
+  assert.deepEqual(await adapter.execute(sql, { needle }), [{ value: 1 }]);
+  assert.deepEqual(bodies, [
+    {
+      query: { kind: 'HogQLMetadata', language: 'hogQL', query: sql },
+      name: 'deepagents_text2sql_validate',
+    },
+    {
+      query: {
+        kind: 'HogQLQuery',
+        query: sql,
+        values: { needle },
       },
-      {
-        query: {
-          kind: 'HogQLQuery',
-          query: sql,
-          values: { needle },
-        },
-        name: 'deepagents_text2sql_execute',
-      },
-    ]);
-  } finally {
-    await server.close();
-  }
+      name: 'deepagents_text2sql_execute',
+    },
+  ]);
 });
 
 it('decodes shell-escaped dollar property names before validation and execution', async () => {
@@ -198,36 +197,34 @@ it('decodes shell-escaped dollar property names before validation and execution'
 });
 
 it('reports API failures without leaking the bearer token', async () => {
-  const server = await startServer(async (_request, response) => {
-    response.setHeader('retry-after', '2');
-    json(
-      response,
-      { code: 'throttled', detail: 'Slow down secret-token' },
-      429,
-    );
-  });
+  await using server = await new HttpServer().start(
+    jsonErrors(async (_request, response) => {
+      response.setHeader('retry-after', '2');
+      json(
+        response,
+        { code: 'throttled', detail: 'Slow down secret-token' },
+        429,
+      );
+    }),
+  );
 
-  try {
-    const transport = createPostHogTransport({
-      host: server.origin,
-      projectId: 42,
-      getAccessToken: () => 'secret-token',
-    });
-    await assert.rejects(
-      transport.query({ query: { kind: 'HogQLQuery', query: 'SELECT 1' } }),
-      (error: unknown) => {
-        assert.ok(error instanceof PostHogApiError);
-        assert.equal(error.status, 429);
-        assert.equal(error.code, 'throttled');
-        assert.equal(error.detail, 'Slow down [REDACTED]');
-        assert.equal(error.retryAfterMs, 2_000);
-        assert.doesNotMatch(error.message, /secret-token/);
-        return true;
-      },
-    );
-  } finally {
-    await server.close();
-  }
+  const transport = createPostHogTransport({
+    host: server.origin,
+    projectId: 42,
+    getAccessToken: () => 'secret-token',
+  });
+  await assert.rejects(
+    transport.query({ query: { kind: 'HogQLQuery', query: 'SELECT 1' } }),
+    (error: unknown) => {
+      assert.ok(error instanceof PostHogApiError);
+      assert.equal(error.status, 429);
+      assert.equal(error.code, 'throttled');
+      assert.equal(error.detail, 'Slow down [REDACTED]');
+      assert.equal(error.retryAfterMs, 2_000);
+      assert.doesNotMatch(error.message, /secret-token/);
+      return true;
+    },
+  );
 });
 
 it('does not retain bearer tokens in injected fetch failures', async () => {
@@ -301,10 +298,14 @@ it('rejects unsafe hosts, redirects, and timed-out requests', async () => {
     /must use HTTPS/,
   );
 
-  const redirectServer = await startServer(async (_request, response) => {
-    response.writeHead(302, { location: 'https://attacker.invalid/' }).end();
-  });
-  try {
+  {
+    await using redirectServer = await new HttpServer().start(
+      jsonErrors(async (_request, response) => {
+        response
+          .writeHead(302, { location: 'https://attacker.invalid/' })
+          .end();
+      }),
+    );
     const transport = createPostHogTransport({
       host: redirectServer.origin,
       projectId: 1,
@@ -314,15 +315,15 @@ it('rejects unsafe hosts, redirects, and timed-out requests', async () => {
       transport.query({ query: { kind: 'HogQLQuery', query: 'SELECT 1' } }),
       /failed before receiving a response/,
     );
-  } finally {
-    await redirectServer.close();
   }
 
-  const slowServer = await startServer(async (_request, response) => {
-    await sleep(100);
-    json(response, { results: [] });
-  });
-  try {
+  {
+    await using slowServer = await new HttpServer().start(
+      jsonErrors(async (_request, response) => {
+        await sleep(100);
+        json(response, { results: [] });
+      }),
+    );
     const transport = createPostHogTransport({
       host: slowServer.origin,
       projectId: 1,
@@ -333,17 +334,17 @@ it('rejects unsafe hosts, redirects, and timed-out requests', async () => {
       transport.query({ query: { kind: 'HogQLQuery', query: 'SELECT 1' } }),
       /timed out after 10ms/,
     );
-  } finally {
-    await slowServer.close();
   }
 
-  const slowBodyServer = await startServer(async (_request, response) => {
-    response.writeHead(200, { 'content-type': 'application/json' });
-    response.write('{"results":');
-    await sleep(100);
-    response.end('[]}');
-  });
-  try {
+  {
+    await using slowBodyServer = await new HttpServer().start(
+      jsonErrors(async (_request, response) => {
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.write('{"results":');
+        await sleep(100);
+        response.end('[]}');
+      }),
+    );
     const transport = createPostHogTransport({
       host: slowBodyServer.origin,
       projectId: 1,
@@ -354,8 +355,6 @@ it('rejects unsafe hosts, redirects, and timed-out requests', async () => {
       transport.query({ query: { kind: 'HogQLQuery', query: 'SELECT 1' } }),
       /timed out after 10ms/,
     );
-  } finally {
-    await slowBodyServer.close();
   }
 });
 
@@ -776,31 +775,17 @@ function mockModel(sql: string) {
   return new MockLanguageModelV4({ doGenerate: response });
 }
 
-async function startServer(
+function jsonErrors(
   handler: (
     request: IncomingMessage,
     response: ServerResponse,
   ) => Promise<void>,
-): Promise<{ origin: string; close(): Promise<void> }> {
-  const server = createServer((request, response) => {
+): RequestListener {
+  return (request, response) => {
     void handler(request, response).catch((error: unknown) => {
       response.writeHead(500, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ detail: String(error) }));
     });
-  });
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', resolve);
-  });
-  const { port } = server.address() as AddressInfo;
-  return {
-    origin: `http://127.0.0.1:${port}`,
-    close: async () => {
-      server.closeAllConnections();
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => (error ? reject(error) : resolve()));
-      });
-    },
   };
 }
 

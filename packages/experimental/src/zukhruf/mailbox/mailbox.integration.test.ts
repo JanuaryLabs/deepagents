@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 import { mkdtempDisposable } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,22 +9,11 @@ import {
   SqliteMailboxStore,
   createInterAgentCommunication,
 } from '@deepagents/experimental/zukhruf';
+import { Sqlite } from '@deepagents/test';
 
 const root = { chatId: 'root', userId: 'user-1' };
 const researcher = { chatId: 'researcher', userId: 'user-1' };
 const reviewer = { chatId: 'reviewer', userId: 'user-1' };
-
-const holdWriteLock = `
-  import { DatabaseSync } from 'node:sqlite';
-  import { setTimeout as sleep } from 'node:timers/promises';
-
-  const database = new DatabaseSync(process.argv[1]);
-  database.exec('BEGIN IMMEDIATE');
-  process.stdout.write('locked\\n');
-  await sleep(200);
-  database.exec('COMMIT');
-  database.close();
-`;
 
 function mail(content: string) {
   return createInterAgentCommunication({
@@ -34,32 +21,6 @@ function mail(content: string) {
     recipient: researcher,
     content,
   });
-}
-
-async function runWhileWriteLocked<T>(
-  path: string,
-  operation: () => Promise<T>,
-): Promise<T> {
-  const holder = spawn(
-    process.execPath,
-    ['--input-type=module', '-e', holdWriteLock, path],
-    { stdio: ['ignore', 'pipe', 'pipe'] },
-  );
-  let stderr = '';
-  holder.stderr.setEncoding('utf8');
-  holder.stderr.on('data', (chunk: string) => {
-    stderr += chunk;
-  });
-  const exited = once(holder, 'exit');
-  const [signal] = await once(holder.stdout, 'data');
-  assert.equal(signal.toString(), 'locked\n', stderr);
-
-  try {
-    return await operation();
-  } finally {
-    const [exitCode] = await exited;
-    assert.equal(exitCode, 0, stderr);
-  }
 }
 
 describe('zukhruf mailbox', () => {
@@ -227,6 +188,7 @@ describe('zukhruf mailbox', () => {
   });
 
   it('waits for cross-process writers while enqueueing and draining in FIFO order', async () => {
+    const sqlite = new Sqlite();
     await using directory = await mkdtempDisposable(
       join(tmpdir(), 'zukhruf-mailbox-lock-'),
     );
@@ -235,15 +197,19 @@ describe('zukhruf mailbox', () => {
     await store.enqueue(mail('one'));
     await store.enqueue(mail('two'));
 
-    await runWhileWriteLocked(path, () => store.enqueue(mail('three')));
-    const messages = await runWhileWriteLocked(path, () =>
-      store.drain(researcher),
-    );
+    {
+      await using lock = await sqlite.writeLock(path, 200);
+      await store.enqueue(mail('three'));
+    }
+    {
+      await using lock = await sqlite.writeLock(path, 200);
+      const messages = await store.drain(researcher);
 
-    assert.deepStrictEqual(
-      messages.map(({ content }) => content),
-      ['one', 'two', 'three'],
-    );
+      assert.deepStrictEqual(
+        messages.map(({ content }) => content),
+        ['one', 'two', 'three'],
+      );
+    }
   });
 
   it('rejects empty communication addressing and content', () => {
