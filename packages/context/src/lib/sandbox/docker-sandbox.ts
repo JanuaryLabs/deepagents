@@ -539,7 +539,7 @@ export const dockerEngine: ContainerEngine<DockerCommonOptions> = {
   },
 
   isMissingVolume(message: string): boolean {
-    return message.toLowerCase().includes('no such volume');
+    return /no such volume|volume \S+ not found/i.test(message);
   },
 
   isNameConflict(message: string): boolean {

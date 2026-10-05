@@ -26,7 +26,12 @@ export class Container implements AsyncDisposable {
 
   readonly cleanup = async (): Promise<void> => {
     try {
-      await this.command(['rm', '--force', this.containerId]).catch((error) => {
+      await this.command([
+        'rm',
+        '--force',
+        '--volumes',
+        this.containerId,
+      ]).catch((error) => {
         if (
           !(error instanceof SubprocessError) ||
           !/No such container/i.test(error.stderr)

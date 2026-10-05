@@ -294,22 +294,38 @@ ran, as well as checking their exit code.
 
 ### Local and remote Docker tests
 
-The same tests use the Docker CLI's selected endpoint. For example:
+Nx Docker tests default to the `limerence-dokploy` context (Hetzner) only when
+neither `DOCKER_CONTEXT` nor `DOCKER_HOST` is set. An explicitly set endpoint
+takes precedence, including an empty context as used by CI. The default is scoped
+to these test commands; it does not change the Docker CLI's globally selected
+context.
 
 ```sh
-DOCKER_CONTEXT=limerence-dokploy nx run @deepagents/context:test
-# Keep project execution serial on a shared remote server:
-DOCKER_CONTEXT=limerence-dokploy nx run-many -t test --projects=@deepagents/test,@deepagents/context,@deepagents/text2sql,@deepagents/experimental --parallel=1
+nx run @deepagents/context:test
+# Use Docker Desktop for a run:
+DOCKER_CONTEXT=desktop-linux nx run @deepagents/context:test
+# Docker test projects run one at a time within this Nx invocation:
+nx run-many -t test --projects=@deepagents/test,@deepagents/context,@deepagents/text2sql,@deepagents/experimental
 ```
 
-Projects tagged `test:docker` use `tools/src/run-docker-tests.ts`. It pins the
-endpoint for the run and disables Nx test caching. SSH endpoints default to one
-test file at a time; an explicit `--test-concurrency` overrides that limit.
+Projects tagged `test:docker` use `tools/src/run-docker-tests.ts`. The
+supervisor resolves the selected Docker context to a concrete Unix or SSH
+endpoint once, passes that pinned endpoint to worker processes, and disables Nx
+test caching. These targets set `parallelism: false`, so Nx runs them exclusively
+within each invocation, locally and in CI. Other targets retain their existing
+parallelism when no Docker test target is running. SSH endpoints default to one
+test file at a time; an explicit `--args="--test-concurrency=2"` allows two files
+within the active project. Cases within a file follow Node's sequential default
+unless the test opts into concurrency. This limits test scheduling, not how many
+containers one case can start, and separate Nx invocations can still overlap.
 Other Node projects keep the standard Node test command.
 
 `Docker`, `Postgres`, `Mysql`, and `SqlServer` support local Unix sockets and SSH
 endpoints. Published test ports bind to the engine host's loopback interface.
 For SSH, each handle exposes a local loopback port forwarded with OpenSSH.
+Acquisition waits for SSH authentication and a private Unix-socket listener;
+client streams share that connection instead of starting an SSH login per query
+connection. The handle owns the SSH process and its temporary socket directory.
 Use `handle.host`, `handle.port`, or `handle.connectionString`; do not construct
 `localhost` URLs from a port returned by `docker port`. Forwarded ports belong
 to the acquiring process and expire when its handle is disposed. SSH uses the
@@ -329,14 +345,17 @@ provides `resources` and the current run's ownership `labels`. Spread these
 defaults before explicit options; merge nested `resources` or `labels` when
 overriding individual settings. Sandbox tests import their public APIs directly.
 
-Normal disposal closes SSH connections and removes owned resources. The Nx
-supervisor also cleans labeled disposable containers, labeled volumes, and
-recorded directories after failures, timeouts, and interruption. Managed Docker
+Normal disposal closes SSH connections and removes owned containers with their
+anonymous volumes. The Nx supervisor also cleans labeled disposable containers,
+their anonymous volumes, labeled volumes, and recorded directories (including
+local SSH sockets) after failures, timeouts, and interruption. Managed Docker
 sandbox volumes inherit the sandbox labels. Shared database servers remain
 running under the existing explicit-cleanup contract; images and build caches
 also remain. If the host is unreachable, cleanup reports the ownership record
 under `.nx/docker-test-runs/`. The next run on that endpoint retries cleanup
-once the recorded processes have exited. Never delete those records to hide a
+once the recorded processes and their worker group have exited. Signalling
+errors still trigger resource cleanup and retain the record for recovery.
+Never delete those records to hide a
 cleanup failure. A forcibly killed supervisor may require the surviving test
 process to exit before recovery can run.
 

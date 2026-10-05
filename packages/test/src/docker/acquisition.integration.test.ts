@@ -49,7 +49,7 @@ test('Docker reuse waits for a reserved name to become inspectable', async (t) =
   inspect.mock.mockImplementationOnce(() => {
     throw missing;
   }, before + 1);
-  const acquired = await docker.reuse(options);
+  await using acquired = await docker.reuse(options);
   assert.equal(inspect.mock.callCount(), before + 3);
   assert.equal(acquired.containerId, server.containerId);
   const { stdout } = await acquired.exec(['printenv', 'POSTGRES_PASSWORD']);

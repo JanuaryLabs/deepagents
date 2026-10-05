@@ -10,6 +10,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(
@@ -34,7 +35,11 @@ function alive(pid: number | undefined | null): boolean {
   }
 }
 
-async function cleanup(run: Run, directory: string): Promise<void> {
+async function cleanup(
+  run: Run,
+  directory: string,
+  release = true,
+): Promise<void> {
   const signal = AbortSignal.timeout(60_000);
   const env = { DOCKER_CONTEXT: undefined, DOCKER_HOST: run.endpoint };
   const docker = (args: string[]) =>
@@ -55,7 +60,7 @@ async function cleanup(run: Run, directory: string): Promise<void> {
         '{{index .Config.Labels "dev.deepagents.test.shared"}}',
         id,
       ]);
-      if (shared !== '1') await docker(['rm', '--force', id]);
+      if (shared !== '1') await docker(['rm', '--force', '--volumes', id]);
     } catch (error) {
       if (
         !(error instanceof SubprocessError) ||
@@ -75,12 +80,24 @@ async function cleanup(run: Run, directory: string): Promise<void> {
     await docker(['volume', 'rm', name]).catch((error) => {
       if (
         !(error instanceof SubprocessError) ||
-        !/no such volume/i.test(error.stderr)
+        !/no such volume|volume \S+ not found/i.test(error.stderr)
       )
         throw error;
     });
   }
   for (const file of await readdir(directory)) {
+    if (file.startsWith('forward-')) {
+      const { path } = JSON.parse(
+        await readFile(join(directory, file), 'utf8'),
+      ) as { path: string };
+      if (
+        !path.startsWith(`/tmp/deepagents-forward-${run.id}-`) ||
+        path.slice(5).includes('/')
+      )
+        throw new Error(`Invalid SSH forwarding cleanup record: ${path}`);
+      await rm(path, { recursive: true, force: true });
+      continue;
+    }
     if (!file.startsWith('directory-')) continue;
     const { path } = JSON.parse(
       await readFile(join(directory, file), 'utf8'),
@@ -106,7 +123,7 @@ async function cleanup(run: Run, directory: string): Promise<void> {
       );
     } else await rm(path, { recursive: true, force: true });
   }
-  await rm(directory, { recursive: true, force: true });
+  if (release) await rm(directory, { recursive: true, force: true });
 }
 
 await mkdir(root, { recursive: true });
@@ -129,7 +146,8 @@ for (const name of await readdir(root)) {
   if (
     previous.endpoint !== endpoint ||
     alive(previous.pid) ||
-    alive(previous.childPid)
+    alive(previous.childPid) ||
+    (previous.childPid && alive(-previous.childPid))
   )
     continue;
   try {
@@ -170,23 +188,39 @@ const child = spawn(process.execPath, ['--test', ...args], {
 });
 run.childPid = child.pid;
 const exited = new Promise<number>((resolve, reject) => {
-  child.once('error', reject);
+  child.on('error', reject);
   child.once('exit', (code) => resolve(code ?? 1));
 });
 let interrupted = false;
-const kill = (signal: NodeJS.Signals) => {
-  if (!child.pid) return;
-  try {
-    process.kill(-child.pid, signal);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+const kill = async (signal: NodeJS.Signals) => {
+  if (!child.pid) return true;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      process.kill(-child.pid, signal);
+      return true;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ESRCH') return true;
+      // macOS can briefly report EPERM while an empty group is being reaped.
+      // Retry that transition; a persistent denial must retain ownership.
+      if (code === 'EPERM' && attempt < 3) {
+        await delay(25);
+        continue;
+      }
+      console.error(
+        `Could not signal Docker test process group ${child.pid}:`,
+        error,
+      );
+      child.kill(signal);
+      return false;
+    }
   }
 };
 let deadline: NodeJS.Timeout | undefined;
 const interrupt = () => {
   interrupted = true;
-  kill('SIGTERM');
-  deadline ??= setTimeout(() => kill('SIGKILL'), 5_000);
+  void kill('SIGTERM');
+  deadline ??= setTimeout(() => void kill('SIGKILL'), 5_000);
 };
 process.on('SIGINT', interrupt);
 process.on('SIGTERM', interrupt);
@@ -197,9 +231,15 @@ try {
 } finally {
   if (deadline) clearTimeout(deadline);
   // Includes SSH channels in workers killed by node --test or --test-force-exit.
-  kill('SIGKILL');
+  const stopped = await kill('SIGKILL');
   try {
-    await cleanup(run, directory);
+    await cleanup(run, directory, stopped);
+    if (!stopped) {
+      process.exitCode = 1;
+      console.error(
+        `Docker test termination failed; retained ownership record for retry: ${directory}`,
+      );
+    }
   } catch (error) {
     process.exitCode = 1;
     console.error(

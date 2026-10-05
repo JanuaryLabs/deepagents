@@ -5,6 +5,37 @@ import { test } from 'node:test';
 
 import { Docker, timebox } from '@deepagents/test';
 
+test('disposing an owned container removes its anonymous volumes', async (t) => {
+  const docker = new Docker();
+  await using container = await docker.start({
+    image: 'postgres:18-alpine',
+    internalPort: 5432,
+    env: { POSTGRES_PASSWORD: 'test' },
+  });
+  const { stdout } = await docker.command(['inspect', container.containerId]);
+  const [{ Mounts: mounts }] = JSON.parse(stdout) as {
+    Mounts: { Type: string; Name: string }[];
+  }[];
+  const volumes = mounts.filter((mount) => mount.Type === 'volume');
+  assert.ok(volumes.length > 0, 'the image declares an anonymous data volume');
+  t.after(async () => {
+    for (const { Name } of volumes) {
+      await docker.command(['volume', 'rm', Name]).catch(() => {});
+    }
+  });
+  await container.cleanup();
+  for (const { Name } of volumes) {
+    const { stdout } = await docker.command([
+      'volume',
+      'ls',
+      '-q',
+      '--filter',
+      `name=^${Name}$`,
+    ]);
+    assert.equal(stdout, '', 'anonymous data must not outlive its container');
+  }
+});
+
 test(
   'Docker identity preserves configuration, ownership, and unfinished creation',
   {
@@ -36,8 +67,8 @@ test(
       }
     });
 
-    const first = await docker.reuse(options);
-    const reordered = await docker.reuse({
+    await using first = await docker.reuse(options);
+    await using reordered = await docker.reuse({
       ...options,
       env: { POSTGRES_DB: 'postgres', POSTGRES_PASSWORD: 'testpassword' },
       labels: {
@@ -46,7 +77,7 @@ test(
       },
     });
     assert.equal(reordered.containerId, first.containerId);
-    const different = await docker.reuse({
+    await using different = await docker.reuse({
       ...options,
       env: { ...options.env, POSTGRES_PASSWORD: 'another-password' },
     });
@@ -61,7 +92,7 @@ test(
       }),
       /readiness failed/,
     );
-    const healthy = await docker.reuse({
+    await using healthy = await docker.reuse({
       ...options,
       healthy: ({ exec }) =>
         timebox(
@@ -151,7 +182,7 @@ test(
       '-P',
       options.image,
     ]);
-    const recovered = await docker.reuse(options);
+    await using recovered = await docker.reuse(options);
     assert.notEqual(recovered.containerId, first.containerId);
     const { stdout: running } = await command('docker', [
       'inspect',

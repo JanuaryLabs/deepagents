@@ -22,6 +22,10 @@ node --test --no-warnings --test-timeout=60000 path/to/package/test/file.test.ts
 - **Always pass `--test-timeout=<ms>` to direct `node --test` runs.** Prefer Nx for
   dependency-aware builds. Database classes share servers without runner setup;
   servers persist until explicit cleanup. See [TEST_PRIMITIVES.md](./TEST_PRIMITIVES.md).
+- Run Nx build, test, and typecheck invocations sequentially in a shared checkout.
+  Typecheck can rebuild dependencies and delete output directories that another
+  test is importing. Use one `nx run-many` task graph or isolated worktrees when
+  parallel verification is needed.
 
 ### Test Import Rules
 
