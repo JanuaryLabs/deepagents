@@ -57,6 +57,7 @@ export default defineConfig(() => ({
     // Built workspace packages have no source tsconfig and run directly in Node.
     server: { deps: { external: [/\/dist\//] } },
     pool: 'forks',
+    maxWorkers: 2,
     execArgv: ['--no-experimental-webstorage'],
     setupFiles: ['./src/test-setup.ts'],
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
