@@ -307,16 +307,24 @@ export function createClaudeAccounts(options: ClaudeAccountsOptions) {
     }
 
     const email = parsed.data.account?.email_address;
-    await vault.commit(
-      owner,
-      {
-        accessToken: parsed.data.access_token,
-        refreshToken: parsed.data.refresh_token,
-        expiresAt: Date.now() + parsed.data.expires_in * 1000,
-        ...(email && { user: { email } }),
-      },
-      signIn.revision,
-    );
+    try {
+      await vault.commit(
+        owner,
+        {
+          accessToken: parsed.data.access_token,
+          refreshToken: parsed.data.refresh_token,
+          expiresAt: Date.now() + parsed.data.expires_in * 1000,
+          ...(email && { user: { email } }),
+        },
+        signIn.revision,
+      );
+    } catch (error) {
+      return fail(
+        owner,
+        signIn,
+        messageOf(error, 'Saving the Claude connection failed.'),
+      );
+    }
     if (signIns.get(owner) === signIn) signIns.delete(owner);
     return publish(owner);
   }

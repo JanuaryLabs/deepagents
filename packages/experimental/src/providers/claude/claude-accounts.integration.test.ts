@@ -708,3 +708,30 @@ test('unreadable stored tokens read as a disconnected account', async () => {
   assert.ok(failure instanceof ClaudeAuthError);
   assert.equal(failure.code, 'not-connected');
 });
+
+test('a store that cannot save ends the sign-in with an error instead of throwing', async () => {
+  const memory = new MemoryStore<any>();
+  // The caller's encrypted storage can be unavailable (Linux basic_text).
+  const store = {
+    get: (key: string) => memory.get(key),
+    set: () => {
+      throw new Error('Secure storage is unavailable on this system.');
+    },
+    delete: (key: string) => memory.delete(key),
+  };
+  const accounts = createClaudeAccounts({ store });
+  using _wire = interceptWire((request) => {
+    if (request.url === TOKEN_URL) return tokens('access-1', 'refresh-1');
+    return unexpected(request);
+  });
+
+  const completed = await signIn(accounts, 'owner-a');
+
+  assert.deepStrictEqual(completed, {
+    status: 'error',
+    message: 'Secure storage is unavailable on this system.',
+  });
+  assert.deepStrictEqual(await accounts.state('owner-a'), {
+    status: 'unauthenticated',
+  });
+});
