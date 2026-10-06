@@ -251,10 +251,17 @@ class AlwaysFailingChangeSource implements StreamChangeSource {
   readonly attemptTimes: number[] = [];
   readonly thirdAttempt = Promise.withResolvers<void>();
 
-  async *subscribe(): AsyncIterable<StreamChange> {
-    this.attemptTimes.push(Date.now());
-    if (this.attemptTimes.length === 3) this.thirdAttempt.resolve();
-    throw new Error('persistent cancellation subscription failure');
+  // Fails on the first next(), as a real source fails to connect.
+  subscribe(): AsyncIterable<StreamChange> {
+    return {
+      [Symbol.asyncIterator]: () => ({
+        next: async () => {
+          this.attemptTimes.push(Date.now());
+          if (this.attemptTimes.length === 3) this.thirdAttempt.resolve();
+          throw new Error('persistent cancellation subscription failure');
+        },
+      }),
+    };
   }
 }
 
