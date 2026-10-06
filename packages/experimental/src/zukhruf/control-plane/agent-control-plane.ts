@@ -5,10 +5,14 @@ import type { StreamManager } from '@deepagents/context';
 
 import type { AgentDeclaration } from '../agent.ts';
 import type { MailboxCoordinator } from '../mailbox/coordinator.ts';
-import type { ConversationId, MessageDeliveryMode } from '../mailbox/types.ts';
-import {
-  MessageDeliveryMode as DeliveryMode,
+import type {
+  ConversationId,
   InterAgentCommunicationType,
+  MessageDeliveryMode,
+} from '../mailbox/types.ts';
+import {
+  InterAgentCommunicationTypes,
+  MessageDeliveryModes,
   createInterAgentCommunication,
 } from '../mailbox/types.ts';
 import type { TurnQueue, TurnRef, TurnRequest } from '../queue/turn-queue.ts';
@@ -257,8 +261,8 @@ export class AgentControlPlane {
     input: { target: string; message: string },
   ): Promise<{ target: string }> {
     return this.#deliverAgentMessage(actor, input, {
-      type: InterAgentCommunicationType.Message,
-      mode: DeliveryMode.QueueOnly,
+      type: InterAgentCommunicationTypes.Message,
+      mode: MessageDeliveryModes.QueueOnly,
       rejectRoot: false,
     });
   }
@@ -268,8 +272,8 @@ export class AgentControlPlane {
     input: { target: string; message: string },
   ): Promise<{ target: string }> {
     return this.#deliverAgentMessage(actor, input, {
-      type: InterAgentCommunicationType.NewTask,
-      mode: DeliveryMode.TriggerTurn,
+      type: InterAgentCommunicationTypes.NewTask,
+      mode: MessageDeliveryModes.TriggerTurn,
       rejectRoot: true,
     });
   }
@@ -380,7 +384,7 @@ export class AgentControlPlane {
     // Codex checks capacity only for mail that starts a turn, and skips the
     // check when the target already has one in flight.
     if (
-      options.mode === DeliveryMode.TriggerTurn &&
+      options.mode === MessageDeliveryModes.TriggerTurn &&
       (await this.#queue.getTurnActivity(target.conversation)) !== 'running' &&
       !(await this.#hasExecutionCapacity(actor.thread))
     ) {
@@ -399,7 +403,10 @@ export class AgentControlPlane {
     await this.#mailbox.deliver(message, options.mode);
     await this.#recordActivity(target.path.isRoot ? actor.thread : target, {
       id: message.id,
-      type: options.mode === DeliveryMode.TriggerTurn ? 'followup' : 'message',
+      type:
+        options.mode === MessageDeliveryModes.TriggerTurn
+          ? 'followup'
+          : 'message',
       at: Date.now(),
       actorPath: actor.thread.path.toString(),
       targetPath: target.path.toString(),

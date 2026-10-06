@@ -21,7 +21,7 @@ import {
   AgentRuntime,
   type ConsumeContext,
   type ConsumeOptions,
-  MessageDeliveryMode,
+  MessageDeliveryModes,
   SqliteMailboxStore,
   TurnQueue,
   type TurnRef,
@@ -312,7 +312,7 @@ test('wait_agent clamps a below-minimum timeout and reports it to the model', as
               recipient: conversation,
               content: 'mail delivered after the requested deadline',
             }),
-            MessageDeliveryMode.QueueOnly,
+            MessageDeliveryModes.QueueOnly,
           ),
         );
         return toolCallResponse('wait_agent', { timeout_ms: 1 });

@@ -10,8 +10,8 @@ import {
 
 import type { MailboxCoordinator } from '../mailbox/coordinator.ts';
 import {
-  InterAgentCommunicationType,
-  MessageDeliveryMode,
+  InterAgentCommunicationTypes,
+  MessageDeliveryModes,
   createInterAgentCommunication,
 } from '../mailbox/types.ts';
 import type { TurnQueue, TurnRef } from '../queue/turn-queue.ts';
@@ -148,7 +148,7 @@ export class AgentStatusProjector {
     await this.#mailbox.deliver(
       createInterAgentCommunication({
         id: `zukhruf:child-terminal:${turn.streamId}`,
-        type: InterAgentCommunicationType.FinalAnswer,
+        type: InterAgentCommunicationTypes.FinalAnswer,
         author: thread.conversation,
         recipient: {
           chatId: thread.parentChatId,
@@ -162,7 +162,7 @@ export class AgentStatusProjector {
           status: stream.status,
         },
       }),
-      MessageDeliveryMode.QueueOnly,
+      MessageDeliveryModes.QueueOnly,
     );
     return { finishedAt: stream.finishedAt, status: stream.status };
   }

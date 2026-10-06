@@ -20,7 +20,7 @@ import {
 import {
   type AgentDeclaration,
   AgentRuntime,
-  MessageDeliveryMode,
+  MessageDeliveryModes,
   PgBossTurnQueue,
   SqliteMailboxStore,
   type TurnRef,
@@ -138,7 +138,7 @@ describe('zukhruf runtime mailbox delivery', () => {
         recipient: researcher,
         content: 'cancel this wake',
       }),
-      MessageDeliveryMode.TriggerTurn,
+      MessageDeliveryModes.TriggerTurn,
     );
     const jobs = await h.boss.findJobs(h.turnQueue.queue, {
       key: researcher.chatId,
@@ -206,7 +206,7 @@ describe('zukhruf runtime mailbox delivery', () => {
           recipient: researcher,
           content: `message ${index}`,
         }),
-        MessageDeliveryMode.QueueOnly,
+        MessageDeliveryModes.QueueOnly,
       );
     }
 
@@ -222,7 +222,7 @@ describe('zukhruf runtime mailbox delivery', () => {
         recipient: researcher,
         content: 'message 4',
       }),
-      MessageDeliveryMode.TriggerTurn,
+      MessageDeliveryModes.TriggerTurn,
     );
 
     const jobs = await h.boss.findJobs(h.turnQueue.queue, {
@@ -376,7 +376,7 @@ describe('zukhruf runtime mailbox delivery', () => {
         recipient: researcher,
         content: 'queued during active turn',
       }),
-      MessageDeliveryMode.QueueOnly,
+      MessageDeliveryModes.QueueOnly,
     );
     await h.runtime.deliver(
       createInterAgentCommunication({
@@ -384,7 +384,7 @@ describe('zukhruf runtime mailbox delivery', () => {
         recipient: researcher,
         content: 'wake after active turn',
       }),
-      MessageDeliveryMode.TriggerTurn,
+      MessageDeliveryModes.TriggerTurn,
     );
 
     await sleep(700);

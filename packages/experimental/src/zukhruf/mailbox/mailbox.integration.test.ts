@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
-  InterAgentCommunicationType,
+  InterAgentCommunicationTypes,
   SqliteMailboxStore,
   createInterAgentCommunication,
 } from '@deepagents/experimental/zukhruf';
@@ -31,7 +31,7 @@ describe('zukhruf mailbox', () => {
     await store.enqueue(mail('queued before two'));
     await store.enqueue({
       ...mail('trigger'),
-      type: InterAgentCommunicationType.NewTask,
+      type: InterAgentCommunicationTypes.NewTask,
       triggerTurn: true,
     });
     await store.enqueue(mail('queued after trigger'));
@@ -113,7 +113,7 @@ describe('zukhruf mailbox', () => {
     const path = join(directory.path, 'mailbox.sqlite');
     const completion = createInterAgentCommunication({
       id: 'child-completion:stream-consumed',
-      type: InterAgentCommunicationType.FinalAnswer,
+      type: InterAgentCommunicationTypes.FinalAnswer,
       author: researcher,
       recipient: root,
       content: 'finished once',

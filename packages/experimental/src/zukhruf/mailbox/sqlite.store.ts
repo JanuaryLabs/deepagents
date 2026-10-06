@@ -8,7 +8,7 @@ import {
 import {
   type ConversationId,
   type InterAgentCommunication,
-  InterAgentCommunicationType,
+  InterAgentCommunicationTypes,
 } from './types.ts';
 
 const DDL = `
@@ -83,7 +83,7 @@ export class SqliteMailboxStore extends MailboxStore implements Disposable {
   ): Promise<MailboxEnqueueResult> {
     return this.#transaction(() => {
       const consumedTerminal =
-        communication.type === InterAgentCommunicationType.FinalAnswer &&
+        communication.type === InterAgentCommunicationTypes.FinalAnswer &&
         this.#hasConsumedTerminal(communication.id);
       if (!consumedTerminal) {
         this.#database
@@ -216,7 +216,7 @@ export class SqliteMailboxStore extends MailboxStore implements Disposable {
            VALUES (?)`,
         );
         for (const { communication } of consumed) {
-          if (communication.type === InterAgentCommunicationType.FinalAnswer) {
+          if (communication.type === InterAgentCommunicationTypes.FinalAnswer) {
             tombstone.run(communication.id);
           }
         }

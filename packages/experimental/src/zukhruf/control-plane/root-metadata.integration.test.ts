@@ -18,7 +18,7 @@ import {
   AgentRuntime,
   type ConsumeContext,
   type ConsumeOptions,
-  MessageDeliveryMode,
+  MessageDeliveryModes,
   SqliteMailboxStore,
   TurnQueue,
   type TurnRef,
@@ -592,7 +592,7 @@ test('host delivery rejects a recipient that does not own the stored chat', asyn
         recipient,
         content: 'poison mail',
       }),
-      MessageDeliveryMode.TriggerTurn,
+      MessageDeliveryModes.TriggerTurn,
     ),
     /chat "shared-chat" belongs to user "alice", not "bob"/,
   );

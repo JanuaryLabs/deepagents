@@ -20,7 +20,7 @@ import {
   type ConversationId,
   type InterAgentCommunication,
   type MailboxEnqueueResult,
-  MessageDeliveryMode,
+  MessageDeliveryModes,
   SqliteMailboxStore,
   TurnQueue,
   type TurnRef,
@@ -1465,7 +1465,7 @@ test('a stale orphan retry cannot clear or supersede a successor turn', async (t
         recipient: child,
         content: 'mail while the successor is active',
       }),
-      MessageDeliveryMode.QueueOnly,
+      MessageDeliveryModes.QueueOnly,
     );
 
     const chat = await store.getChat(child.chatId);
@@ -2756,7 +2756,7 @@ test('wait_agent returns for pending caller mail without consuming it', async (t
             recipient: conversation,
             content: 'mail delivered before the wait tool executes',
           }),
-          MessageDeliveryMode.QueueOnly,
+          MessageDeliveryModes.QueueOnly,
         );
         return toolCallResponse('wait_agent', 'wait-for-caller-mail', {
           timeout_ms: 10_000,
@@ -2868,7 +2868,7 @@ test('wait_agent is released by cross-runtime mail that reaches the next model s
       recipient: conversation,
       content: 'mail from another runtime instance',
     }),
-    MessageDeliveryMode.QueueOnly,
+    MessageDeliveryModes.QueueOnly,
   );
   await settleWithin(running, 'cross-runtime wait_agent turn completes');
 
@@ -3895,7 +3895,7 @@ test('list_agents reports a completed child with a queued follow-up as running',
       recipient: { chatId: 'researcher-chat', userId: 'user-1' },
       content: 'Check the new edge case',
     }),
-    MessageDeliveryMode.TriggerTurn,
+    MessageDeliveryModes.TriggerTurn,
   );
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },

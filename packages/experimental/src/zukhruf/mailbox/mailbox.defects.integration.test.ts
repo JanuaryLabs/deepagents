@@ -23,7 +23,7 @@ import {
   AgentRuntime,
   type ConsumeContext,
   type ConsumeOptions,
-  MessageDeliveryMode,
+  MessageDeliveryModes,
   SqliteMailboxStore,
   TurnQueue,
   type TurnRef,
@@ -322,7 +322,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
 
       await h.runtime.deliver(
         mail('new evidence while active'),
-        MessageDeliveryMode.QueueOnly,
+        MessageDeliveryModes.QueueOnly,
       );
       assert.equal(
         h.queue.pending.length,
@@ -407,7 +407,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
 
       await h.runtime.deliver(
         mail('arrived during the final sample'),
-        MessageDeliveryMode.QueueOnly,
+        MessageDeliveryModes.QueueOnly,
       );
       assert.equal(
         h.queue.pending.length,
@@ -497,7 +497,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
 
       await senderRuntime.deliver(
         mail('arrived from another coordinator'),
-        MessageDeliveryMode.QueueOnly,
+        MessageDeliveryModes.QueueOnly,
       );
       assert.equal(
         queue.pending.length,
@@ -569,7 +569,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
 
       await senderRuntime.deliver(
         mail('first triggered task'),
-        MessageDeliveryMode.TriggerTurn,
+        MessageDeliveryModes.TriggerTurn,
       );
       await queue.runNext();
       assert.equal(queue.pending.length, 0);
@@ -577,7 +577,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
 
       await senderRuntime.deliver(
         mail('second triggered task'),
-        MessageDeliveryMode.TriggerTurn,
+        MessageDeliveryModes.TriggerTurn,
       );
 
       assert.equal(
@@ -628,7 +628,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
 
       await senderRuntime.deliver(
         mail('wait until a natural future turn'),
-        MessageDeliveryMode.QueueOnly,
+        MessageDeliveryModes.QueueOnly,
       );
 
       assert.equal(
@@ -663,7 +663,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
     const h = await runtimeHarness({ queue });
     try {
       await assert.rejects(
-        h.runtime.deliver(mail('wake me'), MessageDeliveryMode.TriggerTurn),
+        h.runtime.deliver(mail('wake me'), MessageDeliveryModes.TriggerTurn),
         /simulated queue push failure/,
       );
 
@@ -747,7 +747,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
 
       await h.runtime.deliver(
         mail('mail must reach resumed request'),
-        MessageDeliveryMode.QueueOnly,
+        MessageDeliveryModes.QueueOnly,
       );
       await submitApproval(h.runtime, researcher, 'approval-call');
       await h.queue.runNext();
@@ -769,7 +769,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
     try {
       await h.runtime.deliver(
         mail('lost after the drain if history persistence fails'),
-        MessageDeliveryMode.TriggerTurn,
+        MessageDeliveryModes.TriggerTurn,
       );
       await using _worker = await h.runtime.work();
       void _worker;

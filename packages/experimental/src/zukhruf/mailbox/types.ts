@@ -6,22 +6,22 @@ export interface ConversationId {
   userId: string;
 }
 
-export const MessageDeliveryMode = {
+export const MessageDeliveryModes = {
   QueueOnly: 'queue-only',
   TriggerTurn: 'trigger-turn',
 } as const;
 
 export type MessageDeliveryMode =
-  (typeof MessageDeliveryMode)[keyof typeof MessageDeliveryMode];
+  (typeof MessageDeliveryModes)[keyof typeof MessageDeliveryModes];
 
-export const InterAgentCommunicationType = {
+export const InterAgentCommunicationTypes = {
   Message: 'MESSAGE',
   NewTask: 'NEW_TASK',
   FinalAnswer: 'FINAL_ANSWER',
 } as const;
 
 export type InterAgentCommunicationType =
-  (typeof InterAgentCommunicationType)[keyof typeof InterAgentCommunicationType];
+  (typeof InterAgentCommunicationTypes)[keyof typeof InterAgentCommunicationTypes];
 
 /** A model-visible message sent from one independent agent thread to another. */
 export interface InterAgentCommunication {
@@ -50,7 +50,7 @@ export function createInterAgentCommunication(
   const value: InterAgentCommunication = {
     ...communication,
     id: communication.id ?? randomUUID(),
-    type: communication.type ?? InterAgentCommunicationType.Message,
+    type: communication.type ?? InterAgentCommunicationTypes.Message,
     otherRecipients: communication.otherRecipients ?? [],
     triggerTurn: false,
   };
@@ -65,7 +65,7 @@ export function assertCommunication(
     throw new Error('inter-agent communication id cannot be empty');
   }
   if (
-    !Object.values(InterAgentCommunicationType).includes(communication.type)
+    !Object.values(InterAgentCommunicationTypes).includes(communication.type)
   ) {
     throw new Error('inter-agent communication type is invalid');
   }

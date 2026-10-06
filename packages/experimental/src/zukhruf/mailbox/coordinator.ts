@@ -7,10 +7,10 @@ import type { TurnQueue, TurnRef } from '../queue/turn-queue.ts';
 import type { MailboxStore } from './store.ts';
 import {
   type ConversationId,
-  MessageDeliveryMode as DeliveryMode,
   type InterAgentCommunication,
-  InterAgentCommunicationType,
+  InterAgentCommunicationTypes,
   type MessageDeliveryMode,
+  MessageDeliveryModes,
   assertCommunication,
 } from './types.ts';
 
@@ -42,10 +42,10 @@ export class MailboxCoordinator {
     const delivered = {
       ...communication,
       type:
-        mode === DeliveryMode.TriggerTurn
-          ? InterAgentCommunicationType.NewTask
+        mode === MessageDeliveryModes.TriggerTurn
+          ? InterAgentCommunicationTypes.NewTask
           : communication.type,
-      triggerTurn: mode === DeliveryMode.TriggerTurn,
+      triggerTurn: mode === MessageDeliveryModes.TriggerTurn,
     };
     assertCommunication(delivered);
 
