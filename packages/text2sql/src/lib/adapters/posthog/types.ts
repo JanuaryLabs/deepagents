@@ -17,11 +17,15 @@ export interface PostHogQueryRequest {
   name?: string;
 }
 
+/**
+ * PostHog serializes HogQLNotice with Pydantic, whose unset optional fields
+ * may arrive as null.
+ */
 export interface PostHogNotice {
-  start?: number;
-  end?: number;
+  start?: number | null;
+  end?: number | null;
   message: string;
-  fix?: string;
+  fix?: string | null;
 }
 
 export interface PostHogMetadataResponse {
@@ -114,13 +118,19 @@ export interface PostHogPropertyDefinition {
   verified?: boolean | null;
 }
 
+/**
+ * Moves PostHog API payloads. It returns them as received; the adapter and its
+ * groundings validate each payload against the shape they need.
+ */
 export interface PostHogTransport {
-  query<T = unknown>(request: PostHogQueryRequest): Promise<T>;
-  listEventDefinitions(): Promise<PostHogEventDefinition[]>;
+  query(request: PostHogQueryRequest): Promise<unknown>;
+  /** Event definitions, each a {@link PostHogEventDefinition}. */
+  listEventDefinitions(): Promise<unknown[]>;
+  /** Property definitions, each a {@link PostHogPropertyDefinition}. */
   listPropertyDefinitions(options: {
     type: PostHogPropertyDefinitionType;
     groupTypeIndex?: number;
-  }): Promise<PostHogPropertyDefinition[]>;
+  }): Promise<unknown[]>;
 }
 
 export interface CreatePostHogTransportOptions {

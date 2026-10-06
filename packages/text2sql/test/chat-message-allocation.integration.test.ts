@@ -130,7 +130,7 @@ describe('Text2Sql client message allocation', () => {
 
       const transport: ChatTransport<UIMessage> = {
         sendMessages: async ({ messages }) => {
-          const last = messages[messages.length - 1] as UIMessage;
+          const last = messages[messages.length - 1];
           await engine.continue(last);
           return createUIMessageStream({
             execute: async ({ writer }) => {

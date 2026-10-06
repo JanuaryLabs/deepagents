@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import OpenAI from 'openai';
+import z from 'zod';
 
 import type { Scorer } from '@deepagents/evals';
 import {
@@ -127,6 +128,9 @@ Options:
 `);
 }
 
+// The input of each DATASET case, as far as the judge reads it.
+const caseInput = z.object({ question: z.string() });
+
 const sqlSemanticMatch: Scorer = async ({ input, output, expected }) => {
   if (!geminiApiKey) {
     throw new Error(
@@ -134,13 +138,13 @@ const sqlSemanticMatch: Scorer = async ({ input, output, expected }) => {
     );
   }
 
-  const question = (input as Record<string, unknown>).question;
+  const { question } = caseInput.parse(input);
   const maxAttempts = 3;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const result = await sqlJudge({
-        input: String(question),
+        input: question,
         output,
         expected: String(expected),
       });

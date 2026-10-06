@@ -1,4 +1,8 @@
-import type { ContextFragment } from '@deepagents/context';
+import {
+  type ContextFragment,
+  isFragment,
+  isFragmentData,
+} from '@deepagents/context';
 
 import { JsonCache } from './file-cache.ts';
 
@@ -33,8 +37,9 @@ export interface FileIndexCacheOptions {
 
 /**
  * File-backed {@link IndexCache} using atomic writes (temp + rename) and
- * treating an unparseable file as a miss. Point {@link FileIndexCacheOptions.dir}
- * at a shared volume to let horizontally-scaled processes share one cache.
+ * treating a file that does not parse to context fragments as a miss. Point
+ * {@link FileIndexCacheOptions.dir} at a shared volume to let
+ * horizontally-scaled processes share one cache.
  */
 export class FileIndexCache implements IndexCache {
   readonly #dir: string | undefined;
@@ -55,6 +60,13 @@ export class FileIndexCache implements IndexCache {
 
   #cacheFor(key: string): JsonCache<ContextFragment[]> {
     const watermark = this.#namespace ? `${this.#namespace}-${key}` : key;
-    return new JsonCache<ContextFragment[]>(watermark, this.#dir);
+    return new JsonCache(watermark, isFragmentList, this.#dir);
   }
+}
+
+function isFragmentList(value: unknown): value is ContextFragment[] {
+  return (
+    Array.isArray(value) &&
+    value.every((item) => isFragment(item) && isFragmentData(item))
+  );
 }

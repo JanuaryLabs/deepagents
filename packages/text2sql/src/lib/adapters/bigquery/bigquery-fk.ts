@@ -1,18 +1,19 @@
+import { z } from 'zod';
+
+import { constraintNameRow, int64 } from './bigquery-rows.ts';
 import type { BigQuery } from './bigquery.ts';
 
-export type ReferencedTableRow = {
-  table_schema: string | null;
-  table_name: string | null;
-};
+/** CONSTRAINT_COLUMN_USAGE: the table a foreign key references. */
+const referencedTableRow = z.object({
+  table_schema: z.string().nullable(),
+  table_name: z.string().nullable(),
+});
 
-export type PrimaryKeyConstraintRow = {
-  constraint_name: string | null;
-};
-
-export type PrimaryKeyColumnRow = {
-  column_name: string | null;
-  ordinal_position: number | null;
-};
+/** KEY_COLUMN_USAGE columns of the referenced primary key. */
+const primaryKeyColumnRow = z.object({
+  column_name: z.string().nullable(),
+  ordinal_position: int64.nullable(),
+});
 
 export type FKChildColumn = {
   column: string;
@@ -27,6 +28,17 @@ export interface FKResolution {
   childColumns: string[];
 }
 
+/**
+ * A resolution kept in the grounding context's shared cache, read back through
+ * this schema because that cache holds unknown values.
+ */
+const fkResolution = z.object({
+  referencedDataset: z.string(),
+  referencedTable: z.string(),
+  referencedColumns: z.array(z.string()),
+  childColumns: z.array(z.string()),
+});
+
 const FK_CACHE_PREFIX = 'fk:';
 
 export async function resolveForeignKey(
@@ -38,7 +50,7 @@ export async function resolveForeignKey(
 ): Promise<FKResolution | undefined> {
   const cacheKey = `${FK_CACHE_PREFIX}${constraintDataset}:${constraintName}`;
   if (cache?.has(cacheKey)) {
-    const cached = cache.get(cacheKey) as FKResolution | undefined;
+    const cached = fkResolution.optional().parse(cache.get(cacheKey));
     if (!cached) return undefined;
     return {
       ...cached,
@@ -63,11 +75,14 @@ async function resolveFK(
   constraintName: string,
   childColumns: FKChildColumn[],
 ): Promise<FKResolution | undefined> {
-  const refRows = await adapter.runQuery<ReferencedTableRow>(`
+  const refRows = await adapter.runQuery(
+    `
     SELECT DISTINCT table_schema, table_name
     FROM ${adapter.infoSchemaView(constraintDataset, 'CONSTRAINT_COLUMN_USAGE')}
     WHERE constraint_name = '${adapter.escapeString(constraintName)}'
-  `);
+  `,
+    referencedTableRow,
+  );
 
   const referenced = refRows.find((r) => r.table_schema && r.table_name);
   if (!referenced?.table_schema || !referenced.table_name) {
@@ -81,24 +96,30 @@ async function resolveFK(
     return undefined;
   }
 
-  const pkConstraintRows = await adapter.runQuery<PrimaryKeyConstraintRow>(`
+  const pkConstraintRows = await adapter.runQuery(
+    `
     SELECT constraint_name
     FROM ${adapter.infoSchemaView(referencedDataset, 'TABLE_CONSTRAINTS')}
     WHERE constraint_type = 'PRIMARY KEY'
       AND table_name = '${adapter.escapeString(referencedTable)}'
     LIMIT 1
-  `);
+  `,
+    constraintNameRow,
+  );
 
   const pkConstraintName = pkConstraintRows[0]?.constraint_name;
   if (!pkConstraintName) return undefined;
 
-  const pkColumnRows = await adapter.runQuery<PrimaryKeyColumnRow>(`
+  const pkColumnRows = await adapter.runQuery(
+    `
     SELECT column_name, ordinal_position
     FROM ${adapter.infoSchemaView(referencedDataset, 'KEY_COLUMN_USAGE')}
     WHERE constraint_name = '${adapter.escapeString(pkConstraintName)}'
       AND table_name = '${adapter.escapeString(referencedTable)}'
     ORDER BY ordinal_position
-  `);
+  `,
+    primaryKeyColumnRow,
+  );
 
   const pkByOrdinal = new Map<number, string>();
   for (const row of pkColumnRows) {

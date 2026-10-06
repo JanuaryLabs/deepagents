@@ -1,17 +1,39 @@
+import { z } from 'zod';
+
 import type { Adapter, ColumnStats } from '../adapter.ts';
 import {
   ColumnStatsGrounding,
   type ColumnStatsGroundingConfig,
 } from '../groundings/column-stats.grounding.ts';
 import type { Column, GroundingContext } from '../groundings/context.ts';
+import { numericValue } from '../groundings/rows.ts';
 
-interface PgStatsRow {
-  attname: string;
-  null_frac: number | null;
-  n_distinct: number | null;
-  histogram_bounds: string | null;
-  correlation: number | null;
-}
+/**
+ * A pg_stats row. null_frac, n_distinct and correlation are float4, which pg
+ * reads as numbers; histogram_bounds is cast to its text form '{a,b}'.
+ * correlation and histogram_bounds are null when ANALYZE did not compute them.
+ */
+const pgStatsRow = z.object({
+  schemaname: z.string(),
+  tablename: z.string(),
+  attname: z.string(),
+  null_frac: z.number().nullable(),
+  n_distinct: z.number().nullable(),
+  histogram_bounds: z.string().nullable(),
+  correlation: z.number().nullable(),
+});
+
+type PgStatsRow = z.output<typeof pgStatsRow>;
+
+/**
+ * MIN/MAX cast to text; AVG of a numeric expression is numeric, which pg
+ * returns as a decimal string. All three are null for an empty table.
+ */
+const liveStatsRow = z.object({
+  min_value: z.string().nullable(),
+  max_value: z.string().nullable(),
+  null_fraction: numericValue.nullable(),
+});
 
 export class PostgresColumnStatsGrounding extends ColumnStatsGrounding {
   #adapter: Adapter;
@@ -36,9 +58,8 @@ export class PostgresColumnStatsGrounding extends ColumnStatsGrounding {
       return `(schemaname = '${this.#adapter.escapeString(schema)}' AND tablename = '${this.#adapter.escapeString(table)}')`;
     });
 
-    const rows = await this.#adapter.runQuery<
-      PgStatsRow & { schemaname: string; tablename: string }
-    >(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT
         schemaname,
         tablename,
@@ -49,7 +70,9 @@ export class PostgresColumnStatsGrounding extends ColumnStatsGrounding {
         correlation
       FROM pg_stats
       WHERE ${conditions.join(' OR ')}
-    `);
+    `,
+      pgStatsRow,
+    );
 
     for (const row of rows) {
       const tableName = allContainers.find((c) => {
@@ -115,17 +138,16 @@ export class PostgresColumnStatsGrounding extends ColumnStatsGrounding {
     const tableIdentifier = `${this.#adapter.quoteIdentifier(schema)}.${this.#adapter.quoteIdentifier(table)}`;
     const columnIdentifier = this.#adapter.quoteIdentifier(column.name);
 
-    const rows = await this.#adapter.runQuery<{
-      min_value: string | null;
-      max_value: string | null;
-      null_fraction: number | string | null;
-    }>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT
         MIN(${columnIdentifier})::text AS min_value,
         MAX(${columnIdentifier})::text AS max_value,
         AVG(CASE WHEN ${columnIdentifier} IS NULL THEN 1.0 ELSE 0.0 END) AS null_fraction
       FROM ${tableIdentifier}
-    `);
+    `,
+      liveStatsRow,
+    );
 
     if (!rows.length) {
       return undefined;

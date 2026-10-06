@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import { Adapter, type GroundingFn } from '../adapter.ts';
 import { PostHogSqlPolicyAnalyzer } from './posthog.sql-policy.ts';
 import type {
@@ -11,6 +13,12 @@ export interface PostHogAdapterOptions {
   transport: PostHogTransport;
   grounding?: GroundingFn[];
 }
+
+/** A HogQLQuery response: one array per row, cells in column order. */
+const hogQLQueryResponse = z.object({
+  results: z.array(z.array(z.unknown())),
+  columns: z.array(z.string().min(1)).optional(),
+});
 
 export class PostHog extends Adapter {
   readonly transport: PostHogTransport;
@@ -56,8 +64,8 @@ export class PostHog extends Adapter {
     return undefined;
   }
 
-  override async runQuery<Row>(sql: string): Promise<Row[]> {
-    return (await this.#execute(sql, 'deepagents_text2sql_grounding')) as Row[];
+  protected override queryRows(sql: string): Promise<unknown[]> {
+    return this.#execute(sql, 'deepagents_text2sql_grounding');
   }
 
   override quoteIdentifier(name: string): string {
@@ -83,8 +91,8 @@ export class PostHog extends Adapter {
     return `SELECT ${projection} FROM ${relation} LIMIT ${limit}`;
   }
 
-  async query<T>(request: PostHogQueryRequest): Promise<T> {
-    return this.transport.query<T>(request);
+  async query(request: PostHogQueryRequest): Promise<unknown> {
+    return this.transport.query(request);
   }
 
   async #execute(
@@ -92,7 +100,7 @@ export class PostHog extends Adapter {
     name: string,
     values?: PostHogQueryValues,
   ): Promise<Record<string, unknown>[]> {
-    const response = await this.transport.query<PostHogQueryResponse>({
+    const response = await this.transport.query({
       query: {
         kind: 'HogQLQuery',
         query: sql,
@@ -105,36 +113,27 @@ export class PostHog extends Adapter {
 }
 
 function rowsFromResponse(value: unknown): Record<string, unknown>[] {
-  if (!isRecord(value) || !Array.isArray(value.results)) {
-    throw new Error('PostHog HogQLQuery response has no results array.');
+  const response = hogQLQueryResponse.safeParse(value);
+  if (!response.success) {
+    throw new Error(
+      `PostHog HogQLQuery response is malformed:\n${z.prettifyError(response.error)}`,
+    );
   }
-  if (
-    value.columns !== undefined &&
-    (!Array.isArray(value.columns) ||
-      value.columns.some(
-        (column) => typeof column !== 'string' || column.length === 0,
-      ))
-  ) {
-    throw new Error('PostHog HogQLQuery response has invalid columns.');
-  }
-  if (
-    Array.isArray(value.columns) &&
-    new Set(value.columns).size !== value.columns.length
-  ) {
+  const { columns, results } = response.data;
+  if (columns && new Set(columns).size !== columns.length) {
     throw new Error(
       'PostHog HogQLQuery response contains duplicate column names; alias every selected expression uniquely.',
     );
   }
-  if (value.results.length === 0) return [];
-  if (!Array.isArray(value.columns)) {
+  if (results.length === 0) return [];
+  if (!columns) {
     throw new Error(
       'PostHog HogQLQuery response requires columns for non-empty results.',
     );
   }
 
-  const columns = value.columns as string[];
-  return value.results.map((row, index) => {
-    if (!Array.isArray(row) || row.length !== columns.length) {
+  return results.map((row, index) => {
+    if (row.length !== columns.length) {
       throw new Error(
         `PostHog HogQLQuery result row ${index} does not match the column count.`,
       );
@@ -143,8 +142,4 @@ function rowsFromResponse(value: unknown): Record<string, unknown>[] {
       columns.map((column, columnIndex) => [column, row[columnIndex]]),
     );
   });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

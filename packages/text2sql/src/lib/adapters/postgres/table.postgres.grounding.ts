@@ -1,23 +1,23 @@
+import { z } from 'zod';
+
 import type { Adapter, Relationship, Table } from '../adapter.ts';
+import { nameRow } from '../groundings/rows.ts';
 import {
   TableGrounding,
   type TableGroundingConfig,
 } from '../groundings/table.grounding.ts';
+import { columnRow } from './postgres-rows.ts';
 
-type ColumnRow = {
-  column_name: string | null;
-  data_type: string | null;
-};
-
-type RelationshipRow = {
-  table_schema: string | null;
-  table_name: string | null;
-  column_name: string | null;
-  foreign_table_schema: string | null;
-  foreign_table_name: string | null;
-  foreign_column_name: string | null;
-  constraint_name: string | null;
-};
+/** A foreign key column joined across information_schema constraint views. */
+const relationshipRow = z.object({
+  constraint_name: z.string().nullable(),
+  table_schema: z.string().nullable(),
+  table_name: z.string().nullable(),
+  column_name: z.string().nullable(),
+  foreign_table_schema: z.string().nullable(),
+  foreign_table_name: z.string().nullable(),
+  foreign_column_name: z.string().nullable(),
+});
 
 export interface PostgresTableGroundingConfig extends TableGroundingConfig {
   /** Schemas to include (defaults to excluding pg_catalog and information_schema) */
@@ -41,26 +41,32 @@ export class PostgresTableGrounding extends TableGrounding {
   }
 
   protected override async getAllTableNames(): Promise<string[]> {
-    const rows = await this.#adapter.runQuery<{ name: string }>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT DISTINCT table_schema || '.' || table_name AS name
       FROM information_schema.tables
       WHERE table_type = 'BASE TABLE'
         ${this.#adapter.buildSchemaFilter('table_schema', this.#schemas)}
       ORDER BY name
-    `);
+    `,
+      nameRow,
+    );
     return rows.map((r) => r.name);
   }
 
   protected override async getTable(tableName: string): Promise<Table> {
     const { schema, table } = this.#adapter.parseTableName(tableName);
 
-    const columns = await this.#adapter.runQuery<ColumnRow>(`
+    const columns = await this.#adapter.runQuery(
+      `
       SELECT column_name, data_type
       FROM information_schema.columns
       WHERE table_schema = '${this.#adapter.escapeString(schema)}'
         AND table_name = '${this.#adapter.escapeString(table)}'
       ORDER BY ordinal_position
-    `);
+    `,
+      columnRow,
+    );
 
     return {
       name: tableName,
@@ -78,7 +84,8 @@ export class PostgresTableGrounding extends TableGrounding {
   ): Promise<Relationship[]> {
     const { schema, table } = this.#adapter.parseTableName(tableName);
 
-    const rows = await this.#adapter.runQuery<RelationshipRow>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT
         tc.constraint_name,
         tc.table_schema,
@@ -98,7 +105,9 @@ export class PostgresTableGrounding extends TableGrounding {
         AND tc.table_schema = '${this.#adapter.escapeString(schema)}'
         AND tc.table_name = '${this.#adapter.escapeString(table)}'
       ORDER BY tc.constraint_name, kcu.ordinal_position
-    `);
+    `,
+      relationshipRow,
+    );
 
     return this.#groupRelationships(rows);
   }
@@ -109,7 +118,8 @@ export class PostgresTableGrounding extends TableGrounding {
     const { schema, table } = this.#adapter.parseTableName(tableName);
 
     // PostgreSQL can query incoming relations directly - no cache needed
-    const rows = await this.#adapter.runQuery<RelationshipRow>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT
         tc.constraint_name,
         tc.table_schema,
@@ -129,12 +139,16 @@ export class PostgresTableGrounding extends TableGrounding {
         AND ccu.table_schema = '${this.#adapter.escapeString(schema)}'
         AND ccu.table_name = '${this.#adapter.escapeString(table)}'
       ORDER BY tc.constraint_name, kcu.ordinal_position
-    `);
+    `,
+      relationshipRow,
+    );
 
     return this.#groupRelationships(rows);
   }
 
-  #groupRelationships(rows: RelationshipRow[]): Relationship[] {
+  #groupRelationships(
+    rows: z.output<typeof relationshipRow>[],
+  ): Relationship[] {
     const relationships = new Map<string, Relationship>();
     const defaultSchema = this.#adapter.defaultSchema ?? 'public';
 

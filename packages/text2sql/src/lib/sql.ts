@@ -180,12 +180,15 @@ export class Text2Sql {
   async run(name: string, sql: string): Promise<Text2SqlRunResult> {
     const adapter = this.#requireAdapter(name);
     const formatted = await this.#validateWith(adapter, sql);
-    const result = await adapter.execute(formatted);
+    const result: unknown = await adapter.execute(formatted);
     if (!Array.isArray(result)) {
       throw new Error('adapter.execute must return an array of rows');
     }
-    const columns = result.length > 0 ? Object.keys(result[0] as object) : [];
-    return { rows: result, columns };
+    const rows: unknown[] = result;
+    const [first] = rows;
+    const columns =
+      typeof first === 'object' && first !== null ? Object.keys(first) : [];
+    return { rows, columns };
   }
 
   async #validateWith(adapter: Adapter, sql: string): Promise<string> {

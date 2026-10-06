@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import type { Relationship, Table } from '../adapter.ts';
 import type { GroundingContext } from '../groundings/context.ts';
 import {
@@ -5,24 +7,25 @@ import {
   type TableGroundingConfig,
 } from '../groundings/table.grounding.ts';
 import { type FKChildColumn, resolveForeignKey } from './bigquery-fk.ts';
+import {
+  constraintNameRow,
+  int64,
+  keyColumnUsageRow,
+  tableNameRow,
+} from './bigquery-rows.ts';
 import type { BigQuery } from './bigquery.ts';
 
-type TableNameRow = {
-  table_name: string | null;
-};
+/** COLUMN_FIELD_PATHS joined to COLUMNS: one row per (nested) field path. */
+const columnFieldPathRow = z.object({
+  field_path: z.string().nullable(),
+  data_type: z.string().nullable(),
+  ordinal_position: int64.nullable(),
+});
 
-type ColumnFieldPathRow = {
-  field_path: string | null;
-  data_type: string | null;
-  ordinal_position: number | null;
-};
-
-type ForeignKeyKeyColumnRow = {
-  constraint_name: string | null;
-  column_name: string | null;
-  ordinal_position: number | null;
-  position_in_unique_constraint: number | null;
-};
+/** A foreign key column together with the table that declares the key. */
+const childKeyColumnRow = keyColumnUsageRow.extend({
+  child_table_name: z.string().nullable(),
+});
 
 export interface BigQueryTableGroundingConfig extends TableGroundingConfig {}
 
@@ -55,12 +58,15 @@ export class BigQueryTableGrounding extends TableGrounding {
     const names: string[] = [];
 
     for (const dataset of this.#adapter.datasets) {
-      const rows = await this.#adapter.runQuery<TableNameRow>(`
+      const rows = await this.#adapter.runQuery(
+        `
         SELECT table_name
         FROM ${this.#adapter.infoSchemaView(dataset, 'TABLES')}
         WHERE table_type = 'BASE TABLE'
         ORDER BY table_name
-      `);
+      `,
+        tableNameRow,
+      );
 
       for (const row of rows) {
         if (!row.table_name) continue;
@@ -74,7 +80,8 @@ export class BigQueryTableGrounding extends TableGrounding {
   protected override async getTable(tableName: string): Promise<Table> {
     const { schema: dataset, table } = this.#adapter.parseTableName(tableName);
 
-    const rows = await this.#adapter.runQuery<ColumnFieldPathRow>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT
         f.field_path,
         f.data_type,
@@ -85,7 +92,9 @@ export class BigQueryTableGrounding extends TableGrounding {
         AND f.column_name = c.column_name
       WHERE f.table_name = '${this.#adapter.escapeString(table)}'
       ORDER BY c.ordinal_position, f.field_path
-    `);
+    `,
+      columnFieldPathRow,
+    );
 
     const seen = new Set<string>();
     const columns = rows
@@ -115,7 +124,8 @@ export class BigQueryTableGrounding extends TableGrounding {
   ): Promise<Relationship[]> {
     const { schema: dataset, table } = this.#adapter.parseTableName(tableName);
 
-    const rows = await this.#adapter.runQuery<ForeignKeyKeyColumnRow>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT
         kcu.constraint_name,
         kcu.column_name,
@@ -128,7 +138,9 @@ export class BigQueryTableGrounding extends TableGrounding {
       WHERE tc.constraint_type = 'FOREIGN KEY'
         AND tc.table_name = '${this.#adapter.escapeString(table)}'
       ORDER BY kcu.constraint_name, kcu.ordinal_position
-    `);
+    `,
+      keyColumnUsageRow,
+    );
 
     const byConstraint = new Map<string, FKChildColumn[]>();
 
@@ -174,14 +186,15 @@ export class BigQueryTableGrounding extends TableGrounding {
     const rels: Relationship[] = [];
 
     for (const constraintDataset of this.#adapter.datasets) {
-      const rows = await this.#adapter.runQuery<{
-        constraint_name: string | null;
-      }>(`
+      const rows = await this.#adapter.runQuery(
+        `
         SELECT DISTINCT constraint_name
         FROM ${this.#adapter.infoSchemaView(constraintDataset, 'CONSTRAINT_COLUMN_USAGE')}
         WHERE table_schema = '${this.#adapter.escapeString(referencedDataset)}'
           AND table_name = '${this.#adapter.escapeString(referencedTable)}'
-      `);
+      `,
+        constraintNameRow,
+      );
 
       for (const row of rows) {
         if (!row.constraint_name) continue;
@@ -204,9 +217,8 @@ export class BigQueryTableGrounding extends TableGrounding {
     expectedReferencedDataset: string,
     expectedReferencedTable: string,
   ): Promise<Relationship | undefined> {
-    const keyRows = await this.#adapter.runQuery<
-      ForeignKeyKeyColumnRow & { child_table_name: string | null }
-    >(`
+    const keyRows = await this.#adapter.runQuery(
+      `
       SELECT
         kcu.constraint_name,
         tc.table_name AS child_table_name,
@@ -220,7 +232,9 @@ export class BigQueryTableGrounding extends TableGrounding {
       WHERE tc.constraint_type = 'FOREIGN KEY'
         AND tc.constraint_name = '${this.#adapter.escapeString(constraintName)}'
       ORDER BY kcu.ordinal_position
-    `);
+    `,
+      childKeyColumnRow,
+    );
 
     if (keyRows.length === 0) return undefined;
     const childTable = keyRows[0]?.child_table_name;

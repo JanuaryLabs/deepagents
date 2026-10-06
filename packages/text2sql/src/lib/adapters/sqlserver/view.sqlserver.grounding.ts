@@ -1,14 +1,11 @@
 import type { Adapter } from '../adapter.ts';
+import { nameRow, viewDefinitionRow } from '../groundings/rows.ts';
 import {
   type View,
   ViewGrounding,
   type ViewGroundingConfig,
 } from '../groundings/view.grounding.ts';
-
-type ColumnRow = {
-  column_name: string | null;
-  data_type: string | null;
-};
+import { columnRow } from './sqlserver-rows.ts';
 
 export interface SqlServerViewGroundingConfig extends ViewGroundingConfig {
   /** Schemas to include (defaults to excluding INFORMATION_SCHEMA and sys) */
@@ -29,13 +26,16 @@ export class SqlServerViewGrounding extends ViewGrounding {
   }
 
   protected override async getAllViewNames(): Promise<string[]> {
-    const rows = await this.#adapter.runQuery<{ name: string }>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT TABLE_SCHEMA + '.' + TABLE_NAME AS name
       FROM INFORMATION_SCHEMA.VIEWS
       WHERE 1=1
         ${this.#adapter.buildSchemaFilter('TABLE_SCHEMA', this.#schemas)}
       ORDER BY name
-    `);
+    `,
+      nameRow,
+    );
     return rows.map((r) => r.name);
   }
 
@@ -44,26 +44,30 @@ export class SqlServerViewGrounding extends ViewGrounding {
 
     let definition: string | undefined;
     if (this.includeDefinition) {
-      const defRows = await this.#adapter.runQuery<{
-        definition: string | null;
-      }>(`
+      const defRows = await this.#adapter.runQuery(
+        `
         SELECT m.definition
         FROM sys.views v
         JOIN sys.schemas s ON v.schema_id = s.schema_id
         JOIN sys.sql_modules m ON v.object_id = m.object_id
         WHERE s.name = '${this.#adapter.escapeString(schema)}'
           AND v.name = '${this.#adapter.escapeString(view)}'
-      `);
+      `,
+        viewDefinitionRow,
+      );
       definition = defRows[0]?.definition ?? undefined;
     }
 
-    const columns = await this.#adapter.runQuery<ColumnRow>(`
+    const columns = await this.#adapter.runQuery(
+      `
       SELECT COLUMN_NAME AS column_name, DATA_TYPE AS data_type
       FROM INFORMATION_SCHEMA.COLUMNS
       WHERE TABLE_SCHEMA = '${this.#adapter.escapeString(schema)}'
         AND TABLE_NAME = '${this.#adapter.escapeString(view)}'
       ORDER BY ORDINAL_POSITION
-    `);
+    `,
+      columnRow,
+    );
 
     return {
       name: viewName,

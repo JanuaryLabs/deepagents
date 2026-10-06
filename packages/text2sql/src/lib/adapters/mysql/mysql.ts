@@ -126,10 +126,6 @@ export class Mysql extends Adapter {
     }
   }
 
-  override async runQuery<Row>(sql: string): Promise<Row[]> {
-    return this.#runIntrospectionQuery<Row>(sql);
-  }
-
   override quoteIdentifier(name: string): string {
     return `\`${name.replace(/`/g, '``')}\``;
   }
@@ -160,8 +156,8 @@ export class Mysql extends Adapter {
     return this.#options.databases;
   }
 
-  async #runIntrospectionQuery<Row>(sql: string): Promise<Row[]> {
-    const result = await this.#options.execute(sql);
+  protected override async queryRows(sql: string): Promise<unknown[]> {
+    const result: unknown = await this.#options.execute(sql);
 
     // Handle mysql2 results: [rows, fields]
     if (Array.isArray(result)) {
@@ -172,19 +168,19 @@ export class Mysql extends Adapter {
         (result.length === 1 ||
           (result.length === 2 && !Array.isArray(result[1]?.[0])))
       ) {
-        return result[0] as Row[];
+        return result[0];
       }
-      return result as Row[];
+      return result;
     }
 
     // Handle object with rows property
     if (
-      result &&
       typeof result === 'object' &&
+      result !== null &&
       'rows' in result &&
-      Array.isArray((result as { rows?: unknown }).rows)
+      Array.isArray(result.rows)
     ) {
-      return (result as { rows: Row[] }).rows;
+      return result.rows;
     }
 
     throw new Error(

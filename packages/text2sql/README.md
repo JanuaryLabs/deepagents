@@ -440,8 +440,9 @@ const text2sql = new Text2Sql({
 });
 ```
 
-`FileIndexCache` writes atomically (temp + rename) and treats an unparseable
-file as a miss, so a torn read self-heals into a re-introspect. `FileIndexLock`
+`FileIndexCache` writes atomically (temp + rename) and treats a file that does
+not parse to context fragments as a miss, so a torn read self-heals into a
+re-introspect. `FileIndexLock`
 (built on `proper-lockfile`, options `{ dir?, namespace?, stale?, retries? }`)
 serializes processes that share a POSIX filesystem; a held lock auto-refreshes
 its mtime so a slow introspection is not mistaken for a crash, and acquisition

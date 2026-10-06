@@ -4,6 +4,7 @@ import {
   ColumnValuesGrounding,
   type ColumnValuesGroundingConfig,
 } from '../groundings/column-values.grounding.ts';
+import { textValueRow } from '../groundings/rows.ts';
 
 export class SqlServerColumnValuesGrounding extends ColumnValuesGrounding {
   #adapter: Adapter;
@@ -54,20 +55,12 @@ export class SqlServerColumnValuesGrounding extends ColumnValuesGrounding {
       WHERE ${columnIdentifier} IS NOT NULL
     `;
 
-    const rows = await this.#adapter.runQuery<{ value: string | null }>(sql);
+    const rows = await this.#adapter.runQuery(sql, textValueRow);
 
     if (!rows.length || rows.length > this.lowCardinalityLimit) {
       return undefined;
     }
 
-    const values: string[] = [];
-    for (const row of rows) {
-      if (row.value == null) {
-        return undefined;
-      }
-      values.push(row.value);
-    }
-
-    return values.length ? values : undefined;
+    return rows.map((row) => row.value);
   }
 }

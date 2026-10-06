@@ -8,6 +8,7 @@ import type {
 } from 'node:http';
 import { it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { z } from 'zod';
 
 import { HttpServer } from '@deepagents/test';
 import { type IndexLock, Text2Sql } from '@deepagents/text2sql';
@@ -21,6 +22,24 @@ import {
   info,
   schema,
 } from '@deepagents/text2sql/posthog';
+
+const namedDefinitions = z.array(z.object({ name: z.string() }));
+const queryRequestBody = z.object({ query: z.object({ kind: z.string() }) });
+const scopeErrorPayload = z.object({
+  error_type: z.string(),
+  referenced_entities: z.array(z.string()),
+});
+const dialectInfoData = z.object({ dialect: z.string() });
+const tableData = z.looseObject({
+  name: z.string(),
+  columns: z.array(z.object({ data: z.object({ name: z.string() }) })),
+});
+const viewData = z.object({ definition: z.string() });
+const propertiesData = z.record(z.string(), z.unknown());
+
+function dataName(data: unknown): string | undefined {
+  return z.object({ name: z.string() }).safeParse(data).data?.name;
+}
 
 const validMetadata = (tableNames: string[] = []) => ({
   isValid: true,
@@ -85,16 +104,20 @@ it('uses the native HTTP transport with rotating bearer tokens and local paginat
     { results: [[1]], columns: ['value'] },
   );
   assert.deepEqual(
-    (await transport.listEventDefinitions()).map(({ name }) => name),
+    namedDefinitions
+      .parse(await transport.listEventDefinitions())
+      .map(({ name }) => name),
     ['a', 'b'],
   );
   assert.deepEqual(
-    (
-      await transport.listPropertyDefinitions({
-        type: 'group',
-        groupTypeIndex: 2,
-      })
-    ).map(({ name }) => name),
+    namedDefinitions
+      .parse(
+        await transport.listPropertyDefinitions({
+          type: 'group',
+          groupTypeIndex: 2,
+        }),
+      )
+      .map(({ name }) => name),
     ['company'],
   );
 
@@ -121,7 +144,7 @@ it('sends named HogQL values unchanged in the query request body', async () => {
     jsonErrors(async (request, response) => {
       const body = await readJsonBody(request);
       bodies.push(body);
-      const query = (body as PostHogQueryRequest).query;
+      const { query } = queryRequestBody.parse(body);
       json(
         response,
         query.kind === 'HogQLMetadata'
@@ -161,7 +184,7 @@ it('sends named HogQL values unchanged in the query request body', async () => {
 it('decodes shell-escaped dollar property names before validation and execution', async () => {
   const queries: string[] = [];
   const transport: PostHogTransport = {
-    async query<T>(request: PostHogQueryRequest): Promise<T> {
+    async query(request: PostHogQueryRequest): Promise<unknown> {
       if (
         request.query.kind === 'HogQLMetadata' ||
         request.query.kind === 'HogQLQuery'
@@ -169,13 +192,11 @@ it('decodes shell-escaped dollar property names before validation and execution'
         queries.push(request.query.query);
       }
       if (request.query.kind === 'DatabaseSchemaQuery') {
-        return schemaFixture() as T;
+        return schemaFixture();
       }
-      return (
-        request.query.kind === 'HogQLMetadata'
-          ? validMetadata(['events'])
-          : { columns: [], results: [] }
-      ) as T;
+      return request.query.kind === 'HogQLMetadata'
+        ? validMetadata(['events'])
+        : { columns: [], results: [] };
     },
     async listEventDefinitions() {
       return [];
@@ -361,10 +382,10 @@ it('rejects unsafe hosts, redirects, and timed-out requests', async () => {
 it('validates HogQL scope server-side and normalizes query rows', async () => {
   const queryKinds: string[] = [];
   const transport: PostHogTransport = {
-    async query<T>(request: PostHogQueryRequest): Promise<T> {
+    async query(request: PostHogQueryRequest): Promise<unknown> {
       queryKinds.push(request.query.kind);
       if (request.query.kind === 'DatabaseSchemaQuery') {
-        return schemaFixture() as T;
+        return schemaFixture();
       }
       if (request.query.kind === 'HogQLMetadata') {
         if (request.query.query.includes('missing_metadata')) {
@@ -373,7 +394,7 @@ it('validates HogQL scope server-side and normalizes query rows', async () => {
             errors: [],
             warnings: [],
             notices: [],
-          } as T;
+          };
         }
         if (request.query.query.includes('DROP')) {
           return {
@@ -382,16 +403,16 @@ it('validates HogQL scope server-side and normalizes query rows', async () => {
             warnings: [],
             notices: [],
             table_names: [],
-          } as T;
+          };
         }
         return validMetadata(
           request.query.query.includes('secrets') ? ['secrets'] : ['events'],
-        ) as T;
+        );
       }
       return {
         columns: ['event', 'count'],
         results: [['signup', 3]],
-      } as T;
+      };
     },
     async listEventDefinitions() {
       return [];
@@ -417,10 +438,7 @@ it('validates HogQL scope server-side and normalizes query rows', async () => {
     (error: unknown) => {
       assert.ok(error instanceof Error);
       assert.equal(error.name, 'SQLScopeError');
-      const payload = JSON.parse(error.message) as {
-        error_type: string;
-        referenced_entities: string[];
-      };
+      const payload = scopeErrorPayload.parse(JSON.parse(error.message));
       assert.equal(payload.error_type, 'OUT_OF_SCOPE');
       assert.deepEqual(payload.referenced_entities, ['secrets']);
       return true;
@@ -439,15 +457,15 @@ it('validates HogQL scope server-side and normalizes query rows', async () => {
 it('rejects out-of-scope parameterized HogQL before execution', async () => {
   const queryKinds: string[] = [];
   const transport: PostHogTransport = {
-    async query<T>(request: PostHogQueryRequest): Promise<T> {
+    async query(request: PostHogQueryRequest): Promise<unknown> {
       queryKinds.push(request.query.kind);
       if (request.query.kind === 'HogQLMetadata') {
-        return validMetadata(['secrets']) as T;
+        return validMetadata(['secrets']);
       }
       if (request.query.kind === 'DatabaseSchemaQuery') {
-        return schemaFixture() as T;
+        return schemaFixture();
       }
-      return { columns: [], results: [] } as T;
+      return { columns: [], results: [] };
     },
     async listEventDefinitions() {
       return [];
@@ -497,14 +515,14 @@ it('rejects ambiguous or malformed HogQL result rows', async () => {
     { results: [[1]] },
   ];
   const transport: PostHogTransport = {
-    async query<T>(request: PostHogQueryRequest): Promise<T> {
+    async query(request: PostHogQueryRequest): Promise<unknown> {
       if (request.query.kind === 'DatabaseSchemaQuery') {
-        return schemaFixture() as T;
+        return schemaFixture();
       }
       if (request.query.kind === 'HogQLMetadata') {
-        return validMetadata(['events']) as T;
+        return validMetadata(['events']);
       }
-      return responses.shift() as T;
+      return responses.shift();
     },
     async listEventDefinitions() {
       return [];
@@ -535,9 +553,9 @@ it('rejects ambiguous or malformed HogQL result rows', async () => {
 
 it('maps PostHog schema, joins, and filtered taxonomy into context fragments', async () => {
   const transport: PostHogTransport = {
-    async query<T>(request: PostHogQueryRequest): Promise<T> {
+    async query(request: PostHogQueryRequest): Promise<unknown> {
       assert.equal(request.query.kind, 'DatabaseSchemaQuery');
-      return schemaFixture() as T;
+      return schemaFixture();
     },
     async listEventDefinitions() {
       return [
@@ -582,41 +600,34 @@ it('maps PostHog schema, joins, and filtered taxonomy into context fragments', a
   const fragments = await adapter.introspect();
   const fragment = (name: string) =>
     fragments.find((candidate) => candidate.name === name);
-  const events = fragments.find(
-    (candidate) =>
-      candidate.name === 'table' &&
-      (candidate.data as { name?: string })?.name === 'events',
+  const events = tableData.parse(
+    fragments.find(
+      (candidate) =>
+        candidate.name === 'table' && dataName(candidate.data) === 'events',
+    )?.data,
   );
-  const activeUsers = fragments.find(
-    (candidate) =>
-      candidate.name === 'view' &&
-      (candidate.data as { name?: string })?.name === 'active_users',
+  const activeUsers = viewData.parse(
+    fragments.find(
+      (candidate) =>
+        candidate.name === 'view' &&
+        dataName(candidate.data) === 'active_users',
+    )?.data,
   );
 
   assert.equal(
-    (fragment('dialectInfo')?.data as { dialect?: string }).dialect,
+    dialectInfoData.parse(fragment('dialectInfo')?.data).dialect,
     'HogQL',
   );
   assert.deepEqual(
-    (
-      (events?.data as { columns?: Array<{ data: { name: string } }> })
-        .columns ?? []
-    ).map((column) => column.data.name),
+    events.columns.map((column) => column.data.name),
     ['event', 'team_id'],
   );
-  assert.equal(
-    Object.hasOwn((events?.data ?? {}) as object, 'rowCount'),
-    false,
-  );
-  assert.equal(
-    (activeUsers?.data as { definition?: string }).definition,
-    'SELECT event FROM events',
-  );
+  assert.equal(Object.hasOwn(events, 'rowCount'), false);
+  assert.equal(activeUsers.definition, 'SELECT event FROM events');
   assert.equal(
     fragments.some(
       (candidate) =>
-        candidate.name === 'table' &&
-        (candidate.data as { name?: string })?.name === 'query_log',
+        candidate.name === 'table' && dataName(candidate.data) === 'query_log',
     ),
     false,
   );
@@ -633,26 +644,24 @@ it('maps PostHog schema, joins, and filtered taxonomy into context fragments', a
       verified: true,
     },
   ]);
-  assert.deepEqual(Object.keys(fragment('posthogProperties')?.data as object), [
-    'event',
-    'person',
-    'session',
-    'group:1',
-  ]);
+  assert.deepEqual(
+    Object.keys(propertiesData.parse(fragment('posthogProperties')?.data)),
+    ['event', 'person', 'session', 'group:1'],
+  );
 });
 
 it('runs generated HogQL through the public Text2Sql flow', async () => {
   let metadataCalls = 0;
   const transport: PostHogTransport = {
-    async query<T>(request: PostHogQueryRequest): Promise<T> {
+    async query(request: PostHogQueryRequest): Promise<unknown> {
       if (request.query.kind === 'DatabaseSchemaQuery') {
-        return schemaFixture() as T;
+        return schemaFixture();
       }
       if (request.query.kind === 'HogQLMetadata') {
         metadataCalls++;
-        return validMetadata(['events']) as T;
+        return validMetadata(['events']);
       }
-      return { columns: ['signups'], results: [[7]] } as T;
+      return { columns: ['signups'], results: [[7]] };
     },
     async listEventDefinitions() {
       return [];

@@ -1,4 +1,5 @@
 import type {
+  BufferEncoding,
   CpOptions,
   FileContent,
   FsStat,
@@ -8,7 +9,9 @@ import type {
 } from 'just-bash';
 import * as path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import z from 'zod';
 
+import { entryType } from '../columns.ts';
 import SQLITE_FS_DDL from './ddl.sqlite-fs.sql';
 
 // Types not exported from just-bash main index but defined in IFileSystem
@@ -50,20 +53,41 @@ export interface SqliteFsOptions {
   chunkSize?: number;
 }
 
-type EntryType = 'file' | 'directory' | 'symlink';
+// Row shapes as node:sqlite returns them for ddl.sqlite-fs.sql: INTEGER as a
+// number, TEXT as a string, BLOB as a Uint8Array.
 
-interface FsEntryRow {
-  path: string;
-  type: EntryType;
-  mode: number;
-  size: number;
-  mtime: number;
-  symlinkTarget: string | null;
-}
+const entryRow = z.object({
+  path: z.string(),
+  type: entryType,
+  mode: z.number(),
+  size: z.number(),
+  mtime: z.number(),
+  symlinkTarget: z.string().nullable(),
+});
 
-interface ChunkRow {
-  data: Uint8Array;
-}
+const typeRow = entryRow.pick({ type: true });
+
+const pathRow = entryRow.pick({ path: true });
+
+const pathTypeRow = entryRow.pick({ path: true, type: true });
+
+// symlink() always stores a target. A file or directory keeps NULL, or the
+// target of the symlink it replaced: writeFile and appendFile change the type
+// of an existing path without clearing it.
+const linkRow = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('symlink'), symlinkTarget: z.string() }),
+  z.object({
+    type: z.enum(['file', 'directory']),
+    symlinkTarget: z.string().nullable(),
+  }),
+]);
+
+const chunkRow = z.object({
+  chunkIndex: z.number(),
+  data: z.instanceof(Uint8Array),
+});
+
+const dataRow = chunkRow.pick({ data: true });
 
 /**
  * SQLite-based filesystem implementing IFileSystem interface.
@@ -201,9 +225,11 @@ export class SqliteFs implements IFileSystem {
     const rootPath = this.#root || '/';
     if (parent === rootPath || parent === '/') return;
 
-    const entry = this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(
-      parent,
-    ) as { type: string } | undefined;
+    const entry = typeRow
+      .optional()
+      .parse(
+        this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(parent),
+      );
 
     if (!entry) {
       this.#ensureParentExists(parent);
@@ -230,10 +256,24 @@ export class SqliteFs implements IFileSystem {
     }
   }
 
+  #chunks(filePath: string): z.output<typeof chunkRow>[] {
+    return z
+      .array(chunkRow)
+      .parse(
+        this.#stmt('SELECT chunkIndex, data FROM fs_chunks WHERE path = ?').all(
+          filePath,
+        ),
+      );
+  }
+
   #readChunks(filePath: string): Uint8Array {
-    const rows = this.#stmt(
-      'SELECT data FROM fs_chunks WHERE path = ? ORDER BY chunkIndex',
-    ).all(filePath) as unknown as ChunkRow[];
+    const rows = z
+      .array(dataRow)
+      .parse(
+        this.#stmt(
+          'SELECT data FROM fs_chunks WHERE path = ? ORDER BY chunkIndex',
+        ).all(filePath),
+      );
 
     if (rows.length === 0) {
       return new Uint8Array(0);
@@ -256,9 +296,13 @@ export class SqliteFs implements IFileSystem {
       throw new Error(`readFile: circular symlink: ${p}`);
     }
 
-    const entry = this.#stmt(
-      'SELECT type, symlinkTarget FROM fs_entries WHERE path = ?',
-    ).get(p) as Pick<FsEntryRow, 'type' | 'symlinkTarget'> | undefined;
+    const entry = linkRow
+      .optional()
+      .parse(
+        this.#stmt(
+          'SELECT type, symlinkTarget FROM fs_entries WHERE path = ?',
+        ).get(p),
+      );
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${p}`);
@@ -270,17 +314,16 @@ export class SqliteFs implements IFileSystem {
 
     seen.add(p);
     const target = this.#normalizePath(
-      path.posix.resolve(this.#dirname(p), entry.symlinkTarget!),
+      path.posix.resolve(this.#dirname(p), entry.symlinkTarget),
     );
     return this.#resolveSymlink(target, seen);
   }
 
-  #toUint8Array(content: FileContent, encoding?: string): Uint8Array {
+  #toUint8Array(content: FileContent, encoding?: BufferEncoding): Uint8Array {
     if (content instanceof Uint8Array) {
       return content;
     }
-    const enc = (encoding ?? 'utf8') as BufferEncoding;
-    return new Uint8Array(Buffer.from(content, enc));
+    return new Uint8Array(Buffer.from(content, encoding ?? 'utf8'));
   }
 
   // ============================================================================
@@ -289,15 +332,17 @@ export class SqliteFs implements IFileSystem {
 
   async readFile(
     filePath: string,
-    options?: ReadFileOptions | string,
+    options?: ReadFileOptions | BufferEncoding,
   ): Promise<string> {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
     const resolved = this.#resolveSymlink(prefixed);
 
-    const entry = this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(
-      resolved,
-    ) as Pick<FsEntryRow, 'type'> | undefined;
+    const entry = typeRow
+      .optional()
+      .parse(
+        this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(resolved),
+      );
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
@@ -309,7 +354,7 @@ export class SqliteFs implements IFileSystem {
     const content = this.#readChunks(resolved);
     const encoding =
       typeof options === 'string' ? options : (options?.encoding ?? 'utf8');
-    return Buffer.from(content).toString(encoding as BufferEncoding);
+    return Buffer.from(content).toString(encoding);
   }
 
   async readFileBuffer(filePath: string): Promise<Uint8Array> {
@@ -317,9 +362,11 @@ export class SqliteFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
     const resolved = this.#resolveSymlink(prefixed);
 
-    const entry = this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(
-      resolved,
-    ) as Pick<FsEntryRow, 'type'> | undefined;
+    const entry = typeRow
+      .optional()
+      .parse(
+        this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(resolved),
+      );
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
@@ -334,7 +381,7 @@ export class SqliteFs implements IFileSystem {
   async writeFile(
     filePath: string,
     content: FileContent,
-    options?: WriteFileOptions | string,
+    options?: WriteFileOptions | BufferEncoding,
   ): Promise<void> {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
@@ -360,7 +407,7 @@ export class SqliteFs implements IFileSystem {
   async appendFile(
     filePath: string,
     content: FileContent,
-    options?: WriteFileOptions | string,
+    options?: WriteFileOptions | BufferEncoding,
   ): Promise<void> {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
@@ -370,9 +417,13 @@ export class SqliteFs implements IFileSystem {
     this.#useTransaction(() => {
       this.#ensureParentExists(prefixed);
 
-      const entry = this.#stmt(
-        'SELECT type FROM fs_entries WHERE path = ?',
-      ).get(prefixed) as Pick<FsEntryRow, 'type'> | undefined;
+      const entry = typeRow
+        .optional()
+        .parse(
+          this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(
+            prefixed,
+          ),
+        );
 
       if (entry && entry.type !== 'file') {
         throw new Error(`appendFile: not a file: ${filePath}`);
@@ -409,9 +460,11 @@ export class SqliteFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
     const resolved = this.#resolveSymlink(prefixed);
 
-    const entry = this.#stmt('SELECT * FROM fs_entries WHERE path = ?').get(
-      resolved,
-    ) as FsEntryRow | undefined;
+    const entry = entryRow
+      .optional()
+      .parse(
+        this.#stmt('SELECT * FROM fs_entries WHERE path = ?').get(resolved),
+      );
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
@@ -431,9 +484,11 @@ export class SqliteFs implements IFileSystem {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
 
-    const entry = this.#stmt('SELECT * FROM fs_entries WHERE path = ?').get(
-      prefixed,
-    ) as FsEntryRow | undefined;
+    const entry = entryRow
+      .optional()
+      .parse(
+        this.#stmt('SELECT * FROM fs_entries WHERE path = ?').get(prefixed),
+      );
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
@@ -453,9 +508,11 @@ export class SqliteFs implements IFileSystem {
     const normalized = this.#normalizePath(dirPath);
     const prefixed = this.#prefixPath(normalized);
 
-    const existing = this.#stmt(
-      'SELECT type FROM fs_entries WHERE path = ?',
-    ).get(prefixed) as Pick<FsEntryRow, 'type'> | undefined;
+    const existing = typeRow
+      .optional()
+      .parse(
+        this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(prefixed),
+      );
 
     if (existing) {
       if (options?.recursive) {
@@ -473,9 +530,13 @@ export class SqliteFs implements IFileSystem {
 
         for (const segment of segments) {
           currentPath = path.posix.join(currentPath, segment);
-          const exists = this.#stmt(
-            'SELECT type FROM fs_entries WHERE path = ?',
-          ).get(currentPath) as Pick<FsEntryRow, 'type'> | undefined;
+          const exists = typeRow
+            .optional()
+            .parse(
+              this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(
+                currentPath,
+              ),
+            );
 
           if (!exists) {
             this.#stmt(
@@ -489,9 +550,13 @@ export class SqliteFs implements IFileSystem {
       } else {
         // Non-recursive: parent must exist
         const parent = this.#dirname(prefixed);
-        const parentEntry = this.#stmt(
-          'SELECT type FROM fs_entries WHERE path = ?',
-        ).get(parent) as Pick<FsEntryRow, 'type'> | undefined;
+        const parentEntry = typeRow
+          .optional()
+          .parse(
+            this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(
+              parent,
+            ),
+          );
 
         if (!parentEntry) {
           throw new Error(`mkdir: parent does not exist: ${parent}`);
@@ -513,9 +578,11 @@ export class SqliteFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
     const resolved = this.#resolveSymlink(prefixed);
 
-    const entry = this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(
-      resolved,
-    ) as Pick<FsEntryRow, 'type'> | undefined;
+    const entry = typeRow
+      .optional()
+      .parse(
+        this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(resolved),
+      );
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${dirPath}`);
@@ -526,12 +593,14 @@ export class SqliteFs implements IFileSystem {
 
     // Get direct children (path starts with dir/ but doesn't have another / after)
     const prefix = resolved === '/' ? '/' : resolved + '/';
-    const rows = this.#stmt(
-      `SELECT path FROM fs_entries
+    const rows = z.array(pathRow).parse(
+      this.#stmt(
+        `SELECT path FROM fs_entries
        WHERE path LIKE ? || '%'
          AND path != ?
          AND path NOT LIKE ? || '%/%'`,
-    ).all(prefix, resolved, prefix) as { path: string }[];
+      ).all(prefix, resolved, prefix),
+    );
 
     return rows.map((row) => path.posix.basename(row.path));
   }
@@ -541,9 +610,11 @@ export class SqliteFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
     const resolved = this.#resolveSymlink(prefixed);
 
-    const entry = this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(
-      resolved,
-    ) as Pick<FsEntryRow, 'type'> | undefined;
+    const entry = typeRow
+      .optional()
+      .parse(
+        this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(resolved),
+      );
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${dirPath}`);
@@ -553,12 +624,14 @@ export class SqliteFs implements IFileSystem {
     }
 
     const prefix = resolved === '/' ? '/' : resolved + '/';
-    const rows = this.#stmt(
-      `SELECT path, type FROM fs_entries
+    const rows = z.array(pathTypeRow).parse(
+      this.#stmt(
+        `SELECT path, type FROM fs_entries
        WHERE path LIKE ? || '%'
          AND path != ?
          AND path NOT LIKE ? || '%/%'`,
-    ).all(prefix, resolved, prefix) as Pick<FsEntryRow, 'path' | 'type'>[];
+      ).all(prefix, resolved, prefix),
+    );
 
     return rows.map((row) => ({
       name: path.posix.basename(row.path),
@@ -572,9 +645,11 @@ export class SqliteFs implements IFileSystem {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
 
-    const entry = this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(
-      prefixed,
-    ) as Pick<FsEntryRow, 'type'> | undefined;
+    const entry = typeRow
+      .optional()
+      .parse(
+        this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(prefixed),
+      );
 
     if (!entry) {
       if (options?.force) {
@@ -609,9 +684,11 @@ export class SqliteFs implements IFileSystem {
     const srcPrefixed = this.#prefixPath(srcNormalized);
     const destPrefixed = this.#prefixPath(destNormalized);
 
-    const srcEntry = this.#stmt('SELECT * FROM fs_entries WHERE path = ?').get(
-      srcPrefixed,
-    ) as FsEntryRow | undefined;
+    const srcEntry = entryRow
+      .optional()
+      .parse(
+        this.#stmt('SELECT * FROM fs_entries WHERE path = ?').get(srcPrefixed),
+      );
 
     if (!srcEntry) {
       throw new Error(`ENOENT: no such file or directory: ${src}`);
@@ -625,9 +702,13 @@ export class SqliteFs implements IFileSystem {
       this.#ensureParentExists(destPrefixed);
 
       if (srcEntry.type === 'directory') {
-        const allEntries = this.#stmt(
-          `SELECT * FROM fs_entries WHERE path = ? OR path LIKE ? || '/%'`,
-        ).all(srcPrefixed, srcPrefixed) as unknown as FsEntryRow[];
+        const allEntries = z
+          .array(entryRow)
+          .parse(
+            this.#stmt(
+              `SELECT * FROM fs_entries WHERE path = ? OR path LIKE ? || '/%'`,
+            ).all(srcPrefixed, srcPrefixed),
+          );
 
         for (const entry of allEntries) {
           const relativePath = path.posix.relative(srcPrefixed, entry.path);
@@ -646,9 +727,7 @@ export class SqliteFs implements IFileSystem {
           );
 
           if (entry.type === 'file') {
-            const chunks = this.#stmt(
-              'SELECT chunkIndex, data FROM fs_chunks WHERE path = ?',
-            ).all(entry.path) as { chunkIndex: number; data: Uint8Array }[];
+            const chunks = this.#chunks(entry.path);
 
             for (const chunk of chunks) {
               this.#stmt(
@@ -671,9 +750,7 @@ export class SqliteFs implements IFileSystem {
         );
 
         if (srcEntry.type === 'file') {
-          const chunks = this.#stmt(
-            'SELECT chunkIndex, data FROM fs_chunks WHERE path = ?',
-          ).all(srcPrefixed) as { chunkIndex: number; data: Uint8Array }[];
+          const chunks = this.#chunks(srcPrefixed);
 
           this.#stmt('DELETE FROM fs_chunks WHERE path = ?').run(destPrefixed);
 
@@ -693,9 +770,11 @@ export class SqliteFs implements IFileSystem {
     const srcPrefixed = this.#prefixPath(srcNormalized);
     const destPrefixed = this.#prefixPath(destNormalized);
 
-    const srcEntry = this.#stmt('SELECT * FROM fs_entries WHERE path = ?').get(
-      srcPrefixed,
-    ) as FsEntryRow | undefined;
+    const srcEntry = entryRow
+      .optional()
+      .parse(
+        this.#stmt('SELECT * FROM fs_entries WHERE path = ?').get(srcPrefixed),
+      );
 
     if (!srcEntry) {
       throw new Error(`ENOENT: no such file or directory: ${src}`);
@@ -706,9 +785,13 @@ export class SqliteFs implements IFileSystem {
 
       if (srcEntry.type === 'directory') {
         // Reverse order: children before parents for delete
-        const allEntries = this.#stmt(
-          `SELECT * FROM fs_entries WHERE path = ? OR path LIKE ? || '/%' ORDER BY path DESC`,
-        ).all(srcPrefixed, srcPrefixed) as unknown as FsEntryRow[];
+        const allEntries = z
+          .array(entryRow)
+          .parse(
+            this.#stmt(
+              `SELECT * FROM fs_entries WHERE path = ? OR path LIKE ? || '/%' ORDER BY path DESC`,
+            ).all(srcPrefixed, srcPrefixed),
+          );
 
         for (const entry of [...allEntries].reverse()) {
           const relativePath = path.posix.relative(srcPrefixed, entry.path);
@@ -727,12 +810,7 @@ export class SqliteFs implements IFileSystem {
           );
 
           if (entry.type === 'file') {
-            const chunks = this.#stmt(
-              'SELECT chunkIndex, data FROM fs_chunks WHERE path = ?',
-            ).all(entry.path) as unknown as {
-              chunkIndex: number;
-              data: Uint8Array;
-            }[];
+            const chunks = this.#chunks(entry.path);
 
             for (const chunk of chunks) {
               this.#stmt(
@@ -760,12 +838,7 @@ export class SqliteFs implements IFileSystem {
         );
 
         if (srcEntry.type === 'file') {
-          const chunks = this.#stmt(
-            'SELECT chunkIndex, data FROM fs_chunks WHERE path = ?',
-          ).all(srcPrefixed) as unknown as {
-            chunkIndex: number;
-            data: Uint8Array;
-          }[];
+          const chunks = this.#chunks(srcPrefixed);
 
           for (const chunk of chunks) {
             this.#stmt(
@@ -784,11 +857,9 @@ export class SqliteFs implements IFileSystem {
   }
 
   getAllPaths(): string[] {
-    const rows = this.#stmt(
-      'SELECT path FROM fs_entries ORDER BY path',
-    ).all() as {
-      path: string;
-    }[];
+    const rows = z
+      .array(pathRow)
+      .parse(this.#stmt('SELECT path FROM fs_entries ORDER BY path').all());
     return rows.map((row) => row.path);
   }
 
@@ -861,9 +932,11 @@ export class SqliteFs implements IFileSystem {
     const srcPrefixed = this.#prefixPath(srcNormalized);
     const destPrefixed = this.#prefixPath(destNormalized);
 
-    const srcEntry = this.#stmt('SELECT * FROM fs_entries WHERE path = ?').get(
-      srcPrefixed,
-    ) as FsEntryRow | undefined;
+    const srcEntry = entryRow
+      .optional()
+      .parse(
+        this.#stmt('SELECT * FROM fs_entries WHERE path = ?').get(srcPrefixed),
+      );
 
     if (!srcEntry) {
       throw new Error(`ENOENT: no such file or directory: ${existingPath}`);
@@ -889,9 +962,7 @@ export class SqliteFs implements IFileSystem {
          VALUES (?, 'file', ?, ?, ?)`,
       ).run(destPrefixed, srcEntry.mode, srcEntry.size, Date.now());
 
-      const chunks = this.#stmt(
-        'SELECT chunkIndex, data FROM fs_chunks WHERE path = ?',
-      ).all(srcPrefixed) as { chunkIndex: number; data: Uint8Array }[];
+      const chunks = this.#chunks(srcPrefixed);
 
       for (const chunk of chunks) {
         this.#stmt(
@@ -905,9 +976,13 @@ export class SqliteFs implements IFileSystem {
     const normalized = this.#normalizePath(linkPath);
     const prefixed = this.#prefixPath(normalized);
 
-    const entry = this.#stmt(
-      'SELECT type, symlinkTarget FROM fs_entries WHERE path = ?',
-    ).get(prefixed) as Pick<FsEntryRow, 'type' | 'symlinkTarget'> | undefined;
+    const entry = linkRow
+      .optional()
+      .parse(
+        this.#stmt(
+          'SELECT type, symlinkTarget FROM fs_entries WHERE path = ?',
+        ).get(prefixed),
+      );
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${linkPath}`);
@@ -917,6 +992,6 @@ export class SqliteFs implements IFileSystem {
       throw new Error(`readlink: not a symbolic link: ${linkPath}`);
     }
 
-    return entry.symlinkTarget!;
+    return entry.symlinkTarget;
   }
 }

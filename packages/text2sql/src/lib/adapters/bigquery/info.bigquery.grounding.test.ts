@@ -1,7 +1,16 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
+import { z } from 'zod';
 
 import { BigQuery, info } from '@deepagents/text2sql/bigquery';
+
+const dialectInfoData = z.object({
+  dialect: z.string(),
+  database: z.string().optional(),
+  details: z.object({
+    identifiers: z.object({ qualifiedTable: z.string() }),
+  }),
+});
 
 describe('BigQueryInfoGrounding', () => {
   it('produces dialect info without projectId', async () => {
@@ -16,10 +25,11 @@ describe('BigQueryInfoGrounding', () => {
     const dialect = fragments.find((f) => f.name === 'dialectInfo');
 
     assert.ok(dialect);
-    assert.strictEqual((dialect.data as any).dialect, 'bigquery');
-    assert.strictEqual((dialect.data as any).database, undefined);
+    const data = dialectInfoData.parse(dialect.data);
+    assert.strictEqual(data.dialect, 'bigquery');
+    assert.strictEqual(data.database, undefined);
     assert.strictEqual(
-      (dialect.data as any).details.identifiers.qualifiedTable,
+      data.details.identifiers.qualifiedTable,
       'dataset.table',
     );
   });
@@ -37,9 +47,10 @@ describe('BigQueryInfoGrounding', () => {
     const dialect = fragments.find((f) => f.name === 'dialectInfo');
 
     assert.ok(dialect);
-    assert.strictEqual((dialect.data as any).database, 'my-project');
+    const data = dialectInfoData.parse(dialect.data);
+    assert.strictEqual(data.database, 'my-project');
     assert.strictEqual(
-      (dialect.data as any).details.identifiers.qualifiedTable,
+      data.details.identifiers.qualifiedTable,
       'project.dataset.table',
     );
   });

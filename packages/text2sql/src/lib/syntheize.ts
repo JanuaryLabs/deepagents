@@ -2,17 +2,41 @@ import { groq } from '@ai-sdk/groq';
 import { writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import pg from 'pg';
+import z from 'zod';
 
 import postgres from './adapters/postgres/index.ts';
-import { Checkpoint, hashConfig as hash } from './checkpoint.ts';
+import { Checkpoint, hashConfig as hash, jsonCodec } from './checkpoint.ts';
 import {
+  ALL_STYLES,
   BreadthEvolver,
   DepthEvolver,
+  type Persona,
   type QuestionComplexity,
   SchemaSynthesizer,
   generatePersonas,
 } from './synthesis/index.ts';
 import { type ExtractedPair } from './synthesis/types.ts';
+
+const personasCodec = jsonCodec(
+  z.array(
+    z.object({
+      role: z.string(),
+      perspective: z.string(),
+      styles: z.array(z.enum(ALL_STYLES)),
+    }),
+  ) satisfies z.ZodType<Persona[]>,
+);
+
+const pairsCodec = jsonCodec(
+  z.array(
+    z.object({
+      question: z.string(),
+      sql: z.string(),
+      context: z.array(z.string()).optional(),
+      success: z.boolean(),
+    }),
+  ) satisfies z.ZodType<ExtractedPair[]>,
+);
 
 const CONFIG = {
   personaCount: 5,
@@ -64,13 +88,17 @@ console.log(`- Total pairs: ${estimate.total}\n`);
 //   },
 // );
 
-const personas = await checkpoint.run('personas', async () => {
-  console.log('Generating personas...');
-  const schemaFragments = await adapter.introspect();
-  return generatePersonas(schemaFragments, {
-    count: CONFIG.personaCount,
-  });
-});
+const personas = await checkpoint.run(
+  'personas',
+  async () => {
+    console.log('Generating personas...');
+    const schemaFragments = await adapter.introspect();
+    return generatePersonas(schemaFragments, {
+      count: CONFIG.personaCount,
+    });
+  },
+  personasCodec,
+);
 
 console.dir(checkpoint.getOutput(), { depth: null });
 
@@ -103,6 +131,7 @@ const seed = (
       });
       return producer.toPairs();
     },
+    pairsCodec,
     { concurrency: CONFIG.concurrency },
   )
 ).flat();
@@ -121,6 +150,7 @@ const evolvedPairs = (
       });
       return producer.toPairs();
     },
+    pairsCodec,
     { concurrency: CONFIG.concurrency },
   )
 ).flat();
@@ -138,15 +168,20 @@ const paraphrasedPairs = (
       });
       return producer.toPairs();
     },
+    pairsCodec,
     { concurrency: CONFIG.concurrency },
   )
 ).flat();
 console.log(`✓ Paraphrased pairs: ${paraphrasedPairs.length}`);
 
-const allPairs = await checkpoint.run('allPairs', async () => {
-  const all = [...seed, ...evolvedPairs, ...paraphrasedPairs];
-  return all.filter((p) => p.success);
-});
+const allPairs = await checkpoint.run(
+  'allPairs',
+  async () => {
+    const all = [...seed, ...evolvedPairs, ...paraphrasedPairs];
+    return all.filter((p) => p.success);
+  },
+  pairsCodec,
+);
 
 console.log(
   `\nTotal: ${allPairs.length} pairs saved to ${checkpoint.getPath()}`,

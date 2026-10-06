@@ -1,24 +1,32 @@
+import { z } from 'zod';
+
 import type { Adapter, TableConstraint } from '../adapter.ts';
 import {
   ConstraintGrounding,
   type ConstraintGroundingConfig,
 } from '../groundings/constraint.grounding.ts';
 
-type ConstraintRow = {
-  constraint_name: string;
-  constraint_type: string;
-  definition: string | null;
-  column_name: string | null;
-  ref_schema: string | null;
-  ref_table: string | null;
-  ref_column: string | null;
-};
+/**
+ * One key column of a pg_constraint row. contype is a "char", which pg reads
+ * as a one-letter string; the column and referenced-table members come from
+ * LEFT JOINs, so they are null for a CHECK without columns or a non-foreign key.
+ */
+const constraintRow = z.object({
+  constraint_name: z.string(),
+  constraint_type: z.string(),
+  definition: z.string().nullable(),
+  column_name: z.string().nullable(),
+  ref_schema: z.string().nullable(),
+  ref_table: z.string().nullable(),
+  ref_column: z.string().nullable(),
+});
 
-type ColumnDefaultRow = {
-  column_name: string;
-  column_default: string | null;
-  is_nullable: string;
-};
+/** information_schema.columns: is_nullable is 'YES' or 'NO'. */
+const columnDefaultRow = z.object({
+  column_name: z.string(),
+  column_default: z.string().nullable(),
+  is_nullable: z.string(),
+});
 
 /**
  * PostgreSQL implementation of ConstraintGrounding.
@@ -31,13 +39,16 @@ export class PostgresConstraintGrounding extends ConstraintGrounding {
     this.#adapter = adapter;
   }
 
-  protected override async getConstraints(tableName: string): Promise<TableConstraint[]> {
+  protected override async getConstraints(
+    tableName: string,
+  ): Promise<TableConstraint[]> {
     const { schema, table } = this.#adapter.parseTableName(tableName);
     const constraints: TableConstraint[] = [];
 
     // Get PRIMARY KEY, FOREIGN KEY, CHECK, and UNIQUE constraints from pg_constraint
     // contype: p=primary key, f=foreign key, c=check, u=unique
-    const constraintRows = await this.#adapter.runQuery<ConstraintRow>(`
+    const constraintRows = await this.#adapter.runQuery(
+      `
       SELECT
         con.conname AS constraint_name,
         con.contype AS constraint_type,
@@ -59,17 +70,22 @@ export class PostgresConstraintGrounding extends ConstraintGrounding {
         AND rel.relname = '${this.#adapter.escapeString(table)}'
         AND con.contype IN ('p', 'f', 'c', 'u')
       ORDER BY con.conname, key.ord
-    `);
+    `,
+      constraintRow,
+    );
 
     // Group by constraint name
-    const constraintMap = new Map<string, {
-      type: string;
-      definition: string | null;
-      columns: string[];
-      refSchema: string | null;
-      refTable: string | null;
-      refColumns: string[];
-    }>();
+    const constraintMap = new Map<
+      string,
+      {
+        type: string;
+        definition: string | null;
+        columns: string[];
+        refSchema: string | null;
+        refTable: string | null;
+        refColumns: string[];
+      }
+    >();
 
     for (const row of constraintRows) {
       const existing = constraintMap.get(row.constraint_name);
@@ -102,9 +118,10 @@ export class PostgresConstraintGrounding extends ConstraintGrounding {
         });
       } else if (data.type === 'f') {
         // FOREIGN KEY constraint
-        const referencedTable = data.refSchema && data.refTable
-          ? `${data.refSchema}.${data.refTable}`
-          : data.refTable ?? undefined;
+        const referencedTable =
+          data.refSchema && data.refTable
+            ? `${data.refSchema}.${data.refTable}`
+            : (data.refTable ?? undefined);
         constraints.push({
           name,
           type: 'FOREIGN_KEY',
@@ -117,7 +134,9 @@ export class PostgresConstraintGrounding extends ConstraintGrounding {
         constraints.push({
           name,
           type: 'CHECK',
-          definition: data.definition?.replace(/^CHECK\s*\(/i, '').replace(/\)$/, '') || undefined,
+          definition:
+            data.definition?.replace(/^CHECK\s*\(/i, '').replace(/\)$/, '') ||
+            undefined,
           columns: data.columns.length > 0 ? data.columns : undefined,
         });
       } else if (data.type === 'u') {
@@ -131,7 +150,8 @@ export class PostgresConstraintGrounding extends ConstraintGrounding {
     }
 
     // Get NOT NULL and DEFAULT from information_schema
-    const columnRows = await this.#adapter.runQuery<ColumnDefaultRow>(`
+    const columnRows = await this.#adapter.runQuery(
+      `
       SELECT
         column_name,
         column_default,
@@ -139,7 +159,9 @@ export class PostgresConstraintGrounding extends ConstraintGrounding {
       FROM information_schema.columns
       WHERE table_schema = '${this.#adapter.escapeString(schema)}'
         AND table_name = '${this.#adapter.escapeString(table)}'
-    `);
+    `,
+      columnDefaultRow,
+    );
 
     for (const col of columnRows) {
       // NOT NULL constraint (exclude primary key columns which are implicitly NOT NULL)

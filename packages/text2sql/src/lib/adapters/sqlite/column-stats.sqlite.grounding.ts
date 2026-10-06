@@ -1,9 +1,21 @@
+import { z } from 'zod';
+
 import type { Adapter, ColumnStats } from '../adapter.ts';
 import {
   ColumnStatsGrounding,
   type ColumnStatsGroundingConfig,
 } from '../groundings/column-stats.grounding.ts';
 import type { Column } from '../groundings/context.ts';
+
+/**
+ * MIN/MAX return the column's own values; AVG returns a REAL, or NULL for an
+ * empty table.
+ */
+const statsRow = z.object({
+  min_value: z.unknown(),
+  max_value: z.unknown(),
+  null_fraction: z.number().nullable(),
+});
 
 /**
  * SQLite implementation of ColumnStatsGrounding.
@@ -35,11 +47,7 @@ export class SqliteColumnStatsGrounding extends ColumnStatsGrounding {
       FROM ${tableIdentifier}
     `;
 
-    const rows = await this.#adapter.runQuery<{
-      min_value: unknown;
-      max_value: unknown;
-      null_fraction: number | string | null;
-    }>(sql);
+    const rows = await this.#adapter.runQuery(sql, statsRow);
 
     if (!rows.length) {
       return undefined;

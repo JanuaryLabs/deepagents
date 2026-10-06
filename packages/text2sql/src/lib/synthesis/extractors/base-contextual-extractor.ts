@@ -15,6 +15,7 @@ import {
 
 import type { Adapter } from '../../adapters/adapter.ts';
 import { type ExtractedPair, PairProducer } from '../types.ts';
+import { toolInputSql } from './tool-input.ts';
 
 export interface DbQueryInput {
   sql: string;
@@ -162,7 +163,7 @@ export abstract class BaseContextualExtractor extends PairProducer {
     // TODO: Update to use fragments and render them
     // const schemaFragments = await this.adapter.introspect();
     // const introspection = new XmlRenderer().render(schemaFragments);
-    const introspection = '' as any; // Placeholder - synthesis needs to be updated to use fragments
+    const introspection = ''; // Placeholder - synthesis needs to be updated to use fragments
 
     // Step 3: Resolve each SQL's context into a standalone question
     yield* this.resolveQuestions(introspection);
@@ -208,9 +209,8 @@ export abstract class BaseContextualExtractor extends PairProducer {
       }
 
       // Use 'input' property (not 'args') to match useChat structure
-      const toolInput = ('input' in part ? part.input : undefined) as
-        DbQueryInput | undefined;
-      if (!toolInput?.sql) {
+      const sql = toolInputSql('input' in part ? part.input : undefined);
+      if (!sql) {
         continue;
       }
 
@@ -233,7 +233,7 @@ export abstract class BaseContextualExtractor extends PairProducer {
       }
 
       this.results.push({
-        sql: toolInput.sql,
+        sql,
         success,
         conversationContext: snapshot,
       });

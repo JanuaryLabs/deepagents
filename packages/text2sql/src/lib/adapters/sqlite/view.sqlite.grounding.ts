@@ -1,14 +1,11 @@
 import type { Adapter } from '../adapter.ts';
+import { nameRow } from '../groundings/rows.ts';
 import {
   type View,
   ViewGrounding,
   type ViewGroundingConfig,
 } from '../groundings/view.grounding.ts';
-
-type ColumnRow = {
-  name: string | null | undefined;
-  type: string | null | undefined;
-};
+import { sqliteMasterSqlRow, tableInfoRow } from './sqlite-rows.ts';
 
 /**
  * SQLite implementation of ViewGrounding.
@@ -22,37 +19,33 @@ export class SqliteViewGrounding extends ViewGrounding {
   }
 
   protected override async getAllViewNames(): Promise<string[]> {
-    const rows = await this.#adapter.runQuery<{
-      name: string | null | undefined;
-    }>(`SELECT name FROM sqlite_master WHERE type='view' ORDER BY name`);
+    const rows = await this.#adapter.runQuery(
+      `SELECT name FROM sqlite_master WHERE type='view' ORDER BY name`,
+      nameRow,
+    );
 
-    return rows
-      .map((row) => row.name)
-      .filter((name): name is string => typeof name === 'string');
+    return rows.map((row) => row.name);
   }
 
   protected override async getView(viewName: string): Promise<View> {
     let definition: string | undefined;
     if (this.includeDefinition) {
-      const defRows = await this.#adapter.runQuery<{
-        sql: string | null | undefined;
-      }>(
+      const defRows = await this.#adapter.runQuery(
         `SELECT sql FROM sqlite_master WHERE type='view' AND name=${this.#quoteIdentifier(viewName)}`,
+        sqliteMasterSqlRow,
       );
       definition = defRows[0]?.sql ?? undefined;
     }
 
-    const columns = await this.#adapter.runQuery<ColumnRow>(
+    const columns = await this.#adapter.runQuery(
       `PRAGMA table_info(${this.#quoteIdentifier(viewName)})`,
+      tableInfoRow,
     );
 
     return {
       name: viewName,
       definition,
-      columns: columns.map((col) => ({
-        name: col.name ?? 'unknown',
-        type: col.type ?? 'unknown',
-      })),
+      columns: columns.map((col) => ({ name: col.name, type: col.type })),
     };
   }
 

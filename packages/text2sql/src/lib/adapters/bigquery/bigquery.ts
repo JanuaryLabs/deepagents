@@ -25,12 +25,6 @@ export type BigQueryAdapterOptions = {
   projectId?: string;
 };
 
-type BigQueryError = {
-  message?: string;
-  reason?: string;
-  code?: number | string;
-};
-
 function formatBigQueryError(sql: string, error: unknown) {
   const errorMessage =
     error instanceof Error
@@ -38,7 +32,9 @@ function formatBigQueryError(sql: string, error: unknown) {
       : typeof error === 'string'
         ? error
         : typeof error === 'object' && error !== null
-          ? ((error as BigQueryError).message ?? JSON.stringify(error))
+          ? 'message' in error && typeof error.message === 'string'
+            ? error.message
+            : JSON.stringify(error)
           : 'Unknown error occurred';
 
   return {
@@ -119,20 +115,20 @@ export class BigQuery extends Adapter {
     }
   }
 
-  override async runQuery<Row>(sql: string): Promise<Row[]> {
-    const result = await this.#options.execute(sql);
+  protected override async queryRows(sql: string): Promise<unknown[]> {
+    const result: unknown = await this.#options.execute(sql);
 
     if (Array.isArray(result)) {
-      return result as Row[];
+      return result;
     }
 
     if (
-      result &&
       typeof result === 'object' &&
+      result !== null &&
       'rows' in result &&
-      Array.isArray((result as { rows?: unknown }).rows)
+      Array.isArray(result.rows)
     ) {
-      return (result as { rows: Row[] }).rows;
+      return result.rows;
     }
 
     throw new Error(

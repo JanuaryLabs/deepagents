@@ -1,4 +1,5 @@
 import type {
+  BufferEncoding,
   CpOptions,
   FileContent,
   FsStat,
@@ -8,8 +9,10 @@ import type {
 } from 'just-bash';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
-import type { Pool, PoolClient, PoolConfig } from 'pg';
+import type { Pool, PoolClient, PoolConfig, QueryResult } from 'pg';
+import z from 'zod';
 
+import { bigintColumn, entryType } from '../columns.ts';
 import { postgresFsDDL } from './ddl.postgres-fs.ts';
 
 interface ReadFileOptions {
@@ -34,21 +37,50 @@ export interface PostgresFsOptions {
   schema?: string;
 }
 
-type EntryType = 'file' | 'directory' | 'symlink';
+// Row shapes as pg returns them for ddl.postgres-fs.ts: INTEGER as a number,
+// BIGINT as a string (see bigintColumn), BYTEA as a Buffer and EXISTS() as a
+// boolean.
 
-interface FsEntryRow {
-  path: string;
-  type: EntryType;
-  mode: number;
-  size: number;
-  mtime: number;
-  symlink_target: string | null;
-  [key: string]: unknown;
-}
+const entryRow = z.object({
+  path: z.string(),
+  type: entryType,
+  mode: z.number(),
+  size: bigintColumn,
+  mtime: bigintColumn,
+  symlink_target: z.string().nullable(),
+});
 
-interface ChunkRow {
-  data: Buffer;
-  [key: string]: unknown;
+const typeRow = entryRow.pick({ type: true });
+
+const pathRow = entryRow.pick({ path: true });
+
+const pathTypeRow = entryRow.pick({ path: true, type: true });
+
+// symlink() always stores a target. A file or directory keeps NULL, or the
+// target of the symlink it replaced: writeFile and appendFile change the type
+// of an existing path without clearing it.
+const linkRow = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('symlink'), symlink_target: z.string() }),
+  z.object({
+    type: z.enum(['file', 'directory']),
+    symlink_target: z.string().nullable(),
+  }),
+]);
+
+const existsRow = z.object({ exists: z.boolean() });
+
+const chunkRow = z.object({
+  chunk_index: z.number(),
+  data: z.instanceof(Buffer),
+});
+
+const dataRow = chunkRow.pick({ data: true });
+
+function rowsOf<Row extends z.ZodType>(
+  row: Row,
+  result: QueryResult,
+): z.output<Row>[] {
+  return z.array(row).parse(result.rows);
 }
 
 export class PostgresFs implements IFileSystem {
@@ -101,8 +133,11 @@ export class PostgresFs implements IFileSystem {
     const ddl = postgresFsDDL(this.#schema);
     await this.#pool.query(ddl);
 
-    const rootSlashExists = await this.#rawQuery<{ exists: boolean }>(
-      `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = '/') AS exists`,
+    const rootSlashExists = rowsOf(
+      existsRow,
+      await this.#rawQuery(
+        `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = '/') AS exists`,
+      ),
     );
     if (!rootSlashExists[0].exists) {
       await this.#rawExec(
@@ -114,9 +149,12 @@ export class PostgresFs implements IFileSystem {
     if (this.#root) {
       await this.#createParentDirs(this.#root);
 
-      const rootExists = await this.#rawQuery<{ exists: boolean }>(
-        `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = $1) AS exists`,
-        [this.#root],
+      const rootExists = rowsOf(
+        existsRow,
+        await this.#rawQuery(
+          `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = $1) AS exists`,
+          [this.#root],
+        ),
       );
       if (!rootExists[0].exists) {
         await this.#rawExec(
@@ -143,9 +181,12 @@ export class PostgresFs implements IFileSystem {
 
     for (let i = 0; i < segments.length - 1; i++) {
       currentPath = path.posix.join(currentPath, segments[i]);
-      const exists = await this.#rawQuery<{ exists: boolean }>(
-        `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = $1) AS exists`,
-        [currentPath],
+      const exists = rowsOf(
+        existsRow,
+        await this.#rawQuery(
+          `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = $1) AS exists`,
+          [currentPath],
+        ),
       );
 
       if (!exists[0].exists) {
@@ -157,12 +198,8 @@ export class PostgresFs implements IFileSystem {
     }
   }
 
-  async #rawQuery<T extends Record<string, unknown>>(
-    sql: string,
-    params?: unknown[],
-  ): Promise<T[]> {
-    const result = await this.#pool.query(sql, params);
-    return result.rows as T[];
+  #rawQuery(sql: string, params?: unknown[]): Promise<QueryResult> {
+    return this.#pool.query(sql, params);
   }
 
   async #rawExec(sql: string, params?: unknown[]): Promise<number> {
@@ -170,12 +207,9 @@ export class PostgresFs implements IFileSystem {
     return result.rowCount ?? 0;
   }
 
-  async #query<T extends Record<string, unknown>>(
-    sql: string,
-    params?: unknown[],
-  ): Promise<T[]> {
+  async #query(sql: string, params?: unknown[]): Promise<QueryResult> {
     this.#ensureInitialized();
-    return this.#rawQuery<T>(sql, params);
+    return this.#rawQuery(sql, params);
   }
 
   async #exec(sql: string, params?: unknown[]): Promise<number> {
@@ -243,11 +277,13 @@ export class PostgresFs implements IFileSystem {
     const rootPath = this.#root || '/';
     if (parent === rootPath || parent === '/') return;
 
-    const result = await client.query<{ type: string }>(
-      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
-      [parent],
+    const [entry] = rowsOf(
+      typeRow,
+      await client.query(
+        `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
+        [parent],
+      ),
     );
-    const entry = result.rows[0];
 
     if (!entry) {
       await this.#ensureParentExists(parent, client);
@@ -285,19 +321,13 @@ export class PostgresFs implements IFileSystem {
     filePath: string,
     client?: PoolClient,
   ): Promise<Uint8Array> {
-    let rows: ChunkRow[];
-    if (client) {
-      const result = await client.query<ChunkRow>(
-        `SELECT data FROM ${this.#t('fs_chunks')} WHERE path = $1 ORDER BY chunk_index`,
-        [filePath],
-      );
-      rows = result.rows as ChunkRow[];
-    } else {
-      rows = await this.#query<ChunkRow>(
-        `SELECT data FROM ${this.#t('fs_chunks')} WHERE path = $1 ORDER BY chunk_index`,
-        [filePath],
-      );
-    }
+    const sql = `SELECT data FROM ${this.#t('fs_chunks')} WHERE path = $1 ORDER BY chunk_index`;
+    const rows = rowsOf(
+      dataRow,
+      client
+        ? await client.query(sql, [filePath])
+        : await this.#query(sql, [filePath]),
+    );
 
     if (rows.length === 0) {
       return new Uint8Array(0);
@@ -320,11 +350,13 @@ export class PostgresFs implements IFileSystem {
       throw new Error(`readFile: circular symlink: ${p}`);
     }
 
-    const rows = await this.#query<Pick<FsEntryRow, 'type' | 'symlink_target'>>(
-      `SELECT type, symlink_target FROM ${this.#t('fs_entries')} WHERE path = $1`,
-      [p],
+    const [entry] = rowsOf(
+      linkRow,
+      await this.#query(
+        `SELECT type, symlink_target FROM ${this.#t('fs_entries')} WHERE path = $1`,
+        [p],
+      ),
     );
-    const entry = rows[0];
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${p}`);
@@ -336,17 +368,16 @@ export class PostgresFs implements IFileSystem {
 
     seen.add(p);
     const target = this.#normalizePath(
-      path.posix.resolve(this.#dirname(p), entry.symlink_target!),
+      path.posix.resolve(this.#dirname(p), entry.symlink_target),
     );
     return this.#resolveSymlink(target, seen);
   }
 
-  #toUint8Array(content: FileContent, encoding?: string): Uint8Array {
+  #toUint8Array(content: FileContent, encoding?: BufferEncoding): Uint8Array {
     if (content instanceof Uint8Array) {
       return content;
     }
-    const enc = (encoding ?? 'utf8') as BufferEncoding;
-    return new Uint8Array(Buffer.from(content, enc));
+    return new Uint8Array(Buffer.from(content, encoding ?? 'utf8'));
   }
 
   async close(): Promise<void> {
@@ -361,17 +392,19 @@ export class PostgresFs implements IFileSystem {
 
   async readFile(
     filePath: string,
-    options?: ReadFileOptions | string,
+    options?: ReadFileOptions | BufferEncoding,
   ): Promise<string> {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
     const resolved = await this.#resolveSymlink(prefixed);
 
-    const rows = await this.#query<Pick<FsEntryRow, 'type'>>(
-      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
-      [resolved],
+    const [entry] = rowsOf(
+      typeRow,
+      await this.#query(
+        `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
+        [resolved],
+      ),
     );
-    const entry = rows[0];
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
@@ -383,7 +416,7 @@ export class PostgresFs implements IFileSystem {
     const content = await this.#readChunks(resolved);
     const encoding =
       typeof options === 'string' ? options : (options?.encoding ?? 'utf8');
-    return Buffer.from(content).toString(encoding as BufferEncoding);
+    return Buffer.from(content).toString(encoding);
   }
 
   async readFileBuffer(filePath: string): Promise<Uint8Array> {
@@ -391,11 +424,13 @@ export class PostgresFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
     const resolved = await this.#resolveSymlink(prefixed);
 
-    const rows = await this.#query<Pick<FsEntryRow, 'type'>>(
-      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
-      [resolved],
+    const [entry] = rowsOf(
+      typeRow,
+      await this.#query(
+        `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
+        [resolved],
+      ),
     );
-    const entry = rows[0];
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
@@ -410,7 +445,7 @@ export class PostgresFs implements IFileSystem {
   async writeFile(
     filePath: string,
     content: FileContent,
-    options?: WriteFileOptions | string,
+    options?: WriteFileOptions | BufferEncoding,
   ): Promise<void> {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
@@ -434,7 +469,7 @@ export class PostgresFs implements IFileSystem {
   async appendFile(
     filePath: string,
     content: FileContent,
-    options?: WriteFileOptions | string,
+    options?: WriteFileOptions | BufferEncoding,
   ): Promise<void> {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
@@ -444,11 +479,13 @@ export class PostgresFs implements IFileSystem {
     await this.#useTransaction(async (client) => {
       await this.#ensureParentExists(prefixed, client);
 
-      const result = await client.query<Pick<FsEntryRow, 'type'>>(
-        `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
-        [prefixed],
+      const [entry] = rowsOf(
+        typeRow,
+        await client.query(
+          `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
+          [prefixed],
+        ),
       );
-      const entry = result.rows[0];
 
       if (entry && entry.type !== 'file') {
         throw new Error(`appendFile: not a file: ${filePath}`);
@@ -475,9 +512,12 @@ export class PostgresFs implements IFileSystem {
   async exists(filePath: string): Promise<boolean> {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
-    const rows = await this.#query<{ exists: boolean }>(
-      `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = $1) AS exists`,
-      [prefixed],
+    const rows = rowsOf(
+      existsRow,
+      await this.#query(
+        `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = $1) AS exists`,
+        [prefixed],
+      ),
     );
     return rows[0].exists;
   }
@@ -487,11 +527,13 @@ export class PostgresFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
     const resolved = await this.#resolveSymlink(prefixed);
 
-    const rows = await this.#query<FsEntryRow>(
-      `SELECT * FROM ${this.#t('fs_entries')} WHERE path = $1`,
-      [resolved],
+    const [entry] = rowsOf(
+      entryRow,
+      await this.#query(
+        `SELECT * FROM ${this.#t('fs_entries')} WHERE path = $1`,
+        [resolved],
+      ),
     );
-    const entry = rows[0];
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
@@ -501,9 +543,9 @@ export class PostgresFs implements IFileSystem {
       isFile: entry.type === 'file',
       isDirectory: entry.type === 'directory',
       isSymbolicLink: false,
-      mode: Number(entry.mode),
-      size: Number(entry.size),
-      mtime: new Date(Number(entry.mtime)),
+      mode: entry.mode,
+      size: entry.size,
+      mtime: new Date(entry.mtime),
     };
   }
 
@@ -511,11 +553,13 @@ export class PostgresFs implements IFileSystem {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
 
-    const rows = await this.#query<FsEntryRow>(
-      `SELECT * FROM ${this.#t('fs_entries')} WHERE path = $1`,
-      [prefixed],
+    const [entry] = rowsOf(
+      entryRow,
+      await this.#query(
+        `SELECT * FROM ${this.#t('fs_entries')} WHERE path = $1`,
+        [prefixed],
+      ),
     );
-    const entry = rows[0];
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
@@ -525,9 +569,9 @@ export class PostgresFs implements IFileSystem {
       isFile: entry.type === 'file',
       isDirectory: entry.type === 'directory',
       isSymbolicLink: entry.type === 'symlink',
-      mode: Number(entry.mode),
-      size: Number(entry.size),
-      mtime: new Date(Number(entry.mtime)),
+      mode: entry.mode,
+      size: entry.size,
+      mtime: new Date(entry.mtime),
     };
   }
 
@@ -535,11 +579,13 @@ export class PostgresFs implements IFileSystem {
     const normalized = this.#normalizePath(dirPath);
     const prefixed = this.#prefixPath(normalized);
 
-    const existingRows = await this.#query<Pick<FsEntryRow, 'type'>>(
-      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
-      [prefixed],
+    const [existing] = rowsOf(
+      typeRow,
+      await this.#query(
+        `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
+        [prefixed],
+      ),
     );
-    const existing = existingRows[0];
 
     if (existing) {
       if (options?.recursive) {
@@ -557,11 +603,13 @@ export class PostgresFs implements IFileSystem {
 
         for (const segment of segments) {
           currentPath = path.posix.join(currentPath, segment);
-          const result = await client.query<Pick<FsEntryRow, 'type'>>(
-            `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
-            [currentPath],
+          const [exists] = rowsOf(
+            typeRow,
+            await client.query(
+              `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
+              [currentPath],
+            ),
           );
-          const exists = result.rows[0];
 
           if (!exists) {
             await client.query(
@@ -574,11 +622,13 @@ export class PostgresFs implements IFileSystem {
         }
       } else {
         const parent = this.#dirname(prefixed);
-        const parentResult = await client.query<Pick<FsEntryRow, 'type'>>(
-          `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
-          [parent],
+        const [parentEntry] = rowsOf(
+          typeRow,
+          await client.query(
+            `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
+            [parent],
+          ),
         );
-        const parentEntry = parentResult.rows[0];
 
         if (!parentEntry) {
           throw new Error(`mkdir: parent does not exist: ${parent}`);
@@ -600,11 +650,13 @@ export class PostgresFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
     const resolved = await this.#resolveSymlink(prefixed);
 
-    const entryRows = await this.#query<Pick<FsEntryRow, 'type'>>(
-      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
-      [resolved],
+    const [entry] = rowsOf(
+      typeRow,
+      await this.#query(
+        `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
+        [resolved],
+      ),
     );
-    const entry = entryRows[0];
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${dirPath}`);
@@ -614,12 +666,15 @@ export class PostgresFs implements IFileSystem {
     }
 
     const prefix = resolved === '/' ? '/' : resolved + '/';
-    const rows = await this.#query<{ path: string }>(
-      `SELECT path FROM ${this.#t('fs_entries')}
+    const rows = rowsOf(
+      pathRow,
+      await this.#query(
+        `SELECT path FROM ${this.#t('fs_entries')}
        WHERE path LIKE $1 || '%'
          AND path != $2
          AND path NOT LIKE $1 || '%/%'`,
-      [prefix, resolved],
+        [prefix, resolved],
+      ),
     );
 
     return rows.map((row) => path.posix.basename(row.path));
@@ -630,11 +685,13 @@ export class PostgresFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
     const resolved = await this.#resolveSymlink(prefixed);
 
-    const entryRows = await this.#query<Pick<FsEntryRow, 'type'>>(
-      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
-      [resolved],
+    const [entry] = rowsOf(
+      typeRow,
+      await this.#query(
+        `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
+        [resolved],
+      ),
     );
-    const entry = entryRows[0];
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${dirPath}`);
@@ -644,12 +701,15 @@ export class PostgresFs implements IFileSystem {
     }
 
     const prefix = resolved === '/' ? '/' : resolved + '/';
-    const rows = await this.#query<Pick<FsEntryRow, 'path' | 'type'>>(
-      `SELECT path, type FROM ${this.#t('fs_entries')}
+    const rows = rowsOf(
+      pathTypeRow,
+      await this.#query(
+        `SELECT path, type FROM ${this.#t('fs_entries')}
        WHERE path LIKE $1 || '%'
          AND path != $2
          AND path NOT LIKE $1 || '%/%'`,
-      [prefix, resolved],
+        [prefix, resolved],
+      ),
     );
 
     return rows.map((row) => ({
@@ -664,11 +724,13 @@ export class PostgresFs implements IFileSystem {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
 
-    const rows = await this.#query<Pick<FsEntryRow, 'type'>>(
-      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
-      [prefixed],
+    const [entry] = rowsOf(
+      typeRow,
+      await this.#query(
+        `SELECT type FROM ${this.#t('fs_entries')} WHERE path = $1`,
+        [prefixed],
+      ),
     );
-    const entry = rows[0];
 
     if (!entry) {
       if (options?.force) {
@@ -679,12 +741,15 @@ export class PostgresFs implements IFileSystem {
 
     await this.#useTransaction(async (client) => {
       if (entry.type === 'directory') {
-        const childrenResult = await client.query<{ exists: boolean }>(
-          `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path LIKE $1 || '/%') AS exists`,
-          [prefixed],
+        const children = rowsOf(
+          existsRow,
+          await client.query(
+            `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path LIKE $1 || '/%') AS exists`,
+            [prefixed],
+          ),
         );
 
-        if (childrenResult.rows[0].exists && !options?.recursive) {
+        if (children[0].exists && !options?.recursive) {
           throw new Error(`ENOTEMPTY: directory not empty: ${filePath}`);
         }
 
@@ -707,11 +772,13 @@ export class PostgresFs implements IFileSystem {
     const srcPrefixed = this.#prefixPath(srcNormalized);
     const destPrefixed = this.#prefixPath(destNormalized);
 
-    const srcRows = await this.#query<FsEntryRow>(
-      `SELECT * FROM ${this.#t('fs_entries')} WHERE path = $1`,
-      [srcPrefixed],
+    const [srcEntry] = rowsOf(
+      entryRow,
+      await this.#query(
+        `SELECT * FROM ${this.#t('fs_entries')} WHERE path = $1`,
+        [srcPrefixed],
+      ),
     );
-    const srcEntry = srcRows[0];
 
     if (!srcEntry) {
       throw new Error(`ENOENT: no such file or directory: ${src}`);
@@ -725,12 +792,15 @@ export class PostgresFs implements IFileSystem {
       await this.#ensureParentExists(destPrefixed, client);
 
       if (srcEntry.type === 'directory') {
-        const allEntriesResult = await client.query<FsEntryRow>(
-          `SELECT * FROM ${this.#t('fs_entries')} WHERE path = $1 OR path LIKE $1 || '/%'`,
-          [srcPrefixed],
+        const allEntries = rowsOf(
+          entryRow,
+          await client.query(
+            `SELECT * FROM ${this.#t('fs_entries')} WHERE path = $1 OR path LIKE $1 || '/%'`,
+            [srcPrefixed],
+          ),
         );
 
-        for (const entry of allEntriesResult.rows) {
+        for (const entry of allEntries) {
           const relativePath = path.posix.relative(srcPrefixed, entry.path);
           const newPath = path.posix.join(destPrefixed, relativePath);
 
@@ -754,15 +824,15 @@ export class PostgresFs implements IFileSystem {
               [newPath],
             );
 
-            const chunksResult = await client.query<{
-              chunk_index: number;
-              data: Buffer;
-            }>(
-              `SELECT chunk_index, data FROM ${this.#t('fs_chunks')} WHERE path = $1`,
-              [entry.path],
+            const chunks = rowsOf(
+              chunkRow,
+              await client.query(
+                `SELECT chunk_index, data FROM ${this.#t('fs_chunks')} WHERE path = $1`,
+                [entry.path],
+              ),
             );
 
-            for (const chunk of chunksResult.rows) {
+            for (const chunk of chunks) {
               await client.query(
                 `INSERT INTO ${this.#t('fs_chunks')} (path, chunk_index, data) VALUES ($1, $2, $3)`,
                 [newPath, chunk.chunk_index, chunk.data],
@@ -786,12 +856,12 @@ export class PostgresFs implements IFileSystem {
         );
 
         if (srcEntry.type === 'file') {
-          const chunksResult = await client.query<{
-            chunk_index: number;
-            data: Buffer;
-          }>(
-            `SELECT chunk_index, data FROM ${this.#t('fs_chunks')} WHERE path = $1`,
-            [srcPrefixed],
+          const chunks = rowsOf(
+            chunkRow,
+            await client.query(
+              `SELECT chunk_index, data FROM ${this.#t('fs_chunks')} WHERE path = $1`,
+              [srcPrefixed],
+            ),
           );
 
           await client.query(
@@ -799,7 +869,7 @@ export class PostgresFs implements IFileSystem {
             [destPrefixed],
           );
 
-          for (const chunk of chunksResult.rows) {
+          for (const chunk of chunks) {
             await client.query(
               `INSERT INTO ${this.#t('fs_chunks')} (path, chunk_index, data) VALUES ($1, $2, $3)`,
               [destPrefixed, chunk.chunk_index, chunk.data],
@@ -816,11 +886,13 @@ export class PostgresFs implements IFileSystem {
     const srcPrefixed = this.#prefixPath(srcNormalized);
     const destPrefixed = this.#prefixPath(destNormalized);
 
-    const srcRows = await this.#query<FsEntryRow>(
-      `SELECT * FROM ${this.#t('fs_entries')} WHERE path = $1`,
-      [srcPrefixed],
+    const [srcEntry] = rowsOf(
+      entryRow,
+      await this.#query(
+        `SELECT * FROM ${this.#t('fs_entries')} WHERE path = $1`,
+        [srcPrefixed],
+      ),
     );
-    const srcEntry = srcRows[0];
 
     if (!srcEntry) {
       throw new Error(`ENOENT: no such file or directory: ${src}`);
@@ -830,9 +902,12 @@ export class PostgresFs implements IFileSystem {
       await this.#ensureParentExists(destPrefixed, client);
 
       if (srcEntry.type === 'directory') {
-        const allEntriesResult = await client.query<FsEntryRow>(
-          `SELECT * FROM ${this.#t('fs_entries')} WHERE path = $1 OR path LIKE $1 || '/%' ORDER BY path DESC`,
-          [srcPrefixed],
+        const allEntries = rowsOf(
+          entryRow,
+          await client.query(
+            `SELECT * FROM ${this.#t('fs_entries')} WHERE path = $1 OR path LIKE $1 || '/%' ORDER BY path DESC`,
+            [srcPrefixed],
+          ),
         );
 
         await client.query(
@@ -840,7 +915,7 @@ export class PostgresFs implements IFileSystem {
           [destPrefixed],
         );
 
-        for (const entry of [...allEntriesResult.rows].reverse()) {
+        for (const entry of [...allEntries].reverse()) {
           const relativePath = path.posix.relative(srcPrefixed, entry.path);
           const newPath = path.posix.join(destPrefixed, relativePath);
 
@@ -864,15 +939,15 @@ export class PostgresFs implements IFileSystem {
               [newPath],
             );
 
-            const chunksResult = await client.query<{
-              chunk_index: number;
-              data: Buffer;
-            }>(
-              `SELECT chunk_index, data FROM ${this.#t('fs_chunks')} WHERE path = $1`,
-              [entry.path],
+            const chunks = rowsOf(
+              chunkRow,
+              await client.query(
+                `SELECT chunk_index, data FROM ${this.#t('fs_chunks')} WHERE path = $1`,
+                [entry.path],
+              ),
             );
 
-            for (const chunk of chunksResult.rows) {
+            for (const chunk of chunks) {
               await client.query(
                 `INSERT INTO ${this.#t('fs_chunks')} (path, chunk_index, data) VALUES ($1, $2, $3)`,
                 [newPath, chunk.chunk_index, chunk.data],
@@ -906,15 +981,15 @@ export class PostgresFs implements IFileSystem {
             [destPrefixed],
           );
 
-          const chunksResult = await client.query<{
-            chunk_index: number;
-            data: Buffer;
-          }>(
-            `SELECT chunk_index, data FROM ${this.#t('fs_chunks')} WHERE path = $1`,
-            [srcPrefixed],
+          const chunks = rowsOf(
+            chunkRow,
+            await client.query(
+              `SELECT chunk_index, data FROM ${this.#t('fs_chunks')} WHERE path = $1`,
+              [srcPrefixed],
+            ),
           );
 
-          for (const chunk of chunksResult.rows) {
+          for (const chunk of chunks) {
             await client.query(
               `INSERT INTO ${this.#t('fs_chunks')} (path, chunk_index, data) VALUES ($1, $2, $3)`,
               [destPrefixed, chunk.chunk_index, chunk.data],
@@ -941,8 +1016,11 @@ export class PostgresFs implements IFileSystem {
   }
 
   async getAllPathsAsync(): Promise<string[]> {
-    const rows = await this.#query<{ path: string; [key: string]: unknown }>(
-      `SELECT path FROM ${this.#t('fs_entries')} ORDER BY path`,
+    const rows = rowsOf(
+      pathRow,
+      await this.#query(
+        `SELECT path FROM ${this.#t('fs_entries')} ORDER BY path`,
+      ),
     );
     return rows.map((row) => row.path);
   }
@@ -952,9 +1030,12 @@ export class PostgresFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
     const resolved = await this.#resolveSymlink(prefixed);
 
-    const rows = await this.#query<{ exists: boolean }>(
-      `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = $1) AS exists`,
-      [resolved],
+    const rows = rowsOf(
+      existsRow,
+      await this.#query(
+        `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = $1) AS exists`,
+        [resolved],
+      ),
     );
     if (!rows[0].exists) {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
@@ -996,9 +1077,12 @@ export class PostgresFs implements IFileSystem {
     const normalized = this.#normalizePath(linkPath);
     const prefixed = this.#prefixPath(normalized);
 
-    const existingRows = await this.#query<{ exists: boolean }>(
-      `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = $1) AS exists`,
-      [prefixed],
+    const existingRows = rowsOf(
+      existsRow,
+      await this.#query(
+        `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = $1) AS exists`,
+        [prefixed],
+      ),
     );
     if (existingRows[0].exists) {
       throw new Error(`EEXIST: file already exists: ${linkPath}`);
@@ -1021,11 +1105,13 @@ export class PostgresFs implements IFileSystem {
     const srcPrefixed = this.#prefixPath(srcNormalized);
     const destPrefixed = this.#prefixPath(destNormalized);
 
-    const srcRows = await this.#query<FsEntryRow>(
-      `SELECT * FROM ${this.#t('fs_entries')} WHERE path = $1`,
-      [srcPrefixed],
+    const [srcEntry] = rowsOf(
+      entryRow,
+      await this.#query(
+        `SELECT * FROM ${this.#t('fs_entries')} WHERE path = $1`,
+        [srcPrefixed],
+      ),
     );
-    const srcEntry = srcRows[0];
 
     if (!srcEntry) {
       throw new Error(`ENOENT: no such file or directory: ${existingPath}`);
@@ -1035,9 +1121,12 @@ export class PostgresFs implements IFileSystem {
       throw new Error(`link: not supported for directories: ${existingPath}`);
     }
 
-    const existingRows = await this.#query<{ exists: boolean }>(
-      `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = $1) AS exists`,
-      [destPrefixed],
+    const existingRows = rowsOf(
+      existsRow,
+      await this.#query(
+        `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = $1) AS exists`,
+        [destPrefixed],
+      ),
     );
     if (existingRows[0].exists) {
       throw new Error(`EEXIST: file already exists: ${newPath}`);
@@ -1052,15 +1141,15 @@ export class PostgresFs implements IFileSystem {
         [destPrefixed, srcEntry.mode, srcEntry.size, Date.now()],
       );
 
-      const chunksResult = await client.query<{
-        chunk_index: number;
-        data: Buffer;
-      }>(
-        `SELECT chunk_index, data FROM ${this.#t('fs_chunks')} WHERE path = $1`,
-        [srcPrefixed],
+      const chunks = rowsOf(
+        chunkRow,
+        await client.query(
+          `SELECT chunk_index, data FROM ${this.#t('fs_chunks')} WHERE path = $1`,
+          [srcPrefixed],
+        ),
       );
 
-      for (const chunk of chunksResult.rows) {
+      for (const chunk of chunks) {
         await client.query(
           `INSERT INTO ${this.#t('fs_chunks')} (path, chunk_index, data) VALUES ($1, $2, $3)`,
           [destPrefixed, chunk.chunk_index, chunk.data],
@@ -1073,11 +1162,13 @@ export class PostgresFs implements IFileSystem {
     const normalized = this.#normalizePath(linkPath);
     const prefixed = this.#prefixPath(normalized);
 
-    const rows = await this.#query<Pick<FsEntryRow, 'type' | 'symlink_target'>>(
-      `SELECT type, symlink_target FROM ${this.#t('fs_entries')} WHERE path = $1`,
-      [prefixed],
+    const [entry] = rowsOf(
+      linkRow,
+      await this.#query(
+        `SELECT type, symlink_target FROM ${this.#t('fs_entries')} WHERE path = $1`,
+        [prefixed],
+      ),
     );
-    const entry = rows[0];
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${linkPath}`);
@@ -1087,6 +1178,6 @@ export class PostgresFs implements IFileSystem {
       throw new Error(`readlink: not a symbolic link: ${linkPath}`);
     }
 
-    return entry.symlink_target!;
+    return entry.symlink_target;
   }
 }

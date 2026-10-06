@@ -17,17 +17,24 @@ export interface ValidatedPair extends ExtractedPair {
  * optionally executing to attach results.
  */
 export class ValidatedProducer extends PairProducer<ValidatedPair> {
+  readonly #producer: PairProducer;
+  readonly #adapter: Adapter;
+  readonly #options: ValidatedProducerOptions;
+
   /**
    * @param producer - Source producer to validate
    * @param adapter - Database adapter for SQL validation
    * @param options - Validation configuration
    */
   constructor(
-    private producer: PairProducer,
-    private adapter: Adapter,
-    private options: ValidatedProducerOptions = {},
+    producer: PairProducer,
+    adapter: Adapter,
+    options: ValidatedProducerOptions = {},
   ) {
     super();
+    this.#producer = producer;
+    this.#adapter = adapter;
+    this.#options = options;
   }
 
   /**
@@ -35,14 +42,14 @@ export class ValidatedProducer extends PairProducer<ValidatedPair> {
    * @returns Validated pairs with error/rowCount metadata attached
    */
   async *produce(): AsyncGenerator<ValidatedPair[]> {
-    for await (const chunk of this.producer.produce()) {
+    for await (const chunk of this.#producer.produce()) {
       const validated: ValidatedPair[] = [];
 
       for (const pair of chunk) {
-        const error = await this.adapter.validate(pair.sql);
+        const error = await this.#adapter.validate(pair.sql);
 
         if (error) {
-          if (!this.options.removeInvalid) {
+          if (!this.#options.removeInvalid) {
             validated.push({
               ...pair,
               success: false,
@@ -53,9 +60,9 @@ export class ValidatedProducer extends PairProducer<ValidatedPair> {
         }
 
         let rowCount: number | undefined;
-        if (this.options.execute) {
+        if (this.#options.execute) {
           try {
-            const result = await this.adapter.execute(pair.sql);
+            const result = await this.#adapter.execute(pair.sql);
             rowCount = Array.isArray(result) ? result.length : undefined;
           } catch {
             // no op

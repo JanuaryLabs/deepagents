@@ -10,6 +10,7 @@ import {
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
+import z from 'zod';
 
 import { fragment } from '@deepagents/context';
 import { Sqlite as TestSqlite } from '@deepagents/test';
@@ -17,6 +18,13 @@ import { Adapter, SQLValidationError, toSql } from '@deepagents/text2sql';
 import { Sqlite, tables } from '@deepagents/text2sql/sqlite';
 
 const testSqlite = new TestSqlite();
+
+// The SQLScopeError fields a scope test compares; absent fields read as undefined.
+const scopeErrorPayload = z.object({
+  error_type: z.unknown().optional(),
+  parser_dialect: z.unknown().optional(),
+  sql_attempted: z.unknown().optional(),
+});
 
 type MockModelResponse =
   | { result: { sql: string; reasoning: string } }
@@ -96,7 +104,7 @@ class ClickHouseFormatterAdapter extends Adapter {
 
   override validateImpl(): void {}
 
-  override runQuery<Row>(): Row[] {
+  protected override queryRows(): unknown[] {
     return [];
   }
 
@@ -417,7 +425,7 @@ describe('toSql', () => {
         }),
       (error) => {
         assert(SQLValidationError.isInstance(error));
-        assert((error as SQLValidationError).message === 'validation error');
+        assert(error.message === 'validation error');
         return true;
       },
     );
@@ -718,20 +726,17 @@ describe('toSql', () => {
           }),
         (error: unknown) => {
           assert(SQLValidationError.isInstance(error));
-          assert.deepStrictEqual(
-            JSON.parse((error as SQLValidationError).message),
-            {
-              error:
-                'SQL scope analysis failed before validation/execution: SQL response was fenced markdown, not executable SQL.',
-              error_type: 'SQL_SCOPE_PARSE_ERROR',
-              suggestion:
-                'Rewrite the query into simpler SQL that can be analyzed safely, or extend parser coverage for this dialect feature.',
-              sql_attempted: input,
-              parser_dialect: 'sqlite',
-              parser_error:
-                'SQL response was fenced markdown, not executable SQL.',
-            },
-          );
+          assert.deepStrictEqual(JSON.parse(error.message), {
+            error:
+              'SQL scope analysis failed before validation/execution: SQL response was fenced markdown, not executable SQL.',
+            error_type: 'SQL_SCOPE_PARSE_ERROR',
+            suggestion:
+              'Rewrite the query into simpler SQL that can be analyzed safely, or extend parser coverage for this dialect feature.',
+            sql_attempted: input,
+            parser_dialect: 'sqlite',
+            parser_error:
+              'SQL response was fenced markdown, not executable SQL.',
+          });
           return true;
         },
       );
@@ -755,11 +760,7 @@ describe('toSql', () => {
         }),
       (error: unknown) => {
         assert(SQLValidationError.isInstance(error));
-        const payload = JSON.parse((error as SQLValidationError).message) as {
-          error_type?: unknown;
-          parser_dialect?: unknown;
-          sql_attempted?: unknown;
-        };
+        const payload = scopeErrorPayload.parse(JSON.parse(error.message));
         assert.deepStrictEqual(
           {
             error_type: payload.error_type,
@@ -907,11 +908,7 @@ describe('toSql', () => {
           }),
         (error) => {
           assert(SQLValidationError.isInstance(error));
-          assert(
-            (error as SQLValidationError).message.includes(
-              'Database connection lost',
-            ),
-          );
+          assert(error.message.includes('Database connection lost'));
           return true;
         },
       );

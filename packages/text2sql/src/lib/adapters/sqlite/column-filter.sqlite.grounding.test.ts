@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
+import { z } from 'zod';
 
 import { Sqlite as TestSqlite } from '@deepagents/test';
 import { createGroundingContext } from '@deepagents/text2sql/grounding';
@@ -13,6 +14,27 @@ import {
 } from '@deepagents/text2sql/sqlite';
 
 const testSqlite = new TestSqlite();
+
+const entityColumns = z.object({
+  columns: z.array(
+    z.object({
+      data: z.object({
+        name: z.string(),
+        values: z.array(z.string()).optional(),
+      }),
+    }),
+  ),
+});
+const tableIndexes = z.object({
+  indexes: z
+    .array(z.object({ data: z.object({ name: z.string() }) }))
+    .optional(),
+});
+const fragmentData = z.record(z.string(), z.unknown());
+
+function dataName(data: unknown): string | undefined {
+  return z.object({ name: z.string() }).safeParse(data).data?.name;
+}
 
 describe('Column restriction', () => {
   describe('table column filtering', () => {
@@ -150,10 +172,10 @@ describe('Column restriction', () => {
       const tableFragments = fragments.filter((f) => f.name === 'table');
 
       const usersData = tableFragments.find(
-        (f) => (f.data as { name: string }).name === 'users',
+        (f) => dataName(f.data) === 'users',
       )?.data;
       const postsData = tableFragments.find(
-        (f) => (f.data as { name: string }).name === 'posts',
+        (f) => dataName(f.data) === 'posts',
       )?.data;
 
       assert.deepStrictEqual(usersData, {
@@ -204,11 +226,9 @@ describe('Column restriction', () => {
 
       const fragments = await adapter.introspect();
       const tableFragment = fragments.find((f) => f.name === 'table');
-      const data = tableFragment?.data as {
-        indexes?: { name: string; data: { name: string; columns: string[] } }[];
-      };
+      const data = tableIndexes.parse(tableFragment?.data);
 
-      const indexNames = data?.indexes?.map((idx) => idx.data.name) ?? [];
+      const indexNames = data.indexes?.map((idx) => idx.data.name) ?? [];
 
       assert.ok(
         indexNames.includes('idx_email'),
@@ -317,7 +337,7 @@ describe('Column restriction', () => {
       const fragments = await adapter.introspect();
       const tableNames = fragments
         .filter((f) => f.name === 'table')
-        .map((f) => (f.data as { name: string }).name);
+        .map((f) => dataName(f.data));
 
       assert.deepStrictEqual(tableNames, ['users']);
       assert.strictEqual(
@@ -393,10 +413,9 @@ describe('Column restriction', () => {
       });
 
       const fragments = await adapter.introspect();
-      const data = fragments.find((f) => f.name === 'table')?.data as {
-        indexes?: unknown[];
-        constraints?: unknown[];
-      };
+      const data = fragmentData.parse(
+        fragments.find((f) => f.name === 'table')?.data,
+      );
 
       assert.strictEqual(data.indexes, undefined);
       assert.strictEqual(data.constraints, undefined);
@@ -432,9 +451,7 @@ describe('Column restriction', () => {
 
       const fragments = await adapter.introspect();
       const tableFragment = fragments.find((f) => f.name === 'table');
-      const data = tableFragment?.data as {
-        columns: { name: string; data: { name: string; values?: string[] } }[];
-      };
+      const data = entityColumns.parse(tableFragment?.data);
 
       const colNames = data.columns.map((c) => c.data.name);
       assert.ok(
@@ -471,9 +488,7 @@ describe('Column restriction', () => {
 
       const fragments = await adapter.introspect();
       const viewFragment = fragments.find((f) => f.name === 'view');
-      const data = viewFragment?.data as {
-        columns: { name: string; data: { name: string } }[];
-      };
+      const data = entityColumns.parse(viewFragment?.data);
 
       const colNames = data.columns.map((c) => c.data.name);
       assert.deepStrictEqual(colNames, ['id', 'name']);
@@ -510,7 +525,7 @@ describe('Column restriction', () => {
       const tableFragments = fragments.filter((f) => f.name === 'table');
 
       const authorsData = tableFragments.find(
-        (f) => (f.data as { name: string }).name === 'authors',
+        (f) => dataName(f.data) === 'authors',
       )?.data;
 
       assert.deepStrictEqual(authorsData, {

@@ -29,6 +29,9 @@ export interface SchemaSynthesizerOptions {
  * Iterates through all persona × complexity combinations.
  */
 export class SchemaSynthesizer extends PairProducer {
+  readonly #adapter: Adapter;
+  readonly #options: SchemaSynthesizerOptions;
+
   #complexities: QuestionComplexity[] = [];
   #personas: (Persona | undefined)[] = [];
   #limit: ReturnType<typeof pLimit>;
@@ -37,17 +40,16 @@ export class SchemaSynthesizer extends PairProducer {
    * @param adapter - Database adapter for schema introspection and SQL validation
    * @param options - Synthesis configuration including count, complexity, and concurrency
    */
-  constructor(
-    private adapter: Adapter,
-    private options: SchemaSynthesizerOptions,
-  ) {
+  constructor(adapter: Adapter, options: SchemaSynthesizerOptions) {
     super();
-    this.#complexities = Array.isArray(this.options.complexity)
-      ? this.options.complexity
-      : [this.options.complexity ?? 'moderate'];
+    this.#adapter = adapter;
+    this.#options = options;
+    this.#complexities = Array.isArray(this.#options.complexity)
+      ? this.#options.complexity
+      : [this.#options.complexity ?? 'moderate'];
 
-    this.#personas = this.options.personas ?? [undefined];
-    this.#limit = pLimit(this.options.concurrency ?? 5);
+    this.#personas = this.#options.personas ?? [undefined];
+    this.#limit = pLimit(this.#options.concurrency ?? 5);
   }
 
   /**
@@ -58,9 +60,9 @@ export class SchemaSynthesizer extends PairProducer {
    */
   async *produce(): AsyncGenerator<ExtractedPair[]> {
     // TODO: Update to use fragments and render them
-    // const schemaFragments = await this.adapter.introspect();
+    // const schemaFragments = await this.#adapter.introspect();
     // const introspection = new XmlRenderer().render(schemaFragments);
-    const introspection = '' as any; // Placeholder - synthesis needs to be updated to use fragments
+    const introspection = ''; // Placeholder - synthesis needs to be updated to use fragments
 
     const combinations = this.#personas.flatMap((persona) =>
       this.#complexities.map((complexity) => ({ persona, complexity })),
@@ -94,16 +96,16 @@ export class SchemaSynthesizer extends PairProducer {
       : undefined;
 
     const prompt = personaContext
-      ? `${personaContext}\n\nGenerate ${this.options.count} questions at ${complexity} complexity.`
+      ? `${personaContext}\n\nGenerate ${this.#options.count} questions at ${complexity} complexity.`
       : undefined;
 
     const { questions } = await this.#limit(() =>
       generateQuestions({
         introspection,
         complexity,
-        count: this.options.count,
+        count: this.#options.count,
         prompt,
-        model: this.options.model,
+        model: this.#options.model,
       }),
     );
 
@@ -114,9 +116,9 @@ export class SchemaSynthesizer extends PairProducer {
             // TODO: Update to use schemaFragments instead of introspection string
             return await toSql({
               input: question,
-              adapter: this.adapter,
-              fragments: this.options.teachings ?? [],
-              model: this.options.model,
+              adapter: this.#adapter,
+              fragments: this.#options.teachings ?? [],
+              model: this.#options.model,
             });
           } catch (error) {
             if (UnanswerableSQLError.isInstance(error)) {

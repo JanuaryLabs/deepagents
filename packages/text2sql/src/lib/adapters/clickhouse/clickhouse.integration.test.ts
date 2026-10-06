@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { z } from 'zod';
 
 import { ClickHouse as TestClickHouse } from '@deepagents/test';
 import {
@@ -24,10 +25,38 @@ const PASSWORD = 'deepagents_test';
 const NOT_READONLY_USER = 'deepagents_not_readonly';
 const NOT_READONLY_PASSWORD = 'deepagents_not_readonly';
 
-type ClickHouseJsonResult<Row> = {
-  data: Row[];
-  exception?: string;
-};
+/** ClickHouse's HTTP JSON format: rows under `data`, a mid-stream error under `exception`. */
+const clickHouseJsonResult = z.object({
+  data: z.array(z.unknown()),
+  exception: z.string().optional(),
+});
+
+// Fragment data as the text2sql schema fragments build it.
+const namedData = z.object({ name: z.string() });
+const childFragment = z.object({
+  name: z.string(),
+  data: z.record(z.string(), z.unknown()),
+});
+const dialectInfoData = z.object({
+  dialect: z.string(),
+  version: z.string().optional(),
+  database: z.string().optional(),
+});
+const tableData = z.object({
+  name: z.string(),
+  rowCount: z.number().optional(),
+  sizeHint: z.string().optional(),
+  columns: z.array(childFragment),
+  indexes: z.array(childFragment).optional(),
+});
+const viewData = z.object({
+  name: z.string(),
+  definition: z.string().optional(),
+});
+
+function dataName(data: unknown): string | undefined {
+  return namedData.safeParse(data).data?.name;
+}
 
 // Immutable SQL only; each test seeds a fresh, independently owned server.
 const SCHEMA_SQL = `
@@ -118,8 +147,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           if (!response.ok) {
             throw new Error(await response.text());
           }
-          const result =
-            (await response.json()) as ClickHouseJsonResult<unknown>;
+          const result = clickHouseJsonResult.parse(await response.json());
           if (result.exception) throw new Error(result.exception);
           return result;
         };
@@ -167,8 +195,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           if (!response.ok) {
             throw new Error(await response.text());
           }
-          const result =
-            (await response.json()) as ClickHouseJsonResult<unknown>;
+          const result = clickHouseJsonResult.parse(await response.json());
           if (result.exception) throw new Error(result.exception);
           return result;
         };
@@ -194,27 +221,26 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
         const users = fragments.find(
           (fragment) =>
             fragment.name === 'table' &&
-            (fragment.data as any)?.name === `${DATABASE}.users`,
+            dataName(fragment.data) === `${DATABASE}.users`,
         );
         const activeUsers = fragments.find(
           (fragment) =>
             fragment.name === 'view' &&
-            (fragment.data as any)?.name === `${DATABASE}.active_users`,
+            dataName(fragment.data) === `${DATABASE}.active_users`,
         );
-        const dialectData = dialect?.data as any;
-        const usersData = users?.data as any;
-        const activeUsersData = activeUsers?.data as any;
+        const dialectData = dialectInfoData.parse(dialect?.data);
+        const usersData = tableData.parse(users?.data);
+        const activeUsersData = viewData.parse(activeUsers?.data);
 
-        assert.equal(dialectData?.dialect, 'clickhouse');
-        assert.match(String(dialectData?.version), /^\d+\.\d+\./);
-        assert.equal(dialectData?.database, DATABASE);
-        assert.equal(usersData?.rowCount, 2);
-        assert.equal(usersData?.sizeHint, 'tiny');
+        assert.equal(dialectData.dialect, 'clickhouse');
+        assert.match(String(dialectData.version), /^\d+\.\d+\./);
+        assert.equal(dialectData.database, DATABASE);
+        assert.equal(usersData.rowCount, 2);
+        assert.equal(usersData.sizeHint, 'tiny');
 
-        const columns = usersData?.columns as
-          Array<{ name: string; data: Record<string, unknown> }> | undefined;
+        const columns = usersData.columns;
         assert.deepEqual(
-          columns?.find((column) => column.data.name === 'id')?.data,
+          columns.find((column) => column.data.name === 'id')?.data,
           {
             name: 'id',
             type: 'UInt64',
@@ -224,7 +250,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           },
         );
         assert.deepEqual(
-          columns?.find((column) => column.data.name === 'created_at')?.data,
+          columns.find((column) => column.data.name === 'created_at')?.data,
           {
             name: 'created_at',
             type: 'DateTime',
@@ -233,14 +259,12 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           },
         );
         assert.deepEqual(
-          columns?.find((column) => column.data.name === 'nickname')?.data,
+          columns.find((column) => column.data.name === 'nickname')?.data,
           { name: 'nickname', type: 'Nullable(String)' },
         );
 
-        const tableIndexes = usersData?.indexes as
-          Array<{ name: string; data: Record<string, unknown> }> | undefined;
         assert.deepEqual(
-          tableIndexes?.map((index) => index.data),
+          usersData.indexes?.map((index) => index.data),
           [
             { name: 'PRIMARY_KEY', columns: ['id'], type: 'PRIMARY_KEY' },
             {
@@ -250,7 +274,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
             },
           ],
         );
-        assert.match(String(activeUsersData?.definition), /^CREATE VIEW/);
+        assert.match(String(activeUsersData.definition), /^CREATE VIEW/);
       } finally {
         await container.cleanup();
       }
@@ -281,8 +305,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           if (!response.ok) {
             throw new Error(await response.text());
           }
-          const result =
-            (await response.json()) as ClickHouseJsonResult<unknown>;
+          const result = clickHouseJsonResult.parse(await response.json());
           if (result.exception) throw new Error(result.exception);
           return result;
         };
@@ -351,8 +374,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           if (!response.ok) {
             throw new Error(await response.text());
           }
-          const result =
-            (await response.json()) as ClickHouseJsonResult<unknown>;
+          const result = clickHouseJsonResult.parse(await response.json());
           if (result.exception) throw new Error(result.exception);
           return result;
         };
@@ -398,8 +420,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           queries.push(sql);
           const response = await fetch(endpoint, { method: 'POST', body: sql });
           if (!response.ok) throw new Error(await response.text());
-          const result =
-            (await response.json()) as ClickHouseJsonResult<unknown>;
+          const result = clickHouseJsonResult.parse(await response.json());
           if (result.exception) throw new Error(result.exception);
           return result;
         };
@@ -462,8 +483,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           if (!response.ok) {
             throw new Error(await response.text());
           }
-          const result =
-            (await response.json()) as ClickHouseJsonResult<unknown>;
+          const result = clickHouseJsonResult.parse(await response.json());
           if (result.exception) throw new Error(result.exception);
           return result;
         };
@@ -529,8 +549,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           if (!response.ok) {
             throw new Error(await response.text());
           }
-          const result =
-            (await response.json()) as ClickHouseJsonResult<unknown>;
+          const result = clickHouseJsonResult.parse(await response.json());
           if (result.exception) throw new Error(result.exception);
           return result;
         };
@@ -591,8 +610,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           if (!response.ok) {
             throw new Error(await response.text());
           }
-          const result =
-            (await response.json()) as ClickHouseJsonResult<unknown>;
+          const result = clickHouseJsonResult.parse(await response.json());
           if (result.exception) throw new Error(result.exception);
           return result;
         };
@@ -655,8 +673,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           if (!response.ok) {
             throw new Error(await response.text());
           }
-          const result =
-            (await response.json()) as ClickHouseJsonResult<unknown>;
+          const result = clickHouseJsonResult.parse(await response.json());
           if (result.exception) throw new Error(result.exception);
           return result;
         };
@@ -712,8 +729,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           if (!response.ok) {
             throw new Error(await response.text());
           }
-          const result =
-            (await response.json()) as ClickHouseJsonResult<unknown>;
+          const result = clickHouseJsonResult.parse(await response.json());
           if (result.exception) throw new Error(result.exception);
           return result;
         };
@@ -771,8 +787,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           if (!response.ok) {
             throw new Error(await response.text());
           }
-          const result =
-            (await response.json()) as ClickHouseJsonResult<unknown>;
+          const result = clickHouseJsonResult.parse(await response.json());
           if (result.exception) throw new Error(result.exception);
           return result;
         };
@@ -824,8 +839,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           if (!response.ok) {
             throw new Error(await response.text());
           }
-          const result =
-            (await response.json()) as ClickHouseJsonResult<unknown>;
+          const result = clickHouseJsonResult.parse(await response.json());
           if (result.exception) throw new Error(result.exception);
           return result;
         };
@@ -882,8 +896,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           if (!response.ok) {
             throw new Error(await response.text());
           }
-          const result =
-            (await response.json()) as ClickHouseJsonResult<unknown>;
+          const result = clickHouseJsonResult.parse(await response.json());
           if (result.exception) throw new Error(result.exception);
           return result;
         };
@@ -935,8 +948,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           if (!response.ok) {
             throw new Error(await response.text());
           }
-          const result =
-            (await response.json()) as ClickHouseJsonResult<unknown>;
+          const result = clickHouseJsonResult.parse(await response.json());
           if (result.exception) throw new Error(result.exception);
           return result;
         };
@@ -986,8 +998,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           if (!response.ok) {
             throw new Error(await response.text());
           }
-          const result =
-            (await response.json()) as ClickHouseJsonResult<unknown>;
+          const result = clickHouseJsonResult.parse(await response.json());
           if (result.exception) throw new Error(result.exception);
           return result;
         };
@@ -1036,8 +1047,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           if (!response.ok) {
             throw new Error(await response.text());
           }
-          const result =
-            (await response.json()) as ClickHouseJsonResult<unknown>;
+          const result = clickHouseJsonResult.parse(await response.json());
           if (result.exception) throw new Error(result.exception);
           return result;
         };
@@ -1090,8 +1100,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           if (!response.ok) {
             throw new Error(await response.text());
           }
-          const result =
-            (await response.json()) as ClickHouseJsonResult<unknown>;
+          const result = clickHouseJsonResult.parse(await response.json());
           if (result.exception) throw new Error(result.exception);
           return result;
         };
@@ -1141,8 +1150,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           if (!response.ok) {
             throw new Error(await response.text());
           }
-          const result =
-            (await response.json()) as ClickHouseJsonResult<unknown>;
+          const result = clickHouseJsonResult.parse(await response.json());
           if (result.exception) throw new Error(result.exception);
           return result;
         };

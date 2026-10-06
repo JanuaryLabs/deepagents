@@ -8,6 +8,7 @@ import {
   CommandError,
   type ExecutionContext,
   type SqlCommand,
+  cliOptions,
   errorMessage,
   renderCommandError,
 } from './command.ts';
@@ -71,10 +72,7 @@ function registerCommand(cli: CAC, command: SqlCommand): void {
   }
 
   cliCommand.action(async (...callArgs: unknown[]) => {
-    const options = (callArgs[callArgs.length - 1] ?? {}) as Record<
-      string,
-      unknown
-    >;
+    const options = cliOptions.parse(callArgs.at(-1));
     const positional = callArgs.slice(0, -1);
     return runCommand(command, positional, options);
   });

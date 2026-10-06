@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import type { ContextFragment, FragmentData } from '@deepagents/context';
 
 import type { Filter } from '../adapter.ts';
@@ -11,6 +13,24 @@ import type {
 } from './types.ts';
 
 type StandardPropertyType = Exclude<PostHogPropertyDefinitionType, 'group'>;
+
+// Definitions as PostHog's event_definitions and property_definitions
+// endpoints list them. Only the members this grounding reads are checked.
+
+const postHogEventDefinition = z.object({
+  name: z.string().min(1),
+  description: z.string().nullish(),
+  tags: z.array(z.string()).nullish(),
+  verified: z.boolean().nullish(),
+});
+
+const postHogPropertyDefinition = z.object({
+  name: z.string().min(1),
+  description: z.string().nullish(),
+  property_type: z.string().nullish(),
+  is_numerical: z.boolean().nullish(),
+  verified: z.boolean().nullish(),
+});
 
 export interface PostHogDefinitionsGroundingConfig {
   events?: Filter;
@@ -91,10 +111,7 @@ export class PostHogDefinitionsGrounding extends AbstractGrounding {
   }
 }
 
-function readEvents(
-  values: PostHogEventDefinition[],
-  filter?: Filter,
-): FragmentData[] {
+function readEvents(values: unknown[], filter?: Filter): FragmentData[] {
   return values
     .map(validateEvent)
     .filter((event) => matchesFilter(event.name, filter))
@@ -109,10 +126,7 @@ function readEvents(
     );
 }
 
-function readProperties(
-  values: PostHogPropertyDefinition[],
-  filter?: Filter,
-): FragmentData[] {
+function readProperties(values: unknown[], filter?: Filter): FragmentData[] {
   return values
     .map(validateProperty)
     .filter((property) => matchesFilter(property.name, filter))
@@ -128,33 +142,20 @@ function readProperties(
     );
 }
 
-function validateEvent(value: PostHogEventDefinition): PostHogEventDefinition {
-  if (
-    !isRecord(value) ||
-    !readNonEmptyString(value.name) ||
-    !isOptionalString(value.description) ||
-    !isOptionalBoolean(value.verified) ||
-    !isOptionalStringArray(value.tags)
-  ) {
+function validateEvent(value: unknown): PostHogEventDefinition {
+  const event = postHogEventDefinition.safeParse(value);
+  if (!event.success) {
     throw new Error('PostHog returned a malformed event definition.');
   }
-  return value;
+  return event.data;
 }
 
-function validateProperty(
-  value: PostHogPropertyDefinition,
-): PostHogPropertyDefinition {
-  if (
-    !isRecord(value) ||
-    !readNonEmptyString(value.name) ||
-    !isOptionalString(value.description) ||
-    !isOptionalString(value.property_type) ||
-    !isOptionalBoolean(value.is_numerical) ||
-    !isOptionalBoolean(value.verified)
-  ) {
+function validateProperty(value: unknown): PostHogPropertyDefinition {
+  const property = postHogPropertyDefinition.safeParse(value);
+  if (!property.success) {
     throw new Error('PostHog returned a malformed property definition.');
   }
-  return value;
+  return property.data;
 }
 
 function validatePropertyTypes(values: StandardPropertyType[]): void {
@@ -178,30 +179,8 @@ function compact(
   value: Record<string, FragmentData | undefined>,
 ): Record<string, FragmentData> {
   return Object.fromEntries(
-    Object.entries(value).filter((entry) => entry[1] !== undefined),
-  ) as Record<string, FragmentData>;
-}
-
-function isOptionalString(value: unknown): boolean {
-  return value === undefined || value === null || typeof value === 'string';
-}
-
-function isOptionalBoolean(value: unknown): boolean {
-  return value === undefined || value === null || typeof value === 'boolean';
-}
-
-function isOptionalStringArray(value: unknown): boolean {
-  return (
-    value === undefined ||
-    value === null ||
-    (Array.isArray(value) && value.every((item) => typeof item === 'string'))
+    Object.entries(value).filter(
+      (entry): entry is [string, FragmentData] => entry[1] !== undefined,
+    ),
   );
-}
-
-function readNonEmptyString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -17,15 +17,20 @@ export interface DeduplicatedProducerOptions {
  * exact match or semantic similarity.
  */
 export class DeduplicatedProducer extends PairProducer {
+  readonly #producer: PairProducer;
+  readonly #options: DeduplicatedProducerOptions;
+
   /**
    * @param producer - Source producer to deduplicate
    * @param options - Deduplication configuration
    */
   constructor(
-    private producer: PairProducer,
-    private options: DeduplicatedProducerOptions = {},
+    producer: PairProducer,
+    options: DeduplicatedProducerOptions = {},
   ) {
     super();
+    this.#producer = producer;
+    this.#options = options;
   }
 
   /**
@@ -33,10 +38,10 @@ export class DeduplicatedProducer extends PairProducer {
    * @returns Unique pairs after deduplication
    */
   async *produce(): AsyncGenerator<ExtractedPair[]> {
-    const { strategy = 'exact' } = this.options;
+    const { strategy = 'exact' } = this.#options;
     const seen = new Set<string>();
 
-    for await (const chunk of this.producer.produce()) {
+    for await (const chunk of this.#producer.produce()) {
       const unique: ExtractedPair[] = [];
 
       for (const pair of chunk) {
@@ -68,9 +73,9 @@ export class DeduplicatedProducer extends PairProducer {
 
   private normalizeSQL(sql: string): string {
     try {
-      const ast = parser.astify(sql, { database: this.options.dialect });
+      const ast = parser.astify(sql, { database: this.#options.dialect });
       return parser
-        .sqlify(ast, { database: this.options.dialect })
+        .sqlify(ast, { database: this.#options.dialect })
         .toLowerCase();
     } catch {
       return sql.toLowerCase().replace(/\s+/g, ' ').trim();

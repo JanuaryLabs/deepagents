@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import type {
   AdapterInfo,
   ColumnStats,
@@ -31,6 +33,7 @@ import {
   RowCountGrounding,
   type RowCountGroundingConfig,
 } from '../groundings/row-count.grounding.ts';
+import { numericValue, textValueRow } from '../groundings/rows.ts';
 import {
   TableGrounding,
   type TableGroundingConfig,
@@ -43,25 +46,83 @@ import {
 import { formatDuckDBIdentifierPath } from './duckdb-identifiers.ts';
 import type { DuckDB } from './duckdb.ts';
 
-type TableNameRow = {
-  database_name: unknown;
-  schema_name: unknown;
-  table_name: unknown;
-};
+// Rows of DuckDB's catalog functions as the documented reader,
+// getRowObjectsJson(), returns them: VARCHAR is a string, VARCHAR[] an array
+// of strings, BOOLEAN a boolean, DOUBLE a number, and BIGINT a decimal string
+// (a bigint under getRowObjectsJS()).
 
-type ColumnRow = {
-  column_name: unknown;
-  data_type: unknown;
-};
+const tableNameRow = z.object({
+  database_name: z.string(),
+  schema_name: z.string(),
+  table_name: z.string(),
+});
 
-type ConstraintRow = {
-  constraint_name: unknown;
-  constraint_type: unknown;
-  expression: unknown;
-  constraint_column_names: unknown;
-  referenced_table: unknown;
-  referenced_column_names: unknown;
-};
+const viewNameRow = z.object({
+  database_name: z.string(),
+  schema_name: z.string(),
+  view_name: z.string(),
+});
+
+const columnRow = z.object({ column_name: z.string(), data_type: z.string() });
+
+const columnNameRow = z.object({ column_name: z.string() });
+
+/** duckdb_columns() filtered to columns that have a default. */
+const columnDefaultRow = z.object({
+  column_name: z.string(),
+  column_default: z.string(),
+});
+
+const infoRow = z.object({
+  version: z.string(),
+  catalog: z.string(),
+  schema: z.string(),
+});
+
+/** duckdb_views().sql: the CREATE VIEW statement. */
+const viewSqlRow = z.object({ sql: z.string().nullable() });
+
+/**
+ * duckdb_constraints(). `expression` is set for CHECK only, `referenced_table`
+ * for FOREIGN KEY only; `referenced_column_names` is empty for every other type.
+ */
+const constraintRow = z.object({
+  constraint_name: z.string(),
+  constraint_type: z.string(),
+  expression: z.string().nullable(),
+  constraint_column_names: z.array(z.string()),
+  referenced_table: z.string().nullable(),
+  referenced_column_names: z.array(z.string()),
+});
+
+type ConstraintRow = z.output<typeof constraintRow>;
+
+const foreignKeyRow = constraintRow.extend({ table_name: z.string() });
+
+/**
+ * duckdb_indexes(). `expressions` is the indexed expressions cast to
+ * VARCHAR[], or NULL when the cast fails.
+ */
+const indexRow = z.object({
+  index_name: z.string(),
+  expressions: z.array(z.string()).nullable(),
+  is_unique: z.boolean(),
+  is_primary: z.boolean(),
+});
+
+/** duckdb_tables().estimated_size: a BIGINT. */
+const estimatedSizeRow = z.object({ estimated_size: numericValue.nullable() });
+
+/**
+ * MIN/MAX are cast to VARCHAR, so both are strings, or NULL for an empty or
+ * all-NULL column; null_fraction is a DOUBLE and n_distinct a BIGINT count.
+ */
+const columnStatsRow = z.object({
+  min_value: z.string().nullable(),
+  max_value: z.string().nullable(),
+  null_fraction: z.number().nullable(),
+  n_distinct: numericValue,
+});
 
 const CONSTRAINT_TYPES = new Map<string, TableConstraint['type']>([
   ['CHECK', 'CHECK'],
@@ -103,7 +164,8 @@ export class DuckDBTableGrounding extends TableGrounding {
 
   protected override async getAllTableNames(): Promise<string[]> {
     const { catalogs, schemas } = await this.#adapter.scopedNamespaces();
-    const rows = await this.#adapter.runQuery<TableNameRow>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT database_name, schema_name, table_name
       FROM duckdb_tables()
       WHERE NOT internal
@@ -111,51 +173,39 @@ export class DuckDBTableGrounding extends TableGrounding {
         AND database_name IN (${sqlLiterals(this.#adapter, catalogs)})
         AND schema_name IN (${sqlLiterals(this.#adapter, schemas)})
       ORDER BY database_name, schema_name, table_name
-    `);
+    `,
+      tableNameRow,
+    );
 
-    return rows.map((row) => {
-      if (
-        typeof row.database_name !== 'string' ||
-        typeof row.schema_name !== 'string' ||
-        typeof row.table_name !== 'string'
-      ) {
-        throw new Error('DuckDB table catalog returned an unknown row shape.');
-      }
-      return this.#adapter.formatRelationName(
+    return rows.map((row) =>
+      this.#adapter.formatRelationName(
         row.database_name,
         row.schema_name,
         row.table_name,
-      );
-    });
+      ),
+    );
   }
 
   protected override async getTable(tableName: string): Promise<Table> {
     const { catalog, schema, table } =
       await this.#adapter.resolveRelationName(tableName);
-    const rows = await this.#adapter.runQuery<ColumnRow>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT column_name, data_type
       FROM duckdb_columns()
       WHERE database_name = '${this.#adapter.escapeString(catalog)}'
         AND schema_name = '${this.#adapter.escapeString(schema)}'
         AND table_name = '${this.#adapter.escapeString(table)}'
       ORDER BY column_index
-    `);
+    `,
+      columnRow,
+    );
 
     return {
       name: this.#adapter.formatRelationName(catalog, schema, table),
       schema: formatDuckDBIdentifierPath([catalog, schema]),
       rawName: table,
-      columns: rows.map((row) => {
-        if (
-          typeof row.column_name !== 'string' ||
-          typeof row.data_type !== 'string'
-        ) {
-          throw new Error(
-            'DuckDB column catalog returned an unknown row shape.',
-          );
-        }
-        return { name: row.column_name, type: row.data_type };
-      }),
+      columns: rows.map(columnFromRow),
     };
   }
 
@@ -176,7 +226,7 @@ export class DuckDBTableGrounding extends TableGrounding {
       const source = {
         catalog: relation.catalog,
         schema: relation.schema,
-        table: requiredString(row.table_name, 'table_name'),
+        table: row.table_name,
       };
       return relationshipFromRow(this.#adapter, source, row);
     });
@@ -192,23 +242,22 @@ export class DuckDBInfoGrounding extends InfoGrounding {
   }
 
   protected override async collectInfo(): Promise<AdapterInfo> {
-    const rows = await this.#adapter.runQuery<{
-      version: unknown;
-      catalog: unknown;
-      schema: unknown;
-    }>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT
         version() AS version,
         current_database() AS catalog,
         current_schema() AS schema
-    `);
-    const row = rows[0];
+    `,
+      infoRow,
+    );
+    const row = rows.at(0);
     return {
       dialect: 'duckdb',
-      version: typeof row?.version === 'string' ? row.version : undefined,
-      database: typeof row?.catalog === 'string' ? row.catalog : undefined,
+      version: row?.version,
+      database: row?.catalog,
       details: {
-        currentSchema: typeof row?.schema === 'string' ? row.schema : 'unknown',
+        currentSchema: row?.schema ?? 'unknown',
         identifierQualification: 'catalog.schema.table',
         parameterPlaceholders: ['$1', '$name'],
       },
@@ -248,11 +297,8 @@ export class DuckDBViewGrounding extends ViewGrounding {
 
   protected override async getAllViewNames(): Promise<string[]> {
     const { catalogs, schemas } = await this.#adapter.scopedNamespaces();
-    const rows = await this.#adapter.runQuery<{
-      database_name: unknown;
-      schema_name: unknown;
-      view_name: unknown;
-    }>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT database_name, schema_name, view_name
       FROM duckdb_views()
       WHERE NOT internal
@@ -260,12 +306,14 @@ export class DuckDBViewGrounding extends ViewGrounding {
         AND database_name IN (${sqlLiterals(this.#adapter, catalogs)})
         AND schema_name IN (${sqlLiterals(this.#adapter, schemas)})
       ORDER BY database_name, schema_name, view_name
-    `);
+    `,
+      viewNameRow,
+    );
     return rows.map((row) =>
       this.#adapter.formatRelationName(
-        requiredString(row.database_name, 'database_name'),
-        requiredString(row.schema_name, 'schema_name'),
-        requiredString(row.view_name, 'view_name'),
+        row.database_name,
+        row.schema_name,
+        row.view_name,
       ),
     );
   }
@@ -274,20 +322,26 @@ export class DuckDBViewGrounding extends ViewGrounding {
     const relation = await this.#adapter.resolveRelationName(viewName);
     const where = relationPredicate(this.#adapter, relation);
     const [columns, definitions] = await Promise.all([
-      this.#adapter.runQuery<ColumnRow>(`
+      this.#adapter.runQuery(
+        `
         SELECT column_name, data_type
         FROM duckdb_columns()
         WHERE ${where}
         ORDER BY column_index
-      `),
+      `,
+        columnRow,
+      ),
       this.includeDefinition
-        ? this.#adapter.runQuery<{ sql: unknown }>(`
+        ? this.#adapter.runQuery(
+            `
             SELECT sql
             FROM duckdb_views()
             WHERE database_name = '${this.#adapter.escapeString(relation.catalog)}'
               AND schema_name = '${this.#adapter.escapeString(relation.schema)}'
               AND view_name = '${this.#adapter.escapeString(relation.table)}'
-          `)
+          `,
+            viewSqlRow,
+          )
         : Promise.resolve([]),
     ]);
     return {
@@ -298,10 +352,7 @@ export class DuckDBViewGrounding extends ViewGrounding {
       ),
       schema: formatDuckDBIdentifierPath([relation.catalog, relation.schema]),
       rawName: relation.table,
-      definition:
-        typeof definitions[0]?.sql === 'string'
-          ? definitions[0].sql
-          : undefined,
+      definition: definitions.at(0)?.sql ?? undefined,
       columns: columns.map(columnFromRow),
     };
   }
@@ -320,7 +371,8 @@ export class DuckDBConstraintGrounding extends ConstraintGrounding {
   ): Promise<TableConstraint[]> {
     const relation = await this.#adapter.resolveRelationName(tableName);
     const [rows, columns] = await Promise.all([
-      this.#adapter.runQuery<ConstraintRow>(`
+      this.#adapter.runQuery(
+        `
         SELECT
           constraint_name,
           constraint_type,
@@ -331,34 +383,31 @@ export class DuckDBConstraintGrounding extends ConstraintGrounding {
         FROM duckdb_constraints()
         WHERE ${relationPredicate(this.#adapter, relation)}
         ORDER BY constraint_index
-      `),
-      this.#adapter.runQuery<{
-        column_name: unknown;
-        column_default: unknown;
-      }>(`
+      `,
+        constraintRow,
+      ),
+      this.#adapter.runQuery(
+        `
         SELECT column_name, column_default
         FROM duckdb_columns()
         WHERE ${relationPredicate(this.#adapter, relation)}
           AND column_default IS NOT NULL
         ORDER BY column_index
-      `),
+      `,
+        columnDefaultRow,
+      ),
     ]);
 
     const constraints = rows.map((row) =>
       constraintFromRow(this.#adapter, relation, row),
     );
     for (const column of columns) {
-      if (
-        typeof column.column_name === 'string' &&
-        typeof column.column_default === 'string'
-      ) {
-        constraints.push({
-          name: `${relation.table}_${column.column_name}_default`,
-          type: 'DEFAULT',
-          columns: [column.column_name],
-          defaultValue: column.column_default,
-        });
-      }
+      constraints.push({
+        name: `${relation.table}_${column.column_name}_default`,
+        type: 'DEFAULT',
+        columns: [column.column_name],
+        defaultValue: column.column_default,
+      });
     }
     return constraints;
   }
@@ -377,12 +426,8 @@ export class DuckDBIndexesGrounding extends IndexesGrounding {
   ): Promise<TableIndex[]> {
     const relation = await this.#adapter.resolveRelationName(tableName);
     const [rows, columnRows] = await Promise.all([
-      this.#adapter.runQuery<{
-        index_name: unknown;
-        expressions: unknown;
-        is_unique: unknown;
-        is_primary: unknown;
-      }>(`
+      this.#adapter.runQuery(
+        `
         SELECT
           index_name,
           TRY_CAST(expressions AS VARCHAR[]) AS expressions,
@@ -391,26 +436,23 @@ export class DuckDBIndexesGrounding extends IndexesGrounding {
         FROM duckdb_indexes()
         WHERE ${relationPredicate(this.#adapter, relation)}
         ORDER BY index_name
-      `),
-      this.#adapter.runQuery<{ column_name: unknown }>(`
+      `,
+        indexRow,
+      ),
+      this.#adapter.runQuery(
+        `
         SELECT column_name
         FROM duckdb_columns()
         WHERE ${relationPredicate(this.#adapter, relation)}
         ORDER BY column_index
-      `),
+      `,
+        columnNameRow,
+      ),
     ]);
-    const tableColumns = columnRows.map((row) =>
-      requiredString(row.column_name, 'column_name'),
-    );
+    const tableColumns = columnRows.map((row) => row.column_name);
 
     return rows.flatMap((row): TableIndex[] => {
-      if (typeof row.index_name !== 'string') {
-        throw new Error('DuckDB index catalog returned an unknown row shape.');
-      }
-      if (
-        !Array.isArray(row.expressions) ||
-        row.expressions.some((expression) => typeof expression !== 'string')
-      ) {
+      if (row.expressions === null) {
         return [];
       }
       const columns = row.expressions.map((expression) =>
@@ -426,8 +468,8 @@ export class DuckDBIndexesGrounding extends IndexesGrounding {
             {
               name: row.index_name,
               columns,
-              unique: row.is_unique === true,
-              type: row.is_primary === true ? 'PRIMARY' : undefined,
+              unique: row.is_unique,
+              type: row.is_primary ? 'PRIMARY' : undefined,
             },
           ]
         : [];
@@ -447,12 +489,15 @@ export class DuckDBRowCountGrounding extends RowCountGrounding {
     tableName: string,
   ): Promise<number | undefined> {
     const relation = await this.#adapter.resolveRelationName(tableName);
-    const rows = await this.#adapter.runQuery<{ estimated_size: unknown }>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT estimated_size
       FROM duckdb_tables()
       WHERE ${relationPredicate(this.#adapter, relation)}
-    `);
-    return this.#adapter.toNumber(rows[0]?.estimated_size);
+    `,
+      estimatedSizeRow,
+    );
+    return this.#adapter.toNumber(rows.at(0)?.estimated_size);
   }
 }
 
@@ -475,12 +520,8 @@ export class DuckDBColumnStatsGrounding extends ColumnStatsGrounding {
     }
     const relation = this.#adapter.quoteRelationName(tableName);
     const identifier = this.#adapter.quoteIdentifier(column.name);
-    const rows = await this.#adapter.runQuery<{
-      min_value: unknown;
-      max_value: unknown;
-      null_fraction: unknown;
-      n_distinct: unknown;
-    }>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT
         CAST(MIN(${identifier}) AS VARCHAR) AS min_value,
         CAST(MAX(${identifier}) AS VARCHAR) AS max_value,
@@ -490,12 +531,14 @@ export class DuckDBColumnStatsGrounding extends ColumnStatsGrounding {
         END AS null_fraction,
         COUNT(DISTINCT ${identifier}) AS n_distinct
       FROM ${relation}
-    `);
-    const row = rows[0];
+    `,
+      columnStatsRow,
+    );
+    const row = rows.at(0);
     if (!row) return undefined;
     return {
-      min: typeof row.min_value === 'string' ? row.min_value : undefined,
-      max: typeof row.max_value === 'string' ? row.max_value : undefined,
+      min: row.min_value ?? undefined,
+      max: row.max_value ?? undefined,
       nullFraction: this.#adapter.toNumber(row.null_fraction),
       nDistinct: this.#adapter.toNumber(row.n_distinct),
     };
@@ -526,18 +569,20 @@ export class DuckDBColumnValuesGrounding extends ColumnValuesGrounding {
     }
     const relation = this.#adapter.quoteRelationName(tableName);
     const identifier = this.#adapter.quoteIdentifier(column.name);
-    const rows = await this.#adapter.runQuery<{ value: unknown }>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT DISTINCT CAST(${identifier} AS VARCHAR) AS value
       FROM ${relation}
       WHERE ${identifier} IS NOT NULL
       ORDER BY value
       LIMIT ${this.lowCardinalityLimit + 1}
-    `);
+    `,
+      textValueRow,
+    );
     if (rows.length === 0 || rows.length > this.lowCardinalityLimit) {
       return undefined;
     }
-    if (rows.some((row) => typeof row.value !== 'string')) return undefined;
-    return rows.map((row) => row.value as string);
+    return rows.map((row) => row.value);
   }
 }
 
@@ -554,23 +599,24 @@ function relationPredicate(
     AND table_name = '${adapter.escapeString(relation.table)}'`;
 }
 
-function columnFromRow(row: ColumnRow): { name: string; type: string } {
-  return {
-    name: requiredString(row.column_name, 'column_name'),
-    type: requiredString(row.data_type, 'data_type'),
-  };
+function columnFromRow(row: z.output<typeof columnRow>): {
+  name: string;
+  type: string;
+} {
+  return { name: row.column_name, type: row.data_type };
 }
 
 async function foreignKeys(
   adapter: DuckDB,
   relation: { catalog: string; schema: string; table: string },
   direction: 'outgoing' | 'incoming',
-): Promise<Array<ConstraintRow & { table_name: unknown }>> {
+): Promise<z.output<typeof foreignKeyRow>[]> {
   const predicate =
     direction === 'outgoing'
       ? `table_name = '${adapter.escapeString(relation.table)}'`
       : `referenced_table = '${adapter.escapeString(relation.table)}'`;
-  return adapter.runQuery(`
+  return adapter.runQuery(
+    `
     SELECT
       table_name,
       constraint_name,
@@ -585,7 +631,9 @@ async function foreignKeys(
       AND constraint_type = 'FOREIGN KEY'
       AND ${predicate}
     ORDER BY table_name, constraint_index
-  `);
+  `,
+    foreignKeyRow,
+  );
 }
 
 function relationshipFromRow(
@@ -599,13 +647,13 @@ function relationshipFromRow(
       source.schema,
       source.table,
     ),
-    from: stringArray(row.constraint_column_names, 'constraint_column_names'),
+    from: row.constraint_column_names,
     referenced_table: adapter.formatRelationName(
       source.catalog,
       source.schema,
       requiredString(row.referenced_table, 'referenced_table'),
     ),
-    to: stringArray(row.referenced_column_names, 'referenced_column_names'),
+    to: row.referenced_column_names,
   };
 }
 
@@ -614,9 +662,10 @@ function constraintFromRow(
   relation: { catalog: string; schema: string; table: string },
   row: ConstraintRow,
 ): TableConstraint {
-  const type = requiredString(row.constraint_type, 'constraint_type');
-  const mapped = CONSTRAINT_TYPES.get(type);
-  if (!mapped) throw new Error(`Unknown DuckDB constraint type: ${type}`);
+  const mapped = CONSTRAINT_TYPES.get(row.constraint_type);
+  if (!mapped) {
+    throw new Error(`Unknown DuckDB constraint type: ${row.constraint_type}`);
+  }
   const referenced =
     mapped === 'FOREIGN_KEY'
       ? adapter.formatRelationName(
@@ -626,21 +675,16 @@ function constraintFromRow(
         )
       : undefined;
   return {
-    name: requiredString(row.constraint_name, 'constraint_name'),
+    name: row.constraint_name,
     type: mapped,
-    columns: stringArray(
-      row.constraint_column_names,
-      'constraint_column_names',
-    ),
+    columns: row.constraint_column_names,
     definition:
-      mapped === 'CHECK' && typeof row.expression === 'string'
+      mapped === 'CHECK' && row.expression !== null
         ? row.expression
         : undefined,
     referencedTable: referenced,
     referencedColumns:
-      mapped === 'FOREIGN_KEY'
-        ? stringArray(row.referenced_column_names, 'referenced_column_names')
-        : undefined,
+      mapped === 'FOREIGN_KEY' ? row.referenced_column_names : undefined,
   };
 }
 
@@ -653,16 +697,9 @@ function parseEnumLabels(type: string): string[] | undefined {
   return labels.length > 0 ? labels : undefined;
 }
 
-function requiredString(value: unknown, field: string): string {
-  if (typeof value !== 'string') {
+function requiredString(value: string | null, field: string): string {
+  if (value === null) {
     throw new Error(`DuckDB catalog field ${field} must be a string.`);
   }
   return value;
-}
-
-function stringArray(value: unknown, field: string): string[] {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
-    throw new Error(`DuckDB catalog field ${field} must be a string array.`);
-  }
-  return value as string[];
 }

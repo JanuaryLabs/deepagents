@@ -1,13 +1,15 @@
+import { z } from 'zod';
+
 import type { Adapter } from '../adapter.ts';
 import {
   type Column,
   ColumnValuesGrounding,
   type ColumnValuesGroundingConfig,
 } from '../groundings/column-values.grounding.ts';
+import { distinctValueRow } from '../groundings/rows.ts';
+import { currentDatabaseRow } from './mysql-rows.ts';
 
-type ColumnTypeRow = {
-  COLUMN_TYPE: string | null;
-};
+const columnTypeRow = z.object({ COLUMN_TYPE: z.string().nullable() });
 
 /**
  * MySQL/MariaDB implementation of ColumnValuesGrounding.
@@ -34,13 +36,16 @@ export class MysqlColumnValuesGrounding extends ColumnValuesGrounding {
     const { schema, table } = this.#adapter.parseTableName(tableName);
     const database = schema || (await this.#getCurrentDatabase());
 
-    const rows = await this.#adapter.runQuery<ColumnTypeRow>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT COLUMN_TYPE
       FROM INFORMATION_SCHEMA.COLUMNS
       WHERE TABLE_SCHEMA = '${this.#adapter.escapeString(database)}'
         AND TABLE_NAME = '${this.#adapter.escapeString(table)}'
         AND COLUMN_NAME = '${this.#adapter.escapeString(column.name)}'
-    `);
+    `,
+      columnTypeRow,
+    );
 
     const columnType = rows[0]?.COLUMN_TYPE;
     if (!columnType) return undefined;
@@ -68,12 +73,15 @@ export class MysqlColumnValuesGrounding extends ColumnValuesGrounding {
     const limit = this.lowCardinalityLimit + 1;
 
     try {
-      const rows = await this.#adapter.runQuery<{ value: unknown }>(`
+      const rows = await this.#adapter.runQuery(
+        `
         SELECT DISTINCT ${columnIdentifier} AS value
         FROM ${tableIdentifier}
         WHERE ${columnIdentifier} IS NOT NULL
         LIMIT ${limit}
-      `);
+      `,
+        distinctValueRow,
+      );
 
       if (!rows.length || rows.length > this.lowCardinalityLimit) {
         return undefined;
@@ -138,8 +146,9 @@ export class MysqlColumnValuesGrounding extends ColumnValuesGrounding {
   }
 
   async #getCurrentDatabase(): Promise<string> {
-    const rows = await this.#adapter.runQuery<{ db: string | null }>(
+    const rows = await this.#adapter.runQuery(
       'SELECT DATABASE() AS db',
+      currentDatabaseRow,
     );
     return rows[0]?.db ?? '';
   }

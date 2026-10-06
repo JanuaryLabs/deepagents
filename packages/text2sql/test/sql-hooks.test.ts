@@ -1,6 +1,7 @@
 import { InMemoryFs, defineCommand } from 'just-bash';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import z from 'zod';
 
 import {
   type CommandResult,
@@ -9,9 +10,10 @@ import {
 } from '@deepagents/context';
 import { createSqlCommandHooks } from '@deepagents/text2sql';
 
-interface CapturedSqlInvocation {
-  args: string[];
-}
+// What the stub `sql` command below prints on stdout.
+const capturedSqlInvocation = z.object({ args: z.array(z.string()) });
+
+type CapturedSqlInvocation = z.infer<typeof capturedSqlInvocation>;
 
 type BashCommandResult = CommandResult & {
   meta?: Record<string, unknown>;
@@ -70,11 +72,11 @@ async function executeWithSqlHooks(
   if (isAsyncIterableCommandResult(result)) {
     throw new Error('expected bash command to return a non-streaming result');
   }
-  return result as BashCommandResult;
+  return result;
 }
 
 function parseCapturedInvocation(stdout: string): CapturedSqlInvocation {
-  return JSON.parse(stdout) as CapturedSqlInvocation;
+  return capturedSqlInvocation.parse(JSON.parse(stdout));
 }
 
 describe('createSqlCommandHooks integration', () => {

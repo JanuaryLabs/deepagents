@@ -1,16 +1,26 @@
+import { z } from 'zod';
+
 import type { Adapter, TableIndex } from '../adapter.ts';
 import {
   IndexesGrounding,
   type IndexesGroundingConfig,
 } from '../groundings/indexes.grounding.ts';
+import { numericValue } from '../groundings/rows.ts';
+import { currentDatabaseRow } from './mysql-rows.ts';
 
-type IndexRow = {
-  INDEX_NAME: string | null;
-  COLUMN_NAME: string | null;
-  NON_UNIQUE: number | null;
-  INDEX_TYPE: string | null;
-  SEQ_IN_INDEX: number | null;
-};
+/**
+ * INFORMATION_SCHEMA.STATISTICS. NON_UNIQUE and SEQ_IN_INDEX are INT on MySQL
+ * but BIGINT on MariaDB, so they arrive as numbers, bigints (mariadb
+ * connector) or strings (mysql2 bigNumberStrings, the mysql CLI). COLUMN_NAME
+ * is NULL for a functional key part.
+ */
+const indexRow = z.object({
+  INDEX_NAME: z.string().nullable(),
+  COLUMN_NAME: z.string().nullable(),
+  NON_UNIQUE: numericValue.nullable(),
+  INDEX_TYPE: z.string().nullable(),
+  SEQ_IN_INDEX: numericValue.nullable(),
+});
 
 /**
  * MySQL/MariaDB implementation of IndexesGrounding.
@@ -31,7 +41,8 @@ export class MysqlIndexesGrounding extends IndexesGrounding {
     const { schema, table } = this.#adapter.parseTableName(tableName);
     const database = schema || (await this.#getCurrentDatabase());
 
-    const rows = await this.#adapter.runQuery<IndexRow>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT
         INDEX_NAME,
         COLUMN_NAME,
@@ -42,7 +53,9 @@ export class MysqlIndexesGrounding extends IndexesGrounding {
       WHERE TABLE_SCHEMA = '${this.#adapter.escapeString(database)}'
         AND TABLE_NAME = '${this.#adapter.escapeString(table)}'
       ORDER BY INDEX_NAME, SEQ_IN_INDEX
-    `);
+    `,
+      indexRow,
+    );
 
     const indexMap = new Map<string, TableIndex>();
 
@@ -54,7 +67,7 @@ export class MysqlIndexesGrounding extends IndexesGrounding {
         index = {
           name: row.INDEX_NAME,
           columns: [],
-          unique: row.NON_UNIQUE === 0,
+          unique: this.#adapter.toNumber(row.NON_UNIQUE) === 0,
           type: row.INDEX_TYPE ?? undefined,
         };
         indexMap.set(row.INDEX_NAME, index);
@@ -69,8 +82,9 @@ export class MysqlIndexesGrounding extends IndexesGrounding {
   }
 
   async #getCurrentDatabase(): Promise<string> {
-    const rows = await this.#adapter.runQuery<{ db: string | null }>(
+    const rows = await this.#adapter.runQuery(
       'SELECT DATABASE() AS db',
+      currentDatabaseRow,
     );
     return rows[0]?.db ?? '';
   }

@@ -3,6 +3,7 @@ import {
   InfoGrounding,
   type InfoGroundingConfig,
 } from '../groundings/info.grounding.ts';
+import { databaseRow, versionRow } from '../groundings/rows.ts';
 
 /**
  * SQL Server implementation of InfoGrounding.
@@ -17,10 +18,8 @@ export class SqlServerInfoGrounding extends InfoGrounding {
 
   protected override async collectInfo(): Promise<AdapterInfo> {
     const [versionRows, dbRows] = await Promise.all([
-      this.#adapter.runQuery<{ version: string }>(
-        'SELECT @@VERSION AS version',
-      ),
-      this.#adapter.runQuery<{ db: string }>('SELECT DB_NAME() AS db'),
+      this.#adapter.runQuery('SELECT @@VERSION AS version', versionRow),
+      this.#adapter.runQuery('SELECT DB_NAME() AS db', databaseRow),
     ]);
 
     return {

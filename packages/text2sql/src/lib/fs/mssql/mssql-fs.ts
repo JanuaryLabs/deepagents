@@ -1,4 +1,5 @@
 import type {
+  BufferEncoding,
   CpOptions,
   FileContent,
   FsStat,
@@ -6,10 +7,12 @@ import type {
   MkdirOptions,
   RmOptions,
 } from 'just-bash';
-import type { ConnectionPool, Transaction, config } from 'mssql';
+import type { ConnectionPool, IResult, Transaction, config } from 'mssql';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
+import z from 'zod';
 
+import { bigintColumn, entryType } from '../columns.ts';
 import { mssqlFsDDL } from './ddl.mssql-fs.ts';
 
 interface ReadFileOptions {
@@ -41,21 +44,51 @@ export interface MssqlFsOptions {
   schema?: string;
 }
 
-type EntryType = 'file' | 'directory' | 'symlink';
+// Row shapes as mssql returns them for ddl.mssql-fs.ts: INT as a number,
+// BIGINT as a string (see bigintColumn), NVARCHAR as a string and VARBINARY as
+// a Buffer.
 
-interface FsEntryRow {
-  path: string;
-  type: EntryType;
-  mode: number;
-  size: number;
-  mtime: number;
-  symlinkTarget: string | null;
-  [key: string]: unknown;
-}
+const entryRow = z.object({
+  path: z.string(),
+  type: entryType,
+  mode: z.number(),
+  size: bigintColumn,
+  mtime: bigintColumn,
+  symlinkTarget: z.string().nullable(),
+});
 
-interface ChunkRow {
-  data: Buffer;
-  [key: string]: unknown;
+const typeRow = entryRow.pick({ type: true });
+
+const pathRow = entryRow.pick({ path: true });
+
+const pathTypeRow = entryRow.pick({ path: true, type: true });
+
+// symlink() always stores a target. A file or directory keeps NULL, or the
+// target of the symlink it replaced: writeFile and appendFile change the type
+// of an existing path without clearing it.
+const linkRow = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('symlink'), symlinkTarget: z.string() }),
+  z.object({
+    type: z.enum(['file', 'directory']),
+    symlinkTarget: z.string().nullable(),
+  }),
+]);
+
+// SELECT CASE WHEN EXISTS(...) THEN 1 ELSE 0 END
+const existsRow = z.object({ exists: z.union([z.literal(0), z.literal(1)]) });
+
+const chunkRow = z.object({
+  chunkIndex: z.number(),
+  data: z.instanceof(Buffer),
+});
+
+const dataRow = chunkRow.pick({ data: true });
+
+function rowsOf<Row extends z.ZodType>(
+  row: Row,
+  result: IResult<unknown>,
+): z.output<Row>[] {
+  return z.array(row).parse(result.recordset);
 }
 
 export class MssqlFs implements IFileSystem {
@@ -124,8 +157,11 @@ export class MssqlFs implements IFileSystem {
       }
     }
 
-    const rootSlashExists = await this.#rawQuery<{ exists: number }>(
-      `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = '/') THEN 1 ELSE 0 END as [exists]`,
+    const rootSlashExists = rowsOf(
+      existsRow,
+      await this.#rawQuery(
+        `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = '/') THEN 1 ELSE 0 END as [exists]`,
+      ),
     );
     if (rootSlashExists[0].exists === 0) {
       await this.#rawExec(
@@ -137,9 +173,12 @@ export class MssqlFs implements IFileSystem {
     if (this.#root) {
       await this.#createParentDirs(this.#root);
 
-      const rootExists = await this.#rawQuery<{ exists: number }>(
-        `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
-        [this.#root],
+      const rootExists = rowsOf(
+        existsRow,
+        await this.#rawQuery(
+          `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
+          [this.#root],
+        ),
       );
       if (rootExists[0].exists === 0) {
         await this.#rawExec(
@@ -166,9 +205,12 @@ export class MssqlFs implements IFileSystem {
 
     for (let i = 0; i < segments.length - 1; i++) {
       currentPath = path.posix.join(currentPath, segments[i]);
-      const exists = await this.#rawQuery<{ exists: number }>(
-        `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
-        [currentPath],
+      const exists = rowsOf(
+        existsRow,
+        await this.#rawQuery(
+          `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
+          [currentPath],
+        ),
       );
 
       if (exists[0].exists === 0) {
@@ -180,16 +222,12 @@ export class MssqlFs implements IFileSystem {
     }
   }
 
-  async #rawQuery<T extends Record<string, unknown>>(
-    sql: string,
-    params?: unknown[],
-  ): Promise<T[]> {
+  #rawQuery(sql: string, params?: unknown[]): Promise<IResult<unknown>> {
     const request = this.#pool.request();
     params?.forEach((value, index) => {
       request.input(`p${index}`, value);
     });
-    const result = await request.query(sql);
-    return result.recordset as T[];
+    return request.query(sql);
   }
 
   async #rawExec(sql: string, params?: unknown[]): Promise<number> {
@@ -201,12 +239,9 @@ export class MssqlFs implements IFileSystem {
     return result.rowsAffected[0] ?? 0;
   }
 
-  async #query<T extends Record<string, unknown>>(
-    sql: string,
-    params?: unknown[],
-  ): Promise<T[]> {
+  async #query(sql: string, params?: unknown[]): Promise<IResult<unknown>> {
     this.#ensureInitialized();
-    return this.#rawQuery<T>(sql, params);
+    return this.#rawQuery(sql, params);
   }
 
   async #exec(sql: string, params?: unknown[]): Promise<number> {
@@ -279,10 +314,12 @@ export class MssqlFs implements IFileSystem {
 
     const request = transaction.request();
     request.input('p0', parent);
-    const result = await request.query<{ type: string }>(
-      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+    const [entry] = rowsOf(
+      typeRow,
+      await request.query(
+        `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+      ),
     );
-    const entry = result.recordset[0];
 
     if (!entry) {
       await this.#ensureParentExists(parent, transaction);
@@ -327,20 +364,13 @@ export class MssqlFs implements IFileSystem {
     filePath: string,
     transaction?: Transaction,
   ): Promise<Uint8Array> {
-    let rows: ChunkRow[];
-    if (transaction) {
-      const req = transaction.request();
-      req.input('p0', filePath);
-      const result = await req.query<ChunkRow>(
-        `SELECT data FROM ${this.#t('fs_chunks')} WHERE path = @p0 ORDER BY chunkIndex`,
-      );
-      rows = result.recordset as ChunkRow[];
-    } else {
-      rows = await this.#query<ChunkRow>(
-        `SELECT data FROM ${this.#t('fs_chunks')} WHERE path = @p0 ORDER BY chunkIndex`,
-        [filePath],
-      );
-    }
+    const sql = `SELECT data FROM ${this.#t('fs_chunks')} WHERE path = @p0 ORDER BY chunkIndex`;
+    const rows = rowsOf(
+      dataRow,
+      transaction
+        ? await transaction.request().input('p0', filePath).query(sql)
+        : await this.#query(sql, [filePath]),
+    );
 
     if (rows.length === 0) {
       return new Uint8Array(0);
@@ -363,11 +393,13 @@ export class MssqlFs implements IFileSystem {
       throw new Error(`readFile: circular symlink: ${p}`);
     }
 
-    const rows = await this.#query<Pick<FsEntryRow, 'type' | 'symlinkTarget'>>(
-      `SELECT type, symlinkTarget FROM ${this.#t('fs_entries')} WHERE path = @p0`,
-      [p],
+    const [entry] = rowsOf(
+      linkRow,
+      await this.#query(
+        `SELECT type, symlinkTarget FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+        [p],
+      ),
     );
-    const entry = rows[0];
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${p}`);
@@ -379,17 +411,16 @@ export class MssqlFs implements IFileSystem {
 
     seen.add(p);
     const target = this.#normalizePath(
-      path.posix.resolve(this.#dirname(p), entry.symlinkTarget!),
+      path.posix.resolve(this.#dirname(p), entry.symlinkTarget),
     );
     return this.#resolveSymlink(target, seen);
   }
 
-  #toUint8Array(content: FileContent, encoding?: string): Uint8Array {
+  #toUint8Array(content: FileContent, encoding?: BufferEncoding): Uint8Array {
     if (content instanceof Uint8Array) {
       return content;
     }
-    const enc = (encoding ?? 'utf8') as BufferEncoding;
-    return new Uint8Array(Buffer.from(content, enc));
+    return new Uint8Array(Buffer.from(content, encoding ?? 'utf8'));
   }
 
   async close(): Promise<void> {
@@ -404,17 +435,19 @@ export class MssqlFs implements IFileSystem {
 
   async readFile(
     filePath: string,
-    options?: ReadFileOptions | string,
+    options?: ReadFileOptions | BufferEncoding,
   ): Promise<string> {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
     const resolved = await this.#resolveSymlink(prefixed);
 
-    const rows = await this.#query<Pick<FsEntryRow, 'type'>>(
-      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
-      [resolved],
+    const [entry] = rowsOf(
+      typeRow,
+      await this.#query(
+        `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+        [resolved],
+      ),
     );
-    const entry = rows[0];
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
@@ -426,7 +459,7 @@ export class MssqlFs implements IFileSystem {
     const content = await this.#readChunks(resolved);
     const encoding =
       typeof options === 'string' ? options : (options?.encoding ?? 'utf8');
-    return Buffer.from(content).toString(encoding as BufferEncoding);
+    return Buffer.from(content).toString(encoding);
   }
 
   async readFileBuffer(filePath: string): Promise<Uint8Array> {
@@ -434,11 +467,13 @@ export class MssqlFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
     const resolved = await this.#resolveSymlink(prefixed);
 
-    const rows = await this.#query<Pick<FsEntryRow, 'type'>>(
-      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
-      [resolved],
+    const [entry] = rowsOf(
+      typeRow,
+      await this.#query(
+        `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+        [resolved],
+      ),
     );
-    const entry = rows[0];
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
@@ -453,7 +488,7 @@ export class MssqlFs implements IFileSystem {
   async writeFile(
     filePath: string,
     content: FileContent,
-    options?: WriteFileOptions | string,
+    options?: WriteFileOptions | BufferEncoding,
   ): Promise<void> {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
@@ -486,7 +521,7 @@ export class MssqlFs implements IFileSystem {
   async appendFile(
     filePath: string,
     content: FileContent,
-    options?: WriteFileOptions | string,
+    options?: WriteFileOptions | BufferEncoding,
   ): Promise<void> {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
@@ -498,10 +533,12 @@ export class MssqlFs implements IFileSystem {
 
       const checkReq = transaction.request();
       checkReq.input('p0', prefixed);
-      const result = await checkReq.query<Pick<FsEntryRow, 'type'>>(
-        `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+      const [entry] = rowsOf(
+        typeRow,
+        await checkReq.query(
+          `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+        ),
       );
-      const entry = result.recordset[0];
 
       if (entry && entry.type !== 'file') {
         throw new Error(`appendFile: not a file: ${filePath}`);
@@ -537,9 +574,12 @@ export class MssqlFs implements IFileSystem {
   async exists(filePath: string): Promise<boolean> {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
-    const rows = await this.#query<{ exists: number }>(
-      `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
-      [prefixed],
+    const rows = rowsOf(
+      existsRow,
+      await this.#query(
+        `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
+        [prefixed],
+      ),
     );
     return rows[0].exists === 1;
   }
@@ -549,11 +589,13 @@ export class MssqlFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
     const resolved = await this.#resolveSymlink(prefixed);
 
-    const rows = await this.#query<FsEntryRow>(
-      `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0`,
-      [resolved],
+    const [entry] = rowsOf(
+      entryRow,
+      await this.#query(
+        `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+        [resolved],
+      ),
     );
-    const entry = rows[0];
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
@@ -563,9 +605,9 @@ export class MssqlFs implements IFileSystem {
       isFile: entry.type === 'file',
       isDirectory: entry.type === 'directory',
       isSymbolicLink: false,
-      mode: Number(entry.mode),
-      size: Number(entry.size),
-      mtime: new Date(Number(entry.mtime)),
+      mode: entry.mode,
+      size: entry.size,
+      mtime: new Date(entry.mtime),
     };
   }
 
@@ -573,11 +615,13 @@ export class MssqlFs implements IFileSystem {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
 
-    const rows = await this.#query<FsEntryRow>(
-      `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0`,
-      [prefixed],
+    const [entry] = rowsOf(
+      entryRow,
+      await this.#query(
+        `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+        [prefixed],
+      ),
     );
-    const entry = rows[0];
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
@@ -587,9 +631,9 @@ export class MssqlFs implements IFileSystem {
       isFile: entry.type === 'file',
       isDirectory: entry.type === 'directory',
       isSymbolicLink: entry.type === 'symlink',
-      mode: Number(entry.mode),
-      size: Number(entry.size),
-      mtime: new Date(Number(entry.mtime)),
+      mode: entry.mode,
+      size: entry.size,
+      mtime: new Date(entry.mtime),
     };
   }
 
@@ -597,11 +641,13 @@ export class MssqlFs implements IFileSystem {
     const normalized = this.#normalizePath(dirPath);
     const prefixed = this.#prefixPath(normalized);
 
-    const existingRows = await this.#query<Pick<FsEntryRow, 'type'>>(
-      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
-      [prefixed],
+    const [existing] = rowsOf(
+      typeRow,
+      await this.#query(
+        `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+        [prefixed],
+      ),
     );
-    const existing = existingRows[0];
 
     if (existing) {
       if (options?.recursive) {
@@ -621,10 +667,12 @@ export class MssqlFs implements IFileSystem {
           currentPath = path.posix.join(currentPath, segment);
           const checkReq = transaction.request();
           checkReq.input('p0', currentPath);
-          const result = await checkReq.query<Pick<FsEntryRow, 'type'>>(
-            `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+          const [exists] = rowsOf(
+            typeRow,
+            await checkReq.query(
+              `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+            ),
           );
-          const exists = result.recordset[0];
 
           if (!exists) {
             const insertReq = transaction.request();
@@ -641,10 +689,12 @@ export class MssqlFs implements IFileSystem {
         const parent = this.#dirname(prefixed);
         const parentReq = transaction.request();
         parentReq.input('p0', parent);
-        const parentResult = await parentReq.query<Pick<FsEntryRow, 'type'>>(
-          `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+        const [parentEntry] = rowsOf(
+          typeRow,
+          await parentReq.query(
+            `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+          ),
         );
-        const parentEntry = parentResult.recordset[0];
 
         if (!parentEntry) {
           throw new Error(`mkdir: parent does not exist: ${parent}`);
@@ -668,11 +718,13 @@ export class MssqlFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
     const resolved = await this.#resolveSymlink(prefixed);
 
-    const entryRows = await this.#query<Pick<FsEntryRow, 'type'>>(
-      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
-      [resolved],
+    const [entry] = rowsOf(
+      typeRow,
+      await this.#query(
+        `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+        [resolved],
+      ),
     );
-    const entry = entryRows[0];
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${dirPath}`);
@@ -682,12 +734,15 @@ export class MssqlFs implements IFileSystem {
     }
 
     const prefix = resolved === '/' ? '/' : resolved + '/';
-    const rows = await this.#query<{ path: string }>(
-      `SELECT path FROM ${this.#t('fs_entries')}
+    const rows = rowsOf(
+      pathRow,
+      await this.#query(
+        `SELECT path FROM ${this.#t('fs_entries')}
        WHERE path LIKE @p0 + '%'
          AND path != @p1
          AND path NOT LIKE @p0 + '%/%'`,
-      [prefix, resolved],
+        [prefix, resolved],
+      ),
     );
 
     return rows.map((row) => path.posix.basename(row.path));
@@ -698,11 +753,13 @@ export class MssqlFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
     const resolved = await this.#resolveSymlink(prefixed);
 
-    const entryRows = await this.#query<Pick<FsEntryRow, 'type'>>(
-      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
-      [resolved],
+    const [entry] = rowsOf(
+      typeRow,
+      await this.#query(
+        `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+        [resolved],
+      ),
     );
-    const entry = entryRows[0];
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${dirPath}`);
@@ -712,12 +769,15 @@ export class MssqlFs implements IFileSystem {
     }
 
     const prefix = resolved === '/' ? '/' : resolved + '/';
-    const rows = await this.#query<Pick<FsEntryRow, 'path' | 'type'>>(
-      `SELECT path, type FROM ${this.#t('fs_entries')}
+    const rows = rowsOf(
+      pathTypeRow,
+      await this.#query(
+        `SELECT path, type FROM ${this.#t('fs_entries')}
        WHERE path LIKE @p0 + '%'
          AND path != @p1
          AND path NOT LIKE @p0 + '%/%'`,
-      [prefix, resolved],
+        [prefix, resolved],
+      ),
     );
 
     return rows.map((row) => ({
@@ -732,11 +792,13 @@ export class MssqlFs implements IFileSystem {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
 
-    const rows = await this.#query<Pick<FsEntryRow, 'type'>>(
-      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
-      [prefixed],
+    const [entry] = rowsOf(
+      typeRow,
+      await this.#query(
+        `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+        [prefixed],
+      ),
     );
-    const entry = rows[0];
 
     if (!entry) {
       if (options?.force) {
@@ -749,11 +811,14 @@ export class MssqlFs implements IFileSystem {
       if (entry.type === 'directory') {
         const childrenReq = transaction.request();
         childrenReq.input('p0', prefixed);
-        const childrenResult = await childrenReq.query<{ exists: number }>(
-          `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path LIKE @p0 + '/%') THEN 1 ELSE 0 END as [exists]`,
+        const children = rowsOf(
+          existsRow,
+          await childrenReq.query(
+            `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path LIKE @p0 + '/%') THEN 1 ELSE 0 END as [exists]`,
+          ),
         );
 
-        if (childrenResult.recordset[0].exists === 1 && !options?.recursive) {
+        if (children[0].exists === 1 && !options?.recursive) {
           throw new Error(`ENOTEMPTY: directory not empty: ${filePath}`);
         }
 
@@ -778,11 +843,13 @@ export class MssqlFs implements IFileSystem {
     const srcPrefixed = this.#prefixPath(srcNormalized);
     const destPrefixed = this.#prefixPath(destNormalized);
 
-    const srcRows = await this.#query<FsEntryRow>(
-      `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0`,
-      [srcPrefixed],
+    const [srcEntry] = rowsOf(
+      entryRow,
+      await this.#query(
+        `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+        [srcPrefixed],
+      ),
     );
-    const srcEntry = srcRows[0];
 
     if (!srcEntry) {
       throw new Error(`ENOENT: no such file or directory: ${src}`);
@@ -798,11 +865,14 @@ export class MssqlFs implements IFileSystem {
       if (srcEntry.type === 'directory') {
         const allEntriesReq = transaction.request();
         allEntriesReq.input('p0', srcPrefixed);
-        const allEntriesResult = await allEntriesReq.query<FsEntryRow>(
-          `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0 OR path LIKE @p0 + '/%'`,
+        const allEntries = rowsOf(
+          entryRow,
+          await allEntriesReq.query(
+            `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0 OR path LIKE @p0 + '/%'`,
+          ),
         );
 
-        for (const entry of allEntriesResult.recordset) {
+        for (const entry of allEntries) {
           const relativePath = path.posix.relative(srcPrefixed, entry.path);
           const newPath = path.posix.join(destPrefixed, relativePath);
 
@@ -834,14 +904,14 @@ export class MssqlFs implements IFileSystem {
 
             const chunksReq = transaction.request();
             chunksReq.input('p0', entry.path);
-            const chunksResult = await chunksReq.query<{
-              chunkIndex: number;
-              data: Buffer;
-            }>(
-              `SELECT chunkIndex, data FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
+            const chunks = rowsOf(
+              chunkRow,
+              await chunksReq.query(
+                `SELECT chunkIndex, data FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
+              ),
             );
 
-            for (const chunk of chunksResult.recordset) {
+            for (const chunk of chunks) {
               const chunkInsertReq = transaction.request();
               chunkInsertReq.input('p0', newPath);
               chunkInsertReq.input('p1', chunk.chunkIndex);
@@ -875,11 +945,11 @@ export class MssqlFs implements IFileSystem {
         if (srcEntry.type === 'file') {
           const chunksReq = transaction.request();
           chunksReq.input('p0', srcPrefixed);
-          const chunksResult = await chunksReq.query<{
-            chunkIndex: number;
-            data: Buffer;
-          }>(
-            `SELECT chunkIndex, data FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
+          const chunks = rowsOf(
+            chunkRow,
+            await chunksReq.query(
+              `SELECT chunkIndex, data FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
+            ),
           );
 
           const deleteChunksReq = transaction.request();
@@ -888,7 +958,7 @@ export class MssqlFs implements IFileSystem {
             `DELETE FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
           );
 
-          for (const chunk of chunksResult.recordset) {
+          for (const chunk of chunks) {
             const chunkInsertReq = transaction.request();
             chunkInsertReq.input('p0', destPrefixed);
             chunkInsertReq.input('p1', chunk.chunkIndex);
@@ -908,11 +978,13 @@ export class MssqlFs implements IFileSystem {
     const srcPrefixed = this.#prefixPath(srcNormalized);
     const destPrefixed = this.#prefixPath(destNormalized);
 
-    const srcRows = await this.#query<FsEntryRow>(
-      `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0`,
-      [srcPrefixed],
+    const [srcEntry] = rowsOf(
+      entryRow,
+      await this.#query(
+        `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+        [srcPrefixed],
+      ),
     );
-    const srcEntry = srcRows[0];
 
     if (!srcEntry) {
       throw new Error(`ENOENT: no such file or directory: ${src}`);
@@ -924,8 +996,11 @@ export class MssqlFs implements IFileSystem {
       if (srcEntry.type === 'directory') {
         const allEntriesReq = transaction.request();
         allEntriesReq.input('p0', srcPrefixed);
-        const allEntriesResult = await allEntriesReq.query<FsEntryRow>(
-          `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0 OR path LIKE @p0 + '/%' ORDER BY path DESC`,
+        const allEntries = rowsOf(
+          entryRow,
+          await allEntriesReq.query(
+            `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0 OR path LIKE @p0 + '/%' ORDER BY path DESC`,
+          ),
         );
 
         const destDeleteReq = transaction.request();
@@ -934,7 +1009,7 @@ export class MssqlFs implements IFileSystem {
           `DELETE FROM ${this.#t('fs_entries')} WHERE path = @dp0 OR path LIKE @dp0 + '/%'`,
         );
 
-        for (const entry of [...allEntriesResult.recordset].reverse()) {
+        for (const entry of [...allEntries].reverse()) {
           const relativePath = path.posix.relative(srcPrefixed, entry.path);
           const newPath = path.posix.join(destPrefixed, relativePath);
 
@@ -966,14 +1041,14 @@ export class MssqlFs implements IFileSystem {
 
             const chunksReq = transaction.request();
             chunksReq.input('p0', entry.path);
-            const chunksResult = await chunksReq.query<{
-              chunkIndex: number;
-              data: Buffer;
-            }>(
-              `SELECT chunkIndex, data FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
+            const chunks = rowsOf(
+              chunkRow,
+              await chunksReq.query(
+                `SELECT chunkIndex, data FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
+              ),
             );
 
-            for (const chunk of chunksResult.recordset) {
+            for (const chunk of chunks) {
               const chunkInsertReq = transaction.request();
               chunkInsertReq.input('p0', newPath);
               chunkInsertReq.input('p1', chunk.chunkIndex);
@@ -1019,14 +1094,14 @@ export class MssqlFs implements IFileSystem {
 
           const chunksReq = transaction.request();
           chunksReq.input('p0', srcPrefixed);
-          const chunksResult = await chunksReq.query<{
-            chunkIndex: number;
-            data: Buffer;
-          }>(
-            `SELECT chunkIndex, data FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
+          const chunks = rowsOf(
+            chunkRow,
+            await chunksReq.query(
+              `SELECT chunkIndex, data FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
+            ),
           );
 
-          for (const chunk of chunksResult.recordset) {
+          for (const chunk of chunks) {
             const chunkInsertReq = transaction.request();
             chunkInsertReq.input('p0', destPrefixed);
             chunkInsertReq.input('p1', chunk.chunkIndex);
@@ -1057,8 +1132,11 @@ export class MssqlFs implements IFileSystem {
   }
 
   async getAllPathsAsync(): Promise<string[]> {
-    const rows = await this.#query<{ path: string; [key: string]: unknown }>(
-      `SELECT path FROM ${this.#t('fs_entries')} ORDER BY path`,
+    const rows = rowsOf(
+      pathRow,
+      await this.#query(
+        `SELECT path FROM ${this.#t('fs_entries')} ORDER BY path`,
+      ),
     );
     return rows.map((row) => row.path);
   }
@@ -1068,9 +1146,12 @@ export class MssqlFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
     const resolved = await this.#resolveSymlink(prefixed);
 
-    const rows = await this.#query<{ exists: number }>(
-      `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
-      [resolved],
+    const rows = rowsOf(
+      existsRow,
+      await this.#query(
+        `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
+        [resolved],
+      ),
     );
     if (rows[0].exists !== 1) {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
@@ -1112,9 +1193,12 @@ export class MssqlFs implements IFileSystem {
     const normalized = this.#normalizePath(linkPath);
     const prefixed = this.#prefixPath(normalized);
 
-    const existingRows = await this.#query<{ exists: number }>(
-      `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
-      [prefixed],
+    const existingRows = rowsOf(
+      existsRow,
+      await this.#query(
+        `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
+        [prefixed],
+      ),
     );
     if (existingRows[0].exists === 1) {
       throw new Error(`EEXIST: file already exists: ${linkPath}`);
@@ -1140,11 +1224,13 @@ export class MssqlFs implements IFileSystem {
     const srcPrefixed = this.#prefixPath(srcNormalized);
     const destPrefixed = this.#prefixPath(destNormalized);
 
-    const srcRows = await this.#query<FsEntryRow>(
-      `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0`,
-      [srcPrefixed],
+    const [srcEntry] = rowsOf(
+      entryRow,
+      await this.#query(
+        `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+        [srcPrefixed],
+      ),
     );
-    const srcEntry = srcRows[0];
 
     if (!srcEntry) {
       throw new Error(`ENOENT: no such file or directory: ${existingPath}`);
@@ -1154,9 +1240,12 @@ export class MssqlFs implements IFileSystem {
       throw new Error(`link: not supported for directories: ${existingPath}`);
     }
 
-    const existingRows = await this.#query<{ exists: number }>(
-      `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
-      [destPrefixed],
+    const existingRows = rowsOf(
+      existsRow,
+      await this.#query(
+        `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
+        [destPrefixed],
+      ),
     );
     if (existingRows[0].exists === 1) {
       throw new Error(`EEXIST: file already exists: ${newPath}`);
@@ -1177,14 +1266,14 @@ export class MssqlFs implements IFileSystem {
 
       const chunksReq = transaction.request();
       chunksReq.input('p0', srcPrefixed);
-      const chunksResult = await chunksReq.query<{
-        chunkIndex: number;
-        data: Buffer;
-      }>(
-        `SELECT chunkIndex, data FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
+      const chunks = rowsOf(
+        chunkRow,
+        await chunksReq.query(
+          `SELECT chunkIndex, data FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
+        ),
       );
 
-      for (const chunk of chunksResult.recordset) {
+      for (const chunk of chunks) {
         const chunkInsertReq = transaction.request();
         chunkInsertReq.input('p0', destPrefixed);
         chunkInsertReq.input('p1', chunk.chunkIndex);
@@ -1200,11 +1289,13 @@ export class MssqlFs implements IFileSystem {
     const normalized = this.#normalizePath(linkPath);
     const prefixed = this.#prefixPath(normalized);
 
-    const rows = await this.#query<Pick<FsEntryRow, 'type' | 'symlinkTarget'>>(
-      `SELECT type, symlinkTarget FROM ${this.#t('fs_entries')} WHERE path = @p0`,
-      [prefixed],
+    const [entry] = rowsOf(
+      linkRow,
+      await this.#query(
+        `SELECT type, symlinkTarget FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+        [prefixed],
+      ),
     );
-    const entry = rows[0];
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${linkPath}`);
@@ -1214,6 +1305,6 @@ export class MssqlFs implements IFileSystem {
       throw new Error(`readlink: not a symbolic link: ${linkPath}`);
     }
 
-    return entry.symlinkTarget!;
+    return entry.symlinkTarget;
   }
 }

@@ -90,10 +90,7 @@ describe('AdapterIndexer — cache isolation', () => {
       Array.isArray(inner),
       'parent fragment holds an array of children',
     );
-    assert.ok(
-      (inner as unknown[]).length > 0,
-      'parent wraps adapter fragments',
-    );
+    assert.ok(inner.length > 0, 'parent wraps adapter fragments');
   });
 });
 

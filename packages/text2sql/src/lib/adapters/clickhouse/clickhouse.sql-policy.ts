@@ -162,12 +162,12 @@ function isScopeBypassingFunction(name: string): boolean {
 function readRows(result: unknown): Record<string, unknown>[] {
   const rows = Array.isArray(result)
     ? result
-    : result && typeof result === 'object' && 'data' in result
-      ? (result as { data: unknown }).data
-      : result && typeof result === 'object' && 'rows' in result
-        ? (result as { rows: unknown }).rows
+    : typeof result === 'object' && result !== null && 'data' in result
+      ? result.data
+      : typeof result === 'object' && result !== null && 'rows' in result
+        ? result.rows
         : undefined;
-  if (!Array.isArray(rows) || rows.some((row) => !isRecord(row))) {
+  if (!Array.isArray(rows) || !rows.every(isRecord)) {
     throw new Error(
       'ClickHouse query callback must return row objects as an array, { data }, or { rows }.',
     );

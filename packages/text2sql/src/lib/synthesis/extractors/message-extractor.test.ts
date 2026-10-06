@@ -8,10 +8,7 @@ type MessagePart = UIMessage['parts'][number];
 type ToolPart = Extract<MessagePart, { type: `tool-${string}` }>;
 type DynamicToolPart = Extract<MessagePart, { type: 'dynamic-tool' }>;
 type ToolCallState =
-  | 'output-available'
-  | 'output-error'
-  | 'input-streaming'
-  | 'input-available';
+  'output-available' | 'output-error' | 'input-streaming' | 'input-available';
 type ToolExecutionOptions = {
   toolName?: string;
   toolCallId?: string;
@@ -61,7 +58,7 @@ function createToolCall(
     output,
     errorText,
   } = options;
-  const toolType = `tool-${toolName}` as `tool-${string}`;
+  const toolType = `tool-${toolName}` as const;
   const hasInput = Object.prototype.hasOwnProperty.call(options, 'input');
   const toolInput = hasInput ? input : { sql, reasoning };
 
@@ -377,9 +374,10 @@ describe('MessageExtractor', () => {
           role: 'user',
           parts: [
             { type: 'text', text: 'Count users please' },
-            { type: 'image', image: 'base64data' } as unknown as {
-              type: 'text';
-              text: string;
+            {
+              type: 'file',
+              mediaType: 'image/png',
+              url: 'data:image/png;base64,base64data',
             },
           ],
         },
@@ -401,9 +399,10 @@ describe('MessageExtractor', () => {
           id: 'user-1',
           role: 'user',
           parts: [
-            { type: 'image', image: 'base64data' } as unknown as {
-              type: 'text';
-              text: string;
+            {
+              type: 'file',
+              mediaType: 'image/png',
+              url: 'data:image/png;base64,base64data',
             },
           ],
         },

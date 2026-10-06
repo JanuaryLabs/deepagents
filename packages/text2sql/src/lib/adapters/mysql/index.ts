@@ -1,4 +1,4 @@
-import { type Adapter } from '../adapter.ts';
+import { type Adapter, groundingFor } from '../adapter.ts';
 import { type ColumnStatsGroundingConfig } from '../groundings/column-stats.grounding.ts';
 import { type ColumnValuesGroundingConfig } from '../groundings/column-values.grounding.ts';
 import { type ConstraintGroundingConfig } from '../groundings/constraint.grounding.ts';
@@ -21,7 +21,10 @@ export * from './mysql.ts';
 export { MysqlSqlPolicyAnalyzer } from './mysql.sql-policy.ts';
 
 export function tables(config: TableGroundingConfig = {}) {
-  return (adapter: Adapter) => new MysqlTableGrounding(adapter, config);
+  return groundingFor(
+    Mysql,
+    (adapter) => new MysqlTableGrounding(adapter, config),
+  );
 }
 
 export function info(config: InfoGroundingConfig = {}) {
@@ -29,9 +32,10 @@ export function info(config: InfoGroundingConfig = {}) {
 }
 
 export function views(config: ViewGroundingConfig = {}) {
-  return (adapter: Adapter) => {
-    return new MysqlViewGrounding(adapter, config);
-  };
+  return groundingFor(
+    Mysql,
+    (adapter) => new MysqlViewGrounding(adapter, config),
+  );
 }
 
 export function columnStats(config: ColumnStatsGroundingConfig = {}) {

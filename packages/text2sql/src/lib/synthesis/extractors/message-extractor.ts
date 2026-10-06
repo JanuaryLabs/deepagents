@@ -1,10 +1,8 @@
 import { type UIMessage, getToolName, isToolUIPart } from 'ai';
 
 import { type ExtractedPair, PairProducer } from '../types.ts';
-import {
-  type DbQueryInput,
-  getMessageText,
-} from './base-contextual-extractor.ts';
+import { getMessageText } from './base-contextual-extractor.ts';
+import { toolInputSql } from './tool-input.ts';
 
 export interface MessageExtractorOptions {
   includeFailures?: boolean;
@@ -55,10 +53,8 @@ export class MessageExtractor extends PairProducer {
           }
 
           // Handle both static and dynamic tool part shapes
-          const toolInput = ('input' in part ? part.input : undefined) as
-            | DbQueryInput
-            | undefined;
-          if (!toolInput?.sql) {
+          const sql = toolInputSql('input' in part ? part.input : undefined);
+          if (!sql) {
             continue;
           }
 
@@ -82,7 +78,7 @@ export class MessageExtractor extends PairProducer {
           yield [
             {
               question,
-              sql: toolInput.sql,
+              sql,
               success,
             },
           ];

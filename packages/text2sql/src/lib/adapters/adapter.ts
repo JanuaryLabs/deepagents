@@ -1,4 +1,5 @@
 import { type SqlLanguage, format as formatSql } from 'sql-formatter';
+import { z } from 'zod';
 
 import type { ContextFragment, FragmentObject } from '@deepagents/context';
 
@@ -134,6 +135,25 @@ export interface IntrospectionProgress {
 export type OnProgress = (progress: IntrospectionProgress) => void;
 
 export type GroundingFn = (adapter: Adapter) => AbstractGrounding;
+
+/**
+ * Builds a grounding factory for a grounding that needs a concrete adapter's
+ * API (BigQuery datasets, DuckDB namespaces, ...). Given any other adapter,
+ * the factory throws.
+ */
+export function groundingFor<A extends Adapter>(
+  adapterType: abstract new (...args: never[]) => A,
+  create: (adapter: A) => AbstractGrounding,
+): GroundingFn {
+  return (adapter) => {
+    if (!(adapter instanceof adapterType)) {
+      throw new Error(
+        `A ${adapterType.name} grounding needs a ${adapterType.name} adapter, not ${adapter.constructor.name}.`,
+      );
+    }
+    return create(adapter);
+  };
+}
 
 export type ExecuteFunction = (sql: string) => Promise<any> | any;
 export type ValidateFunction = (
@@ -496,7 +516,30 @@ export abstract class Adapter {
 
   abstract executeImpl(sql: string): Promise<any[]> | any[];
   abstract validateImpl(sql: string): Promise<string | void> | string | void;
-  abstract runQuery<Row>(sql: string): Promise<Row[]> | Row[];
+
+  /**
+   * Run an introspection query and check every row against `row`, the shape
+   * the driver returns for that query. A row of any other shape throws.
+   */
+  async runQuery<RowSchema extends z.ZodType>(
+    sql: string,
+    row: RowSchema,
+  ): Promise<z.output<RowSchema>[]> {
+    const rows = z.array(row).safeParse(await this.queryRows(sql));
+    if (!rows.success) {
+      throw new Error(
+        `${this.constructor.name} introspection query returned rows of an unexpected shape:\n${z.prettifyError(rows.error)}\nSQL: ${sql.trim()}`,
+        { cause: rows.error },
+      );
+    }
+    return rows.data;
+  }
+
+  /**
+   * Run an introspection query through the driver and return its rows as the
+   * driver produced them.
+   */
+  protected abstract queryRows(sql: string): Promise<unknown[]> | unknown[];
 
   /**
    * Quote an identifier (table/column name) for safe use in SQL.

@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import type { Table, TableConstraint } from '../adapter.ts';
 import {
   ConstraintGrounding,
@@ -5,23 +7,22 @@ import {
 } from '../groundings/constraint.grounding.ts';
 import type { GroundingContext } from '../groundings/context.ts';
 import { type FKChildColumn, resolveForeignKey } from './bigquery-fk.ts';
+import { keyColumnUsageRow } from './bigquery-rows.ts';
 import type { BigQuery } from './bigquery.ts';
 
-type ColumnMetadataRow = {
-  table_name: string | null;
-  column_name: string | null;
-  is_nullable: string | null;
-  column_default: string | null;
-};
+/** COLUMNS: 'YES'/'NO' nullability and the default expression, if any. */
+const columnMetadataRow = z.object({
+  table_name: z.string().nullable(),
+  column_name: z.string().nullable(),
+  is_nullable: z.string().nullable(),
+  column_default: z.string().nullable(),
+});
 
-type KeyColumnUsageRow = {
-  table_name: string | null;
-  constraint_name: string | null;
-  constraint_type: string | null;
-  column_name: string | null;
-  ordinal_position: number | null;
-  position_in_unique_constraint: number | null;
-};
+/** A PRIMARY KEY or FOREIGN KEY column with its table and constraint type. */
+const tableKeyColumnRow = keyColumnUsageRow.extend({
+  table_name: z.string().nullable(),
+  constraint_type: z.string().nullable(),
+});
 
 export interface BigQueryConstraintGroundingConfig extends ConstraintGroundingConfig {}
 
@@ -100,12 +101,15 @@ export class BigQueryConstraintGrounding extends ConstraintGrounding {
     inList: string,
     constraintsByTable: Map<string, TableConstraint[]>,
   ): Promise<void> {
-    const rows = await this.#adapter.runQuery<ColumnMetadataRow>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT table_name, column_name, is_nullable, column_default
       FROM ${this.#adapter.infoSchemaView(dataset, 'COLUMNS')}
       WHERE table_name IN (${inList})
       ORDER BY table_name, ordinal_position
-    `);
+    `,
+      columnMetadataRow,
+    );
 
     for (const row of rows) {
       if (!row.table_name || !row.column_name) continue;
@@ -136,7 +140,8 @@ export class BigQueryConstraintGrounding extends ConstraintGrounding {
     inList: string,
     constraintsByTable: Map<string, TableConstraint[]>,
   ): Promise<void> {
-    const rows = await this.#adapter.runQuery<KeyColumnUsageRow>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT
         tc.table_name,
         tc.constraint_name,
@@ -151,7 +156,9 @@ export class BigQueryConstraintGrounding extends ConstraintGrounding {
       WHERE tc.table_name IN (${inList})
         AND tc.constraint_type IN ('PRIMARY KEY', 'FOREIGN KEY')
       ORDER BY tc.table_name, tc.constraint_name, kcu.ordinal_position
-    `);
+    `,
+      tableKeyColumnRow,
+    );
 
     const pkByTable = new Map<string, Map<string, string[]>>();
     const fkByTable = new Map<string, Map<string, FKChildColumn[]>>();

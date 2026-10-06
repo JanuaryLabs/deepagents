@@ -1,20 +1,25 @@
+import { z } from 'zod';
+
 import type { Table } from '../adapter.ts';
 import type { GroundingContext } from '../groundings/context.ts';
 import {
   RowCountGrounding,
   type RowCountGroundingConfig,
 } from '../groundings/row-count.grounding.ts';
+import { numericValue } from '../groundings/rows.ts';
 import type { BigQuery } from './bigquery.ts';
 
-type RowCountRow = {
-  table_name: string | null;
-  total_rows: number | string | null;
-};
+/** TABLE_STORAGE: total_rows is an INT64. */
+const tableStorageRow = z.object({
+  table_name: z.string().nullable(),
+  total_rows: numericValue.nullable(),
+});
 
-type LegacyRowCountRow = {
-  table_name: string | null;
-  row_count: number | string | null;
-};
+/** Legacy __TABLES__: row_count is an INT64. */
+const legacyRowCountRow = z.object({
+  table_name: z.string().nullable(),
+  row_count: numericValue.nullable(),
+});
 
 export interface BigQueryRowCountGroundingConfig extends RowCountGroundingConfig {}
 
@@ -92,11 +97,14 @@ export class BigQueryRowCountGrounding extends RowCountGrounding {
     dataset: string,
     inList: string,
   ): Promise<Map<string, number>> {
-    const rows = await this.#adapter.runQuery<RowCountRow>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT table_name, total_rows
       FROM ${this.#adapter.infoSchemaView(dataset, 'TABLE_STORAGE')}
       WHERE table_name IN (${inList})
-    `);
+    `,
+      tableStorageRow,
+    );
 
     const result = new Map<string, number>();
     for (const row of rows) {
@@ -114,11 +122,14 @@ export class BigQueryRowCountGrounding extends RowCountGrounding {
     const projectPrefix = this.#adapter.projectId
       ? `\`${this.#adapter.projectId}\`.`
       : '';
-    const rows = await this.#adapter.runQuery<LegacyRowCountRow>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT table_id AS table_name, row_count
       FROM ${projectPrefix}\`${dataset}\`.__TABLES__
       WHERE table_id IN (${inList})
-    `);
+    `,
+      legacyRowCountRow,
+    );
 
     const result = new Map<string, number>();
     for (const row of rows) {

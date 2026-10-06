@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import type { SQLScopeErrorPayload } from '../../agents/exceptions.ts';
 import { buildScopeParseErrorPayload } from '../../sql-scope-error.ts';
 import type {
@@ -11,6 +13,13 @@ import type {
   PostHogTransport,
 } from './types.ts';
 
+const postHogNotice = z.object({
+  start: z.number().nullish(),
+  end: z.number().nullish(),
+  message: z.string(),
+  fix: z.string().nullish(),
+});
+
 export class PostHogSqlPolicyAnalyzer implements SqlPolicyAnalyzer {
   readonly #transport: PostHogTransport;
 
@@ -22,7 +31,7 @@ export class PostHogSqlPolicyAnalyzer implements SqlPolicyAnalyzer {
     sql: string,
     context: SqlPolicyContext,
   ): Promise<SqlPolicyViolation | null> {
-    const response = await this.#transport.query<PostHogMetadataResponse>({
+    const response = await this.#transport.query({
       query: { kind: 'HogQLMetadata', language: 'hogQL', query: sql },
       name: 'deepagents_text2sql_validate',
     });
@@ -60,8 +69,8 @@ function validateMetadataResponse(value: unknown): PostHogMetadataResponse {
   }
 
   const errors = validateNotices(value.errors, 'errors');
-  validateNotices(value.warnings, 'warnings');
-  validateNotices(value.notices, 'notices');
+  const warnings = validateNotices(value.warnings, 'warnings');
+  const notices = validateNotices(value.notices, 'notices');
   const tableNames = validateTableNames(value.table_names);
 
   if (!value.isValid || errors.length > 0) {
@@ -76,8 +85,8 @@ function validateMetadataResponse(value: unknown): PostHogMetadataResponse {
   return {
     isValid: true,
     errors,
-    warnings: value.warnings as PostHogNotice[],
-    notices: value.notices as PostHogNotice[],
+    warnings,
+    notices,
     table_names: tableNames,
   };
 }
@@ -86,14 +95,13 @@ function validateNotices(value: unknown, name: string): PostHogNotice[] {
   if (!Array.isArray(value)) {
     throw new Error(`PostHog HogQLMetadata response has no ${name} array.`);
   }
-  for (const notice of value) {
-    if (!isRecord(notice) || typeof notice.message !== 'string') {
-      throw new Error(
-        `PostHog HogQLMetadata response has an invalid ${name} notice.`,
-      );
-    }
+  const notices = z.array(postHogNotice).safeParse(value);
+  if (!notices.success) {
+    throw new Error(
+      `PostHog HogQLMetadata response has an invalid ${name} notice.`,
+    );
   }
-  return value as PostHogNotice[];
+  return notices.data;
 }
 
 function validateTableNames(value: unknown): string[] {

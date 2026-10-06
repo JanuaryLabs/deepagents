@@ -3,6 +3,7 @@ import {
   InfoGrounding,
   type InfoGroundingConfig,
 } from '../groundings/info.grounding.ts';
+import { versionRow } from '../groundings/rows.ts';
 
 /**
  * SQLite implementation of InfoGrounding.
@@ -16,8 +17,9 @@ export class SqliteInfoGrounding extends InfoGrounding {
   }
 
   protected override async collectInfo(): Promise<AdapterInfo> {
-    const rows = await this.#adapter.runQuery<{ version: string }>(
+    const rows = await this.#adapter.runQuery(
       'SELECT sqlite_version() AS version',
+      versionRow,
     );
 
     return {

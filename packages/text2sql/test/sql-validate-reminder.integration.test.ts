@@ -3,10 +3,10 @@ import type {
   LanguageModelV4StreamPart,
 } from '@ai-sdk/provider';
 import {
-  type UIMessage,
   generateId,
   isToolUIPart,
   simulateReadableStream,
+  validateUIMessages,
 } from 'ai';
 import {
   MockLanguageModelV4,
@@ -128,12 +128,22 @@ async function runToolOutputs(chatId: string, commands: string[]) {
   const branch = await store.getActiveBranch(chatId);
   assert.ok(branch?.headMessageId);
   const chain = await store.getMessageChain(branch.headMessageId);
-  const outputs = chain
-    .filter((entry) => entry.name === 'assistant')
-    .flatMap((entry) => (entry.data as UIMessage).parts)
+  const assistantMessages = await validateUIMessages({
+    messages: chain
+      .filter((entry) => entry.name === 'assistant')
+      .map((entry) => entry.data),
+  });
+  const outputs = assistantMessages
+    .flatMap((message) => message.parts)
     .filter(isToolUIPart)
     .filter((part) => part.state === 'output-available')
-    .map((part) => part.output as Record<string, unknown>);
+    .map((part) => {
+      assert.ok(
+        typeof part.output === 'object' && part.output !== null,
+        'stored tool output is an object',
+      );
+      return part.output;
+    });
   return { model, outputs };
 }
 

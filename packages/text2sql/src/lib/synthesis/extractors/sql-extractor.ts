@@ -61,7 +61,7 @@ export class SqlExtractor extends PairProducer {
     // TODO: Update to use fragments and render them
     // const schemaFragments = await this.#adapter.introspect();
     // const introspection = new XmlRenderer().render(schemaFragments);
-    const introspection = '' as any; // Placeholder - synthesis needs to be updated to use fragments
+    const introspection = ''; // Placeholder - synthesis needs to be updated to use fragments
 
     for (const sql of this.#sqls) {
       let isValid = true;

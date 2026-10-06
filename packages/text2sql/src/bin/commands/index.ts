@@ -9,6 +9,7 @@ import {
 import * as path from 'node:path';
 import { finished } from 'node:stream/promises';
 import { v7 } from 'uuid';
+import z from 'zod';
 
 import { type Text2SqlIndexProgressHandler } from '../../lib/adapter-index.ts';
 import { type Text2Sql } from '../../lib/sql.ts';
@@ -16,10 +17,14 @@ import {
   type ExecutionContext,
   OUT_DIR_OPTION,
   SqlCommand,
+  cliWord,
   errorMessage,
   resolveOutputDir,
 } from '../command.ts';
 import { type VerboseFormat, formatPretty } from './indexing-formatter.ts';
+
+/** The positional arguments of `[...adapters]`. */
+const indexArgs = z.tuple([z.array(cliWord)]);
 
 interface IndexManifest {
   fragmentsPath: string;
@@ -48,7 +53,7 @@ export class IndexCommand extends SqlCommand {
     args: unknown[],
     options: Record<string, unknown>,
   ): Promise<number> {
-    const adapterNames = (args[0] as string[] | undefined) ?? [];
+    const [adapterNames] = indexArgs.parse(args);
     const requested = options.all ? [] : adapterNames;
     const names = this.resolveNames(ctx.text2Sql, requested);
     const verbose = this.resolveVerbose(options.verbose);
@@ -168,19 +173,23 @@ async function probeFifoWriter(
   try {
     stats = await stat(eventsPath);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    if (hasErrorCode(err, 'ENOENT')) return null;
     throw err;
   }
   if (!stats.isFIFO()) return null;
   try {
     return await open(eventsPath, constants.O_WRONLY | constants.O_NONBLOCK);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENXIO') {
+    if (hasErrorCode(err, 'ENXIO')) {
       stderr.write(`sql index: waiting for reader on FIFO ${eventsPath}...\n`);
       return null;
     }
     throw err;
   }
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return error instanceof Error && 'code' in error && error.code === code;
 }
 
 function waitForOpen(stream: WriteStream): Promise<void> {

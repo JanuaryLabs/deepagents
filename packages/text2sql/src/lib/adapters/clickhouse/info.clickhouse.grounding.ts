@@ -1,13 +1,12 @@
+import { z } from 'zod';
+
 import type { Adapter, AdapterInfo } from '../adapter.ts';
 import {
   InfoGrounding,
   type InfoGroundingConfig,
 } from '../groundings/info.grounding.ts';
 
-type InfoRow = {
-  version: string;
-  database: string;
-};
+const infoRow = z.object({ version: z.string(), database: z.string() });
 
 export class ClickHouseInfoGrounding extends InfoGrounding {
   readonly #adapter: Adapter;
@@ -18,8 +17,9 @@ export class ClickHouseInfoGrounding extends InfoGrounding {
   }
 
   protected override async collectInfo(): Promise<AdapterInfo> {
-    const rows = await this.#adapter.runQuery<InfoRow>(
+    const rows = await this.#adapter.runQuery(
       'SELECT version() AS version, currentDatabase() AS database',
+      infoRow,
     );
     const row = rows[0];
     return {

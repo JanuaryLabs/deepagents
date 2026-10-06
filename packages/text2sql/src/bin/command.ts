@@ -1,7 +1,20 @@
 import * as path from 'node:path';
 import type { Writable } from 'node:stream';
+import z from 'zod';
 
 import { Text2Sql, Text2SqlValidationError } from '../lib/sql.ts';
+
+/**
+ * A positional word as cac passes it: a string, or a number when mri reads the
+ * word after a boolean flag (such as `--all 2`) and it looks numeric.
+ */
+export const cliWord = z.union([z.string(), z.number()]).transform(String);
+
+/** The options object cac passes as an action's last argument. */
+export const cliOptions = z.record(z.string(), z.unknown());
+
+/** The positional arguments of `<db> <...sql>`. */
+const queryArgs = z.tuple([cliWord, z.array(cliWord)]);
 
 export interface ExecutionContext {
   text2Sql: Text2Sql;
@@ -87,9 +100,9 @@ export abstract class SqlQueryCommand extends SqlCommand {
     args: unknown[],
     options: Record<string, unknown>,
   ): Promise<number> {
-    const [db, sqlParts] = args as [string, string[] | undefined];
+    const [db, sqlParts] = queryArgs.parse(args);
     const name = this.resolveAdapterName(ctx.text2Sql, db);
-    const sql = (sqlParts ?? []).join(' ').trim();
+    const sql = sqlParts.join(' ').trim();
     if (!sql) this.fail('no query provided');
 
     try {

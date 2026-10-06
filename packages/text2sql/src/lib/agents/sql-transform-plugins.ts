@@ -1,6 +1,7 @@
 import type {
   CommandNode,
   ScriptNode,
+  SimpleCommandNode,
   TransformContext,
   TransformPlugin,
   TransformResult,
@@ -18,12 +19,18 @@ import {
 
 import { isValidAdapterName } from '../adapter-name.ts';
 
+type WordPart = WordNode['parts'][number];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 function isScriptNode(value: unknown): value is ScriptNode {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-  const node = value as Record<string, unknown>;
-  return node.type === 'Script' && Array.isArray(node.statements);
+  return (
+    isRecord(value) &&
+    value.type === 'Script' &&
+    Array.isArray(value.statements)
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -179,15 +186,11 @@ function wordContainsBlockedCommand(
     return false;
   }
 
-  return wordPartContainsBlockedCommand(
-    word.parts as unknown as Array<Record<string, unknown>>,
-    context,
-    mode,
-  );
+  return wordPartContainsBlockedCommand(word.parts, context, mode);
 }
 
 function wordPartContainsBlockedCommand(
-  parts: Array<Record<string, unknown>>,
+  parts: readonly unknown[],
   context: InspectionContext,
   mode: SqlInspectionMode,
 ): boolean {
@@ -199,11 +202,17 @@ function wordPartContainsBlockedCommand(
   return false;
 }
 
+// Walks every value of the node, not only the fields of known part types, so
+// a command substitution nested anywhere (an arithmetic expression, a
+// parameter operation's word, a brace item) is still inspected.
 function partContainsBlockedCommand(
-  node: Record<string, unknown>,
+  node: unknown,
   context: InspectionContext,
   mode: SqlInspectionMode,
 ): boolean {
+  if (!isRecord(node)) {
+    return false;
+  }
   const type = node.type;
 
   if (type === 'CommandSubstitution' || type === 'ProcessSubstitution') {
@@ -223,32 +232,14 @@ function partContainsBlockedCommand(
 
   for (const value of Object.values(node)) {
     if (Array.isArray(value)) {
-      for (const item of value) {
-        if (typeof item === 'object' && item !== null) {
-          if (
-            partContainsBlockedCommand(
-              item as Record<string, unknown>,
-              context,
-              mode,
-            )
-          ) {
-            return true;
-          }
-        }
+      if (wordPartContainsBlockedCommand(value, context, mode)) {
+        return true;
       }
       continue;
     }
 
-    if (typeof value === 'object' && value !== null) {
-      if (
-        partContainsBlockedCommand(
-          value as Record<string, unknown>,
-          context,
-          mode,
-        )
-      ) {
-        return true;
-      }
+    if (partContainsBlockedCommand(value, context, mode)) {
+      return true;
     }
   }
 
@@ -455,11 +446,10 @@ function getShellInvocationDescriptor(
   return { kind: 'none', payload: null };
 }
 
-function getHereDocPayload(
-  redirections: Array<{
-    target: { type?: string; content?: WordNode };
-  }>,
-): { hasHereDoc: boolean; payload: string | null } {
+function getHereDocPayload(redirections: SimpleCommandNode['redirections']): {
+  hasHereDoc: boolean;
+  payload: string | null;
+} {
   const payloads: string[] = [];
 
   for (const redirection of redirections) {
@@ -686,9 +676,7 @@ function isBlockedSimpleCommand(
       value: WordNode | null;
       array: WordNode[] | null;
     }>;
-    redirections: Array<{
-      target: { type?: string; content?: WordNode };
-    }>;
+    redirections: SimpleCommandNode['redirections'];
   },
   context: InspectionContext,
   mode: SqlInspectionMode,
@@ -720,11 +708,7 @@ function isBlockedSimpleCommand(
   if (
     command.redirections.some((redirection) => {
       if (redirection.target.type === 'Word') {
-        return wordContainsBlockedCommand(
-          redirection.target as unknown as WordNode,
-          context,
-          mode,
-        );
+        return wordContainsBlockedCommand(redirection.target, context, mode);
       }
       if (redirection.target.type === 'HereDoc' && redirection.target.content) {
         return wordContainsBlockedCommand(
@@ -897,9 +881,7 @@ export class SqlProxyEnforcementPlugin implements TransformPlugin<SqlProxyEnforc
 // SQL Backtick Rewrite Plugin
 // ─────────────────────────────────────────────────────────────────────────────
 
-function wordPartsContainExpansion(
-  parts: Array<Record<string, unknown>>,
-): boolean {
+function wordPartsContainExpansion(parts: readonly WordPart[]): boolean {
   for (const part of parts) {
     if (
       part.type === 'CommandSubstitution' ||
@@ -909,12 +891,8 @@ function wordPartsContainExpansion(
       return true;
     }
 
-    if (part.type === 'DoubleQuoted' && Array.isArray(part.parts)) {
-      if (
-        wordPartsContainExpansion(part.parts as Array<Record<string, unknown>>)
-      ) {
-        return true;
-      }
+    if (part.type === 'DoubleQuoted' && wordPartsContainExpansion(part.parts)) {
+      return true;
     }
   }
 
@@ -941,49 +919,40 @@ function isSqlCommandRequiringRewrite(
 
   const sqlArgs = cmd.args.slice(2);
   if (sqlArgs.length > 1) return true;
-  return sqlArgs.some((arg: WordNode) =>
-    wordPartsContainExpansion(
-      arg.parts as unknown as Array<Record<string, unknown>>,
-    ),
-  );
+  return sqlArgs.some((arg) => wordPartsContainExpansion(arg.parts));
 }
 
-function extractWordPartText(parts: Array<Record<string, unknown>>): string {
-  let text = '';
-  for (const part of parts) {
-    const type = part.type;
-    if (type === 'Literal' || type === 'SingleQuoted' || type === 'Escaped') {
-      text += part.value as string;
-    } else if (type === 'DoubleQuoted' && Array.isArray(part.parts)) {
-      text += extractWordPartText(part.parts as Array<Record<string, unknown>>);
-    } else if (type === 'CommandSubstitution' && part.legacy === true) {
-      text += '`' + serialize(part.body as ScriptNode).trim() + '`';
-    } else if (type === 'CommandSubstitution') {
-      text += '$(' + serialize(part.body as ScriptNode).trim() + ')';
-    } else if (type === 'ParameterExpansion') {
-      text += emitParameterExpansion(part);
-    } else if (type === 'ArithmeticExpansion') {
-      const expression = part.expression as
-        | { originalText?: string }
-        | undefined;
-      text += '$((' + (expression?.originalText ?? '') + '))';
-    }
+function extractWordPartText(parts: readonly WordPart[]): string {
+  return parts.map(wordPartText).join('');
+}
+
+function wordPartText(part: WordPart): string {
+  switch (part.type) {
+    case 'Literal':
+    case 'SingleQuoted':
+    case 'Escaped':
+      return part.value;
+    case 'DoubleQuoted':
+      return extractWordPartText(part.parts);
+    case 'CommandSubstitution':
+      return part.legacy
+        ? '`' + serialize(part.body).trim() + '`'
+        : '$(' + serialize(part.body).trim() + ')';
+    case 'ParameterExpansion':
+      return emitParameterExpansion(part);
+    case 'ArithmeticExpansion':
+      return '$((' + (part.expression.originalText ?? '') + '))';
+    default:
+      return '';
   }
-  return text;
 }
 
-function emitParameterExpansion(part: Record<string, unknown>): string {
-  const parameter = part.parameter as string;
-  const operation = part.operation as
-    | {
-        type: string;
-        word?: { parts: Array<Record<string, unknown>> };
-        checkEmpty?: boolean;
-      }
-    | null
-    | undefined;
+function emitParameterExpansion(
+  part: Extract<WordPart, { type: 'ParameterExpansion' }>,
+): string {
+  const { parameter, operation } = part;
   if (!operation) return '$' + parameter;
-  if (operation.type === 'DefaultValue' && operation.word) {
+  if (operation.type === 'DefaultValue') {
     const fallback = extractWordPartText(operation.word.parts);
     const separator = operation.checkEmpty ? ':-' : '-';
     return '${' + parameter + separator + fallback + '}';
@@ -992,13 +961,7 @@ function emitParameterExpansion(part: Record<string, unknown>): string {
 }
 
 function extractSqlText(args: WordNode[]): string {
-  return args
-    .map((arg) =>
-      extractWordPartText(
-        arg.parts as unknown as Array<Record<string, unknown>>,
-      ),
-    )
-    .join(' ');
+  return args.map((arg) => extractWordPartText(arg.parts)).join(' ');
 }
 
 function rewriteSqlCommand(

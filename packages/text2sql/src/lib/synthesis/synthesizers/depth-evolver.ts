@@ -180,6 +180,10 @@ const ALL_TECHNIQUES: DepthTechnique[] = [
  * Based on Microsoft's Evol-Instruct methodology for in-depth evolution.
  */
 export class DepthEvolver extends PairProducer {
+  readonly #source: PairProducer | ExtractedPair[];
+  readonly #adapter: Adapter;
+  readonly #options: DepthEvolverOptions;
+
   #limit: ReturnType<typeof pLimit>;
 
   /**
@@ -188,12 +192,15 @@ export class DepthEvolver extends PairProducer {
    * @param options - Evolution options including techniques, count, and concurrency
    */
   constructor(
-    private source: PairProducer | ExtractedPair[],
-    private adapter: Adapter,
-    private options: DepthEvolverOptions,
+    source: PairProducer | ExtractedPair[],
+    adapter: Adapter,
+    options: DepthEvolverOptions,
   ) {
     super();
-    this.#limit = pLimit(this.options?.concurrency ?? 4);
+    this.#source = source;
+    this.#adapter = adapter;
+    this.#options = options;
+    this.#limit = pLimit(this.#options?.concurrency ?? 4);
   }
 
   /**
@@ -202,17 +209,17 @@ export class DepthEvolver extends PairProducer {
    */
   async *produce(): AsyncGenerator<ExtractedPair[]> {
     // TODO: Update to use fragments and render them
-    // const schemaFragments = await this.adapter.introspect();
+    // const schemaFragments = await this.#adapter.introspect();
     // const introspection = new XmlRenderer().render(schemaFragments);
-    const introspection = '' as any; // Placeholder - synthesis needs to be updated to use fragments
-    const count = this.options?.count ?? 1;
-    const techniques = this.options?.techniques ?? ALL_TECHNIQUES;
+    const introspection = ''; // Placeholder - synthesis needs to be updated to use fragments
+    const count = this.#options?.count ?? 1;
+    const techniques = this.#options?.techniques ?? ALL_TECHNIQUES;
 
     let pairIndex = 0;
-    for await (const chunk of this.from(this.source)) {
+    for await (const chunk of this.from(this.#source)) {
       for (const pair of chunk) {
         const tasks = Array.from({ length: count }, (_, i) => {
-          const technique = this.options?.techniques
+          const technique = this.#options?.techniques
             ? techniques[i % techniques.length]
             : techniques[(pairIndex * count + i) % techniques.length];
           return this.#limit(() =>
@@ -239,7 +246,7 @@ export class DepthEvolver extends PairProducer {
         schema: introspection,
         technique,
         techniqueInstruction: techniqueInstructions[technique],
-        model: this.options?.model,
+        model: this.#options?.model,
       }),
     );
 
@@ -248,9 +255,9 @@ export class DepthEvolver extends PairProducer {
       // TODO: Update to use schemaFragments instead of introspection string
       const sqlResult = await toSql({
         input: evolvedQuestion,
-        adapter: this.adapter,
+        adapter: this.#adapter,
         fragments: [],
-        model: this.options?.model,
+        model: this.#options?.model,
       });
 
       return {

@@ -1,17 +1,21 @@
+import { z } from 'zod';
+
 import type { Table, TableIndex } from '../adapter.ts';
 import type { GroundingContext } from '../groundings/context.ts';
 import {
   IndexesGrounding,
   type IndexesGroundingConfig,
 } from '../groundings/indexes.grounding.ts';
+import { int64 } from './bigquery-rows.ts';
 import type { BigQuery } from './bigquery.ts';
 
-type IndexHintRow = {
-  table_name: string | null;
-  column_name: string | null;
-  is_partitioning_column: string | null;
-  clustering_ordinal_position: number | null;
-};
+/** COLUMNS: 'YES'/'NO' partitioning and the INT64 clustering position, if any. */
+const indexHintRow = z.object({
+  table_name: z.string().nullable(),
+  column_name: z.string().nullable(),
+  is_partitioning_column: z.string().nullable(),
+  clustering_ordinal_position: int64.nullable(),
+});
 
 export interface BigQueryIndexesGroundingConfig extends IndexesGroundingConfig {}
 
@@ -62,13 +66,16 @@ export class BigQueryIndexesGrounding extends IndexesGrounding {
       .map((n) => `'${this.#adapter.escapeString(n)}'`)
       .join(', ');
 
-    const rows = await this.#adapter.runQuery<IndexHintRow>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT table_name, column_name, is_partitioning_column, clustering_ordinal_position
       FROM ${this.#adapter.infoSchemaView(dataset, 'COLUMNS')}
       WHERE table_name IN (${inList})
         AND (is_partitioning_column = 'YES' OR clustering_ordinal_position IS NOT NULL)
       ORDER BY table_name, clustering_ordinal_position
-    `);
+    `,
+      indexHintRow,
+    );
 
     const byTable = new Map<
       string,

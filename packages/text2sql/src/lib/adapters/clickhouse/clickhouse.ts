@@ -13,8 +13,6 @@ export interface ClickHouseAdapterOptions {
   defaultDatabase?: string;
 }
 
-type RowResult<Row> = Row[] | { data: Row[] } | { rows: Row[] };
-
 export class ClickHouse extends Adapter {
   readonly #options: ClickHouseAdapterOptions;
 
@@ -60,8 +58,8 @@ export class ClickHouse extends Adapter {
     }
   }
 
-  override async runQuery<Row>(sql: string): Promise<Row[]> {
-    return rowsFromResult<Row>(await this.#options.execute(sql));
+  protected override async queryRows(sql: string): Promise<unknown[]> {
+    return rowsFromResult(await this.#options.execute(sql));
   }
 
   override quoteIdentifier(name: string): string {
@@ -88,15 +86,11 @@ export class ClickHouse extends Adapter {
   }
 }
 
-function rowsFromResult<Row>(result: unknown): Row[] {
-  if (Array.isArray(result)) return result as Row[];
-  if (result && typeof result === 'object') {
-    const candidate = result as Partial<RowResult<Row>> & {
-      data?: unknown;
-      rows?: unknown;
-    };
-    if (Array.isArray(candidate.data)) return candidate.data as Row[];
-    if (Array.isArray(candidate.rows)) return candidate.rows as Row[];
+function rowsFromResult(result: unknown): unknown[] {
+  if (Array.isArray(result)) return result;
+  if (typeof result === 'object' && result !== null) {
+    if ('data' in result && Array.isArray(result.data)) return result.data;
+    if ('rows' in result && Array.isArray(result.rows)) return result.rows;
   }
   throw new Error(
     'ClickHouse execute() must return an array of rows, { data: rows }, or { rows }.',

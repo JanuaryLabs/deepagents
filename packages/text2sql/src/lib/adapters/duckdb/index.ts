@@ -1,4 +1,4 @@
-import type { Adapter } from '../adapter.ts';
+import { groundingFor } from '../adapter.ts';
 import type { ColumnStatsGroundingConfig } from '../groundings/column-stats.grounding.ts';
 import type { ColumnValuesGroundingConfig } from '../groundings/column-values.grounding.ts';
 import type { ConstraintGroundingConfig } from '../groundings/constraint.grounding.ts';
@@ -23,43 +23,59 @@ export * from './duckdb.ts';
 export { DuckDBSqlPolicyAnalyzer } from './duckdb.sql-policy.ts';
 
 export function tables(config: TableGroundingConfig = {}) {
-  return (adapter: Adapter) =>
-    new DuckDBTableGrounding(adapter as DuckDB, config);
+  return groundingFor(
+    DuckDB,
+    (adapter) => new DuckDBTableGrounding(adapter, config),
+  );
 }
 
 export function info(config: InfoGroundingConfig = {}) {
-  return (adapter: Adapter) =>
-    new DuckDBInfoGrounding(adapter as DuckDB, config);
+  return groundingFor(
+    DuckDB,
+    (adapter) => new DuckDBInfoGrounding(adapter, config),
+  );
 }
 
 export function views(config: ViewGroundingConfig = {}) {
-  return (adapter: Adapter) =>
-    new DuckDBViewGrounding(adapter as DuckDB, config);
+  return groundingFor(
+    DuckDB,
+    (adapter) => new DuckDBViewGrounding(adapter, config),
+  );
 }
 
 export function constraints(config: ConstraintGroundingConfig = {}) {
-  return (adapter: Adapter) =>
-    new DuckDBConstraintGrounding(adapter as DuckDB, config);
+  return groundingFor(
+    DuckDB,
+    (adapter) => new DuckDBConstraintGrounding(adapter, config),
+  );
 }
 
 export function indexes(config: IndexesGroundingConfig = {}) {
-  return (adapter: Adapter) =>
-    new DuckDBIndexesGrounding(adapter as DuckDB, config);
+  return groundingFor(
+    DuckDB,
+    (adapter) => new DuckDBIndexesGrounding(adapter, config),
+  );
 }
 
 export function rowCount(config: RowCountGroundingConfig = {}) {
-  return (adapter: Adapter) =>
-    new DuckDBRowCountGrounding(adapter as DuckDB, config);
+  return groundingFor(
+    DuckDB,
+    (adapter) => new DuckDBRowCountGrounding(adapter, config),
+  );
 }
 
 export function columnStats(config: ColumnStatsGroundingConfig = {}) {
-  return (adapter: Adapter) =>
-    new DuckDBColumnStatsGrounding(adapter as DuckDB, config);
+  return groundingFor(
+    DuckDB,
+    (adapter) => new DuckDBColumnStatsGrounding(adapter, config),
+  );
 }
 
 export function columnValues(config: ColumnValuesGroundingConfig = {}) {
-  return (adapter: Adapter) =>
-    new DuckDBColumnValuesGrounding(adapter as DuckDB, config);
+  return groundingFor(
+    DuckDB,
+    (adapter) => new DuckDBColumnValuesGrounding(adapter, config),
+  );
 }
 
 export default {

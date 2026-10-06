@@ -1,7 +1,5 @@
 import type {
   CreatePostHogTransportOptions,
-  PostHogEventDefinition,
-  PostHogPropertyDefinition,
   PostHogPropertyDefinitionType,
   PostHogQueryRequest,
   PostHogTransport,
@@ -102,11 +100,11 @@ export function createPostHogTransport(
     return parsed;
   };
 
-  const listDefinitions = async <T>(
+  const listDefinitions = async (
     resource: 'event_definitions' | 'property_definitions',
     parameters: URLSearchParams,
-  ): Promise<T[]> => {
-    const definitions: T[] = [];
+  ): Promise<unknown[]> => {
+    const definitions: unknown[] = [];
     let offset = 0;
 
     for (;;) {
@@ -128,7 +126,7 @@ export function createPostHogTransport(
         );
       }
 
-      definitions.push(...(page.results as T[]));
+      definitions.push(...page.results);
       if (page.next === null) return definitions;
       if (page.results.length === 0) {
         throw new Error(
@@ -140,14 +138,14 @@ export function createPostHogTransport(
   };
 
   return {
-    async query<T>(request: PostHogQueryRequest): Promise<T> {
-      return (await requestJson(`${projectPath}/query/`, {
+    async query(request: PostHogQueryRequest): Promise<unknown> {
+      return requestJson(`${projectPath}/query/`, {
         method: 'POST',
         body: JSON.stringify(request),
-      })) as T;
+      });
     },
 
-    listEventDefinitions(): Promise<PostHogEventDefinition[]> {
+    listEventDefinitions(): Promise<unknown[]> {
       return listDefinitions(
         'event_definitions',
         new URLSearchParams({
@@ -163,7 +161,7 @@ export function createPostHogTransport(
     }: {
       type: PostHogPropertyDefinitionType;
       groupTypeIndex?: number;
-    }): Promise<PostHogPropertyDefinition[]> {
+    }): Promise<unknown[]> {
       if (
         type === 'group' &&
         (groupTypeIndex === undefined ||

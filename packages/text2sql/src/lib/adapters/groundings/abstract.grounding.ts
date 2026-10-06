@@ -37,7 +37,7 @@ export function applyColumnFilter<
   if (!columnsConfig) return entity;
   const filter = columnsConfig[entity.name];
   if (!filter) return entity;
-  return { ...entity, columns: filterColumns(entity.columns, filter) } as T;
+  return { ...entity, columns: filterColumns(entity.columns, filter) };
 }
 
 /**

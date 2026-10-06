@@ -1,12 +1,21 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { z } from 'zod';
 
-import {
-  type PostHogMetadataResponse,
-  type PostHogQueryResponse,
-  type PostHogSchemaResponse,
-  createPostHogTransport,
-} from '@deepagents/text2sql/posthog';
+import { createPostHogTransport } from '@deepagents/text2sql/posthog';
+
+const metadataResponse = z.object({
+  isValid: z.boolean(),
+  errors: z.array(z.unknown()),
+});
+const schemaResponse = z.object({
+  tables: z.record(z.string(), z.unknown()),
+  joins: z.array(z.unknown()),
+});
+const queryResponse = z.object({
+  columns: z.array(z.string()),
+  results: z.array(z.array(z.unknown())),
+});
 
 const host = process.env.POSTHOG_HOST;
 const projectId = process.env.POSTHOG_PROJECT_ID;
@@ -28,14 +37,14 @@ it(
     });
 
     const [
-      metadata,
-      schema,
+      metadataPayload,
+      schemaPayload,
       events,
       eventProperties,
       personProperties,
       sessionProperties,
     ] = await Promise.all([
-      transport.query<PostHogMetadataResponse>({
+      transport.query({
         query: {
           kind: 'HogQLMetadata',
           language: 'hogQL',
@@ -43,7 +52,7 @@ it(
         },
         name: 'deepagents_text2sql_live_metadata',
       }),
-      transport.query<PostHogSchemaResponse>({
+      transport.query({
         query: { kind: 'DatabaseSchemaQuery' },
         name: 'deepagents_text2sql_live_schema',
       }),
@@ -52,10 +61,14 @@ it(
       transport.listPropertyDefinitions({ type: 'person' }),
       transport.listPropertyDefinitions({ type: 'session' }),
     ]);
-    const result = await transport.query<PostHogQueryResponse>({
-      query: { kind: 'HogQLQuery', query: 'SELECT 1 AS value' },
-      name: 'deepagents_text2sql_live_execute',
-    });
+    const metadata = metadataResponse.parse(metadataPayload);
+    const schema = schemaResponse.parse(schemaPayload);
+    const result = queryResponse.parse(
+      await transport.query({
+        query: { kind: 'HogQLQuery', query: 'SELECT 1 AS value' },
+        name: 'deepagents_text2sql_live_execute',
+      }),
+    );
 
     assert.equal(metadata.isValid, true);
     assert.ok(Array.isArray(metadata.errors));

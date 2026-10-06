@@ -18,15 +18,17 @@ export interface FilteredProducerOptions {
  * Wraps another PairProducer and filters the output based on criteria.
  */
 export class FilteredProducer extends PairProducer {
+  readonly #producer: PairProducer;
+  readonly #options: FilteredProducerOptions;
+
   /**
    * @param producer - Source producer to filter
    * @param options - Filter configuration
    */
-  constructor(
-    private producer: PairProducer,
-    private options: FilteredProducerOptions = {},
-  ) {
+  constructor(producer: PairProducer, options: FilteredProducerOptions = {}) {
     super();
+    this.#producer = producer;
+    this.#options = options;
   }
 
   /**
@@ -34,17 +36,17 @@ export class FilteredProducer extends PairProducer {
    * @returns Pairs matching all configured filter criteria
    */
   async *produce(): AsyncGenerator<ExtractedPair[]> {
-    for await (const chunk of this.producer.produce()) {
+    for await (const chunk of this.#producer.produce()) {
       const filtered = chunk.filter((pair) => {
-        if (this.options.successOnly !== false && !pair.success) {
+        if (this.#options.successOnly !== false && !pair.success) {
           return false;
         }
 
-        if (this.options.tables?.length) {
-          if (!this.matchesTables(pair.sql, this.options.tables)) return false;
+        if (this.#options.tables?.length) {
+          if (!this.matchesTables(pair.sql, this.#options.tables)) return false;
         }
 
-        if (this.options.filter && !this.options.filter(pair)) {
+        if (this.#options.filter && !this.#options.filter(pair)) {
           return false;
         }
 
@@ -65,7 +67,7 @@ export class FilteredProducer extends PairProducer {
     const filterNames = this.#filterNames;
     try {
       const refs = parser.tableList(sql, {
-        database: this.options.dialect,
+        database: this.#options.dialect,
       });
       const sqlNames = refs.map((r) => r.split('::').pop()!.toLowerCase());
       return sqlNames.some((t) => filterNames.has(t));

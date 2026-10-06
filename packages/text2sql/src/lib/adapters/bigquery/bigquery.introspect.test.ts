@@ -1,6 +1,8 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
+import { z } from 'zod';
 
+import type { ContextFragment } from '@deepagents/context';
 import {
   BigQuery,
   constraints,
@@ -16,6 +18,34 @@ import {
   requireOne,
   createExecuteStub as sharedExecuteStub,
 } from './test-helpers.test.ts';
+
+const columnFragment = z.object({
+  data: z.object({
+    name: z.string(),
+    pk: z.boolean().optional(),
+    fk: z.string().optional(),
+    notNull: z.boolean().optional(),
+    indexed: z.boolean().optional(),
+  }),
+});
+
+const tableData = z.object({
+  name: z.string(),
+  rowCount: z.number().optional(),
+  sizeHint: z.string().optional(),
+  columns: z.array(columnFragment),
+});
+
+const viewData = z.object({
+  name: z.string(),
+  definition: z.string().optional(),
+});
+
+function tablesIn(fragments: ContextFragment[]) {
+  return fragments
+    .filter((f) => f.name === 'table')
+    .map((f) => tableData.parse(f.data));
+}
 
 function createExecuteStub(responder: SqlResponder) {
   return sharedExecuteStub((sql) => {
@@ -374,13 +404,11 @@ describe('BigQuery adapter', () => {
       },
     });
 
-    const tableFrags = fragments.filter((f) => f.name === 'table');
+    const tableFrags = tablesIn(fragments);
 
     // 0-column table should be filtered out
     assert.strictEqual(
-      tableFrags.filter(
-        (t) => (t.data as any)?.name === 'analytics.empty_table',
-      ).length,
+      tableFrags.filter((t) => t.name === 'analytics.empty_table').length,
       0,
       'Empty table (0 columns) should be filtered out',
     );
@@ -392,72 +420,64 @@ describe('BigQuery adapter', () => {
     );
 
     const orders = requireOne(
-      tableFrags.filter((t) => (t.data as any)?.name === 'analytics.orders'),
+      tableFrags.filter((t) => t.name === 'analytics.orders'),
       'Expected orders table fragment',
     );
 
     const users = requireOne(
-      tableFrags.filter((t) => (t.data as any)?.name === 'analytics.users'),
+      tableFrags.filter((t) => t.name === 'analytics.users'),
       'Expected users table fragment',
     );
 
     // Nested field paths are flattened as dot-delimited column names.
-    const ordersColumnNames = (orders.data as any).columns.map(
-      (c: any) => c.data.name,
-    );
+    const ordersColumnNames = orders.columns.map((c) => c.data.name);
     assert.ok(
       ordersColumnNames.includes('user.address.city'),
       'Expected flattened nested field path column user.address.city',
     );
 
     // Constraints annotate columns (PK/FK/NOT NULL) and skip out-of-scope FK targets.
-    const usersId: any = requireOne(
-      (users.data as any).columns.filter((c: any) => c.data.name === 'id'),
+    const usersId = requireOne(
+      users.columns.filter((c) => c.data.name === 'id'),
       'Expected users.id column fragment',
     );
     assert.strictEqual(usersId.data.pk, true);
 
-    const ordersUserId: any = requireOne(
-      (orders.data as any).columns.filter(
-        (c: any) => c.data.name === 'user_id',
-      ),
+    const ordersUserId = requireOne(
+      orders.columns.filter((c) => c.data.name === 'user_id'),
       'Expected orders.user_id column fragment',
     );
     assert.strictEqual(ordersUserId.data.notNull, true);
     assert.strictEqual(ordersUserId.data.fk, 'analytics.users.id');
 
     // Row count + sizeHint come from metadata-only grounding.
-    assert.strictEqual((orders.data as any).rowCount, 1200);
-    assert.strictEqual((orders.data as any).sizeHint, 'medium');
-    assert.strictEqual((users.data as any).rowCount, 50);
-    assert.strictEqual((users.data as any).sizeHint, 'tiny');
+    assert.strictEqual(orders.rowCount, 1200);
+    assert.strictEqual(orders.sizeHint, 'medium');
+    assert.strictEqual(users.rowCount, 50);
+    assert.strictEqual(users.sizeHint, 'tiny');
 
     // Partition/clustering columns are treated as "indexed".
-    const ordersCreatedAt: any = requireOne(
-      (orders.data as any).columns.filter(
-        (c: any) => c.data.name === 'created_at',
-      ),
+    const ordersCreatedAt = requireOne(
+      orders.columns.filter((c) => c.data.name === 'created_at'),
       'Expected orders.created_at column fragment',
     );
     assert.strictEqual(ordersCreatedAt.data.indexed, true);
     assert.strictEqual(ordersUserId.data.indexed, true);
 
     // Views include materialized views and definitions.
-    const viewFrags = fragments.filter((f) => f.name === 'view');
+    const viewFrags = fragments
+      .filter((f) => f.name === 'view')
+      .map((f) => viewData.parse(f.data));
     const activeUsers = requireOne(
-      viewFrags.filter(
-        (v) => (v.data as any)?.name === 'analytics.active_users',
-      ),
+      viewFrags.filter((v) => v.name === 'analytics.active_users'),
       'Expected active_users view fragment',
     );
     const ordersMv = requireOne(
-      viewFrags.filter((v) => (v.data as any)?.name === 'analytics.orders_mv'),
+      viewFrags.filter((v) => v.name === 'analytics.orders_mv'),
       'Expected orders_mv materialized view fragment',
     );
-    assert.ok((activeUsers.data as any).definition?.includes('CREATE VIEW'));
-    assert.ok(
-      (ordersMv.data as any).definition?.includes('CREATE MATERIALIZED VIEW'),
-    );
+    assert.ok(activeUsers.definition?.includes('CREATE VIEW'));
+    assert.ok(ordersMv.definition?.includes('CREATE MATERIALIZED VIEW'));
 
     // Relationship fragments are produced when FK metadata exists.
     const relationshipFrags = fragments.filter(
@@ -553,12 +573,12 @@ describe('BigQuery adapter', () => {
     });
 
     const fragments = await adapter.introspect();
-    const userTable = fragments.find(
-      (f) => f.name === 'table' && (f.data as any)?.name === 'analytics.users',
+    const userTable = tablesIn(fragments).find(
+      (t) => t.name === 'analytics.users',
     );
     assert.ok(userTable, 'users table should exist');
-    assert.strictEqual((userTable.data as any).rowCount, 42);
-    assert.strictEqual((userTable.data as any).sizeHint, 'tiny');
+    assert.strictEqual(userTable.rowCount, 42);
+    assert.strictEqual(userTable.sizeHint, 'tiny');
   });
 
   it('survives when both TABLE_STORAGE and __TABLES__ fail', async () => {
@@ -596,10 +616,10 @@ describe('BigQuery adapter', () => {
     });
 
     const fragments = await adapter.introspect();
-    const userTable = fragments.find(
-      (f) => f.name === 'table' && (f.data as any)?.name === 'analytics.users',
+    const userTable = tablesIn(fragments).find(
+      (t) => t.name === 'analytics.users',
     );
     assert.ok(userTable, 'users table should exist even without row counts');
-    assert.strictEqual((userTable.data as any).rowCount, undefined);
+    assert.strictEqual(userTable.rowCount, undefined);
   });
 });

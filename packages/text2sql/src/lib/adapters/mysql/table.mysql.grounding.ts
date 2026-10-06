@@ -1,25 +1,24 @@
-import type { Adapter, Relationship, Table } from '../adapter.ts';
+import { z } from 'zod';
+
+import type { Relationship, Table } from '../adapter.ts';
+import { nameRow } from '../groundings/rows.ts';
 import {
   TableGrounding,
   type TableGroundingConfig,
 } from '../groundings/table.grounding.ts';
+import { columnRow, currentDatabaseRow } from './mysql-rows.ts';
 import type { Mysql } from './mysql.ts';
 
-type ColumnRow = {
-  COLUMN_NAME: string | null;
-  DATA_TYPE: string | null;
-  COLUMN_TYPE: string | null;
-};
-
-type RelationshipRow = {
-  TABLE_SCHEMA: string | null;
-  TABLE_NAME: string | null;
-  COLUMN_NAME: string | null;
-  REFERENCED_TABLE_SCHEMA: string | null;
-  REFERENCED_TABLE_NAME: string | null;
-  REFERENCED_COLUMN_NAME: string | null;
-  CONSTRAINT_NAME: string | null;
-};
+/** INFORMATION_SCHEMA.KEY_COLUMN_USAGE, one row per foreign key column. */
+const relationshipRow = z.object({
+  CONSTRAINT_NAME: z.string().nullable(),
+  TABLE_SCHEMA: z.string().nullable(),
+  TABLE_NAME: z.string().nullable(),
+  COLUMN_NAME: z.string().nullable(),
+  REFERENCED_TABLE_SCHEMA: z.string().nullable(),
+  REFERENCED_TABLE_NAME: z.string().nullable(),
+  REFERENCED_COLUMN_NAME: z.string().nullable(),
+});
 
 export interface MysqlTableGroundingConfig extends TableGroundingConfig {
   /** Databases to include (defaults to excluding system databases) */
@@ -33,23 +32,26 @@ export interface MysqlTableGroundingConfig extends TableGroundingConfig {
  * with both MySQL and MariaDB.
  */
 export class MysqlTableGrounding extends TableGrounding {
-  #adapter: Adapter;
+  #adapter: Mysql;
   #databases?: string[];
 
-  constructor(adapter: Adapter, config: MysqlTableGroundingConfig = {}) {
+  constructor(adapter: Mysql, config: MysqlTableGroundingConfig = {}) {
     super(config);
     this.#adapter = adapter;
-    this.#databases = config.databases ?? (adapter as Mysql).databases;
+    this.#databases = config.databases ?? adapter.databases;
   }
 
   protected override async getAllTableNames(): Promise<string[]> {
-    const rows = await this.#adapter.runQuery<{ name: string }>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT DISTINCT CONCAT(TABLE_SCHEMA, '.', TABLE_NAME) AS name
       FROM INFORMATION_SCHEMA.TABLES
       WHERE TABLE_TYPE = 'BASE TABLE'
         ${this.#buildDatabaseFilter('TABLE_SCHEMA')}
       ORDER BY name
-    `);
+    `,
+      nameRow,
+    );
     return rows.map((r) => r.name);
   }
 
@@ -57,13 +59,16 @@ export class MysqlTableGrounding extends TableGrounding {
     const { schema, table } = this.#adapter.parseTableName(tableName);
     const database = schema || (await this.#getCurrentDatabase());
 
-    const columns = await this.#adapter.runQuery<ColumnRow>(`
+    const columns = await this.#adapter.runQuery(
+      `
       SELECT COLUMN_NAME, DATA_TYPE, COLUMN_TYPE
       FROM INFORMATION_SCHEMA.COLUMNS
       WHERE TABLE_SCHEMA = '${this.#adapter.escapeString(database)}'
         AND TABLE_NAME = '${this.#adapter.escapeString(table)}'
       ORDER BY ORDINAL_POSITION
-    `);
+    `,
+      columnRow,
+    );
 
     return {
       name: tableName,
@@ -82,7 +87,8 @@ export class MysqlTableGrounding extends TableGrounding {
     const { schema, table } = this.#adapter.parseTableName(tableName);
     const database = schema || (await this.#getCurrentDatabase());
 
-    const rows = await this.#adapter.runQuery<RelationshipRow>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT
         kcu.CONSTRAINT_NAME,
         kcu.TABLE_SCHEMA,
@@ -96,7 +102,9 @@ export class MysqlTableGrounding extends TableGrounding {
         AND kcu.TABLE_NAME = '${this.#adapter.escapeString(table)}'
         AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
       ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION
-    `);
+    `,
+      relationshipRow,
+    );
 
     return this.#groupRelationships(rows);
   }
@@ -107,7 +115,8 @@ export class MysqlTableGrounding extends TableGrounding {
     const { schema, table } = this.#adapter.parseTableName(tableName);
     const database = schema || (await this.#getCurrentDatabase());
 
-    const rows = await this.#adapter.runQuery<RelationshipRow>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT
         kcu.CONSTRAINT_NAME,
         kcu.TABLE_SCHEMA,
@@ -120,12 +129,16 @@ export class MysqlTableGrounding extends TableGrounding {
       WHERE kcu.REFERENCED_TABLE_SCHEMA = '${this.#adapter.escapeString(database)}'
         AND kcu.REFERENCED_TABLE_NAME = '${this.#adapter.escapeString(table)}'
       ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION
-    `);
+    `,
+      relationshipRow,
+    );
 
     return this.#groupRelationships(rows);
   }
 
-  #groupRelationships(rows: RelationshipRow[]): Relationship[] {
+  #groupRelationships(
+    rows: z.output<typeof relationshipRow>[],
+  ): Relationship[] {
     const relationships = new Map<string, Relationship>();
 
     for (const row of rows) {
@@ -173,8 +186,9 @@ export class MysqlTableGrounding extends TableGrounding {
   }
 
   async #getCurrentDatabase(): Promise<string> {
-    const rows = await this.#adapter.runQuery<{ db: string | null }>(
+    const rows = await this.#adapter.runQuery(
       'SELECT DATABASE() AS db',
+      currentDatabaseRow,
     );
     return rows[0]?.db ?? '';
   }

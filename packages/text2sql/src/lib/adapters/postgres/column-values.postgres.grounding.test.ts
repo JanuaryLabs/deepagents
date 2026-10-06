@@ -1,6 +1,7 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import pg from 'pg';
+import { z } from 'zod';
 
 import { Postgres as TestPostgres } from '@deepagents/test';
 import {
@@ -12,24 +13,26 @@ import {
 
 const testPostgres = new TestPostgres();
 
-type ColumnData = { name: string; values?: string[] };
-type ColumnFragment = { name: 'column'; data: ColumnData };
-type TableFragmentData = { name: string; columns: ColumnFragment[] };
+const columnData = z.object({
+  name: z.string(),
+  values: z.array(z.string()).optional(),
+});
+const tableData = z.object({
+  name: z.string(),
+  columns: z.array(z.object({ data: columnData })),
+});
 type Fragment = { name: string; data?: unknown };
 
 function findColumn(
   fragments: readonly Fragment[],
   tableName: string,
   columnName: string,
-): ColumnData | undefined {
-  const tableFragment = fragments.find(
-    (f) =>
-      f.name === 'table' &&
-      (f.data as TableFragmentData)?.name === `public.${tableName}`,
-  );
-  return (tableFragment?.data as TableFragmentData | undefined)?.columns.find(
-    (c) => c.data.name === columnName,
-  )?.data;
+): z.output<typeof columnData> | undefined {
+  return fragments
+    .filter((f) => f.name === 'table')
+    .map((f) => tableData.parse(f.data))
+    .find((data) => data.name === `public.${tableName}`)
+    ?.columns.find((c) => c.data.name === columnName)?.data;
 }
 
 async function withPgAdapter(

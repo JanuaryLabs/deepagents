@@ -45,7 +45,7 @@ class PolicyWiringAdapter extends Adapter {
     this.validateCalls++;
   }
 
-  override runQuery<Row>(): Row[] {
+  protected override queryRows(): unknown[] {
     return [];
   }
 

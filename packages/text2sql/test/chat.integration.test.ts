@@ -1,4 +1,9 @@
-import { type UIMessage, generateId, simulateReadableStream } from 'ai';
+import {
+  type UIMessage,
+  generateId,
+  simulateReadableStream,
+  validateUIMessages,
+} from 'ai';
 import {
   MockLanguageModelV4,
   convertReadableStreamToArray as drain,
@@ -6,6 +11,7 @@ import {
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
+import z from 'zod';
 
 import {
   ContextEngine,
@@ -135,7 +141,7 @@ describe('Text2Sql user-constructed chat', () => {
     const persisted = chain.find((m) => m.name === 'user');
     assert.ok(persisted, 'user message should be persisted');
 
-    const data = persisted.data as UIMessage;
+    const [data] = await validateUIMessages({ messages: [persisted.data] });
     const textPart = data.parts.find((part) => part.type === 'text');
     assert.strictEqual(textPart?.text, 'How many users are there?');
   });
@@ -168,7 +174,9 @@ describe('Text2Sql user-constructed chat', () => {
     const assistantMsg = chain.find((m) => m.name === 'assistant');
     assert.ok(assistantMsg, 'assistant message should be persisted');
 
-    const data = assistantMsg.data as UIMessage;
+    const [data] = await validateUIMessages({
+      messages: [assistantMsg.data],
+    });
     assert.ok(
       data.parts && data.parts.length > 0,
       'assistant message should have parts',
@@ -230,7 +238,13 @@ describe('Text2Sql user-constructed chat', () => {
     assert.ok(persistedChat, 'chat should exist');
     assert.ok(persistedChat.metadata?.usage, 'chat metadata should have usage');
 
-    const usage = persistedChat.metadata.usage as Record<string, number>;
+    const usage = z
+      .object({
+        inputTokens: z.number(),
+        outputTokens: z.number(),
+        totalTokens: z.number(),
+      })
+      .parse(persistedChat.metadata.usage);
     assert.ok(usage.inputTokens > 0, 'inputTokens should be > 0');
     assert.ok(usage.outputTokens > 0, 'outputTokens should be > 0');
     assert.ok(usage.totalTokens > 0, 'totalTokens should be > 0');
@@ -558,7 +572,7 @@ describe('Text2Sql user-constructed chat', () => {
     const persisted = chain.find((m) => m.name === 'user');
     assert.ok(persisted, 'user message should be persisted');
 
-    const data = persisted.data as UIMessage;
+    const [data] = await validateUIMessages({ messages: [persisted.data] });
     const textPart = data.parts.find((part) => part.type === 'text');
     assert.ok(textPart, 'should have a text part');
     assert.ok(
@@ -570,14 +584,16 @@ describe('Text2Sql user-constructed chat', () => {
       'text should contain the reminder content',
     );
 
-    const metadata = data.metadata as Record<string, unknown>;
+    const metadata = data.metadata;
     assert.ok(metadata, 'message should have metadata');
     assert.ok(
-      Array.isArray(metadata.reminders),
+      typeof metadata === 'object' &&
+        'reminders' in metadata &&
+        Array.isArray(metadata.reminders),
       'metadata should have reminders array',
     );
     assert.strictEqual(
-      (metadata.reminders as unknown[]).length,
+      metadata.reminders.length,
       1,
       'should have exactly one reminder',
     );

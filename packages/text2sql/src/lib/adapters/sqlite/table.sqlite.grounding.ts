@@ -1,21 +1,10 @@
 import type { Adapter, Relationship, Table } from '../adapter.ts';
+import { nameRow } from '../groundings/rows.ts';
 import {
   TableGrounding,
   type TableGroundingConfig,
 } from '../groundings/table.grounding.ts';
-
-type ColumnRow = {
-  name: string | null | undefined;
-  type: string | null | undefined;
-  pk?: number | null | undefined;
-};
-
-type ForeignKeyRow = {
-  id: number | null | undefined;
-  table: string | null | undefined;
-  from: string | null | undefined;
-  to: string | null | undefined;
-};
+import { foreignKeyListRow, tableInfoRow } from './sqlite-rows.ts';
 
 /**
  * SQLite implementation of TableGrounding.
@@ -33,64 +22,55 @@ export class SqliteTableGrounding extends TableGrounding {
   }
 
   protected override async getAllTableNames(): Promise<string[]> {
-    const rows = await this.#adapter.runQuery<{
-      name: string | null | undefined;
-    }>(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`);
+    const rows = await this.#adapter.runQuery(
+      `SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`,
+      nameRow,
+    );
 
     return rows
       .map((row) => row.name)
-      .filter(
-        (name): name is string =>
-          typeof name === 'string' && !name.startsWith('sqlite_'),
-      );
+      .filter((name) => !name.startsWith('sqlite_'));
   }
 
   protected override async getTable(tableName: string): Promise<Table> {
-    const columns = await this.#adapter.runQuery<ColumnRow>(
+    const columns = await this.#adapter.runQuery(
       `PRAGMA table_info(${this.#quoteIdentifier(tableName)})`,
+      tableInfoRow,
     );
 
     return {
       name: tableName,
       rawName: tableName,
-      columns: columns.map((col) => ({
-        name: col.name ?? 'unknown',
-        type: col.type ?? 'unknown',
-      })),
+      columns: columns.map((col) => ({ name: col.name, type: col.type })),
     };
   }
 
   protected override async findOutgoingRelations(
     tableName: string,
   ): Promise<Relationship[]> {
-    const rows = await this.#adapter.runQuery<ForeignKeyRow>(
+    const rows = await this.#adapter.runQuery(
       `PRAGMA foreign_key_list(${this.#quoteIdentifier(tableName)})`,
+      foreignKeyListRow,
     );
 
     const groups = new Map<number, Relationship>();
 
     for (const row of rows) {
-      if (
-        row.id == null ||
-        row.table == null ||
-        row.from == null ||
-        row.to == null
-      ) {
+      if (row.to === null) {
         continue;
       }
 
-      const id = Number(row.id);
-      const existing = groups.get(id);
+      const existing = groups.get(row.id);
       if (!existing) {
-        groups.set(id, {
+        groups.set(row.id, {
           table: tableName,
-          from: [String(row.from)],
-          referenced_table: String(row.table),
-          to: [String(row.to)],
+          from: [row.from],
+          referenced_table: row.table,
+          to: [row.to],
         });
       } else {
-        existing.from.push(String(row.from));
-        existing.to.push(String(row.to));
+        existing.from.push(row.from);
+        existing.to.push(row.to);
       }
     }
 

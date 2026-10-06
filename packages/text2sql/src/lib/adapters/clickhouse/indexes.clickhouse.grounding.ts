@@ -1,18 +1,18 @@
+import { z } from 'zod';
+
 import type { Adapter, TableIndex } from '../adapter.ts';
 import {
   IndexesGrounding,
   type IndexesGroundingConfig,
 } from '../groundings/indexes.grounding.ts';
+import { nameRow } from '../groundings/rows.ts';
 
-type PrimaryKeyRow = {
-  name: string;
-};
-
-type DataSkippingIndexRow = {
-  name: string;
-  type: string;
-  expression: string;
-};
+/** `system.data_skipping_indices`: every selected column is a String. */
+const dataSkippingIndexRow = z.object({
+  name: z.string(),
+  type: z.string(),
+  expression: z.string(),
+});
 
 export class ClickHouseIndexesGrounding extends IndexesGrounding {
   readonly #adapter: Adapter;
@@ -29,21 +29,27 @@ export class ClickHouseIndexesGrounding extends IndexesGrounding {
     if (!schema) return [];
 
     const [primaryKeyRows, indexRows] = await Promise.all([
-      this.#adapter.runQuery<PrimaryKeyRow>(`
+      this.#adapter.runQuery(
+        `
         SELECT name
         FROM system.columns
         WHERE database = '${this.#adapter.escapeString(schema)}'
           AND table = '${this.#adapter.escapeString(table)}'
           AND is_in_primary_key = 1
         ORDER BY position
-      `),
-      this.#adapter.runQuery<DataSkippingIndexRow>(`
+      `,
+        nameRow,
+      ),
+      this.#adapter.runQuery(
+        `
         SELECT name, type_full AS type, expr AS expression
         FROM system.data_skipping_indices
         WHERE database = '${this.#adapter.escapeString(schema)}'
           AND table = '${this.#adapter.escapeString(table)}'
         ORDER BY name
-      `),
+      `,
+        dataSkippingIndexRow,
+      ),
     ]);
 
     const indexes: TableIndex[] = [];

@@ -1,16 +1,35 @@
+import { z } from 'zod';
+
 import type { Adapter, ColumnStats } from '../adapter.ts';
 import {
   ColumnStatsGrounding,
   type ColumnStatsGroundingConfig,
 } from '../groundings/column-stats.grounding.ts';
 import type { Column, GroundingContext } from '../groundings/context.ts';
+import { numericValue } from '../groundings/rows.ts';
 
-interface NDistinctRow {
-  schema_name: string;
-  table_name: string;
-  column_name: string;
-  approx_n_distinct: number;
-}
+/**
+ * Distinct-value estimate per statistics column. OBJECT_SCHEMA_NAME,
+ * OBJECT_NAME and COL_NAME return NULL for an object the caller cannot see;
+ * the estimate adds COUNT(*) to a bigint sum, so it is a bigint, which tedious
+ * returns as a decimal string.
+ */
+const nDistinctRow = z.object({
+  schema_name: z.string().nullable(),
+  table_name: z.string().nullable(),
+  column_name: z.string().nullable(),
+  approx_n_distinct: numericValue,
+});
+
+/**
+ * MIN and MAX are cast to NVARCHAR(MAX); AVG over a decimal is a decimal
+ * (a number from tedious). All three are NULL for an empty table.
+ */
+const statsRow = z.object({
+  min_value: z.string().nullable(),
+  max_value: z.string().nullable(),
+  null_fraction: numericValue.nullable(),
+});
 
 export class SqlServerColumnStatsGrounding extends ColumnStatsGrounding {
   #adapter: Adapter;
@@ -35,7 +54,8 @@ export class SqlServerColumnStatsGrounding extends ColumnStatsGrounding {
     });
 
     try {
-      const rows = await this.#adapter.runQuery<NDistinctRow>(`
+      const rows = await this.#adapter.runQuery(
+        `
         SELECT
           OBJECT_SCHEMA_NAME(s.object_id) AS schema_name,
           OBJECT_NAME(s.object_id) AS table_name,
@@ -51,9 +71,14 @@ export class SqlServerColumnStatsGrounding extends ColumnStatsGrounding {
         WHERE sc.stats_column_id = 1
           AND sp.rows > 0
           AND s.object_id IN (${objectIds.join(', ')})
-      `);
+      `,
+        nDistinctRow,
+      );
 
       for (const row of rows) {
+        const nDistinct = this.#adapter.toNumber(row.approx_n_distinct);
+        if (row.column_name === null || nDistinct === undefined) continue;
+
         const tableName = ctx.tables.find((t) => {
           const { schema, table } = this.#adapter.parseTableName(t.name);
           return schema === row.schema_name && table === row.table_name;
@@ -65,7 +90,7 @@ export class SqlServerColumnStatsGrounding extends ColumnStatsGrounding {
           map = new Map();
           this.#nDistinctCache.set(tableName, map);
         }
-        map.set(row.column_name, row.approx_n_distinct);
+        map.set(row.column_name, nDistinct);
       }
     } catch {
       // sys.dm_db_stats_histogram requires SQL Server 2016 SP1+
@@ -99,11 +124,7 @@ export class SqlServerColumnStatsGrounding extends ColumnStatsGrounding {
       FROM ${tableIdentifier}
     `;
 
-    const rows = await this.#adapter.runQuery<{
-      min_value: string | null;
-      max_value: string | null;
-      null_fraction: number | string | null;
-    }>(sql);
+    const rows = await this.#adapter.runQuery(sql, statsRow);
 
     if (!rows.length) {
       if (cachedNDistinct != null) {

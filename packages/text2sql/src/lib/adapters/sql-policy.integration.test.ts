@@ -5,16 +5,9 @@ import assert from 'node:assert';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {
-  type TestContext,
-  after,
-  afterEach,
-  before,
-  describe,
-  it,
-  mock,
-} from 'node:test';
+import { type TestContext, describe, it, mock } from 'node:test';
 import pg from 'pg';
+import { z } from 'zod';
 
 import {
   type MysqlDatabase,
@@ -58,8 +51,19 @@ import {
   views as sqlServerViews,
 } from '@deepagents/text2sql/sqlserver';
 
+const scopeErrorPayload = z.object({
+  error: z.string(),
+  error_type: z.enum(['OUT_OF_SCOPE', 'SQL_SCOPE_PARSE_ERROR']),
+  suggestion: z.string(),
+  sql_attempted: z.string(),
+  referenced_entities: z.array(z.string()).optional(),
+  allowed_entities: z.array(z.string()).optional(),
+  parser_dialect: z.string().optional(),
+  parser_error: z.string().optional(),
+}) satisfies z.ZodType<SQLScopeErrorPayload>;
+
 function parseScopePayload(payload: string): SQLScopeErrorPayload {
-  return JSON.parse(payload) as SQLScopeErrorPayload;
+  return scopeErrorPayload.parse(JSON.parse(payload));
 }
 
 type PolicyProbe = {
@@ -82,10 +86,9 @@ type AdapterFactoryResult = {
   probes: AdapterProbes;
 };
 
-type AdapterPolicyTestEnvironment = {
+type AdapterPolicyTestEnvironment = AsyncDisposable & {
   create: () => AdapterFactoryResult | Promise<AdapterFactoryResult>;
   createEmptyScope: () => AdapterFactoryResult | Promise<AdapterFactoryResult>;
-  cleanup?: () => Promise<void>;
   queries: AdapterQueries;
 };
 
@@ -225,13 +228,13 @@ const policyPostgresDdl = `
   INSERT INTO public.users (id, name) VALUES (1, 'Ada');
 `;
 
-const policyMysqlDdl = `
+const policyMysqlDdl = (adminDatabase: string) => `
   DROP VIEW IF EXISTS active_users;
   DROP TABLE IF EXISTS orders;
   DROP TABLE IF EXISTS users;
-  DROP DATABASE IF EXISTS admin;
+  DROP DATABASE IF EXISTS \`${adminDatabase}\`;
 
-  CREATE DATABASE admin;
+  CREATE DATABASE \`${adminDatabase}\`;
   CREATE TABLE users (
     id INT PRIMARY KEY,
     name VARCHAR(255) NOT NULL
@@ -242,7 +245,7 @@ const policyMysqlDdl = `
     total DECIMAL(10, 2) NOT NULL,
     CONSTRAINT orders_users_fk FOREIGN KEY (user_id) REFERENCES users(id)
   );
-  CREATE TABLE admin.secrets (
+  CREATE TABLE \`${adminDatabase}\`.secrets (
     id INT PRIMARY KEY,
     user_id INT
   );
@@ -358,9 +361,9 @@ function createMysqlScope(
   const groundingProbe = mock.fn();
   const validateProbe = mock.fn();
   const grounding = options.grounding ?? [
-    mysqlTables({ filter: options.tables ?? ['app.users'] }),
+    mysqlTables({ filter: options.tables ?? [`${container.database}.users`] }),
     mysqlViews({
-      filter: options.views ?? ['app.active_users'],
+      filter: options.views ?? [`${container.database}.active_users`],
       includeDefinition: false,
     }),
   ];
@@ -431,11 +434,10 @@ function createSqlServerScope(
   };
 }
 
-type BigQueryRuntime = {
+type BigQueryRuntime = AsyncDisposable & {
   dataset: Dataset;
   datasetId: string;
   projectId: string;
-  cleanup: () => Promise<void>;
 };
 
 async function startBigQueryRuntime(): Promise<BigQueryRuntime | undefined> {
@@ -473,7 +475,7 @@ async function startBigQueryRuntime(): Promise<BigQueryRuntime | undefined> {
       dataset,
       datasetId,
       projectId,
-      cleanup: () => owned.disposeAsync(),
+      [Symbol.asyncDispose]: () => owned.disposeAsync(),
     };
   } catch (error) {
     try {
@@ -537,6 +539,10 @@ function createBigQueryScope(
   };
 }
 
+const testPostgres = new TestPostgres();
+const testMysql = new TestMysql();
+const testSqlServer = new TestSqlServer();
+
 const adapterCases: AdapterCase[] = [
   {
     name: 'sqlite',
@@ -546,86 +552,75 @@ const adapterCases: AdapterCase[] = [
         create: async () => resources.use(await createSqlitePolicyAdapter({})),
         createEmptyScope: async () =>
           resources.use(await createSqlitePolicyAdapter({ grounding: [] })),
-        cleanup: () => resources.disposeAsync(),
         queries: defaultPolicyQueries,
+        [Symbol.asyncDispose]: () => resources.disposeAsync(),
       };
     },
   },
   {
     name: 'postgres',
     setup: async () => {
-      const container = await new TestPostgres().start();
+      await using resources = new AsyncDisposableStack();
+      const database = resources.use(await testPostgres.database());
       const pool = new pg.Pool({
-        connectionString: container.connectionString,
+        connectionString: database.connectionString,
       });
-      try {
-        await pool.query(policyPostgresDdl);
-      } catch (error) {
-        await pool.end();
-        await container.cleanup();
-        throw error;
-      }
+      resources.defer(() => pool.end());
+      await pool.query(policyPostgresDdl);
+      const owned = resources.move();
 
       return {
         create: () => createPostgresScope(pool),
         createEmptyScope: () => createPostgresScope(pool, { grounding: [] }),
-        cleanup: async () => {
-          await pool.end();
-          await container.cleanup();
-        },
         queries: {
           ...defaultPolicyQueries,
           outOfScopeSql: 'SELECT * FROM private.secrets',
         },
+        [Symbol.asyncDispose]: () => owned.disposeAsync(),
       };
     },
   },
   {
     name: 'mysql',
     setup: async () => {
-      const container = await new TestMysql().start();
-      try {
-        await container.query(policyMysqlDdl);
-      } catch (error) {
-        await container.cleanup();
-        throw error;
-      }
+      await using resources = new AsyncDisposableStack();
+      const database = resources.use(await testMysql.database());
+      // The out-of-scope table lives in a second database on the shared server.
+      const adminDatabase = `${database.database}_admin`;
+      resources.defer(async () => {
+        await database.query(`DROP DATABASE IF EXISTS \`${adminDatabase}\``);
+      });
+      await database.query(policyMysqlDdl(adminDatabase));
+      const owned = resources.move();
 
       return {
-        create: () => createMysqlScope(container),
-        createEmptyScope: () => createMysqlScope(container, { grounding: [] }),
-        cleanup: container.cleanup,
+        create: () => createMysqlScope(database),
+        createEmptyScope: () => createMysqlScope(database, { grounding: [] }),
         queries: {
           ...defaultPolicyQueries,
           executeResult: [{ id: '1', name: 'Ada' }],
-          outOfScopeSql: 'SELECT * FROM admin.secrets',
+          outOfScopeSql: `SELECT * FROM ${adminDatabase}.secrets`,
         },
+        [Symbol.asyncDispose]: () => owned.disposeAsync(),
       };
     },
   },
   {
     name: 'sqlserver',
     setup: async () => {
-      const container = await new TestSqlServer().start();
-      const pool = new sql.ConnectionPool(container.connectionString);
-      try {
-        await pool.connect();
-        for (const statement of policySqlServerDdl) {
-          await pool.request().batch(statement);
-        }
-      } catch (error) {
-        await pool.close();
-        await container.cleanup();
-        throw error;
+      await using resources = new AsyncDisposableStack();
+      const database = resources.use(await testSqlServer.database());
+      const pool = new sql.ConnectionPool(database.connectionString);
+      resources.defer(() => pool.close());
+      await pool.connect();
+      for (const statement of policySqlServerDdl) {
+        await pool.request().batch(statement);
       }
+      const owned = resources.move();
 
       return {
         create: () => createSqlServerScope(pool),
         createEmptyScope: () => createSqlServerScope(pool, { grounding: [] }),
-        cleanup: async () => {
-          await pool.close();
-          await container.cleanup();
-        },
         queries: {
           ...defaultPolicyQueries,
           inScopeSql: 'SELECT TOP 1 * FROM users',
@@ -634,6 +629,7 @@ const adapterCases: AdapterCase[] = [
           cteSql:
             'WITH visible AS (SELECT TOP 1 * FROM users) SELECT * FROM visible',
         },
+        [Symbol.asyncDispose]: () => owned.disposeAsync(),
       };
     },
   },
@@ -646,11 +642,11 @@ const adapterCases: AdapterCase[] = [
       return {
         create: () => createBigQueryScope(runtime),
         createEmptyScope: () => createBigQueryScope(runtime, { grounding: [] }),
-        cleanup: runtime.cleanup,
         queries: {
           ...defaultPolicyQueries,
           setOperationSql: 'SELECT * FROM users UNION ALL SELECT * FROM users',
         },
+        [Symbol.asyncDispose]: () => runtime[Symbol.asyncDispose](),
       };
     },
   },
@@ -658,37 +654,16 @@ const adapterCases: AdapterCase[] = [
 
 for (const adapterCase of adapterCases) {
   describe(`${adapterCase.name} SQL policy`, () => {
-    let runtime: AdapterPolicyTestEnvironment | undefined;
-
-    before(async () => {
-      runtime = await adapterCase.setup();
-    });
-
-    after(async () => {
-      await runtime?.cleanup?.();
-      runtime = undefined;
-    });
-
-    async function createAdapter() {
-      return runtime?.create();
-    }
-
-    async function createEmptyScopeAdapter() {
-      return runtime?.createEmptyScope();
-    }
-
-    function skipUnavailableRuntime(t: TestContext): boolean {
-      if (runtime) return false;
-      t.skip(`${adapterCase.name} test database is unavailable`);
-      return true;
+    async function acquireRuntime(t: TestContext) {
+      const runtime = await adapterCase.setup();
+      if (!runtime) t.skip(`${adapterCase.name} test database is unavailable`);
+      return runtime;
     }
 
     it('allows entity-free queries', async (t) => {
-      if (skipUnavailableRuntime(t)) return;
-      const created = await createAdapter();
-      assert.ok(created, `${adapterCase.name} adapter must be available`);
-      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
-      const { adapter, probes } = created;
+      await using runtime = await acquireRuntime(t);
+      if (!runtime) return;
+      const { adapter, probes } = await runtime.create();
 
       const result = await adapter.validate('SELECT 1');
 
@@ -699,11 +674,9 @@ for (const adapterCase of adapterCases) {
     });
 
     it('allows in-scope table queries in validate', async (t) => {
-      if (skipUnavailableRuntime(t)) return;
-      const created = await createAdapter();
-      assert.ok(created, `${adapterCase.name} adapter must be available`);
-      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
-      const { adapter, probes } = created;
+      await using runtime = await acquireRuntime(t);
+      if (!runtime) return;
+      const { adapter, probes } = await runtime.create();
 
       const result = await adapter.validate(runtime.queries.inScopeSql);
 
@@ -714,11 +687,9 @@ for (const adapterCase of adapterCases) {
     });
 
     it('allows in-scope table queries in execute', async (t) => {
-      if (skipUnavailableRuntime(t)) return;
-      const created = await createAdapter();
-      assert.ok(created, `${adapterCase.name} adapter must be available`);
-      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
-      const { adapter, probes } = created;
+      await using runtime = await acquireRuntime(t);
+      if (!runtime) return;
+      const { adapter, probes } = await runtime.create();
 
       const result = await adapter.execute(runtime.queries.inScopeSql);
 
@@ -729,11 +700,9 @@ for (const adapterCase of adapterCases) {
     });
 
     it('allows in-scope view queries in validate', async (t) => {
-      if (skipUnavailableRuntime(t)) return;
-      const created = await createAdapter();
-      assert.ok(created, `${adapterCase.name} adapter must be available`);
-      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
-      const { adapter, probes } = created;
+      await using runtime = await acquireRuntime(t);
+      if (!runtime) return;
+      const { adapter, probes } = await runtime.create();
 
       const result = await adapter.validate(runtime.queries.inScopeViewSql);
 
@@ -744,11 +713,9 @@ for (const adapterCase of adapterCases) {
     });
 
     it('allows in-scope view queries in execute', async (t) => {
-      if (skipUnavailableRuntime(t)) return;
-      const created = await createAdapter();
-      assert.ok(created, `${adapterCase.name} adapter must be available`);
-      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
-      const { adapter, probes } = created;
+      await using runtime = await acquireRuntime(t);
+      if (!runtime) return;
+      const { adapter, probes } = await runtime.create();
 
       const result = await adapter.execute(runtime.queries.inScopeViewSql);
 
@@ -759,11 +726,9 @@ for (const adapterCase of adapterCases) {
     });
 
     it('allows CTE queries when their base entities are grounded', async (t) => {
-      if (skipUnavailableRuntime(t)) return;
-      const created = await createAdapter();
-      assert.ok(created, `${adapterCase.name} adapter must be available`);
-      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
-      const { adapter, probes } = created;
+      await using runtime = await acquireRuntime(t);
+      if (!runtime) return;
+      const { adapter, probes } = await runtime.create();
 
       const result = await adapter.validate(runtime.queries.cteSql);
 
@@ -774,11 +739,9 @@ for (const adapterCase of adapterCases) {
     });
 
     it('allows subquery queries when their base entities are grounded', async (t) => {
-      if (skipUnavailableRuntime(t)) return;
-      const created = await createAdapter();
-      assert.ok(created, `${adapterCase.name} adapter must be available`);
-      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
-      const { adapter, probes } = created;
+      await using runtime = await acquireRuntime(t);
+      if (!runtime) return;
+      const { adapter, probes } = await runtime.create();
 
       const result = await adapter.validate(runtime.queries.subquerySql);
 
@@ -789,11 +752,9 @@ for (const adapterCase of adapterCases) {
     });
 
     it('allows set-operation queries when their base entities are grounded', async (t) => {
-      if (skipUnavailableRuntime(t)) return;
-      const created = await createAdapter();
-      assert.ok(created, `${adapterCase.name} adapter must be available`);
-      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
-      const { adapter, probes } = created;
+      await using runtime = await acquireRuntime(t);
+      if (!runtime) return;
+      const { adapter, probes } = await runtime.create();
 
       const result = await adapter.validate(runtime.queries.setOperationSql);
 
@@ -804,11 +765,9 @@ for (const adapterCase of adapterCases) {
     });
 
     it('blocks out-of-scope validate queries before hitting the db validator', async (t) => {
-      if (skipUnavailableRuntime(t)) return;
-      const created = await createAdapter();
-      assert.ok(created, `${adapterCase.name} adapter must be available`);
-      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
-      const { adapter, probes } = created;
+      await using runtime = await acquireRuntime(t);
+      if (!runtime) return;
+      const { adapter, probes } = await runtime.create();
 
       const result = await adapter.validate(runtime.queries.outOfScopeSql);
 
@@ -821,15 +780,12 @@ for (const adapterCase of adapterCases) {
     });
 
     it('blocks out-of-scope execute queries before hitting the db executor', async (t) => {
-      if (skipUnavailableRuntime(t)) return;
-      const created = await createAdapter();
-      assert.ok(created, `${adapterCase.name} adapter must be available`);
-      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
-      const rt = runtime;
-      const { adapter, probes } = created;
+      await using runtime = await acquireRuntime(t);
+      if (!runtime) return;
+      const { adapter, probes } = await runtime.create();
 
       await assert.rejects(
-        () => adapter.execute(rt.queries.outOfScopeSql),
+        () => adapter.execute(runtime.queries.outOfScopeSql),
         (error: unknown) => {
           const payload = parseScopePayload(
             error instanceof Error ? error.message : String(error),
@@ -845,11 +801,9 @@ for (const adapterCase of adapterCases) {
     });
 
     it('blocks base-entity validate queries when grounded scope resolves no entities', async (t) => {
-      if (skipUnavailableRuntime(t)) return;
-      const created = await createEmptyScopeAdapter();
-      assert.ok(created, `${adapterCase.name} adapter must be available`);
-      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
-      const { adapter, probes } = created;
+      await using runtime = await acquireRuntime(t);
+      if (!runtime) return;
+      const { adapter, probes } = await runtime.createEmptyScope();
 
       const result = await adapter.validate(runtime.queries.inScopeSql);
 
@@ -861,15 +815,12 @@ for (const adapterCase of adapterCases) {
     });
 
     it('blocks base-entity execute queries when grounded scope resolves no entities', async (t) => {
-      if (skipUnavailableRuntime(t)) return;
-      const created = await createEmptyScopeAdapter();
-      assert.ok(created, `${adapterCase.name} adapter must be available`);
-      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
-      const rt = runtime;
-      const { adapter, probes } = created;
+      await using runtime = await acquireRuntime(t);
+      if (!runtime) return;
+      const { adapter, probes } = await runtime.createEmptyScope();
 
       await assert.rejects(
-        () => adapter.execute(rt.queries.inScopeSql),
+        () => adapter.execute(runtime.queries.inScopeSql),
         (error: unknown) => {
           const payload = parseScopePayload(
             error instanceof Error ? error.message : String(error),
@@ -884,10 +835,9 @@ for (const adapterCase of adapterCases) {
     });
 
     it('returns SQL_SCOPE_PARSE_ERROR and never touches the db on parse failure', async (t) => {
-      if (skipUnavailableRuntime(t)) return;
-      const created = await createAdapter();
-      assert.ok(created, `${adapterCase.name} adapter must be available`);
-      const { adapter, probes } = created;
+      await using runtime = await acquireRuntime(t);
+      if (!runtime) return;
+      const { adapter, probes } = await runtime.create();
 
       const result = await adapter.validate('SELECT * FROM');
 
@@ -963,21 +913,12 @@ describe('sqlite SQL policy traversal', () => {
 });
 
 describe('spreadsheet SQL policy', () => {
-  const tempDirs: string[] = [];
-
-  afterEach(async () => {
-    await Promise.all(
-      tempDirs
-        .splice(0)
-        .map((dir) => fs.rm(dir, { recursive: true, force: true })),
-    );
-  });
-
   it('enforces SQL policy through the inherited sqlite adapter', async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'text2sql-scope-'));
-    tempDirs.push(dir);
+    await using dir = await fs.mkdtempDisposable(
+      path.join(os.tmpdir(), 'text2sql-scope-'),
+    );
 
-    const file = path.join(dir, 'users.csv');
+    const file = path.join(dir.path, 'users.csv');
     await fs.writeFile(file, 'id,name\n1,Ada\n');
 
     const adapter = new Spreadsheet({
@@ -1098,19 +1039,17 @@ describe('scope enforcement edge cases', () => {
 });
 
 describe('bigquery scope normalization', () => {
-  let runtime: BigQueryRuntime | undefined;
+  async function acquireRuntime(t: TestContext) {
+    const runtime = await startBigQueryRuntime();
+    if (!runtime) t.skip('BigQuery test database is unavailable');
+    return runtime;
+  }
 
-  before(async () => {
-    runtime = await startBigQueryRuntime();
-  });
-
-  after(async () => {
-    await runtime?.cleanup();
-    runtime = undefined;
-  });
-
-  function createBigQuery(tables: string[], views: string[] = []) {
-    assert.ok(runtime, 'BigQuery runtime must be available');
+  function createBigQuery(
+    runtime: BigQueryRuntime,
+    tables: string[],
+    views: string[] = [],
+  ) {
     return createBigQueryScope(runtime, {
       tables,
       views,
@@ -1121,15 +1060,10 @@ describe('bigquery scope normalization', () => {
     });
   }
 
-  function skipUnavailableRuntime(t: TestContext): boolean {
-    if (runtime) return false;
-    t.skip('BigQuery test database is unavailable');
-    return true;
-  }
-
   it('allows backtick-quoted 3-part name when dataset.table is in allowed set', async (t) => {
-    if (skipUnavailableRuntime(t) || !runtime) return;
-    const { adapter } = createBigQuery([`${runtime.datasetId}.users`]);
+    await using runtime = await acquireRuntime(t);
+    if (!runtime) return;
+    const { adapter } = createBigQuery(runtime, [`${runtime.datasetId}.users`]);
     const result = await adapter.validate(
       `SELECT id, name FROM \`${runtime.projectId}.${runtime.datasetId}.users\` LIMIT 50`,
     );
@@ -1137,8 +1071,9 @@ describe('bigquery scope normalization', () => {
   });
 
   it('blocks unauthorized backtick-quoted 3-part name', async (t) => {
-    if (skipUnavailableRuntime(t) || !runtime) return;
-    const { adapter } = createBigQuery([`${runtime.datasetId}.users`]);
+    await using runtime = await acquireRuntime(t);
+    if (!runtime) return;
+    const { adapter } = createBigQuery(runtime, [`${runtime.datasetId}.users`]);
     const result = await adapter.validate(
       `SELECT * FROM \`${runtime.projectId}.${runtime.datasetId}.secrets\``,
     );
@@ -1148,8 +1083,9 @@ describe('bigquery scope normalization', () => {
   });
 
   it('allows unquoted 2-part dataset.table name', async (t) => {
-    if (skipUnavailableRuntime(t) || !runtime) return;
-    const { adapter } = createBigQuery([`${runtime.datasetId}.users`]);
+    await using runtime = await acquireRuntime(t);
+    if (!runtime) return;
+    const { adapter } = createBigQuery(runtime, [`${runtime.datasetId}.users`]);
     const result = await adapter.validate(
       `SELECT * FROM ${runtime.datasetId}.users`,
     );

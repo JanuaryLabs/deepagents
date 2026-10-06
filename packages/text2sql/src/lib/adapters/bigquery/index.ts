@@ -1,4 +1,4 @@
-import { type Adapter } from '../adapter.ts';
+import { groundingFor } from '../adapter.ts';
 import { type ConstraintGroundingConfig } from '../groundings/constraint.grounding.ts';
 import { type IndexesGroundingConfig } from '../groundings/indexes.grounding.ts';
 import { type InfoGroundingConfig } from '../groundings/info.grounding.ts';
@@ -17,32 +17,45 @@ export * from './bigquery.ts';
 export { BigQuerySqlPolicyAnalyzer } from './bigquery.sql-policy.ts';
 
 export function tables(config: TableGroundingConfig = {}) {
-  return (adapter: Adapter) =>
-    new BigQueryTableGrounding(adapter as unknown as BigQuery, config);
+  return groundingFor(
+    BigQuery,
+    (adapter) => new BigQueryTableGrounding(adapter, config),
+  );
 }
 
 export function info(config: InfoGroundingConfig = {}) {
-  return (adapter: Adapter) => new BigQueryInfoGrounding(adapter as BigQuery);
+  return groundingFor(
+    BigQuery,
+    (adapter) => new BigQueryInfoGrounding(adapter),
+  );
 }
 
 export function views(config: ViewGroundingConfig = {}) {
-  return (adapter: Adapter) =>
-    new BigQueryViewGrounding(adapter as BigQuery, config);
+  return groundingFor(
+    BigQuery,
+    (adapter) => new BigQueryViewGrounding(adapter, config),
+  );
 }
 
 export function indexes(config: IndexesGroundingConfig = {}) {
-  return (adapter: Adapter) =>
-    new BigQueryIndexesGrounding(adapter as BigQuery, config);
+  return groundingFor(
+    BigQuery,
+    (adapter) => new BigQueryIndexesGrounding(adapter, config),
+  );
 }
 
 export function rowCount(config: RowCountGroundingConfig = {}) {
-  return (adapter: Adapter) =>
-    new BigQueryRowCountGrounding(adapter as BigQuery, config);
+  return groundingFor(
+    BigQuery,
+    (adapter) => new BigQueryRowCountGrounding(adapter, config),
+  );
 }
 
 export function constraints(config: ConstraintGroundingConfig = {}) {
-  return (adapter: Adapter) =>
-    new BigQueryConstraintGrounding(adapter as unknown as BigQuery, config);
+  return groundingFor(
+    BigQuery,
+    (adapter) => new BigQueryConstraintGrounding(adapter, config),
+  );
 }
 
 export default {

@@ -1,29 +1,17 @@
 import * as assert from 'node:assert';
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import * as path from 'node:path';
-import { after, before, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
+import { Sqlite } from '@deepagents/test';
 import { SqliteFs } from '@deepagents/text2sql';
 
+const sqlite = new Sqlite();
+
 describe('SqliteFs', () => {
-  let tempDir: string;
-  let sqliteFs: SqliteFs;
-
-  before(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sqlite-fs-test-'));
-    sqliteFs = new SqliteFs({
-      dbPath: path.join(tempDir, 'test.db'),
-      root: '/',
-    });
-  });
-
-  after(async () => {
-    await fs.rm(tempDir, { recursive: true, force: true });
-  });
-
   describe('file operations', () => {
     it('should write and read a file', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       const content = 'Hello, World!';
       await sqliteFs.writeFile('/test.txt', content);
 
@@ -32,6 +20,9 @@ describe('SqliteFs', () => {
     });
 
     it('should write and read binary content', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       const content = new Uint8Array([0x00, 0x01, 0x02, 0xff, 0xfe]);
       await sqliteFs.writeFile('/binary.bin', content);
 
@@ -40,6 +31,9 @@ describe('SqliteFs', () => {
     });
 
     it('should overwrite existing file', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       await sqliteFs.writeFile('/overwrite.txt', 'original');
       await sqliteFs.writeFile('/overwrite.txt', 'updated');
 
@@ -48,6 +42,9 @@ describe('SqliteFs', () => {
     });
 
     it('should append to file', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       await sqliteFs.writeFile('/append.txt', 'Hello');
       await sqliteFs.appendFile('/append.txt', ', World!');
 
@@ -56,6 +53,9 @@ describe('SqliteFs', () => {
     });
 
     it('should throw on reading non-existent file', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       await assert.rejects(
         () => sqliteFs.readFile('/nonexistent.txt'),
         /ENOENT/,
@@ -63,6 +63,9 @@ describe('SqliteFs', () => {
     });
 
     it('should auto-create parent directories on write', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       await sqliteFs.writeFile('/deep/nested/path/file.txt', 'content');
 
       const result = await sqliteFs.readFile('/deep/nested/path/file.txt');
@@ -77,6 +80,9 @@ describe('SqliteFs', () => {
 
   describe('large file chunking', () => {
     it('should handle files larger than chunk size', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       // Create a 2MB file (larger than 1MB chunk size)
       const size = 2 * 1024 * 1024;
       const content = new Uint8Array(size);
@@ -94,12 +100,18 @@ describe('SqliteFs', () => {
 
   describe('directory operations', () => {
     it('should create directory', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       await sqliteFs.mkdir('/newdir');
       const stat = await sqliteFs.stat('/newdir');
       assert.strictEqual(stat.isDirectory, true);
     });
 
     it('should create directory recursively', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       await sqliteFs.mkdir('/a/b/c/d', { recursive: true });
 
       assert.strictEqual(await sqliteFs.exists('/a'), true);
@@ -109,6 +121,9 @@ describe('SqliteFs', () => {
     });
 
     it('should list directory contents', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       await sqliteFs.mkdir('/listdir');
       await sqliteFs.writeFile('/listdir/file1.txt', 'content1');
       await sqliteFs.writeFile('/listdir/file2.txt', 'content2');
@@ -122,6 +137,9 @@ describe('SqliteFs', () => {
     });
 
     it('should list directory with file types', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       await sqliteFs.mkdir('/typedir');
       await sqliteFs.writeFile('/typedir/file.txt', 'content');
       await sqliteFs.mkdir('/typedir/subdir');
@@ -139,6 +157,9 @@ describe('SqliteFs', () => {
 
   describe('remove operations', () => {
     it('should remove file', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       await sqliteFs.writeFile('/toremove.txt', 'content');
       assert.strictEqual(await sqliteFs.exists('/toremove.txt'), true);
 
@@ -147,6 +168,9 @@ describe('SqliteFs', () => {
     });
 
     it('should remove directory recursively', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       await sqliteFs.mkdir('/rmdir');
       await sqliteFs.writeFile('/rmdir/file.txt', 'content');
       await sqliteFs.mkdir('/rmdir/subdir');
@@ -157,6 +181,9 @@ describe('SqliteFs', () => {
     });
 
     it('should not throw on force remove of non-existent', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       await sqliteFs.rm('/nonexistent', { force: true });
       // Should not throw
     });
@@ -164,6 +191,9 @@ describe('SqliteFs', () => {
 
   describe('copy and move operations', () => {
     it('should copy file', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       await sqliteFs.writeFile('/original.txt', 'original content');
       await sqliteFs.cp('/original.txt', '/copied.txt');
 
@@ -172,6 +202,9 @@ describe('SqliteFs', () => {
     });
 
     it('should copy directory recursively', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       await sqliteFs.mkdir('/srcdir');
       await sqliteFs.writeFile('/srcdir/file.txt', 'content');
       await sqliteFs.mkdir('/srcdir/nested');
@@ -191,6 +224,9 @@ describe('SqliteFs', () => {
     });
 
     it('should move file', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       await sqliteFs.writeFile('/tomove.txt', 'moving');
       await sqliteFs.mv('/tomove.txt', '/moved.txt');
 
@@ -201,6 +237,9 @@ describe('SqliteFs', () => {
 
   describe('stat operations', () => {
     it('should return file stats', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       await sqliteFs.writeFile('/statfile.txt', 'content');
       const stat = await sqliteFs.stat('/statfile.txt');
 
@@ -210,6 +249,9 @@ describe('SqliteFs', () => {
     });
 
     it('should return directory stats', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       await sqliteFs.mkdir('/statdir');
       const stat = await sqliteFs.stat('/statdir');
 
@@ -218,6 +260,9 @@ describe('SqliteFs', () => {
     });
 
     it('should change file mode', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       await sqliteFs.writeFile('/modefile.txt', 'content');
       await sqliteFs.chmod('/modefile.txt', 0o755);
 
@@ -228,6 +273,9 @@ describe('SqliteFs', () => {
 
   describe('symlink operations', () => {
     it('should create and read symlink', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       await sqliteFs.writeFile('/target.txt', 'target content');
       await sqliteFs.symlink('/target.txt', '/link.txt');
 
@@ -241,6 +289,9 @@ describe('SqliteFs', () => {
     });
 
     it('should distinguish lstat from stat for symlinks', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       await sqliteFs.writeFile('/lstat-target.txt', 'content');
       await sqliteFs.symlink('/lstat-target.txt', '/lstat-link.txt');
 
@@ -253,7 +304,10 @@ describe('SqliteFs', () => {
   });
 
   describe('path operations', () => {
-    it('should resolve paths', () => {
+    it('should resolve paths', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       assert.strictEqual(sqliteFs.resolvePath('/home', 'user'), '/home/user');
       assert.strictEqual(sqliteFs.resolvePath('/home/user', '..'), '/home');
       assert.strictEqual(
@@ -263,6 +317,9 @@ describe('SqliteFs', () => {
     });
 
     it('should get all paths', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+
       // Create some entries
       await sqliteFs.mkdir('/getall');
       await sqliteFs.writeFile('/getall/file.txt', 'content');
@@ -276,7 +333,8 @@ describe('SqliteFs', () => {
 
   describe('persistence', () => {
     it('should persist data across instances', async () => {
-      const dbPath = path.join(tempDir, 'persist.db');
+      await using database = await sqlite.database();
+      const dbPath = database.path;
 
       // Write with first instance
       const fs1 = new SqliteFs({ dbPath, root: '/' });
@@ -292,7 +350,8 @@ describe('SqliteFs', () => {
 
   describe('root option', () => {
     it('should prefix paths with root', async () => {
-      const dbPath = path.join(tempDir, 'root-test.db');
+      await using database = await sqlite.database();
+      const dbPath = database.path;
       const rootFs = new SqliteFs({ dbPath, root: '/prefix' });
 
       // Write a file via the prefixed fs
@@ -315,7 +374,8 @@ describe('SqliteFs', () => {
     });
 
     it('should create root directory structure on initialization', async () => {
-      const dbPath = path.join(tempDir, 'root-init.db');
+      await using database = await sqlite.database();
+      const dbPath = database.path;
       const rootFs = new SqliteFs({ dbPath, root: '/chat/123/results' });
 
       // Verify root directory was created
@@ -331,7 +391,8 @@ describe('SqliteFs', () => {
     });
 
     it('should isolate two instances with different roots', async () => {
-      const dbPath = path.join(tempDir, 'multi-root.db');
+      await using database = await sqlite.database();
+      const dbPath = database.path;
 
       // Create two filesystems with different roots
       const fs1 = new SqliteFs({ dbPath, root: '/chat-1' });
@@ -359,7 +420,8 @@ describe('SqliteFs', () => {
     });
 
     it('should handle nested paths with root', async () => {
-      const dbPath = path.join(tempDir, 'nested-root.db');
+      await using database = await sqlite.database();
+      const dbPath = database.path;
       const rootFs = new SqliteFs({ dbPath, root: '/artifacts' });
 
       // Create nested structure
@@ -384,7 +446,8 @@ describe('SqliteFs', () => {
     });
 
     it('should handle root directory reads correctly', async () => {
-      const dbPath = path.join(tempDir, 'root-read.db');
+      await using database = await sqlite.database();
+      const dbPath = database.path;
       const rootFs = new SqliteFs({ dbPath, root: '/myroot' });
 
       // Create some files in the root
@@ -399,7 +462,8 @@ describe('SqliteFs', () => {
     });
 
     it('should normalize root path variations', async () => {
-      const dbPath = path.join(tempDir, 'normalize-root.db');
+      await using database = await sqlite.database();
+      const dbPath = database.path;
 
       // Trailing slash should be normalized
       const fs1 = new SqliteFs({ dbPath, root: '/prefix/' });

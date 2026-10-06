@@ -31,8 +31,19 @@ export class FileCache {
 }
 
 export class JsonCache<T> extends FileCache {
-  constructor(watermark: string, baseDir?: string) {
+  #isValid: (value: unknown) => value is T;
+
+  /**
+   * @param isValid - Checks that a parsed cache file holds a T; a file that
+   * fails it is read as a miss.
+   */
+  constructor(
+    watermark: string,
+    isValid: (value: unknown) => value is T,
+    baseDir?: string,
+  ) {
     super(watermark, '.json', baseDir);
+    this.#isValid = isValid;
   }
 
   async read(): Promise<T | null> {
@@ -41,7 +52,8 @@ export class JsonCache<T> extends FileCache {
       return null;
     }
     try {
-      return JSON.parse(content) as T;
+      const value: unknown = JSON.parse(content);
+      return this.#isValid(value) ? value : null;
     } catch {
       // Corrupt or legacy cache file (e.g. a torn write on a non-atomic
       // shared volume): treat as a miss so the caller re-introspects and

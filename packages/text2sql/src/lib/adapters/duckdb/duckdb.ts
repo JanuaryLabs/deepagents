@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import {
   Adapter,
   type ExecuteFunction,
@@ -10,6 +12,8 @@ import {
 } from './duckdb-identifiers.ts';
 import { DuckDBSqlPolicyAnalyzer } from './duckdb.sql-policy.ts';
 
+const namespaceRow = z.object({ catalog: z.string(), schema: z.string() });
+
 export interface DuckDBAdapterOptions {
   execute: ExecuteFunction;
   validate?: ValidateFunction;
@@ -17,8 +21,6 @@ export interface DuckDBAdapterOptions {
   catalogs?: string[];
   schemas?: string[];
 }
-
-type RowResult<Row> = Row[] | { data: Row[] } | { rows: Row[] };
 
 export class DuckDB extends Adapter {
   readonly #options: DuckDBAdapterOptions;
@@ -68,8 +70,8 @@ export class DuckDB extends Adapter {
     }
   }
 
-  override async runQuery<Row>(sql: string): Promise<Row[]> {
-    return rowsFromResult<Row>(await this.#options.execute(sql));
+  protected override async queryRows(sql: string): Promise<unknown[]> {
+    return rowsFromResult(await this.#options.execute(sql));
   }
 
   override quoteIdentifier(name: string): string {
@@ -133,15 +135,14 @@ export class DuckDB extends Adapter {
   }
 
   async #loadNamespace(): Promise<{ catalog: string; schema: string }> {
-    const rows = await this.runQuery<{ catalog: unknown; schema: unknown }>(`
+    const rows = await this.runQuery(
+      `
       SELECT current_database() AS catalog, current_schema() AS schema
-    `);
-    const row = rows[0];
-    if (
-      rows.length !== 1 ||
-      typeof row?.catalog !== 'string' ||
-      typeof row.schema !== 'string'
-    ) {
+    `,
+      namespaceRow,
+    );
+    const row = rows.at(0);
+    if (rows.length !== 1 || !row) {
       throw new Error(
         'DuckDB current namespace returned an unknown row shape.',
       );
@@ -159,15 +160,11 @@ function validateScopeOption(name: string, values: string[] | undefined): void {
   }
 }
 
-function rowsFromResult<Row>(result: unknown): Row[] {
-  if (Array.isArray(result)) return result as Row[];
-  if (result && typeof result === 'object') {
-    const candidate = result as Partial<RowResult<Row>> & {
-      data?: unknown;
-      rows?: unknown;
-    };
-    if (Array.isArray(candidate.data)) return candidate.data as Row[];
-    if (Array.isArray(candidate.rows)) return candidate.rows as Row[];
+function rowsFromResult(result: unknown): unknown[] {
+  if (Array.isArray(result)) return result;
+  if (typeof result === 'object' && result !== null) {
+    if ('data' in result && Array.isArray(result.data)) return result.data;
+    if ('rows' in result && Array.isArray(result.rows)) return result.rows;
   }
   throw new Error(
     'DuckDB execute() must return an array of rows, { data: rows }, or { rows }.',

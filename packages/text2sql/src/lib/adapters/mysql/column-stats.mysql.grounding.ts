@@ -1,15 +1,24 @@
+import { z } from 'zod';
+
 import type { Adapter, ColumnStats } from '../adapter.ts';
 import {
   ColumnStatsGrounding,
   type ColumnStatsGroundingConfig,
 } from '../groundings/column-stats.grounding.ts';
 import type { Column } from '../groundings/column-values.grounding.ts';
+import { numericValue } from '../groundings/rows.ts';
+import { currentDatabaseRow } from './mysql-rows.ts';
 
-type StatsRow = {
-  min_value: string | null;
-  max_value: string | null;
-  null_fraction: number | string | null;
-};
+/**
+ * MIN/MAX are cast to CHAR, so they are strings; AVG of 1.0/0.0 is a DECIMAL,
+ * which mysql2 and the mariadb connector return as a string. All three are
+ * NULL for an empty table.
+ */
+const statsRow = z.object({
+  min_value: z.string().nullable(),
+  max_value: z.string().nullable(),
+  null_fraction: numericValue.nullable(),
+});
 
 /**
  * MySQL/MariaDB implementation of ColumnStatsGrounding.
@@ -39,13 +48,16 @@ export class MysqlColumnStatsGrounding extends ColumnStatsGrounding {
     const columnIdentifier = this.#adapter.quoteIdentifier(column.name);
 
     try {
-      const rows = await this.#adapter.runQuery<StatsRow>(`
+      const rows = await this.#adapter.runQuery(
+        `
         SELECT
           CAST(MIN(${columnIdentifier}) AS CHAR) AS min_value,
           CAST(MAX(${columnIdentifier}) AS CHAR) AS max_value,
           AVG(CASE WHEN ${columnIdentifier} IS NULL THEN 1.0 ELSE 0.0 END) AS null_fraction
         FROM ${tableIdentifier}
-      `);
+      `,
+        statsRow,
+      );
 
       if (!rows.length) {
         return undefined;
@@ -98,8 +110,9 @@ export class MysqlColumnStatsGrounding extends ColumnStatsGrounding {
   }
 
   async #getCurrentDatabase(): Promise<string> {
-    const rows = await this.#adapter.runQuery<{ db: string | null }>(
+    const rows = await this.#adapter.runQuery(
       'SELECT DATABASE() AS db',
+      currentDatabaseRow,
     );
     return rows[0]?.db ?? '';
   }

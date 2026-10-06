@@ -14,12 +14,14 @@ import * as path from 'node:path';
 import { text as streamText } from 'node:stream/consumers';
 import { describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
+import z from 'zod';
 
 import {
   ContextEngine,
   type ContextFragment,
   InMemoryContextStore,
   XmlRenderer,
+  isFragment,
 } from '@deepagents/context';
 import { Sqlite as TestSqlite } from '@deepagents/test';
 
@@ -42,11 +44,20 @@ interface RunOpts {
   eventsPathEnv?: string;
 }
 
-interface IndexManifest {
-  fragmentsPath: string;
-  eventsPath: string;
-  adapters: string[];
-}
+// The manifest `sql index` prints on stdout.
+const indexManifest = z.object({
+  fragmentsPath: z.string(),
+  eventsPath: z.string(),
+  adapters: z.array(z.string()),
+});
+
+type IndexManifest = z.infer<typeof indexManifest>;
+
+// One NDJSON progress event; tests assert on timestampMs themselves.
+const indexEvent = z.object({
+  type: z.string(),
+  timestampMs: z.unknown().optional(),
+});
 
 function buildEnv(opts: RunOpts): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
@@ -105,7 +116,7 @@ function ndjsonTypes(raw: string): string[] {
     .trim()
     .split('\n')
     .filter(Boolean)
-    .map((line) => (JSON.parse(line) as { type: string }).type);
+    .map((line) => indexEvent.parse(JSON.parse(line)).type);
 }
 
 function writeAdaptersModule(
@@ -140,21 +151,28 @@ function distFileUrl(...parts: string[]): string {
 function parseIndexManifest(result: SpawnResult): IndexManifest {
   assert.equal(result.exitCode, 0, result.stderr);
   assert.equal(result.stderr, '');
-  return JSON.parse(result.stdout) as IndexManifest;
+  return indexManifest.parse(JSON.parse(result.stdout));
 }
 
-function readJsonFile<T>(file: string): T {
-  return JSON.parse(readFileSync(file, 'utf-8')) as T;
+function readJsonFile(file: string): unknown {
+  return JSON.parse(readFileSync(file, 'utf-8'));
 }
 
-function readEvents(
-  file: string,
-): Array<{ type: string; timestampMs?: number }> {
+function readFragments(file: string): ContextFragment[] {
+  const fragments = readJsonFile(file);
+  assert.ok(
+    Array.isArray(fragments) && fragments.every(isFragment),
+    `expected context fragments in ${file}`,
+  );
+  return fragments;
+}
+
+function readEvents(file: string): z.output<typeof indexEvent>[] {
   return readFileSync(file, 'utf-8')
     .trim()
     .split('\n')
     .filter(Boolean)
-    .map((line) => JSON.parse(line) as { type: string; timestampMs?: number });
+    .map((line) => indexEvent.parse(JSON.parse(line)));
 }
 
 function assertManifestFiles(cwd: string, manifest: IndexManifest): void {
@@ -551,7 +569,7 @@ describe('sql binary', () => {
     assert.deepEqual(manifest.adapters, ['mem']);
     assertManifestFiles(cwd, manifest);
 
-    const fragments = readJsonFile<ContextFragment[]>(manifest.fragmentsPath);
+    const fragments = readFragments(manifest.fragmentsPath);
     assert.equal(fragments.length, 1);
     assert.equal(fragments[0].name, 'mem');
   });
@@ -574,8 +592,8 @@ describe('sql binary', () => {
 
     assert.deepEqual(explicitManifest.adapters, defaultManifest.adapters);
     assert.deepEqual(
-      readJsonFile<ContextFragment[]>(explicitManifest.fragmentsPath),
-      readJsonFile<ContextFragment[]>(defaultManifest.fragmentsPath),
+      readJsonFile(explicitManifest.fragmentsPath),
+      readJsonFile(defaultManifest.fragmentsPath),
     );
   });
 
@@ -587,7 +605,7 @@ describe('sql binary', () => {
     const manifest = parseIndexManifest(
       await runBin(['index', 'mem'], { cwd }),
     );
-    const fragments = readJsonFile<ContextFragment[]>(manifest.fragmentsPath);
+    const fragments = readFragments(manifest.fragmentsPath);
 
     assert.deepEqual(manifest.adapters, ['mem']);
     assert.deepEqual(
@@ -604,7 +622,7 @@ describe('sql binary', () => {
     const manifest = parseIndexManifest(
       await runBin(['index', 'mem', 'mem'], { cwd }),
     );
-    const fragments = readJsonFile<ContextFragment[]>(manifest.fragmentsPath);
+    const fragments = readFragments(manifest.fragmentsPath);
 
     assert.deepEqual(manifest.adapters, ['mem']);
     assert.deepEqual(
@@ -633,7 +651,7 @@ describe('sql binary', () => {
     const manifest = parseIndexManifest(
       await runBin(['index', '--all', 'alpha'], { cwd, adaptersPath }),
     );
-    const fragments = readJsonFile<ContextFragment[]>(manifest.fragmentsPath);
+    const fragments = readFragments(manifest.fragmentsPath);
 
     assert.deepEqual(manifest.adapters, ['alpha', 'beta']);
     assert.deepEqual(
@@ -798,7 +816,7 @@ describe('sql binary', () => {
     assert.ok(types.includes('index:start'));
     assert.ok(types.includes('index:end'));
 
-    const manifest = JSON.parse(result.stdout) as IndexManifest;
+    const manifest = indexManifest.parse(JSON.parse(result.stdout));
     assert.equal(manifest.eventsPath, fifoPath);
   });
 
@@ -856,7 +874,7 @@ describe('sql binary', () => {
     assert.ok(types.includes('index:start'));
     assert.ok(types.includes('index:end'));
 
-    const manifest = JSON.parse(stdout) as IndexManifest;
+    const manifest = indexManifest.parse(JSON.parse(stdout));
     assert.equal(manifest.eventsPath, fifoPath);
   });
 
@@ -878,7 +896,7 @@ describe('sql binary', () => {
     const result = await runBin(['index', '--verbose'], { cwd });
     assert.equal(result.exitCode, 0, result.stderr);
 
-    const manifest = JSON.parse(result.stdout) as IndexManifest;
+    const manifest = indexManifest.parse(JSON.parse(result.stdout));
     assert.deepEqual(manifest.adapters, ['mem']);
 
     const lines = result.stderr.trim().split('\n');
@@ -902,7 +920,7 @@ describe('sql binary', () => {
     const events = result.stderr
       .trim()
       .split('\n')
-      .map((line) => JSON.parse(line) as { type: string; timestampMs: number });
+      .map((line) => indexEvent.parse(JSON.parse(line)));
 
     const types = events.map((event) => event.type);
     assert.ok(types.includes('index:start'));
@@ -981,7 +999,7 @@ describe('sql binary', () => {
     );
     const cwd = cwdDirectory.path;
     const manifest = parseIndexManifest(await runBin(['index'], { cwd }));
-    const fragments = readJsonFile<ContextFragment[]>(manifest.fragmentsPath);
+    const fragments = readFragments(manifest.fragmentsPath);
     const engine = new ContextEngine({
       chatId: 'cli-index-test',
       userId: 'test-user',

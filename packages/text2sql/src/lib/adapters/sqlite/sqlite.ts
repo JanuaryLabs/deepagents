@@ -142,20 +142,20 @@ export class Sqlite extends Adapter {
     return `'${name.replace(/'/g, "''")}'`;
   }
 
-  override async runQuery<Row>(sql: string): Promise<Row[]> {
-    const result = await this.#options.execute(sql);
+  protected override async queryRows(sql: string): Promise<unknown[]> {
+    const result: unknown = await this.#options.execute(sql);
 
     if (Array.isArray(result)) {
-      return result as Row[];
+      return result;
     }
 
     if (
-      result &&
       typeof result === 'object' &&
+      result !== null &&
       'rows' in result &&
-      Array.isArray((result as { rows?: unknown }).rows)
+      Array.isArray(result.rows)
     ) {
-      return (result as { rows: Row[] }).rows;
+      return result.rows;
     }
 
     throw new Error(

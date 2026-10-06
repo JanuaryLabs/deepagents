@@ -140,6 +140,9 @@ async function paraphraseQuestion(params: {
  * Based on Microsoft's Evol-Instruct methodology for in-breadth evolution.
  */
 export class BreadthEvolver extends PairProducer {
+  readonly #source: PairProducer | ExtractedPair[];
+  readonly #options: BreadthEvolverOptions;
+
   #limit: ReturnType<typeof pLimit>;
 
   /**
@@ -147,11 +150,13 @@ export class BreadthEvolver extends PairProducer {
    * @param options - Evolution options including count, persona, and concurrency
    */
   constructor(
-    private source: PairProducer | ExtractedPair[],
-    private options: BreadthEvolverOptions,
+    source: PairProducer | ExtractedPair[],
+    options: BreadthEvolverOptions,
   ) {
     super();
-    this.#limit = pLimit(this.options.concurrency ?? 4);
+    this.#source = source;
+    this.#options = options;
+    this.#limit = pLimit(this.#options.concurrency ?? 4);
   }
 
   /**
@@ -159,15 +164,15 @@ export class BreadthEvolver extends PairProducer {
    * Uses pLimit for concurrency control, yields results per pair after chunk completes.
    */
   async *produce(): AsyncGenerator<ExtractedPair[]> {
-    for await (const chunk of this.from(this.source)) {
+    for await (const chunk of this.from(this.#source)) {
       const tasks = chunk.map((pair) =>
         this.#limit(async () => {
           const result = await paraphraseQuestion({
             question: pair.question,
             sql: pair.sql,
-            count: this.options.count,
-            persona: this.options.persona,
-            model: this.options.model,
+            count: this.#options.count,
+            persona: this.#options.persona,
+            model: this.#options.model,
           });
 
           return result.paraphrases.map((paraphrase: string) => ({

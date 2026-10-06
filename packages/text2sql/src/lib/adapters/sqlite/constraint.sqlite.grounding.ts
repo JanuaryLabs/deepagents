@@ -3,27 +3,11 @@ import {
   ConstraintGrounding,
   type ConstraintGroundingConfig,
 } from '../groundings/constraint.grounding.ts';
-
-type TableInfoRow = {
-  cid: number;
-  name: string;
-  type: string;
-  notnull: number;
-  dflt_value: string | null;
-  pk: number;
-};
-
-type SqliteMasterRow = {
-  sql: string | null;
-};
-
-type ForeignKeyRow = {
-  id: number;
-  seq: number;
-  table: string;
-  from: string;
-  to: string;
-};
+import {
+  foreignKeyListRow,
+  sqliteMasterSqlRow,
+  tableInfoRow,
+} from './sqlite-rows.ts';
 
 /**
  * SQLite implementation of ConstraintGrounding.
@@ -46,8 +30,9 @@ export class SqliteConstraintGrounding extends ConstraintGrounding {
     const constraints: TableConstraint[] = [];
 
     // Get column info for NOT NULL, DEFAULT, and PRIMARY KEY constraints
-    const columns = await this.#adapter.runQuery<TableInfoRow>(
+    const columns = await this.#adapter.runQuery(
       `PRAGMA table_info(${this.#quoteIdentifier(tableName)})`,
+      tableInfoRow,
     );
 
     // Collect PRIMARY KEY columns (pk > 0, ordered by pk value for composite keys)
@@ -86,12 +71,13 @@ export class SqliteConstraintGrounding extends ConstraintGrounding {
     }
 
     // Get FOREIGN KEY constraints
-    const fkRows = await this.#adapter.runQuery<ForeignKeyRow>(
+    const fkRows = await this.#adapter.runQuery(
       `PRAGMA foreign_key_list(${this.#quoteIdentifier(tableName)})`,
+      foreignKeyListRow,
     );
 
     // Group foreign keys by id (each FK can have multiple columns)
-    const fkGroups = new Map<number, ForeignKeyRow[]>();
+    const fkGroups = new Map<number, typeof fkRows>();
     for (const row of fkRows) {
       const group = fkGroups.get(row.id) ?? [];
       group.push(row);
@@ -106,13 +92,15 @@ export class SqliteConstraintGrounding extends ConstraintGrounding {
         type: 'FOREIGN_KEY',
         columns: rows.map((r) => r.from),
         referencedTable: rows[0].table,
-        referencedColumns: rows.map((r) => r.to),
+        // A key that references the parent's primary key names no columns.
+        referencedColumns: rows.flatMap((r) => (r.to === null ? [] : [r.to])),
       });
     }
 
     // Get CHECK and UNIQUE constraints from DDL
-    const ddlRows = await this.#adapter.runQuery<SqliteMasterRow>(
+    const ddlRows = await this.#adapter.runQuery(
       `SELECT sql FROM sqlite_master WHERE type='table' AND name=${this.#quoteIdentifier(tableName)}`,
+      sqliteMasterSqlRow,
     );
 
     if (ddlRows[0]?.sql) {

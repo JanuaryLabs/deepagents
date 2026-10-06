@@ -1,4 +1,4 @@
-import type { Adapter } from '../adapter.ts';
+import { groundingFor } from '../adapter.ts';
 import {
   PostHogDefinitionsGrounding,
   type PostHogDefinitionsGroundingConfig,
@@ -22,13 +22,17 @@ export function info() {
 }
 
 export function schema(config: PostHogSchemaGroundingConfig = {}) {
-  return (adapter: Adapter) =>
-    new PostHogSchemaGrounding(adapter as PostHog, config);
+  return groundingFor(
+    PostHog,
+    (adapter) => new PostHogSchemaGrounding(adapter, config),
+  );
 }
 
 export function definitions(config: PostHogDefinitionsGroundingConfig = {}) {
-  return (adapter: Adapter) =>
-    new PostHogDefinitionsGrounding(adapter as PostHog, config);
+  return groundingFor(
+    PostHog,
+    (adapter) => new PostHogDefinitionsGrounding(adapter, config),
+  );
 }
 
 export default {

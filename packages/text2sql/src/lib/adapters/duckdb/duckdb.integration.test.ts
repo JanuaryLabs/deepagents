@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { z } from 'zod';
 
 import { DuckDB as TestDuckDB } from '@deepagents/test';
 import {
@@ -20,6 +21,28 @@ import {
 } from '@deepagents/text2sql/duckdb';
 
 const duckdb = new TestDuckDB();
+
+// Fragment data and error payload shapes these tests read.
+const entityData = z.object({ name: z.string() });
+const dialectData = z.object({ dialect: z.unknown() });
+const tableData = z.object({
+  rowCount: z.unknown().optional(),
+  indexes: z.unknown().optional(),
+  columns: z.array(z.object({ data: z.record(z.string(), z.unknown()) })),
+});
+const errorPayload = z.object({ error_type: z.unknown() });
+
+function findEntity<F extends { name: string; data?: unknown }>(
+  fragments: readonly F[],
+  kind: 'table' | 'view',
+  name: string,
+): F | undefined {
+  return fragments.find(
+    (fragment) =>
+      fragment.name === kind &&
+      entityData.safeParse(fragment.data).data?.name === name,
+  );
+}
 
 it('executes grounded DuckDB friendly SQL through the public adapter', async () => {
   await using database = await duckdb.database();
@@ -171,9 +194,9 @@ it('enforces DuckDB read-only and grounded-scope policy before execution', async
   }
 
   const invalid = await adapter.validate('SELCT 1');
-  assert.equal(typeof invalid, 'string');
+  assert.ok(typeof invalid === 'string');
   assert.equal(
-    JSON.parse(invalid as string).error_type,
+    errorPayload.parse(JSON.parse(invalid)).error_type,
     'SQL_SCOPE_PARSE_ERROR',
   );
 
@@ -309,22 +332,19 @@ it('introspects indexes on quoted DuckDB identifiers', async () => {
     execute,
     grounding: [tables(), indexes()],
   }).introspect();
-  const table = fragments.find(
-    (fragment) =>
-      fragment.name === 'table' &&
-      (fragment.data as Record<string, unknown>).name ===
-        '"memory"."main"."orders.archive"',
+  const table = findEntity(
+    fragments,
+    'table',
+    '"memory"."main"."orders.archive"',
   );
 
-  assert.deepEqual(
-    (table?.data as Record<string, unknown> | undefined)?.indexes,
-    [
-      {
-        name: 'index',
-        data: { name: 'customer_id_idx', columns: ['customer.id'] },
-      },
-    ],
-  );
+  assert.ok(table);
+  assert.deepEqual(tableData.parse(table.data).indexes, [
+    {
+      name: 'index',
+      data: { name: 'customer_id_idx', columns: ['customer.id'] },
+    },
+  ]);
 });
 
 function hasSqlErrorName(
@@ -388,24 +408,14 @@ it('introspects DuckDB catalog metadata through first-class groundings', async (
 
   const fragments = await adapter.introspect();
   const dialect = fragments.find((fragment) => fragment.name === 'dialectInfo');
-  assert.equal(
-    (dialect?.data as Record<string, unknown> | undefined)?.dialect,
-    'duckdb',
-  );
+  assert.ok(dialect);
+  assert.equal(dialectData.parse(dialect.data).dialect, 'duckdb');
 
-  const users = fragments.find(
-    (fragment) =>
-      fragment.name === 'table' &&
-      (fragment.data as Record<string, unknown> | undefined)?.name ===
-        '"memory"."main"."users"',
-  );
+  const users = findEntity(fragments, 'table', '"memory"."main"."users"');
   assert.ok(users);
-  const usersData = users.data as Record<string, unknown>;
+  const usersData = tableData.parse(users.data);
   assert.equal(usersData.rowCount, 2);
-  const userColumns = usersData.columns as Array<{
-    name: string;
-    data: Record<string, unknown>;
-  }>;
+  const userColumns = usersData.columns;
   assert.deepEqual(
     userColumns.find((column) => column.data.name === 'status')?.data.values,
     ['active', 'inactive'],
@@ -419,12 +429,7 @@ it('introspects DuckDB catalog metadata through first-class groundings', async (
     true,
   );
 
-  const orders = fragments.find(
-    (fragment) =>
-      fragment.name === 'table' &&
-      (fragment.data as Record<string, unknown> | undefined)?.name ===
-        '"memory"."main"."orders"',
-  );
+  const orders = findEntity(fragments, 'table', '"memory"."main"."orders"');
   assert.ok(orders);
   assert.match(JSON.stringify(orders.data), /orders_user_id_idx/);
 
@@ -435,11 +440,10 @@ it('introspects DuckDB catalog metadata through first-class groundings', async (
   assert.match(JSON.stringify(relationship.data), /orders/);
   assert.match(JSON.stringify(relationship.data), /users/);
 
-  const activeUsers = fragments.find(
-    (fragment) =>
-      fragment.name === 'view' &&
-      (fragment.data as Record<string, unknown> | undefined)?.name ===
-        '"memory"."main"."active_users"',
+  const activeUsers = findEntity(
+    fragments,
+    'view',
+    '"memory"."main"."active_users"',
   );
   assert.ok(activeUsers);
   assert.match(JSON.stringify(activeUsers.data), /CREATE VIEW/);

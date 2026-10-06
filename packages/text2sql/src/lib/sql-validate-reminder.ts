@@ -17,7 +17,9 @@ function extractSqlInvocation(command: unknown): SqlQueryInvocation | null {
 }
 
 function inputCommand(input: unknown): unknown {
-  return (input as { command?: unknown } | undefined)?.command;
+  return typeof input === 'object' && input !== null && 'command' in input
+    ? input.command
+    : undefined;
 }
 
 /**
@@ -33,9 +35,7 @@ function alreadyValidated(
   for (const message of messages ?? []) {
     for (const part of message.parts) {
       if (!isToolUIPart(part)) continue;
-      const invocation = extractSqlInvocation(
-        inputCommand((part as { input?: unknown }).input),
-      );
+      const invocation = extractSqlInvocation(inputCommand(part.input));
       if (
         invocation?.subcommand === 'validate' &&
         invocation.dbName === run.dbName &&

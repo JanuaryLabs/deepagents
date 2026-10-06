@@ -15,7 +15,7 @@ import {
 
 // Helper to normalize SQLite results (which have null prototype) to plain objects
 const normalize = <T extends Record<string, unknown>>(rows: T[]): T[] =>
-  rows.map((r) => ({ ...r }) as T);
+  rows.map((r) => ({ ...r }));
 
 /**
  * Helper to create a CSV file from data.

@@ -18,16 +18,16 @@ export async function loadAdapters(): Promise<Record<string, Adapter>> {
       ? pathToFileURL(resolve(target)).href
       : target;
 
-  let mod: { default?: unknown };
-  try {
-    mod = (await import(specifier)) as { default?: unknown };
-  } catch (cause) {
+  const mod: unknown = await import(specifier).catch((cause: unknown) => {
     throw new Error(
       `TEXT2SQL_ADAPTERS=${target}: failed to import module - ${errorMessage(cause)}`,
     );
-  }
+  });
 
-  const exported = mod.default;
+  const exported =
+    typeof mod === 'object' && mod !== null && 'default' in mod
+      ? mod.default
+      : undefined;
   if (!exported || typeof exported !== 'object' || Array.isArray(exported)) {
     throw new Error(
       `TEXT2SQL_ADAPTERS=${target}: default export must be a Record<string, Adapter> (got ${describe(exported)}).`,
@@ -41,12 +41,14 @@ export async function loadAdapters(): Promise<Record<string, Adapter>> {
     );
   }
 
+  const adapters: Record<string, Adapter> = {};
   for (const [name, value] of entries) {
     if (!isAdapterShape(value)) {
       throw new Error(
         `TEXT2SQL_ADAPTERS=${target}: adapter "${name}" is missing one of the required methods (format, validate, execute).`,
       );
     }
+    adapters[name] = value;
   }
 
   try {
@@ -55,16 +57,24 @@ export async function loadAdapters(): Promise<Record<string, Adapter>> {
     throw new Error(`TEXT2SQL_ADAPTERS=${target}: ${errorMessage(cause)}`);
   }
 
-  return exported as Record<string, Adapter>;
+  return adapters;
 }
 
-function isAdapterShape(value: unknown): boolean {
-  if (!value || typeof value !== 'object') return false;
-  const v = value as Record<string, unknown>;
+/**
+ * The CLI accepts any object with the methods every command calls, so a
+ * module may export plain objects as well as Adapter instances. Indexing also
+ * calls introspect(), which fails when an adapter does not provide it.
+ */
+function isAdapterShape(value: unknown): value is Adapter {
   return (
-    typeof v.format === 'function' &&
-    typeof v.validate === 'function' &&
-    typeof v.execute === 'function'
+    typeof value === 'object' &&
+    value !== null &&
+    'format' in value &&
+    typeof value.format === 'function' &&
+    'validate' in value &&
+    typeof value.validate === 'function' &&
+    'execute' in value &&
+    typeof value.execute === 'function'
   );
 }
 

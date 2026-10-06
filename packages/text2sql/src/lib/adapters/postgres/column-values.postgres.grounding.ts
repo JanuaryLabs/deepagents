@@ -1,9 +1,27 @@
+import { z } from 'zod';
+
 import type { Adapter } from '../adapter.ts';
 import {
   type Column,
   ColumnValuesGrounding,
   type ColumnValuesGroundingConfig,
 } from '../groundings/column-values.grounding.ts';
+
+/** An ENUM label with its type; typname, nspname and enumlabel are names. */
+const enumValueRow = z.object({
+  type_name: z.string(),
+  type_schema: z.string(),
+  enum_value: z.string(),
+});
+
+/** The type a column was declared with, from information_schema.columns. */
+const columnTypeRow = z.object({
+  udt_name: z.string(),
+  udt_schema: z.string(),
+});
+
+/** `SELECT DISTINCT <column>::text AS value`. */
+const textValueRow = z.object({ value: z.string().nullable() });
 
 export class PostgresColumnValuesGrounding extends ColumnValuesGrounding {
   #adapter: Adapter;
@@ -24,11 +42,8 @@ export class PostgresColumnValuesGrounding extends ColumnValuesGrounding {
       return;
     }
 
-    const rows = await this.#adapter.runQuery<{
-      type_name: string;
-      type_schema: string;
-      enum_value: string;
-    }>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT
         t.typname AS type_name,
         n.nspname AS type_schema,
@@ -37,7 +52,9 @@ export class PostgresColumnValuesGrounding extends ColumnValuesGrounding {
       JOIN pg_enum e ON t.oid = e.enumtypid
       JOIN pg_namespace n ON n.oid = t.typnamespace
       ORDER BY t.typname, e.enumsortorder
-    `);
+    `,
+      enumValueRow,
+    );
 
     for (const row of rows) {
       const key = `${row.type_schema}.${row.type_name}`;
@@ -68,16 +85,16 @@ export class PostgresColumnValuesGrounding extends ColumnValuesGrounding {
 
     // Get the actual type name for this column
     const { schema, table } = this.#adapter.parseTableName(tableName);
-    const rows = await this.#adapter.runQuery<{
-      udt_name: string;
-      udt_schema: string;
-    }>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT udt_name, udt_schema
       FROM information_schema.columns
       WHERE table_schema = '${this.#adapter.escapeString(schema)}'
         AND table_name = '${this.#adapter.escapeString(table)}'
         AND column_name = '${this.#adapter.escapeString(column.name)}'
-    `);
+    `,
+      columnTypeRow,
+    );
 
     if (!rows.length) {
       return undefined;
@@ -113,7 +130,7 @@ export class PostgresColumnValuesGrounding extends ColumnValuesGrounding {
       LIMIT ${limit}
     `;
 
-    const rows = await this.#adapter.runQuery<{ value: string | null }>(sql);
+    const rows = await this.#adapter.runQuery(sql, textValueRow);
 
     if (!rows.length || rows.length > this.lowCardinalityLimit) {
       return undefined;

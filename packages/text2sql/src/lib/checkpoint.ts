@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import pLimit from 'p-limit';
+import z from 'zod';
 
 export interface CheckpointOptions {
   /** Path to the checkpoint file */
@@ -11,30 +12,43 @@ export interface CheckpointOptions {
 
 /**
  * Codec for encoding/decoding values during checkpoint operations.
- * Use this when storing objects with methods (like Teachables) that need
- * to be serialized to plain JSON and restored with their methods.
+ * A checkpoint file is read back from disk, so decode() receives whatever
+ * JSON holds there and must throw when it does not fit. Use {@link jsonCodec}
+ * for plain JSON values; write a codec when storing objects with methods
+ * (like Teachables) that need to be serialized to plain JSON and restored
+ * with their methods.
  */
-export interface Codec<T, TSerialized = unknown> {
+export interface Codec<T> {
   /** Convert runtime value to JSON-serializable format */
-  encode: (value: T) => TSerialized;
-  /** Convert stored JSON back to runtime value */
-  decode: (serialized: TSerialized) => T;
+  encode: (value: T) => unknown;
+  /** Convert stored JSON back to runtime value, throwing when it does not fit */
+  decode: (stored: unknown) => T;
 }
 
-interface PointEntry {
-  inputHash: string;
-  output: unknown;
+/**
+ * Codec for values that are already plain JSON: stores them as they are and
+ * validates them against the schema when they are read back.
+ */
+export function jsonCodec<T>(schema: z.ZodType<T>): Codec<T> {
+  return { encode: (value) => value, decode: (stored) => schema.parse(stored) };
 }
 
-interface PointData {
-  committed: boolean;
-  entries: PointEntry[];
-}
+// The file shape save() writes.
+const pointData = z.object({
+  committed: z.boolean(),
+  entries: z.array(
+    z.object({ inputHash: z.string(), output: z.unknown().optional() }),
+  ),
+});
 
-interface CheckpointFile {
-  configHash?: string;
-  points: Record<string, PointData>;
-}
+const checkpointFile = z.object({
+  configHash: z.string().optional(),
+  points: z.record(z.string(), pointData),
+});
+
+type PointData = z.infer<typeof pointData>;
+
+type CheckpointFile = z.infer<typeof checkpointFile>;
 
 export class Checkpoint {
   private points: Record<string, PointData>;
@@ -61,7 +75,7 @@ export class Checkpoint {
     if (existsSync(path)) {
       try {
         const content = readFileSync(path, 'utf-8');
-        const file: CheckpointFile = JSON.parse(content);
+        const file = checkpointFile.parse(JSON.parse(content));
 
         // Check if config changed
         if (configHash && file.configHash && file.configHash !== configHash) {
@@ -69,7 +83,7 @@ export class Checkpoint {
           return new Checkpoint(path, configHash, {});
         }
 
-        const points = file.points ?? {};
+        const points = file.points;
         const totalEntries = Object.values(points).reduce(
           (sum, p) => sum + p.entries.length,
           0,
@@ -92,34 +106,26 @@ export class Checkpoint {
    *
    * @param key - Unique identifier for this computation
    * @param computation - Async function that produces the value
-   * @param codec - Optional codec for encoding/decoding non-primitive values
+   * @param codec - Codec that stores the value and restores it on resume
    */
   async run<T>(
     key: string,
     computation: () => Promise<T>,
-    codec?: Codec<T>,
+    codec: Codec<T>,
   ): Promise<T> {
-    const point = this.point<T>(key);
-
     // Use fixed input hash for single-value runs
-    return point.through(
-      'single',
-      async () => {
-        const result = await computation();
-        return codec ? (codec.encode(result) as T) : result;
-      },
-      codec,
-    );
+    return this.point(key, codec).through('single', computation);
   }
 
   /**
    * Create a resumable checkpoint point for iterative operations.
    *
    * @param step - Unique identifier for this checkpoint point
+   * @param codec - Codec that stores each output and restores it on resume
    */
-  point<T>(step: string): Point<T> {
+  point<T>(step: string, codec: Codec<T>): Point<T> {
     this.points[step] ??= { committed: false, entries: [] };
-    return new Point<T>(this.points[step], () => this.save());
+    return new Point(this.points[step], codec, () => this.save());
   }
 
   /**
@@ -128,6 +134,7 @@ export class Checkpoint {
    * @param step - Unique identifier for this checkpoint
    * @param inputs - Items to process
    * @param process - Function to process each input
+   * @param codec - Codec that stores each output and restores it on resume
    * @param options - Optional settings like concurrency
    * @returns All outputs (use `.flat()` if outputs are arrays)
    */
@@ -135,9 +142,10 @@ export class Checkpoint {
     step: string,
     inputs: Iterable<I>,
     process: (input: I) => Promise<O>,
+    codec: Codec<O>,
     options?: { concurrency?: number },
   ): Promise<O[]> {
-    const point = this.point<O>(step);
+    const point = this.point(step, codec);
     const limit = pLimit(options?.concurrency ?? 1);
 
     const inputArray = Array.from(inputs);
@@ -195,39 +203,36 @@ function hash(value: unknown): string {
  * Uses input hashing to determine if an operation was already processed.
  */
 export class Point<T> {
-  #cache: Map<string, T>;
+  #stored: Map<string, unknown>;
   private data: PointData;
+  private codec: Codec<T>;
   private persist: () => Promise<void>;
 
-  constructor(data: PointData, persist: () => Promise<void>) {
-    this.#cache = new Map(
-      data.entries.map((e) => [e.inputHash, e.output as T]),
-    );
+  constructor(data: PointData, codec: Codec<T>, persist: () => Promise<void>) {
+    this.#stored = new Map(data.entries.map((e) => [e.inputHash, e.output]));
     this.data = data;
+    this.codec = codec;
     this.persist = persist;
   }
 
   /**
    * Execute computation if input wasn't processed before.
-   * Returns cached output if input hash exists, otherwise executes, saves, and returns.
+   * Returns the decoded stored output if input hash exists, otherwise
+   * executes, saves the encoded output, and returns the computed value.
    */
-  async through<I, O>(
-    input: I,
-    compute: () => Promise<O>,
-    codec?: Codec<O>,
-  ): Promise<O> {
+  async through(input: unknown, compute: () => Promise<T>): Promise<T> {
     const inputHash = hash(input);
 
-    if (this.#cache.has(inputHash)) {
-      const cached = this.#cache.get(inputHash) as O;
-      return codec ? codec.decode(cached) : cached;
+    if (this.#stored.has(inputHash)) {
+      return this.codec.decode(this.#stored.get(inputHash));
     }
 
-    const output = await compute();
+    const value = await compute();
+    const output = this.codec.encode(value);
     this.data.entries.push({ inputHash, output });
-    this.#cache.set(inputHash, output as T);
+    this.#stored.set(inputHash, output);
     await this.persist();
-    return codec ? codec.decode(output) : output;
+    return value;
   }
 
   /** Mark this point as complete. */
@@ -243,7 +248,7 @@ export class Point<T> {
 
   /** Get all outputs from this point. */
   values(): T[] {
-    return this.data.entries.map((e) => e.output as T);
+    return this.data.entries.map((e) => this.codec.decode(e.output));
   }
 }
 

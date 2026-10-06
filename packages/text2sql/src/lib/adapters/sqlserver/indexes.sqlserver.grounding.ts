@@ -1,16 +1,22 @@
+import { z } from 'zod';
+
 import type { Adapter, TableIndex } from '../adapter.ts';
 import {
   IndexesGrounding,
   type IndexesGroundingConfig,
 } from '../groundings/indexes.grounding.ts';
 
-type IndexRow = {
-  index_name: string;
-  column_name: string;
-  is_unique: boolean;
-  index_type: string;
-  key_ordinal: number;
-};
+/**
+ * An index key column. `is_unique` is a bit (a boolean from tedious),
+ * `key_ordinal` a tinyint and `type_desc` nvarchar(60).
+ */
+const indexRow = z.object({
+  index_name: z.string(),
+  column_name: z.string(),
+  is_unique: z.boolean(),
+  index_type: z.string(),
+  key_ordinal: z.number(),
+});
 
 export interface SqlServerIndexesGroundingConfig extends IndexesGroundingConfig {
   /** Schemas to include (defaults to excluding INFORMATION_SCHEMA and sys) */
@@ -30,10 +36,13 @@ export class SqlServerIndexesGrounding extends IndexesGrounding {
     this.#schemas = config.schemas;
   }
 
-  protected override async getIndexes(tableName: string): Promise<TableIndex[]> {
+  protected override async getIndexes(
+    tableName: string,
+  ): Promise<TableIndex[]> {
     const { schema, table } = this.#adapter.parseTableName(tableName);
 
-    const rows = await this.#adapter.runQuery<IndexRow>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT
         i.name AS index_name,
         COL_NAME(ic.object_id, ic.column_id) AS column_name,
@@ -53,12 +62,14 @@ export class SqlServerIndexesGrounding extends IndexesGrounding {
         AND i.name IS NOT NULL
         AND ic.is_included_column = 0
       ORDER BY i.name, ic.key_ordinal
-    `);
+    `,
+      indexRow,
+    );
 
     return this.#groupIndexes(rows);
   }
 
-  #groupIndexes(rows: IndexRow[]): TableIndex[] {
+  #groupIndexes(rows: z.output<typeof indexRow>[]): TableIndex[] {
     const indexes = new Map<string, TableIndex>();
 
     for (const row of rows) {

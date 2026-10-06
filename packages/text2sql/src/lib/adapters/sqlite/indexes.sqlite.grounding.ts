@@ -3,20 +3,7 @@ import {
   IndexesGrounding,
   type IndexesGroundingConfig,
 } from '../groundings/indexes.grounding.ts';
-
-type IndexListRow = {
-  seq: number;
-  name: string;
-  unique: number;
-  origin: string; // 'c' = CREATE INDEX, 'pk' = PRIMARY KEY, 'u' = UNIQUE constraint
-  partial: number;
-};
-
-type IndexInfoRow = {
-  seqno: number;
-  cid: number;
-  name: string | null;
-};
+import { indexInfoRow, indexListRow } from './sqlite-rows.ts';
 
 /**
  * SQLite implementation of IndexesGrounding.
@@ -29,9 +16,12 @@ export class SqliteIndexesGrounding extends IndexesGrounding {
     this.#adapter = adapter;
   }
 
-  protected override async getIndexes(tableName: string): Promise<TableIndex[]> {
-    const indexListRows = await this.#adapter.runQuery<IndexListRow>(
+  protected override async getIndexes(
+    tableName: string,
+  ): Promise<TableIndex[]> {
+    const indexListRows = await this.#adapter.runQuery(
       `PRAGMA index_list(${this.#quoteIdentifier(tableName)})`,
+      indexListRow,
     );
 
     const indexes: TableIndex[] = [];
@@ -39,14 +29,14 @@ export class SqliteIndexesGrounding extends IndexesGrounding {
     for (const indexRow of indexListRows) {
       if (!indexRow.name) continue;
 
-      const indexInfoRows = await this.#adapter.runQuery<IndexInfoRow>(
+      const indexInfoRows = await this.#adapter.runQuery(
         `PRAGMA index_info(${this.#quoteIdentifier(indexRow.name)})`,
+        indexInfoRow,
       );
 
       const columns = indexInfoRows
-        .filter((row) => row.name != null)
-        .sort((a, b) => a.seqno - b.seqno)
-        .map((row) => row.name as string);
+        .toSorted((a, b) => a.seqno - b.seqno)
+        .flatMap((row) => (row.name === null ? [] : [row.name]));
 
       if (!columns.length) continue;
 

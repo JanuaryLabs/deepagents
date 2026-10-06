@@ -1,14 +1,16 @@
+import { z } from 'zod';
+
 import type { Adapter } from '../adapter.ts';
+import { nameRow } from '../groundings/rows.ts';
 import {
   type View,
   ViewGrounding,
   type ViewGroundingConfig,
 } from '../groundings/view.grounding.ts';
+import { columnRow } from './clickhouse-rows.ts';
 
-type ColumnRow = {
-  name: string;
-  type: string;
-};
+/** `system.tables.create_table_query`: the CREATE VIEW statement. */
+const definitionRow = z.object({ definition: z.string() });
 
 export class ClickHouseViewGrounding extends ViewGrounding {
   readonly #adapter: Adapter;
@@ -19,14 +21,17 @@ export class ClickHouseViewGrounding extends ViewGrounding {
   }
 
   protected override async getAllViewNames(): Promise<string[]> {
-    const rows = await this.#adapter.runQuery<{ name: string }>(`
+    const rows = await this.#adapter.runQuery(
+      `
       SELECT concat(database, '.', name) AS name
       FROM system.tables
       WHERE database NOT IN ('system', 'information_schema', 'INFORMATION_SCHEMA')
         AND is_temporary = 0
         AND endsWith(engine, 'View')
       ORDER BY database, name
-    `);
+    `,
+      nameRow,
+    );
     return rows.map((row) => row.name);
   }
 
@@ -39,21 +44,27 @@ export class ClickHouseViewGrounding extends ViewGrounding {
     }
 
     const [columns, definitionRows] = await Promise.all([
-      this.#adapter.runQuery<ColumnRow>(`
+      this.#adapter.runQuery(
+        `
         SELECT name, type
         FROM system.columns
         WHERE database = '${this.#adapter.escapeString(schema)}'
           AND table = '${this.#adapter.escapeString(table)}'
         ORDER BY position
-      `),
+      `,
+        columnRow,
+      ),
       this.includeDefinition
-        ? this.#adapter.runQuery<{ definition: string }>(`
+        ? this.#adapter.runQuery(
+            `
             SELECT create_table_query AS definition
             FROM system.tables
             WHERE database = '${this.#adapter.escapeString(schema)}'
               AND name = '${this.#adapter.escapeString(table)}'
               AND endsWith(engine, 'View')
-          `)
+          `,
+            definitionRow,
+          )
         : Promise.resolve([]),
     ]);
 

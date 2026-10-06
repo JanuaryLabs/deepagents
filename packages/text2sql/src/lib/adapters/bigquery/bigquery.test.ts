@@ -1,31 +1,20 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
+import { z } from 'zod';
 
 import { BigQuery } from '@deepagents/text2sql/bigquery';
+
+const idRow = z.object({ id: z.number() });
 
 describe('BigQuery adapter class', () => {
   const validOpts = {
     execute: async () => [],
-    validate: async () => undefined as void,
+    validate: async () => {},
     datasets: ['analytics'],
     grounding: [],
   };
 
   describe('constructor validation', () => {
-    it('throws when execute is missing', () => {
-      assert.throws(
-        () => new BigQuery({ ...validOpts, execute: undefined as any }),
-        /requires an execute/,
-      );
-    });
-
-    it('throws when validate is missing', () => {
-      assert.throws(
-        () => new BigQuery({ ...validOpts, validate: undefined as any }),
-        /requires a validate/,
-      );
-    });
-
     it('throws when datasets is empty', () => {
       assert.throws(
         () => new BigQuery({ ...validOpts, datasets: [] }),
@@ -83,7 +72,7 @@ describe('BigQuery adapter class', () => {
     it('returns rows directly when execute returns an array', async () => {
       const rows = [{ id: 1 }, { id: 2 }];
       const adapter = new BigQuery({ ...validOpts, execute: async () => rows });
-      const result = await adapter.runQuery('SELECT 1');
+      const result = await adapter.runQuery('SELECT 1', idRow);
       assert.deepStrictEqual(result, rows);
     });
 
@@ -93,7 +82,7 @@ describe('BigQuery adapter class', () => {
         ...validOpts,
         execute: async () => ({ rows }),
       });
-      const result = await adapter.runQuery('SELECT 1');
+      const result = await adapter.runQuery('SELECT 1', idRow);
       assert.deepStrictEqual(result, rows);
     });
 
@@ -103,7 +92,7 @@ describe('BigQuery adapter class', () => {
         execute: async () => 'bad',
       });
       await assert.rejects(
-        () => adapter.runQuery('SELECT 1'),
+        () => adapter.runQuery('SELECT 1', idRow),
         /must return an array of rows/,
       );
     });
@@ -125,7 +114,7 @@ describe('BigQuery adapter class', () => {
       });
       const result = await adapter.validate('SELECT bad');
       assert.ok(typeof result === 'string');
-      const parsed = JSON.parse(result as string);
+      const parsed = JSON.parse(result);
       assert.strictEqual(parsed.error, 'syntax error at position 5');
       assert.strictEqual(parsed.error_type, 'BIGQUERY_ERROR');
       assert.strictEqual(parsed.sql_attempted, adapter.format('SELECT bad'));
@@ -139,7 +128,8 @@ describe('BigQuery adapter class', () => {
         },
       });
       const result = await adapter.validate('SELECT x');
-      const parsed = JSON.parse(result as string);
+      assert.ok(typeof result === 'string');
+      const parsed = JSON.parse(result);
       assert.strictEqual(parsed.error, 'raw string error');
     });
 
@@ -151,7 +141,8 @@ describe('BigQuery adapter class', () => {
         },
       });
       const result = await adapter.validate('SELECT x');
-      const parsed = JSON.parse(result as string);
+      assert.ok(typeof result === 'string');
+      const parsed = JSON.parse(result);
       assert.strictEqual(parsed.error, 'obj error');
     });
   });

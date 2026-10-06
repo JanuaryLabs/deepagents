@@ -1,37 +1,44 @@
+import { z } from 'zod';
+
 import type { Adapter, TableConstraint } from '../adapter.ts';
 import {
   ConstraintGrounding,
   type ConstraintGroundingConfig,
 } from '../groundings/constraint.grounding.ts';
 
-type CheckConstraintRow = {
-  constraint_name: string;
-  definition: string;
-};
+// Names are sysname (strings); COL_NAME() resolves the column of an object the
+// same catalog query already made visible.
 
-type UniqueConstraintRow = {
-  constraint_name: string;
-  column_name: string;
-};
+/** A PRIMARY KEY or UNIQUE constraint column, in key order. */
+const keyColumnRow = z.object({
+  constraint_name: z.string(),
+  column_name: z.string(),
+});
 
-type PrimaryKeyRow = {
-  constraint_name: string;
-  column_name: string;
-};
+const foreignKeyRow = z.object({
+  constraint_name: z.string(),
+  column_name: z.string(),
+  ref_schema: z.string(),
+  ref_table: z.string(),
+  ref_column: z.string(),
+});
 
-type ForeignKeyRow = {
-  constraint_name: string;
-  column_name: string;
-  ref_schema: string;
-  ref_table: string;
-  ref_column: string;
-};
+/** sys.check_constraints.definition is nvarchar(max) and nullable. */
+const checkConstraintRow = z.object({
+  constraint_name: z.string(),
+  definition: z.string().nullable(),
+});
 
-type ColumnDefaultRow = {
-  column_name: string;
-  default_definition: string | null;
-  is_nullable: number;
-};
+/**
+ * sys.columns with its default. `default_definition` is NULL when the LEFT
+ * JOIN finds no default; `is_nullable` is a bit, which tedious returns as a
+ * boolean.
+ */
+const columnDefaultRow = z.object({
+  column_name: z.string(),
+  default_definition: z.string().nullable(),
+  is_nullable: z.boolean(),
+});
 
 /**
  * SQL Server implementation of ConstraintGrounding.
@@ -44,12 +51,15 @@ export class SqlServerConstraintGrounding extends ConstraintGrounding {
     this.#adapter = adapter;
   }
 
-  protected override async getConstraints(tableName: string): Promise<TableConstraint[]> {
+  protected override async getConstraints(
+    tableName: string,
+  ): Promise<TableConstraint[]> {
     const { schema, table } = this.#adapter.parseTableName(tableName);
     const constraints: TableConstraint[] = [];
 
     // Get PRIMARY KEY constraint
-    const pkRows = await this.#adapter.runQuery<PrimaryKeyRow>(`
+    const pkRows = await this.#adapter.runQuery(
+      `
       SELECT
         kc.name AS constraint_name,
         COL_NAME(ic.object_id, ic.column_id) AS column_name
@@ -61,7 +71,9 @@ export class SqlServerConstraintGrounding extends ConstraintGrounding {
         AND t.name = '${this.#adapter.escapeString(table)}'
         AND kc.type = 'PK'
       ORDER BY ic.key_ordinal
-    `);
+    `,
+      keyColumnRow,
+    );
 
     if (pkRows.length > 0) {
       constraints.push({
@@ -72,7 +84,8 @@ export class SqlServerConstraintGrounding extends ConstraintGrounding {
     }
 
     // Get FOREIGN KEY constraints
-    const fkRows = await this.#adapter.runQuery<ForeignKeyRow>(`
+    const fkRows = await this.#adapter.runQuery(
+      `
       SELECT
         fk.name AS constraint_name,
         COL_NAME(fkc.parent_object_id, fkc.parent_column_id) AS column_name,
@@ -88,10 +101,20 @@ export class SqlServerConstraintGrounding extends ConstraintGrounding {
       WHERE s.name = '${this.#adapter.escapeString(schema)}'
         AND t.name = '${this.#adapter.escapeString(table)}'
       ORDER BY fk.name, fkc.constraint_column_id
-    `);
+    `,
+      foreignKeyRow,
+    );
 
     // Group foreign keys by name
-    const fkMap = new Map<string, { columns: string[]; refSchema: string; refTable: string; refColumns: string[] }>();
+    const fkMap = new Map<
+      string,
+      {
+        columns: string[];
+        refSchema: string;
+        refTable: string;
+        refColumns: string[];
+      }
+    >();
     for (const row of fkRows) {
       const existing = fkMap.get(row.constraint_name);
       if (existing) {
@@ -118,7 +141,8 @@ export class SqlServerConstraintGrounding extends ConstraintGrounding {
     }
 
     // Get CHECK constraints
-    const checkRows = await this.#adapter.runQuery<CheckConstraintRow>(`
+    const checkRows = await this.#adapter.runQuery(
+      `
       SELECT
         cc.name AS constraint_name,
         cc.definition
@@ -127,7 +151,9 @@ export class SqlServerConstraintGrounding extends ConstraintGrounding {
       JOIN sys.schemas s ON t.schema_id = s.schema_id
       WHERE s.name = '${this.#adapter.escapeString(schema)}'
         AND t.name = '${this.#adapter.escapeString(table)}'
-    `);
+    `,
+      checkConstraintRow,
+    );
 
     for (const row of checkRows) {
       constraints.push({
@@ -138,7 +164,8 @@ export class SqlServerConstraintGrounding extends ConstraintGrounding {
     }
 
     // Get UNIQUE constraints
-    const uniqueRows = await this.#adapter.runQuery<UniqueConstraintRow>(`
+    const uniqueRows = await this.#adapter.runQuery(
+      `
       SELECT
         i.name AS constraint_name,
         COL_NAME(ic.object_id, ic.column_id) AS column_name
@@ -150,7 +177,9 @@ export class SqlServerConstraintGrounding extends ConstraintGrounding {
         AND t.name = '${this.#adapter.escapeString(table)}'
         AND i.is_unique_constraint = 1
       ORDER BY i.name, ic.key_ordinal
-    `);
+    `,
+      keyColumnRow,
+    );
 
     // Group unique constraints by name
     const uniqueMap = new Map<string, string[]>();
@@ -172,7 +201,8 @@ export class SqlServerConstraintGrounding extends ConstraintGrounding {
     }
 
     // Get NOT NULL and DEFAULT constraints
-    const columnRows = await this.#adapter.runQuery<ColumnDefaultRow>(`
+    const columnRows = await this.#adapter.runQuery(
+      `
       SELECT
         c.name AS column_name,
         dc.definition AS default_definition,
@@ -183,7 +213,9 @@ export class SqlServerConstraintGrounding extends ConstraintGrounding {
       LEFT JOIN sys.default_constraints dc ON c.default_object_id = dc.object_id
       WHERE s.name = '${this.#adapter.escapeString(schema)}'
         AND t.name = '${this.#adapter.escapeString(table)}'
-    `);
+    `,
+      columnDefaultRow,
+    );
 
     // Get primary key columns to exclude from NOT NULL
     const pkConstraint = constraints.find((c) => c.type === 'PRIMARY_KEY');
@@ -191,7 +223,7 @@ export class SqlServerConstraintGrounding extends ConstraintGrounding {
 
     for (const col of columnRows) {
       // NOT NULL constraint (exclude primary key columns which are implicitly NOT NULL)
-      if (col.is_nullable === 0 && !pkColumns.has(col.column_name)) {
+      if (!col.is_nullable && !pkColumns.has(col.column_name)) {
         constraints.push({
           name: `${table}_${col.column_name}_notnull`,
           type: 'NOT_NULL',
@@ -205,7 +237,9 @@ export class SqlServerConstraintGrounding extends ConstraintGrounding {
           name: `${table}_${col.column_name}_default`,
           type: 'DEFAULT',
           columns: [col.column_name],
-          defaultValue: col.default_definition.replace(/^\(/, '').replace(/\)$/, ''),
+          defaultValue: col.default_definition
+            .replace(/^\(/, '')
+            .replace(/\)$/, ''),
         });
       }
     }

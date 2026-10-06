@@ -84,7 +84,7 @@ class TestAdapter extends Adapter {
 
   validateImpl(): void {}
 
-  runQuery<Row>(): Row[] {
+  protected queryRows(): unknown[] {
     return [];
   }
 
@@ -247,7 +247,7 @@ function isProgressChunk(chunk: unknown): chunk is {
     typeof chunk === 'object' &&
     chunk !== null &&
     'type' in chunk &&
-    (chunk as { type?: unknown }).type === TEXT2SQL_INDEX_PROGRESS_CHUNK
+    chunk.type === TEXT2SQL_INDEX_PROGRESS_CHUNK
   );
 }
 
@@ -301,7 +301,7 @@ describe('Text2Sql index progress events', () => {
       assertTimestamped(events);
 
       const startChunkIndex = chunks.findIndex(
-        (chunk) => (chunk as { type?: string })?.type === 'start',
+        (chunk) => chunk.type === 'start',
       );
       const firstProgressChunk = chunks.findIndex(isProgressChunk);
       const firstAssistantChunk = chunks.findIndex(
@@ -309,9 +309,7 @@ describe('Text2Sql index progress events', () => {
           typeof chunk === 'object' &&
           chunk !== null &&
           'type' in chunk &&
-          ['text-start', 'text-delta'].includes(
-            String((chunk as { type?: unknown }).type),
-          ),
+          ['text-start', 'text-delta'].includes(String(chunk.type)),
       );
       const lastProgressChunk = chunks.findLastIndex(isProgressChunk);
 
@@ -521,9 +519,7 @@ describe('Text2Sql index progress events', () => {
           typeof chunk === 'object' &&
           chunk !== null &&
           'type' in chunk &&
-          ['text-start', 'text-delta'].includes(
-            String((chunk as { type?: unknown }).type),
-          ),
+          ['text-start', 'text-delta'].includes(String(chunk.type)),
       ),
       'assistant stream should not start after indexing fails',
     );

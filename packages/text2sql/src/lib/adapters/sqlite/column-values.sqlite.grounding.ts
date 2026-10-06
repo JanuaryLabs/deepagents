@@ -4,6 +4,7 @@ import {
   ColumnValuesGrounding,
   type ColumnValuesGroundingConfig,
 } from '../groundings/column-values.grounding.ts';
+import { distinctValueRow } from '../groundings/rows.ts';
 
 /**
  * SQLite implementation of ColumnValuesGrounding.
@@ -37,7 +38,7 @@ export class SqliteColumnValuesGrounding extends ColumnValuesGrounding {
       LIMIT ${limit}
     `;
 
-    const rows = await this.#adapter.runQuery<{ value: unknown }>(sql);
+    const rows = await this.#adapter.runQuery(sql, distinctValueRow);
 
     if (!rows.length || rows.length > this.lowCardinalityLimit) {
       return undefined;

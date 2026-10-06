@@ -3,6 +3,8 @@ import {
   InfoGrounding,
   type InfoGroundingConfig,
 } from '../groundings/info.grounding.ts';
+import { versionRow } from '../groundings/rows.ts';
+import { currentDatabaseRow } from './mysql-rows.ts';
 
 /**
  * MySQL/MariaDB implementation of InfoGrounding.
@@ -19,10 +21,8 @@ export class MysqlInfoGrounding extends InfoGrounding {
 
   protected override async collectInfo(): Promise<AdapterInfo> {
     const [versionRows, dbRows] = await Promise.all([
-      this.#adapter.runQuery<{ version: string }>(
-        'SELECT VERSION() AS version',
-      ),
-      this.#adapter.runQuery<{ db: string | null }>('SELECT DATABASE() AS db'),
+      this.#adapter.runQuery('SELECT VERSION() AS version', versionRow),
+      this.#adapter.runQuery('SELECT DATABASE() AS db', currentDatabaseRow),
     ]);
 
     const version = versionRows[0]?.version;
