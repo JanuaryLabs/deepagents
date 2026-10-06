@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import type { ContextFragment } from '@deepagents/context';
+import { isFragment } from '@deepagents/context';
 import { elementsFragment } from '@deepagents/elements/context';
 
 describe('elementsFragment', () => {
@@ -16,7 +16,8 @@ describe('elementsFragment', () => {
     ]);
 
     assert.equal(fragment.name, 'elements');
-    const children = fragment.data as ContextFragment[];
+    const children = fragment.data;
+    assert.ok(Array.isArray(children) && children.every(isFragment));
     assert.equal(children.length, 3);
     assert.equal(children[0].name, 'instructions');
     assert.match(String(children[0].data), /Never invent elements/);

@@ -46,10 +46,7 @@ export function elementsFragment(
 
   return {
     name: 'elements',
-    data: [
-      { name: 'instructions', data: ELEMENTS_INSTRUCTIONS } as ContextFragment,
-      ...items,
-    ],
+    data: [{ name: 'instructions', data: ELEMENTS_INSTRUCTIONS }, ...items],
     metadata: { elements: snapshot },
   };
 }
