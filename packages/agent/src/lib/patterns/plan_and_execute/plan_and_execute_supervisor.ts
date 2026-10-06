@@ -1,10 +1,10 @@
 import { groq } from '@ai-sdk/groq';
-import { tool } from 'ai';
+import { type ToolExecutionOptions, tool } from 'ai';
 import { writeFileSync } from 'node:fs';
 import z from 'zod';
 
 import { type Agent, agent, instructions } from '../../agent.ts';
-import { printer, toState } from '../../stream_utils.ts';
+import { printer } from '../../stream_utils.ts';
 import { swarm } from '../../swarm.ts';
 import { createSupervisor } from './../supervisor.ts';
 
@@ -262,14 +262,26 @@ class PlanExecuteStateManager {
   }
 }
 
+/**
+ * What the state tools receive as context: the swarm's context variables,
+ * which are the state manager. A tool context must be a plain object type,
+ * which a class is not, so this is the manager's public surface.
+ */
+type PlanExecuteContext = Pick<
+  PlanExecuteStateManager,
+  keyof PlanExecuteStateManager
+>;
+
 // Create state management tools - now using context instead of closures
 function createStateTools() {
   return {
     get_current_state: tool({
       description: 'Get the current state of the plan-and-execute workflow',
       inputSchema: z.object({}),
-      execute: async (_, options) => {
-        const context = toState<PlanExecuteStateManager>(options);
+      execute: async (
+        _,
+        { context }: ToolExecutionOptions<PlanExecuteContext>,
+      ) => {
         const state = context.getCurrentState();
         const stats = context.getStateStats();
         return {
@@ -297,8 +309,10 @@ function createStateTools() {
       inputSchema: z.object({
         plan: z.array(z.string()).describe('New plan steps to execute'),
       }),
-      execute: async ({ plan }, options) => {
-        const context = toState<PlanExecuteStateManager>(options);
+      execute: async (
+        { plan },
+        { context }: ToolExecutionOptions<PlanExecuteContext>,
+      ) => {
         try {
           context.cleanupOrphanedFeedback();
           context.updatePlan(plan);
@@ -315,8 +329,10 @@ function createStateTools() {
         stepId: z.string().describe('The ID of the completed step'),
         result: z.string().describe('The result of the step execution'),
       }),
-      execute: async ({ stepId, result }, options) => {
-        const context = toState<PlanExecuteStateManager>(options);
+      execute: async (
+        { stepId, result },
+        { context }: ToolExecutionOptions<PlanExecuteContext>,
+      ) => {
         try {
           context.addCompletedStep(stepId, result);
           return `Step "${stepId}" marked as completed`;
@@ -331,8 +347,10 @@ function createStateTools() {
       inputSchema: z.object({
         response: z.string().describe('The final response to the user'),
       }),
-      execute: async ({ response }, options) => {
-        const context = toState<PlanExecuteStateManager>(options);
+      execute: async (
+        { response },
+        { context }: ToolExecutionOptions<PlanExecuteContext>,
+      ) => {
         context.setFinalResponse(response);
         return 'Final response set - task is complete';
       },
@@ -345,8 +363,10 @@ function createStateTools() {
         stepId: z.string().describe('The ID of the step that was worked on'),
         result: z.string().describe('The result of the work done'),
       }),
-      execute: async ({ stepId, result }, options) => {
-        const context = toState<PlanExecuteStateManager>(options);
+      execute: async (
+        { stepId, result },
+        { context }: ToolExecutionOptions<PlanExecuteContext>,
+      ) => {
         try {
           context.submitWork(stepId, result);
           return `Work submitted for evaluation: step ${stepId}`;
@@ -359,8 +379,10 @@ function createStateTools() {
     get_pending_work: tool({
       description: 'Get work that is pending evaluation',
       inputSchema: z.object({}),
-      execute: async (_, options) => {
-        const context = toState<PlanExecuteStateManager>(options);
+      execute: async (
+        _,
+        { context }: ToolExecutionOptions<PlanExecuteContext>,
+      ) => {
         const pending = context.getPendingWork();
         return {
           pendingCount: pending.length,
@@ -379,8 +401,10 @@ function createStateTools() {
       inputSchema: z.object({
         stepId: z.string().describe('The ID of the step to approve'),
       }),
-      execute: async ({ stepId }, options) => {
-        const context = toState<PlanExecuteStateManager>(options);
+      execute: async (
+        { stepId },
+        { context }: ToolExecutionOptions<PlanExecuteContext>,
+      ) => {
         try {
           await context.approveWork(stepId);
           return `Work approved and marked complete: step ${stepId}`;
@@ -398,8 +422,10 @@ function createStateTools() {
           .string()
           .describe('Specific feedback on what needs improvement'),
       }),
-      execute: async ({ stepId, feedback }, options) => {
-        const context = toState<PlanExecuteStateManager>(options);
+      execute: async (
+        { stepId, feedback },
+        { context }: ToolExecutionOptions<PlanExecuteContext>,
+      ) => {
         try {
           await context.rejectWork(stepId, feedback);
           return `Work rejected with feedback: step ${stepId}`;
@@ -412,8 +438,10 @@ function createStateTools() {
     get_work_feedback: tool({
       description: 'Get feedback on previously rejected work',
       inputSchema: z.object({}),
-      execute: async (_, options) => {
-        const context = toState<PlanExecuteStateManager>(options);
+      execute: async (
+        _,
+        { context }: ToolExecutionOptions<PlanExecuteContext>,
+      ) => {
         const feedback = context.getWorkFeedback();
         return {
           feedbackCount: feedback.length,
@@ -433,8 +461,10 @@ function createStateTools() {
       inputSchema: z.object({
         stepId: z.string().describe('The ID of the step to clear feedback for'),
       }),
-      execute: async ({ stepId }, options) => {
-        const context = toState<PlanExecuteStateManager>(options);
+      execute: async (
+        { stepId },
+        { context }: ToolExecutionOptions<PlanExecuteContext>,
+      ) => {
         try {
           context.clearFeedback(stepId);
           return `Feedback cleared for step: ${stepId}`;
@@ -447,8 +477,10 @@ function createStateTools() {
     get_current_task: tool({
       description: 'Get only the current task to execute (limited state view)',
       inputSchema: z.object({}),
-      execute: async (_, options) => {
-        const context = toState<PlanExecuteStateManager>(options);
+      execute: async (
+        _,
+        { context }: ToolExecutionOptions<PlanExecuteContext>,
+      ) => {
         const state = context.getCurrentState();
         const feedback = context.getWorkFeedback();
 
@@ -493,8 +525,10 @@ function createStateTools() {
           .optional()
           .describe('Maximum age for pending work in minutes (default: 30)'),
       }),
-      execute: async ({ maxAgeMinutes }, options) => {
-        const context = toState<PlanExecuteStateManager>(options);
+      execute: async (
+        { maxAgeMinutes },
+        { context }: ToolExecutionOptions<PlanExecuteContext>,
+      ) => {
         context.cleanupStaleWork(maxAgeMinutes);
         context.cleanupOrphanedFeedback();
         const stats = context.getStateStats();
@@ -883,8 +917,10 @@ if (import.meta.main) {
     'Explain the origin of money in a simple educational format';
   const stateManager = new PlanExecuteStateManager(objective);
   const [result, stdout] = swarm(supervisor, objective, stateManager).tee();
-  printer.readableStream(stdout);
-  const messages = await Array.fromAsync(result as any);
+  const [messages] = await Promise.all([
+    Array.fromAsync(result),
+    printer.readableStream(stdout),
+  ]);
   writeFileSync(
     'supervisor_plan_and_execute_messages.json',
     JSON.stringify(messages, null, 2),

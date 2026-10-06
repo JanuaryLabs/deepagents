@@ -89,13 +89,11 @@ The function form runs each time the agent's instructions are needed, so context
 
 ## Accessing Context in Tools
 
-Tools access their per-tool context via `options.context`. The `toState()`
-helper keeps that access typed:
+Tools receive their context as `context` on the execute options. Declare its
+type on that parameter:
 
 ```typescript
-import { tool } from 'ai';
-
-import { toState } from '@deepagents/agent';
+import { type ToolExecutionOptions, tool } from 'ai';
 
 type Context = {
   userId: string;
@@ -105,19 +103,18 @@ type Context = {
 const sensitiveDataTool = tool({
   description: 'Access sensitive data',
   inputSchema: z.object({ dataId: z.string() }),
-  execute: async ({ dataId }, options) => {
-    const ctx = toState<Context>(options);
-
-    if (ctx.accessLevel !== 'admin') {
+  execute: async ({ dataId }, { context }: ToolExecutionOptions<Context>) => {
+    if (context.accessLevel !== 'admin') {
       return 'Access denied: admin required';
     }
 
-    return await fetchSensitiveData(dataId, ctx.userId);
+    return await fetchSensitiveData(dataId, context.userId);
   },
 });
 ```
 
-The `toState<T>()` helper provides type-safe access to the context.
+Declare the context with `type`, not `interface`: the AI SDK requires a tool
+context to extend `Record<string, unknown>`, and an interface does not.
 
 ## Modifying Context
 
@@ -127,13 +124,18 @@ Context is mutable during execution. Tools can update it:
 const collectResultsTool = tool({
   description: 'Store a result',
   inputSchema: z.object({ result: z.string() }),
-  execute: async ({ result }, options) => {
-    const ctx = toState<{ results: string[] }>(options);
-    ctx.results.push(result);
+  execute: async (
+    { result },
+    { context }: ToolExecutionOptions<{ results: string[] }>,
+  ) => {
+    context.results.push(result);
     return 'Result stored';
   },
 });
 ```
+
+Do not give such a tool a `contextSchema`: the AI SDK then hands the tool a
+parsed copy, and its changes never reach the shared context.
 
 Modified context persists through the rest of execution and is available in the returned `state`:
 
@@ -157,9 +159,7 @@ type SharedContext = {
 const researcher = agent<unknown, SharedContext>({
   name: 'Researcher',
   prompt: (ctx) => `Research for user ${ctx.userId}...`,
-  tools: {
-    /* ... */
-  },
+  tools: {/* ... */},
 });
 
 const writer = agent<unknown, SharedContext>({
@@ -191,9 +191,8 @@ The execution engine uses `currentActiveAgent` in context to track which agent i
 ```typescript
 // Internal mechanism (simplified from swarm.ts)
 handoffTool: dynamicTool({
-  execute: async (_, options) => {
-    const state = toState(options);
-    state.currentActiveAgent = this.internalName;
+  execute: async (_, { context }) => {
+    context.currentActiveAgent = this.internalName;
     return `Transfer successful to ${this.internalName}`;
   },
 });
@@ -210,9 +209,8 @@ type TrackingContext = {
 const trackingTool = tool({
   description: 'Track agent visit',
   inputSchema: z.object({}),
-  execute: async (_, options) => {
-    const ctx = toState<TrackingContext>(options);
-    ctx.visitedAgents.push(ctx.currentAgent);
+  execute: async (_, { context }: ToolExecutionOptions<TrackingContext>) => {
+    context.visitedAgents.push(context.currentAgent);
     return 'Visit logged';
   },
 });
@@ -252,9 +250,11 @@ type PipelineContext = {
 const searchAgent = agent<unknown, PipelineContext>({
   tools: {
     storeResult: tool({
-      execute: async ({ result }, options) => {
-        const ctx = toState<PipelineContext>(options);
-        ctx.searchResults.push(result);
+      execute: async (
+        { result },
+        { context }: ToolExecutionOptions<PipelineContext>,
+      ) => {
+        context.searchResults.push(result);
         return 'Stored';
       },
     }),

@@ -62,11 +62,16 @@ When the coordinator calls `summarize`, the summarizer agent runs to completion 
 By default, `asTool()` returns the agent's full output. Use `outputExtractor` to transform the result:
 
 ```typescript
-type OutputExtractorFn = (
-  result: GenerateTextResult<ToolSet, any>,
+// `O` is the agent's output type; `result.output` is typed with it.
+type OutputExtractorFn<O = unknown> = (
+  result: Omit<GenerateTextResult<ToolSet, any, any>, 'output'> & {
+    readonly output: O;
+  },
 ) => string | Promise<string>;
 
-const summaryExtractor: OutputExtractorFn = async (result) => {
+const summaryExtractor: OutputExtractorFn<{ summary: string }> = async (
+  result,
+) => {
   return result.output.summary;
 };
 

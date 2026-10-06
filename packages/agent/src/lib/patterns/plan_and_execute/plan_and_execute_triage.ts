@@ -1,11 +1,11 @@
 import { groq } from '@ai-sdk/groq';
 import { openai } from '@ai-sdk/openai';
-import { tool } from 'ai';
+import { type ToolExecutionOptions, tool } from 'ai';
 import { exec } from 'node:child_process';
 import z from 'zod';
 
 import { type Agent, agent, instructions } from '../../agent.ts';
-import { printer, toState } from '../../stream_utils.ts';
+import { printer } from '../../stream_utils.ts';
 import { execute } from '../../swarm.ts';
 
 const tool_exec_cmd = tool({
@@ -39,12 +39,12 @@ const tool_exec_cmd = tool({
     });
   },
 });
-interface PlanExecuteState {
+type PlanExecuteState = {
   input: string;
   plan: string[];
   pastSteps: Array<[string, string]>;
   response?: string;
-}
+};
 
 const planner = agent<unknown, PlanExecuteState>({
   model: openai('gpt-4.1-nano'),
@@ -74,8 +74,10 @@ const planner = agent<unknown, PlanExecuteState>({
       inputSchema: z.object({
         plan: z.array(z.string()),
       }),
-      execute: ({ plan }, options) => {
-        const state = toState<PlanExecuteState>(options);
+      execute: (
+        { plan },
+        { context: state }: ToolExecutionOptions<PlanExecuteState>,
+      ) => {
         state.plan = plan;
         return 'Plan set successfully.';
       },
@@ -107,8 +109,10 @@ const executor = agent<unknown, PlanExecuteState>({
       description:
         'Get the next task from the plan that has not been executed yet',
       inputSchema: z.object({}),
-      execute: (input, options) => {
-        const state = toState<PlanExecuteState>(options);
+      execute: (
+        input,
+        { context: state }: ToolExecutionOptions<PlanExecuteState>,
+      ) => {
         if (state.plan.length === 0) {
           return 'No tasks in the plan.';
         }
@@ -122,8 +126,10 @@ const executor = agent<unknown, PlanExecuteState>({
       inputSchema: z.object({
         result: z.string().describe('The result of executing the task.'),
       }),
-      execute: ({ result }, options) => {
-        const state = toState<PlanExecuteState>(options);
+      execute: (
+        { result },
+        { context: state }: ToolExecutionOptions<PlanExecuteState>,
+      ) => {
         if (state.plan.length === 0) {
           return 'No tasks to complete.';
         }
@@ -161,8 +167,10 @@ const replanner = agent<unknown, PlanExecuteState>({
       inputSchema: z.object({
         response: z.string().min(1),
       }),
-      execute: ({ response }, options) => {
-        const state = toState<PlanExecuteState>(options);
+      execute: (
+        { response },
+        { context: state }: ToolExecutionOptions<PlanExecuteState>,
+      ) => {
         state.response = response;
         return 'Final response set successfully.';
       },
@@ -170,8 +178,10 @@ const replanner = agent<unknown, PlanExecuteState>({
     get_current_state: tool({
       description: 'Get the current state of the plan and past steps',
       inputSchema: z.object({}),
-      execute: (input, options) => {
-        const state = toState<PlanExecuteState>(options);
+      execute: (
+        input,
+        { context: state }: ToolExecutionOptions<PlanExecuteState>,
+      ) => {
         return {
           plan: state.plan,
           pastSteps: state.pastSteps,
@@ -183,8 +193,10 @@ const replanner = agent<unknown, PlanExecuteState>({
       inputSchema: z.object({
         plan: z.array(z.string()),
       }),
-      execute: ({ plan }, options) => {
-        const state = toState<PlanExecuteState>(options);
+      execute: (
+        { plan },
+        { context: state }: ToolExecutionOptions<PlanExecuteState>,
+      ) => {
         state.plan = plan;
         return 'Plan updated successfully.';
       },
@@ -210,8 +222,10 @@ const triage: Agent<unknown, PlanExecuteState> = agent<
     get_current_state: tool({
       description: 'Get the current state of the plan and past steps',
       inputSchema: z.object({}),
-      execute: (input, options) => {
-        const state = toState<PlanExecuteState>(options);
+      execute: (
+        input,
+        { context: state }: ToolExecutionOptions<PlanExecuteState>,
+      ) => {
         return {
           plan: state.plan,
           pastSteps: state.pastSteps,

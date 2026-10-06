@@ -10,39 +10,37 @@ Your job is to conduct thorough research and provide comprehensive, accurate ana
 Use strategic search approaches: start wide, then narrow down to specific details.
 `.trim();
 
+const ResearchInputSchema = z.object({
+  query: z
+    .string()
+    .describe(
+      'The research query - use broad terms initially, then specific terms',
+    ),
+  approach: z
+    .enum(['broad', 'specific', 'targeted'])
+    .default('broad')
+    .describe(
+      'Search approach: broad for initial exploration, specific for detailed investigation, targeted for precise facts',
+    ),
+  focusAreas: z
+    .array(z.string())
+    .optional()
+    .describe('Specific areas to focus research on within the query topic'),
+  maxSources: z
+    .number()
+    .min(1)
+    .max(3)
+    .default(3)
+    .describe('Maximum number of sources to investigate'),
+});
+
 const researchTool = dynamicTool({
   description:
     'Conduct web research with strategic search approach - start broad, then narrow focus',
-  inputSchema: z.object({
-    query: z
-      .string()
-      .describe(
-        'The research query - use broad terms initially, then specific terms',
-      ),
-    approach: z
-      .enum(['broad', 'specific', 'targeted'])
-      .default('broad')
-      .describe(
-        'Search approach: broad for initial exploration, specific for detailed investigation, targeted for precise facts',
-      ),
-    focusAreas: z
-      .array(z.string())
-      .optional()
-      .describe('Specific areas to focus research on within the query topic'),
-    maxSources: z
-      .number()
-      .min(1)
-      .max(3)
-      .default(3)
-      .describe('Maximum number of sources to investigate'),
-  }),
+  inputSchema: ResearchInputSchema,
   execute: async (input) => {
-    const { query, approach, focusAreas, maxSources } = input as {
-      query: string;
-      approach: 'broad' | 'specific' | 'targeted';
-      focusAreas?: string[];
-      maxSources: number;
-    };
+    const { query, approach, focusAreas, maxSources } =
+      ResearchInputSchema.parse(input);
 
     try {
       // Apply Anthropic's "start wide, then narrow down" principle
@@ -68,7 +66,7 @@ Research Guidelines:
 
 Maximum ${maxSources} sources. Return comprehensive analysis with key findings.`,
         tools: {
-          browser_search: (groq as any).tools.browserSearch({}),
+          browser_search: groq.tools.browserSearch({}),
         },
         toolChoice: 'required',
         providerOptions: {

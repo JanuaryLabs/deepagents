@@ -668,7 +668,7 @@ prepareEnd?: PrepareEndFn<COut, Output>;
 type PrepareEndFn<C, O> = (config: {
   messages: ResponseMessage[];
   responseMessage: ResponseMessage;
-  contextVariables: C;
+  contextVariables: C & SwarmContext; // SwarmContext = { currentActiveAgent?: string }
   abortSignal?: AbortSignal;
 }) => StreamTextResult<ToolSet, O> | undefined | void;
 ```

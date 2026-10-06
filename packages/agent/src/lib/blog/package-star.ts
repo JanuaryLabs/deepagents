@@ -123,7 +123,7 @@ const list_packages_tool = tool({
         // ignore invalid json files
       }
     }
-    return { json: results } as any;
+    return { json: results };
   },
 });
 
@@ -143,7 +143,7 @@ const read_package_json_tool = tool({
     const raw = await fs.readFile(abs, 'utf8');
     const json = JSON.parse(raw);
     const rel = path.relative(ROOT_DIR, abs);
-    return { json: { path: rel, json } } as any;
+    return { json: { path: rel, json } };
   },
 });
 

@@ -1,15 +1,8 @@
 import { openai } from '@ai-sdk/openai';
-import { tool } from 'ai';
+import { type ToolExecutionOptions, tool } from 'ai';
 import { z } from 'zod';
 
-import {
-  agent,
-  execute,
-  input,
-  instructions,
-  toState,
-  user,
-} from '@deepagents/agent';
+import { agent, execute, input, instructions, user } from '@deepagents/agent';
 import {
   fastembed,
   ingest,
@@ -39,10 +32,10 @@ const PaperSummarySchema = z.object({
 // State Management
 // ============================
 
-interface ArxivAgentContext {
+type ArxivAgentContext = {
   pdf_url: string;
   store_path: string;
-}
+};
 
 export async function queryArxivPaper(
   query: string,
@@ -62,8 +55,10 @@ const queryPaperTool = tool({
   description:
     'Query the ingested arXiv paper using semantic search. Returns relevant sections from the paper.',
   inputSchema: QueryPaperSchema,
-  execute: async ({ query }, options) => {
-    const context = toState<ArxivAgentContext>(options);
+  execute: async (
+    { query },
+    { context }: ToolExecutionOptions<ArxivAgentContext>,
+  ) => {
     try {
       const results = await queryArxivPaper(
         query,

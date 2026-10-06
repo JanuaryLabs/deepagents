@@ -137,8 +137,7 @@ export const rewooSolver = agent({
 
 export async function runRewoo(query: string) {
   // 1) Plan
-  const { output } = await generate(rewooPlanner, query, {});
-  const plan = output as RewooPlan;
+  const { output: plan } = await generate(rewooPlanner, query, {});
 
   // 2) Execute tool calls (in parallel)
   const evidences: Evidence[] = await Promise.all(

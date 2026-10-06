@@ -356,12 +356,17 @@ const verifier = agent({
 The `outputExtractor` function transforms structured agent output into tool-friendly strings:
 
 ```typescript
-type OutputExtractorFn = (
-  output: GenerateTextResult<ToolSet, any>,
+// `O` is the agent's output type; `output.output` is typed with it.
+type OutputExtractorFn<O = unknown> = (
+  output: Omit<GenerateTextResult<ToolSet, any, any>, 'output'> & {
+    readonly output: O;
+  },
 ) => string | Promise<string>;
 
 // Example: Extract just the summary field
-const summaryExtractor: OutputExtractorFn = async (result) => {
+const summaryExtractor: OutputExtractorFn<
+  z.infer<typeof AnalysisSummarySchema>
+> = async (result) => {
   return result.output.summary;
 };
 

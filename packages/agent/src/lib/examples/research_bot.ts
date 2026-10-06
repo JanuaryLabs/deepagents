@@ -69,7 +69,7 @@ const research = agent({
   }),
   tools: {
     // browser_search: groq.tools.browserSearch({}),
-    web_search: (openai as any).tools.webSearch({
+    web_search: openai.tools.webSearch({
       searchContextSize: 'low',
     }),
   },
@@ -96,8 +96,7 @@ const writer = agent({
 
 async function planSearches(query: string): Promise<WebSearchPlan> {
   console.log('Planning searches...');
-  const { output } = await generate(planner, `Query: ${query}`, {});
-  const plan = output as WebSearchPlan;
+  const { output: plan } = await generate(planner, `Query: ${query}`, {});
   console.log(`Will perform ${plan.searches.length} searches`);
   return plan;
 }
@@ -129,7 +128,7 @@ async function writeReport(
   console.log('Thinking about report...');
   const writerInput = `Original query: ${query}\nSummarized search results: ${JSON.stringify(searchResults)}`;
   const { output } = await generate(writer, writerInput, {});
-  return output as ReportData;
+  return output;
 }
 
 async function run(query: string) {

@@ -51,10 +51,10 @@ type VerificationResult = z.infer<typeof VerificationResultSchema>;
 type AnalysisSummary = z.infer<typeof AnalysisSummarySchema>;
 
 // Custom output extractor for sub-agents that return an AnalysisSummary
-const summaryExtractor: OutputExtractorFn = async (result) => {
+const summaryExtractor: OutputExtractorFn<AnalysisSummary> = async (result) => {
   // The financial/risk analyst agents emit an AnalysisSummary with a `summary` field.
   // We want the tool call to return just that summary text so the writer can drop it inline.
-  return (result.output as AnalysisSummary).summary;
+  return result.output.summary;
 };
 
 const plannerAgent = agent({
@@ -110,7 +110,7 @@ const searchAgent = agent({
   }),
   toolChoice: 'required',
   tools: {
-    browser_search: (groq as any).tools.browserSearch({}),
+    browser_search: groq.tools.browserSearch({}),
   },
 });
 
@@ -157,8 +157,11 @@ const progress = createProgress<Ctx>();
 progress.add({
   title: 'Planning searches',
   task: async (ctx, task) => {
-    const { output } = await generate(plannerAgent, `Query: ${query}`, {});
-    const plan = output as FinancialSearchPlan;
+    const { output: plan } = await generate(
+      plannerAgent,
+      `Query: ${query}`,
+      {},
+    );
     ctx.plan = plan;
     task.title = `Planned ${plan.searches.length} searches`;
   },
@@ -225,12 +228,11 @@ progress.add({
       task.output = `📝 ${message}`;
     });
 
-    const { output } = await generate(
+    const { output: report } = await generate(
       writerWithTools,
       `Original query: ${query}\nSummarized search results: ${ctx.searchResults}`,
       {},
     );
-    const report = output as FinancialReportData;
 
     progressUpdater[Symbol.dispose]?.();
 
@@ -247,12 +249,11 @@ progress.add({
     task.output = '🔍 Checking report quality and consistency...';
     task.title = '🔍 Verifying report';
 
-    const { output } = await generate(
+    const { output: verification } = await generate(
       verifierAgent,
       ctx.report!.markdown_report,
       {},
     );
-    const verification = output as VerificationResult;
 
     ctx.verification = verification;
 

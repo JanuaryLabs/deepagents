@@ -92,8 +92,10 @@ export const outlineAgent = agent<unknown, OutlineAgentContext>({
       inputSchema: z.object({
         outline: OutlineSchema,
       }),
-      // execute: ({ outline }, options) => {
-      //   const context = toState<OutlineAgentContext>(options);
+      // execute: (
+      //   { outline },
+      //   { context }: ToolExecutionOptions<OutlineAgentContext>,
+      // ) => {
       //   // Store the outline in a file or database
       //   console.log('Generated Outline:\n', outline);
       //   context.outline = outline;

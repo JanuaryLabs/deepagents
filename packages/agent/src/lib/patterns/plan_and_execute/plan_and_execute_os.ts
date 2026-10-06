@@ -23,9 +23,6 @@ const ReplanSchema = z.union([
   }),
 ]);
 
-type Plan = z.infer<typeof PlanSchema>;
-type ReplanResult = z.infer<typeof ReplanSchema>;
-
 interface PlanExecuteState {
   input: string;
   plan: string[];
@@ -110,8 +107,11 @@ export async function planAndExecute(
     plan: [],
     pastSteps: [],
   };
-  const { output } = await generate(planner, `Objective: ${objective}`, {});
-  const initialPlan = output as Plan;
+  const { output: initialPlan } = await generate(
+    planner,
+    `Objective: ${objective}`,
+    {},
+  );
   state.plan = initialPlan.steps;
   console.log('📋 Initial plan created:');
   state.plan.forEach((step, i) => console.log(`  ${i + 1}. ${step}`));
@@ -168,12 +168,11 @@ Based on the progress made, either:
 Only include steps that still NEED to be done. Do not repeat completed steps.
     `.trim();
 
-    const { output: replanOutput } = await generate(
+    const { output: replanResult } = await generate(
       replanner,
       replanPrompt,
       {},
     );
-    const replanResult = replanOutput as ReplanResult;
 
     if (replanResult.type === 'response') {
       state.response = replanResult.response;

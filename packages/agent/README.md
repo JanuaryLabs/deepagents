@@ -83,9 +83,7 @@ const researcher = agent({
   model: openai('gpt-4o'),
   prompt: 'You research topics and provide detailed information.',
   handoffDescription: 'Handles research and fact-finding tasks',
-  tools: {
-    /* research tools */
-  },
+  tools: {/* research tools */},
 });
 
 const writer = agent({
@@ -142,25 +140,29 @@ console.log(result.output);
 Share state between agents and tools:
 
 ```typescript
-import { tool } from 'ai';
+import { type ToolExecutionOptions, tool } from 'ai';
 import { z } from 'zod';
 
-import { agent, execute, toState } from '@deepagents/agent';
+import { agent, execute } from '@deepagents/agent';
 
-interface AppContext {
+// A `type`, not an `interface`: the AI SDK requires a tool context to
+// extend Record<string, unknown>, which an interface does not.
+type AppContext = {
   userId: string;
   preferences: Record<string, string>;
-}
+};
 
 const preferenceTool = tool({
   description: 'Save user preference',
-  parameters: z.object({
+  inputSchema: z.object({
     key: z.string(),
     value: z.string(),
   }),
-  execute: async ({ key, value }, options) => {
-    const ctx = toState<AppContext>(options);
-    ctx.preferences[key] = value;
+  execute: async (
+    { key, value },
+    { context }: ToolExecutionOptions<AppContext>,
+  ) => {
+    context.preferences[key] = value;
     return `Saved ${key}=${value}`;
   },
 });
@@ -232,9 +234,6 @@ swarm(agent, messages, context, abortSignal?)
 ```typescript
 // Create user message
 user(message: string): UIMessage
-
-// Access context in tools
-toState<T>(options: ToolCallOptions): T
 
 // Extract structured output
 toOutput<T>(result): Promise<T>

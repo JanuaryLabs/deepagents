@@ -10,7 +10,6 @@ import {
   instructions,
   lmstudio,
   printer,
-  toState,
   user,
 } from '@deepagents/agent';
 import {
@@ -51,9 +50,8 @@ const write_section_tool = tool({
       sectionTitle,
       sectionContent,
     }: { sectionTitle: string; sectionContent: string },
-    options: ToolExecutionOptions<any>,
+    { context }: ToolExecutionOptions<SectionAgentContext>,
   ) => {
-    const context = toState<SectionAgentContext>(options);
     const p = `./docs/section_${snakeCase(sectionTitle)}.md`;
     await writeFile(p, sectionContent, 'utf-8');
     context.section_path[sectionTitle] = p;

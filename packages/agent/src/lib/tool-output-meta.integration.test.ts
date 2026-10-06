@@ -123,7 +123,7 @@ describe('host-only tool output metadata', () => {
               meta: { requestId: 'custom-request' },
             },
           },
-        ] as UIMessage['parts'],
+        ],
       },
       {
         id: 'user-2',

@@ -3,7 +3,6 @@ import {
   type InferUIMessageChunk,
   type Output,
   type StreamTextResult,
-  type ToolExecutionOptions,
   type ToolSet,
   type UIDataTypes,
   type UIMessage,
@@ -27,7 +26,7 @@ export async function streamWrite(
 ) {
   response.consumeStream();
   const writeStream = createWriteStream('blog_writer_output.md');
-  Readable.fromWeb(response.textStream as any).pipe(writeStream);
+  Readable.fromWeb(response.textStream).pipe(writeStream);
   console.log(await response.usage);
 }
 
@@ -81,7 +80,7 @@ export const printer = {
     const wrapInTags = options?.wrapInTags ?? true;
     const includeText = options?.text ?? true;
     const state = { reasoningOpen: false };
-    for await (const chunk of stream as any) {
+    for await (const chunk of stream) {
       printChunk(
         chunk,
         { reasoning: includeReasoning, wrapInTags, text: includeText },
@@ -188,10 +187,6 @@ export function toOutput<T extends Output.Output>(
   return isPromise(result)
     ? result.then((res) => res.output)
     : last(result.partialOutputStream);
-}
-
-export function toState<C>(options: ToolExecutionOptions<any>): C {
-  return options.context as C;
 }
 
 export function toToolsContext<C>(tools: ToolSet, context: C) {

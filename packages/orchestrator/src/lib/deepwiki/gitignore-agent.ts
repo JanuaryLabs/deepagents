@@ -1,11 +1,13 @@
 import { groq } from '@ai-sdk/groq';
-import { tool } from 'ai';
+import { type ToolExecutionOptions, tool } from 'ai';
 import z from 'zod';
 
-import { agent, instructions, toState } from '@deepagents/agent';
+import { agent, instructions } from '@deepagents/agent';
 import { read_dir_tool, read_file_tool } from '@deepagents/toolbox';
 
-export const ignoreAgent = agent<{ repo_path: string }>({
+type IgnoreAgentContext = { repo_path: string };
+
+export const ignoreAgent = agent<IgnoreAgentContext>({
   name: 'Ignore Agent',
   model: groq('openai/gpt-oss-20b'),
   prompt: instructions({
@@ -31,8 +33,10 @@ export const ignoreAgent = agent<{ repo_path: string }>({
           .min(1)
           .describe('The content of the .gitignore file.'),
       }),
-      execute: async ({ content }, options) => {
-        const context = toState<{ repo_path: string }>(options);
+      execute: async (
+        { content },
+        { context }: ToolExecutionOptions<IgnoreAgentContext>,
+      ) => {
         console.log('Generated .gitignore content:\n', content);
         // await fs.promises.writeFile(join(context.repo_path, '.gitignore'), content);
         return 'Successfully wrote .gitignore file.';

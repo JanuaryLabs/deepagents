@@ -1,11 +1,13 @@
 import { type LanguageModelV4 } from '@ai-sdk/provider';
 import {
+  type DeepPartial,
   type GenerateTextResult,
   type ModelMessage,
   Output,
   type StreamTextResult,
   type ToolCallRepairFunction,
   type ToolChoice,
+  type ToolExecutionOptions,
   type ToolSet,
   type UIDataTypes,
   type UIMessage,
@@ -25,8 +27,8 @@ import {
   SUPERVISOR_PROMPT_PREFIX,
 } from './prompts.ts';
 import { createRepairToolCall } from './repair.ts';
-import { toState } from './stream_utils.ts';
-import { prepareStep } from './swarm.ts';
+import { toToolsContext } from './stream_utils.ts';
+import { type SwarmContext, type SwarmToolSet, prepareStep } from './swarm.ts';
 import { withHostOnlyToolMetadata } from './tool-output.ts';
 
 export interface Handoff<CIn> {
@@ -58,8 +60,12 @@ export function agent<Output, CIn = ContextVariables, COut = CIn>(
 export type ResponseMessage = UIMessage<unknown, UIDataTypes, UITools>;
 
 export type AgentModel = LanguageModelV4;
-export type OutputExtractorFn = (
-  output: GenerateTextResult<ToolSet, any, any>,
+/** The AI SDK output spec of an agent whose structured output is `O`. */
+export type AgentOutput<O> = Output.Output<O, DeepPartial<O>, never>;
+export type OutputExtractorFn<O = unknown> = (
+  output: Omit<GenerateTextResult<ToolSet, any, any>, 'output'> & {
+    readonly output: O;
+  },
 ) => string | Promise<string>;
 export type PrepareHandoffFn = (
   messages: ModelMessage[],
@@ -67,7 +73,7 @@ export type PrepareHandoffFn = (
 export type PrepareEndFn<C, _O = unknown> = (config: {
   messages: ResponseMessage[];
   responseMessage: ResponseMessage;
-  contextVariables: C;
+  contextVariables: C & SwarmContext;
   abortSignal?: AbortSignal;
 }) =>
   | StreamTextResult<ToolSet, any, any>
@@ -138,9 +144,8 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
           properties: {},
           additionalProperties: true,
         }),
-        execute: async (_, options) => {
-          const state = toState(options) as any;
-          state.currentActiveAgent = this.internalName;
+        execute: async (_, { context }) => {
+          context.currentActiveAgent = this.internalName;
           return `Transfer successful to ${this.internalName}.`;
         },
       }),
@@ -213,7 +218,7 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
 
   asTool(props?: {
     toolDescription?: string;
-    outputExtractor?: OutputExtractorFn;
+    outputExtractor?: OutputExtractorFn<Output>;
   }) {
     return tool({
       description: props?.toolDescription || this.handoff.handoffDescription,
@@ -226,9 +231,15 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
             'Optional instructions on how the final output should be formatted. this would be passed to the underlying llm as part of the prompt.',
           ),
       }),
-      execute: async ({ input, output }, options) => {
+      execute: async (
+        { input, output },
+        {
+          context: contextVariables,
+          abortSignal,
+        }: ToolExecutionOptions<CIn & SwarmContext>,
+      ) => {
         try {
-          const contextVariables = options.context as CIn;
+          const tools: SwarmToolSet = this.handoff.tools;
           const result = await generateText({
             model: this.model,
             instructions: this.#prepareInstructions(),
@@ -239,17 +250,12 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
               ${output ? `<OutputInstructions>\n${output}\n</OutputInstructions>` : ''}
             `,
             temperature: 0,
-            tools: this.handoff.tools,
-            abortSignal: options.abortSignal,
+            tools,
+            abortSignal,
             stopWhen: isStepCount(25),
-            repairToolCall: this.repairToolCall(options.abortSignal),
-            runtimeContext: contextVariables as any,
-            toolsContext: Object.fromEntries(
-              Object.keys(this.handoff.tools).map((toolName) => [
-                toolName,
-                contextVariables,
-              ]),
-            ) as any,
+            repairToolCall: this.repairToolCall(abortSignal),
+            runtimeContext: contextVariables,
+            toolsContext: toToolsContext(tools, contextVariables),
             output: this.output
               ? Output.object({ schema: this.output })
               : undefined,
@@ -283,7 +289,7 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
 
   toTool(props?: {
     toolDescription?: string;
-    outputExtractor?: OutputExtractorFn;
+    outputExtractor?: OutputExtractorFn<Output>;
   }) {
     return { [this.handoffToolName]: this.asTool(props) };
   }
@@ -322,8 +328,8 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
     includeTransferTool?: boolean;
     includeHandoffs?: boolean;
   }): ToolSet {
-    const tools = flattenTools(
-      this as Agent<unknown, CIn, COut>,
+    const tools = flattenTools<Agent<unknown, CIn, COut>, ToolSet>(
+      this,
       (node) => node.toHandoffs(),
       (node) => node.handoff.tools,
     );
@@ -339,9 +345,7 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
     agent?: Omit<Partial<CreateAgent<Output, CIn, COut>>, 'handoffs'>,
   ): Agent<Output, CIn, COut> {
     return new Agent<Output, CIn, COut>({
-      prepareHandoff: (messages) => {
-        this.prepareHandoff?.(messages);
-      },
+      prepareHandoff: (messages) => this.prepareHandoff?.(messages),
       model: agent?.model ?? this.model,
       toolChoice: agent?.toolChoice ?? this.toolChoice,
       prompt: agent?.prompt ?? this.handoff.instructions,
@@ -501,13 +505,17 @@ export function isTransferToolResult(
   if (!('output' in call)) {
     return false;
   }
-  const lastActiveAgent = (call.output as Record<string, string>)
-    .lastActiveAgent;
-
-  if (!lastActiveAgent) {
+  const { output } = call;
+  if (typeof output !== 'object' || output === null) {
     return false;
   }
-  return true;
+  return (
+    'lastActiveAgent' in output &&
+    typeof output.lastActiveAgent === 'string' &&
+    output.lastActiveAgent !== '' &&
+    'currentActiveAgent' in output &&
+    typeof output.currentActiveAgent === 'string'
+  );
 }
 
 export function lastTransferResult(messages: ResponseMessage[]) {

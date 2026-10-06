@@ -118,11 +118,11 @@ Context variables allow you to share data between agents and maintain state acro
 import { agent, instructions } from './agent.ts';
 import { execute } from './swarm.ts';
 
-interface MyContext {
+type MyContext = {
   userName: string;
   preferences: string[];
   sessionData: Record<string, any>;
-}
+};
 
 const personalized_agent = agent<MyContext>({
   name: 'personalized_assistant',
@@ -155,13 +155,11 @@ const response = await execute(
 
 ### Managing State with Tools
 
-Use the `toState()` utility to access and modify context within tools:
+Declare the context type on the tool's execute options to read and modify it:
 
 ```typescript
-import { tool } from 'ai';
+import { type ToolExecutionOptions, tool } from 'ai';
 import { z } from 'zod';
-
-import { toState } from './stream_utils.ts';
 
 const update_user_preferences = tool({
   description:
@@ -174,8 +172,7 @@ const update_user_preferences = tool({
         'List of user preferences (e.g., ["concise_answers", "technical_details"])',
       ),
   }),
-  execute: ({ preferences }, options) => {
-    const context = toState<MyContext>(options);
+  execute: ({ preferences }, { context }: ToolExecutionOptions<MyContext>) => {
     context.preferences = preferences;
     return `Updated preferences: ${preferences.join(', ')}`;
   },
@@ -304,10 +301,8 @@ const research_agent = agent({
 ### Tool with Context Access
 
 ```typescript
-import { tool } from 'ai';
+import { type ToolExecutionOptions, tool } from 'ai';
 import { z } from 'zod';
-
-import { toState } from './stream_utils.ts';
 
 const store_session_data = tool({
   description:
@@ -325,8 +320,7 @@ const store_session_data = tool({
       ),
     value: z.string().min(1, 'Value is required').describe('The data to store'),
   }),
-  execute: ({ key, value }, options) => {
-    const context = toState<MyContext>(options);
+  execute: ({ key, value }, { context }: ToolExecutionOptions<MyContext>) => {
     context.sessionData[key] = value;
     return `Successfully stored ${key}: ${value}`;
   },
@@ -700,7 +694,9 @@ const stream = swarm(agent, message, context?);
 ### Context Access
 
 ```typescript
-const context = toState<MyType>(options);
+execute: (input, { context }: ToolExecutionOptions<MyType>) => {
+  // read or modify context
+};
 ```
 
 ### Common Patterns

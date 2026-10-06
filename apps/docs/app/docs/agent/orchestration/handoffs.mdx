@@ -81,9 +81,8 @@ this.handoffTool = {
       properties: {},
       additionalProperties: true,
     }),
-    execute: async (_, options) => {
-      const state = toState(options);
-      state.currentActiveAgent = this.internalName;
+    execute: async (_, { context }) => {
+      context.currentActiveAgent = this.internalName;
       return `Transfer successful to ${this.internalName}.`;
     },
   }),

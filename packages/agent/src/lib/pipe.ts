@@ -101,10 +101,7 @@ export function pipe(
             await result.consumeStream();
           } else {
             const output = await it(state, (newState) => {
-              Object.assign(
-                state as Record<string, unknown>,
-                newState as Record<string, unknown>,
-              );
+              Object.assign(state, newState);
             });
 
             if (typeof output === 'string') {

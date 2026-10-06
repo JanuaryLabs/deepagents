@@ -1,8 +1,8 @@
 import { groq } from '@ai-sdk/groq';
-import { jsonSchema, tool } from 'ai';
+import { type ToolExecutionOptions, jsonSchema, tool } from 'ai';
 import z from 'zod';
 
-import { agent, execute, toState, user } from '@deepagents/agent';
+import { agent, execute, user } from '@deepagents/agent';
 import { scratchpad_tool } from '@deepagents/toolbox';
 
 import { researcherAgent } from './reasearcher.ts';
@@ -102,8 +102,10 @@ export const leadResearcherAgent = agent<unknown, LeadResearcherState>({
             'The topic to research. Should be a single topic, and should be described in high detail (at least a paragraph).',
           ),
       }),
-      execute: async ({ research_topic }, options) => {
-        const context = toState<LeadResearcherState>(options);
+      execute: async (
+        { research_topic },
+        { context }: ToolExecutionOptions<LeadResearcherState>,
+      ) => {
         context.research_iterations++;
         const result = await execute(
           researcherAgent,

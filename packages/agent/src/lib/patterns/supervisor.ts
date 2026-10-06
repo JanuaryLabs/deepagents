@@ -47,16 +47,20 @@ export function createSupervisor<C>(props: {
       // }
     },
     prepareEnd({ messages, contextVariables, abortSignal, responseMessage }) {
-      const state = contextVariables as any;
-      console.log('supervisor: Falling back to supervisor', state);
-      if (state.currentActiveAgent === undefined) {
+      console.log('supervisor: Falling back to supervisor', contextVariables);
+      if (
+        typeof contextVariables !== 'object' ||
+        contextVariables === null ||
+        !('currentActiveAgent' in contextVariables) ||
+        contextVariables.currentActiveAgent === undefined
+      ) {
         console.warn(
           `supervisor: active agent was never set, so supervisor responded directly`,
         );
         // active agent was never set, so supervisor responded directly
         return void 0;
       }
-      if (state.currentActiveAgent === supervisor.internalName) {
+      if (contextVariables.currentActiveAgent === supervisor.internalName) {
         // TODO: this condition should be implict in the swarm function (if the same agent ended the conversation that means loop completed).
         console.warn(
           `supervisor: active agent is supervisor, so supervisor responded directly`,
@@ -64,7 +68,7 @@ export function createSupervisor<C>(props: {
         // active agent is supervisor, so supervisor responded directly
         return void 0;
       }
-      state.currentActiveAgent = supervisor.internalName;
+      contextVariables.currentActiveAgent = supervisor.internalName;
       // responseMessage.parts.push({
       //   type: 'dynamic-tool',
       //   toolName: supervisor.handoffToolName,
@@ -157,5 +161,5 @@ if (import.meta.main) {
     `A reflection on the quiet art of living alone.`,
     { currentActiveAgent: supervisor.internalName },
   );
-  printer.readableStream(stream);
+  await printer.readableStream(stream);
 }

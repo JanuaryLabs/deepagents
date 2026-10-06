@@ -62,6 +62,21 @@ function parseSizeToBytes(sizeStr: string | undefined): number {
           : 1;
   return Math.round(n * mul);
 }
+
+// One line of `docker images --format '{{json .}}'`: every field is a string,
+// and Size (e.g. "14.4MB") is the only one read here.
+const DockerImageLineSchema = z.looseObject({ Size: z.string().optional() });
+
+function parseDockerImageLine(line: string) {
+  try {
+    const parsed = DockerImageLineSchema.safeParse(JSON.parse(line));
+    if (!parsed.success) return [];
+    return [{ ...parsed.data, bytes: parseSizeToBytes(parsed.data.Size) }];
+  } catch {
+    return [];
+  }
+}
+
 const docker_container_agent = agent({
   model: groq('openai/gpt-oss-20b'),
   name: 'docker_container_agent',
@@ -246,18 +261,9 @@ const docker_image_agent: Agent = agent({
         args.push('--format', '{{json .}}');
         const res = await runDocker(args);
         const lines = res.stdout.split('\n').filter(Boolean);
-        const items = lines
-          .map((l) => {
-            try {
-              const o = JSON.parse(l);
-              return { ...o, bytes: parseSizeToBytes(o.Size) };
-            } catch {
-              return null;
-            }
-          })
-          .filter(Boolean) as Array<Record<string, any> & { bytes: number }>;
+        const items = lines.flatMap(parseDockerImageLine);
         items.sort((a, b) => b.bytes - a.bytes);
-        return { json: items.slice(0, limit) } as any;
+        return { json: items.slice(0, limit) };
       },
     }),
     docker_inspect: tool({
@@ -450,7 +456,7 @@ const docker_system_agent = agent({
           return {
             error:
               'Provide at least one of since or until to bound the output.',
-          } as any;
+          };
         }
         const args = ['events'];
         if (since) args.push('--since', since);

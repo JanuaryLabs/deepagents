@@ -8,22 +8,22 @@ export const ProgressMessages = {
     'Planning report structure...',
     'Writing sections...',
     'Finalizing report...',
-  ] as string[],
+  ],
   ANALYZING: [
     'Processing data...',
     'Running analysis...',
     'Generating insights...',
-  ] as string[],
+  ],
   SEARCHING: [
     'Executing searches...',
     'Gathering results...',
     'Processing findings...',
-  ] as string[],
+  ],
   PROCESSING: [
     'Starting processing...',
     'Working on task...',
     'Finalizing results...',
-  ] as string[],
+  ],
 };
 
 export function createProgress<Ctx>(...tasks: ListrTask<Ctx>[]) {

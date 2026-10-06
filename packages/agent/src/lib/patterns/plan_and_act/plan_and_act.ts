@@ -174,12 +174,11 @@ export async function runPlanAndAct(
 
   // Step 1: Generate initial plan
   console.log('\n📋 PLANNING PHASE');
-  const { output } = await generate(
+  const { output: initialPlanResponse } = await generate(
     planner,
     `Create a plan to accomplish this task: ${query}`,
     {},
   );
-  const initialPlanResponse = output as PlanningResponse;
 
   console.log('💭 Reasoning:', initialPlanResponse.reasoning);
   console.log(
@@ -214,7 +213,7 @@ export async function runPlanAndAct(
     console.log(`🔄 Executing Step ${stepIndex + 1}: ${currentStep}`);
 
     // Execute the current step
-    const { output: execOutput } = await generate(
+    const { output: executionResult } = await generate(
       executor,
       `Execute this step: ${currentStep}
 
@@ -222,7 +221,6 @@ Context: You are working on this overall task: "${query}"
 Previous steps completed: ${state.executionHistory.length}`,
       {},
     );
-    const executionResult = execOutput as ExecutionResult;
 
     console.log(`💭 Execution reasoning: ${executionResult.reasoning}`);
     console.log(`🎬 Action taken: ${executionResult.action_taken}`);
@@ -263,12 +261,11 @@ Analyze the progress and decide whether to continue with more steps or provide t
 
     // Replan based on execution results
     console.log('\n🔄 REPLANNING PHASE');
-    const { output: replanOutput } = await generate(
+    const { output: replanningDecision } = await generate(
       replanner,
       contextForReplanning,
       {},
     );
-    const replanningDecision = replanOutput as ReplanningDecision;
 
     // Record this execution cycle
     state.executionHistory.push({

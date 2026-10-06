@@ -7,6 +7,7 @@ import {
   type StepResult,
   type StreamTextResult,
   type StreamTextTransform,
+  type Tool,
   type ToolSet,
   type UIDataTypes,
   type UIMessage,
@@ -22,12 +23,11 @@ import {
   toUIMessageStream,
 } from 'ai';
 import chalk from 'chalk';
-import dedent from 'dedent';
 
 import {
   type Agent,
   type AgentModel,
-  type TransferTool,
+  type AgentOutput,
   isTransferToolResult,
 } from './agent.ts';
 import {
@@ -36,6 +36,18 @@ import {
   toToolsContext,
   user,
 } from './stream_utils.ts';
+
+/**
+ * Handoff state the swarm keeps on the context variables: a transfer tool
+ * writes the agent it hands off to, and prepareStep reads it on the next step.
+ */
+export type SwarmContext = { currentActiveAgent?: string };
+
+/**
+ * An agent's tools as the swarm runs them: every tool receives the swarm's
+ * context variables. Input and output stay `any`, as in the SDK's ToolSet.
+ */
+export type SwarmToolSet = Record<string, Tool<any, any, SwarmContext>>;
 
 export type OutputMode = 'full_history' | 'last_message';
 
@@ -85,13 +97,13 @@ function filterAgentOutput(
 export async function generate<O, CIn, COut = CIn>(
   agent: Agent<O, CIn, COut>,
   messages: UIMessage[] | string,
-  contextVariables: CIn,
+  contextVariables: CIn & SwarmContext,
   config?: {
     abortSignal?: AbortSignal;
     providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
   },
-): Promise<GenerateTextResult<ToolSet, any, any>> {
-  const tools = agent.toToolset();
+): Promise<GenerateTextResult<ToolSet, any, AgentOutput<O>>> {
+  const tools: SwarmToolSet = agent.toToolset();
   return generateText({
     abortSignal: config?.abortSignal,
     providerOptions: agent.providerOptions ?? config?.providerOptions,
@@ -105,8 +117,8 @@ export async function generate<O, CIn, COut = CIn>(
     stopWhen: isStepCount(25),
     tools,
     activeTools: agent.toolsNames,
-    runtimeContext: contextVariables as any,
-    toolsContext: toToolsContext(tools, contextVariables) as any,
+    runtimeContext: contextVariables,
+    toolsContext: toToolsContext(tools, contextVariables),
     toolChoice: agent.toolChoice,
     output: agent.output ? Output.object({ schema: agent.output }) : undefined,
     onToolExecutionStart: ({ toolCall }) => {
@@ -124,15 +136,15 @@ export async function generate<O, CIn, COut = CIn>(
 export async function execute<O, CIn, COut = CIn>(
   agent: Agent<O, CIn, COut>,
   messages: UIMessage[] | string,
-  contextVariables: CIn,
+  contextVariables: CIn & SwarmContext,
   config?: {
     abortSignal?: AbortSignal;
     providerOptions?: Parameters<typeof streamText>[0]['providerOptions'];
     transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
   },
-): Promise<StreamTextResult<ToolSet, any, any>> {
+): Promise<StreamTextResult<ToolSet, any, AgentOutput<O>>> {
   const runId = generateId();
-  const tools = agent.toToolset();
+  const tools: SwarmToolSet = agent.toToolset();
   const stream = streamText({
     abortSignal: config?.abortSignal,
     providerOptions: config?.providerOptions,
@@ -146,8 +158,8 @@ export async function execute<O, CIn, COut = CIn>(
     experimental_transform: config?.transform ?? smoothStream(),
     tools,
     activeTools: agent.toolsNames,
-    runtimeContext: contextVariables as any,
-    toolsContext: toToolsContext(tools, contextVariables) as any,
+    runtimeContext: contextVariables,
+    toolsContext: toToolsContext(tools, contextVariables),
     toolChoice: agent.toolChoice,
     repairToolCall: agent.repairToolCall(config?.abortSignal),
     onError: (error) => {
@@ -178,11 +190,11 @@ export const stream = execute;
 export const prepareStep = <CIn>(
   agent: Agent<unknown, CIn, any>,
   model: AgentModel,
-  contextVariables: CIn,
+  contextVariables: CIn & SwarmContext,
 ): PrepareStepFunction<NoInfer<ToolSet>> => {
   return async ({ steps, messages }) => {
     const step = steps.at(-1);
-    const agentName = (contextVariables as any).currentActiveAgent;
+    const agentName = contextVariables.currentActiveAgent;
     if (!step) {
       return await prepareAgent(model, agent, messages, contextVariables);
     }
@@ -209,7 +221,7 @@ export const prepareStep = <CIn>(
 export function swarm<CIn>(
   agent: Agent<unknown, CIn, any>,
   messages: UIMessage[] | string,
-  contextVariables: CIn,
+  contextVariables: CIn & SwarmContext,
   abortSignal?: AbortSignal,
 ) {
   const originalMessages = Array.isArray(messages)
@@ -242,14 +254,13 @@ export function swarm<CIn>(
       if (!agent.prepareEnd) return;
 
       while (true) {
-        const state = contextVariables as any;
-        if (state.currentActiveAgent === undefined) {
+        if (contextVariables.currentActiveAgent === undefined) {
           console.warn(
             `swarm: active agent was never set, so no prepareEnd call will be made`,
           );
           return;
         }
-        if (state.currentActiveAgent === agent.internalName) {
+        if (contextVariables.currentActiveAgent === agent.internalName) {
           console.warn(
             `swarm: active agent is the root agent, so no prepareEnd call will be made`,
           );
@@ -327,87 +338,6 @@ function findAgent<CIn>(agent: Agent<unknown, CIn, any>, agentName: string) {
   return [...agent.toHandoffs(), agent].find(
     (it) => it.handoff.name === agentName,
   );
-}
-
-function getActiveAgentName(messages: ModelMessage[]): string | undefined {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-
-    if (message.role === 'tool') {
-      for (const block of message.content) {
-        if (
-          block.type === 'tool-result' &&
-          block.toolName.startsWith('transfer_to_') &&
-          block.output.type === 'json' &&
-          isTransferToolResult({ output: block.output.value })
-        ) {
-          return (block.output.value as TransferTool['output'])
-            .currentActiveAgent;
-        }
-      }
-    }
-  }
-  return undefined;
-}
-
-function tagAgents(
-  step: StepResult<NoInfer<ToolSet>>,
-  defaultAgentName: string,
-) {
-  const { request, response, ...stepResult } = step;
-  // let transferToolResultIdx = -1;
-  const messages = response.messages;
-  let agentName: string | undefined;
-
-  // look for the last agent from the step
-  for (let i = stepResult.content.length - 1; i >= 0; i--) {
-    const block = stepResult.content[i];
-    if (
-      block.type === 'tool-result' &&
-      block.dynamic &&
-      block.toolName.startsWith('transfer_to_') &&
-      isTransferToolResult(block)
-    ) {
-      // If we found a dynamic tool result, we can use it
-      agentName = block.output.lastActiveAgent;
-      // transferToolResultIdx = i;
-      break;
-    }
-  }
-
-  // if no agent in the step result, look for for it in the messages
-  // todo: can we just use this instead of looking into the step result?
-  if (!agentName) {
-    for (const message of messages.slice(0).reverse()) {
-      if (
-        message.role === 'tool' &&
-        message.content[0].type === 'tool-result' &&
-        message.content[0].toolName.startsWith('transfer_to_') &&
-        message.content[0].output.type === 'json' &&
-        isTransferToolResult({
-          output: message.content[0].output.value,
-        })
-      ) {
-        agentName = (message.content[0].output.value as TransferTool['output'])
-          .currentActiveAgent;
-        break;
-      }
-    }
-  }
-
-  if (!agentName) {
-    agentName = defaultAgentName;
-  }
-
-  for (const block of stepResult.content) {
-    if (block.type === 'text' && !block.text.startsWith('<name>')) {
-      block.text = `<name>${agentName}</name><content>${dedent(block.text)}</content>`;
-    }
-  }
-  // console.log(
-  //   `Debug: ${chalk.red('NoOp')}: No transfer tool result found.`,
-  // );
-  // console.dir({ stepResult, messages }, { depth: null });
 }
 
 function removeTransferCalls(messages: ModelMessage[]): ModelMessage[] {

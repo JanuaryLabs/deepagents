@@ -1,4 +1,4 @@
-import type { JSONValue } from '@ai-sdk/provider';
+import { type JSONValue, isJSONValue } from '@ai-sdk/provider';
 import type { ToolSet } from 'ai';
 
 type ToolWithModelOutput<T extends ToolSet[string]> = T & {
@@ -15,32 +15,75 @@ export function withHostOnlyToolMetadata<TOOLS extends ToolSet>(
 ): ToolSetWithModelOutput<TOOLS> {
   const wrapped: ToolSet = {};
   for (const [name, tool] of Object.entries(tools)) {
-    wrapped[name] =
-      tool.toModelOutput !== undefined
-        ? tool
-        : Object.defineProperties(
-            {
-              ...tool,
-              toModelOutput: ({ output }: { output: unknown }) =>
-                defaultToolModelOutput(output),
-            },
-            Object.getOwnPropertyDescriptors(tool),
-          );
+    if (tool.toModelOutput !== undefined) {
+      wrapped[name] = tool;
+      continue;
+    }
+    // An own `toModelOutput` that is undefined must not replace the default.
+    const descriptors = Object.getOwnPropertyDescriptors(tool);
+    Reflect.deleteProperty(descriptors, 'toModelOutput');
+    wrapped[name] = Object.defineProperties(
+      {
+        ...tool,
+        toModelOutput: ({ output }: { output: unknown }) =>
+          defaultToolModelOutput(output),
+      },
+      descriptors,
+    );
   }
-  return wrapped as ToolSetWithModelOutput<TOOLS>;
+  if (!projectsEveryTool(tools, wrapped)) {
+    throw new Error(
+      'withHostOnlyToolMetadata left a tool without a projection',
+    );
+  }
+  return wrapped;
+}
+
+/** Whether `wrapped` projects every tool of `tools` for the model. */
+function projectsEveryTool<TOOLS extends ToolSet>(
+  tools: TOOLS,
+  wrapped: ToolSet,
+): wrapped is ToolSetWithModelOutput<TOOLS> {
+  return Object.keys(tools).every(
+    (name) =>
+      Object.hasOwn(wrapped, name) && wrapped[name].toModelOutput !== undefined,
+  );
 }
 
 function defaultToolModelOutput(output: unknown) {
-  if (
-    typeof output === 'object' &&
-    output !== null &&
-    !Array.isArray(output) &&
-    Object.hasOwn(output, 'meta')
-  ) {
-    const { meta: _meta, ...visible } = output as Record<string, unknown>;
-    return { type: 'json' as const, value: visible as JSONValue };
-  }
   return typeof output === 'string'
     ? { type: 'text' as const, value: output }
-    : { type: 'json' as const, value: (output ?? null) as JSONValue };
+    : { type: 'json' as const, value: toJSONValue(withoutMeta(output)) };
+}
+
+/** A top-level `meta` field is for the host, not the model. */
+function withoutMeta(output: unknown): unknown {
+  if (
+    typeof output !== 'object' ||
+    output === null ||
+    Array.isArray(output) ||
+    !Object.hasOwn(output, 'meta')
+  ) {
+    return output;
+  }
+  const visible = { ...output };
+  Reflect.deleteProperty(visible, 'meta');
+  return visible;
+}
+
+/**
+ * Tool outputs are whatever the tool returned, not necessarily JSON. A JSON
+ * value passes through unchanged; anything else is normalized the way the AI
+ * SDK normalizes outputs of tools without toModelOutput: a JSON round trip.
+ */
+function toJSONValue(value: unknown): JSONValue {
+  if (isJSONValue(value)) {
+    return value;
+  }
+  const serialized: string | undefined = JSON.stringify(value);
+  if (serialized === undefined) {
+    return null;
+  }
+  const parsed: unknown = JSON.parse(serialized);
+  return isJSONValue(parsed) ? parsed : null;
 }

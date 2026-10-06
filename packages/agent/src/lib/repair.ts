@@ -21,7 +21,7 @@ export function createRepairToolCall(
       `Debug: ${chalk.yellow('RepairingToolCall')}: ${toolCall.toolName}`,
     );
 
-    const tool = tools[toolCall.toolName as keyof typeof tools];
+    const tool = tools[toolCall.toolName];
 
     const { output } = await generateText({
       abortSignal,
