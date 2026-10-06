@@ -158,7 +158,7 @@ test('every member sees a group message concurrently and only volunteers publish
       return textResponse('I have nothing useful to add.');
     }),
   );
-  openaiApi.listen({ onUnhandledRequest: 'bypass' });
+  openaiApi.listen({ onUnhandledFrame: 'bypass' });
   try {
     await using group = await WhatsAppGroup.create({
       userId: 'user-1',
