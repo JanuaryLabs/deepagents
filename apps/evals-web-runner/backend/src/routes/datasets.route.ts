@@ -127,7 +127,7 @@ export default function (router: Hono<AppBindings>) {
       const { name, offset, limit } = c.var.input;
 
       try {
-        const ds = dataset<Record<string, unknown>>(datasetPath(name));
+        const ds = dataset(datasetPath(name));
         const allRows = await ds.toArray();
         const page = allRows.slice(offset, offset + limit);
         const columns = allRows.length > 0 ? Object.keys(allRows[0]!) : [];

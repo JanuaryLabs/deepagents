@@ -100,17 +100,21 @@ function resolveFailedIndexes(
   return new Set(failingCases.map((c) => c.idx));
 }
 
-export class EvalBuilder<R> implements PromiseLike<R> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  #options: EvaluateOptions<any> | EvaluateEachOptions<any, any>;
+/** How one `evaluate()` call runs a case selection and judges its result. */
+interface EvalPlan<R extends RunSummary | RunSummary[]> {
+  run(selection: Selection): Promise<R>;
+  hasFailures(result: R): boolean;
+}
+
+export class EvalBuilder<
+  R extends RunSummary | RunSummary[],
+> implements PromiseLike<R> {
+  readonly #plan: EvalPlan<R>;
   #selection: Selection = { type: 'all' };
   #shouldAssert = false;
 
-  constructor(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    options: EvaluateOptions<any> | EvaluateEachOptions<any, any>,
-  ) {
-    this.#options = options;
+  constructor(plan: EvalPlan<R>) {
+    this.#plan = plan;
   }
 
   #setSelection(selection: Selection): this {
@@ -146,9 +150,7 @@ export class EvalBuilder<R> implements PromiseLike<R> {
 
   then<TResult1 = R, TResult2 = never>(
     onfulfilled?:
-      | ((value: R) => TResult1 | PromiseLike<TResult1>)
-      | null
-      | undefined,
+      ((value: R) => TResult1 | PromiseLike<TResult1>) | null | undefined,
     onrejected?:
       | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
       | null
@@ -158,86 +160,87 @@ export class EvalBuilder<R> implements PromiseLike<R> {
   }
 
   async #execute(): Promise<R> {
-    if ('models' in this.#options) {
-      return this.#executeMulti() as Promise<R>;
-    }
-    return this.#executeSingle() as Promise<R>;
-  }
-
-  #applyDatasetFilter(ds: AsyncIterable<unknown>): AsyncIterable<unknown> {
-    switch (this.#selection.type) {
-      case 'all':
-        return ds;
-      case 'cases':
-        return this.#selection.indexes.size > 0
-          ? filterRecordsByIndex(ds, this.#selection.indexes)
-          : ds;
-      case 'sample':
-        return dataset(ds).sample(this.#selection.count);
-      case 'failed':
-        return ds;
-    }
-  }
-
-  async #executeSingle(): Promise<RunSummary> {
-    const options = this.#options as EvaluateOptions<unknown>;
-    let ds: AsyncIterable<unknown> = options.dataset;
-
-    if (this.#selection.type === 'failed') {
-      const indexes = resolveFailedIndexes(
-        options.store,
-        options.name,
-        options.model,
-        options.threshold,
-      );
-      if (indexes.size > 0) {
-        ds = filterRecordsByIndex(ds, indexes);
-      }
-    } else {
-      ds = this.#applyDatasetFilter(ds);
-    }
-
-    const result = await evaluateSingle({ ...options, dataset: ds });
-
-    if (this.#shouldAssert && result.failCount > 0) {
+    const result = await this.#plan.run(this.#selection);
+    if (this.#shouldAssert && this.#plan.hasFailures(result)) {
       throw new EvalAssertionError(result);
     }
-
     return result;
   }
+}
 
-  async #executeMulti(): Promise<RunSummary[]> {
-    const options = this.#options as EvaluateEachOptions<
-      unknown,
-      { name: string }
-    >;
+function selectCases<T>(
+  ds: AsyncIterable<T>,
+  selection: Exclude<Selection, { type: 'failed' }>,
+): AsyncIterable<T> {
+  switch (selection.type) {
+    case 'all':
+      return ds;
+    case 'cases':
+      return selection.indexes.size > 0
+        ? filterRecordsByIndex(ds, selection.indexes)
+        : ds;
+    case 'sample':
+      return dataset(ds).sample(selection.count);
+  }
+}
 
-    let result: RunSummary[];
+class SingleModelEval<T> implements EvalPlan<RunSummary> {
+  readonly #options: EvaluateOptions<T>;
 
-    if (this.#selection.type === 'failed') {
-      const perModelIndexes = new Map<string, Set<number>>();
-      for (const variant of options.models) {
-        perModelIndexes.set(
-          variant.name,
-          resolveFailedIndexes(
-            options.store,
-            options.name,
-            variant.name,
-            options.threshold,
-          ),
-        );
-      }
-      result = await evaluateEach(options, perModelIndexes);
-    } else {
-      const filtered = this.#applyDatasetFilter(options.dataset);
-      result = await evaluateEach({ ...options, dataset: filtered });
+  constructor(options: EvaluateOptions<T>) {
+    this.#options = options;
+  }
+
+  run(selection: Selection): Promise<RunSummary> {
+    return evaluateSingle({
+      ...this.#options,
+      dataset: this.#cases(selection),
+    });
+  }
+
+  hasFailures(summary: RunSummary): boolean {
+    return summary.failCount > 0;
+  }
+
+  #cases(selection: Selection): AsyncIterable<T> {
+    const { dataset: ds, store, name, model, threshold } = this.#options;
+    if (selection.type !== 'failed') return selectCases(ds, selection);
+    const indexes = resolveFailedIndexes(store, name, model, threshold);
+    return indexes.size > 0 ? filterRecordsByIndex(ds, indexes) : ds;
+  }
+}
+
+class EachModelEval<T, V extends { name: string }> implements EvalPlan<
+  RunSummary[]
+> {
+  readonly #options: EvaluateEachOptions<T, V>;
+
+  constructor(options: EvaluateEachOptions<T, V>) {
+    this.#options = options;
+  }
+
+  run(selection: Selection): Promise<RunSummary[]> {
+    if (selection.type === 'failed') {
+      return evaluateEach(this.#options, this.#failedIndexesPerModel());
     }
+    return evaluateEach({
+      ...this.#options,
+      dataset: selectCases(this.#options.dataset, selection),
+    });
+  }
 
-    if (this.#shouldAssert && result.some((s) => s.failCount > 0)) {
-      throw new EvalAssertionError(result);
-    }
+  hasFailures(summaries: RunSummary[]): boolean {
+    return summaries.some((s) => s.failCount > 0);
+  }
 
-    return result;
+  #failedIndexesPerModel(): Map<string, Set<number>> {
+    const { models, store, name, threshold } = this.#options;
+    return new Map(
+      models.map((variant) => [
+        variant.name,
+        resolveFailedIndexes(store, name, variant.name, threshold),
+      ]),
+    );
   }
 }
 
@@ -251,9 +254,9 @@ export function evaluate<T, V extends { name: string }>(
   options: EvaluateOptions<T> | EvaluateEachOptions<T, V>,
 ): EvalBuilder<RunSummary> | EvalBuilder<RunSummary[]> {
   if ('models' in options) {
-    return new EvalBuilder<RunSummary[]>(options);
+    return new EvalBuilder(new EachModelEval(options));
   }
-  return new EvalBuilder<RunSummary>(options);
+  return new EvalBuilder(new SingleModelEval(options));
 }
 
 function wireReporters(reporters: Reporter[]) {

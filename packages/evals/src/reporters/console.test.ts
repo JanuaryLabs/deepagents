@@ -1,31 +1,20 @@
 import assert from 'node:assert';
-import { afterEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 import { consoleReporter } from '@deepagents/evals/reporters';
 import type { RunEndData } from '@deepagents/evals/reporters';
 
 describe('consoleReporter', () => {
-  const originalLog = console.log;
-  const originalWrite = process.stdout.write;
-
-  const logs: string[] = [];
-  const writes: string[] = [];
-
-  afterEach(() => {
-    console.log = originalLog;
-    process.stdout.write = originalWrite;
-    logs.length = 0;
-    writes.length = 0;
-  });
-
-  it('prints scorer rationale from metadata when reason is missing', () => {
-    console.log = (...args: unknown[]) => {
+  it('prints scorer rationale from metadata when reason is missing', async (t) => {
+    const logs: string[] = [];
+    const writes: string[] = [];
+    t.mock.method(console, 'log', (...args: unknown[]) => {
       logs.push(args.map(String).join(' '));
-    };
-    process.stdout.write = ((chunk: unknown) => {
+    });
+    t.mock.method(process.stdout, 'write', (chunk: unknown) => {
       writes.push(String(chunk));
       return true;
-    }) as typeof process.stdout.write;
+    });
 
     const reporter = consoleReporter();
     const runData: RunEndData = {
@@ -66,7 +55,7 @@ describe('consoleReporter', () => {
       ],
     };
 
-    reporter.onRunEnd?.(runData);
+    await reporter.onRunEnd?.(runData);
 
     const combined = [...writes, ...logs].join('\n');
     assert.match(

@@ -5,7 +5,8 @@ export interface HfOptions {
   rows?: number;
 }
 
-interface HfApiResponse {
+/** The fields this module reads from a datasets-server `/rows` page. */
+interface HfRowsPage {
   rows: Array<{ row_idx: number; row: Record<string, unknown> }>;
   num_rows_total: number;
 }
@@ -13,17 +14,17 @@ interface HfApiResponse {
 const HF_BASE_URL = 'https://datasets-server.huggingface.co/rows';
 const PAGE_SIZE = 100;
 
-export function hf<T = Record<string, unknown>>(
-  options: HfOptions,
-): AsyncIterable<T> {
+export function hf(options: HfOptions): AsyncIterable<Record<string, unknown>> {
   return {
     [Symbol.asyncIterator]() {
-      return paginate<T>(options);
+      return paginate(options);
     },
   };
 }
 
-async function* paginate<T>(options: HfOptions): AsyncGenerator<T> {
+async function* paginate(
+  options: HfOptions,
+): AsyncGenerator<Record<string, unknown>> {
   const { dataset, config, split, rows } = options;
   const limit = rows ?? Infinity;
   let offset = 0;
@@ -38,7 +39,7 @@ async function* paginate<T>(options: HfOptions): AsyncGenerator<T> {
     if (page.rows.length === 0) return;
 
     for (const entry of page.rows) {
-      yield entry.row as T;
+      yield entry.row;
       yielded++;
       if (yielded >= limit) return;
     }
@@ -91,7 +92,7 @@ export async function downloadHf(options: HfOptions): Promise<string> {
   return lines.join('\n');
 }
 
-async function fetchPage(url: string): Promise<HfApiResponse> {
+async function fetchPage(url: string): Promise<HfRowsPage> {
   const response = await fetch(url);
   if (!response.ok) {
     const body = await response.text().catch(() => '');
@@ -100,11 +101,39 @@ async function fetchPage(url: string): Promise<HfApiResponse> {
     );
   }
   const text = await response.text();
+  const page = parseJson(text, url);
+  if (!isHfRowsPage(page)) {
+    throw new Error(
+      `HuggingFace API returned an unexpected rows page from ${url}: ${text.slice(0, 200)}`,
+    );
+  }
+  return page;
+}
+
+function parseJson(text: string, url: string): unknown {
   try {
-    return JSON.parse(text) as HfApiResponse;
+    return JSON.parse(text);
   } catch {
     throw new Error(
       `HuggingFace API returned non-JSON response from ${url}: ${text.slice(0, 200)}`,
     );
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isHfRowsPage(value: unknown): value is HfRowsPage {
+  return (
+    isRecord(value) &&
+    typeof value.num_rows_total === 'number' &&
+    Array.isArray(value.rows) &&
+    value.rows.every(
+      (entry) =>
+        isRecord(entry) &&
+        typeof entry.row_idx === 'number' &&
+        isRecord(entry.row),
+    )
+  );
 }

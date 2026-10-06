@@ -1,21 +1,32 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
-import type OpenAI from 'openai';
 
 import { factuality, levenshtein, sql } from '@deepagents/evals/scorers';
+import type { JudgeClient } from '@deepagents/evals/scorers';
 
-function judgeClient(choice: string, requests: unknown[]): OpenAI {
+function judgeClient(choice: string, requests: unknown[]): JudgeClient {
   return {
     chat: {
       completions: {
-        create: async (request: unknown) => {
+        create: async (request) => {
           requests.push(request);
           return {
+            id: 'chatcmpl-judge',
+            object: 'chat.completion',
+            created: 0,
+            model: 'judge-model',
             choices: [
               {
+                index: 0,
+                finish_reason: 'tool_calls',
+                logprobs: null,
                 message: {
+                  role: 'assistant',
+                  content: null,
+                  refusal: null,
                   tool_calls: [
                     {
+                      id: 'call-select-choice',
                       type: 'function',
                       function: {
                         name: 'select_choice',
@@ -33,7 +44,7 @@ function judgeClient(choice: string, requests: unknown[]): OpenAI {
         },
       },
     },
-  } as unknown as OpenAI;
+  };
 }
 
 describe('built-in scorers', () => {

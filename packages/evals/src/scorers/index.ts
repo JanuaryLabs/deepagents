@@ -14,9 +14,20 @@ export interface ScorerResult {
 
 export type Scorer = (args: ScorerArgs) => Promise<ScorerResult>;
 
+/** The part of an OpenAI-compatible client that an LLM judge calls. */
+export interface JudgeClient {
+  chat: {
+    completions: {
+      create(
+        body: OpenAI.ChatCompletionCreateParamsNonStreaming,
+      ): Promise<OpenAI.ChatCompletion>;
+    };
+  };
+}
+
 export interface JudgeConfig {
   model: string;
-  client?: OpenAI;
+  client?: JudgeClient;
 }
 
 export const exactMatch: Scorer = async ({ output, expected }) => {
@@ -120,6 +131,10 @@ class LevenshteinSimilarity {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (a == null || b == null) return false;
@@ -130,17 +145,13 @@ function deepEqual(a: unknown, b: unknown): boolean {
     return a.every((val, i) => deepEqual(val, b[i]));
   }
 
-  if (typeof a === 'object') {
-    const keysA = Object.keys(a as Record<string, unknown>).sort();
-    const keysB = Object.keys(b as Record<string, unknown>).sort();
+  if (isRecord(a)) {
+    if (!isRecord(b)) return false;
+    const keysA = Object.keys(a).sort();
+    const keysB = Object.keys(b).sort();
     if (keysA.length !== keysB.length) return false;
     return keysA.every(
-      (key, i) =>
-        keysB[i] === key &&
-        deepEqual(
-          (a as Record<string, unknown>)[key],
-          (b as Record<string, unknown>)[key],
-        ),
+      (key, i) => keysB[i] === key && deepEqual(a[key], b[key]),
     );
   }
 
@@ -171,7 +182,7 @@ class LlmJudge {
   readonly #model: string;
   readonly #choices: Readonly<Record<string, number>>;
   readonly #criterion: string;
-  #client: OpenAI | undefined;
+  #client: JudgeClient | undefined;
 
   private constructor(
     config: JudgeConfig,
@@ -275,10 +286,12 @@ class LlmJudge {
       throw new Error(`Unexpected judge tool call: ${toolCall.function.name}`);
     }
 
-    const payload = JSON.parse(toolCall.function.arguments) as {
-      choice?: unknown;
-      reasons?: unknown;
-    };
+    const payload: unknown = JSON.parse(toolCall.function.arguments);
+    if (!isRecord(payload)) {
+      throw new Error(
+        `Judge sent select_choice arguments that are not an object: ${toolCall.function.arguments}`,
+      );
+    }
     const choice =
       typeof payload.choice === 'string' ? payload.choice.trim() : '';
     const score = this.#choices[choice];

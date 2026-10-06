@@ -1,4 +1,4 @@
-import { appendFile, mkdir } from 'node:fs/promises';
+import { appendFileSync, mkdirSync } from 'node:fs';
 
 import { stringifyUnknown } from './format.ts';
 import {
@@ -16,18 +16,30 @@ export interface JsonReporterOptions {
 export function jsonReporter(options?: JsonReporterOptions): Reporter {
   const outputDir = resolveOutputDir(options?.outputDir);
   const pretty = options?.pretty ?? true;
-  let streamFilename = '';
+  // evaluate() with several models shares one reporter across concurrent
+  // runs, so each run streams its cases to its own file.
+  const streamFiles = new Map<string, string>();
 
   return {
-    async onRunStart(data) {
-      await mkdir(outputDir, { recursive: true });
-      streamFilename = getReportPath(outputDir, data.name, data.runId, 'jsonl');
+    onRunStart(data) {
+      mkdirSync(outputDir, { recursive: true });
+      streamFiles.set(
+        data.runId,
+        getReportPath(outputDir, data.name, data.runId, 'jsonl'),
+      );
     },
-    async onCaseEnd(data) {
+    onCaseEnd(data) {
+      const streamFile = streamFiles.get(data.runId);
+      if (streamFile === undefined) {
+        throw new Error(
+          `jsonReporter received a case for run ${data.runId} before its onRunStart`,
+        );
+      }
       const line = stringifyUnknown(data, { space: 0, fallback: 'null' });
-      await appendFile(streamFilename, line + '\n', 'utf-8');
+      appendFileSync(streamFile, line + '\n', 'utf-8');
     },
     async onRunEnd(data) {
+      streamFiles.delete(data.runId);
       const content = stringifyUnknown(data, {
         space: pretty ? 2 : 0,
         fallback: 'null',

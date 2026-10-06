@@ -329,7 +329,7 @@ export default function (router: Hono<AppBindings>) {
       const createFilteredDataset = (): AsyncIterable<
         Record<string, unknown>
       > => {
-        const ds = dataset<Record<string, unknown>>(datasetPath(datasetName));
+        const ds = dataset(datasetPath(datasetName));
         const filtered = recordSelection
           ? filterRecordsByIndex(ds, recordSelection.indexes)
           : ds;
@@ -517,7 +517,7 @@ export default function (router: Hono<AppBindings>) {
       }
 
       const createDataset = (): AsyncIterable<Record<string, unknown>> => {
-        return dataset<Record<string, unknown>>(datasetPath(datasetName));
+        return dataset(datasetPath(datasetName));
       };
 
       let recordSelection: ReturnType<typeof parseRecordSelection> | undefined;

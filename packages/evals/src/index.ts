@@ -26,6 +26,7 @@ export {
   weighted,
 } from './scorers/index.ts';
 export type {
+  JudgeClient,
   JudgeConfig,
   Scorer,
   ScorerArgs,

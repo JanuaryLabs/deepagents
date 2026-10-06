@@ -191,6 +191,13 @@ async function wrapTask<T>(
   }
 }
 
+/** A dataset case's `expected` field, when the case is an object that has one. */
+function expectedOf(input: unknown): unknown {
+  return typeof input === 'object' && input !== null && 'expected' in input
+    ? input.expected
+    : undefined;
+}
+
 function clampScore(score: number, scorerName: string): number {
   if (score < 0 || score > 1) {
     console.warn(
@@ -253,6 +260,7 @@ export async function runEval<T>(config: EvalConfig<T>): Promise<RunSummary> {
     await semaphore.acquire();
     try {
       emitter.emit('case:start', { runId, index, input });
+      const expected = expectedOf(input);
 
       let finalResult: WrappedResult;
       let finalScores: Record<string, ScorerResult>;
@@ -276,7 +284,7 @@ export async function runEval<T>(config: EvalConfig<T>): Promise<RunSummary> {
               const sr = await scorer({
                 input,
                 output: result.output,
-                expected: (input as Record<string, unknown>).expected,
+                expected,
               });
               scores[sName] = {
                 score: clampScore(sr.score, sName),
@@ -334,7 +342,7 @@ export async function runEval<T>(config: EvalConfig<T>): Promise<RunSummary> {
             const sr = await scorer({
               input,
               output: finalResult.output,
-              expected: (input as Record<string, unknown>).expected,
+              expected,
             });
             finalScores[sName] = {
               score: clampScore(sr.score, sName),
@@ -353,7 +361,7 @@ export async function runEval<T>(config: EvalConfig<T>): Promise<RunSummary> {
         idx: index,
         input,
         output: finalResult.output || null,
-        expected: (input as Record<string, unknown>).expected,
+        expected,
         latency_ms: finalResult.latencyMs,
         tokens_in: finalResult.tokensIn,
         tokens_out: finalResult.tokensOut,
@@ -395,7 +403,7 @@ export async function runEval<T>(config: EvalConfig<T>): Promise<RunSummary> {
         index,
         input,
         output: finalResult.output,
-        expected: (input as Record<string, unknown>).expected,
+        expected,
         scores: finalScores,
         error: finalResult.error,
         latencyMs: finalResult.latencyMs,

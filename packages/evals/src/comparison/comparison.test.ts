@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import { DatabaseSync } from 'node:sqlite';
-import { beforeEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 import { compareRuns } from '@deepagents/evals/comparison';
 import { RunStore } from '@deepagents/evals/store';
@@ -47,13 +47,9 @@ function createRunInSuite(
 }
 
 describe('compareRuns', () => {
-  let store: RunStore;
-
-  beforeEach(() => {
-    store = new RunStore(new DatabaseSync(':memory:'));
-  });
-
   it('reports all cases as unchanged when runs have identical scores', () => {
+    using database = new DatabaseSync(':memory:');
+    const store = new RunStore(database);
     const baselineId = createRunInSuite(store, 'baseline', 'gpt-4');
     const candidateId = createRunInSuite(store, 'candidate', 'gpt-4');
 
@@ -86,6 +82,8 @@ describe('compareRuns', () => {
   });
 
   it('detects improvement when candidate scores higher than baseline', () => {
+    using database = new DatabaseSync(':memory:');
+    const store = new RunStore(database);
     const baselineId = createRunInSuite(store, 'baseline', 'gpt-4');
     const candidateId = createRunInSuite(store, 'candidate', 'gpt-4');
 
@@ -116,6 +114,8 @@ describe('compareRuns', () => {
   });
 
   it('detects regression when candidate scores lower and flags it', () => {
+    using database = new DatabaseSync(':memory:');
+    const store = new RunStore(database);
     const baselineId = createRunInSuite(store, 'baseline', 'gpt-4');
     const candidateId = createRunInSuite(store, 'candidate', 'gpt-4');
 
@@ -149,6 +149,8 @@ describe('compareRuns', () => {
   });
 
   it('handles mixed results with improved, regressed, and unchanged cases', () => {
+    using database = new DatabaseSync(':memory:');
+    const store = new RunStore(database);
     const baselineId = createRunInSuite(store, 'baseline', 'gpt-4');
     const candidateId = createRunInSuite(store, 'candidate', 'gpt-4');
 
@@ -183,6 +185,8 @@ describe('compareRuns', () => {
   });
 
   it('computes correct cost and token deltas between runs', () => {
+    using database = new DatabaseSync(':memory:');
+    const store = new RunStore(database);
     const baselineId = createRunInSuite(store, 'baseline', 'gpt-4');
     const candidateId = createRunInSuite(store, 'candidate', 'gpt-4');
 
@@ -213,6 +217,8 @@ describe('compareRuns', () => {
   });
 
   it('treats delta at tolerance boundary as unchanged and beyond as changed', () => {
+    using database = new DatabaseSync(':memory:');
+    const store = new RunStore(database);
     const baselineId = createRunInSuite(store, 'baseline', 'gpt-4');
     const candidateId = createRunInSuite(store, 'candidate', 'gpt-4');
 

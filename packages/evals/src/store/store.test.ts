@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import { DatabaseSync } from 'node:sqlite';
-import { beforeEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 import { setTimeout } from 'node:timers/promises';
 
 import { RunStore } from '@deepagents/evals/store';
@@ -48,13 +48,9 @@ function createRunInSuite(
 }
 
 describe('RunStore', () => {
-  let store: RunStore;
-
-  beforeEach(() => {
-    store = new RunStore(new DatabaseSync(':memory:'));
-  });
-
   it('creates a suite and returns id and name', () => {
+    using db = new DatabaseSync(':memory:');
+    const store = new RunStore(db);
     const suite = store.createSuite('accuracy-suite');
 
     assert.ok(suite.id, 'suite should have an id');
@@ -66,6 +62,8 @@ describe('RunStore', () => {
   });
 
   it('creates a run linked to a suite and lists it', () => {
+    using db = new DatabaseSync(':memory:');
+    const store = new RunStore(db);
     const suite = store.createSuite('linked-suite');
     const runId = store.createRun({
       suite_id: suite.id,
@@ -86,6 +84,8 @@ describe('RunStore', () => {
   });
 
   it('creates a run and retrieves it via getRun', () => {
+    using db = new DatabaseSync(':memory:');
+    const store = new RunStore(db);
     const { suiteId, runId } = createRunInSuite(store, {
       name: 'run-with-suite',
       model: 'claude-3',
@@ -105,6 +105,8 @@ describe('RunStore', () => {
   });
 
   it('saves cases in batch and retrieves them in idx order', () => {
+    using db = new DatabaseSync(':memory:');
+    const store = new RunStore(db);
     const { runId } = createRunInSuite(store, {
       name: 'batch-run',
       model: 'gpt-4',
@@ -124,6 +126,8 @@ describe('RunStore', () => {
   });
 
   it('getFailingCases returns cases with scores below threshold', () => {
+    using db = new DatabaseSync(':memory:');
+    const store = new RunStore(db);
     const { runId } = createRunInSuite(store, {
       name: 'failing-run',
       model: 'gpt-4',
@@ -155,6 +159,8 @@ describe('RunStore', () => {
   });
 
   it('getRunSummary computes correct aggregates', () => {
+    using db = new DatabaseSync(':memory:');
+    const store = new RunStore(db);
     const { runId } = createRunInSuite(store, {
       name: 'summary-run',
       model: 'gpt-4',
@@ -193,6 +199,8 @@ describe('RunStore', () => {
   });
 
   it('listSuites returns suites in descending creation order', async () => {
+    using db = new DatabaseSync(':memory:');
+    const store = new RunStore(db);
     store.createSuite('first');
     await setTimeout(5);
     store.createSuite('second');
@@ -211,6 +219,8 @@ describe('RunStore', () => {
   });
 
   it('finishRun updates status and summary', () => {
+    using db = new DatabaseSync(':memory:');
+    const store = new RunStore(db);
     const { runId } = createRunInSuite(store, {
       name: 'finish-run',
       model: 'gpt-4',
@@ -235,7 +245,27 @@ describe('RunStore', () => {
     assert.deepStrictEqual(run.summary, summary);
   });
 
+  it('getRun rejects a stored summary that is not a run summary', () => {
+    using db = new DatabaseSync(':memory:');
+    const store = new RunStore(db);
+    const { runId } = createRunInSuite(store, {
+      name: 'corrupt-summary-run',
+      model: 'gpt-4',
+    });
+    db.prepare('UPDATE runs SET summary = ? WHERE id = ?').run(
+      JSON.stringify({ totalCases: 'ten' }),
+      runId,
+    );
+
+    assert.throws(() => store.getRun(runId), {
+      name: 'TypeError',
+      message: `Unexpected JSON in summary of run ${runId}`,
+    });
+  });
+
   it('creates a prompt and lists it', () => {
+    using db = new DatabaseSync(':memory:');
+    const store = new RunStore(db);
     const prompt = store.createPrompt(
       'test-prompt',
       'You are a test assistant',
@@ -253,10 +283,14 @@ describe('RunStore', () => {
   });
 
   it('getPrompt returns undefined for missing id', () => {
+    using db = new DatabaseSync(':memory:');
+    const store = new RunStore(db);
     assert.strictEqual(store.getPrompt('nonexistent'), undefined);
   });
 
   it('deletePrompt removes the prompt', () => {
+    using db = new DatabaseSync(':memory:');
+    const store = new RunStore(db);
     const prompt = store.createPrompt('to-delete', 'content');
     store.deletePrompt(prompt.id);
     assert.strictEqual(store.getPrompt(prompt.id), undefined);
@@ -264,6 +298,8 @@ describe('RunStore', () => {
   });
 
   it('saving the same prompt name creates a new version', () => {
+    using db = new DatabaseSync(':memory:');
+    const store = new RunStore(db);
     const v1 = store.createPrompt('unique-name', 'content 1');
     const v2 = store.createPrompt('unique-name', 'content 2');
 
@@ -277,7 +313,7 @@ describe('RunStore', () => {
   });
 
   it('migrates legacy prompts table and preserves prompt data', () => {
-    const db = new DatabaseSync(':memory:');
+    using db = new DatabaseSync(':memory:');
     const legacyPromptId = crypto.randomUUID();
     db.exec(`
       CREATE TABLE prompts (
@@ -304,7 +340,7 @@ describe('RunStore', () => {
   });
 
   it('migrates runs to require suite_id and drops orphaned runs', () => {
-    const db = new DatabaseSync(':memory:');
+    using db = new DatabaseSync(':memory:');
     db.exec(`
       PRAGMA foreign_keys = ON;
       CREATE TABLE suites (
@@ -343,21 +379,16 @@ describe('RunStore', () => {
     ).run(crypto.randomUUID(), 'orphan-run', 'gpt-4', Date.now(), 'running');
 
     const migratedStore = new RunStore(db);
-    const suiteColumn = (
-      db.prepare('PRAGMA table_info(runs)').all() as Array<{
-        name: string;
-        notnull: number;
-      }>
-    ).find((column) => column.name === 'suite_id');
+    const suiteColumn = db
+      .prepare('PRAGMA table_info(runs)')
+      .all()
+      .find((column) => column.name === 'suite_id');
     assert.strictEqual(suiteColumn?.notnull, 1);
 
-    const suiteForeignKey = (
-      db.prepare('PRAGMA foreign_key_list(runs)').all() as Array<{
-        from: string;
-        on_delete: string;
-        table: string;
-      }>
-    ).find((fk) => fk.from === 'suite_id' && fk.table === 'suites');
+    const suiteForeignKey = db
+      .prepare('PRAGMA foreign_key_list(runs)')
+      .all()
+      .find((fk) => fk.from === 'suite_id' && fk.table === 'suites');
     assert.strictEqual(suiteForeignKey?.on_delete, 'CASCADE');
 
     const runs = migratedStore.listRuns();
@@ -387,6 +418,8 @@ describe('RunStore', () => {
   });
 
   it('saves multiple scorers per case and retrieves all scores', () => {
+    using db = new DatabaseSync(':memory:');
+    const store = new RunStore(db);
     const { runId } = createRunInSuite(store, {
       name: 'multi-scorer-run',
       model: 'gpt-4',

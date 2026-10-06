@@ -26,9 +26,7 @@ describe('dataset', () => {
     ];
     await writeFile(filePath, JSON.stringify(data));
 
-    const result = await dataset<{ id: number; name: string }>(
-      filePath,
-    ).toArray();
+    const result = await dataset(filePath).toArray();
     assert.deepStrictEqual(result, data);
   });
 
@@ -43,7 +41,7 @@ describe('dataset', () => {
     ];
     await writeFile(filePath, lines.join('\n'));
 
-    const result = await dataset<{ q: string; a: string }>(filePath).toArray();
+    const result = await dataset(filePath).toArray();
     assert.deepStrictEqual(result, [
       { q: 'hello', a: 'world' },
       { q: 'foo', a: 'bar' },

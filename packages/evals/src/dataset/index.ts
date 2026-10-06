@@ -62,8 +62,8 @@ export class Dataset<T> implements AsyncIterable<T> {
       }
       for (let i = items.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
-        const temp = items[i] as T;
-        items[i] = items[j] as T;
+        const temp = items[i];
+        items[i] = items[j];
         items[j] = temp;
       }
       yield* items;
@@ -80,8 +80,8 @@ export class Dataset<T> implements AsyncIterable<T> {
       const count = Math.min(Math.max(0, n), items.length);
       for (let i = items.length - 1; i > items.length - count - 1; i--) {
         const j = Math.floor(Math.random() * (i + 1));
-        const temp = items[i] as T;
-        items[i] = items[j] as T;
+        const temp = items[i];
+        items[i] = items[j];
         items[j] = temp;
       }
       for (let i = items.length - count; i < items.length; i++) {
@@ -153,18 +153,33 @@ function parseCSVLine(line: string): string[] {
   return fields;
 }
 
-function loadJSON<T>(filePath: string): () => AsyncIterable<T> {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function loadJSON(
+  filePath: string,
+): () => AsyncIterable<Record<string, unknown>> {
   return async function* () {
     const content = await readFile(filePath, 'utf-8');
-    const data = JSON.parse(content);
+    const data: unknown = JSON.parse(content);
     if (!Array.isArray(data)) {
       throw new Error(`JSON file "${filePath}" does not contain an array`);
     }
-    yield* data;
+    for (const [index, row] of data.entries()) {
+      if (!isRecord(row)) {
+        throw new Error(
+          `JSON file "${filePath}" has a non-object row at index ${index}`,
+        );
+      }
+      yield row;
+    }
   };
 }
 
-function loadJSONL<T>(filePath: string): () => AsyncIterable<T> {
+function loadJSONL(
+  filePath: string,
+): () => AsyncIterable<Record<string, unknown>> {
   return async function* () {
     const rl = createInterface({
       input: createReadStream(filePath, 'utf-8'),
@@ -173,9 +188,14 @@ function loadJSONL<T>(filePath: string): () => AsyncIterable<T> {
     try {
       for await (const line of rl) {
         const trimmed = line.trim();
-        if (trimmed) {
-          yield JSON.parse(trimmed);
+        if (!trimmed) continue;
+        const row: unknown = JSON.parse(trimmed);
+        if (!isRecord(row)) {
+          throw new Error(
+            `JSONL file "${filePath}" has a non-object row: ${trimmed.slice(0, 200)}`,
+          );
         }
+        yield row;
       }
     } finally {
       rl.close();
@@ -213,9 +233,15 @@ function loadCSV(
   };
 }
 
+/**
+ * Builds a dataset from in-memory items, an async source, or a JSON, JSONL or
+ * CSV file. A file's rows must be objects; CSV cells are strings.
+ */
+export function dataset<T>(source: T[] | AsyncIterable<T>): Dataset<T>;
+export function dataset(source: string): Dataset<Record<string, unknown>>;
 export function dataset<T>(
-  source: T[] | string | AsyncIterable<T>,
-): Dataset<T> {
+  source: T[] | AsyncIterable<T> | string,
+): Dataset<T> | Dataset<Record<string, unknown>> {
   if (Array.isArray(source)) {
     return new Dataset(async function* () {
       yield* source;
@@ -229,11 +255,11 @@ export function dataset<T>(
   const ext = extname(source).toLowerCase();
   switch (ext) {
     case '.json':
-      return new Dataset(loadJSON<T>(source));
+      return new Dataset(loadJSON(source));
     case '.jsonl':
-      return new Dataset(loadJSONL<T>(source));
+      return new Dataset(loadJSONL(source));
     case '.csv':
-      return new Dataset(loadCSV(source) as () => AsyncIterable<T>);
+      return new Dataset(loadCSV(source));
     default:
       throw new Error(
         `Unsupported file extension "${ext}" for dataset file "${source}". Supported: .json, .jsonl, .csv`,
