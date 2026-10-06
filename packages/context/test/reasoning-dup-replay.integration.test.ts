@@ -65,7 +65,7 @@ function turnSpanningToolRoundTrip(id: string): UIMessage {
         },
       },
       { type: 'text', text: 'Here is the answer.' },
-    ] as UIMessage['parts'],
+    ],
   };
 }
 
@@ -77,11 +77,9 @@ function reasoningItemIds(
     if (message.role !== 'assistant') continue;
     const content = Array.isArray(message.content) ? message.content : [];
     for (const part of content) {
-      if ((part as { type?: string }).type !== 'reasoning') continue;
-      const itemId = (
-        part as { providerOptions?: { openai?: { itemId?: string } } }
-      ).providerOptions?.openai?.itemId;
-      if (itemId) ids.push(itemId);
+      if (part.type !== 'reasoning') continue;
+      const itemId = part.providerOptions?.openai?.itemId;
+      if (typeof itemId === 'string' && itemId) ids.push(itemId);
     }
   }
   return ids;
@@ -108,7 +106,7 @@ describe('reasoning that spans a client-tool round-trip', () => {
       sandbox: await createVirtualAgentSandbox(),
     });
 
-    const modelMessages = await convertToModelMessages(messages as never, {
+    const modelMessages = await convertToModelMessages(messages, {
       ignoreIncompleteToolCalls: true,
     });
 

@@ -1,6 +1,8 @@
 import type { ConnectionPool, Transaction, config } from 'mssql';
 import { createRequire } from 'node:module';
+import { z } from 'zod';
 
+import { bigintColumn, parseJson, parseJsonObject } from './columns.ts';
 import { storeDDL } from './ddl.sqlserver.ts';
 import type {
   BranchData,
@@ -22,6 +24,131 @@ import type {
   StoredChatData,
 } from './store.ts';
 import { ContextStore } from './store.ts';
+
+// Row shapes as mssql (tedious) returns them for ddl.sqlserver.ts: BIGINT
+// arrives as a string (see bigintColumn), INT and COUNT() as numbers, BIT as a
+// boolean, and JSON is stored as NVARCHAR.
+
+const chatColumns = z.object({
+  id: z.string(),
+  userId: z.string(),
+  title: z.string().nullable(),
+  metadata: z.string().nullable(),
+  createdAt: bigintColumn,
+  updatedAt: bigintColumn,
+});
+
+const storedChat = chatColumns.transform(toStoredChat);
+
+const chatInfo = chatColumns
+  .extend({ messageCount: z.number(), branchCount: z.number() })
+  .transform((row): ChatInfo => ({
+    ...toStoredChat(row),
+    messageCount: row.messageCount,
+    branchCount: row.branchCount,
+  }));
+
+const messageColumns = z.object({
+  id: z.string(),
+  chatId: z.string(),
+  parentId: z.string().nullable(),
+  name: z.string(),
+  type: z.string().nullable(),
+  data: z.string(),
+  createdAt: bigintColumn,
+});
+
+const storedMessage = messageColumns.transform(toMessage);
+
+const searchResult = messageColumns
+  .extend({ rank: z.number(), snippet: z.string() })
+  .transform((row): SearchResult => ({
+    message: toMessage(row),
+    rank: row.rank,
+    snippet: row.snippet,
+  }));
+
+const storedBranch = z.object({
+  id: z.string(),
+  chatId: z.string(),
+  name: z.string(),
+  headMessageId: z.string().nullable(),
+  isActive: z.boolean(),
+  createdAt: bigintColumn,
+}) satisfies z.ZodType<BranchData>;
+
+const branchRow = z.object({
+  id: z.string(),
+  name: z.string(),
+  headMessageId: z.string().nullable(),
+  isActive: z.boolean(),
+  createdAt: bigintColumn,
+});
+
+const storedCheckpoint = z.object({
+  id: z.string(),
+  chatId: z.string(),
+  name: z.string(),
+  messageId: z.string(),
+  createdAt: bigintColumn,
+}) satisfies z.ZodType<CheckpointData>;
+
+const checkpointInfo = z.object({
+  id: z.string(),
+  name: z.string(),
+  messageId: z.string(),
+  createdAt: bigintColumn,
+}) satisfies z.ZodType<CheckpointInfo>;
+
+const idRow = z.object({ id: z.string() });
+
+const hasChildrenRow = z.object({ hasChildren: z.number() });
+
+const countRow = z.object({ count: z.number() });
+
+const ftsInstalledRow = z.object({ ftsInstalled: z.number().nullable() });
+
+const graphMessageRow = z.object({
+  id: z.string(),
+  parentId: z.string().nullable(),
+  name: z.string(),
+  data: z.string(),
+  createdAt: bigintColumn,
+});
+
+const graphBranch = z.object({
+  name: z.string(),
+  headMessageId: z.string().nullable(),
+  isActive: z.boolean(),
+}) satisfies z.ZodType<GraphBranch>;
+
+const graphCheckpoint = z.object({
+  name: z.string(),
+  messageId: z.string(),
+}) satisfies z.ZodType<GraphCheckpoint>;
+
+function toStoredChat(row: z.output<typeof chatColumns>): StoredChatData {
+  return {
+    id: row.id,
+    userId: row.userId,
+    title: row.title ?? undefined,
+    metadata: row.metadata ? parseJsonObject(row.metadata) : undefined,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function toMessage(row: z.output<typeof messageColumns>): MessageData {
+  return {
+    id: row.id,
+    chatId: row.chatId,
+    parentId: row.parentId,
+    name: row.name,
+    type: row.type ?? undefined,
+    data: parseJson(row.data),
+    createdAt: row.createdAt,
+  };
+}
 
 export interface SqlServerStoreOptions {
   /**
@@ -143,10 +270,7 @@ export class SqlServerContextStore extends ContextStore {
    * Execute a query using the pool (no transaction).
    * Converts positional params to SQL Server named params (@p0, @p1, ...).
    */
-  async #query<T extends Record<string, unknown>>(
-    sql: string,
-    params?: unknown[],
-  ): Promise<T[]> {
+  async #query(sql: string, params?: unknown[]): Promise<unknown[]> {
     this.#ensureInitialized();
     const request = this.#pool.request();
 
@@ -156,7 +280,18 @@ export class SqlServerContextStore extends ContextStore {
     });
 
     const result = await request.query(sql);
-    return result.recordset as T[];
+    return result.recordset;
+  }
+
+  /**
+   * Execute a query using the pool and parse every returned row.
+   */
+  async #rows<Row extends z.ZodType>(
+    row: Row,
+    sql: string,
+    params?: unknown[],
+  ): Promise<z.output<Row>[]> {
+    return z.array(row).parse(await this.#query(sql, params));
   }
 
   /**
@@ -194,14 +329,7 @@ export class SqlServerContextStore extends ContextStore {
         VALUES (@p0, @p1, @p2, @p3)
       `);
 
-      const row = result.recordset[0] as {
-        id: string;
-        userId: string;
-        title: string | null;
-        metadata: string | null;
-        createdAt: number | string;
-        updatedAt: number | string;
-      };
+      const created = storedChat.parse(result.recordset[0]);
 
       // Create "main" branch
       const branchRequest = transaction.request();
@@ -214,14 +342,7 @@ export class SqlServerContextStore extends ContextStore {
         VALUES (@p0, @p1, 'main', NULL, 1, @p2)
       `);
 
-      return {
-        id: row.id,
-        userId: row.userId,
-        title: row.title ?? undefined,
-        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-        createdAt: Number(row.createdAt),
-        updatedAt: Number(row.updatedAt),
-      };
+      return created;
     });
   }
 
@@ -255,14 +376,7 @@ export class SqlServerContextStore extends ContextStore {
         OUTPUT INSERTED.*;
       `);
 
-      const row = result.recordset[0] as {
-        id: string;
-        userId: string;
-        title: string | null;
-        metadata: string | null;
-        createdAt: number | string;
-        updatedAt: number | string;
-      };
+      const upserted = storedChat.parse(result.recordset[0]);
 
       // Ensure "main" branch exists
       const branchRequest = transaction.request();
@@ -279,40 +393,17 @@ export class SqlServerContextStore extends ContextStore {
         END
       `);
 
-      return {
-        id: row.id,
-        userId: row.userId,
-        title: row.title ?? undefined,
-        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-        createdAt: Number(row.createdAt),
-        updatedAt: Number(row.updatedAt),
-      };
+      return upserted;
     });
   }
 
   async getChat(chatId: string): Promise<StoredChatData | undefined> {
-    const rows = await this.#query<{
-      id: string;
-      userId: string;
-      title: string | null;
-      metadata: string | null;
-      createdAt: number | string;
-      updatedAt: number | string;
-    }>(`SELECT * FROM ${this.#t('chats')} WHERE id = @p0`, [chatId]);
-
-    if (rows.length === 0) {
-      return undefined;
-    }
-
-    const row = rows[0];
-    return {
-      id: row.id,
-      userId: row.userId,
-      title: row.title ?? undefined,
-      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-      createdAt: Number(row.createdAt),
-      updatedAt: Number(row.updatedAt),
-    };
+    const [chat] = await this.#rows(
+      storedChat,
+      `SELECT * FROM ${this.#t('chats')} WHERE id = @p0`,
+      [chatId],
+    );
+    return chat;
   }
 
   async updateChat(
@@ -323,31 +414,16 @@ export class SqlServerContextStore extends ContextStore {
       const mssql = SqlServerContextStore.#requireMssql();
       const read = transaction.request();
       read.input('chatId', mssql.NVarChar, chatId);
-      const result = await read.query<{
-        id: string;
-        userId: string;
-        title: string | null;
-        metadata: string | null;
-        createdAt: number | string;
-        updatedAt: number | string;
-      }>(`
+      const result = await read.query(`
         SELECT *
         FROM ${this.#t('chats')} WITH (UPDLOCK, HOLDLOCK)
         WHERE id = @chatId;
       `);
-      const row = result.recordset[0];
-      if (!row) {
+      const current = storedChat.optional().parse(result.recordset[0]);
+      if (!current) {
         throw new Error(`updateChat: chat "${chatId}" not found`);
       }
 
-      const current: StoredChatData = {
-        id: row.id,
-        userId: row.userId,
-        title: row.title ?? undefined,
-        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-        createdAt: Number(row.createdAt),
-        updatedAt: Number(row.updatedAt),
-      };
       const updates = update(current);
       if (updates === undefined) return current;
 
@@ -368,21 +444,13 @@ export class SqlServerContextStore extends ContextStore {
       }
       write.input('chatId', mssql.NVarChar, chatId);
 
-      const updated = await write.query<typeof row>(`
+      const updated = await write.query(`
         UPDATE ${this.#t('chats')}
         SET ${setClauses.join(', ')}
         OUTPUT INSERTED.*
         WHERE id = @chatId;
       `);
-      const next = updated.recordset[0];
-      return {
-        id: next.id,
-        userId: next.userId,
-        title: next.title ?? undefined,
-        metadata: next.metadata ? JSON.parse(next.metadata) : undefined,
-        createdAt: Number(next.createdAt),
-        updatedAt: Number(next.updatedAt),
-      };
+      return storedChat.parse(updated.recordset[0]);
     });
   }
 
@@ -419,16 +487,8 @@ export class SqlServerContextStore extends ContextStore {
       params.push(options.limit);
     }
 
-    const rows = await this.#query<{
-      id: string;
-      userId: string;
-      title: string | null;
-      metadata: string | null;
-      createdAt: number | string;
-      updatedAt: number | string;
-      messageCount: number | string;
-      branchCount: number | string;
-    }>(
+    return this.#rows(
+      chatInfo,
       `SELECT
         c.id,
         c.userId,
@@ -446,17 +506,6 @@ export class SqlServerContextStore extends ContextStore {
       ORDER BY c.updatedAt DESC${paginationClause}`,
       params,
     );
-
-    return rows.map((row) => ({
-      id: row.id,
-      userId: row.userId,
-      title: row.title ?? undefined,
-      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-      messageCount: Number(row.messageCount),
-      branchCount: Number(row.branchCount),
-      createdAt: Number(row.createdAt),
-      updatedAt: Number(row.updatedAt),
-    }));
   }
 
   async deleteChat(
@@ -549,7 +598,8 @@ export class SqlServerContextStore extends ContextStore {
     if (parentId === messageId) {
       throw new Error(`Message ${messageId} cannot be its own parent`);
     }
-    const rows = await this.#query(
+    const rows = await this.#rows(
+      idRow,
       `UPDATE ${this.#t('messages')} SET parentId = @p0
        OUTPUT INSERTED.id
        WHERE id = @p1`,
@@ -561,30 +611,12 @@ export class SqlServerContextStore extends ContextStore {
   }
 
   async getMessage(messageId: string): Promise<MessageData | undefined> {
-    const rows = await this.#query<{
-      id: string;
-      chatId: string;
-      parentId: string | null;
-      name: string;
-      type: string | null;
-      data: string;
-      createdAt: number | string;
-    }>(`SELECT * FROM ${this.#t('messages')} WHERE id = @p0`, [messageId]);
-
-    if (rows.length === 0) {
-      return undefined;
-    }
-
-    const row = rows[0];
-    return {
-      id: row.id,
-      chatId: row.chatId,
-      parentId: row.parentId,
-      name: row.name,
-      type: row.type ?? undefined,
-      data: JSON.parse(row.data),
-      createdAt: Number(row.createdAt),
-    };
+    const [message] = await this.#rows(
+      storedMessage,
+      `SELECT * FROM ${this.#t('messages')} WHERE id = @p0`,
+      [messageId],
+    );
+    return message;
   }
 
   async getMessageChain(headId: string): Promise<MessageData[]> {
@@ -592,16 +624,8 @@ export class SqlServerContextStore extends ContextStore {
     // The CTE walks from head (newest) to root (oldest), so we track depth
     // and order by depth DESC to get chronological order (root first)
     // Depth limit of 10000 prevents infinite loops from circular references
-    const rows = await this.#query<{
-      id: string;
-      chatId: string;
-      parentId: string | null;
-      name: string;
-      type: string | null;
-      data: string;
-      createdAt: number | string;
-      depth: number;
-    }>(
+    return this.#rows(
+      storedMessage,
       `WITH chain AS (
         SELECT *, 0 as depth FROM ${this.#t('messages')} WHERE id = @p0
         UNION ALL
@@ -613,24 +637,15 @@ export class SqlServerContextStore extends ContextStore {
       ORDER BY depth DESC`,
       [headId],
     );
-
-    return rows.map((row) => ({
-      id: row.id,
-      chatId: row.chatId,
-      parentId: row.parentId,
-      name: row.name,
-      type: row.type ?? undefined,
-      data: JSON.parse(row.data),
-      createdAt: Number(row.createdAt),
-    }));
   }
 
   async hasChildren(messageId: string): Promise<boolean> {
-    const rows = await this.#query<{ hasChildren: number }>(
+    const [row] = await this.#rows(
+      hasChildrenRow,
       `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('messages')} WHERE parentId = @p0) THEN 1 ELSE 0 END as hasChildren`,
       [messageId],
     );
-    return rows[0].hasChildren === 1;
+    return row.hasChildren === 1;
   }
 
   async getMessages(chatId: string): Promise<MessageData[]> {
@@ -670,59 +685,21 @@ export class SqlServerContextStore extends ContextStore {
     chatId: string,
     name: string,
   ): Promise<BranchData | undefined> {
-    const rows = await this.#query<{
-      id: string;
-      chatId: string;
-      name: string;
-      headMessageId: string | null;
-      isActive: boolean | number;
-      createdAt: number | string;
-    }>(
+    const [branch] = await this.#rows(
+      storedBranch,
       `SELECT * FROM ${this.#t('branches')} WHERE chatId = @p0 AND name = @p1`,
       [chatId, name],
     );
-
-    if (rows.length === 0) {
-      return undefined;
-    }
-
-    const row = rows[0];
-    return {
-      id: row.id,
-      chatId: row.chatId,
-      name: row.name,
-      headMessageId: row.headMessageId,
-      isActive: row.isActive === true || row.isActive === 1,
-      createdAt: Number(row.createdAt),
-    };
+    return branch;
   }
 
   async getActiveBranch(chatId: string): Promise<BranchData | undefined> {
-    const rows = await this.#query<{
-      id: string;
-      chatId: string;
-      name: string;
-      headMessageId: string | null;
-      isActive: boolean | number;
-      createdAt: number | string;
-    }>(
+    const [branch] = await this.#rows(
+      storedBranch,
       `SELECT * FROM ${this.#t('branches')} WHERE chatId = @p0 AND isActive = 1`,
       [chatId],
     );
-
-    if (rows.length === 0) {
-      return undefined;
-    }
-
-    const row = rows[0];
-    return {
-      id: row.id,
-      chatId: row.chatId,
-      name: row.name,
-      headMessageId: row.headMessageId,
-      isActive: true,
-      createdAt: Number(row.createdAt),
-    };
+    return branch;
   }
 
   async setActiveBranch(chatId: string, branchId: string): Promise<void> {
@@ -750,7 +727,8 @@ export class SqlServerContextStore extends ContextStore {
     messageId: string | null,
     expectedHeadMessageId: string | null,
   ): Promise<boolean> {
-    const rows = await this.#query(
+    const rows = await this.#rows(
+      idRow,
       `UPDATE ${this.#t('branches')} SET headMessageId = @p0
        OUTPUT INSERTED.id
        WHERE id = @p1
@@ -762,13 +740,8 @@ export class SqlServerContextStore extends ContextStore {
 
   async listBranches(chatId: string): Promise<BranchInfo[]> {
     // Get branches with message count by walking the chain
-    const branches = await this.#query<{
-      id: string;
-      name: string;
-      headMessageId: string | null;
-      isActive: boolean | number;
-      createdAt: number | string;
-    }>(
+    const branches = await this.#rows(
+      branchRow,
       `SELECT
         id,
         name,
@@ -784,32 +757,34 @@ export class SqlServerContextStore extends ContextStore {
     // For each branch, count messages in the chain
     const result: BranchInfo[] = [];
     for (const branch of branches) {
-      let messageCount = 0;
-      if (branch.headMessageId) {
-        const countRows = await this.#query<{ count: number | string }>(
-          `WITH chain AS (
-            SELECT id, parentId FROM ${this.#t('messages')} WHERE id = @p0
-            UNION ALL
-            SELECT m.id, m.parentId FROM ${this.#t('messages')} m
-            INNER JOIN chain c ON m.id = c.parentId
-          )
-          SELECT COUNT(*) as count FROM chain`,
-          [branch.headMessageId],
-        );
-        messageCount = Number(countRows[0].count);
-      }
-
       result.push({
         id: branch.id,
         name: branch.name,
         headMessageId: branch.headMessageId,
-        isActive: branch.isActive === true || branch.isActive === 1,
-        messageCount,
-        createdAt: Number(branch.createdAt),
+        isActive: branch.isActive,
+        messageCount: branch.headMessageId
+          ? await this.#countChain(branch.headMessageId)
+          : 0,
+        createdAt: branch.createdAt,
       });
     }
 
     return result;
+  }
+
+  async #countChain(headMessageId: string): Promise<number> {
+    const [row] = await this.#rows(
+      countRow,
+      `WITH chain AS (
+        SELECT id, parentId FROM ${this.#t('messages')} WHERE id = @p0
+        UNION ALL
+        SELECT m.id, m.parentId FROM ${this.#t('messages')} m
+        INNER JOIN chain c ON m.id = c.parentId
+      )
+      SELECT COUNT(*) as count FROM chain`,
+      [headMessageId],
+    );
+    return row.count;
   }
 
   // ==========================================================================
@@ -845,51 +820,23 @@ export class SqlServerContextStore extends ContextStore {
     chatId: string,
     name: string,
   ): Promise<CheckpointData | undefined> {
-    const rows = await this.#query<{
-      id: string;
-      chatId: string;
-      name: string;
-      messageId: string;
-      createdAt: number | string;
-    }>(
+    const [checkpoint] = await this.#rows(
+      storedCheckpoint,
       `SELECT * FROM ${this.#t('checkpoints')} WHERE chatId = @p0 AND name = @p1`,
       [chatId, name],
     );
-
-    if (rows.length === 0) {
-      return undefined;
-    }
-
-    const row = rows[0];
-    return {
-      id: row.id,
-      chatId: row.chatId,
-      name: row.name,
-      messageId: row.messageId,
-      createdAt: Number(row.createdAt),
-    };
+    return checkpoint;
   }
 
   async listCheckpoints(chatId: string): Promise<CheckpointInfo[]> {
-    const rows = await this.#query<{
-      id: string;
-      name: string;
-      messageId: string;
-      createdAt: number | string;
-    }>(
+    return this.#rows(
+      checkpointInfo,
       `SELECT id, name, messageId, createdAt
        FROM ${this.#t('checkpoints')}
        WHERE chatId = @p0
        ORDER BY createdAt DESC`,
       [chatId],
     );
-
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      messageId: row.messageId,
-      createdAt: Number(row.createdAt),
-    }));
   }
 
   async deleteCheckpoint(chatId: string, name: string): Promise<void> {
@@ -912,7 +859,8 @@ export class SqlServerContextStore extends ContextStore {
     const roles = options?.roles;
 
     // Check if FTS is available - if not, fall back to LIKE search
-    const ftsCheck = await this.#query<{ ftsInstalled: number }>(
+    const ftsCheck = await this.#rows(
+      ftsInstalledRow,
       `SELECT CAST(SERVERPROPERTY('IsFullTextInstalled') AS INT) as ftsInstalled`,
     );
     const ftsAvailable = ftsCheck[0]?.ftsInstalled === 1;
@@ -950,31 +898,7 @@ export class SqlServerContextStore extends ContextStore {
       sql += ` ORDER BY ct.RANK DESC OFFSET 0 ROWS FETCH NEXT @p${paramIndex} ROWS ONLY`;
       params.push(limit);
 
-      const rows = await this.#query<{
-        id: string;
-        chatId: string;
-        parentId: string | null;
-        name: string;
-        type: string | null;
-        data: string;
-        createdAt: number | string;
-        rank: number;
-        snippet: string;
-      }>(sql, params);
-
-      return rows.map((row) => ({
-        message: {
-          id: row.id,
-          chatId: row.chatId,
-          parentId: row.parentId,
-          name: row.name,
-          type: row.type ?? undefined,
-          data: JSON.parse(row.data),
-          createdAt: Number(row.createdAt),
-        },
-        rank: row.rank,
-        snippet: row.snippet,
-      }));
+      return this.#rows(searchResult, sql, params);
     } else {
       // Fallback to LIKE search when FTS is not installed
       let sql = `
@@ -1005,31 +929,7 @@ export class SqlServerContextStore extends ContextStore {
       sql += ` ORDER BY m.createdAt DESC OFFSET 0 ROWS FETCH NEXT @p${paramIndex} ROWS ONLY`;
       params.push(limit);
 
-      const rows = await this.#query<{
-        id: string;
-        chatId: string;
-        parentId: string | null;
-        name: string;
-        type: string | null;
-        data: string;
-        createdAt: number | string;
-        rank: number;
-        snippet: string;
-      }>(sql, params);
-
-      return rows.map((row) => ({
-        message: {
-          id: row.id,
-          chatId: row.chatId,
-          parentId: row.parentId,
-          name: row.name,
-          type: row.type ?? undefined,
-          data: JSON.parse(row.data),
-          createdAt: Number(row.createdAt),
-        },
-        rank: row.rank,
-        snippet: row.snippet,
-      }));
+      return this.#rows(searchResult, sql, params);
     }
   }
 
@@ -1039,13 +939,8 @@ export class SqlServerContextStore extends ContextStore {
 
   async getGraph(chatId: string): Promise<GraphData> {
     // Get all messages for complete graph
-    const messageRows = await this.#query<{
-      id: string;
-      parentId: string | null;
-      name: string;
-      data: string;
-      createdAt: number | string;
-    }>(
+    const messageRows = await this.#rows(
+      graphMessageRow,
       `SELECT id, parentId, name, data, createdAt
        FROM ${this.#t('messages')}
        WHERE chatId = @p0
@@ -1054,23 +949,20 @@ export class SqlServerContextStore extends ContextStore {
     );
 
     const nodes: GraphNode[] = messageRows.map((row) => {
-      const data = JSON.parse(row.data);
+      const data = parseJson(row.data);
       const content = typeof data === 'string' ? data : JSON.stringify(data);
       return {
         id: row.id,
         parentId: row.parentId,
         role: row.name,
         content: content.length > 50 ? content.slice(0, 50) + '...' : content,
-        createdAt: Number(row.createdAt),
+        createdAt: row.createdAt,
       };
     });
 
     // Get all branches
-    const branchRows = await this.#query<{
-      name: string;
-      headMessageId: string | null;
-      isActive: boolean | number;
-    }>(
+    const branches = await this.#rows(
+      graphBranch,
       `SELECT name, headMessageId, isActive
        FROM ${this.#t('branches')}
        WHERE chatId = @p0
@@ -1078,28 +970,15 @@ export class SqlServerContextStore extends ContextStore {
       [chatId],
     );
 
-    const branches: GraphBranch[] = branchRows.map((row) => ({
-      name: row.name,
-      headMessageId: row.headMessageId,
-      isActive: row.isActive === true || row.isActive === 1,
-    }));
-
     // Get all checkpoints
-    const checkpointRows = await this.#query<{
-      name: string;
-      messageId: string;
-    }>(
+    const checkpoints = await this.#rows(
+      graphCheckpoint,
       `SELECT name, messageId
        FROM ${this.#t('checkpoints')}
        WHERE chatId = @p0
        ORDER BY createdAt ASC`,
       [chatId],
     );
-
-    const checkpoints: GraphCheckpoint[] = checkpointRows.map((row) => ({
-      name: row.name,
-      messageId: row.messageId,
-    }));
 
     return {
       chatId,

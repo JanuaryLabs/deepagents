@@ -8,6 +8,16 @@ export interface ArchitectureUrls {
   armv7l?: string;
 }
 
+const ARCHITECTURES = [
+  'x86_64',
+  'aarch64',
+  'armv7l',
+] as const satisfies readonly (keyof ArchitectureUrls)[];
+
+function isArchitecture(value: string): value is keyof ArchitectureUrls {
+  return ARCHITECTURES.some((architecture) => architecture === value);
+}
+
 export interface UrlBinaryOptions {
   /** Final executable name installed under `/usr/local/bin`. */
   name: string;
@@ -67,7 +77,7 @@ async function resolveUrl(
   if (typeof options.url === 'string') return options.url;
 
   const arch = await ctx.arch();
-  const archUrl = options.url[arch as keyof ArchitectureUrls];
+  const archUrl = isArchitecture(arch) ? options.url[arch] : undefined;
   if (!archUrl) {
     throw new InstallError({
       target: options.name,

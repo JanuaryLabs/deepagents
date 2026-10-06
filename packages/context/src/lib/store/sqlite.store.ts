@@ -1,5 +1,7 @@
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import { z } from 'zod';
 
+import { parseJson, parseJsonObject } from './columns.ts';
 import STORE_DDL from './ddl.sqlite.sql';
 import type {
   BranchData,
@@ -21,6 +23,151 @@ import type {
   StoredChatData,
 } from './store.ts';
 import { ContextStore } from './store.ts';
+
+// Row shapes as node:sqlite returns them for ddl.sqlite.sql: INTEGER columns
+// are numbers, TEXT columns strings, and JSON is stored as TEXT.
+
+const chatColumns = z.object({
+  id: z.string(),
+  userId: z.string(),
+  title: z.string().nullable(),
+  metadata: z.string().nullable(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+
+const storedChat = chatColumns.transform(toStoredChat);
+
+const chatInfo = chatColumns
+  .extend({ messageCount: z.number(), branchCount: z.number() })
+  .transform((row): ChatInfo => ({
+    ...toStoredChat(row),
+    messageCount: row.messageCount,
+    branchCount: row.branchCount,
+  }));
+
+const messageColumns = z.object({
+  id: z.string(),
+  chatId: z.string(),
+  parentId: z.string().nullable(),
+  name: z.string(),
+  type: z.string().nullable(),
+  data: z.string(),
+  createdAt: z.number(),
+});
+
+const storedMessage = messageColumns.transform(toMessage);
+
+const searchResult = messageColumns
+  .extend({ rank: z.number(), snippet: z.string() })
+  .transform((row): SearchResult => ({
+    message: toMessage(row),
+    rank: row.rank,
+    snippet: row.snippet,
+  }));
+
+const storedBranch = z
+  .object({
+    id: z.string(),
+    chatId: z.string(),
+    name: z.string(),
+    headMessageId: z.string().nullable(),
+    isActive: z.number(),
+    createdAt: z.number(),
+  })
+  .transform((row): BranchData => ({
+    id: row.id,
+    chatId: row.chatId,
+    name: row.name,
+    headMessageId: row.headMessageId,
+    isActive: row.isActive === 1,
+    createdAt: row.createdAt,
+  }));
+
+const branchInfo = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    headMessageId: z.string().nullable(),
+    isActive: z.number(),
+    createdAt: z.number(),
+    messageCount: z.number(),
+  })
+  .transform((row): BranchInfo => ({
+    id: row.id,
+    name: row.name,
+    headMessageId: row.headMessageId,
+    isActive: row.isActive === 1,
+    messageCount: row.messageCount,
+    createdAt: row.createdAt,
+  }));
+
+const storedCheckpoint = z.object({
+  id: z.string(),
+  chatId: z.string(),
+  name: z.string(),
+  messageId: z.string(),
+  createdAt: z.number(),
+}) satisfies z.ZodType<CheckpointData>;
+
+const checkpointInfo = z.object({
+  id: z.string(),
+  name: z.string(),
+  messageId: z.string(),
+  createdAt: z.number(),
+}) satisfies z.ZodType<CheckpointInfo>;
+
+const idRow = z.object({ id: z.string() });
+
+const hasChildrenRow = z.object({ hasChildren: z.number() });
+
+const graphMessageRow = z.object({
+  id: z.string(),
+  parentId: z.string().nullable(),
+  name: z.string(),
+  data: z.string(),
+  createdAt: z.number(),
+});
+
+const graphBranch = z
+  .object({
+    name: z.string(),
+    headMessageId: z.string().nullable(),
+    isActive: z.number(),
+  })
+  .transform((row): GraphBranch => ({
+    name: row.name,
+    headMessageId: row.headMessageId,
+    isActive: row.isActive === 1,
+  }));
+
+const graphCheckpoint = z.object({
+  name: z.string(),
+  messageId: z.string(),
+}) satisfies z.ZodType<GraphCheckpoint>;
+
+function toStoredChat(row: z.output<typeof chatColumns>): StoredChatData {
+  return {
+    id: row.id,
+    userId: row.userId,
+    title: row.title ?? undefined,
+    metadata: row.metadata ? parseJsonObject(row.metadata) : undefined,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function toMessage(row: z.output<typeof messageColumns>): MessageData {
+  return {
+    id: row.id,
+    chatId: row.chatId,
+    parentId: row.parentId,
+    name: row.name,
+    type: row.type ?? undefined,
+    data: parseJson(row.data),
+    createdAt: row.createdAt,
+  };
+}
 
 /**
  * SQLite-based context store using graph model.
@@ -88,25 +235,20 @@ export class SqliteContextStore extends ContextStore {
   async createChat(chat: ChatData): Promise<StoredChatData> {
     return this.#useTransaction(() => {
       // Create chat (createdAt and updatedAt are auto-set by SQLite DEFAULT)
-      const row = this.#db
-        .prepare(
-          `INSERT INTO chats (id, userId, title, metadata)
+      const created = storedChat.parse(
+        this.#db
+          .prepare(
+            `INSERT INTO chats (id, userId, title, metadata)
            VALUES (?, ?, ?, ?)
            RETURNING *`,
-        )
-        .get(
-          chat.id,
-          chat.userId,
-          chat.title ?? null,
-          chat.metadata ? JSON.stringify(chat.metadata) : null,
-        ) as {
-        id: string;
-        userId: string;
-        title: string | null;
-        metadata: string | null;
-        createdAt: number;
-        updatedAt: number;
-      };
+          )
+          .get(
+            chat.id,
+            chat.userId,
+            chat.title ?? null,
+            chat.metadata ? JSON.stringify(chat.metadata) : null,
+          ),
+      );
 
       // Create "main" branch
       this.#db
@@ -116,40 +258,28 @@ export class SqliteContextStore extends ContextStore {
         )
         .run(crypto.randomUUID(), chat.id, Date.now());
 
-      return {
-        id: row.id,
-        userId: row.userId,
-        title: row.title ?? undefined,
-        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
-      };
+      return created;
     });
   }
 
   async upsertChat(chat: ChatData): Promise<StoredChatData> {
     return this.#useTransaction(() => {
       // Insert if not exists, no-op update if exists (to trigger RETURNING)
-      const row = this.#db
-        .prepare(
-          `INSERT INTO chats (id, userId, title, metadata)
+      const upserted = storedChat.parse(
+        this.#db
+          .prepare(
+            `INSERT INTO chats (id, userId, title, metadata)
            VALUES (?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET id = excluded.id
            RETURNING *`,
-        )
-        .get(
-          chat.id,
-          chat.userId,
-          chat.title ?? null,
-          chat.metadata ? JSON.stringify(chat.metadata) : null,
-        ) as {
-        id: string;
-        userId: string;
-        title: string | null;
-        metadata: string | null;
-        createdAt: number;
-        updatedAt: number;
-      };
+          )
+          .get(
+            chat.id,
+            chat.userId,
+            chat.title ?? null,
+            chat.metadata ? JSON.stringify(chat.metadata) : null,
+          ),
+      );
 
       // Ensure "main" branch exists (INSERT OR IGNORE uses UNIQUE(chatId, name) constraint)
       this.#db
@@ -159,43 +289,14 @@ export class SqliteContextStore extends ContextStore {
         )
         .run(crypto.randomUUID(), chat.id, Date.now());
 
-      return {
-        id: row.id,
-        userId: row.userId,
-        title: row.title ?? undefined,
-        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
-      };
+      return upserted;
     });
   }
 
   #getChat(chatId: string): StoredChatData | undefined {
-    const row = this.#db
-      .prepare('SELECT * FROM chats WHERE id = ?')
-      .get(chatId) as
-      | {
-          id: string;
-          userId: string;
-          title: string | null;
-          metadata: string | null;
-          createdAt: number;
-          updatedAt: number;
-        }
-      | undefined;
-
-    if (!row) {
-      return undefined;
-    }
-
-    return {
-      id: row.id,
-      userId: row.userId,
-      title: row.title ?? undefined,
-      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    };
+    return storedChat
+      .optional()
+      .parse(this.#db.prepare('SELECT * FROM chats WHERE id = ?').get(chatId));
   }
 
   async getChat(chatId: string): Promise<StoredChatData | undefined> {
@@ -228,27 +329,13 @@ export class SqliteContextStore extends ContextStore {
       }
 
       params.push(chatId);
-      const row = this.#db
-        .prepare(
-          `UPDATE chats SET ${setClauses.join(', ')} WHERE id = ? RETURNING *`,
-        )
-        .get(...params) as {
-        id: string;
-        userId: string;
-        title: string | null;
-        metadata: string | null;
-        createdAt: number;
-        updatedAt: number;
-      };
-
-      return {
-        id: row.id,
-        userId: row.userId,
-        title: row.title ?? undefined,
-        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
-      };
+      return storedChat.parse(
+        this.#db
+          .prepare(
+            `UPDATE chats SET ${setClauses.join(', ')} WHERE id = ? RETURNING *`,
+          )
+          .get(...params),
+      );
     }, 'immediate');
   }
 
@@ -289,9 +376,10 @@ export class SqliteContextStore extends ContextStore {
       }
     }
 
-    const rows = this.#db
-      .prepare(
-        `SELECT
+    return z.array(chatInfo).parse(
+      this.#db
+        .prepare(
+          `SELECT
           c.id,
           c.userId,
           c.title,
@@ -306,28 +394,9 @@ export class SqliteContextStore extends ContextStore {
         ${whereClause}
         GROUP BY c.id
         ORDER BY c.updatedAt DESC${limitClause}`,
-      )
-      .all(...params) as {
-      id: string;
-      userId: string;
-      title: string | null;
-      metadata: string | null;
-      createdAt: number;
-      updatedAt: number;
-      messageCount: number;
-      branchCount: number;
-    }[];
-
-    return rows.map((row) => ({
-      id: row.id,
-      userId: row.userId,
-      title: row.title ?? undefined,
-      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-      messageCount: row.messageCount,
-      branchCount: row.branchCount,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    }));
+        )
+        .all(...params),
+    );
   }
 
   async deleteChat(
@@ -336,9 +405,13 @@ export class SqliteContextStore extends ContextStore {
   ): Promise<boolean> {
     return this.#useTransaction(() => {
       // Get message IDs before deletion for FTS cleanup
-      const messageIds = this.#db
-        .prepare('SELECT id FROM messages WHERE chatId = ?')
-        .all(chatId) as { id: string }[];
+      const messageIds = z
+        .array(idRow)
+        .parse(
+          this.#db
+            .prepare('SELECT id FROM messages WHERE chatId = ?')
+            .all(chatId),
+        );
 
       // Build the delete query with optional userId check
       let sql = 'DELETE FROM chats WHERE id = ?';
@@ -437,33 +510,9 @@ export class SqliteContextStore extends ContextStore {
   }
 
   async getMessage(messageId: string): Promise<MessageData | undefined> {
-    const row = this.#stmt('SELECT * FROM messages WHERE id = ?').get(
-      messageId,
-    ) as
-      | {
-          id: string;
-          chatId: string;
-          parentId: string | null;
-          name: string;
-          type: string | null;
-          data: string;
-          createdAt: number;
-        }
-      | undefined;
-
-    if (!row) {
-      return undefined;
-    }
-
-    return {
-      id: row.id,
-      chatId: row.chatId,
-      parentId: row.parentId,
-      name: row.name,
-      type: row.type ?? undefined,
-      data: JSON.parse(row.data),
-      createdAt: row.createdAt,
-    };
+    return storedMessage
+      .optional()
+      .parse(this.#stmt('SELECT * FROM messages WHERE id = ?').get(messageId));
   }
 
   async getMessageChain(headId: string): Promise<MessageData[]> {
@@ -471,8 +520,9 @@ export class SqliteContextStore extends ContextStore {
     // The CTE walks from head (newest) to root (oldest), so we track depth
     // and order by depth DESC to get chronological order (root first)
     // Depth limit of 100000 prevents infinite loops from circular references
-    const rows = this.#stmt(
-      `WITH RECURSIVE chain AS (
+    return z.array(storedMessage).parse(
+      this.#stmt(
+        `WITH RECURSIVE chain AS (
         SELECT *, 0 as depth FROM messages WHERE id = ?
         UNION ALL
         SELECT m.*, c.depth + 1 FROM messages m
@@ -481,32 +531,16 @@ export class SqliteContextStore extends ContextStore {
       )
       SELECT * FROM chain
       ORDER BY depth DESC`,
-    ).all(headId) as {
-      id: string;
-      chatId: string;
-      parentId: string | null;
-      name: string;
-      type: string | null;
-      data: string;
-      createdAt: number;
-      depth: number;
-    }[];
-
-    return rows.map((row) => ({
-      id: row.id,
-      chatId: row.chatId,
-      parentId: row.parentId,
-      name: row.name,
-      type: row.type ?? undefined,
-      data: JSON.parse(row.data),
-      createdAt: row.createdAt,
-    }));
+      ).all(headId),
+    );
   }
 
   async hasChildren(messageId: string): Promise<boolean> {
-    const row = this.#stmt(
-      'SELECT EXISTS(SELECT 1 FROM messages WHERE parentId = ?) as hasChildren',
-    ).get(messageId) as { hasChildren: number };
+    const row = hasChildrenRow.parse(
+      this.#stmt(
+        'SELECT EXISTS(SELECT 1 FROM messages WHERE parentId = ?) as hasChildren',
+      ).get(messageId),
+    );
 
     return row.hasChildren === 1;
   }
@@ -549,59 +583,23 @@ export class SqliteContextStore extends ContextStore {
     chatId: string,
     name: string,
   ): Promise<BranchData | undefined> {
-    const row = this.#db
-      .prepare('SELECT * FROM branches WHERE chatId = ? AND name = ?')
-      .get(chatId, name) as
-      | {
-          id: string;
-          chatId: string;
-          name: string;
-          headMessageId: string | null;
-          isActive: number;
-          createdAt: number;
-        }
-      | undefined;
-
-    if (!row) {
-      return undefined;
-    }
-
-    return {
-      id: row.id,
-      chatId: row.chatId,
-      name: row.name,
-      headMessageId: row.headMessageId,
-      isActive: row.isActive === 1,
-      createdAt: row.createdAt,
-    };
+    return storedBranch
+      .optional()
+      .parse(
+        this.#db
+          .prepare('SELECT * FROM branches WHERE chatId = ? AND name = ?')
+          .get(chatId, name),
+      );
   }
 
   async getActiveBranch(chatId: string): Promise<BranchData | undefined> {
-    const row = this.#stmt(
-      'SELECT * FROM branches WHERE chatId = ? AND isActive = 1',
-    ).get(chatId) as
-      | {
-          id: string;
-          chatId: string;
-          name: string;
-          headMessageId: string | null;
-          isActive: number;
-          createdAt: number;
-        }
-      | undefined;
-
-    if (!row) {
-      return undefined;
-    }
-
-    return {
-      id: row.id,
-      chatId: row.chatId,
-      name: row.name,
-      headMessageId: row.headMessageId,
-      isActive: true,
-      createdAt: row.createdAt,
-    };
+    return storedBranch
+      .optional()
+      .parse(
+        this.#stmt(
+          'SELECT * FROM branches WHERE chatId = ? AND isActive = 1',
+        ).get(chatId),
+      );
   }
 
   async setActiveBranch(chatId: string, branchId: string): Promise<void> {
@@ -630,9 +628,10 @@ export class SqliteContextStore extends ContextStore {
   async listBranches(chatId: string): Promise<BranchInfo[]> {
     // Single query with correlated subquery to count messages per branch
     // Eliminates N+1 pattern (was: 1 query + N recursive CTEs)
-    const rows = this.#db
-      .prepare(
-        `SELECT
+    return z.array(branchInfo).parse(
+      this.#db
+        .prepare(
+          `SELECT
           b.id,
           b.name,
           b.headMessageId,
@@ -653,24 +652,9 @@ export class SqliteContextStore extends ContextStore {
         FROM branches b
         WHERE b.chatId = ?
         ORDER BY b.createdAt ASC`,
-      )
-      .all(chatId) as {
-      id: string;
-      name: string;
-      headMessageId: string | null;
-      isActive: number;
-      createdAt: number;
-      messageCount: number;
-    }[];
-
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      headMessageId: row.headMessageId,
-      isActive: row.isActive === 1,
-      messageCount: row.messageCount,
-      createdAt: row.createdAt,
-    }));
+        )
+        .all(chatId),
+    );
   }
 
   // ==========================================================================
@@ -699,52 +683,26 @@ export class SqliteContextStore extends ContextStore {
     chatId: string,
     name: string,
   ): Promise<CheckpointData | undefined> {
-    const row = this.#db
-      .prepare('SELECT * FROM checkpoints WHERE chatId = ? AND name = ?')
-      .get(chatId, name) as
-      | {
-          id: string;
-          chatId: string;
-          name: string;
-          messageId: string;
-          createdAt: number;
-        }
-      | undefined;
-
-    if (!row) {
-      return undefined;
-    }
-
-    return {
-      id: row.id,
-      chatId: row.chatId,
-      name: row.name,
-      messageId: row.messageId,
-      createdAt: row.createdAt,
-    };
+    return storedCheckpoint
+      .optional()
+      .parse(
+        this.#db
+          .prepare('SELECT * FROM checkpoints WHERE chatId = ? AND name = ?')
+          .get(chatId, name),
+      );
   }
 
   async listCheckpoints(chatId: string): Promise<CheckpointInfo[]> {
-    const rows = this.#db
-      .prepare(
-        `SELECT id, name, messageId, createdAt
+    return z.array(checkpointInfo).parse(
+      this.#db
+        .prepare(
+          `SELECT id, name, messageId, createdAt
          FROM checkpoints
          WHERE chatId = ?
          ORDER BY createdAt DESC`,
-      )
-      .all(chatId) as {
-      id: string;
-      name: string;
-      messageId: string;
-      createdAt: number;
-    }[];
-
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      messageId: row.messageId,
-      createdAt: row.createdAt,
-    }));
+        )
+        .all(chatId),
+    );
   }
 
   async deleteCheckpoint(chatId: string, name: string): Promise<void> {
@@ -794,31 +752,7 @@ export class SqliteContextStore extends ContextStore {
     sql += ' ORDER BY fts.rank LIMIT ?';
     params.push(limit);
 
-    const rows = this.#db.prepare(sql).all(...params) as {
-      id: string;
-      chatId: string;
-      parentId: string | null;
-      name: string;
-      type: string | null;
-      data: string;
-      createdAt: number;
-      rank: number;
-      snippet: string;
-    }[];
-
-    return rows.map((row) => ({
-      message: {
-        id: row.id,
-        chatId: row.chatId,
-        parentId: row.parentId,
-        name: row.name,
-        type: row.type ?? undefined,
-        data: JSON.parse(row.data),
-        createdAt: row.createdAt,
-      },
-      rank: row.rank,
-      snippet: row.snippet,
-    }));
+    return z.array(searchResult).parse(this.#db.prepare(sql).all(...params));
   }
 
   // ==========================================================================
@@ -827,20 +761,16 @@ export class SqliteContextStore extends ContextStore {
 
   async getGraph(chatId: string): Promise<GraphData> {
     // Get all messages for complete graph
-    const messageRows = this.#db
-      .prepare(
-        `SELECT id, parentId, name, data, createdAt
+    const messageRows = z.array(graphMessageRow).parse(
+      this.#db
+        .prepare(
+          `SELECT id, parentId, name, data, createdAt
          FROM messages
          WHERE chatId = ?
          ORDER BY createdAt ASC`,
-      )
-      .all(chatId) as {
-      id: string;
-      parentId: string | null;
-      name: string;
-      data: string;
-      createdAt: number;
-    }[];
+        )
+        .all(chatId),
+    );
 
     const nodes: GraphNode[] = messageRows.map((row) => {
       const data = JSON.parse(row.data);
@@ -863,42 +793,28 @@ export class SqliteContextStore extends ContextStore {
     });
 
     // Get all branches
-    const branchRows = this.#db
-      .prepare(
-        `SELECT name, headMessageId, isActive
+    const branches = z.array(graphBranch).parse(
+      this.#db
+        .prepare(
+          `SELECT name, headMessageId, isActive
          FROM branches
          WHERE chatId = ?
          ORDER BY createdAt ASC`,
-      )
-      .all(chatId) as {
-      name: string;
-      headMessageId: string | null;
-      isActive: number;
-    }[];
-
-    const branches: GraphBranch[] = branchRows.map((row) => ({
-      name: row.name,
-      headMessageId: row.headMessageId,
-      isActive: row.isActive === 1,
-    }));
+        )
+        .all(chatId),
+    );
 
     // Get all checkpoints
-    const checkpointRows = this.#db
-      .prepare(
-        `SELECT name, messageId
+    const checkpoints = z.array(graphCheckpoint).parse(
+      this.#db
+        .prepare(
+          `SELECT name, messageId
          FROM checkpoints
          WHERE chatId = ?
          ORDER BY createdAt ASC`,
-      )
-      .all(chatId) as {
-      name: string;
-      messageId: string;
-    }[];
-
-    const checkpoints: GraphCheckpoint[] = checkpointRows.map((row) => ({
-      name: row.name,
-      messageId: row.messageId,
-    }));
+        )
+        .all(chatId),
+    );
 
     return {
       chatId,

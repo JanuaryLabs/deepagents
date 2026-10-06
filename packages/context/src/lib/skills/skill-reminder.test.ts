@@ -9,10 +9,13 @@ import {
   ContextEngine,
   type IClassifier,
   InMemoryContextStore,
+  isRecord,
   reminder,
   skillsReminder,
   user,
 } from '@deepagents/context';
+
+import { requireUIMessage } from '../ui-message-guards.ts';
 
 function makeSkill(name: string, description: string): AvailableSkill {
   return {
@@ -59,7 +62,10 @@ async function bakeUserMessage(
   const users = (await store.getMessages('skills')).filter(
     (m) => m.name === 'user',
   );
-  return users[users.length - 1].data as UIMessage;
+  return requireUIMessage(
+    users[users.length - 1].data,
+    'last stored user message',
+  );
 }
 
 function textOf(message: UIMessage): string {
@@ -194,9 +200,13 @@ describe('factory reminders folded into the user message', () => {
       'Should contain resolved factory reminder',
     );
 
-    const metadata = message.metadata as { reminders?: unknown[] } | undefined;
+    const { metadata } = message;
+    assert.ok(
+      isRecord(metadata) && Array.isArray(metadata.reminders),
+      'Should only have 2 reminders (empty skipped)',
+    );
     assert.strictEqual(
-      metadata?.reminders?.length,
+      metadata.reminders.length,
       2,
       'Should only have 2 reminders (empty skipped)',
     );

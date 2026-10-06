@@ -1,3 +1,4 @@
+import { validateUIMessages } from 'ai';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -264,10 +265,10 @@ describe('Branching', () => {
       assert.ok(msg1);
       assert.ok(msg2);
       // Assistant messages store UIMessage object in data
-      assert.strictEqual(
-        (msg2!.data as any).parts[0].text,
-        'Original response',
-      );
+      const [storedReply] = await validateUIMessages({ messages: [msg2.data] });
+      const storedPart = storedReply.parts[0];
+      assert.ok(storedPart.type === 'text');
+      assert.strictEqual(storedPart.text, 'Original response');
     });
 
     it('should link new messages to fork point after rewind', async () => {
@@ -429,10 +430,9 @@ describe('Branching', () => {
         sandbox: await createVirtualAgentSandbox(),
       });
       assert.strictEqual(forkedMessages.length, 2);
-      assert.strictEqual(
-        (forkedMessages[1] as any).parts[0].text,
-        'Response B',
-      );
+      const forkedPart = forkedMessages[1].parts[0];
+      assert.ok(forkedPart.type === 'text');
+      assert.strictEqual(forkedPart.text, 'Response B');
 
       // Switch to main and get its messages
       await engine.switchBranch('main');
@@ -441,7 +441,9 @@ describe('Branching', () => {
         sandbox: await createVirtualAgentSandbox(),
       });
       assert.strictEqual(mainMessages.length, 2);
-      assert.strictEqual((mainMessages[1] as any).parts[0].text, 'Response A');
+      const mainPart = mainMessages[1].parts[0];
+      assert.ok(mainPart.type === 'text');
+      assert.strictEqual(mainPart.text, 'Response A');
     });
 
     it('should throw when switching to non-existent branch', async () => {

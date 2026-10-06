@@ -1,4 +1,4 @@
-import type { UIMessage } from 'ai';
+import { validateUIMessages } from 'ai';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -9,6 +9,7 @@ import {
   fromFragment,
   getReminderRanges,
   identity,
+  isRecord,
   isSyntheticReminderMessage,
   render,
   skills,
@@ -49,18 +50,18 @@ describe('browser export path', () => {
     assert.ok(output.includes('<path>/skills/deploy/SKILL.md</path>'));
   });
 
-  it('supports reminder metadata helpers through browser entrypoint', () => {
-    const message = user('Deploy now.').codec?.encode() as {
-      parts: Array<{ type: string; text?: string }>;
-      metadata?: Record<string, unknown>;
-    };
-    applyUserRemindersToMessage(message as unknown as UIMessage, [
+  it('supports reminder metadata helpers through browser entrypoint', async () => {
+    const [message] = await validateUIMessages({
+      messages: [user('Deploy now.').codec?.encode()],
+    });
+    applyUserRemindersToMessage(message, [
       {
         text: 'Ask for confirmation before destructive actions',
         asPart: false,
       },
     ]);
 
+    assert.ok(isRecord(message.metadata));
     const ranges = getReminderRanges(message.metadata);
     assert.strictEqual(ranges.length, 1);
 
@@ -73,9 +74,11 @@ describe('browser export path', () => {
     }
   });
 
-  it('strips reminders from messages through browser entrypoint', () => {
+  it('strips reminders from messages through browser entrypoint', async () => {
     const partMode = true;
-    const message = user('Ship now.').codec?.encode() as UIMessage;
+    const [message] = await validateUIMessages({
+      messages: [user('Ship now.').codec?.encode()],
+    });
     applyUserRemindersToMessage(message, [
       { text: 'hidden-inline', asPart: false },
       { text: 'hidden-part', asPart: partMode },
@@ -89,9 +92,9 @@ describe('browser export path', () => {
       ),
       ['Ship now.'],
     );
-    const strippedMetadata = stripped.metadata as
-      | { reminders?: unknown }
-      | undefined;
+    const strippedMetadata = isRecord(stripped.metadata)
+      ? stripped.metadata
+      : undefined;
     assert.strictEqual(strippedMetadata?.reminders, undefined);
   });
 

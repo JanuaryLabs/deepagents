@@ -471,7 +471,7 @@ describe('Stream Chunks', () => {
                WHERE type = 'index'
                  AND tbl_name = 'streams'`,
         )
-        .all() as Array<{ name: string }>;
+        .all();
 
       const indexNames = new Set(rows.map((row) => row.name));
       assert.ok(indexNames.has('idx_streams_created_at_id'));

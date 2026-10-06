@@ -1,8 +1,9 @@
-import spawn, { type SubprocessError } from 'nano-spawn';
+import spawn, { SubprocessError } from 'nano-spawn';
 import { spawn as childSpawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import z from 'zod';
 
 import {
   AppleContainerCreationError,
@@ -169,10 +170,10 @@ function buildMountArg(volume: SandboxVolume): string {
 }
 
 function getCliErrorMessage(error: unknown): string {
-  const err = error as SubprocessError;
-  return (
-    err.stderr?.trim() || err.stdout?.trim() || err.message || String(error)
-  );
+  if (error instanceof SubprocessError) {
+    return error.stderr.trim() || error.stdout.trim() || error.message;
+  }
+  return (error instanceof Error && error.message) || String(error);
 }
 
 function safeParseArray(stdout: string): unknown[] {
@@ -184,13 +185,21 @@ function safeParseArray(stdout: string): unknown[] {
   }
 }
 
+/**
+ * One `container inspect` entry. CLI 1.0.0 nests the state in a `status`
+ * object; pre-1.0 returned a bare string ("booted" was a pre-1.0 transient
+ * right after `run --detach`).
+ */
+const containerInspectEntry = z.object({
+  status: z.union([
+    z.string(),
+    z.object({ state: z.string() }).transform(({ state }) => state),
+  ]),
+});
+
 function readContainerStatus(entry: unknown): 'running' | 'stopped' {
-  // CLI 1.0.0 nests the state in a `status` object; pre-1.0 returned a bare
-  // string ("booted" was a pre-1.0 transient right after `run --detach`).
-  const raw = (entry as { status?: string | { state?: string } })?.status;
-  const status = String(
-    (typeof raw === 'object' && raw !== null ? raw.state : raw) ?? '',
-  ).toLowerCase();
+  const parsed = containerInspectEntry.safeParse(entry);
+  const status = parsed.success ? parsed.data.status.toLowerCase() : '';
   // "running"/"booted" are up → attach. "stopped" is the only state
   // `container start` accepts. Fail loud on anything else (error/exited/…)
   // rather than attaching to a broken container.
@@ -414,11 +423,17 @@ function createAppleInstallerContext(
       ]);
       return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
     } catch (error) {
-      const err = error as SubprocessError;
+      if (error instanceof SubprocessError) {
+        return {
+          stdout: error.stdout,
+          stderr: error.stderr,
+          exitCode: error.exitCode ?? 1,
+        };
+      }
       return {
-        stdout: err.stdout ?? '',
-        stderr: err.stderr ?? err.message ?? '',
-        exitCode: err.exitCode ?? 1,
+        stdout: '',
+        stderr: error instanceof Error ? error.message : '',
+        exitCode: 1,
       };
     }
   };

@@ -319,7 +319,7 @@ const writer = agent({
 | Option            | Type                                    | Description                                                  |
 | ----------------- | --------------------------------------- | ------------------------------------------------------------ |
 | `toolDescription` | `string`                                | Override the generated tool description                      |
-| `outputExtractor` | `(result) => string \| Promise<string>` | Transform the sub-agent result before the parent receives it |
+| `outputExtractor` | `(result) => T \| Promise<T>`            | Transform the sub-agent result before the parent receives it |
 
 ## asAdvisor()
 

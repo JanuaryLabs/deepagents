@@ -50,7 +50,7 @@ export function skills(availableSkills: AvailableSkill[]): ContextFragment {
   return {
     name: 'available_skills',
     data: [
-      { name: 'instructions', data: SKILLS_INSTRUCTIONS } as ContextFragment,
+      { name: 'instructions', data: SKILLS_INSTRUCTIONS },
       ...skillFragments,
     ],
     metadata: { skills: skillSnapshot },

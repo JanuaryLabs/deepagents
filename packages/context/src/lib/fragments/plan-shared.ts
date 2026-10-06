@@ -91,7 +91,7 @@ export function validateDependencies<
   label: string,
 ): { byId: Map<string, T>; blocks: Map<string, string[]> } {
   const byId = uniqueIds(items, label);
-  const blocks = new Map(items.map(({ id }) => [id, [] as string[]]));
+  const blocks = new Map<string, string[]>(items.map(({ id }) => [id, []]));
 
   for (const item of items) {
     const blockers = new Set<string>();

@@ -264,10 +264,10 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       ac.abort();
       await settleWithin(
         iterator.return?.() ??
-          Promise.resolve({
+          Promise.resolve<IteratorResult<StreamChange>>({
             done: true,
             value: undefined,
-          } as IteratorResult<StreamChange>),
+          }),
         'iterator return',
       );
 

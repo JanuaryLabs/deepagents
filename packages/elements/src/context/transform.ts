@@ -93,9 +93,7 @@ export function elementChunking(): (buffer: string) => string | null {
   };
 }
 
-// smoothStream's return type is narrower than the exported StreamTextTransform
-// (no stopStream param), so we bridge by dropping stopStream before forwarding.
-const smoothFactory = smoothStream({ chunking: elementChunking() });
+const chunking = elementChunking();
 
 /**
  * Element-safe replacement for the default `smoothStream()` transform. Pass
@@ -104,7 +102,12 @@ const smoothFactory = smoothStream({ chunking: elementChunking() });
  * ```ts
  * const stream = await chat(agent, { transform: [elementsStreamTransform] });
  * ```
+ *
+ * Generic over the agent's tool set, so it fits any `StreamTextTransform<TOOLS>`
+ * (smoothStream fixes its tool set when called, not per stream).
  */
-export const elementsStreamTransform: StreamTextTransform<ToolSet> = (
-  options,
-) => smoothFactory({ tools: options.tools });
+export function elementsStreamTransform<TOOLS extends ToolSet>(
+  options: Parameters<StreamTextTransform<TOOLS>>[0],
+): ReturnType<StreamTextTransform<TOOLS>> {
+  return smoothStream<TOOLS>({ chunking })({ tools: options.tools });
+}

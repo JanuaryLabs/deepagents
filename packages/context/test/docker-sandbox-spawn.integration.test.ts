@@ -1,14 +1,9 @@
 import assert from 'node:assert';
 import { text as streamText } from 'node:stream/consumers';
-import { after, before, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import {
-  type AgentSandbox,
-  type DisposableSandbox,
-  createBashTool,
-  createDockerSandbox,
-} from '@deepagents/context';
+import { createBashTool, createDockerSandbox } from '@deepagents/context';
 import { Docker } from '@deepagents/test';
 
 const docker = new Docker();
@@ -27,23 +22,12 @@ async function readFirstChunk(
 }
 
 describe('Docker Sandbox — spawn', () => {
-  let sandbox: DisposableSandbox;
-  let dockerSpawn: NonNullable<DisposableSandbox['spawn']>;
-
-  before(async () => {
-    sandbox = await createDockerSandbox(docker.defaults);
-    assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
-    dockerSpawn = sandbox.spawn;
-  });
-
-  after(async () => {
-    await sandbox.dispose();
-  });
-
   describe('failure modes', () => {
     it('exit resolves with signal info when aborted mid-stream', async () => {
+      await using sandbox = await createDockerSandbox(docker.defaults);
+      assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
       const controller = new AbortController();
-      const child = dockerSpawn('printf hi; while :; do sleep 1; done', {
+      const child = sandbox.spawn('printf hi; while :; do sleep 1; done', {
         signal: controller.signal,
       });
 
@@ -61,7 +45,9 @@ describe('Docker Sandbox — spawn', () => {
     });
 
     it('exit resolves with non-zero code on command failure', async () => {
-      const child = dockerSpawn('exit 42');
+      await using sandbox = await createDockerSandbox(docker.defaults);
+      assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
+      const child = sandbox.spawn('exit 42');
       await streamText(child.stdout);
       await streamText(child.stderr);
       assert.deepStrictEqual(await child.exit, {
@@ -72,7 +58,9 @@ describe('Docker Sandbox — spawn', () => {
     });
 
     it('stdout and stderr both close after the child exits', async () => {
-      const child = dockerSpawn('echo hi; echo err >&2');
+      await using sandbox = await createDockerSandbox(docker.defaults);
+      assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
+      const child = sandbox.spawn('echo hi; echo err >&2');
       const [out, err, info] = await Promise.all([
         streamText(child.stdout),
         streamText(child.stderr),
@@ -86,7 +74,9 @@ describe('Docker Sandbox — spawn', () => {
 
   describe('live streaming', () => {
     it('delivers stdout bytes before the child exits', async () => {
-      const child = dockerSpawn('printf hi; sleep 1; printf bye');
+      await using sandbox = await createDockerSandbox(docker.defaults);
+      assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
+      const child = sandbox.spawn('printf hi; sleep 1; printf bye');
 
       const winner = await Promise.race([
         readFirstChunk(child.stdout).then(() => 'chunk' as const),
@@ -105,7 +95,9 @@ describe('Docker Sandbox — spawn', () => {
     });
 
     it('streams stderr independently of stdout', async () => {
-      const child = dockerSpawn(
+      await using sandbox = await createDockerSandbox(docker.defaults);
+      assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
+      const child = sandbox.spawn(
         'echo "to stdout"; echo "to stderr" >&2; echo "also stdout"',
       );
       const [out, err] = await Promise.all([
@@ -123,7 +115,9 @@ describe('Docker Sandbox — spawn', () => {
 
   describe('SpawnOptions', () => {
     it('forwards env into the child via docker exec -e', async () => {
-      const child = dockerSpawn('printf "%s" "$MY_VAR"', {
+      await using sandbox = await createDockerSandbox(docker.defaults);
+      assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
+      const child = sandbox.spawn('printf "%s" "$MY_VAR"', {
         env: { MY_VAR: 'hello-from-host' },
       });
       const text = await streamText(child.stdout);
@@ -133,7 +127,9 @@ describe('Docker Sandbox — spawn', () => {
     });
 
     it('forwards cwd into the child via docker exec -w', async () => {
-      const child = dockerSpawn('pwd', { cwd: '/tmp' });
+      await using sandbox = await createDockerSandbox(docker.defaults);
+      assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
+      const child = sandbox.spawn('pwd', { cwd: '/tmp' });
       const text = await streamText(child.stdout);
       const info = await child.exit;
       assert.strictEqual(text.trim(), '/tmp');
@@ -143,6 +139,7 @@ describe('Docker Sandbox — spawn', () => {
 
   describe('executeCommand signal retrofit', () => {
     it('honors options.signal (no longer silently dropped)', async () => {
+      await using sandbox = await createDockerSandbox(docker.defaults);
       const controller = new AbortController();
       const exec = sandbox.executeCommand('sleep 10', {
         signal: controller.signal,
@@ -222,21 +219,13 @@ describe('Docker Sandbox — spawn', () => {
   });
 
   describe('through createBashTool', () => {
-    let agent: AgentSandbox;
-
-    before(async () => {
-      agent = await createBashTool({
-        sandbox: await createDockerSandbox(docker.defaults),
+    it('exposes spawn on the wrapped sandbox', async () => {
+      await using sandbox = await createDockerSandbox(docker.defaults);
+      const agent = await createBashTool({
+        sandbox,
         destination: '/workspace',
       });
       await agent.sandbox.executeCommand('mkdir -p /workspace');
-    });
-
-    after(async () => {
-      await agent.sandbox.dispose();
-    });
-
-    it('exposes spawn on the wrapped sandbox', () => {
       assert.ok(
         agent.sandbox.spawn,
         'createBashTool must forward spawn from the backend',
@@ -244,6 +233,12 @@ describe('Docker Sandbox — spawn', () => {
     });
 
     it('streams live stdout through the wrapper', async () => {
+      await using sandbox = await createDockerSandbox(docker.defaults);
+      const agent = await createBashTool({
+        sandbox,
+        destination: '/workspace',
+      });
+      await agent.sandbox.executeCommand('mkdir -p /workspace');
       assert.ok(agent.sandbox.spawn);
       const child = agent.sandbox.spawn('printf hi; sleep 1; printf bye');
 

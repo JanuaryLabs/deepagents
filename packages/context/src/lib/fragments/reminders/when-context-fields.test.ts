@@ -1,4 +1,4 @@
-import type { LanguageModelUsage, UIMessage } from 'ai';
+import type { UIMessage } from 'ai';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -61,11 +61,11 @@ describe('WhenContext: chat', () => {
       userId: 'u1',
     });
 
-    let captured: Record<string, unknown> | undefined = 'NOT_SET' as any;
+    const observed: Array<Record<string, unknown> | undefined> = [];
     engine.set(
       reminder('check', {
         when: (ctx: WhenContext) => {
-          captured = ctx.chat.metadata;
+          observed.push(ctx.chat.metadata);
           return false;
         },
       }),
@@ -73,7 +73,8 @@ describe('WhenContext: chat', () => {
     );
     await engine.save();
 
-    assert.strictEqual(captured, undefined);
+    assert.ok(observed.length > 0, 'the predicate must run');
+    assert.strictEqual(observed.at(-1), undefined);
   });
 });
 
@@ -91,9 +92,15 @@ describe('WhenContext: usage', () => {
 
     await engine.trackUsage({
       inputTokens: 500,
+      inputTokenDetails: {
+        noCacheTokens: undefined,
+        cacheReadTokens: undefined,
+        cacheWriteTokens: undefined,
+      },
       outputTokens: 200,
+      outputTokenDetails: { textTokens: undefined, reasoningTokens: undefined },
       totalTokens: 700,
-    } as LanguageModelUsage);
+    });
 
     engine.set(
       reminder('budget-warning', {
@@ -342,11 +349,11 @@ describe('WhenContext: lastAssistantMessage', () => {
       userId: 'u1',
     });
 
-    let captured: UIMessage | undefined = 'NOT_SET' as any;
+    const observed: Array<UIMessage | undefined> = [];
     engine.set(
       reminder('check', {
         when: (ctx: WhenContext) => {
-          captured = ctx.lastAssistantMessage;
+          observed.push(ctx.lastAssistantMessage);
           return false;
         },
       }),
@@ -354,7 +361,8 @@ describe('WhenContext: lastAssistantMessage', () => {
     );
     await engine.save();
 
-    assert.strictEqual(captured, undefined);
+    assert.ok(observed.length > 0, 'the predicate must run');
+    assert.strictEqual(observed.at(-1), undefined);
   });
 });
 

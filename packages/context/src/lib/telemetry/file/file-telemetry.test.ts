@@ -1,11 +1,26 @@
-import { type Telemetry, generateText } from 'ai';
-import { MockLanguageModelV4 } from 'ai/test';
+import {
+  type Telemetry,
+  embed,
+  generateObject,
+  generateText,
+  isStepCount,
+  rerank,
+  streamText,
+  tool,
+} from 'ai';
+import {
+  MockEmbeddingModelV4,
+  MockLanguageModelV4,
+  MockRerankingModelV4,
+  convertArrayToReadableStream,
+} from 'ai/test';
 import assert from 'node:assert';
 import { mkdtempDisposable, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
+import { z } from 'zod';
 
 import { createFileTelemetry } from '@deepagents/context/telemetry/file';
 
@@ -14,17 +29,124 @@ const usage = {
   outputTokens: { total: 1, text: 1, reasoning: 0 },
 } as const;
 
-function createTextModel(): MockLanguageModelV4 {
+const telemetryRecord = z.object({
+  timestamp: z.string(),
+  event: z.string(),
+  data: z.unknown(),
+});
+
+const objectTelemetryRecord = telemetryRecord.extend({
+  data: z.record(z.string(), z.unknown()),
+});
+
+function createTextModel(text = 'file output'): MockLanguageModelV4 {
   return new MockLanguageModelV4({
     provider: 'test-provider',
     modelId: 'test-model',
     doGenerate: {
-      content: [{ type: 'text', text: 'file output' }],
+      content: [{ type: 'text', text }],
       finishReason: { unified: 'stop', raw: 'stop' },
       usage,
       warnings: [],
     },
   });
+}
+
+async function readRecords(path: string) {
+  return (await readFile(path, 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => objectTelemetryRecord.parse(JSON.parse(line)));
+}
+
+/**
+ * Runs real AI SDK operations that, together, fire every telemetry callback:
+ * a two-step generateText with a tool call, generateObject, embed, rerank, a
+ * streamText aborted before it starts, and a generateText whose model fails.
+ */
+async function triggerEveryTelemetryCallback(
+  telemetry: Telemetry,
+): Promise<void> {
+  await generateText({
+    model: new MockLanguageModelV4({
+      doGenerate: [
+        {
+          content: [
+            {
+              type: 'tool-call',
+              toolCallId: 'echo-call',
+              toolName: 'echo',
+              input: JSON.stringify({ text: 'tool input' }),
+            },
+          ],
+          finishReason: { unified: 'tool-calls', raw: 'tool-calls' },
+          usage,
+          warnings: [],
+        },
+        {
+          content: [{ type: 'text', text: 'final answer' }],
+          finishReason: { unified: 'stop', raw: 'stop' },
+          usage,
+          warnings: [],
+        },
+      ],
+    }),
+    prompt: 'use the tool',
+    tools: {
+      echo: tool({
+        inputSchema: z.object({ text: z.string() }),
+        execute: async ({ text }) => ({ echoed: text }),
+      }),
+    },
+    stopWhen: isStepCount(2),
+    telemetry: { integrations: telemetry },
+  });
+  await generateObject({
+    model: createTextModel('{"value":"object"}'),
+    schema: z.object({ value: z.string() }),
+    prompt: 'make an object',
+    telemetry: { integrations: telemetry },
+  });
+  await embed({
+    model: new MockEmbeddingModelV4({
+      doEmbed: { embeddings: [[0.1, 0.2]], warnings: [] },
+    }),
+    value: 'embed me',
+    telemetry: { integrations: telemetry },
+  });
+  await rerank({
+    model: new MockRerankingModelV4({
+      doRerank: async () => ({
+        ranking: [{ index: 0, relevanceScore: 0.9 }],
+      }),
+    }),
+    documents: ['only document'],
+    query: 'rank me',
+    telemetry: { integrations: telemetry },
+  });
+  await streamText({
+    model: new MockLanguageModelV4({
+      doStream: {
+        stream: convertArrayToReadableStream([
+          { type: 'stream-start', warnings: [] },
+        ]),
+      },
+    }),
+    prompt: 'aborted before it starts',
+    abortSignal: AbortSignal.abort(),
+    telemetry: { integrations: telemetry },
+  }).consumeStream();
+  await assert.rejects(
+    generateText({
+      model: new MockLanguageModelV4({
+        doGenerate: () => Promise.reject(new Error('model failure')),
+      }),
+      prompt: 'fail',
+      maxRetries: 0,
+      telemetry: { integrations: telemetry },
+    }),
+    { message: 'model failure' },
+  );
 }
 
 describe('createFileTelemetry()', () => {
@@ -48,14 +170,7 @@ describe('createFileTelemetry()', () => {
     const records = (await readFile(path, 'utf8'))
       .trim()
       .split('\n')
-      .map(
-        (line) =>
-          JSON.parse(line) as {
-            timestamp: string;
-            event: string;
-            data: unknown;
-          },
-      );
+      .map((line) => telemetryRecord.parse(JSON.parse(line)));
     assert.deepStrictEqual(
       [...new Set(records.map((record) => record.timestamp))],
       [timestamp],
@@ -82,21 +197,23 @@ describe('createFileTelemetry()', () => {
     const path = join(directory.path, 'nested', 'ai.jsonl');
     const telemetry = createFileTelemetry({ path });
 
-    await telemetry.onStart?.({
-      recordInputs: false,
-      recordOutputs: false,
+    await generateText({
+      model: createTextModel(),
       prompt: 'SECRET_PROMPT',
-      runtimeContext: {
-        private: { secret: 'SECRET_CONTEXT' },
+      runtimeContext: { private: { secret: 'SECRET_CONTEXT' } },
+      telemetry: {
+        integrations: telemetry,
+        recordInputs: false,
+        recordOutputs: false,
+        // Without this opt-in the SDK hands telemetry an empty runtimeContext.
+        includeRuntimeContext: { private: true },
       },
-    } as never);
+    });
 
-    const [{ data }] = (await readFile(path, 'utf8'))
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line) as { data: Record<string, unknown> });
+    const [{ event, data }] = await readRecords(path);
+    assert.equal(event, 'onStart');
     assert.equal(data.runtimeContext, '[Redacted]');
-    assert.doesNotMatch(JSON.stringify(data), /SECRET_/);
+    assert.doesNotMatch(await readFile(path, 'utf8'), /SECRET_/);
   });
 
   it('writes every AI SDK telemetry lifecycle callback', async () => {
@@ -121,23 +238,15 @@ describe('createFileTelemetry()', () => {
       'onRerankEnd',
       'onEnd',
       'onAbort',
+      'onError',
     ] as const satisfies readonly (keyof Telemetry)[];
 
-    for (const name of callbackNames) {
-      const callback = telemetry[name] as
-        ((event: unknown) => void | PromiseLike<void>) | undefined;
-      assert.ok(callback, `${name} should be implemented`);
-      await callback({ marker: name });
-    }
-    await telemetry.onError?.({ marker: 'onError' });
+    await triggerEveryTelemetryCallback(telemetry);
 
-    const records = (await readFile(path, 'utf8'))
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line) as { event: string });
+    const records = await readRecords(path);
     assert.deepStrictEqual(
-      records.map(({ event }) => event),
-      [...callbackNames, 'onError'],
+      new Set(records.map(({ event }) => event)),
+      new Set(callbackNames),
     );
     assert.strictEqual(telemetry.onStepFinish, undefined);
   });
@@ -168,10 +277,7 @@ describe('createFileTelemetry()', () => {
     const lines = (await readFile(path, 'utf8')).trim().split('\n');
     assert.strictEqual(lines.length, 606);
     const starts = lines
-      .map(
-        (line) =>
-          JSON.parse(line) as { event: string; data: Record<string, unknown> },
-      )
+      .map((line) => objectTelemetryRecord.parse(JSON.parse(line)))
       .filter(({ event }) => event === 'onStart');
     assert.strictEqual(starts.length, 101);
     assert.ok(

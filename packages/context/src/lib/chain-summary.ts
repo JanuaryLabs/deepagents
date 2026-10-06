@@ -6,7 +6,7 @@ import {
   isSyntheticReminderMessage,
 } from './fragments/reminders/index.ts';
 import type { MessageData } from './store/store.ts';
-import { requireUIMessage } from './ui-message-guards.ts';
+import { isUIMessage, requireUIMessage } from './ui-message-guards.ts';
 
 export interface ChainSummary {
   turn: number;
@@ -101,7 +101,7 @@ export class ChainSummaryBuilder {
     this.#messageCount++;
     if (fragment.name !== 'user') return;
     const encoded = fragment.codec?.encode();
-    if (encoded && isSyntheticReminderMessage(encoded as UIMessage)) return;
+    if (isUIMessage(encoded) && isSyntheticReminderMessage(encoded)) return;
     this.#turn++;
   }
 

@@ -1,5 +1,7 @@
-import type { ScriptNode, WordNode } from 'just-bash';
+import type { WordNode } from 'just-bash';
 import { serialize } from 'just-bash';
+
+type WordPart = WordNode['parts'][number];
 
 export interface StaticWordTextOptions {
   preserveLegacyBackticks?: boolean;
@@ -12,55 +14,42 @@ export function asStaticWordText(
   if (!word) {
     return null;
   }
-  return asStaticWordPartText(
-    word.parts as unknown as Array<Record<string, unknown>>,
-    options,
-  );
+  return asStaticWordPartText(word.parts, options);
 }
 
 export function asStaticWordPartText(
-  parts: Array<Record<string, unknown>>,
+  parts: readonly WordPart[],
   options: StaticWordTextOptions = {},
 ): string | null {
-  let text = '';
+  const texts: string[] = [];
 
   for (const part of parts) {
-    const type = part.type;
-
-    if (type === 'Literal' || type === 'SingleQuoted' || type === 'Escaped') {
-      if (typeof part.value !== 'string') {
-        return null;
-      }
-      text += part.value;
-      continue;
+    const text = staticPartText(part, options);
+    if (text == null) {
+      return null;
     }
-
-    if (type === 'DoubleQuoted') {
-      if (!Array.isArray(part.parts)) {
-        return null;
-      }
-      const inner = asStaticWordPartText(
-        part.parts as Array<Record<string, unknown>>,
-        options,
-      );
-      if (inner == null) {
-        return null;
-      }
-      text += inner;
-      continue;
-    }
-
-    if (
-      options.preserveLegacyBackticks &&
-      type === 'CommandSubstitution' &&
-      part.legacy === true
-    ) {
-      text += '`' + serialize(part.body as ScriptNode).trim() + '`';
-      continue;
-    }
-
-    return null;
+    texts.push(text);
   }
 
-  return text;
+  return texts.join('');
+}
+
+function staticPartText(
+  part: WordPart,
+  options: StaticWordTextOptions,
+): string | null {
+  switch (part.type) {
+    case 'Literal':
+    case 'SingleQuoted':
+    case 'Escaped':
+      return part.value;
+    case 'DoubleQuoted':
+      return asStaticWordPartText(part.parts, options);
+    case 'CommandSubstitution':
+      return options.preserveLegacyBackticks && part.legacy
+        ? '`' + serialize(part.body).trim() + '`'
+        : null;
+    default:
+      return null;
+  }
 }

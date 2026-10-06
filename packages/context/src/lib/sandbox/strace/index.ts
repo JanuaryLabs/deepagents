@@ -1,4 +1,4 @@
-import spawn, { type SubprocessError } from 'nano-spawn';
+import spawn, { SubprocessError } from 'nano-spawn';
 import { randomUUID } from 'node:crypto';
 import { readFile, rm } from 'node:fs/promises';
 import { posix } from 'node:path';
@@ -384,8 +384,8 @@ async function runOnHost(
     const { stderr } = await spawn('sh', ['-c', command]);
     return { exitCode: 0, stderr };
   } catch (error) {
-    const e = error as SubprocessError;
-    return { exitCode: e.exitCode ?? 1, stderr: e.stderr };
+    if (!(error instanceof SubprocessError)) throw error;
+    return { exitCode: error.exitCode ?? 1, stderr: error.stderr };
   }
 }
 

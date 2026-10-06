@@ -2,7 +2,13 @@ import type {
   LanguageModelV4Prompt,
   LanguageModelV4StreamPart,
 } from '@ai-sdk/provider';
-import { type UIMessage, isToolUIPart, simulateReadableStream, tool } from 'ai';
+import {
+  type UIMessage,
+  isToolUIPart,
+  simulateReadableStream,
+  tool,
+  validateUIMessages,
+} from 'ai';
 import {
   MockLanguageModelV4,
   convertReadableStreamToArray as drain,
@@ -81,7 +87,7 @@ const priorAssistantTurn: UIMessage = {
       },
     },
     { type: 'text', text: 'There is one user.' },
-  ] as UIMessage['parts'],
+  ],
 };
 
 function toolResultOutputs(prompt: LanguageModelV4Prompt) {
@@ -326,7 +332,10 @@ describe('replaying history with a tool result carrying host-only meta', () => {
     const chain = await store.getMessageChain(branch.headMessageId);
     const stored = chain.findLast((entry) => entry.name === 'assistant');
     assert.ok(stored);
-    const outputs = (stored.data as UIMessage).parts
+    const [storedMessage] = await validateUIMessages({
+      messages: [stored.data],
+    });
+    const outputs = storedMessage.parts
       .filter(isToolUIPart)
       .filter((part) => part.state === 'output-available')
       .map((part) => part.output);

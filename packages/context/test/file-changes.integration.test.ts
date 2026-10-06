@@ -7,6 +7,7 @@ import { mkdtempDisposable, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { z } from 'zod';
 
 import {
   BashException,
@@ -74,6 +75,24 @@ async function runProbe(backend: DockerBackend): Promise<CommandResult> {
   await backend.writeFiles([{ path: '/probe.mjs', content: probeBundle }]);
   return backend.executeCommand('node /probe.mjs');
 }
+
+// `withStraceFileChanges` attaches the observed changes to a command result as
+// `meta.fileChanges`; `meta` is an open record, so read them back through the
+// shape the producer writes.
+const fileChangesSchema = z
+  .array(
+    z.object({
+      op: z.enum(['write', 'delete', 'rename']),
+      path: z.string(),
+      from: z.string().optional(),
+      timestamp: z.number(),
+    }),
+  )
+  .optional();
+
+const fileChangesOf = (
+  meta: Record<string, unknown> | undefined,
+): FileChange[] => fileChangesSchema.parse(meta?.fileChanges) ?? [];
 
 const ops = (changes: FileChange[]) =>
   changes.map((c) => ({
@@ -410,11 +429,10 @@ describe('strace file-change tracking (docker backend)', () => {
         stopWhen: isStepCount(2),
       });
 
-      const aggregated = res.toolResults.flatMap(
-        (tr) =>
-          ((tr.output as { meta?: { fileChanges?: FileChange[] } }).meta
-            ?.fileChanges ?? []) as FileChange[],
-      );
+      const aggregated = res.toolResults.flatMap((tr) => {
+        assert.ok(!tr.dynamic && tr.toolName === 'bash');
+        return fileChangesOf(tr.output.meta);
+      });
       assert.deepStrictEqual(aggregated.map((c) => c.path).sort(), [
         `${ROOT}/agg1.txt`,
         `${ROOT}/agg2.txt`,
@@ -526,7 +544,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
       assert.strictEqual(r.stdout, '');
       assert.strictEqual(r.stderr, 'rejected: no writes allowed\n');
       assert.strictEqual(r.exitCode, 42);
-      const changes = (r.meta?.fileChanges ?? []) as FileChange[];
+      const changes = fileChangesOf(r.meta);
       assert.deepStrictEqual(
         changes.map(({ op, path }) => ({ op, path })),
         [{ op: 'write', path: `${ROOT}/a.txt` }],
@@ -630,10 +648,10 @@ describe('onFileChanges failure handling (docker backend)', () => {
 
       // The model sees a failed RESULT (the caller's format()), not a thrown
       // tool call the agent/guardrail would swallow.
-      const output = res.toolResults[0].output as {
-        exitCode: number;
-        stderr: string;
-      };
+      const [result] = res.toolResults;
+      assert.ok(result && !result.dynamic && result.toolName === 'writeFile');
+      const { output } = result;
+      assert.ok('exitCode' in output);
       assert.strictEqual(output.exitCode, 42);
       assert.match(output.stderr, /rejected: no writes allowed/);
     } finally {
@@ -670,15 +688,13 @@ describe('onFileChanges failure handling (docker backend)', () => {
         stopWhen: isStepCount(2),
       });
 
-      const output = res.toolResults[0].output as {
-        exitCode: number;
-        stderr: string;
-        meta?: { fileChanges?: FileChange[] };
-      };
+      const [result] = res.toolResults;
+      assert.ok(result && !result.dynamic && result.toolName === 'bash');
+      const { output } = result;
       assert.strictEqual(output.exitCode, 42);
       assert.match(output.stderr, /rejected: no writes allowed/);
       assert.deepStrictEqual(
-        (output.meta?.fileChanges ?? []).map(({ op, path }) => ({ op, path })),
+        fileChangesOf(output.meta).map(({ op, path }) => ({ op, path })),
         [{ op: 'write', path: `${ROOT}/r.txt` }],
       );
       assert.deepStrictEqual(
@@ -756,7 +772,9 @@ describe('onFileChanges failure handling (docker backend)', () => {
       assert.strictEqual(info.success, true);
       // Spawn is onError's only signal — the isolated throw landed here.
       assert.strictEqual(errors.length, 1);
-      assert.match((errors[0] as Error).message, /boom/);
+      const [error] = errors;
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /boom/);
     } finally {
       await s.sandbox.dispose();
     }

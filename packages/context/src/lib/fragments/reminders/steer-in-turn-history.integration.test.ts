@@ -24,6 +24,13 @@ import {
 } from '@deepagents/context';
 import { createFileTelemetry } from '@deepagents/context/telemetry/file';
 
+/** One JSONL line written by createFileTelemetry. */
+const telemetryRecord = z.object({
+  timestamp: z.string(),
+  event: z.string(),
+  data: z.unknown(),
+});
+
 const testUsage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
   outputTokens: { total: 5, text: 5, reasoning: 0 },
@@ -115,7 +122,7 @@ describe('steer reminders and in-turn history', () => {
       const fired = (await readFile(path, 'utf8'))
         .trim()
         .split('\n')
-        .map((line) => JSON.parse(line) as { event: string; data: unknown })
+        .map((line) => telemetryRecord.parse(JSON.parse(line)))
         .filter((record) => record.event === 'onLanguageModelCallStart')
         .some((record) => JSON.stringify(record.data).includes(STEER));
 

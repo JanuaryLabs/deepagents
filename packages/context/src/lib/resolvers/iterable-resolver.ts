@@ -7,7 +7,9 @@ export interface IterableResolverOptions {
 
 const DEFAULT_MAX_ITEMS = 10_000;
 
-function hasIterableProtocol(value: object): boolean {
+function hasIterableProtocol(
+  value: object,
+): value is AsyncIterable<unknown> | Iterable<unknown> {
   return Symbol.asyncIterator in value || Symbol.iterator in value;
 }
 
@@ -27,7 +29,9 @@ export class IterableResolver implements ValueResolver {
     this.#maxItems = options.maxItems ?? DEFAULT_MAX_ITEMS;
   }
 
-  canResolve(value: unknown): boolean {
+  canResolve(
+    value: unknown,
+  ): value is AsyncIterable<unknown> | Iterable<unknown> {
     if (value === null || value === undefined) return false;
     if (typeof value !== 'object') return false;
     if (Array.isArray(value)) return false;
@@ -38,14 +42,16 @@ export class IterableResolver implements ValueResolver {
   }
 
   async resolve(value: unknown, _ctx: LoadContext): Promise<unknown> {
-    const iterable = value as AsyncIterable<unknown> | Iterable<unknown>;
+    if (!this.canResolve(value)) {
+      throw new TypeError(`${this.name} cannot resolve a ${typeof value}`);
+    }
     const collected: unknown[] = [];
-    if (isAsyncIterable(iterable)) {
-      for await (const chunk of iterable) {
+    if (isAsyncIterable(value)) {
+      for await (const chunk of value) {
         pushLimited(collected, chunk, this.#maxItems, this.name);
       }
     } else {
-      for (const chunk of iterable) {
+      for (const chunk of value) {
         pushLimited(collected, chunk, this.#maxItems, this.name);
       }
     }

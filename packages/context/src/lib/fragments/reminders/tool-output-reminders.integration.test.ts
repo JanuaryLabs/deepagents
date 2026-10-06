@@ -38,6 +38,8 @@ import {
   toolOutput,
 } from '@deepagents/context';
 
+import { isUIMessage, requireUIMessage } from '../../ui-message-guards.ts';
+
 const testUsage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
   outputTokens: { total: 5, text: 5, reasoning: 0 },
@@ -323,7 +325,7 @@ const metaTool = tool({
   inputSchema: z.object({}),
   execute: async () => ({ value: 42, meta: { hidden: 'SECRET' } }),
   toModelOutput: ({ output }) => {
-    const { meta: _meta, ...visible } = output as { meta?: unknown };
+    const { meta: _meta, ...visible } = output;
     return { type: 'json', value: visible };
   },
 });
@@ -448,7 +450,7 @@ async function storedAssistant(
   const chain = await store.getMessageChain(branch.headMessageId);
   const entry = chain.findLast((e) => e.name === 'assistant');
   assert.ok(entry, 'expected a stored assistant message');
-  return entry.data as UIMessage;
+  return requireUIMessage(entry.data, 'stored assistant message');
 }
 
 function toolOutputsOf(message: UIMessage): unknown[] {
@@ -458,28 +460,22 @@ function toolOutputsOf(message: UIMessage): unknown[] {
     .map((part) => part.output);
 }
 
-function toolResultValuesIn(prompt: unknown[]): unknown[] {
+function toolResultValuesIn(prompt: LanguageModelV4Prompt): unknown[] {
   const values: unknown[] = [];
-  for (const message of prompt as Array<{
-    role: string;
-    content: Array<{ type: string; output?: { type: string; value: unknown } }>;
-  }>) {
+  for (const message of prompt) {
     if (message.role !== 'tool') continue;
     for (const item of message.content) {
-      if (item.type === 'tool-result' && item.output) {
-        values.push(item.output.value);
+      if (item.type === 'tool-result') {
+        values.push('value' in item.output ? item.output.value : undefined);
       }
     }
   }
   return values;
 }
 
-function toolResultOutputsIn(prompt: unknown[]): unknown[] {
+function toolResultOutputsIn(prompt: LanguageModelV4Prompt): unknown[] {
   const outputs: unknown[] = [];
-  for (const message of prompt as Array<{
-    role: string;
-    content: Array<{ type: string; output?: unknown }>;
-  }>) {
+  for (const message of prompt) {
     if (message.role !== 'tool') continue;
     for (const item of message.content) {
       if (item.type === 'tool-result') outputs.push(item.output);
@@ -488,16 +484,11 @@ function toolResultOutputsIn(prompt: unknown[]): unknown[] {
   return outputs;
 }
 
-function reminderTextsIn(prompt: unknown[]): string[] {
+function reminderTextsIn(prompt: LanguageModelV4Prompt): string[] {
   return prompt.flatMap((message) => {
-    const candidate = message as {
-      role?: string;
-      content?: Array<{ type?: string; text?: string }>;
-    };
-    if (candidate.role !== 'user' || !Array.isArray(candidate.content))
-      return [];
-    return candidate.content.flatMap((part) =>
-      part.type === 'text' && part.text?.startsWith('<system-reminder>')
+    if (message.role !== 'user') return [];
+    return message.content.flatMap((part) =>
+      part.type === 'text' && part.text.startsWith('<system-reminder>')
         ? [part.text]
         : [],
     );
@@ -546,14 +537,13 @@ describe('tool-output reminders', () => {
 
     const lastPrompt = latestStreamPrompt(model);
     assert.deepStrictEqual(toolResultValuesIn(lastPrompt), [{ ok: true }]);
-    const [toolMessage, reminderMessage] = lastPrompt.slice(-2) as Array<{
-      role: string;
-      content: Array<{ type: string; text?: string }>;
-    }>;
+    const [toolMessage, reminderMessage] = lastPrompt.slice(-2);
     assert.strictEqual(toolMessage.role, 'tool');
-    assert.strictEqual(reminderMessage.role, 'user');
+    assert.ok(reminderMessage.role === 'user');
+    const [firstReminderPart] = reminderMessage.content;
+    assert.ok(firstReminderPart?.type === 'text');
     assert.strictEqual(
-      reminderMessage.content[0]?.text,
+      firstReminderPart.text,
       '<system-reminder>CHECK THE FS TOOLS</system-reminder>',
     );
   });
@@ -731,12 +721,13 @@ describe('tool-output reminders', () => {
   });
 
   it('reaches Anthropic as sibling tool-result and reminder blocks', async () => {
-    const requests: Array<{ messages: unknown[] }> = [];
+    const anthropicRequestSchema = z.object({ messages: z.array(z.unknown()) });
+    const requests: Array<z.infer<typeof anthropicRequestSchema>> = [];
     const anthropic = createAnthropic({
       apiKey: 'test-key',
       fetch: async (_input, init) => {
         requests.push(
-          JSON.parse(String(init?.body)) as { messages: unknown[] },
+          anthropicRequestSchema.parse(JSON.parse(String(init?.body))),
         );
         const body =
           requests.length === 1
@@ -1029,8 +1020,7 @@ describe('tool-output reminders', () => {
     assert.strictEqual(
       lastPrompt.filter(
         (message) =>
-          (message as { role?: string }).role === 'user' &&
-          reminderTextsIn([message]).length > 0,
+          message.role === 'user' && reminderTextsIn([message]).length > 0,
       ).length,
       1,
     );
@@ -1041,15 +1031,17 @@ describe('tool-output reminders', () => {
     const synthetic = chain.find(
       (entry) =>
         entry.name === 'user' &&
-        (entry.data as UIMessage).parts.some(
+        isUIMessage(entry.data) &&
+        entry.data.parts.some(
           (part) => part.type === 'text' && part.text.includes('TOOL CHECK'),
         ),
     );
     assert.ok(synthetic, 'expected the combined synthetic reminder in storage');
     assert.deepStrictEqual(
-      (synthetic.data as UIMessage).parts.flatMap((part) =>
-        part.type === 'text' ? [part.text] : [],
-      ),
+      requireUIMessage(
+        synthetic.data,
+        'stored synthetic reminder',
+      ).parts.flatMap((part) => (part.type === 'text' ? [part.text] : [])),
       [
         '<system-reminder>TOOL CHECK</system-reminder>',
         '<system-reminder>STEER CHECK</system-reminder>',

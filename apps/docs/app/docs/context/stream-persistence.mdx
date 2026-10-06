@@ -334,8 +334,8 @@ const uiStream = createUIMessageStream({
       flushSize: 20,
     });
 
-    pw.writer.write({ type: 'text-delta', id: 'text-1', delta: 'Hello' });
-    pw.writer.write({ type: 'text-delta', id: 'text-1', delta: ' world' });
+    await pw.writer.write({ type: 'text-delta', id: 'text-1', delta: 'Hello' });
+    await pw.writer.write({ type: 'text-delta', id: 'text-1', delta: ' world' });
 
     await pw.complete();
   },

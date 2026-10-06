@@ -1,9 +1,13 @@
-import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import type {
+  LanguageModelV4Prompt,
+  LanguageModelV4StreamPart,
+} from '@ai-sdk/provider';
 import {
   type UIMessage,
   generateId,
   isToolUIPart,
   simulateReadableStream,
+  validateUIMessages,
 } from 'ai';
 import {
   MockLanguageModelV4,
@@ -20,6 +24,7 @@ import {
   chat,
   createBashTool,
   createVirtualSandbox,
+  isRecord,
   reminder,
 } from '@deepagents/context';
 
@@ -80,14 +85,20 @@ async function storedToolOutput(
   const branch = await store.getActiveBranch(chatId);
   assert.ok(branch?.headMessageId, 'expected a branch head');
   const chain = await store.getMessageChain(branch.headMessageId);
-  const outputs = chain
-    .filter((entry) => entry.name === 'assistant')
-    .flatMap((entry) => (entry.data as UIMessage).parts)
+  const assistantMessages = await validateUIMessages({
+    messages: chain
+      .filter((entry) => entry.name === 'assistant')
+      .map((entry) => entry.data),
+  });
+  const outputs = assistantMessages
+    .flatMap((message) => message.parts)
     .filter(isToolUIPart)
     .filter((part) => part.state === 'output-available')
     .map((part) => part.output);
   assert.equal(outputs.length, 1, 'expected exactly one tool output');
-  return outputs[0] as Record<string, unknown>;
+  const [output] = outputs;
+  assert.ok(isRecord(output), 'expected the tool output to be an object');
+  return output;
 }
 
 async function runBash(chatId: string, command: string) {
@@ -106,7 +117,9 @@ async function runBash(chatId: string, command: string) {
         const call = ctx.toolOutcome;
         return (
           call?.name === 'bash' &&
-          /^\s*sql\s+run\b/.test((call.input as { command: string }).command)
+          isRecord(call.input) &&
+          typeof call.input.command === 'string' &&
+          /^\s*sql\s+run\b/.test(call.input.command)
         );
       },
     }),
@@ -117,16 +130,11 @@ async function runBash(chatId: string, command: string) {
   return { output: await storedToolOutput(store, chatId), model };
 }
 
-function reminderTextsIn(prompt: unknown[]): string[] {
+function reminderTextsIn(prompt: LanguageModelV4Prompt): string[] {
   return prompt.flatMap((message) => {
-    const candidate = message as {
-      role?: string;
-      content?: Array<{ type?: string; text?: string }>;
-    };
-    if (candidate.role !== 'user' || !Array.isArray(candidate.content))
-      return [];
-    return candidate.content.flatMap((part) =>
-      part.type === 'text' && part.text?.startsWith('<system-reminder>')
+    if (message.role !== 'user') return [];
+    return message.content.flatMap((part) =>
+      part.type === 'text' && part.text.startsWith('<system-reminder>')
         ? [part.text]
         : [],
     );

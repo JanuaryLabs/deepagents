@@ -34,18 +34,24 @@ function wctx(
 function useFakeTime<T>(iso: string, fn: () => T): T {
   mock.timers.enable({ apis: ['Date'] });
   mock.timers.setTime(new Date(iso).getTime());
-  let result: T;
   try {
-    result = fn();
-  } catch (e) {
+    return fn();
+  } finally {
     mock.timers.reset();
-    throw e;
   }
-  if (result instanceof Promise) {
-    return result.finally(() => mock.timers.reset()) as T;
+}
+
+async function useFakeTimeAsync<T>(
+  iso: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  mock.timers.enable({ apis: ['Date'] });
+  mock.timers.setTime(new Date(iso).getTime());
+  try {
+    return await fn();
+  } finally {
+    mock.timers.reset();
   }
-  mock.timers.reset();
-  return result;
 }
 
 describe('dayChanged', () => {
@@ -298,7 +304,7 @@ describe('weekChanged', () => {
 
 describe('temporal predicate composition', () => {
   it('composes dayChanged with afterTurn', async () => {
-    await useFakeTime('2026-03-28T12:00:00Z', async () => {
+    await useFakeTimeAsync('2026-03-28T12:00:00Z', async () => {
       const pred = and(dayChanged(), afterTurn(3));
 
       assert.strictEqual(
@@ -328,7 +334,7 @@ describe('temporal predicate composition', () => {
   });
 
   it('composes hourChanged with not()', async () => {
-    await useFakeTime('2026-03-27T13:05:00Z', async () => {
+    await useFakeTimeAsync('2026-03-27T13:05:00Z', async () => {
       const pred = not(hourChanged());
 
       assert.strictEqual(

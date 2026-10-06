@@ -1,7 +1,6 @@
 import { getErrorMessage } from '@ai-sdk/provider';
 import {
   type LanguageModelUsage,
-  type ModelMessage,
   type PrepareStepFunction,
   type StepResult,
   type Tool,
@@ -18,6 +17,7 @@ import {
   type EstimateResult,
   type FragmentEstimate,
   getModelsRegistry,
+  inputPricePerMillion,
 } from './estimate.ts';
 import {
   type ChatMessage,
@@ -40,6 +40,7 @@ import {
   applyUserRemindersToMessage,
   evaluateFiredReminders,
   isConditionalReminder,
+  isRecord,
   isSyntheticReminderMessage,
   synthesizeReminderMessage,
 } from './fragments/reminders/index.ts';
@@ -69,7 +70,11 @@ import {
   type StoredChatData,
 } from './store/store.ts';
 import { extractPlainText } from './text.ts';
-import { requireUIMessage, requireUserUIMessage } from './ui-message-guards.ts';
+import {
+  isUIMessage,
+  requireUIMessage,
+  requireUserUIMessage,
+} from './ui-message-guards.ts';
 
 export type { SaveResult } from './save/save-pipeline.ts';
 export { HeadConflictError } from './save/save-pipeline.ts';
@@ -220,12 +225,10 @@ function mergeLanguageModelUsage(
 
 function isAvailableSkill(value: unknown): value is AvailableSkill {
   return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    typeof (value as Record<string, unknown>).name === 'string' &&
-    typeof (value as Record<string, unknown>).description === 'string' &&
-    typeof (value as Record<string, unknown>).path === 'string'
+    isRecord(value) &&
+    typeof value.name === 'string' &&
+    typeof value.description === 'string' &&
+    typeof value.path === 'string'
   );
 }
 
@@ -992,7 +995,7 @@ export class ContextEngine {
         ...(reminderInput ? [reminderInput] : []),
       ];
       if (inputs.length > 0) {
-        const inputModel = await convertToModelMessages(inputs as never, {
+        const inputModel = await convertToModelMessages(inputs, {
           ignoreIncompleteToolCalls: true,
         });
         const head = await this.headMessage();
@@ -1035,7 +1038,7 @@ export class ContextEngine {
         session.terminalToolParts.clear();
 
         return {
-          messages: [...(messages as ModelMessage[]), ...inputModel],
+          messages: [...messages, ...inputModel],
         };
       }
 
@@ -1119,7 +1122,7 @@ export class ContextEngine {
       ...message,
       id,
       parts,
-    } as UIMessage);
+    });
 
     if (!session) {
       this.set(fragment);
@@ -1199,7 +1202,7 @@ export class ContextEngine {
     const fragmentIndex = pending.findLastIndex((fragment) => {
       if (fragment.name !== 'user') return false;
       const encoded = fragment.codec?.encode();
-      return !encoded || !isSyntheticReminderMessage(encoded as UIMessage);
+      return !isUIMessage(encoded) || !isSyntheticReminderMessage(encoded);
     });
     if (fragmentIndex < 0) return;
     const fragment = pending[fragmentIndex];
@@ -1229,7 +1232,7 @@ export class ContextEngine {
     };
     if (onceIds.length > 0) {
       carrier.metadata = {
-        ...(carrier.metadata as Record<string, unknown> | undefined),
+        ...(isRecord(carrier.metadata) ? carrier.metadata : {}),
         onceIds,
       };
     }
@@ -1390,6 +1393,7 @@ export class ContextEngine {
       );
     }
 
+    const inputPrice = inputPricePerMillion(model);
     const tokenizer = registry.getTokenizer(modelId);
     const fragmentEstimates: FragmentEstimate[] = [];
 
@@ -1397,7 +1401,7 @@ export class ContextEngine {
     for (const fragment of this.#renderableFragments) {
       const rendered = renderer.render([fragment]);
       const tokens = tokenizer.count(rendered);
-      const cost = (tokens / 1_000_000) * model.cost.input;
+      const cost = (tokens / 1_000_000) * inputPrice;
       fragmentEstimates.push({
         id: fragment.id,
         name: fragment.name,
@@ -1414,7 +1418,7 @@ export class ContextEngine {
       for (const msg of chain) {
         const content = estimateMessageContent(msg.data);
         const tokens = tokenizer.count(content);
-        const cost = (tokens / 1_000_000) * model.cost.input;
+        const cost = (tokens / 1_000_000) * inputPrice;
         fragmentEstimates.push({
           name: msg.name,
           id: msg.id,
@@ -1430,7 +1434,7 @@ export class ContextEngine {
         fragment.codec ? fragment.codec.encode() : getFragmentData(fragment),
       );
       const tokens = tokenizer.count(content);
-      const cost = (tokens / 1_000_000) * model.cost.input;
+      const cost = (tokens / 1_000_000) * inputPrice;
       fragmentEstimates.push({
         name: fragment.name,
         id: fragment.id,

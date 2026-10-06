@@ -1,10 +1,9 @@
 import assert from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { text as streamText } from 'node:stream/consumers';
-import { after, before, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 import {
-  type AgentSandbox,
   DAYTONA_DEFAULT_DESTINATION,
   type DisposableSandbox,
   createBashTool,
@@ -13,16 +12,9 @@ import {
 
 type DaytonaClient = Parameters<typeof createDaytonaSandbox>[0];
 
-type DynamicImport = (specifier: string) => Promise<unknown>;
-
-const dynamicImport = new Function(
-  'specifier',
-  'return import(specifier)',
-) as DynamicImport;
-
 async function isDaytonaSdkAvailable(): Promise<boolean> {
   try {
-    await dynamicImport('@daytona/sdk');
+    await import('@daytona/sdk');
     return true;
   } catch {
     return false;
@@ -50,6 +42,30 @@ async function deleteByName(
   await created?.delete?.();
 }
 
+interface LiveDaytonaSandbox extends AsyncDisposable {
+  readonly sandbox: DisposableSandbox;
+}
+
+/**
+ * Creates a uniquely named live Daytona sandbox on its own client. Disposal
+ * disposes the sandbox, deletes it by name, then disposes the client.
+ */
+async function liveDaytonaSandbox(): Promise<LiveDaytonaSandbox> {
+  await using stack = new AsyncDisposableStack();
+  const { Daytona } = await import('@daytona/sdk');
+  const client = stack.use(new Daytona());
+  const sandboxName = `deepagents-test-${randomUUID()}`;
+  stack.defer(() => deleteByName(client, sandboxName));
+  const sandbox = stack.use(
+    await createDaytonaSandbox(client, { name: sandboxName }),
+  );
+  const owned = stack.move();
+  return {
+    sandbox,
+    [Symbol.asyncDispose]: () => owned.disposeAsync(),
+  };
+}
+
 describe('Daytona Sandbox', async () => {
   const sdkAvailable = await isDaytonaSdkAvailable();
   const apiKeyAvailable = Boolean(process.env.DAYTONA_API_KEY);
@@ -62,27 +78,10 @@ describe('Daytona Sandbox', async () => {
   }
 
   describe('createDaytonaSandbox', { skip: !liveAvailable }, () => {
-    let client: DaytonaClient;
-    let sandboxName: string;
-    let sandbox: DisposableSandbox;
-    let daytonaSpawn: NonNullable<DisposableSandbox['spawn']>;
-
-    before(async () => {
-      const { Daytona } = await import('@daytona/sdk');
-      client = new Daytona();
-      sandboxName = `deepagents-test-${randomUUID()}`;
-      sandbox = await createDaytonaSandbox(client, { name: sandboxName });
-      assert.ok(sandbox.spawn, 'daytona sandbox must expose spawn');
-      daytonaSpawn = sandbox.spawn;
-    });
-
-    after(async () => {
-      await sandbox?.dispose();
-      await deleteByName(client, sandboxName);
-    });
-
     describe('command execution', () => {
       it('captures stdout and preserves exit code on success', async () => {
+        await using live = await liveDaytonaSandbox();
+        const { sandbox } = live;
         const result = await sandbox.executeCommand('printf "hello"');
         assert.strictEqual(result.exitCode, 0);
         assert.strictEqual(result.stdout, 'hello');
@@ -90,6 +89,8 @@ describe('Daytona Sandbox', async () => {
       });
 
       it('preserves non-zero exit codes and command output', async () => {
+        await using live = await liveDaytonaSandbox();
+        const { sandbox } = live;
         const result = await sandbox.executeCommand(
           'echo "expected failure" >&2; exit 42',
         );
@@ -100,6 +101,8 @@ describe('Daytona Sandbox', async () => {
 
     describe('file operations', () => {
       it('writes and reads a file round trip', async () => {
+        await using live = await liveDaytonaSandbox();
+        const { sandbox } = live;
         await sandbox.writeFiles([
           { path: '/tmp/deepagents-daytona-file.txt', content: 'hello world' },
         ]);
@@ -111,6 +114,8 @@ describe('Daytona Sandbox', async () => {
       });
 
       it('reads raw bytes with the binary encoding', async () => {
+        await using live = await liveDaytonaSandbox();
+        const { sandbox } = live;
         const bytes = Buffer.from([0x89, 0x50, 0x00, 0xff]);
         await sandbox.writeFiles([
           { path: '/tmp/deepagents-daytona-blob.bin', content: bytes },
@@ -125,6 +130,8 @@ describe('Daytona Sandbox', async () => {
       });
 
       it('reports whether a path exists', async () => {
+        await using live = await liveDaytonaSandbox();
+        const { sandbox } = live;
         await sandbox.writeFiles([
           { path: '/tmp/deepagents-daytona-present.txt', content: 'x' },
         ]);
@@ -143,8 +150,11 @@ describe('Daytona Sandbox', async () => {
 
     describe('failure modes', () => {
       it('exit resolves with signal info when aborted mid-stream', async () => {
+        await using live = await liveDaytonaSandbox();
+        const { sandbox } = live;
+        assert.ok(sandbox.spawn, 'daytona sandbox must expose spawn');
         const controller = new AbortController();
-        const child = daytonaSpawn(
+        const child = sandbox.spawn(
           'printf "hi\\n"; sleep 30; printf "bye\\n"',
           {
             signal: controller.signal,
@@ -163,7 +173,10 @@ describe('Daytona Sandbox', async () => {
       });
 
       it('exit resolves with non-zero code on command failure', async () => {
-        const child = daytonaSpawn('exit 42');
+        await using live = await liveDaytonaSandbox();
+        const { sandbox } = live;
+        assert.ok(sandbox.spawn, 'daytona sandbox must expose spawn');
+        const child = sandbox.spawn('exit 42');
         await streamText(child.stdout);
         await streamText(child.stderr);
         assert.deepStrictEqual(await child.exit, {
@@ -174,7 +187,10 @@ describe('Daytona Sandbox', async () => {
       });
 
       it('stdout and stderr both close after the child exits', async () => {
-        const child = daytonaSpawn('echo hi; echo err >&2');
+        await using live = await liveDaytonaSandbox();
+        const { sandbox } = live;
+        assert.ok(sandbox.spawn, 'daytona sandbox must expose spawn');
+        const child = sandbox.spawn('echo hi; echo err >&2');
         const [out, err, info] = await Promise.all([
           streamText(child.stdout),
           streamText(child.stderr),
@@ -192,7 +208,10 @@ describe('Daytona Sandbox', async () => {
 
     describe('live streaming', () => {
       it('delivers stdout bytes before the child exits', async () => {
-        const child = daytonaSpawn('printf "hi\\n"; sleep 2; printf "bye\\n"');
+        await using live = await liveDaytonaSandbox();
+        const { sandbox } = live;
+        assert.ok(sandbox.spawn, 'daytona sandbox must expose spawn');
+        const child = sandbox.spawn('printf "hi\\n"; sleep 2; printf "bye\\n"');
 
         const winner = await Promise.race([
           readFirstChunk(child.stdout).then(() => 'chunk' as const),
@@ -211,7 +230,10 @@ describe('Daytona Sandbox', async () => {
       });
 
       it('streams stderr independently of stdout', async () => {
-        const child = daytonaSpawn(
+        await using live = await liveDaytonaSandbox();
+        const { sandbox } = live;
+        assert.ok(sandbox.spawn, 'daytona sandbox must expose spawn');
+        const child = sandbox.spawn(
           'echo "to stdout"; echo "to stderr" >&2; echo "also stdout"',
         );
         const [out, err] = await Promise.all([
@@ -229,7 +251,10 @@ describe('Daytona Sandbox', async () => {
 
     describe('SpawnOptions', () => {
       it('forwards env into the child', async () => {
-        const child = daytonaSpawn('printf "%s\\n" "$MY_VAR"', {
+        await using live = await liveDaytonaSandbox();
+        const { sandbox } = live;
+        assert.ok(sandbox.spawn, 'daytona sandbox must expose spawn');
+        const child = sandbox.spawn('printf "%s\\n" "$MY_VAR"', {
           env: { MY_VAR: 'hello-from-host' },
         });
         const text = await streamText(child.stdout);
@@ -239,11 +264,14 @@ describe('Daytona Sandbox', async () => {
       });
 
       it('forwards cwd into the child', async () => {
+        await using live = await liveDaytonaSandbox();
+        const { sandbox } = live;
+        assert.ok(sandbox.spawn, 'daytona sandbox must expose spawn');
         const cwd = '/tmp/deepagents-daytona-cwd';
         const mkdir = await sandbox.executeCommand(`mkdir -p ${cwd}`);
         assert.strictEqual(mkdir.exitCode, 0);
 
-        const child = daytonaSpawn('pwd', { cwd });
+        const child = sandbox.spawn('pwd', { cwd });
         const text = await streamText(child.stdout);
         const info = await child.exit;
         assert.strictEqual(text.trim(), cwd);
@@ -256,33 +284,16 @@ describe('Daytona Sandbox', async () => {
     'createDaytonaSandbox + createBashTool',
     { skip: !liveAvailable },
     () => {
-      let agent: AgentSandbox;
-      let client: DaytonaClient;
-      let sandboxName: string;
-
-      before(async () => {
-        const { Daytona } = await import('@daytona/sdk');
-        client = new Daytona();
-        sandboxName = `deepagents-test-${randomUUID()}`;
-        const backend = await createDaytonaSandbox(client, {
-          name: sandboxName,
-        });
-        const mkdir = await backend.executeCommand(
+      it('exposes spawn on the wrapped sandbox', async () => {
+        await using live = await liveDaytonaSandbox();
+        const mkdir = await live.sandbox.executeCommand(
           `mkdir -p ${DAYTONA_DEFAULT_DESTINATION}`,
         );
         assert.strictEqual(mkdir.exitCode, 0);
-        agent = await createBashTool({
-          sandbox: backend,
+        const agent = await createBashTool({
+          sandbox: live.sandbox,
           destination: DAYTONA_DEFAULT_DESTINATION,
         });
-      });
-
-      after(async () => {
-        await agent?.sandbox.dispose();
-        await deleteByName(client, sandboxName);
-      });
-
-      it('exposes spawn on the wrapped sandbox', () => {
         assert.ok(
           agent.sandbox.spawn,
           'createBashTool must forward spawn from the backend',
@@ -290,6 +301,15 @@ describe('Daytona Sandbox', async () => {
       });
 
       it('streams live stdout through the wrapper', async () => {
+        await using live = await liveDaytonaSandbox();
+        const mkdir = await live.sandbox.executeCommand(
+          `mkdir -p ${DAYTONA_DEFAULT_DESTINATION}`,
+        );
+        assert.strictEqual(mkdir.exitCode, 0);
+        const agent = await createBashTool({
+          sandbox: live.sandbox,
+          destination: DAYTONA_DEFAULT_DESTINATION,
+        });
         assert.ok(agent.sandbox.spawn);
         const child = agent.sandbox.spawn(
           'printf "hi\\n"; sleep 2; printf "bye\\n"',

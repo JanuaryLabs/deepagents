@@ -1,4 +1,4 @@
-import spawn, { type SubprocessError } from 'nano-spawn';
+import spawn, { SubprocessError } from 'nano-spawn';
 import { spawn as childSpawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -187,7 +187,11 @@ export abstract class ContainerSandboxStrategy<
       if (this.isServiceDown(message)) {
         throw this.engine.errors.serviceNotAvailable();
       }
-      throw this.engine.errors.creation(message, image, error as Error);
+      throw this.engine.errors.creation(
+        message,
+        image,
+        error instanceof Error ? error : undefined,
+      );
     }
   }
 
@@ -386,8 +390,14 @@ export abstract class ContainerSandboxStrategy<
       await this.cleanupCreatedVolumes();
     } catch (cleanupError) {
       if (originalError instanceof Error) {
-        const original = originalError as Error & { suppressed?: unknown[] };
-        original.suppressed = [...(original.suppressed ?? []), cleanupError];
+        const suppressed: unknown[] =
+          'suppressed' in originalError &&
+          Array.isArray(originalError.suppressed)
+            ? originalError.suppressed
+            : [];
+        Object.assign(originalError, {
+          suppressed: [...suppressed, cleanupError],
+        });
       }
     }
   }
@@ -425,7 +435,11 @@ export abstract class ContainerSandboxStrategy<
           );
         }
       }
-      throw this.engine.errors.creation(message, image, error as Error);
+      throw this.engine.errors.creation(
+        message,
+        image,
+        error instanceof Error ? error : undefined,
+      );
     }
   }
 
@@ -453,11 +467,17 @@ export abstract class ContainerSandboxStrategy<
         exitCode: 0,
       };
     } catch (error) {
-      const err = error as SubprocessError;
+      if (error instanceof SubprocessError) {
+        return {
+          stdout: error.stdout,
+          stderr: error.stderr || error.message,
+          exitCode: error.exitCode ?? 1,
+        };
+      }
       return {
-        stdout: err.stdout || '',
-        stderr: err.stderr || err.message || '',
-        exitCode: err.exitCode ?? 1,
+        stdout: '',
+        stderr: error instanceof Error ? error.message : '',
+        exitCode: 1,
       };
     }
   }

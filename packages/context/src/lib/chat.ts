@@ -1,11 +1,12 @@
 import {
   APICallError,
   InvalidToolInputError,
+  type LanguageModelUsage,
   NoSuchToolError,
-  type StreamTextResult,
   ToolCallRepairError,
   type ToolSet,
   type UIMessage,
+  type UIMessageChunk,
   type UIMessageStreamOptions,
   type UIMessageStreamWriter,
   createUIMessageStream,
@@ -15,10 +16,14 @@ import {
 import type { AgentModel } from './advisor.ts';
 import type { StreamOptions, ToolCallArguments } from './agent.ts';
 import type { ContextEngine } from './engine.ts';
+import { isRecord } from './fragments/reminders/index.ts';
 import type { AgentSandbox } from './sandbox/types.ts';
 import { TitleGenerator } from './title.ts';
 
-type ChatConfig = Omit<StreamOptions, 'maxRetries'> & {
+type ChatConfig<TOOLS extends ToolSet> = Omit<
+  StreamOptions<TOOLS>,
+  'maxRetries'
+> & {
   /** Native writer for data parts, available before the first model request. */
   onStream?: (writer: UIMessageStreamWriter) => void;
   generateTitle?: boolean;
@@ -32,14 +37,23 @@ type ChatConfig = Omit<StreamOptions, 'maxRetries'> & {
     | Promise<Record<string, unknown> | undefined>;
 };
 
+/** The part of an agent's stream result that `chat()` consumes. */
+export interface ChatStreamResult {
+  toUIMessageStream(
+    options?: UIMessageStreamOptions<UIMessage>,
+  ): ReadableStream<UIMessageChunk>;
+  /** AI SDK v7 can settle an aborted stream without usage data. */
+  readonly usage: PromiseLike<LanguageModelUsage | undefined>;
+}
+
 export interface ChatAgentLike<TOOLS extends ToolSet = {}> {
   context?: ContextEngine;
   model?: AgentModel;
   sandbox: AgentSandbox;
   tools?: TOOLS;
   stream(
-    ...args: ToolCallArguments<TOOLS, ChatConfig>
-  ): Promise<StreamTextResult<ToolSet, any, any>>;
+    ...args: ToolCallArguments<TOOLS, ChatConfig<TOOLS>>
+  ): Promise<ChatStreamResult>;
 }
 
 export type ChatMessageMetadata =
@@ -58,7 +72,7 @@ export const defaultChatMessageMetadata: NonNullable<ChatMessageMetadata> = ({
 };
 
 export type ChatOptions<TOOLS extends ToolSet> = NonNullable<
-  ToolCallArguments<TOOLS, ChatConfig>[0]
+  ToolCallArguments<TOOLS, ChatConfig<TOOLS>>[0]
 >;
 
 /**
@@ -81,7 +95,7 @@ export type ChatOptions<TOOLS extends ToolSet> = NonNullable<
  */
 export async function chat<const TOOLS extends ToolSet>(
   agent: ChatAgentLike<TOOLS>,
-  ...args: ToolCallArguments<NoInfer<TOOLS>, ChatConfig>
+  ...args: ToolCallArguments<NoInfer<TOOLS>, ChatConfig<NoInfer<TOOLS>>>
 ) {
   const [options] = args;
   const context = agent.context;
@@ -107,27 +121,29 @@ export async function chat<const TOOLS extends ToolSet>(
     generateId: () => initialAssistantMsgId,
     onError: options?.onError ?? formatChatError,
     onStepEnd: async ({ responseMessage }) => {
-      await context.writeAssistantSegment(responseMessage as UIMessage);
+      await context.writeAssistantSegment(responseMessage);
     },
     onEnd: async ({ responseMessage, isAborted }) => {
-      let message = responseMessage as UIMessage;
-      if (isAborted) {
-        message = { ...message, parts: sanitizeAbortedParts(message.parts) };
-      }
+      const settled = isAborted
+        ? {
+            ...responseMessage,
+            parts: sanitizeAbortedParts(responseMessage.parts),
+          }
+        : responseMessage;
 
-      const finalMetadata = await options?.finalAssistantMetadata?.(message);
+      const finalMetadata = await options?.finalAssistantMetadata?.(settled);
       const mergedMetadata = {
-        ...((message.metadata as object) ?? {}),
+        ...(isRecord(settled.metadata) ? settled.metadata : {}),
         ...(finalMetadata ?? {}),
       };
-      if (Object.keys(mergedMetadata).length > 0) {
-        message = { ...message, metadata: mergedMetadata } as UIMessage;
-      }
+      const message =
+        Object.keys(mergedMetadata).length > 0
+          ? { ...settled, metadata: mergedMetadata }
+          : settled;
 
       await context.writeAssistantSegment(message);
       const usage = await result?.usage;
-      // AI SDK v7 can resolve an aborted stream without usage data when the
-      // provider never emitted a finish chunk.
+      // The provider may never have emitted a finish chunk.
       if (usage !== undefined) {
         await context.trackUsage(usage);
       }
@@ -164,12 +180,6 @@ export async function chat<const TOOLS extends ToolSet>(
   });
 }
 
-const TERMINAL_TOOL_STATES = new Set([
-  'output-available',
-  'output-error',
-  'output-denied',
-]);
-
 function sanitizeAbortedParts(parts: UIMessage['parts']): UIMessage['parts'] {
   const sanitized: UIMessage['parts'] = [];
   for (const part of parts) {
@@ -177,16 +187,27 @@ function sanitizeAbortedParts(parts: UIMessage['parts']): UIMessage['parts'] {
       sanitized.push(part);
       continue;
     }
-    if (TERMINAL_TOOL_STATES.has(part.state)) {
-      sanitized.push(part);
-      continue;
+    switch (part.state) {
+      case 'output-available':
+      case 'output-error':
+      case 'output-denied':
+        sanitized.push(part);
+        break;
+      case 'input-streaming':
+        break;
+      default: {
+        // An output-error part may only carry an approval that was granted.
+        const { approval, ...pending } = part;
+        sanitized.push({
+          ...pending,
+          state: 'output-error',
+          errorText: 'Cancelled by user',
+          ...(approval?.approved === true
+            ? { approval: { ...approval, approved: true } }
+            : {}),
+        });
+      }
     }
-    if (part.state === 'input-streaming') continue;
-    sanitized.push({
-      ...part,
-      state: 'output-error',
-      errorText: 'Cancelled by user',
-    } as (typeof sanitized)[number]);
   }
   return sanitized;
 }

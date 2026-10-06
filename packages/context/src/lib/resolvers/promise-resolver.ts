@@ -3,11 +3,14 @@ import type { LoadContext, ValueResolver } from './types.ts';
 export class PromiseResolver implements ValueResolver {
   readonly name = 'PromiseResolver';
 
-  canResolve(value: unknown): boolean {
+  canResolve(value: unknown): value is Promise<unknown> {
     return value instanceof Promise;
   }
 
-  resolve(value: unknown, _ctx: LoadContext): Promise<unknown> {
-    return value as Promise<unknown>;
+  async resolve(value: unknown, _ctx: LoadContext): Promise<unknown> {
+    if (!this.canResolve(value)) {
+      throw new TypeError(`${this.name} cannot resolve a ${typeof value}`);
+    }
+    return value;
   }
 }

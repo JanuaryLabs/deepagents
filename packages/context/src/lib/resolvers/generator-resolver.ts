@@ -24,7 +24,7 @@ export class GeneratorResolver implements ValueResolver {
     this.#maxItems = options.maxItems ?? DEFAULT_MAX_ITEMS;
   }
 
-  canResolve(value: unknown): boolean {
+  canResolve(value: unknown): value is GeneratorFragmentLoader {
     return (
       typeof value === 'function' &&
       GENERATOR_CTOR_NAMES.has(value.constructor.name)
@@ -32,7 +32,10 @@ export class GeneratorResolver implements ValueResolver {
   }
 
   async resolve(value: unknown, ctx: LoadContext): Promise<unknown> {
-    const iterable = (value as GeneratorFragmentLoader)(ctx);
+    if (!this.canResolve(value)) {
+      throw new TypeError(`${this.name} cannot resolve a ${typeof value}`);
+    }
+    const iterable = value(ctx);
     const collected: unknown[] = [];
     if (isAsyncIterable(iterable)) {
       for await (const chunk of iterable) {

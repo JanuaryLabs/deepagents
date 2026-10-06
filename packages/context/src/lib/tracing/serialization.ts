@@ -1,5 +1,6 @@
 import type { LanguageModelUsage } from 'ai';
 
+import { isRecord } from '../telemetry/redact-telemetry-event.ts';
 import type { GenerationUsageData, OpenAISpanError } from './types.ts';
 
 export function normalizeForJson(value: unknown): unknown {
@@ -34,19 +35,22 @@ export function normalizeForJson(value: unknown): unknown {
   }
 
   if (typeof value === 'object') {
-    const normalized: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(
-      value as Record<string, unknown>,
-    )) {
-      const result = normalizeForJson(entry);
-      if (result !== undefined) {
-        normalized[key] = result;
-      }
-    }
-    return normalized;
+    return normalizeObjectForJson(value);
   }
 
   return String(value);
+}
+
+/** Normalizes each own enumerable property, dropping undefined results. */
+export function normalizeObjectForJson(value: object): Record<string, unknown> {
+  const normalized: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const result = normalizeForJson(entry);
+    if (result !== undefined) {
+      normalized[key] = result;
+    }
+  }
+  return normalized;
 }
 
 export function normalizeRecordArray(
@@ -57,11 +61,7 @@ export function normalizeRecordArray(
     return undefined;
   }
 
-  return normalized.map((item) =>
-    typeof item === 'object' && item != null
-      ? (item as Record<string, unknown>)
-      : { value: item },
-  );
+  return normalized.map((item) => (isRecord(item) ? item : { value: item }));
 }
 
 export function normalizeUsage(
@@ -101,11 +101,11 @@ export function normalizeUsage(
 
 export function errorToSpanError(error: unknown): OpenAISpanError {
   if (error instanceof Error) {
-    const data = normalizeForJson({
+    const data = normalizeObjectForJson({
       name: error.name,
       stack: error.stack,
       cause: error.cause,
-    }) as Record<string, unknown>;
+    });
 
     return {
       message: error.message,

@@ -20,9 +20,14 @@ const sandbox = await createBashTool({
 });
 
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
-  process.once(signal, async () => {
-    await backend[Symbol.asyncDispose]();
-    process.exit(0);
+  process.once(signal, () => {
+    backend[Symbol.asyncDispose]().then(
+      () => process.exit(0),
+      (error: unknown) => {
+        console.error(error);
+        process.exit(1);
+      },
+    );
   });
 }
 
@@ -50,11 +55,14 @@ const ai = agent({
   },
 });
 
-let text = 'List the files in /tmp using bash, then tell me your name.';
-while (true) {
+async function* prompts() {
+  yield 'List the files in /tmp using bash, then tell me your name.';
+  while (true) yield await input();
+}
+
+for await (const text of prompts()) {
   console.log('Turn: ', await context.getTurnCount());
   await context.continue(user(text));
   const stream = await chat(ai);
   await printer.readableStream(stream);
-  text = await input();
 }

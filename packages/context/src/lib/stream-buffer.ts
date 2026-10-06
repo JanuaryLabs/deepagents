@@ -19,8 +19,17 @@ export interface PersistedWriterOptions {
   flushSize?: number;
 }
 
+/**
+ * A `UIMessageStreamWriter` whose `write` persists the chunk before forwarding
+ * it, so it returns that work's promise. Await it to keep chunk order and to
+ * observe storage failures.
+ */
+export type PersistedStreamWriter = Omit<UIMessageStreamWriter, 'write'> & {
+  write(part: StreamPart): Promise<void>;
+};
+
 export interface PersistedWriter {
-  writer: UIMessageStreamWriter;
+  writer: PersistedStreamWriter;
   streamId: string;
   flush(): Promise<void>;
   complete(): Promise<void>;
@@ -91,7 +100,7 @@ export async function persistedWriter(
     }
   }
 
-  const wrappedWriter: UIMessageStreamWriter = {
+  const wrappedWriter: PersistedStreamWriter = {
     onError: writer.onError,
     async write(part: StreamPart) {
       await persistChunk(makeChunk(part));

@@ -628,7 +628,7 @@ describe('Delete Chat', () => {
         store.getChat('reader-chat-3'),
         store.listChats({ userId: 'alice' }),
         store.deleteChat('reader-chat-4'),
-      ];
+      ] as const;
 
       const results = await Promise.all(operations);
 
@@ -639,9 +639,9 @@ describe('Delete Chat', () => {
 
       // Reads should work
       assert.ok(results[2]); // getChat 2
-      assert.strictEqual((results[2] as { id: string }).id, 'reader-chat-2');
+      assert.strictEqual(results[2].id, 'reader-chat-2');
       assert.ok(results[3]); // getChat 3
-      assert.strictEqual((results[3] as { id: string }).id, 'reader-chat-3');
+      assert.strictEqual(results[3].id, 'reader-chat-3');
 
       // Final state: only chats 2 and 3 should remain
       const finalChats = await store.listChats({ userId: 'alice' });

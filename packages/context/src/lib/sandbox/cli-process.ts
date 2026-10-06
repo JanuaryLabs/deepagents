@@ -30,8 +30,8 @@ export function toSandboxProcess(
   }
 
   return {
-    stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
-    stderr: Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>,
+    stdout: Readable.toWeb(child.stdout),
+    stderr: Readable.toWeb(child.stderr),
     exit: new Promise<ExitInfo>((resolve, reject) => {
       const settle = () => {
         child.removeListener('exit', onExitEvent);

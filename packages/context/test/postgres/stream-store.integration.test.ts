@@ -92,7 +92,8 @@ async function openStoreWithRetry(
 }
 
 function isTransientPostgresStartupError(error: unknown): boolean {
-  const maybeCode = (error as { code?: unknown }).code;
+  const maybeCode =
+    error instanceof Error && 'code' in error ? error.code : undefined;
   return (
     maybeCode === 'ECONNRESET' ||
     maybeCode === 'ECONNREFUSED' ||

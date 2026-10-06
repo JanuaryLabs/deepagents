@@ -1,10 +1,12 @@
 import { PassThrough, Readable } from 'node:stream';
+import { text } from 'node:stream/consumers';
 
 import { readFileContent } from './read-file.ts';
 import type {
   CommandResult,
   DisposableSandbox,
   ExecuteCommandOptions,
+  ExitInfo,
   SandboxProcess,
   SandboxReadinessOptions,
   SpawnOptions,
@@ -148,12 +150,6 @@ function startKernelProcess(
   };
 }
 
-async function readAll(stream: Readable): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of stream) chunks.push(chunk as Buffer);
-  return Buffer.concat(chunks).toString('utf8');
-}
-
 /**
  * Wire an AbortSignal to a cancellation callback. Returns an unbind fn that
  * removes the listener. If the signal is already aborted, fires `onAbort`
@@ -218,7 +214,7 @@ export async function createAgentOsSandbox(
 
   let os: AgentOsInstance;
   try {
-    os = await AgentOs.create(kernelOptions as Record<string, unknown>);
+    os = await AgentOs.create(kernelOptions);
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
     throw new AgentOsCreationError(err.message, err);
@@ -227,8 +223,8 @@ export async function createAgentOsSandbox(
   try {
     const probe = startKernelProcess(os, ':', {});
     const [, stderr, exitCode] = await Promise.all([
-      readAll(probe.stdout),
-      readAll(probe.stderr),
+      text(probe.stdout),
+      text(probe.stderr),
       probe.exit,
     ]);
     if (exitCode !== 0) {
@@ -257,8 +253,8 @@ export async function createAgentOsSandbox(
 
       try {
         const [stdout, stderr, exitCode] = await Promise.all([
-          readAll(proc.stdout),
-          readAll(proc.stderr),
+          text(proc.stdout),
+          text(proc.stderr),
           proc.exit,
         ]);
         return { stdout, stderr, exitCode };
@@ -274,14 +270,15 @@ export async function createAgentOsSandbox(
       if (signal?.aborted) {
         const empty = (): ReadableStream<Uint8Array> =>
           new ReadableStream({ start: (c) => c.close() });
+        const killed: ExitInfo = {
+          code: null,
+          signal: 'SIGKILL',
+          success: false,
+        };
         return {
           stdout: empty(),
           stderr: empty(),
-          exit: Promise.resolve({
-            code: null,
-            signal: 'SIGKILL' as NodeJS.Signals,
-            success: false,
-          }),
+          exit: Promise.resolve(killed),
         };
       }
 
@@ -289,19 +286,19 @@ export async function createAgentOsSandbox(
       const unbind = bindAbort(signal, proc.kill);
 
       const exit = proc.exit
-        .then((code) => {
+        .then((code): ExitInfo => {
           const killed = proc.wasKilled(code);
           return {
             code: killed ? null : code,
-            signal: killed ? ('SIGKILL' as NodeJS.Signals) : null,
+            signal: killed ? 'SIGKILL' : null,
             success: !killed && code === 0,
           };
         })
         .finally(unbind);
 
       return {
-        stdout: Readable.toWeb(proc.stdout) as ReadableStream<Uint8Array>,
-        stderr: Readable.toWeb(proc.stderr) as ReadableStream<Uint8Array>,
+        stdout: Readable.toWeb(proc.stdout),
+        stderr: Readable.toWeb(proc.stderr),
         exit,
       };
     },

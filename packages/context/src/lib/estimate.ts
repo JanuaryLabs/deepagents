@@ -1,4 +1,5 @@
 import { encode } from 'gpt-tokenizer';
+import { z } from 'zod';
 
 import type { ContextFragment } from './fragments.ts';
 import type { Models } from './models.generated.ts';
@@ -16,13 +17,14 @@ export interface ModelCost {
 }
 
 /**
- * Model information from models.dev
+ * Model information from models.dev. `family` and `cost` are absent for some
+ * models there; a model without `cost` cannot be priced.
  */
 export interface ModelInfo {
   id: string;
   name: string;
-  family: string;
-  cost: ModelCost;
+  family?: string;
+  cost?: ModelCost;
   limit: {
     context: number;
     output: number;
@@ -77,23 +79,41 @@ export const defaultTokenizer: Tokenizer = {
   },
 };
 
-type ModelsDevResponse = Record<
-  string,
-  {
-    id: string;
-    name: string;
-    models: Record<
-      string,
-      {
-        id: string;
-        name: string;
-        family: string;
-        cost: ModelCost;
-        limit: { context: number; output: number };
-      }
-    >;
+const modelCostSchema = z.object({
+  input: z.number(),
+  output: z.number(),
+  cache_read: z.number().optional(),
+  cache_write: z.number().optional(),
+  reasoning: z.number().optional(),
+}) satisfies z.ZodType<ModelCost>;
+
+const modelsDevResponseSchema = z.record(
+  z.string(),
+  z.object({
+    models: z.record(
+      z.string(),
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        family: z.string().optional(),
+        cost: modelCostSchema.optional(),
+        limit: z.object({ context: z.number(), output: z.number() }),
+      }),
+    ),
+  }),
+);
+
+/**
+ * Price per 1M input tokens. Throws for a model models.dev lists without cost.
+ */
+export function inputPricePerMillion(model: ModelInfo): number {
+  if (!model.cost) {
+    throw new Error(
+      `Model "${model.provider}:${model.id}" has no pricing data on models.dev`,
+    );
   }
->;
+  return model.cost.input;
+}
 
 /**
  * Registry for AI model information from models.dev
@@ -116,7 +136,7 @@ export class ModelsRegistry {
       throw new Error(`Failed to fetch models: ${response.statusText}`);
     }
 
-    const data = (await response.json()) as ModelsDevResponse;
+    const data = modelsDevResponseSchema.parse(await response.json());
 
     for (const [providerId, provider] of Object.entries(data)) {
       for (const [modelId, model] of Object.entries(provider.models)) {
@@ -179,14 +199,10 @@ export class ModelsRegistry {
    * Get the appropriate tokenizer for a model
    */
   getTokenizer(modelId: string): Tokenizer {
-    const model = this.get(modelId);
-    if (model) {
-      const familyTokenizer = this.#tokenizers.get(model.family);
-      if (familyTokenizer) {
-        return familyTokenizer;
-      }
-    }
-    return this.#defaultTokenizer;
+    const family = this.get(modelId)?.family;
+    const familyTokenizer =
+      family === undefined ? undefined : this.#tokenizers.get(family);
+    return familyTokenizer ?? this.#defaultTokenizer;
   }
 
   /**
@@ -202,9 +218,10 @@ export class ModelsRegistry {
       );
     }
 
+    const inputPrice = inputPricePerMillion(model);
     const tokenizer = this.getTokenizer(modelId);
     const tokens = tokenizer.count(input);
-    const cost = (tokens / 1_000_000) * model.cost.input;
+    const cost = (tokens / 1_000_000) * inputPrice;
 
     return {
       model: model.id,
@@ -221,17 +238,14 @@ export class ModelsRegistry {
   }
 }
 
-// Singleton instance for convenience
-let _registry: ModelsRegistry | null = null;
+// Shared instance for convenience. Construction does no I/O; load() fetches.
+const sharedRegistry = new ModelsRegistry();
 
 /**
  * Get the shared ModelsRegistry instance
  */
 export function getModelsRegistry(): ModelsRegistry {
-  if (!_registry) {
-    _registry = new ModelsRegistry();
-  }
-  return _registry;
+  return sharedRegistry;
 }
 
 /**
@@ -259,15 +273,16 @@ export async function estimate(
     );
   }
 
+  const inputPrice = inputPricePerMillion(model);
   const tokenizer = registry.getTokenizer(modelId);
   const totalTokens = tokenizer.count(input);
-  const totalCost = (totalTokens / 1_000_000) * model.cost.input;
+  const totalCost = (totalTokens / 1_000_000) * inputPrice;
 
   // Calculate per-fragment estimates
   const fragmentEstimates: FragmentEstimate[] = fragments.map((fragment) => {
     const rendered = renderer.render([fragment]);
     const tokens = tokenizer.count(rendered);
-    const cost = (tokens / 1_000_000) * model.cost.input;
+    const cost = (tokens / 1_000_000) * inputPrice;
     return {
       id: fragment.id,
       name: fragment.name,

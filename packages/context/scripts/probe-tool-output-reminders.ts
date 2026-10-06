@@ -21,6 +21,7 @@ import {
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { z } from 'zod';
 
 /* eslint-disable @nx/enforce-module-boundaries -- This probe intentionally exercises the package's public entrypoints. */
 import {
@@ -126,6 +127,30 @@ function textMessage(text: string): UIMessage {
   return { id: generateId(), role: 'user', parts: [{ type: 'text', text }] };
 }
 
+const fileChange = z.object({
+  op: z.enum(['write', 'delete', 'rename']),
+  path: z.string(),
+  from: z.string().optional(),
+  timestamp: z.number(),
+}) satisfies z.ZodType<FileChange>;
+
+/** The `meta.fileChanges` withStraceFileChanges attaches to a command result. */
+const outputWithFileChanges = z.object({
+  meta: z.object({ fileChanges: z.array(fileChange).optional() }).optional(),
+});
+
+const telemetryRecord = z.object({ event: z.string(), data: z.unknown() });
+
+function wroteObservedFile(output: unknown): boolean {
+  const parsed = outputWithFileChanges.safeParse(output);
+  return (
+    parsed.success &&
+    (parsed.data.meta?.fileChanges ?? []).some(
+      (change) => change.op === 'write' && change.path === writtenPath,
+    )
+  );
+}
+
 function rawToolOutputs(messages: UIMessage[]): unknown[] {
   return messages.flatMap((message) =>
     message.parts.flatMap((part) =>
@@ -185,7 +210,8 @@ try {
     chatId: 'tool-output-reminder-probe',
     userId: 'probe',
   });
-  let predicateSawRawFileMetadata = false;
+  const predicateResults: boolean[] = [];
+  const predicateSawRawFileMetadata = () => predicateResults.at(-1) ?? false;
   context.set(
     reminder(reminderText, {
       target: 'tool-output',
@@ -193,13 +219,9 @@ try {
         name: 'bash',
         state: 'output-available',
         output(output) {
-          const changes = (output as { meta?: { fileChanges?: FileChange[] } })
-            .meta?.fileChanges;
-          predicateSawRawFileMetadata =
-            changes?.some(
-              (change) => change.op === 'write' && change.path === writtenPath,
-            ) ?? false;
-          return predicateSawRawFileMetadata;
+          const saw = wroteObservedFile(output);
+          predicateResults.push(saw);
+          return saw;
         },
       }),
     }),
@@ -217,7 +239,7 @@ try {
   await context.continue(textMessage('Write the probe file.'));
   await drain(await chat(probeAgent, { generateTitle: false }));
 
-  assert.equal(predicateSawRawFileMetadata, true);
+  assert.equal(predicateSawRawFileMetadata(), true);
   assert.ok(
     fileChangeCalls
       .flat()
@@ -242,15 +264,9 @@ try {
   assert.doesNotMatch(JSON.stringify(modelOutputs), /fileChanges|meta/);
 
   const stored = await context.getMessages();
-  const rawOutputs = rawToolOutputs(stored) as Array<{
-    meta?: { fileChanges?: FileChange[] };
-  }>;
+  const rawOutputs = rawToolOutputs(stored);
   assert.equal(rawOutputs.length, 1);
-  assert.ok(
-    rawOutputs[0]?.meta?.fileChanges?.some(
-      (change) => change.op === 'write' && change.path === writtenPath,
-    ),
-  );
+  assert.ok(wroteObservedFile(rawOutputs[0]));
   const synthetic = stored.find(isSyntheticReminderMessage);
   assert.equal(synthetic?.metadata?.synthetic.source, 'reminder');
 
@@ -272,7 +288,7 @@ try {
   const telemetryRecords = (await readFile(telemetryPath, 'utf8'))
     .trim()
     .split('\n')
-    .map((line) => JSON.parse(line) as { event: string; data: unknown });
+    .map((line) => telemetryRecord.parse(JSON.parse(line)));
   const telemetryEvents = telemetryRecords.map((record) => record.event);
   for (const required of [
     'onStart',
@@ -298,7 +314,7 @@ try {
   const summary = {
     passed: true,
     assertions: {
-      predicateSawRawFileMetadata,
+      predicateSawRawFileMetadata: predicateSawRawFileMetadata(),
       fileChangeTracked: true,
       rawOutputStoredWithHostMetadata: true,
       modelOutputExcludedHostMetadata: true,

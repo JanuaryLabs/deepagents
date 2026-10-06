@@ -1,7 +1,10 @@
 import { createRequire } from 'node:module';
 import type { Pool, PoolClient, PoolConfig } from 'pg';
+import { z } from 'zod';
 
+import { bigintColumn } from '../store/columns.ts';
 import { postgresStreamDDL } from './ddl.stream.postgres.ts';
+import { streamStatus, toStreamPart } from './rows.ts';
 import type {
   ListStreamIdsOptions,
   StreamChunkData,
@@ -17,22 +20,39 @@ export interface PostgresStreamStoreOptions {
   schema?: string;
 }
 
-type StreamRow = {
-  id: string;
-  status: StreamStatus;
-  created_at: string | number;
-  started_at: string | number | null;
-  finished_at: string | number | null;
-  cancel_requested_at: string | number | null;
-  error: string | null;
-};
+// Row shapes as pg returns them for ddl.stream.postgres.ts: BIGINT arrives as
+// a string (see bigintColumn), INTEGER as a number, JSONB parsed.
 
-type StreamChunkRow = {
-  stream_id: string;
-  seq: number;
-  data: StreamChunkData['data'];
-  created_at: string | number;
-};
+const storedStream = z
+  .object({
+    id: z.string(),
+    status: streamStatus,
+    created_at: bigintColumn,
+    started_at: bigintColumn.nullable(),
+    finished_at: bigintColumn.nullable(),
+    cancel_requested_at: bigintColumn.nullable(),
+    error: z.string().nullable(),
+  })
+  .transform((row): StreamData => ({
+    id: row.id,
+    status: row.status,
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    cancelRequestedAt: row.cancel_requested_at,
+    error: row.error,
+  }));
+
+const statusRow = z.object({ status: streamStatus });
+
+const idRow = z.object({ id: z.string() });
+
+const chunkRow = z.object({
+  stream_id: z.string(),
+  seq: z.number(),
+  data: z.unknown(),
+  created_at: bigintColumn,
+});
 
 export class PostgresStreamStore extends StreamStore {
   #pool: Pool;
@@ -96,13 +116,18 @@ export class PostgresStreamStore extends StreamStore {
     }
   }
 
-  async #query<T extends Record<string, unknown>>(
-    sql: string,
-    params?: unknown[],
-  ): Promise<T[]> {
+  async #query(sql: string, params?: unknown[]): Promise<unknown[]> {
     this.#ensureInitialized();
     const result = await this.#pool.query(sql, params);
-    return result.rows as T[];
+    return result.rows;
+  }
+
+  async #rows<Row extends z.ZodType>(
+    row: Row,
+    sql: string,
+    params?: unknown[],
+  ): Promise<z.output<Row>[]> {
+    return z.array(row).parse(await this.#query(sql, params));
   }
 
   async #useTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -133,7 +158,8 @@ export class PostgresStreamStore extends StreamStore {
   async upsertStream(
     stream: StreamData,
   ): Promise<{ stream: StreamData; created: boolean }> {
-    const rows = await this.#query<StreamRow>(
+    const [created] = await this.#rows(
+      storedStream,
       `INSERT INTO ${this.#t('streams')}
        (id, status, created_at, started_at, finished_at, cancel_requested_at, error)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -142,8 +168,8 @@ export class PostgresStreamStore extends StreamStore {
       streamParams(stream),
     );
 
-    if (rows[0]) {
-      return { stream: rowToStream(rows[0]), created: true };
+    if (created) {
+      return { stream: created, created: true };
     }
 
     const existing = await this.getStream(stream.id);
@@ -156,15 +182,17 @@ export class PostgresStreamStore extends StreamStore {
   }
 
   async getStream(streamId: string): Promise<StreamData | undefined> {
-    const rows = await this.#query<StreamRow>(
+    const [found] = await this.#rows(
+      storedStream,
       `SELECT * FROM ${this.#t('streams')} WHERE id = $1`,
       [streamId],
     );
-    return rows[0] ? rowToStream(rows[0]) : undefined;
+    return found;
   }
 
   async getStreamStatus(streamId: string): Promise<StreamStatus | undefined> {
-    const rows = await this.#query<{ status: StreamStatus }>(
+    const rows = await this.#rows(
+      statusRow,
       `SELECT status FROM ${this.#t('streams')} WHERE id = $1`,
       [streamId],
     );
@@ -182,7 +210,7 @@ export class PostgresStreamStore extends StreamStore {
 
     sql += ' ORDER BY created_at ASC, id ASC';
 
-    const rows = await this.#query<{ id: string }>(sql, params);
+    const rows = await this.#rows(idRow, sql, params);
     return rows.map((row) => row.id);
   }
 
@@ -191,16 +219,15 @@ export class PostgresStreamStore extends StreamStore {
     update: StreamUpdater,
   ): Promise<StreamUpdateResult> {
     return this.#useTransaction(async (client) => {
-      const selected = await client.query<StreamRow>(
+      const selected = await client.query(
         `SELECT * FROM ${this.#t('streams')} WHERE id = $1 FOR UPDATE`,
         [streamId],
       );
-      const row = selected.rows[0];
-      if (!row) {
+      const stream = storedStream.optional().parse(selected.rows[0]);
+      if (!stream) {
         throw new Error(`updateStream: stream "${streamId}" not found`);
       }
 
-      const stream = rowToStream(row);
       const updates = update(stream);
       if (updates === undefined) return { stream, updated: false };
 
@@ -223,14 +250,14 @@ export class PostgresStreamStore extends StreamStore {
       if (setClauses.length === 0) return { stream, updated: false };
 
       params.push(streamId);
-      const updated = await client.query<StreamRow>(
+      const updated = await client.query(
         `UPDATE ${this.#t('streams')}
             SET ${setClauses.join(', ')}
           WHERE id = $${params.length}
           RETURNING *`,
         params,
       );
-      return { stream: rowToStream(updated.rows[0]), updated: true };
+      return { stream: storedStream.parse(updated.rows[0]), updated: true };
     });
   }
 
@@ -314,7 +341,7 @@ export class PostgresStreamStore extends StreamStore {
           ['failed', failedAt, failure.error, failure.streamId],
         );
         if (result.rowCount !== 1) {
-          const existing = await client.query<{ id: string }>(
+          const existing = await client.query(
             `SELECT id FROM ${this.#t('streams')} WHERE id = $1`,
             [failure.streamId],
           );
@@ -346,13 +373,15 @@ export class PostgresStreamStore extends StreamStore {
       sql += ` LIMIT $${params.length}`;
     }
 
-    const rows = await this.#query<StreamChunkRow>(sql, params);
-    return rows.map((row) => ({
-      streamId: row.stream_id,
-      seq: row.seq,
-      data: row.data,
-      createdAt: toNumber(row.created_at),
-    }));
+    const rows = await this.#rows(chunkRow, sql, params);
+    return Promise.all(
+      rows.map(async (row): Promise<StreamChunkData> => ({
+        streamId: row.stream_id,
+        seq: row.seq,
+        data: await toStreamPart(row.data),
+        createdAt: row.created_at,
+      })),
+    );
   }
 
   async deleteStream(streamId: string): Promise<void> {
@@ -363,11 +392,11 @@ export class PostgresStreamStore extends StreamStore {
 
   async reopenStream(streamId: string): Promise<StreamData> {
     return this.#useTransaction(async (client) => {
-      const result = await client.query<StreamRow>(
+      const result = await client.query(
         `SELECT * FROM ${this.#t('streams')} WHERE id = $1 FOR UPDATE`,
         [streamId],
       );
-      const row = result.rows[0];
+      const row = statusRow.optional().parse(result.rows[0]);
       if (!row) {
         throw new Error(`Stream "${streamId}" not found`);
       }
@@ -414,26 +443,6 @@ function streamParams(stream: StreamData): unknown[] {
     stream.cancelRequestedAt,
     stream.error,
   ];
-}
-
-function rowToStream(row: StreamRow): StreamData {
-  return {
-    id: row.id,
-    status: row.status,
-    createdAt: toNumber(row.created_at),
-    startedAt: toNullableNumber(row.started_at),
-    finishedAt: toNullableNumber(row.finished_at),
-    cancelRequestedAt: toNullableNumber(row.cancel_requested_at),
-    error: row.error,
-  };
-}
-
-function toNumber(value: string | number): number {
-  return typeof value === 'number' ? value : Number(value);
-}
-
-function toNullableNumber(value: string | number | null): number | null {
-  return value == null ? null : toNumber(value);
 }
 
 function isTerminal(status: StreamStatus): boolean {

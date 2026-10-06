@@ -106,40 +106,59 @@ function normalizeError(
   error: Error,
   ancestors: WeakSet<object>,
 ): Record<string, unknown> {
-  const normalized = Object.create(null) as Record<string, unknown>;
-  normalized.name = error.name;
-  normalized.message = error.message;
-  if (error.stack != null) normalized.stack = error.stack;
+  // Object.fromEntries defines every key as an own property, so an own
+  // `__proto__` key stays a key instead of replacing the prototype.
+  const entries: [string, unknown][] = [
+    ['name', error.name],
+    ['message', error.message],
+  ];
+  if (error.stack != null) entries.push(['stack', error.stack]);
   if (error.cause !== undefined) {
-    normalized.cause = normalize(error.cause, ancestors);
+    entries.push(['cause', normalize(error.cause, ancestors)]);
   }
   for (const [key, descriptor] of Object.entries(
     Object.getOwnPropertyDescriptors(error),
   )) {
     if (['name', 'message', 'stack', 'cause'].includes(key)) continue;
-    normalized[key] = normalizeDescriptor(descriptor, ancestors);
+    entries.push([key, normalizeDescriptor(descriptor, ancestors)]);
   }
-  return normalized;
+  return Object.fromEntries(entries);
 }
 
 function normalizeObject(
   value: object,
   ancestors: WeakSet<object>,
 ): Record<string, unknown> {
-  const normalized = Object.create(null) as Record<string, unknown>;
-  const prototype = Object.getPrototypeOf(value) as {
-    constructor?: { name?: string };
-  } | null;
-  const typeName = prototype?.constructor?.name;
-  if (typeName && typeName !== 'Object') normalized.$type = typeName;
+  const typeName = prototypeConstructorName(value);
+  const entries: [string, unknown][] =
+    typeName && typeName !== 'Object' ? [['$type', typeName]] : [];
 
   for (const key of Reflect.ownKeys(value)) {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (descriptor == null) continue;
-    normalized[typeof key === 'symbol' ? String(key) : key] =
-      normalizeDescriptor(descriptor, ancestors);
+    entries.push([
+      typeof key === 'symbol' ? String(key) : key,
+      normalizeDescriptor(descriptor, ancestors),
+    ]);
   }
-  return normalized;
+  return Object.fromEntries(entries);
+}
+
+/**
+ * Reads the constructor name from the prototype, not the value, so an own
+ * `constructor` field is reported as data rather than as the type.
+ */
+function prototypeConstructorName(value: object): string | undefined {
+  const prototype: unknown = Object.getPrototypeOf(value);
+  if (
+    typeof prototype !== 'object' ||
+    prototype === null ||
+    !('constructor' in prototype)
+  ) {
+    return undefined;
+  }
+  const { constructor } = prototype;
+  return typeof constructor === 'function' ? constructor.name : undefined;
 }
 
 function normalizeDescriptor(

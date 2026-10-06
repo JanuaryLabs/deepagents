@@ -24,6 +24,8 @@ import {
   socraticPrompting,
 } from '@deepagents/context';
 
+import { isUIMessage } from '../ui-message-guards.ts';
+
 const testUsage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
   outputTokens: { total: 5, text: 5, reasoning: 0 },
@@ -574,7 +576,8 @@ describe('plan instructions', () => {
     ).filter(
       (entry) =>
         entry.name === 'user' &&
-        isSyntheticReminderMessage(entry.data as UIMessage),
+        isUIMessage(entry.data) &&
+        isSyntheticReminderMessage(entry.data),
     );
     assert.equal(syntheticReviews.length, 3);
     assert.deepEqual(

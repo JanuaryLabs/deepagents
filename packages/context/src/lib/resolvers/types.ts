@@ -42,8 +42,9 @@ export interface ValueResolver {
   canResolve(value: unknown): boolean;
   /**
    * Returns the materialized value. Typed `unknown` (not `FragmentData`) to avoid
-   * TypeScript's recursive-promise inference blowup — callers cast at the boundary.
-   * The walker re-feeds this through `walkData`, so recursive lazy values are still resolved.
+   * TypeScript's recursive-promise inference blowup. The walker re-feeds this
+   * through `walkData` and checks the walked result with `isFragmentData`, so
+   * recursive lazy values are still resolved.
    */
   resolve(value: unknown, ctx: LoadContext): Promise<unknown>;
 }

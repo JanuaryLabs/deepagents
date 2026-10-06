@@ -14,6 +14,7 @@ import {
   createBashTool,
   createVirtualSandbox,
   everyNToolCalls,
+  isRecord,
   reminder,
   toolCall,
   toolCallCount,
@@ -88,6 +89,10 @@ function assistantWithTools(parts: ToolPartInit[], text?: string): UIMessage {
     role: 'assistant',
     parts: messageParts,
   };
+}
+
+function emptyChat(): WhenContext['chat'] {
+  return { id: 'chat', userId: 'user', createdAt: 0, updatedAt: 0 };
 }
 
 function whenContextWithTools(
@@ -309,7 +314,8 @@ describe('toolCall structured options', () => {
       reminder('rm-detected', {
         when: toolCall({
           name: 'bash',
-          input: (i) => /rm -rf/.test((i as { cmd: string }).cmd),
+          input: (i) =>
+            isRecord(i) && typeof i.cmd === 'string' && /rm -rf/.test(i.cmd),
         }),
       }),
       user('turn 2'),
@@ -326,7 +332,8 @@ describe('toolCall structured options', () => {
       reminder('rm-detected', {
         when: toolCall({
           name: 'bash',
-          input: (i) => /rm -rf/.test((i as { cmd: string }).cmd),
+          input: (i) =>
+            isRecord(i) && typeof i.cmd === 'string' && /rm -rf/.test(i.cmd),
         }),
       }),
       user('turn 2'),
@@ -535,7 +542,7 @@ describe('everyNToolCalls', () => {
       await predicate(
         whenContextWithTools(
           [{ name: 'bash', state: 'input-available', input: { cmd: 'pwd' } }],
-          {} as WhenContext['chat'],
+          emptyChat(),
         ),
       ),
       false,
@@ -561,7 +568,7 @@ describe('everyNToolCalls', () => {
             },
             { name: 'third', state: 'output-denied' },
           ],
-          {} as WhenContext['chat'],
+          emptyChat(),
         ),
       ),
       true,
@@ -570,7 +577,7 @@ describe('everyNToolCalls', () => {
 
   it('is stateless and rearms when reminder delivery resets the segment', async () => {
     const predicate = everyNToolCalls(3);
-    const chat = {} as WhenContext['chat'];
+    const chat = emptyChat();
 
     assert.equal(await predicate(whenContext(2, chat)), false);
     assert.equal(await predicate(whenContext(3, chat)), true);
@@ -608,7 +615,10 @@ describe('toolCall + state: input-streaming + input', () => {
       reminder('saw-rm', {
         when: toolCall({
           state: 'input-streaming',
-          input: (i) => /rm/.test((i as { partial?: string }).partial ?? ''),
+          input: (i) =>
+            isRecord(i) &&
+            typeof i.partial === 'string' &&
+            /rm/.test(i.partial),
         }),
       }),
       user('turn 2'),

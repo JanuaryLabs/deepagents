@@ -1,3 +1,4 @@
+import type { LanguageModelV4Prompt } from '@ai-sdk/provider';
 import { APICallError, tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
@@ -43,10 +44,12 @@ const testUsage = {
 } as const;
 
 function extractSystemPrompt(
-  prompt: Array<{ role: string; content?: string }>,
+  prompt: LanguageModelV4Prompt,
 ): string | undefined {
-  const systemMsg = prompt.find((m) => m.role === 'system');
-  return systemMsg?.content;
+  for (const message of prompt) {
+    if (message.role === 'system') return message.content;
+  }
+  return undefined;
 }
 
 function createGenerateModel(responseText?: string) {
@@ -255,12 +258,8 @@ describe('asTool', () => {
     const result = await callerAgent.generate();
 
     assert.ok(subModel.doGenerateCalls.length >= 1);
-    const subPrompt = subModel.doGenerateCalls[0]!.prompt as Array<{
-      role: string;
-      content?: unknown;
-    }>;
     const systemPrompt = extractSystemPrompt(
-      subPrompt as Array<{ role: string; content?: string }>,
+      subModel.doGenerateCalls[0]!.prompt,
     );
     assert.ok(systemPrompt?.includes('research agent'));
   });
@@ -339,11 +338,9 @@ describe('asTool', () => {
 
     await callerAgent.generate();
 
-    const subPrompt = subModel.doGenerateCalls[0]!.prompt as Array<{
-      role: string;
-      content?: unknown[];
-    }>;
-    const userMsg = subPrompt.find((m) => m.role === 'user');
+    const userMsg = subModel.doGenerateCalls[0]!.prompt.find(
+      (m) => m.role === 'user',
+    );
     const textContent = JSON.stringify(userMsg?.content);
     assert.ok(textContent.includes('Raw data here'));
     assert.ok(textContent.includes('OutputInstructions'));
@@ -578,11 +575,9 @@ describe('asAdvisor', () => {
     const result = await executorAgent.generate();
 
     assert.strictEqual(advisorModel.doGenerateCalls.length, 1);
-    const advisorPrompt = advisorModel.doGenerateCalls[0]!.prompt as Array<{
-      role: string;
-      content?: string;
-    }>;
-    const systemPrompt = extractSystemPrompt(advisorPrompt);
+    const systemPrompt = extractSystemPrompt(
+      advisorModel.doGenerateCalls[0]!.prompt,
+    );
     assert.ok(systemPrompt?.includes('coding assistant'));
     assert.ok(systemPrompt?.includes('advisor providing strategic guidance'));
     assert.strictEqual(result.text, 'Task complete.');

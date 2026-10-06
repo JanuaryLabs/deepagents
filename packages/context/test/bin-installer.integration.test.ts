@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { after, before, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 import {
   type DockerSandboxVolume,
@@ -13,9 +13,19 @@ import { Docker } from '@deepagents/test';
 
 const docker = new Docker();
 
+type DockerDirectory = Awaited<ReturnType<Docker['directory']>>;
+
+/** Seeds an executable `bin/hello.js` that prints `linked`. */
+async function seedHelloBinary(fixture: DockerDirectory): Promise<void> {
+  await fixture.mkdir('bin');
+  await fixture.writeFile(
+    'bin/hello.js',
+    `#!/usr/bin/env node\nconsole.log('linked');\n`,
+    0o755,
+  );
+}
+
 describe('bin installer', () => {
-  let fixture: Awaited<ReturnType<Docker['directory']>>;
-  let tempDir: string;
   const HELLO_BINARY = '/mnt/bin/hello.js';
 
   const tempMount: DockerSandboxVolume = {
@@ -25,28 +35,15 @@ describe('bin installer', () => {
     readOnly: true,
   };
 
-  before(async () => {
-    fixture = await new Docker().directory();
-    tempDir = fixture.path;
-    await fixture.mkdir('bin');
-    await fixture.writeFile(
-      'bin/hello.js',
-      `#!/usr/bin/env node\nconsole.log('linked');\n`,
-      0o755,
-    );
-  });
-
-  after(async () => {
-    await fixture[Symbol.asyncDispose]();
-  });
-
   it('symlinks a bind-mounted binary onto PATH using the basename', async () => {
+    await using fixture = await new Docker().directory();
+    await seedHelloBinary(fixture);
     await useSandbox(
       {
         ...docker.defaults,
         image: 'node:lts-alpine',
         installers: [pkg(['bash']), bin(HELLO_BINARY)],
-        volumes: [{ ...tempMount, hostPath: tempDir }],
+        volumes: [{ ...tempMount, hostPath: fixture.path }],
       },
       async (sandbox) => {
         const result = await sandbox.executeCommand('hello');
@@ -57,13 +54,15 @@ describe('bin installer', () => {
   });
 
   it('follows a symlink whose target is a regular file', async () => {
+    await using fixture = await new Docker().directory();
+    await seedHelloBinary(fixture);
     await fixture.symlink('hello.js', 'bin/hello-shim.js');
     await useSandbox(
       {
         ...docker.defaults,
         image: 'node:lts-alpine',
         installers: [pkg(['bash']), bin('/mnt/bin/hello-shim.js')],
-        volumes: [{ ...tempMount, hostPath: tempDir }],
+        volumes: [{ ...tempMount, hostPath: fixture.path }],
       },
       async (sandbox) => {
         const result = await sandbox.executeCommand('hello-shim');
@@ -74,6 +73,8 @@ describe('bin installer', () => {
   });
 
   it('honors custom name and target', async () => {
+    await using fixture = await new Docker().directory();
+    await seedHelloBinary(fixture);
     await useSandbox(
       {
         ...docker.defaults,
@@ -82,7 +83,7 @@ describe('bin installer', () => {
           pkg(['bash']),
           bin(HELLO_BINARY, { name: 'greet', target: '/opt/bin/greet' }),
         ],
-        volumes: [{ ...tempMount, hostPath: tempDir }],
+        volumes: [{ ...tempMount, hostPath: fixture.path }],
       },
       async (sandbox) => {
         const result = await sandbox.executeCommand('/opt/bin/greet');

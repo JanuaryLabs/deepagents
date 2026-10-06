@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
+import { z } from 'zod';
 
 import {
   type FragmentSerializerRegistry,
@@ -18,11 +19,10 @@ import {
 function isNoteSerializedFragment(
   input: SerializedFragmentLike,
 ): input is { type: 'note'; text: string } {
-  return (
-    input.type === 'note' &&
-    typeof (input as { text?: unknown }).text === 'string'
-  );
+  return input.type === 'note' && typeof input.text === 'string';
 }
+
+const noteDataSchema = z.object({ text: z.string() });
 
 describe('serialized fragment conversion', () => {
   const customRegistry = {
@@ -52,7 +52,7 @@ describe('serialized fragment conversion', () => {
           return undefined;
         }
 
-        const data = getFragmentData(fragment) as { text: string };
+        const data = noteDataSchema.parse(getFragmentData(fragment));
         return { type: 'note' as const, text: data.text };
       },
     },
@@ -216,7 +216,7 @@ describe('serialized fragment conversion', () => {
 
   it('throws on unknown serialized fragment types', () => {
     assert.throws(
-      () => toFragment({ type: 'unknown' } as never),
+      () => toFragment({ type: 'unknown' }),
       /Unsupported serialized fragment type: unknown/,
     );
   });
@@ -242,7 +242,7 @@ describe('serialized fragment conversion', () => {
           type: 'principle',
           title: 'Messaging',
           description: 'No message fragments',
-          policies: [assistantText('Done') as never],
+          policies: [assistantText('Done')],
         }),
       /Message fragments are not supported/,
     );

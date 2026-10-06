@@ -76,8 +76,32 @@ export function isFragment(data: unknown): data is ContextFragment {
     data !== null &&
     'name' in data &&
     ('data' in data || 'codec' in data) &&
-    typeof (data as ContextFragment).name === 'string'
+    typeof data.name === 'string'
   );
+}
+
+/**
+ * Runtime check that a value fits {@link FragmentData}. Lazy values
+ * (functions, promises, iterables) are accepted as they are, because only the
+ * resolver chain can tell what they produce.
+ */
+export function isFragmentData(value: unknown): value is FragmentData {
+  return fitsFragmentData(value, new WeakSet());
+}
+
+function fitsFragmentData(value: unknown, visited: WeakSet<object>): boolean {
+  if (typeof value !== 'object') {
+    return typeof value !== 'bigint' && typeof value !== 'symbol';
+  }
+  if (value === null || visited.has(value)) return true;
+  visited.add(value);
+  if (Array.isArray(value)) {
+    return value.every((item) => fitsFragmentData(item, visited));
+  }
+  if (value instanceof Promise) return true;
+  if (Symbol.asyncIterator in value || Symbol.iterator in value) return true;
+  if (isFragment(value)) return fitsFragmentData(value.data, visited);
+  return Object.values(value).every((item) => fitsFragmentData(item, visited));
 }
 
 /**
@@ -120,7 +144,13 @@ export function isMessageFragment(
 
 export function getFragmentData(fragment: ContextFragment): FragmentData {
   if (fragment.codec) {
-    return fragment.codec.decode() as FragmentData;
+    const decoded = fragment.codec.decode();
+    if (!isFragmentData(decoded)) {
+      throw new Error(
+        `Fragment "${fragment.name}" codec decoded a value that is not fragment data`,
+      );
+    }
+    return decoded;
   }
 
   if ('data' in fragment) {

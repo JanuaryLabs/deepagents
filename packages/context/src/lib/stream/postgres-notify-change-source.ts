@@ -1,6 +1,8 @@
 import { createRequire } from 'node:module';
 import type { Notification, Pool, PoolClient, PoolConfig } from 'pg';
+import { z } from 'zod';
 
+import { parseJson } from '../store/columns.ts';
 import type { StreamChange, StreamChangeSource } from './change-source.ts';
 import {
   DEFAULT_POSTGRES_STREAM_CHANGES_CHANNEL,
@@ -334,29 +336,19 @@ class ChangeQueue<T> {
   }
 }
 
+/** What the notify triggers in ddl.stream.postgres-notify.ts send. */
+const notificationPayload = z.object({
+  schema: z.string(),
+  streamId: z.string(),
+  kind: z.string(),
+});
+
 function parsePayload(
   payload: string,
-): { schema: string; streamId: string; kind: string } | undefined {
+): z.output<typeof notificationPayload> | undefined {
   try {
-    const parsed = JSON.parse(payload) as unknown;
-    if (!parsed || typeof parsed !== 'object') return undefined;
-    const candidate = parsed as {
-      schema?: unknown;
-      streamId?: unknown;
-      kind?: unknown;
-    };
-    if (
-      typeof candidate.schema !== 'string' ||
-      typeof candidate.streamId !== 'string' ||
-      typeof candidate.kind !== 'string'
-    ) {
-      return undefined;
-    }
-    return {
-      schema: candidate.schema,
-      streamId: candidate.streamId,
-      kind: candidate.kind,
-    };
+    const parsed = notificationPayload.safeParse(parseJson(payload));
+    return parsed.success ? parsed.data : undefined;
   } catch {
     return undefined;
   }

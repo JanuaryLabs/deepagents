@@ -25,6 +25,13 @@ import {
 } from '@deepagents/context';
 import { createFileTelemetry } from '@deepagents/context/telemetry/file';
 
+/** One JSONL line written by createFileTelemetry. */
+const telemetryRecord = z.object({
+  timestamp: z.string(),
+  event: z.string(),
+  data: z.unknown(),
+});
+
 const testUsage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
   outputTokens: { total: 5, text: 5, reasoning: 0 },
@@ -87,7 +94,7 @@ function repeatedFailureReminder(name: string) {
 function remindersInPrompts(jsonl: string): string[] {
   const seen: string[] = [];
   for (const line of jsonl.trim().split('\n')) {
-    const record = JSON.parse(line) as { event: string; data: unknown };
+    const record = telemetryRecord.parse(JSON.parse(line));
     if (record.event !== 'onLanguageModelCallStart') continue;
     for (const match of JSON.stringify(record.data).matchAll(
       /<system-reminder>(.*?)<\\?\/system-reminder>/g,

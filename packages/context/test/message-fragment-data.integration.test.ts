@@ -11,10 +11,10 @@ import {
   user,
 } from '@deepagents/context';
 
-function encoded(fragment: { codec?: { encode(): unknown } }): UIMessage {
+function encoded(fragment: { codec?: { encode(): unknown } }): unknown {
   const value = fragment.codec?.encode();
   assert.ok(value);
-  return value as UIMessage;
+  return value;
 }
 
 describe('built-in message fragments', () => {

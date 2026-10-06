@@ -1,6 +1,5 @@
 import {
-  type StreamTextResult,
-  type ToolSet,
+  type LanguageModelUsage,
   type UIMessage,
   type UIMessageChunk,
   generateId,
@@ -30,6 +29,8 @@ import {
   pass,
   user,
 } from '@deepagents/context';
+
+import { requireUIMessage } from './ui-message-guards.ts';
 
 const sandbox = await createBashTool({
   sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
@@ -214,7 +215,10 @@ describe('context chat()', () => {
     assert.deepStrictEqual(
       {
         names: secondChain.map((entry: { name: string }) => entry.name),
-        assistantRole: (secondChain[1].data as UIMessage).role,
+        assistantRole: requireUIMessage(
+          secondChain[1].data,
+          'second chain entry',
+        ).role,
       },
       {
         names: ['user', 'assistant'],
@@ -499,7 +503,10 @@ describe('chat() title generation', () => {
       (entry: { name: string }) => entry.name === 'assistant',
     );
     assert.ok(persistedAssistant);
-    const { parts } = persistedAssistant.data as UIMessage;
+    const { parts } = requireUIMessage(
+      persistedAssistant.data,
+      'persisted assistant',
+    );
     assert.deepStrictEqual(
       parts.filter((part) => part.type === 'data-chat-title'),
       [],
@@ -511,7 +518,9 @@ describe('chat() title generation', () => {
   });
 });
 
-function createChunkedStream(chunks: UIMessageChunk[]): ReadableStream {
+function createChunkedStream(
+  chunks: UIMessageChunk[],
+): ReadableStream<UIMessageChunk> {
   return new ReadableStream({
     start(controller) {
       for (const chunk of chunks) {
@@ -522,6 +531,18 @@ function createChunkedStream(chunks: UIMessageChunk[]): ReadableStream {
   });
 }
 
+const abortedUsage: LanguageModelUsage = {
+  inputTokens: 10,
+  inputTokenDetails: {
+    noCacheTokens: undefined,
+    cacheReadTokens: undefined,
+    cacheWriteTokens: undefined,
+  },
+  outputTokens: 5,
+  outputTokenDetails: { textTokens: undefined, reasoningTokens: undefined },
+  totalTokens: 15,
+};
+
 function createAbortMockAgent(
   context: ContextEngine,
   uiChunks: UIMessageChunk[],
@@ -531,15 +552,10 @@ function createAbortMockAgent(
     context,
     model,
     sandbox,
-    stream: async () =>
-      ({
-        toUIMessageStream: () => createChunkedStream(uiChunks),
-        usage: Promise.resolve({
-          inputTokens: 10,
-          outputTokens: 5,
-          totalTokens: 15,
-        }),
-      }) as unknown as StreamTextResult<ToolSet, any, any>,
+    stream: async () => ({
+      toUIMessageStream: () => createChunkedStream(uiChunks),
+      usage: Promise.resolve(abortedUsage),
+    }),
   };
 }
 
@@ -573,7 +589,10 @@ describe('chat() abort handling', () => {
     );
     assert.ok(assistantEntry, 'assistant message should be saved on abort');
 
-    const assistantMsg = assistantEntry.data as UIMessage;
+    const assistantMsg = requireUIMessage(
+      assistantEntry.data,
+      'assistant entry',
+    );
     const textPart = assistantMsg.parts.find(
       (p: { type: string }) => p.type === 'text',
     );
@@ -626,10 +645,14 @@ describe('chat() abort handling', () => {
     const branch = await store.getActiveBranch('abort-tool-chat');
     assert.ok(branch?.headMessageId);
     const chain = await store.getMessageChain(branch.headMessageId);
-    const assistantMsg = chain.find(
+    const assistantEntry = chain.find(
       (entry: { name: string }) => entry.name === 'assistant',
-    )?.data as UIMessage;
-    assert.ok(assistantMsg);
+    );
+    assert.ok(assistantEntry);
+    const assistantMsg = requireUIMessage(
+      assistantEntry.data,
+      'assistant entry',
+    );
 
     const toolPart = assistantMsg.parts.find(isToolUIPart);
     assert.ok(toolPart, 'tool part should exist');
@@ -668,10 +691,14 @@ describe('chat() abort handling', () => {
     const branch = await store.getActiveBranch('abort-streaming-chat');
     assert.ok(branch?.headMessageId);
     const chain = await store.getMessageChain(branch.headMessageId);
-    const assistantMsg = chain.find(
+    const assistantEntry = chain.find(
       (entry: { name: string }) => entry.name === 'assistant',
-    )?.data as UIMessage;
-    assert.ok(assistantMsg);
+    );
+    assert.ok(assistantEntry);
+    const assistantMsg = requireUIMessage(
+      assistantEntry.data,
+      'assistant entry',
+    );
 
     const toolParts = assistantMsg.parts.filter(isToolUIPart);
     assert.strictEqual(
@@ -723,10 +750,14 @@ describe('chat() abort handling', () => {
     const branch = await store.getActiveBranch('abort-approval-chat');
     assert.ok(branch?.headMessageId);
     const chain = await store.getMessageChain(branch.headMessageId);
-    const assistantMsg = chain.find(
+    const assistantEntry = chain.find(
       (entry: { name: string }) => entry.name === 'assistant',
-    )?.data as UIMessage;
-    assert.ok(assistantMsg);
+    );
+    assert.ok(assistantEntry);
+    const assistantMsg = requireUIMessage(
+      assistantEntry.data,
+      'assistant entry',
+    );
 
     const toolPart = assistantMsg.parts.find(isToolUIPart);
     assert.ok(toolPart, 'tool part should exist');
@@ -794,10 +825,14 @@ describe('chat() abort handling', () => {
     const branch = await store.getActiveBranch('abort-mixed-chat');
     assert.ok(branch?.headMessageId);
     const chain = await store.getMessageChain(branch.headMessageId);
-    const assistantMsg = chain.find(
+    const assistantEntry = chain.find(
       (entry: { name: string }) => entry.name === 'assistant',
-    )?.data as UIMessage;
-    assert.ok(assistantMsg);
+    );
+    assert.ok(assistantEntry);
+    const assistantMsg = requireUIMessage(
+      assistantEntry.data,
+      'assistant entry',
+    );
 
     const toolParts = assistantMsg.parts.filter(isToolUIPart);
 
@@ -1027,18 +1062,19 @@ describe('convertToModelMessages strips incomplete tool calls', () => {
 
     const firstMsg = userMessage('call the search tool');
 
+    const orphanToolCall = {
+      type: 'tool-invocation',
+      toolCallId: 'orphan-tc',
+      toolName: 'search',
+      state: 'input-available',
+      input: { query: 'test' },
+    } as const;
     const corruptAssistant: UIMessage = {
       id: generateId(),
       role: 'assistant',
       parts: [
         { type: 'text', text: 'Let me search for that.' },
-        {
-          type: 'tool-invocation',
-          toolCallId: 'orphan-tc',
-          toolName: 'search',
-          state: 'input-available',
-          input: { query: 'test' },
-        } as UIMessage['parts'][number],
+        orphanToolCall,
       ],
     };
 
@@ -1374,7 +1410,10 @@ describe('chat() guardrail self-correction persistence', () => {
     const assistantEntry = chain.find(
       (e: { name: string }) => e.name === 'assistant',
     )!;
-    const assistantData = assistantEntry.data as UIMessage;
+    const assistantData = requireUIMessage(
+      assistantEntry.data,
+      'assistant entry',
+    );
     assert.strictEqual(assistantData.role, 'assistant');
 
     const branches = await store.listBranches('guardrail-upsert-test');
@@ -1451,14 +1490,15 @@ describe('chat() guardrail self-correction persistence', () => {
     const assistantEntry = chain.find(
       (e: { name: string }) => e.name === 'assistant',
     )!;
-    const assistantData = assistantEntry.data as UIMessage;
-
-    const textParts = assistantData.parts.filter(
-      (p: { type: string }) => p.type === 'text',
+    const assistantData = requireUIMessage(
+      assistantEntry.data,
+      'assistant entry',
     );
+
+    const textParts = assistantData.parts.filter((p) => p.type === 'text');
     assert.ok(textParts.length > 0, 'Should have text parts');
 
-    const allText = textParts.map((p) => (p as { text: string }).text).join('');
+    const allText = textParts.map((p) => p.text).join('');
 
     assert.ok(
       allText.includes('clean result'),
@@ -1710,13 +1750,12 @@ describe('chat() guardrail self-correction persistence', () => {
       ['user', 'assistant'],
     );
 
-    const assistantData = chain.find(
-      (e: { name: string }) => e.name === 'assistant',
-    )!.data as UIMessage;
-    const textParts = assistantData.parts.filter(
-      (p: { type: string }) => p.type === 'text',
+    const assistantData = requireUIMessage(
+      chain.find((e: { name: string }) => e.name === 'assistant')?.data,
+      'assistant entry',
     );
-    const allText = textParts.map((p) => (p as { text: string }).text).join('');
+    const textParts = assistantData.parts.filter((p) => p.type === 'text');
+    const allText = textParts.map((p) => p.text).join('');
     assert.ok(
       allText.includes('corrected response'),
       `Final assistant should contain retry text, got: "${allText}"`,

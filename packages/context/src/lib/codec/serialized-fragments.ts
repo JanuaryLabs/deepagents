@@ -1,6 +1,9 @@
+import { z } from 'zod';
+
 import {
   type ContextFragment,
   type FragmentData,
+  isFragmentData,
   isFragmentObject,
   isMessageFragment,
 } from '../fragments.ts';
@@ -123,23 +126,10 @@ export type FragmentSerializerRegistry = Record<
 
 export interface FragmentSerializationOptions<
   TRegistry extends FragmentSerializerRegistry | undefined =
-    | FragmentSerializerRegistry
-    | undefined,
+    FragmentSerializerRegistry | undefined,
 > {
   registry?: TRegistry;
 }
-
-type RegistrySerializedFragment<
-  TRegistry extends FragmentSerializerRegistry | undefined,
-> = TRegistry extends FragmentSerializerRegistry
-  ? {
-      [K in keyof TRegistry]: TRegistry[K] extends FragmentSerializerEntry<
-        infer TSerialized
-      >
-        ? TSerialized
-        : never;
-    }[keyof TRegistry]
-  : never;
 
 function isSerializedFragmentLike(
   value: unknown,
@@ -148,12 +138,12 @@ function isSerializedFragmentLike(
     typeof value === 'object' &&
     value !== null &&
     'type' in value &&
-    typeof (value as { type?: unknown }).type === 'string'
+    typeof value.type === 'string'
   );
 }
 
 function toFragmentData(
-  value: SerializedValue,
+  value: unknown,
   options?: FragmentSerializationOptions,
 ): FragmentData {
   if (isSerializedFragmentLike(value)) {
@@ -173,78 +163,143 @@ function toFragmentData(
     );
   }
 
+  if (!isFragmentData(value)) {
+    throw new Error(`Unsupported serialized value of type ${typeof value}`);
+  }
   return value;
 }
 
-const builtInSerializedRegistry: {
-  [K in SerializedFragmentType]: FragmentSerializerEntry<
-    Extract<SerializedFragment, { type: K }>
-  >;
-} = {
-  term: {
-    toFragment: (input) => term(input.name, input.definition),
-  },
-  hint: {
-    toFragment: (input) => hint(input.text),
-  },
-  guardrail: {
-    toFragment: (input) =>
+/**
+ * A built-in entry validates the stored fields before building the fragment,
+ * so a malformed payload fails here instead of yielding a fragment with
+ * missing fields.
+ */
+function builtInEntry<TInput>(
+  schema: z.ZodType<TInput>,
+  build: (
+    input: TInput,
+    options?: FragmentSerializationOptions,
+  ) => ContextFragment,
+): FragmentSerializerEntry {
+  return {
+    toFragment: (input, options) => {
+      const parsed = schema.safeParse(input);
+      if (!parsed.success) {
+        throw new Error(
+          `Invalid serialized ${input.type} fragment: ${z.prettifyError(parsed.error)}`,
+        );
+      }
+      return build(parsed.data, options);
+    },
+  };
+}
+
+const nestedPolicies = z.array(z.unknown()).optional();
+
+const builtInSerializedRegistry: Record<
+  SerializedFragmentType,
+  FragmentSerializerEntry
+> = {
+  term: builtInEntry(
+    z.object({ name: z.string(), definition: z.string() }),
+    (input) => term(input.name, input.definition),
+  ),
+  hint: builtInEntry(z.object({ text: z.string() }), (input) =>
+    hint(input.text),
+  ),
+  guardrail: builtInEntry(
+    z.object({
+      rule: z.string(),
+      reason: z.string().optional(),
+      action: z.string().optional(),
+    }),
+    (input) =>
       guardrail({
         rule: input.rule,
         reason: input.reason,
         action: input.action,
       }),
-  },
-  explain: {
-    toFragment: (input) =>
+  ),
+  explain: builtInEntry(
+    z.object({
+      concept: z.string(),
+      explanation: z.string(),
+      therefore: z.string().optional(),
+    }),
+    (input) =>
       explain({
         concept: input.concept,
         explanation: input.explanation,
         therefore: input.therefore,
       }),
-  },
-  example: {
-    toFragment: (input) =>
+  ),
+  example: builtInEntry(
+    z.object({
+      question: z.string(),
+      answer: z.string(),
+      note: z.string().optional(),
+    }),
+    (input) =>
       example({
         question: input.question,
         answer: input.answer,
         note: input.note,
       }),
-  },
-  clarification: {
-    toFragment: (input) =>
+  ),
+  clarification: builtInEntry(
+    z.object({ when: z.string(), ask: z.string(), reason: z.string() }),
+    (input) =>
       clarification({
         when: input.when,
         ask: input.ask,
         reason: input.reason,
       }),
-  },
-  workflow: {
-    toFragment: (input) =>
+  ),
+  workflow: builtInEntry(
+    z.object({
+      task: z.string(),
+      steps: z.array(z.string()),
+      triggers: z.array(z.string()).optional(),
+      notes: z.string().optional(),
+    }),
+    (input) =>
       workflow({
         task: input.task,
         steps: input.steps,
         triggers: input.triggers,
         notes: input.notes,
       }),
-  },
-  quirk: {
-    toFragment: (input) =>
+  ),
+  quirk: builtInEntry(
+    z.object({ issue: z.string(), workaround: z.string() }),
+    (input) =>
       quirk({
         issue: input.issue,
         workaround: input.workaround,
       }),
-  },
-  styleGuide: {
-    toFragment: (input) =>
+  ),
+  styleGuide: builtInEntry(
+    z.object({
+      prefer: z.string(),
+      never: z.string().optional(),
+      always: z.string().optional(),
+    }),
+    (input) =>
       styleGuide({
         prefer: input.prefer,
         never: input.never,
         always: input.always,
       }),
-  },
-  analogy: {
-    toFragment: (input) =>
+  ),
+  analogy: builtInEntry(
+    z.object({
+      concepts: z.array(z.string()),
+      relationship: z.string(),
+      insight: z.string().optional(),
+      therefore: z.string().optional(),
+      pitfall: z.string().optional(),
+    }),
+    (input) =>
       analogy({
         concepts: input.concepts,
         relationship: input.relationship,
@@ -252,56 +307,82 @@ const builtInSerializedRegistry: {
         therefore: input.therefore,
         pitfall: input.pitfall,
       }),
-  },
-  glossary: {
-    toFragment: (input) => glossary(input.entries),
-  },
-  role: {
-    toFragment: (input) => role(input.content),
-  },
-  principle: {
-    toFragment: (input, options) =>
+  ),
+  glossary: builtInEntry(
+    z.object({ entries: z.record(z.string(), z.string()) }),
+    (input) => glossary(input.entries),
+  ),
+  role: builtInEntry(z.object({ content: z.string() }), (input) =>
+    role(input.content),
+  ),
+  principle: builtInEntry(
+    z.object({
+      title: z.string(),
+      description: z.string(),
+      policies: nestedPolicies,
+    }),
+    (input, options) =>
       principle({
         title: input.title,
         description: input.description,
         policies: input.policies?.map((item) => toFragmentData(item, options)),
       }),
-  },
-  policy: {
-    toFragment: (input, options) =>
+  ),
+  policy: builtInEntry(
+    z.object({
+      rule: z.string(),
+      before: z.string().optional(),
+      reason: z.string().optional(),
+      policies: nestedPolicies,
+    }),
+    (input, options) =>
       policy({
         rule: input.rule,
         before: input.before,
         reason: input.reason,
         policies: input.policies?.map((item) => toFragmentData(item, options)),
       }),
-  },
-  identity: {
-    toFragment: (input) =>
+  ),
+  identity: builtInEntry(
+    z.object({ name: z.string().optional(), role: z.string().optional() }),
+    (input) =>
       identity({
         name: input.name,
         role: input.role,
       }),
-  },
-  persona: {
-    toFragment: (input) =>
+  ),
+  persona: builtInEntry(
+    z.object({
+      name: z.string(),
+      role: z.string().optional(),
+      objective: z.string().optional(),
+      tone: z.string().optional(),
+    }),
+    (input) =>
       persona({
         name: input.name,
         role: input.role,
         objective: input.objective,
         tone: input.tone,
       }),
-  },
-  alias: {
-    toFragment: (input) => alias(input.term, input.meaning),
-  },
-  preference: {
-    toFragment: (input) => preference(input.aspect, input.value),
-  },
-  correction: {
-    toFragment: (input) => correction(input.subject, input.clarification),
-  },
+  ),
+  alias: builtInEntry(
+    z.object({ term: z.string(), meaning: z.string() }),
+    (input) => alias(input.term, input.meaning),
+  ),
+  preference: builtInEntry(
+    z.object({ aspect: z.string(), value: z.string() }),
+    (input) => preference(input.aspect, input.value),
+  ),
+  correction: builtInEntry(
+    z.object({ subject: z.string(), clarification: z.string() }),
+    (input) => correction(input.subject, input.clarification),
+  ),
 };
+
+function isBuiltInSerializedType(type: string): type is SerializedFragmentType {
+  return Object.hasOwn(builtInSerializedRegistry, type);
+}
 
 const messageLikeTypes = new Set(['user', 'assistant', 'message']);
 
@@ -323,8 +404,8 @@ function findCustomSerializedFragment(
   return undefined;
 }
 
-export function toFragment<T extends SerializedFragmentLike>(
-  input: T,
+export function toFragment(
+  input: SerializedFragmentLike,
   options?: FragmentSerializationOptions,
 ): ContextFragment {
   if (messageLikeTypes.has(input.type)) {
@@ -335,20 +416,25 @@ export function toFragment<T extends SerializedFragmentLike>(
 
   const entry =
     options?.registry?.[input.type] ??
-    builtInSerializedRegistry[input.type as SerializedFragmentType];
+    (isBuiltInSerializedType(input.type)
+      ? builtInSerializedRegistry[input.type]
+      : undefined);
   if (!entry) {
     throw new Error(`Unsupported serialized fragment type: ${input.type}`);
   }
 
-  return (entry as FragmentSerializerEntry<T>).toFragment(input, options);
+  return entry.toFragment(input, options);
 }
 
-export function fromFragment<
-  TRegistry extends FragmentSerializerRegistry | undefined = undefined,
->(
+/**
+ * Serialize a non-message fragment. The result is whatever the matching
+ * registry entry or the fragment's codec produces, so only its `type` is
+ * known statically.
+ */
+export function fromFragment(
   fragment: ContextFragment,
-  options?: FragmentSerializationOptions<TRegistry>,
-): SerializedFragment | RegistrySerializedFragment<TRegistry> {
+  options?: FragmentSerializationOptions,
+): SerializedFragmentLike {
   if (isMessageFragment(fragment)) {
     throw new Error(
       'Message fragments are not supported by serialized fragment conversion',
@@ -357,7 +443,7 @@ export function fromFragment<
 
   const customSerialized = findCustomSerializedFragment(fragment, options);
   if (customSerialized !== undefined) {
-    return customSerialized as RegistrySerializedFragment<TRegistry>;
+    return customSerialized;
   }
 
   if (fragment.codec) {
@@ -367,10 +453,10 @@ export function fromFragment<
         `Fragment "${fragment.name}" codec must encode to a serialized fragment object`,
       );
     }
-    return encoded as SerializedFragment;
+    return encoded;
   }
 
-  if (!builtInSerializedRegistry[fragment.name as SerializedFragmentType]) {
+  if (!isBuiltInSerializedType(fragment.name)) {
     throw new Error(`Unsupported fragment name: ${fragment.name}`);
   }
 

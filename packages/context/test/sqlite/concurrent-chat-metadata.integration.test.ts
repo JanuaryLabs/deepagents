@@ -2,6 +2,7 @@ import type { LanguageModelUsage } from 'ai';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
+import { z } from 'zod';
 
 import {
   ContextEngine,
@@ -13,6 +14,15 @@ import {
 import { Sqlite } from '@deepagents/test';
 
 const sqlite = new Sqlite();
+
+// trackUsage merges token counts into the chat metadata as a LanguageModelUsage.
+const storedUsageSchema = z
+  .object({
+    inputTokens: z.number().optional(),
+    outputTokens: z.number().optional(),
+    totalTokens: z.number().optional(),
+  })
+  .optional();
 
 function usage(input: number, output: number): LanguageModelUsage {
   return {
@@ -47,7 +57,7 @@ test('concurrent trackUsage calls accumulate both usages without losing one', as
   ]);
 
   const chat = await store.getChat('usage-race');
-  const stored = chat?.metadata?.usage as LanguageModelUsage | undefined;
+  const stored = storedUsageSchema.parse(chat?.metadata?.usage);
   assert.equal(
     stored?.totalTokens,
     330,

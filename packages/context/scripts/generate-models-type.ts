@@ -1,26 +1,20 @@
 import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { z } from 'zod';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-interface ModelsDevResponse {
-  [providerId: string]: {
-    id: string;
-    name: string;
-    models: {
-      [modelId: string]: {
-        id: string;
-        name: string;
-      };
-    };
-  };
-}
+/** The part of https://models.dev/api.json this script reads: provider id → model id. */
+const modelsDevResponse = z.record(
+  z.string(),
+  z.object({ models: z.record(z.string(), z.unknown()) }),
+);
 
 async function main() {
   console.log('Fetching models from models.dev...');
   const response = await fetch('https://models.dev/api.json');
-  const data = (await response.json()) as ModelsDevResponse;
+  const data = modelsDevResponse.parse(await response.json());
 
   const modelIds: string[] = [];
 

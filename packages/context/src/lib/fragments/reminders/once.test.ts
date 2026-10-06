@@ -11,7 +11,7 @@ function ctx(over: Partial<WhenContext> = {}): WhenContext {
     turn: 1,
     content: '',
     currentMessage: { id: 'm', role: 'user', parts: [] },
-    chat: {} as never,
+    chat: { id: 'chat', userId: 'user', createdAt: 0, updatedAt: 0 },
     branch: 'main',
     messageCount: 1,
     firedOnceIds: new Set(),

@@ -1,4 +1,4 @@
-import spawn from 'nano-spawn';
+import spawn, { SubprocessError } from 'nano-spawn';
 
 import {
   DockerSandboxError,
@@ -75,15 +75,17 @@ export function createInstallerContext(
       ]);
       return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
     } catch (error) {
-      const err = error as Error & {
-        stdout?: string;
-        stderr?: string;
-        exitCode?: number;
-      };
+      if (error instanceof SubprocessError) {
+        return {
+          stdout: error.stdout,
+          stderr: error.stderr,
+          exitCode: error.exitCode ?? 1,
+        };
+      }
       return {
-        stdout: err.stdout ?? '',
-        stderr: err.stderr ?? err.message ?? '',
-        exitCode: err.exitCode ?? 1,
+        stdout: '',
+        stderr: error instanceof Error ? error.message : '',
+        exitCode: 1,
       };
     }
   };

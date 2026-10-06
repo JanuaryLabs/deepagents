@@ -50,16 +50,16 @@ function reasoningReply(id: string, text: string, itemId: string): UIMessage {
         },
       },
       { type: 'text', text },
-    ] as UIMessage['parts'],
+    ],
   };
 }
 
 async function activeTexts(store: ContextStore): Promise<string[]> {
   const messages = await engine(store).getMessages();
   return messages.map((m) =>
-    (m.parts as { type: string; text?: string }[])
+    m.parts
       .filter((p) => p.type === 'text')
-      .map((p) => p.text ?? '')
+      .map((p) => p.text)
       .join(''),
   );
 }

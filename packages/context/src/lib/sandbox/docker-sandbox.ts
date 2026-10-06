@@ -1,4 +1,4 @@
-import spawn, { type SubprocessError } from 'nano-spawn';
+import spawn, { SubprocessError } from 'nano-spawn';
 import { type StdioOptions, spawn as childSpawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -505,8 +505,10 @@ export const dockerEngine: ContainerEngine<DockerCommonOptions> = {
   },
 
   errorMessage(error: unknown): string {
-    const err = error as SubprocessError;
-    return err.stderr || err.stdout || err.message || String(error);
+    if (error instanceof SubprocessError) {
+      return error.stderr || error.stdout || error.message;
+    }
+    return (error instanceof Error && error.message) || String(error);
   },
 
   async removeVolume(name) {
@@ -770,11 +772,17 @@ async function executeDockerCommand(
       const result = await spawn('docker', execArgs(command));
       return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
     } catch (error) {
-      const err = error as SubprocessError;
+      if (error instanceof SubprocessError) {
+        return {
+          stdout: error.stdout,
+          stderr: error.stderr || error.message,
+          exitCode: error.exitCode ?? 1,
+        };
+      }
       return {
-        stdout: err.stdout || '',
-        stderr: err.stderr || err.message || '',
-        exitCode: err.exitCode ?? 1,
+        stdout: '',
+        stderr: error instanceof Error ? error.message : '',
+        exitCode: 1,
       };
     }
   }
@@ -911,11 +919,14 @@ export class ComposeStrategy extends ContainerSandboxStrategy {
         '-d',
       ]);
     } catch (error) {
-      const err = error as SubprocessError;
-      if (err.stderr?.includes('Cannot connect')) {
+      const stderr = error instanceof SubprocessError ? error.stderr : '';
+      if (stderr.includes('Cannot connect')) {
         throw this.engine.errors.serviceNotAvailable();
       }
-      throw new ComposeStartError(this.composeFile, err.stderr || err.message);
+      throw new ComposeStartError(
+        this.composeFile,
+        stderr || (error instanceof Error ? error.message : String(error)),
+      );
     }
   }
 

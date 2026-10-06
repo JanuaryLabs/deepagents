@@ -51,16 +51,7 @@ async function runBashToolCall(input: string) {
     tools: { bash: tools.bash },
   });
 
-  return result.content as Array<{
-    type: string;
-    toolName?: string;
-    error?: unknown;
-    output?: {
-      stdout: string;
-      stderr: string;
-      exitCode: number;
-    };
-  }>;
+  return result.content;
 }
 
 describe('bash tool reasoning contract', () => {
@@ -71,6 +62,7 @@ describe('bash tool reasoning contract', () => {
       (part) => part.type === 'tool-error' && part.toolName === 'bash',
     );
     assert.ok(toolError, 'Expected bash tool call to fail validation');
+    assert.strictEqual(toolError.type, 'tool-error');
     assert.match(String(toolError.error), /reasoning/i);
   });
 
@@ -99,6 +91,8 @@ describe('bash tool reasoning contract', () => {
       (part) => part.type === 'tool-result' && part.toolName === 'bash',
     );
     assert.ok(toolResult, 'Expected bash tool call to succeed');
+    assert.strictEqual(toolResult.type, 'tool-result');
+    assert.ok(!toolResult.dynamic, 'Expected the static bash tool result');
     assert.ok(toolResult.output, 'Expected bash tool output');
     assert.strictEqual(toolResult.output.exitCode, 0);
     assert.strictEqual(toolResult.output.stderr, '');

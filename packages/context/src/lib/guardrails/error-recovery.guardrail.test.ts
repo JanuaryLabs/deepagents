@@ -182,10 +182,7 @@ describe('Guardrail System', () => {
         id: 'custom-fail',
         name: 'Always Fail',
         handle: (part) => {
-          if (
-            part.type === 'text-delta' &&
-            (part as { delta: string }).delta.includes('bad')
-          ) {
+          if (part.type === 'text-delta' && part.delta.includes('bad')) {
             return fail('Found bad word');
           }
           return pass(part);

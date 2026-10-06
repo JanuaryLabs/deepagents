@@ -1,6 +1,8 @@
 import { createRequire } from 'node:module';
 import type { Pool, PoolClient, PoolConfig } from 'pg';
+import { z } from 'zod';
 
+import { bigintColumn, jsonObject } from './columns.ts';
 import { storeDDL } from './ddl.postgres.ts';
 import type {
   BranchData,
@@ -22,6 +24,161 @@ import type {
   StoredChatData,
 } from './store.ts';
 import { ContextStore } from './store.ts';
+
+// Row shapes as pg returns them for ddl.postgres.ts: unquoted identifiers fold
+// to lowercase, BIGINT and COUNT() arrive as strings (see bigintColumn), JSONB
+// arrives parsed, and BOOLEAN as a boolean.
+
+const chatColumns = z.object({
+  id: z.string(),
+  userid: z.string(),
+  title: z.string().nullable(),
+  metadata: jsonObject.nullable(),
+  createdat: bigintColumn,
+  updatedat: bigintColumn,
+});
+
+const storedChat = chatColumns.transform(toStoredChat);
+
+const chatInfo = chatColumns
+  .extend({ messagecount: bigintColumn, branchcount: bigintColumn })
+  .transform((row): ChatInfo => ({
+    ...toStoredChat(row),
+    messageCount: row.messagecount,
+    branchCount: row.branchcount,
+  }));
+
+const messageColumns = z.object({
+  id: z.string(),
+  chatid: z.string(),
+  parentid: z.string().nullable(),
+  name: z.string(),
+  type: z.string().nullable(),
+  data: z.unknown(),
+  createdat: bigintColumn,
+});
+
+const storedMessage = messageColumns.transform(toMessage);
+
+const searchResult = messageColumns
+  .extend({ rank: z.number(), snippet: z.string() })
+  .transform((row): SearchResult => ({
+    message: toMessage(row),
+    rank: row.rank,
+    snippet: row.snippet,
+  }));
+
+const storedBranch = z
+  .object({
+    id: z.string(),
+    chatid: z.string(),
+    name: z.string(),
+    headmessageid: z.string().nullable(),
+    isactive: z.boolean(),
+    createdat: bigintColumn,
+  })
+  .transform((row): BranchData => ({
+    id: row.id,
+    chatId: row.chatid,
+    name: row.name,
+    headMessageId: row.headmessageid,
+    isActive: row.isactive,
+    createdAt: row.createdat,
+  }));
+
+const branchRow = z.object({
+  id: z.string(),
+  name: z.string(),
+  headmessageid: z.string().nullable(),
+  isactive: z.boolean(),
+  createdat: bigintColumn,
+});
+
+const storedCheckpoint = z
+  .object({
+    id: z.string(),
+    chatid: z.string(),
+    name: z.string(),
+    messageid: z.string(),
+    createdat: bigintColumn,
+  })
+  .transform((row): CheckpointData => ({
+    id: row.id,
+    chatId: row.chatid,
+    name: row.name,
+    messageId: row.messageid,
+    createdAt: row.createdat,
+  }));
+
+const checkpointInfo = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    messageid: z.string(),
+    createdat: bigintColumn,
+  })
+  .transform((row): CheckpointInfo => ({
+    id: row.id,
+    name: row.name,
+    messageId: row.messageid,
+    createdAt: row.createdat,
+  }));
+
+const idRow = z.object({ id: z.string() });
+
+const existsRow = z.object({ exists: z.boolean() });
+
+const countRow = z.object({ count: bigintColumn });
+
+const graphMessageRow = z.object({
+  id: z.string(),
+  parentid: z.string().nullable(),
+  name: z.string(),
+  data: z.unknown(),
+  createdat: bigintColumn,
+});
+
+const graphBranch = z
+  .object({
+    name: z.string(),
+    headmessageid: z.string().nullable(),
+    isactive: z.boolean(),
+  })
+  .transform((row): GraphBranch => ({
+    name: row.name,
+    headMessageId: row.headmessageid,
+    isActive: row.isactive,
+  }));
+
+const graphCheckpoint = z
+  .object({ name: z.string(), messageid: z.string() })
+  .transform((row): GraphCheckpoint => ({
+    name: row.name,
+    messageId: row.messageid,
+  }));
+
+function toStoredChat(row: z.output<typeof chatColumns>): StoredChatData {
+  return {
+    id: row.id,
+    userId: row.userid,
+    title: row.title ?? undefined,
+    metadata: row.metadata ?? undefined,
+    createdAt: row.createdat,
+    updatedAt: row.updatedat,
+  };
+}
+
+function toMessage(row: z.output<typeof messageColumns>): MessageData {
+  return {
+    id: row.id,
+    chatId: row.chatid,
+    parentId: row.parentid,
+    name: row.name,
+    type: row.type ?? undefined,
+    data: row.data,
+    createdAt: row.createdat,
+  };
+}
 
 export interface PostgresStoreOptions {
   /**
@@ -125,13 +282,21 @@ export class PostgresContextStore extends ContextStore {
   /**
    * Execute a query using the pool (no transaction).
    */
-  async #query<T extends Record<string, unknown>>(
-    sql: string,
-    params?: unknown[],
-  ): Promise<T[]> {
+  async #query(sql: string, params?: unknown[]): Promise<unknown[]> {
     this.#ensureInitialized();
     const result = await this.#pool.query(sql, params);
-    return result.rows as T[];
+    return result.rows;
+  }
+
+  /**
+   * Execute a query using the pool and parse every returned row.
+   */
+  async #rows<Row extends z.ZodType>(
+    row: Row,
+    sql: string,
+    params?: unknown[],
+  ): Promise<z.output<Row>[]> {
+    return z.array(row).parse(await this.#query(sql, params));
   }
 
   /**
@@ -161,14 +326,7 @@ export class PostgresContextStore extends ContextStore {
           chat.metadata ? JSON.stringify(chat.metadata) : null,
         ],
       );
-      const row = result.rows[0] as {
-        id: string;
-        userid: string;
-        title: string | null;
-        metadata: Record<string, unknown> | null;
-        createdat: string;
-        updatedat: string;
-      };
+      const created = storedChat.parse(result.rows[0]);
 
       await client.query(
         `INSERT INTO ${this.#t('branches')} (id, chatId, name, headMessageId, isActive, createdAt)
@@ -176,14 +334,7 @@ export class PostgresContextStore extends ContextStore {
         [crypto.randomUUID(), chat.id, Date.now()],
       );
 
-      return {
-        id: row.id,
-        userId: row.userid,
-        title: row.title ?? undefined,
-        metadata: row.metadata ?? undefined,
-        createdAt: Number(row.createdat),
-        updatedAt: Number(row.updatedat),
-      };
+      return created;
     });
   }
 
@@ -201,14 +352,7 @@ export class PostgresContextStore extends ContextStore {
           chat.metadata ? JSON.stringify(chat.metadata) : null,
         ],
       );
-      const row = result.rows[0] as {
-        id: string;
-        userid: string;
-        title: string | null;
-        metadata: Record<string, unknown> | null;
-        createdat: string;
-        updatedat: string;
-      };
+      const upserted = storedChat.parse(result.rows[0]);
 
       await client.query(
         `INSERT INTO ${this.#t('branches')} (id, chatId, name, headMessageId, isActive, createdAt)
@@ -217,40 +361,17 @@ export class PostgresContextStore extends ContextStore {
         [crypto.randomUUID(), chat.id, Date.now()],
       );
 
-      return {
-        id: row.id,
-        userId: row.userid,
-        title: row.title ?? undefined,
-        metadata: row.metadata ?? undefined,
-        createdAt: Number(row.createdat),
-        updatedAt: Number(row.updatedat),
-      };
+      return upserted;
     });
   }
 
   async getChat(chatId: string): Promise<StoredChatData | undefined> {
-    const rows = await this.#query<{
-      id: string;
-      userid: string;
-      title: string | null;
-      metadata: Record<string, unknown> | null;
-      createdat: string;
-      updatedat: string;
-    }>(`SELECT * FROM ${this.#t('chats')} WHERE id = $1`, [chatId]);
-
-    if (rows.length === 0) {
-      return undefined;
-    }
-
-    const row = rows[0];
-    return {
-      id: row.id,
-      userId: row.userid,
-      title: row.title ?? undefined,
-      metadata: row.metadata ?? undefined,
-      createdAt: Number(row.createdat),
-      updatedAt: Number(row.updatedat),
-    };
+    const [chat] = await this.#rows(
+      storedChat,
+      `SELECT * FROM ${this.#t('chats')} WHERE id = $1`,
+      [chatId],
+    );
+    return chat;
   }
 
   async updateChat(
@@ -262,28 +383,11 @@ export class PostgresContextStore extends ContextStore {
         `SELECT * FROM ${this.#t('chats')} WHERE id = $1 FOR UPDATE`,
         [chatId],
       );
-      const row = result.rows[0] as
-        | {
-            id: string;
-            userid: string;
-            title: string | null;
-            metadata: Record<string, unknown> | null;
-            createdat: string;
-            updatedat: string;
-          }
-        | undefined;
-      if (!row) {
+      const current = storedChat.optional().parse(result.rows[0]);
+      if (!current) {
         throw new Error(`updateChat: chat "${chatId}" not found`);
       }
 
-      const current: StoredChatData = {
-        id: row.id,
-        userId: row.userid,
-        title: row.title ?? undefined,
-        metadata: row.metadata ?? undefined,
-        createdAt: Number(row.createdat),
-        updatedAt: Number(row.updatedat),
-      };
       const updates = update(current);
       if (updates === undefined) return current;
 
@@ -306,15 +410,7 @@ export class PostgresContextStore extends ContextStore {
         `UPDATE ${this.#t('chats')} SET ${setClauses.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
         params,
       );
-      const next = updated.rows[0] as typeof row;
-      return {
-        id: next.id,
-        userId: next.userid,
-        title: next.title ?? undefined,
-        metadata: next.metadata ?? undefined,
-        createdAt: Number(next.createdat),
-        updatedAt: Number(next.updatedat),
-      };
+      return storedChat.parse(updated.rows[0]);
     });
   }
 
@@ -349,16 +445,8 @@ export class PostgresContextStore extends ContextStore {
       }
     }
 
-    const rows = await this.#query<{
-      id: string;
-      userid: string;
-      title: string | null;
-      metadata: Record<string, unknown> | null;
-      createdat: string;
-      updatedat: string;
-      messagecount: string;
-      branchcount: string;
-    }>(
+    return this.#rows(
+      chatInfo,
       `SELECT
         c.id,
         c.userId,
@@ -376,17 +464,6 @@ export class PostgresContextStore extends ContextStore {
       ORDER BY c.updatedAt DESC${limitClause}`,
       params,
     );
-
-    return rows.map((row) => ({
-      id: row.id,
-      userId: row.userid,
-      title: row.title ?? undefined,
-      metadata: row.metadata ?? undefined,
-      messageCount: Number(row.messagecount),
-      branchCount: Number(row.branchcount),
-      createdAt: Number(row.createdat),
-      updatedAt: Number(row.updatedat),
-    }));
   }
 
   async deleteChat(
@@ -459,7 +536,8 @@ export class PostgresContextStore extends ContextStore {
     if (parentId === messageId) {
       throw new Error(`Message ${messageId} cannot be its own parent`);
     }
-    const rows = await this.#query(
+    const rows = await this.#rows(
+      idRow,
       `UPDATE ${this.#t('messages')} SET parentId = $1 WHERE id = $2 RETURNING id`,
       [parentId, messageId],
     );
@@ -469,43 +547,17 @@ export class PostgresContextStore extends ContextStore {
   }
 
   async getMessage(messageId: string): Promise<MessageData | undefined> {
-    const rows = await this.#query<{
-      id: string;
-      chatid: string;
-      parentid: string | null;
-      name: string;
-      type: string | null;
-      data: unknown;
-      createdat: string;
-    }>(`SELECT * FROM ${this.#t('messages')} WHERE id = $1`, [messageId]);
-
-    if (rows.length === 0) {
-      return undefined;
-    }
-
-    const row = rows[0];
-    return {
-      id: row.id,
-      chatId: row.chatid,
-      parentId: row.parentid,
-      name: row.name,
-      type: row.type ?? undefined,
-      data: row.data,
-      createdAt: Number(row.createdat),
-    };
+    const [message] = await this.#rows(
+      storedMessage,
+      `SELECT * FROM ${this.#t('messages')} WHERE id = $1`,
+      [messageId],
+    );
+    return message;
   }
 
   async getMessageChain(headId: string): Promise<MessageData[]> {
-    const rows = await this.#query<{
-      id: string;
-      chatid: string;
-      parentid: string | null;
-      name: string;
-      type: string | null;
-      data: unknown;
-      createdat: string;
-      depth: number;
-    }>(
+    return this.#rows(
+      storedMessage,
       `WITH RECURSIVE chain AS (
         SELECT *, 0 as depth FROM ${this.#t('messages')} WHERE id = $1
         UNION ALL
@@ -517,24 +569,15 @@ export class PostgresContextStore extends ContextStore {
       ORDER BY depth DESC`,
       [headId],
     );
-
-    return rows.map((row) => ({
-      id: row.id,
-      chatId: row.chatid,
-      parentId: row.parentid,
-      name: row.name,
-      type: row.type ?? undefined,
-      data: row.data,
-      createdAt: Number(row.createdat),
-    }));
   }
 
   async hasChildren(messageId: string): Promise<boolean> {
-    const rows = await this.#query<{ exists: boolean }>(
+    const [row] = await this.#rows(
+      existsRow,
       `SELECT EXISTS(SELECT 1 FROM ${this.#t('messages')} WHERE parentId = $1) as exists`,
       [messageId],
     );
-    return rows[0].exists;
+    return row.exists;
   }
 
   async getMessages(chatId: string): Promise<MessageData[]> {
@@ -574,59 +617,21 @@ export class PostgresContextStore extends ContextStore {
     chatId: string,
     name: string,
   ): Promise<BranchData | undefined> {
-    const rows = await this.#query<{
-      id: string;
-      chatid: string;
-      name: string;
-      headmessageid: string | null;
-      isactive: boolean;
-      createdat: string;
-    }>(`SELECT * FROM ${this.#t('branches')} WHERE chatId = $1 AND name = $2`, [
-      chatId,
-      name,
-    ]);
-
-    if (rows.length === 0) {
-      return undefined;
-    }
-
-    const row = rows[0];
-    return {
-      id: row.id,
-      chatId: row.chatid,
-      name: row.name,
-      headMessageId: row.headmessageid,
-      isActive: row.isactive,
-      createdAt: Number(row.createdat),
-    };
+    const [branch] = await this.#rows(
+      storedBranch,
+      `SELECT * FROM ${this.#t('branches')} WHERE chatId = $1 AND name = $2`,
+      [chatId, name],
+    );
+    return branch;
   }
 
   async getActiveBranch(chatId: string): Promise<BranchData | undefined> {
-    const rows = await this.#query<{
-      id: string;
-      chatid: string;
-      name: string;
-      headmessageid: string | null;
-      isactive: boolean;
-      createdat: string;
-    }>(
+    const [branch] = await this.#rows(
+      storedBranch,
       `SELECT * FROM ${this.#t('branches')} WHERE chatId = $1 AND isActive = TRUE`,
       [chatId],
     );
-
-    if (rows.length === 0) {
-      return undefined;
-    }
-
-    const row = rows[0];
-    return {
-      id: row.id,
-      chatId: row.chatid,
-      name: row.name,
-      headMessageId: row.headmessageid,
-      isActive: true,
-      createdAt: Number(row.createdat),
-    };
+    return branch;
   }
 
   async setActiveBranch(chatId: string, branchId: string): Promise<void> {
@@ -648,7 +653,8 @@ export class PostgresContextStore extends ContextStore {
     messageId: string | null,
     expectedHeadMessageId: string | null,
   ): Promise<boolean> {
-    const rows = await this.#query(
+    const rows = await this.#rows(
+      idRow,
       `UPDATE ${this.#t('branches')} SET headMessageId = $1
        WHERE id = $2 AND headMessageId IS NOT DISTINCT FROM $3
        RETURNING id`,
@@ -658,13 +664,8 @@ export class PostgresContextStore extends ContextStore {
   }
 
   async listBranches(chatId: string): Promise<BranchInfo[]> {
-    const branches = await this.#query<{
-      id: string;
-      name: string;
-      headmessageid: string | null;
-      isactive: boolean;
-      createdat: string;
-    }>(
+    const branches = await this.#rows(
+      branchRow,
       `SELECT
         id,
         name,
@@ -679,32 +680,34 @@ export class PostgresContextStore extends ContextStore {
 
     const result: BranchInfo[] = [];
     for (const branch of branches) {
-      let messageCount = 0;
-      if (branch.headmessageid) {
-        const countRows = await this.#query<{ count: string }>(
-          `WITH RECURSIVE chain AS (
-            SELECT id, parentId FROM ${this.#t('messages')} WHERE id = $1
-            UNION ALL
-            SELECT m.id, m.parentId FROM ${this.#t('messages')} m
-            INNER JOIN chain c ON m.id = c.parentId
-          )
-          SELECT COUNT(*) as count FROM chain`,
-          [branch.headmessageid],
-        );
-        messageCount = Number(countRows[0].count);
-      }
-
       result.push({
         id: branch.id,
         name: branch.name,
         headMessageId: branch.headmessageid,
         isActive: branch.isactive,
-        messageCount,
-        createdAt: Number(branch.createdat),
+        messageCount: branch.headmessageid
+          ? await this.#countChain(branch.headmessageid)
+          : 0,
+        createdAt: branch.createdat,
       });
     }
 
     return result;
+  }
+
+  async #countChain(headMessageId: string): Promise<number> {
+    const [row] = await this.#rows(
+      countRow,
+      `WITH RECURSIVE chain AS (
+        SELECT id, parentId FROM ${this.#t('messages')} WHERE id = $1
+        UNION ALL
+        SELECT m.id, m.parentId FROM ${this.#t('messages')} m
+        INNER JOIN chain c ON m.id = c.parentId
+      )
+      SELECT COUNT(*) as count FROM chain`,
+      [headMessageId],
+    );
+    return row.count;
   }
 
   // ==========================================================================
@@ -732,51 +735,23 @@ export class PostgresContextStore extends ContextStore {
     chatId: string,
     name: string,
   ): Promise<CheckpointData | undefined> {
-    const rows = await this.#query<{
-      id: string;
-      chatid: string;
-      name: string;
-      messageid: string;
-      createdat: string;
-    }>(
+    const [checkpoint] = await this.#rows(
+      storedCheckpoint,
       `SELECT * FROM ${this.#t('checkpoints')} WHERE chatId = $1 AND name = $2`,
       [chatId, name],
     );
-
-    if (rows.length === 0) {
-      return undefined;
-    }
-
-    const row = rows[0];
-    return {
-      id: row.id,
-      chatId: row.chatid,
-      name: row.name,
-      messageId: row.messageid,
-      createdAt: Number(row.createdat),
-    };
+    return checkpoint;
   }
 
   async listCheckpoints(chatId: string): Promise<CheckpointInfo[]> {
-    const rows = await this.#query<{
-      id: string;
-      name: string;
-      messageid: string;
-      createdat: string;
-    }>(
+    return this.#rows(
+      checkpointInfo,
       `SELECT id, name, messageId, createdAt
        FROM ${this.#t('checkpoints')}
        WHERE chatId = $1
        ORDER BY createdAt DESC`,
       [chatId],
     );
-
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      messageId: row.messageid,
-      createdAt: Number(row.createdat),
-    }));
   }
 
   async deleteCheckpoint(chatId: string, name: string): Promise<void> {
@@ -828,31 +803,7 @@ export class PostgresContextStore extends ContextStore {
     sql += ` ORDER BY rank DESC LIMIT $${paramIndex}`;
     params.push(limit);
 
-    const rows = await this.#query<{
-      id: string;
-      chatid: string;
-      parentid: string | null;
-      name: string;
-      type: string | null;
-      data: unknown;
-      createdat: string;
-      rank: number;
-      snippet: string;
-    }>(sql, params);
-
-    return rows.map((row) => ({
-      message: {
-        id: row.id,
-        chatId: row.chatid,
-        parentId: row.parentid,
-        name: row.name,
-        type: row.type ?? undefined,
-        data: row.data,
-        createdAt: Number(row.createdat),
-      },
-      rank: row.rank,
-      snippet: row.snippet,
-    }));
+    return this.#rows(searchResult, sql, params);
   }
 
   // ==========================================================================
@@ -860,13 +811,8 @@ export class PostgresContextStore extends ContextStore {
   // ==========================================================================
 
   async getGraph(chatId: string): Promise<GraphData> {
-    const messageRows = await this.#query<{
-      id: string;
-      parentid: string | null;
-      name: string;
-      data: unknown;
-      createdat: string;
-    }>(
+    const messageRows = await this.#rows(
+      graphMessageRow,
       `SELECT id, parentId, name, data, createdAt
        FROM ${this.#t('messages')}
        WHERE chatId = $1
@@ -882,15 +828,12 @@ export class PostgresContextStore extends ContextStore {
         parentId: row.parentid,
         role: row.name,
         content: content.length > 50 ? content.slice(0, 50) + '...' : content,
-        createdAt: Number(row.createdat),
+        createdAt: row.createdat,
       };
     });
 
-    const branchRows = await this.#query<{
-      name: string;
-      headmessageid: string | null;
-      isactive: boolean;
-    }>(
+    const branches = await this.#rows(
+      graphBranch,
       `SELECT name, headMessageId, isActive
        FROM ${this.#t('branches')}
        WHERE chatId = $1
@@ -898,27 +841,14 @@ export class PostgresContextStore extends ContextStore {
       [chatId],
     );
 
-    const branches: GraphBranch[] = branchRows.map((row) => ({
-      name: row.name,
-      headMessageId: row.headmessageid,
-      isActive: row.isactive,
-    }));
-
-    const checkpointRows = await this.#query<{
-      name: string;
-      messageid: string;
-    }>(
+    const checkpoints = await this.#rows(
+      graphCheckpoint,
       `SELECT name, messageId
        FROM ${this.#t('checkpoints')}
        WHERE chatId = $1
        ORDER BY createdAt ASC`,
       [chatId],
     );
-
-    const checkpoints: GraphCheckpoint[] = checkpointRows.map((row) => ({
-      name: row.name,
-      messageId: row.messageid,
-    }));
 
     return {
       chatId,

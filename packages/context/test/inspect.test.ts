@@ -3,11 +3,11 @@ import { HttpResponse, http } from 'msw';
 import { setupServer } from 'msw/node';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
+import { z } from 'zod';
 
 import {
   ContextEngine,
   InMemoryContextStore,
-  type InspectResult,
   XmlRenderer,
   assistantText,
   createBashTool,
@@ -17,6 +17,23 @@ import {
   role,
   user,
 } from '@deepagents/context';
+
+/** A persisted user UIMessage carrying the reminder metadata its save folded in. */
+const persistedUserMessageSchema = z.object({
+  parts: z.array(
+    z.looseObject({ type: z.string(), text: z.string().optional() }),
+  ),
+  metadata: z.looseObject({
+    reminders: z.array(z.looseObject({ text: z.string(), mode: z.string() })),
+  }),
+});
+
+/** The InspectResult fields the JSON round-trip test reads back. */
+const inspectResultJsonSchema = z.object({
+  rendered: z.string(),
+  estimate: z.looseObject({ model: z.string() }),
+  meta: z.looseObject({ chatId: z.string() }),
+});
 
 async function createVirtualAgentSandbox() {
   return createBashTool({
@@ -206,22 +223,17 @@ describe('ContextEngine.inspect()', () => {
     );
     assert.ok(persistedUser, 'should include persisted user message');
 
-    const persistedData = persistedUser?.data as {
-      parts?: Array<{ type: string; text?: string }>;
-      metadata?: {
-        reminders?: Array<{ text: string; mode: string }>;
-      };
-    };
-    assert.strictEqual(persistedData.parts?.[0]?.text, 'payload');
+    const persistedData = persistedUserMessageSchema.parse(persistedUser.data);
+    assert.strictEqual(persistedData.parts.at(0)?.text, 'payload');
     assert.strictEqual(
-      persistedData.parts?.[1]?.text,
+      persistedData.parts.at(1)?.text,
       '<system-reminder>tooltip-reminder</system-reminder>',
     );
     assert.strictEqual(
-      persistedData.metadata?.reminders?.[0]?.text,
+      persistedData.metadata.reminders.at(0)?.text,
       'tooltip-reminder',
     );
-    assert.strictEqual(persistedData.metadata?.reminders?.[0]?.mode, 'part');
+    assert.strictEqual(persistedData.metadata.reminders.at(0)?.mode, 'part');
 
     const graphUserNode = result.graph.nodes.find(
       (node) => node.id === 'user-reminder-msg',
@@ -330,7 +342,7 @@ describe('ContextEngine.inspect()', () => {
 
     // Should not throw
     const json = JSON.stringify(result);
-    const parsed = JSON.parse(json) as InspectResult;
+    const parsed = inspectResultJsonSchema.parse(JSON.parse(json));
 
     // Verify round-trip
     assert.strictEqual(parsed.meta.chatId, 'test-chat-9');

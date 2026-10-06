@@ -5,7 +5,6 @@ import { describe, it } from 'node:test';
 import {
   AsyncResolver,
   ContextEngine,
-  type ContextFragment,
   type FragmentData,
   FragmentLoaderResolver,
   FunctionResolver,
@@ -19,6 +18,7 @@ import {
   createVirtualSandbox,
   defaultResolvers,
   fragment,
+  isFragment,
 } from '@deepagents/context';
 
 async function createVirtualAgentSandbox() {
@@ -98,9 +98,11 @@ describe('FragmentLoaderResolver — nested', () => {
     );
     const walker = newWalker();
     await walker.resolve([f], await ctx());
-    const data = f.data as ContextFragment[];
-    assert.strictEqual(data.length, 1);
-    assert.deepStrictEqual(data[0].data, ['final']);
+    assert.ok(Array.isArray(f.data));
+    assert.strictEqual(f.data.length, 1);
+    const [inner] = f.data;
+    assert.ok(isFragment(inner));
+    assert.deepStrictEqual(inner.data, ['final']);
   });
 });
 
@@ -141,7 +143,8 @@ describe('FragmentLoaderResolver — errors', () => {
       await walker.resolve([f], await ctx());
       assert.fail('expected reject');
     } catch (err) {
-      assert.strictEqual((err as Error).cause, original);
+      assert.ok(err instanceof Error);
+      assert.strictEqual(err.cause, original);
     }
   });
 
@@ -165,9 +168,11 @@ describe('FragmentLoaderResolver — cycle handling', () => {
     const f = fragment('parent', [shared, shared]);
     const walker = newWalker();
     await walker.resolve([f], await ctx());
-    const data = f.data as Array<Array<{ key: string }>>;
-    assert.deepStrictEqual(data[0][0], { key: 'value' });
-    assert.deepStrictEqual(data[0][1], { key: 'value' });
+    assert.ok(Array.isArray(f.data));
+    const [pair] = f.data;
+    assert.ok(Array.isArray(pair));
+    assert.deepStrictEqual(pair[0], { key: 'value' });
+    assert.deepStrictEqual(pair[1], { key: 'value' });
   });
 
   it('terminates on a self-referential array cycle', async () => {
@@ -176,10 +181,12 @@ describe('FragmentLoaderResolver — cycle handling', () => {
     const f = fragment('cyclic', arr);
     const walker = newWalker();
     await walker.resolve([f], await ctx());
-    const data = f.data as unknown[][];
-    assert.strictEqual(data[0][0], 'a');
+    assert.ok(Array.isArray(f.data));
+    const [walked] = f.data;
+    assert.ok(Array.isArray(walked));
+    assert.strictEqual(walked[0], 'a');
     assert.strictEqual(
-      data[0][1],
+      walked[1],
       undefined,
       'cycle slot must be dropped (returned as undefined)',
     );
@@ -232,11 +239,12 @@ describe('FragmentLoaderResolver — sandbox optionality', () => {
     class FunctionNoSandboxResolver {
       readonly name = 'FunctionNoSandboxResolver';
       readonly requiresSandbox = false;
-      canResolve(v: unknown): boolean {
+      canResolve(v: unknown): v is () => unknown {
         return typeof v === 'function';
       }
       async resolve(v: unknown): Promise<unknown> {
-        return (v as () => unknown)();
+        if (!this.canResolve(v)) throw new TypeError('not a function loader');
+        return v();
       }
     }
     const walker = new FragmentLoaderResolver([
@@ -294,8 +302,8 @@ describe('FragmentLoaderResolver — custom resolver chain', () => {
     const syncLoader = () => 'sync';
     const f = fragment('sync-leak', syncLoader);
     await walker.resolve([f], await ctx());
-    const data = f.data as unknown[];
-    assert.strictEqual(data[0], syncLoader);
+    assert.ok(Array.isArray(f.data));
+    assert.strictEqual(f.data[0], syncLoader);
   });
 });
 

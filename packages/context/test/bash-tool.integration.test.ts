@@ -581,31 +581,38 @@ describe('readFile tool', () => {
   });
 
   it('hands every supported image format to the model as a file part', async () => {
-    const files = {
-      'image.gif': Buffer.from('GIF89a'),
-      'image.jpg': Buffer.from([0xff, 0xd8, 0xff]),
-      'image.webp': Buffer.concat([
-        Buffer.from('RIFF'),
-        Buffer.alloc(4),
-        Buffer.from('WEBP'),
-      ]),
-    };
-    const mediaTypes = {
-      'image.gif': 'image/gif',
-      'image.jpg': 'image/jpeg',
-      'image.webp': 'image/webp',
-    } as const;
+    const files = [
+      {
+        path: 'image.gif',
+        content: Buffer.from('GIF89a'),
+        mediaType: 'image/gif',
+      },
+      {
+        path: 'image.jpg',
+        content: Buffer.from([0xff, 0xd8, 0xff]),
+        mediaType: 'image/jpeg',
+      },
+      {
+        path: 'image.webp',
+        content: Buffer.concat([
+          Buffer.from('RIFF'),
+          Buffer.alloc(4),
+          Buffer.from('WEBP'),
+        ]),
+        mediaType: 'image/webp',
+      },
+    ];
     const { tools, sandbox } = await createBashTool({
       sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
     });
     await sandbox.writeFiles(
-      Object.entries(files).map(([path, content]) => ({
+      files.map(({ path, content }) => ({
         path: `/workspace/${path}`,
         content,
       })),
     );
 
-    for (const [path, content] of Object.entries(files)) {
+    for (const { path, content, mediaType } of files) {
       assert.deepStrictEqual(
         await executeReadFile(tools.readFile, { path }, `read-${path}`),
         {
@@ -614,7 +621,7 @@ describe('readFile tool', () => {
             {
               type: 'file',
               data: { type: 'data', data: content.toString('base64') },
-              mediaType: mediaTypes[path as keyof typeof mediaTypes],
+              mediaType,
               filename: path,
             },
           ],

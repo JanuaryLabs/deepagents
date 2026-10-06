@@ -1,3 +1,4 @@
+import { validateUIMessages } from 'ai';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { execFile } from 'node:child_process';
@@ -7,6 +8,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import { promisify } from 'node:util';
+import { z } from 'zod';
 
 import {
   ContextEngine,
@@ -15,6 +17,7 @@ import {
   assistantText,
   createBashTool,
   createVirtualSandbox,
+  isRecord,
   reminder,
   user,
 } from '@deepagents/context';
@@ -160,7 +163,7 @@ function makeToolClarificationMessage(id: string) {
 }
 
 function getPragmaNumber(db: DatabaseSync, name: string): number {
-  const row = db.prepare(`PRAGMA ${name}`).get() as Record<string, number>;
+  const row = db.prepare(`PRAGMA ${name}`).get();
   const direct = row?.[name];
   if (typeof direct === 'number') {
     return direct;
@@ -257,7 +260,7 @@ describe('Sqlite ContextEngine Integration', () => {
             sandbox: await createVirtualAgentSandbox(),
           });
         } catch (error) {
-          return { error } as { error: unknown };
+          return { error };
         }
       })(),
       'resolve dangling parent',
@@ -449,11 +452,14 @@ describe('Sqlite ContextEngine Integration', () => {
             throw new Error('Expected SQLITE_FULL, but no error occurred');
           }
 
-          const err = failure as {
-            code?: string;
-            errcode?: number;
-            errstr?: string;
-          };
+          // node:sqlite reports engine failures with these extra fields.
+          const err = z
+            .object({
+              code: z.string().optional(),
+              errcode: z.number().optional(),
+              errstr: z.string().optional(),
+            })
+            .parse(failure);
           assert.strictEqual(err.code, 'ERR_SQLITE_ERROR');
           assert.strictEqual(err.errcode, 13);
           assert.match(err.errstr ?? '', /database or disk is full/i);
@@ -600,7 +606,7 @@ describe('Sqlite ContextEngine Integration', () => {
       sandbox: await createVirtualAgentSandbox(),
     });
     assert.strictEqual(mainResult.messages.length, 2);
-    const mainAssistant = mainResult.messages[1] as { id?: string };
+    const mainAssistant = mainResult.messages[1];
     assert.strictEqual(mainAssistant.id, 'assistant-pending');
   });
 
@@ -625,19 +631,7 @@ describe('Sqlite ContextEngine Integration', () => {
       renderer,
       sandbox: await createVirtualAgentSandbox(),
     });
-    const message = afterSave.messages[0] as {
-      parts: Array<{ type: string; text?: string }>;
-      metadata?: {
-        reminders?: Array<{
-          id: string;
-          text: string;
-          partIndex: number;
-          start: number;
-          end: number;
-          mode: string;
-        }>;
-      };
-    };
+    const message = afterSave.messages[0];
 
     assert.deepStrictEqual(
       message.parts.map((part) =>
@@ -645,16 +639,15 @@ describe('Sqlite ContextEngine Integration', () => {
       ),
       [`body${taggedReminder('inline')}`, taggedReminder('part-reminder')],
     );
-    assert.strictEqual(message.metadata?.reminders?.length, 2);
+    assert.ok(isRecord(message.metadata));
+    assert.ok(Array.isArray(message.metadata.reminders));
+    assert.strictEqual(message.metadata.reminders.length, 2);
 
     const roundtrip = await engine.resolve({
       renderer,
       sandbox: await createVirtualAgentSandbox(),
     });
-    const messageAgain = roundtrip.messages[0] as {
-      parts: Array<{ type: string; text?: string }>;
-      metadata?: unknown;
-    };
+    const messageAgain = roundtrip.messages[0];
 
     assert.deepStrictEqual(
       messageAgain.parts,
@@ -701,11 +694,10 @@ describe('Sqlite ContextEngine Integration', () => {
 
     const msg = await store.getMessage('a1');
     assert.ok(msg, 'Message a1 should exist');
-    const data = msg.data as {
-      parts?: Array<{ type: string; text?: string }>;
-    };
+    const [stored] = await validateUIMessages({ messages: [msg.data] });
+    const storedPart = stored.parts[0];
     assert.ok(
-      data.parts?.[0]?.text?.includes('Updated version'),
+      storedPart.type === 'text' && storedPart.text.includes('Updated version'),
       'Should have updated content',
     );
 
@@ -782,13 +774,13 @@ describe('Sqlite ContextEngine Integration', () => {
     );
 
     const msg = await store.getMessage('a1');
-    const data = msg!.data as {
-      parts?: Array<{ type: string; text?: string }>;
-    };
+    assert.ok(msg);
+    const [stored] = await validateUIMessages({ messages: [msg.data] });
+    const storedPart = stored.parts[0];
     assert.ok(
-      data.parts?.[0]?.text?.includes('Step 3'),
+      storedPart.type === 'text' && storedPart.text.includes('Step 3'),
       'Should have final content from 3rd save',
     );
-    assert.strictEqual(msg!.parentId, 'u1', 'parentId should remain user msg');
+    assert.strictEqual(msg.parentId, 'u1', 'parentId should remain user msg');
   });
 });

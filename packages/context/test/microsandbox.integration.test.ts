@@ -10,18 +10,11 @@ import {
   createMicrosandboxSandbox,
 } from '@deepagents/context';
 
-type DynamicImport = (specifier: string) => Promise<unknown>;
-
-const dynamicImport = new Function(
-  'specifier',
-  'return import(specifier)',
-) as DynamicImport;
-
 type MicrosandboxSdk = typeof import('microsandbox');
 
 async function importMicrosandboxSdk(): Promise<MicrosandboxSdk | undefined> {
   try {
-    return (await dynamicImport('microsandbox')) as MicrosandboxSdk;
+    return await import('microsandbox');
   } catch {
     return undefined;
   }
@@ -337,7 +330,7 @@ describe('Microsandbox Sandbox', async () => {
 
     describe('lifecycle', () => {
       it('keeps a detached named sandbox running across client disposal and restart', async () => {
-        const sdk = (await importMicrosandboxSdk()) as MicrosandboxSdk;
+        const sdk = await import('microsandbox');
         const name = `deepagents-test-${randomUUID()}`;
         const [first, peer] = await Promise.all([
           createMicrosandboxSandbox({
@@ -376,7 +369,7 @@ describe('Microsandbox Sandbox', async () => {
       });
 
       it('reacquires a named sandbox for concurrent operations after its endpoint stops', async () => {
-        const sdk = (await importMicrosandboxSdk()) as MicrosandboxSdk;
+        const sdk = await import('microsandbox');
         const name = `deepagents-test-${randomUUID()}`;
         const sandbox = await createMicrosandboxSandbox({
           name,
@@ -413,7 +406,7 @@ describe('Microsandbox Sandbox', async () => {
       });
 
       it('resumes a named sandbox with rootfs state intact after dispose', async () => {
-        const sdk = (await importMicrosandboxSdk()) as MicrosandboxSdk;
+        const sdk = await import('microsandbox');
         const name = `deepagents-test-${randomUUID()}`;
         try {
           const first = await createMicrosandboxSandbox({ name });
@@ -440,7 +433,7 @@ describe('Microsandbox Sandbox', async () => {
       });
 
       it('removes an unnamed sandbox entirely on dispose', async () => {
-        const sdk = (await importMicrosandboxSdk()) as MicrosandboxSdk;
+        const sdk = await import('microsandbox');
         const namesBefore = new Set(
           (await sdk.Sandbox.list()).sandboxes.map((handle) => handle.name),
         );
@@ -461,7 +454,7 @@ describe('Microsandbox Sandbox', async () => {
 
     describe('configure', () => {
       it('keeps a named sandbox persistent when configure() marks it ephemeral', async () => {
-        const sdk = (await importMicrosandboxSdk()) as MicrosandboxSdk;
+        const sdk = await import('microsandbox');
         const name = `deepagents-test-${randomUUID()}`;
         const sandbox = await createMicrosandboxSandbox({
           name,
@@ -518,7 +511,7 @@ describe('Microsandbox Sandbox', async () => {
     });
 
     it('disposes the sandbox and rethrows when the hook fails', async () => {
-      const sdk = (await importMicrosandboxSdk()) as MicrosandboxSdk;
+      const sdk = await import('microsandbox');
       const name = `deepagents-test-${randomUUID()}`;
       try {
         await assert.rejects(

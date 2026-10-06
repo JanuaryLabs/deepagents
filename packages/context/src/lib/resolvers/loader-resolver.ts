@@ -1,8 +1,7 @@
 import {
   type ContextFragment,
-  type FragmentData,
-  type FragmentObject,
   isFragment,
+  isFragmentData,
   isFragmentObject,
 } from '../fragments.ts';
 import type { LoadContext, ValueResolver } from './types.ts';
@@ -39,13 +38,19 @@ export class FragmentLoaderResolver {
     path: string,
   ): Promise<void> {
     if (!('data' in fragment)) return;
-    fragment.data = (await this.#walkData(
+    const data = await this.#walkData(
       fragment.data,
       ctx,
       depth,
       ancestors,
       path,
-    )) as FragmentData;
+    );
+    if (!isFragmentData(data)) {
+      throw new Error(
+        `Fragment '${path}' resolved to a value that is not fragment data`,
+      );
+    }
+    fragment.data = data;
   }
 
   async #walkData(
@@ -122,7 +127,7 @@ export class FragmentLoaderResolver {
       if (ancestors.has(value)) return undefined;
       const childAncestors = new Set(ancestors);
       childAncestors.add(value);
-      const out: FragmentObject = {};
+      const out: Record<string, unknown> = {};
       const entries = Object.entries(value);
       const resolvedValues = await Promise.all(
         entries.map(([, v]) =>
@@ -131,7 +136,7 @@ export class FragmentLoaderResolver {
       );
       for (let i = 0; i < entries.length; i += 1) {
         const [k] = entries[i];
-        const v = resolvedValues[i] as FragmentData | undefined;
+        const v = resolvedValues[i];
         if (v !== undefined) out[k] = v;
       }
       return out;

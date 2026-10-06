@@ -1,6 +1,21 @@
 import YAML from 'yaml';
+import { z } from 'zod';
 
 import type { ParsedSkillMd } from './types.ts';
+
+const MISSING_NAME = 'Invalid SKILL.md: frontmatter must have a "name" field';
+const MISSING_DESCRIPTION =
+  'Invalid SKILL.md: frontmatter must have a "description" field';
+
+const frontmatterSchema = z.looseObject(
+  {
+    name: z.string({ error: MISSING_NAME }).min(1, { error: MISSING_NAME }),
+    description: z
+      .string({ error: MISSING_DESCRIPTION })
+      .min(1, { error: MISSING_DESCRIPTION }),
+  },
+  { error: MISSING_NAME },
+);
 
 /**
  * Parse YAML frontmatter from a SKILL.md file content.
@@ -24,20 +39,13 @@ export function parseFrontmatter(content: string): ParsedSkillMd {
   }
 
   const [, yamlContent, body] = match;
-  const frontmatter = YAML.parse(yamlContent) as Record<string, unknown>;
-
-  if (!frontmatter.name || typeof frontmatter.name !== 'string') {
-    throw new Error('Invalid SKILL.md: frontmatter must have a "name" field');
-  }
-
-  if (!frontmatter.description || typeof frontmatter.description !== 'string') {
-    throw new Error(
-      'Invalid SKILL.md: frontmatter must have a "description" field',
-    );
+  const parsed = frontmatterSchema.safeParse(YAML.parse(yamlContent));
+  if (!parsed.success) {
+    throw new Error(parsed.error.issues[0].message);
   }
 
   return {
-    frontmatter: frontmatter as ParsedSkillMd['frontmatter'],
+    frontmatter: parsed.data,
     body: body.trim(),
   };
 }

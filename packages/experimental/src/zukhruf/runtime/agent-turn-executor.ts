@@ -263,17 +263,14 @@ export class AgentTurnExecutor {
     try {
       let writer: UIMessageStreamWriter;
       const compaction = declaration.compaction
-        ? createCompaction(
-            declaration.compaction,
-            engine,
-            this.#store,
-            abort.signal,
-            (data) =>
-              writer.write({
-                type: 'data-compaction',
-                id: `${data.id}:${data.status}`,
-                data,
-              }),
+        ? createCompaction<
+            ReturnType<typeof agent<typeof modelTools>>['tools']
+          >(declaration.compaction, engine, this.#store, abort.signal, (data) =>
+            writer.write({
+              type: 'data-compaction',
+              id: `${data.id}:${data.status}`,
+              data,
+            }),
           )
         : undefined;
       const stream = await chat(

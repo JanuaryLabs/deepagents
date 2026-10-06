@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { after, before, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 import {
   ContainerCreationError,
@@ -185,40 +185,35 @@ describe('Docker Sandbox', () => {
     });
 
     describe('command execution', () => {
-      let sandbox: DisposableSandbox;
-
-      before(async () => {
-        sandbox = await createDockerSandbox(docker.defaults);
-      });
-
-      after(async () => {
-        await sandbox.dispose();
-      });
-
       it('captures stdout correctly', async () => {
+        await using sandbox = await createDockerSandbox(docker.defaults);
         const result = await sandbox.executeCommand('echo "test output"');
         assert.strictEqual(result.exitCode, 0);
         assert.strictEqual(result.stdout.trim(), 'test output');
       });
 
       it('captures stderr correctly', async () => {
+        await using sandbox = await createDockerSandbox(docker.defaults);
         const result = await sandbox.executeCommand('echo "error" >&2');
         assert.strictEqual(result.exitCode, 0);
         assert.strictEqual(result.stderr.trim(), 'error');
       });
 
       it('preserves exit codes', async () => {
+        await using sandbox = await createDockerSandbox(docker.defaults);
         const result = await sandbox.executeCommand('exit 42');
         assert.strictEqual(result.exitCode, 42);
       });
 
       it('returns exit code 127 for command not found', async () => {
+        await using sandbox = await createDockerSandbox(docker.defaults);
         const result = await sandbox.executeCommand('nonexistent_command_xyz');
         assert.strictEqual(result.exitCode, 127);
         assert.match(result.stderr, /not found/i);
       });
 
       it('handles multi-line output', async () => {
+        await using sandbox = await createDockerSandbox(docker.defaults);
         const result = await sandbox.executeCommand(
           'echo "line1"; echo "line2"; echo "line3"',
         );
@@ -228,6 +223,7 @@ describe('Docker Sandbox', () => {
       });
 
       it('handles special characters in output', async () => {
+        await using sandbox = await createDockerSandbox(docker.defaults);
         const result = await sandbox.executeCommand('echo "hello $USER world"');
         assert.strictEqual(result.exitCode, 0);
         // $USER should expand (or be empty) - just check it doesn't error
@@ -235,17 +231,8 @@ describe('Docker Sandbox', () => {
     });
 
     describe('file operations', () => {
-      let sandbox: DisposableSandbox;
-
-      before(async () => {
-        sandbox = await createDockerSandbox(docker.defaults);
-      });
-
-      after(async () => {
-        await sandbox.dispose();
-      });
-
       it('writes single file', async () => {
+        await using sandbox = await createDockerSandbox(docker.defaults);
         await sandbox.writeFiles([
           { path: '/tmp/test.txt', content: 'hello world' },
         ]);
@@ -255,6 +242,7 @@ describe('Docker Sandbox', () => {
       });
 
       it('writes multiple files', async () => {
+        await using sandbox = await createDockerSandbox(docker.defaults);
         await sandbox.writeFiles([
           { path: '/tmp/file1.txt', content: 'content1' },
           { path: '/tmp/file2.txt', content: 'content2' },
@@ -267,6 +255,7 @@ describe('Docker Sandbox', () => {
       });
 
       it('creates parent directories automatically', async () => {
+        await using sandbox = await createDockerSandbox(docker.defaults);
         await sandbox.writeFiles([
           { path: '/tmp/nested/deep/file.txt', content: 'nested content' },
         ]);
@@ -276,6 +265,7 @@ describe('Docker Sandbox', () => {
       });
 
       it('handles files with special characters', async () => {
+        await using sandbox = await createDockerSandbox(docker.defaults);
         const specialContent = 'line1\nline2\ttab\n';
         await sandbox.writeFiles([
           { path: '/tmp/special.txt', content: specialContent },
@@ -287,6 +277,7 @@ describe('Docker Sandbox', () => {
       });
 
       it('throws error when reading non-existent file', async () => {
+        await using sandbox = await createDockerSandbox(docker.defaults);
         await assert.rejects(
           sandbox.readFile('/nonexistent/path/file.txt'),
           /Failed to read file/,
@@ -328,26 +319,15 @@ describe('Docker Sandbox', () => {
     });
 
     describe('volumes', () => {
-      let fixture: Awaited<ReturnType<Docker['directory']>>;
-      let tempDir: string;
-
-      before(async () => {
-        fixture = await new Docker().directory();
-        tempDir = fixture.path;
-        await fixture.writeFile('host-file.txt', 'from host');
-      });
-
-      after(async () => {
-        await fixture[Symbol.asyncDispose]();
-      });
-
       it('attaches bind volume as read-only by default', async () => {
+        await using fixture = await new Docker().directory();
+        await fixture.writeFile('host-file.txt', 'from host');
         const sandbox = await createDockerSandbox({
           ...docker.defaults,
           volumes: [
             {
               type: 'bind',
-              hostPath: tempDir,
+              hostPath: fixture.path,
               containerPath: '/data',
             },
           ],
@@ -373,12 +353,14 @@ describe('Docker Sandbox', () => {
       });
 
       it('attaches bind volume as read-write when specified', async () => {
+        await using fixture = await new Docker().directory();
+        await fixture.writeFile('host-file.txt', 'from host');
         const sandbox = await createDockerSandbox({
           ...docker.defaults,
           volumes: [
             {
               type: 'bind',
-              hostPath: tempDir,
+              hostPath: fixture.path,
               containerPath: '/data',
               readOnly: false,
             },
@@ -475,8 +457,7 @@ describe('Docker Sandbox', () => {
           (err: Error) => {
             assert.ok(err instanceof VolumeInspectError);
             assert.strictEqual(err.name, 'VolumeInspectError');
-            const volumeErr = err as VolumeInspectError;
-            assert.strictEqual(volumeErr.volume, volumeName);
+            assert.strictEqual(err.volume, volumeName);
             return true;
           },
         );
@@ -575,8 +556,7 @@ describe('Docker Sandbox', () => {
             (err: Error) => {
               assert.ok(err instanceof VolumeCreateError);
               assert.strictEqual(err.name, 'VolumeCreateError');
-              const volumeErr = err as VolumeCreateError;
-              assert.strictEqual(volumeErr.volume, volumeName);
+              assert.strictEqual(err.volume, volumeName);
               return true;
             },
           );
@@ -1436,10 +1416,10 @@ describe('Docker Sandbox', () => {
 
   describe('useSandbox', () => {
     it('auto-disposes sandbox on successful completion', async () => {
-      let sandboxRef: DisposableSandbox | null = null;
+      const captured: DisposableSandbox[] = [];
 
       const result = await useSandbox(docker.defaults, async (sandbox) => {
-        sandboxRef = sandbox;
+        captured.push(sandbox);
         const output = await sandbox.executeCommand(
           'echo "hello from useSandbox"',
         );
@@ -1449,7 +1429,7 @@ describe('Docker Sandbox', () => {
       assert.strictEqual(result, 'hello from useSandbox');
 
       // Verify sandbox is disposed (command should fail)
-      const captured1 = sandboxRef as DisposableSandbox | null;
+      const captured1 = captured.at(0);
       if (captured1) {
         try {
           await captured1.executeCommand('echo test');
@@ -1461,11 +1441,11 @@ describe('Docker Sandbox', () => {
     });
 
     it('auto-disposes sandbox even when function throws', async () => {
-      let sandboxRef: DisposableSandbox | null = null;
+      const captured: DisposableSandbox[] = [];
 
       await assert.rejects(
         useSandbox(docker.defaults, async (sandbox) => {
-          sandboxRef = sandbox;
+          captured.push(sandbox);
           // Verify container is running
           const result = await sandbox.executeCommand('echo alive');
           assert.strictEqual(result.exitCode, 0);
@@ -1476,7 +1456,7 @@ describe('Docker Sandbox', () => {
       );
 
       // Verify sandbox is disposed (command should fail)
-      const captured2 = sandboxRef as DisposableSandbox | null;
+      const captured2 = captured.at(0);
       if (captured2) {
         try {
           await captured2.executeCommand('echo test');
@@ -1514,9 +1494,8 @@ describe('Docker Sandbox', () => {
           (err: Error) => {
             assert.ok(err instanceof MissingRuntimeError);
             assert.ok(err instanceof DockerSandboxError);
-            const missing = err as MissingRuntimeError;
-            assert.strictEqual(missing.runtime, 'npm');
-            assert.deepStrictEqual(missing.required, ['node', 'npm']);
+            assert.strictEqual(err.runtime, 'npm');
+            assert.deepStrictEqual(err.required, ['node', 'npm']);
             return true;
           },
         );
@@ -1561,9 +1540,8 @@ describe('Docker Sandbox', () => {
           }),
           (err: Error) => {
             assert.ok(err instanceof MissingRuntimeError);
-            const missing = err as MissingRuntimeError;
-            assert.strictEqual(missing.runtime, 'pip');
-            assert.deepStrictEqual(missing.required, ['python3', 'pip3']);
+            assert.strictEqual(err.runtime, 'pip');
+            assert.deepStrictEqual(err.required, ['python3', 'pip3']);
             return true;
           },
         );
@@ -1645,9 +1623,8 @@ describe('Docker Sandbox', () => {
           }),
           (err: Error) => {
             assert.ok(err instanceof InstallError);
-            const installErr = err as InstallError;
-            assert.strictEqual(installErr.target, 'bogus');
-            assert.strictEqual(installErr.source, 'url');
+            assert.strictEqual(err.target, 'bogus');
+            assert.strictEqual(err.source, 'url');
             return true;
           },
         );
@@ -1695,16 +1672,12 @@ describe('Docker Sandbox', () => {
             assert.ok(err instanceof VolumePathError);
             assert.ok(err instanceof DockerSandboxError);
             assert.strictEqual(err.name, 'VolumePathError');
-            const volumeErr = err as VolumePathError;
             assert.strictEqual(
-              volumeErr.source,
+              err.source,
               '/nonexistent/path/that/does/not/exist',
             );
-            assert.strictEqual(volumeErr.containerPath, '/app');
-            assert.strictEqual(
-              volumeErr.reason,
-              'hostPath does not exist on host',
-            );
+            assert.strictEqual(err.containerPath, '/app');
+            assert.strictEqual(err.reason, 'hostPath does not exist on host');
             return true;
           },
         );
@@ -1728,10 +1701,9 @@ describe('Docker Sandbox', () => {
             }),
             (err: Error) => {
               assert.ok(err instanceof VolumePathError);
-              const volumeErr = err as VolumePathError;
-              assert.strictEqual(volumeErr.source, tempDir);
+              assert.strictEqual(err.source, tempDir);
               assert.strictEqual(
-                volumeErr.reason,
+                err.reason,
                 'hostPath must not contain commas',
               );
               return true;
@@ -1757,9 +1729,8 @@ describe('Docker Sandbox', () => {
           }),
           (err: Error) => {
             assert.ok(err instanceof VolumePathError);
-            const volumeErr = err as VolumePathError;
             assert.strictEqual(
-              volumeErr.reason,
+              err.reason,
               'containerPath must not contain commas',
             );
             return true;
@@ -1783,11 +1754,7 @@ describe('Docker Sandbox', () => {
           }),
           (err: Error) => {
             assert.ok(err instanceof VolumePathError);
-            const volumeErr = err as VolumePathError;
-            assert.strictEqual(
-              volumeErr.reason,
-              'subPath must not contain commas',
-            );
+            assert.strictEqual(err.reason, 'subPath must not contain commas');
             return true;
           },
         );
@@ -1836,11 +1803,7 @@ describe('Docker Sandbox', () => {
             }),
             (err: Error) => {
               assert.ok(err instanceof VolumeInspectError);
-              const volumeErr = err as VolumeInspectError;
-              assert.match(
-                volumeErr.reason,
-                /permission denied inspecting volume/,
-              );
+              assert.match(err.reason, /permission denied inspecting volume/);
               return true;
             },
           );
@@ -1862,12 +1825,11 @@ describe('Docker Sandbox', () => {
             assert.ok(err instanceof PackageInstallError);
             assert.ok(err instanceof DockerSandboxError);
             assert.strictEqual(err.name, 'PackageInstallError');
-            const pkgErr = err as PackageInstallError;
-            assert.deepStrictEqual(pkgErr.packages, [
+            assert.deepStrictEqual(err.packages, [
               'nonexistent-package-xyz-12345',
             ]);
-            assert.strictEqual(pkgErr.image, 'bash:5.3-alpine3.24');
-            assert.strictEqual(pkgErr.packageManager, 'apk');
+            assert.strictEqual(err.image, 'bash:5.3-alpine3.24');
+            assert.strictEqual(err.packageManager, 'apk');
             return true;
           },
         );

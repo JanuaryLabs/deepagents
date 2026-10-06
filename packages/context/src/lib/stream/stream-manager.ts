@@ -489,7 +489,7 @@ async function drainAvailable(
     );
     if (chunks.length === 0) break;
     for (const chunk of chunks) {
-      controller.enqueue(chunk.data as StreamPart);
+      controller.enqueue(chunk.data);
       lastSeqRef.value = chunk.seq;
     }
     total += chunks.length;
@@ -506,24 +506,13 @@ function isAbortError(error: unknown): boolean {
   );
 }
 
+/**
+ * Reads the stream to its end, discarding chunks. An abort cancels the stream
+ * and rejects with the signal's reason once the cancellation has settled.
+ */
 async function drain(
   stream: ReadableStream,
   signal?: AbortSignal,
 ): Promise<void> {
-  const reader = stream.getReader();
-  const onAbort = () => reader.cancel();
-
-  if (signal) {
-    signal.addEventListener('abort', onAbort, { once: true });
-  }
-
-  try {
-    while (true) {
-      const { done } = await reader.read();
-      if (done) break;
-    }
-  } finally {
-    signal?.removeEventListener('abort', onAbort);
-    reader.releaseLock();
-  }
+  await stream.pipeTo(new WritableStream(), { signal });
 }

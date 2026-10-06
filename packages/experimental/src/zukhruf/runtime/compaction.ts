@@ -84,9 +84,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Resolve policy from the provider's request metadata after model middleware. */
-function cacheRetentionMs(
+function cacheRetentionMs<TOOLS extends ToolSet>(
   step: Pick<
-    StepResult<ToolSet>,
+    StepResult<TOOLS>,
     'model' | 'request' | 'response' | 'providerMetadata' | 'usage'
   >,
 ): number | undefined {
@@ -180,7 +180,7 @@ function cacheRetentionMs(
 }
 
 /** Projects model history while leaving the durable UI transcript untouched. */
-export function createCompaction(
+export function createCompaction<TOOLS extends ToolSet>(
   config: AgentCompaction,
   engine: ContextEngine,
   store: ContextStore,
@@ -194,11 +194,11 @@ export function createCompaction(
   let baseline: z.infer<typeof inputUsageSchema> | null = null;
   let request: Omit<z.infer<typeof cacheObservationSchema>, 'retentionMs'>;
   let settingsHash: string;
-  let settings: Parameters<GenerateTextOnStartCallback<ToolSet>>[0];
+  let settings: Parameters<GenerateTextOnStartCallback<TOOLS>>[0];
 
   // The SDK calls onStart before prepareStep, with the complete tool set
   // including sandbox tools. Resolve descriptions at each preparation boundary.
-  const onStart: GenerateTextOnStartCallback<ToolSet> = (input) => {
+  const onStart: GenerateTextOnStartCallback<TOOLS> = (input) => {
     settings = input;
   };
 
@@ -473,7 +473,7 @@ export function createCompaction(
     }
   };
 
-  const onStepStart: GenerateTextOnStepStartCallback<ToolSet> = (input) => {
+  const onStepStart: GenerateTextOnStepStartCallback<TOOLS> = (input) => {
     request = {
       scope: scope(input, input.instructions),
       prefixLength: input.messages.length,
@@ -481,7 +481,7 @@ export function createCompaction(
       startedAt: Date.now(),
     };
   };
-  const onStepEnd: GenerateTextOnStepEndCallback<ToolSet> = async (step) => {
+  const onStepEnd: GenerateTextOnStepEndCallback<TOOLS> = async (step) => {
     if (signal.aborted || step.finishReason === 'error') return;
     const iterations = step.usage.raw?.iterations;
     // Native compaction/iteration totals can describe billing, not the sent prompt.

@@ -1,4 +1,4 @@
-import type { UIMessage } from 'ai';
+import type { StepResult, ToolSet, UIMessage } from 'ai';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
@@ -46,12 +46,65 @@ async function seed(
   return { context, assistant };
 }
 
+/** A completed text step: the safe boundary a steer reminder waits for. */
+const safeBoundaryStep: StepResult<ToolSet> = {
+  callId: 'call-0',
+  stepNumber: 0,
+  model: { provider: 'mock', modelId: 'mock-model' },
+  toolsContext: {},
+  runtimeContext: {},
+  content: [{ type: 'text', text: 'safe boundary' }],
+  text: 'safe boundary',
+  reasoning: [],
+  reasoningText: undefined,
+  files: [],
+  sources: [],
+  toolCalls: [],
+  staticToolCalls: [],
+  dynamicToolCalls: [],
+  toolResults: [],
+  staticToolResults: [],
+  dynamicToolResults: [],
+  finishReason: 'stop',
+  rawFinishReason: undefined,
+  usage: {
+    inputTokens: undefined,
+    inputTokenDetails: {
+      noCacheTokens: undefined,
+      cacheReadTokens: undefined,
+      cacheWriteTokens: undefined,
+    },
+    outputTokens: undefined,
+    outputTokenDetails: { textTokens: undefined, reasoningTokens: undefined },
+    totalTokens: undefined,
+  },
+  performance: {
+    effectiveOutputTokensPerSecond: 0,
+    outputTokensPerSecond: undefined,
+    inputTokensPerSecond: undefined,
+    effectiveTotalTokensPerSecond: 0,
+    stepTimeMs: 0,
+    responseTimeMs: 0,
+    toolExecutionMs: {},
+    timeToFirstOutputMs: undefined,
+  },
+  warnings: undefined,
+  request: {},
+  response: {
+    messages: [],
+    id: 'response-0',
+    timestamp: new Date(0),
+    modelId: 'mock-model',
+  },
+  providerMetadata: undefined,
+};
+
 async function evaluateBoundary(context: ContextEngine): Promise<boolean> {
   const prepareStep = context.createPrepareStep();
   const result = await prepareStep({
-    steps: [{ content: [{ type: 'text', text: 'safe boundary' }] }],
+    steps: [safeBoundaryStep],
     stepNumber: 1,
-    model: {},
+    model: 'mock-model',
     instructions: undefined,
     initialInstructions: undefined,
     messages: [],
@@ -59,7 +112,7 @@ async function evaluateBoundary(context: ContextEngine): Promise<boolean> {
     responseMessages: [],
     toolsContext: {},
     runtimeContext: {},
-  } as never);
+  });
   return JSON.stringify(result)?.includes('REVIEW') ?? false;
 }
 

@@ -1,6 +1,6 @@
 import { existsSync } from 'fs';
 import { type CustomCommand, defineCommand } from 'just-bash';
-import spawn from 'nano-spawn';
+import spawn, { SubprocessError } from 'nano-spawn';
 import * as path from 'path';
 
 export interface BinaryBridgeConfig {
@@ -102,35 +102,26 @@ export function createBinaryBridges(
           exitCode: 0,
         };
       } catch (error) {
-        // nano-spawn wraps ENOENT (missing binary) into a SubprocessError
-        // with exitCode undefined and the real cause on error.cause.
-        if (error && typeof error === 'object') {
-          const err = error as { cause?: unknown; message?: string };
-          const cause = err.cause as
-            | { code?: string; path?: string; syscall?: string }
-            | undefined;
-
-          if (cause?.code === 'ENOENT') {
+        if (error instanceof SubprocessError) {
+          // nano-spawn wraps ENOENT (missing binary) into a SubprocessError
+          // with exitCode undefined and the real cause on error.cause.
+          if (hasErrorCode(error.cause, 'ENOENT')) {
             return {
               stdout: '',
               stderr: `${name}: ${binaryPath} not found`,
               exitCode: 127,
             };
           }
-        }
 
-        // nano-spawn throws SubprocessError for non-zero exits
-        if (error && typeof error === 'object' && 'exitCode' in error) {
-          const subprocessError = error as {
-            exitCode?: number;
-            stdout: string;
-            stderr: string;
-          };
-          return {
-            stdout: subprocessError.stdout ?? '',
-            stderr: subprocessError.stderr ?? '',
-            exitCode: subprocessError.exitCode ?? 1,
-          };
+          // nano-spawn sets `exitCode` for non-zero exits and failed spawns,
+          // and leaves it out when a signal killed the process.
+          if ('exitCode' in error) {
+            return {
+              stdout: error.stdout,
+              stderr: error.stderr,
+              exitCode: error.exitCode ?? 1,
+            };
+          }
         }
 
         // Unknown error (e.g., binary not found)
@@ -144,6 +135,15 @@ export function createBinaryBridges(
   });
 }
 
+function hasErrorCode(value: unknown, code: string): boolean {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'code' in value &&
+    value.code === code
+  );
+}
+
 /**
  * Resolves the real filesystem path from a just-bash virtual path.
  *
@@ -151,34 +151,34 @@ export function createBinaryBridges(
  * but we need the actual host filesystem path for spawning processes.
  */
 function resolveRealCwd(ctx: { cwd: string; fs: unknown }): string {
-  const fs = ctx.fs as {
-    toRealPath?: (p: string) => string | null;
-    root?: string;
-    getMountPoint?: () => string;
-  };
+  const realCwd = mapToRealPath(ctx.fs, ctx.cwd) ?? process.cwd();
+  // Verify the path exists, fall back to process.cwd() if not
+  return existsSync(realCwd) ? realCwd : process.cwd();
+}
 
-  let realCwd: string;
-
-  if (fs.root) {
+/**
+ * The host path behind `cwd`, read from the filesystem's runtime shape: the
+ * `root` and `toRealPath` members it relies on are private in just-bash's
+ * typings. Returns null for InMemoryFs or unknown filesystems.
+ */
+function mapToRealPath(fs: unknown, cwd: string): string | null {
+  if (typeof fs !== 'object' || fs === null) {
+    return null;
+  }
+  if ('root' in fs && typeof fs.root === 'string' && fs.root) {
     // ReadWriteFs - virtual paths are relative to root
     // e.g., root=/Users/x/project, cwd=/ -> /Users/x/project
-    realCwd = path.join(fs.root, ctx.cwd);
-  } else if (
+    return path.join(fs.root, cwd);
+  }
+  if (
+    'getMountPoint' in fs &&
     typeof fs.getMountPoint === 'function' &&
+    'toRealPath' in fs &&
     typeof fs.toRealPath === 'function'
   ) {
     // OverlayFs - use toRealPath for proper path mapping
-    const real = fs.toRealPath(ctx.cwd);
-    realCwd = real ?? process.cwd();
-  } else {
-    // Fallback for InMemoryFs or unknown filesystems
-    realCwd = process.cwd();
+    const real: unknown = fs.toRealPath(cwd);
+    return typeof real === 'string' ? real : null;
   }
-
-  // Verify the path exists, fall back to process.cwd() if not
-  if (!existsSync(realCwd)) {
-    realCwd = process.cwd();
-  }
-
-  return realCwd;
+  return null;
 }

@@ -99,7 +99,7 @@ export async function createDaytonaSandbox(
   client: Daytona,
   options: DaytonaSandboxOptions = {},
 ): Promise<DisposableSandbox> {
-  validateDaytonaOptions(options);
+  const target = validateDaytonaOptions(options);
 
   // The caller supplies a Daytona client, so @daytona/sdk is already installed;
   // this dynamic import only surfaces the SDK error classes for instanceof
@@ -109,11 +109,11 @@ export async function createDaytonaSandbox(
 
   let sandbox: Sandbox;
   try {
-    if (options.sandboxId !== undefined) {
-      sandbox = await client.get(options.sandboxId);
+    if ('sandboxId' in target) {
+      sandbox = await client.get(target.sandboxId);
       await startIfStopped(sandbox, options);
     } else {
-      sandbox = await acquireReusedSandbox(client, options, sdk);
+      sandbox = await acquireReusedSandbox(client, target.name, options, sdk);
     }
   } catch (error) {
     throw normalizeDaytonaError(error, sdk);
@@ -171,12 +171,13 @@ const UNRECOVERABLE_SANDBOX_STATES = new Set<string>([
 
 async function acquireReusedSandbox(
   client: Daytona,
+  name: string,
   options: DaytonaSandboxOptions,
   sdk: DaytonaSdk,
 ): Promise<Sandbox> {
   let existing: Sandbox;
   try {
-    existing = await client.get(options.name as string);
+    existing = await client.get(name);
   } catch (error) {
     if (error instanceof sdk.DaytonaNotFoundError) {
       return createSandbox(client, options);
@@ -262,7 +263,13 @@ function createSandbox(
   return client.create(params, { timeout: options.createTimeout });
 }
 
-function validateDaytonaOptions(options: DaytonaSandboxOptions): void {
+/**
+ * Where the sandbox comes from: an existing sandbox to attach to, or a stable
+ * name to get-or-create.
+ */
+type DaytonaTarget = { sandboxId: string } | { name: string };
+
+function validateDaytonaOptions(options: DaytonaSandboxOptions): DaytonaTarget {
   if (options.image && options.snapshot) {
     throw new DaytonaSandboxError(
       'Daytona sandbox options cannot include both "image" and "snapshot". Choose one environment source.',
@@ -274,14 +281,17 @@ function validateDaytonaOptions(options: DaytonaSandboxOptions): void {
     );
   }
 
-  if (options.sandboxId === undefined && options.name === undefined) {
-    throw new DaytonaSandboxError(
-      'Daytona sandbox options require "name" (get-or-create) or "sandboxId" (attach). An unnamed sandbox cannot be reclaimed, since dispose() does not delete it.',
-    );
+  if (options.sandboxId === undefined) {
+    if (options.name === undefined) {
+      throw new DaytonaSandboxError(
+        'Daytona sandbox options require "name" (get-or-create) or "sandboxId" (attach). An unnamed sandbox cannot be reclaimed, since dispose() does not delete it.',
+      );
+    }
+    return { name: options.name };
   }
 
   if (!options.sandboxId) {
-    return;
+    return { sandboxId: options.sandboxId };
   }
 
   const creationOnlyFields: Array<keyof DaytonaSandboxOptions> = [
@@ -311,6 +321,7 @@ function validateDaytonaOptions(options: DaytonaSandboxOptions): void {
       `Daytona sandbox options cannot combine "sandboxId" with creation options: ${present.join(', ')}`,
     );
   }
+  return { sandboxId: options.sandboxId };
 }
 
 function createDaytonaSandboxMethods(args: {
@@ -353,16 +364,9 @@ function createDaytonaSandboxMethods(args: {
       };
     } catch (error) {
       if (aborted) return abortedCommandResult();
-      const err = error as Error & {
-        stdout?: string;
-        stderr?: string;
-        exitCode?: number;
-      };
-      return {
-        stdout: err.stdout ?? '',
-        stderr: err.stderr ?? err.message ?? String(error),
-        exitCode: err.exitCode ?? 1,
-      };
+      // The SDK rejects with a DaytonaError (or a transport error), which
+      // carries no command output or exit code of its own.
+      return { stdout: '', stderr: toError(error).message, exitCode: 1 };
     } finally {
       options?.signal?.removeEventListener('abort', abort);
     }
@@ -701,13 +705,13 @@ function uniqueParentDirectories(paths: string[]): string[] {
 }
 
 function compactObject<T extends Record<string, unknown>>(input: T): T {
-  const output: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(input)) {
-    if (value !== undefined) {
-      output[key] = value;
+  const output = { ...input };
+  for (const [key, value] of Object.entries(output)) {
+    if (value === undefined) {
+      Reflect.deleteProperty(output, key);
     }
   }
-  return output as T;
+  return output;
 }
 
 function toError(error: unknown): Error {

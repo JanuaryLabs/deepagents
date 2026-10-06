@@ -2,7 +2,7 @@ import { InMemoryFs, MountableFs, OverlayFs, ReadWriteFs } from 'just-bash';
 import assert from 'node:assert';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 import { createBashTool, createVirtualSandbox } from '@deepagents/context';
 
@@ -17,22 +17,24 @@ import { createBashTool, createVirtualSandbox } from '@deepagents/context';
  * 2. Missing `mountPoint: '/'` in OverlayFs causes files to appear at wrong paths
  *    (e.g., /skills/home/user/project/... instead of /skills/...)
  */
-describe('bash sandbox skills mounting', () => {
-  const testDir = path.join(process.cwd(), '.test-bash-sandbox');
-  const skillsDir = path.join(testDir, 'skills');
-  const artifactsDir = path.join(testDir, 'artifacts');
+/**
+ * Creates a test directory structure mimicking a real skills setup under
+ * `root`: a `research-grants` skill with its SKILL.md, and an empty
+ * artifacts directory.
+ */
+async function seedSkills(
+  root: string,
+): Promise<{ skillsDir: string; artifactsDir: string }> {
+  const skillsDir = path.join(root, 'skills');
+  const artifactsDir = path.join(root, 'artifacts');
+  await fs.mkdir(path.join(skillsDir, 'research-grants'), {
+    recursive: true,
+  });
+  await fs.mkdir(artifactsDir, { recursive: true });
 
-  beforeEach(async () => {
-    // Create test directory structure mimicking a real skills setup
-    await fs.mkdir(path.join(skillsDir, 'research-grants'), {
-      recursive: true,
-    });
-    await fs.mkdir(artifactsDir, { recursive: true });
-
-    // Create a test SKILL.md file
-    await fs.writeFile(
-      path.join(skillsDir, 'research-grants', 'SKILL.md'),
-      `---
+  await fs.writeFile(
+    path.join(skillsDir, 'research-grants', 'SKILL.md'),
+    `---
 name: research-grants
 description: Research grant application assistant
 ---
@@ -40,13 +42,11 @@ description: Research grant application assistant
 # Research Grants Skill
 
 This skill helps with grant applications.`,
-    );
-  });
+  );
+  return { skillsDir, artifactsDir };
+}
 
-  afterEach(async () => {
-    await fs.rm(testDir, { recursive: true, force: true });
-  });
-
+describe('bash sandbox skills mounting', () => {
   /**
    * Reproduces the client's bug: fsMounts created but not used.
    *
@@ -54,6 +54,10 @@ This skill helps with grant applications.`,
    * included fsMounts in the MountableFs configuration.
    */
   it('FAILS: demonstrates bug when fsMounts is created but not used', async () => {
+    await using testDir = await fs.mkdtempDisposable(
+      path.join(process.cwd(), '.test-bash-sandbox-'),
+    );
+    const { skillsDir, artifactsDir } = await seedSkills(testDir.path);
     // This is the BUGGY pattern from client's code
     const listOfSkills = [
       {
@@ -119,6 +123,10 @@ This skill helps with grant applications.`,
    * at /skills/home/user/project/... instead of /skills/...
    */
   it('FAILS: demonstrates bug when OverlayFs uses wrong mountPoint', async () => {
+    await using testDir = await fs.mkdtempDisposable(
+      path.join(process.cwd(), '.test-bash-sandbox-'),
+    );
+    const { skillsDir, artifactsDir } = await seedSkills(testDir.path);
     const listOfSkills = [
       {
         name: 'research-grants',
@@ -186,6 +194,10 @@ This skill helps with grant applications.`,
    * 2. Use `mountPoint: '/'` in OverlayFs so files appear at root of the mount
    */
   it('SUCCESS: correct way to mount skills with mountPoint: "/"', async () => {
+    await using testDir = await fs.mkdtempDisposable(
+      path.join(process.cwd(), '.test-bash-sandbox-'),
+    );
+    const { skillsDir, artifactsDir } = await seedSkills(testDir.path);
     const listOfSkills = [
       {
         name: 'research-grants',
@@ -236,6 +248,10 @@ This skill helps with grant applications.`,
   });
 
   it('SUCCESS: OverlayFs + MountableFs exposes host skill files at sandbox path', async () => {
+    await using testDir = await fs.mkdtempDisposable(
+      path.join(process.cwd(), '.test-bash-sandbox-'),
+    );
+    const { skillsDir, artifactsDir } = await seedSkills(testDir.path);
     const skillMounts = [{ host: skillsDir, sandbox: '/skills/skills' }];
 
     const fsMounts = skillMounts.map(({ host, sandbox }) => ({
@@ -301,6 +317,10 @@ This skill helps with grant applications.`,
    * Multiple skills mounted correctly.
    */
   it('SUCCESS: multiple skills mounted independently', async () => {
+    await using testDir = await fs.mkdtempDisposable(
+      path.join(process.cwd(), '.test-bash-sandbox-'),
+    );
+    const { skillsDir } = await seedSkills(testDir.path);
     // Create another skill
     const dataAnalysisDir = path.join(skillsDir, 'data-analysis');
     await fs.mkdir(dataAnalysisDir, { recursive: true });
@@ -359,6 +379,10 @@ description: Data analysis skill
    * Skills are read-only - cannot write to them.
    */
   it('SUCCESS: skills are read-only', async () => {
+    await using testDir = await fs.mkdtempDisposable(
+      path.join(process.cwd(), '.test-bash-sandbox-'),
+    );
+    const { skillsDir } = await seedSkills(testDir.path);
     const fsMounts = [
       {
         mountPoint: '/skills/research-grants',

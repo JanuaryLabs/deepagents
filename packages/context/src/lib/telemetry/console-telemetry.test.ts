@@ -1,5 +1,20 @@
-import { type Telemetry, generateText, isStepCount, tool } from 'ai';
-import { MockLanguageModelV4 } from 'ai/test';
+import {
+  NoObjectGeneratedError,
+  type Telemetry,
+  embed,
+  generateObject,
+  generateText,
+  isStepCount,
+  rerank,
+  streamText,
+  tool,
+} from 'ai';
+import {
+  MockEmbeddingModelV4,
+  MockLanguageModelV4,
+  MockRerankingModelV4,
+  convertArrayToReadableStream,
+} from 'ai/test';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import { z } from 'zod';
@@ -11,12 +26,127 @@ const usage = {
   outputTokens: { total: 1, text: 1, reasoning: 0 },
 } as const;
 
-interface CapturedTelemetryRecord {
-  event: string;
-  data: {
-    toolCall?: { input?: unknown };
-    toolOutput?: { output?: unknown };
-  };
+const telemetryRecord = z.object({
+  timestamp: z.string(),
+  event: z.string(),
+  data: z.unknown(),
+});
+
+const objectTelemetryRecord = telemetryRecord.extend({
+  data: z.record(z.string(), z.unknown()),
+});
+
+const toolCallInput = z.object({
+  toolCall: z.object({ input: z.unknown() }),
+});
+
+const toolOutputValue = z.object({
+  toolOutput: z.object({ output: z.unknown() }),
+});
+
+function parseRecord(line: string) {
+  return telemetryRecord.parse(JSON.parse(line));
+}
+
+function textModel(text: string): MockLanguageModelV4 {
+  return new MockLanguageModelV4({
+    doGenerate: {
+      content: [{ type: 'text', text }],
+      finishReason: { unified: 'stop', raw: 'stop' },
+      usage,
+      warnings: [],
+    },
+  });
+}
+
+/**
+ * Runs real AI SDK operations that, together, fire every telemetry callback:
+ * a two-step generateText with a tool call, generateObject, embed, rerank, a
+ * streamText aborted before it starts, and a generateText whose model fails.
+ */
+async function triggerEveryTelemetryCallback(
+  telemetry: Telemetry,
+): Promise<void> {
+  await generateText({
+    model: new MockLanguageModelV4({
+      doGenerate: [
+        {
+          content: [
+            {
+              type: 'tool-call',
+              toolCallId: 'echo-call',
+              toolName: 'echo',
+              input: JSON.stringify({ text: 'tool input' }),
+            },
+          ],
+          finishReason: { unified: 'tool-calls', raw: 'tool-calls' },
+          usage,
+          warnings: [],
+        },
+        {
+          content: [{ type: 'text', text: 'final answer' }],
+          finishReason: { unified: 'stop', raw: 'stop' },
+          usage,
+          warnings: [],
+        },
+      ],
+    }),
+    prompt: 'use the tool',
+    tools: {
+      echo: tool({
+        inputSchema: z.object({ text: z.string() }),
+        execute: async ({ text }) => ({ echoed: text }),
+      }),
+    },
+    stopWhen: isStepCount(2),
+    telemetry: { integrations: telemetry },
+  });
+  await generateObject({
+    model: textModel('{"value":"object"}'),
+    schema: z.object({ value: z.string() }),
+    prompt: 'make an object',
+    telemetry: { integrations: telemetry },
+  });
+  await embed({
+    model: new MockEmbeddingModelV4({
+      doEmbed: { embeddings: [[0.1, 0.2]], warnings: [] },
+    }),
+    value: 'embed me',
+    telemetry: { integrations: telemetry },
+  });
+  await rerank({
+    model: new MockRerankingModelV4({
+      doRerank: async () => ({
+        ranking: [{ index: 0, relevanceScore: 0.9 }],
+      }),
+    }),
+    documents: ['only document'],
+    query: 'rank me',
+    telemetry: { integrations: telemetry },
+  });
+  await streamText({
+    model: new MockLanguageModelV4({
+      doStream: {
+        stream: convertArrayToReadableStream([
+          { type: 'stream-start', warnings: [] },
+        ]),
+      },
+    }),
+    prompt: 'aborted before it starts',
+    abortSignal: AbortSignal.abort(),
+    telemetry: { integrations: telemetry },
+  }).consumeStream();
+  await assert.rejects(
+    generateText({
+      model: new MockLanguageModelV4({
+        doGenerate: () => Promise.reject(new Error('model failure')),
+      }),
+      prompt: 'fail',
+      maxRetries: 0,
+      telemetry: { integrations: telemetry },
+    }),
+    { message: 'model failure' },
+  );
 }
 
 describe('createConsoleTelemetry()', () => {
@@ -50,14 +180,7 @@ describe('createConsoleTelemetry()', () => {
       telemetry: { integrations: telemetry },
     });
 
-    const records = stdout.map(
-      (line) =>
-        JSON.parse(line) as {
-          timestamp: string;
-          event: string;
-          data: unknown;
-        },
-    );
+    const records = stdout.map(parseRecord);
     assert.deepStrictEqual(
       [...new Set(records.map((record) => record.timestamp))],
       [timestamp],
@@ -124,9 +247,7 @@ describe('createConsoleTelemetry()', () => {
       telemetry: { integrations: telemetry },
     });
 
-    const records = output.map(
-      (line) => JSON.parse(line) as { event: string; data: unknown },
-    );
+    const records = output.map(parseRecord);
     assert.deepStrictEqual(
       records
         .map(({ event }) => event)
@@ -185,9 +306,7 @@ describe('createConsoleTelemetry()', () => {
       });
       return {
         serialized: output.join('\n'),
-        records: output.map(
-          (line) => JSON.parse(line) as CapturedTelemetryRecord,
-        ),
+        records: output.map(parseRecord),
       };
     };
 
@@ -195,19 +314,22 @@ describe('createConsoleTelemetry()', () => {
     assert.doesNotMatch(withoutInputs.serialized, /SECRET_MODEL_INPUT/);
     assert.match(withoutInputs.serialized, /SECRET_MODEL_OUTPUT/);
     assert.match(withoutInputs.serialized, /SECRET_TOOL_OUTPUT/);
+    const toolStart = withoutInputs.records.find(
+      ({ event }) => event === 'onToolExecutionStart',
+    );
     assert.strictEqual(
-      withoutInputs.records.find(
-        ({ event }) => event === 'onToolExecutionStart',
-      )?.data.toolCall?.input,
+      toolCallInput.parse(toolStart?.data).toolCall.input,
       '[Redacted]',
     );
 
     const withoutOutputs = await capture(true, false);
     assert.match(withoutOutputs.serialized, /SECRET_MODEL_INPUT/);
     assert.doesNotMatch(withoutOutputs.serialized, /SECRET_MODEL_OUTPUT/);
+    const toolEnd = withoutOutputs.records.find(
+      ({ event }) => event === 'onToolExecutionEnd',
+    );
     assert.strictEqual(
-      withoutOutputs.records.find(({ event }) => event === 'onToolExecutionEnd')
-        ?.data.toolOutput?.output,
+      toolOutputValue.parse(toolEnd?.data).toolOutput.output,
       '[Redacted]',
     );
   });
@@ -222,39 +344,58 @@ describe('createConsoleTelemetry()', () => {
       },
     });
 
-    await telemetry.onEmbedEnd?.({
-      recordInputs: false,
-      recordOutputs: false,
+    await embed({
+      model: new MockEmbeddingModelV4({
+        doEmbed: { embeddings: [[0.1, 0.2]], warnings: [] },
+      }),
       value: 'SECRET_EMBED_INPUT',
-      embedding: [0.1, 0.2],
-    } as never);
-    await telemetry.onObjectStepStart?.({
-      recordInputs: false,
-      recordOutputs: true,
-      system: 'SECRET_OBJECT_SYSTEM',
-      prompt: 'SECRET_OBJECT_PROMPT',
-      schema: { description: 'SECRET_OBJECT_SCHEMA' },
-      schemaDescription: 'SECRET_SCHEMA_DESCRIPTION',
+      telemetry: {
+        integrations: telemetry,
+        recordInputs: false,
+        recordOutputs: false,
+      },
+    });
+    await generateObject({
+      model: textModel('{"value":"public object"}'),
+      schema: z.object({ value: z.string().describe('SECRET_OBJECT_SCHEMA') }),
       schemaName: 'SECRET_SCHEMA_NAME',
-      output: { schema: 'SECRET_OUTPUT_SPECIFICATION' },
-    } as never);
-    await telemetry.onObjectStepEnd?.({
-      recordInputs: true,
-      recordOutputs: false,
-      objectText: 'SECRET_OBJECT_OUTPUT',
-      output: { value: 'SECRET_PARSED_OBJECT' },
-      error: new Error('SECRET_INVALID_OBJECT_OUTPUT'),
-    } as never);
+      schemaDescription: 'SECRET_SCHEMA_DESCRIPTION',
+      instructions: 'SECRET_OBJECT_SYSTEM',
+      prompt: 'SECRET_OBJECT_PROMPT',
+      telemetry: { integrations: telemetry, recordInputs: false },
+    });
+    await assert.rejects(
+      generateObject({
+        model: textModel('SECRET_INVALID_OBJECT_OUTPUT'),
+        schema: z.object({ value: z.string() }),
+        prompt: 'produce an object',
+        telemetry: { integrations: telemetry, recordOutputs: false },
+      }),
+      (error) => NoObjectGeneratedError.isInstance(error),
+    );
 
-    const records = output.map(
-      (line) => JSON.parse(line) as { event: string; data: object },
+    const records = output.map((line) =>
+      objectTelemetryRecord.parse(JSON.parse(line)),
     );
     const serialized = output.join('\n');
     assert.doesNotMatch(serialized, /SECRET_/);
     assert.match(serialized, /\[Redacted\]/);
     assert.deepStrictEqual(
       records.map(({ event }) => event),
-      ['onEmbedEnd', 'onObjectStepStart', 'onObjectStepEnd'],
+      [
+        'onStart',
+        'onEmbedStart',
+        'onEmbedEnd',
+        'onEnd',
+        'onStart',
+        'onObjectStepStart',
+        'onObjectStepEnd',
+        'onEnd',
+        'onStart',
+        'onObjectStepStart',
+        'onObjectStepEnd',
+        'onError',
+      ],
     );
     for (const { data } of records) {
       assert.strictEqual(Object.hasOwn(data, 'toolCall'), false);
@@ -306,9 +447,8 @@ describe('createConsoleTelemetry()', () => {
     });
     const circular: Record<string, unknown> = { label: 'root' };
     circular.self = circular;
-    const error = new Error('outer failure', {
-      cause: new Error('inner failure'),
-    });
+    const cause = new Error('inner failure');
+    const error = new Error('outer failure', { cause });
     Object.assign(error, { code: 'E_OUTER' });
 
     await telemetry.onError?.({
@@ -322,10 +462,7 @@ describe('createConsoleTelemetry()', () => {
 
     assert.deepStrictEqual(stdout, []);
     assert.strictEqual(stderr.length, 1);
-    const record = JSON.parse(stderr[0]) as {
-      event: string;
-      data: Record<string, unknown>;
-    };
+    const record = objectTelemetryRecord.parse(JSON.parse(stderr[0]));
     assert.strictEqual(record.event, 'onError');
     assert.deepStrictEqual(record.data.error, {
       name: 'Error',
@@ -334,7 +471,7 @@ describe('createConsoleTelemetry()', () => {
       cause: {
         name: 'Error',
         message: 'inner failure',
-        stack: (error.cause as Error).stack,
+        stack: cause.stack,
       },
       code: 'E_OUTER',
     });
@@ -357,20 +494,17 @@ describe('createConsoleTelemetry()', () => {
         error: (value) => errors.push(String(value)),
       },
     });
-    const payload = JSON.parse(
+    const payload: unknown = JSON.parse(
       '{"__proto__":{"polluted":true},"constructor":"kept"}',
     );
 
     await telemetry.onError?.(payload);
 
-    const record = JSON.parse(errors[0]) as {
-      data: Record<string, unknown>;
-    };
+    // `data: z.unknown()` hands back JSON.parse's object untouched, so its
+    // own `__proto__` key survives parsing.
+    const record = parseRecord(errors[0]);
     assert.deepStrictEqual(record.data, payload);
-    assert.strictEqual(
-      (Object.prototype as { polluted?: boolean }).polluted,
-      undefined,
-    );
+    assert.strictEqual(Object.hasOwn(Object.prototype, 'polluted'), false);
   });
 
   it('covers every AI SDK telemetry lifecycle callback without duplicate step logs', async () => {
@@ -401,20 +535,14 @@ describe('createConsoleTelemetry()', () => {
       'onAbort',
     ] as const satisfies readonly (keyof Telemetry)[];
 
-    for (const name of callbackNames) {
-      const callback = telemetry[name] as
-        ((event: unknown) => void | PromiseLike<void>) | undefined;
-      assert.ok(callback, `${name} should be implemented`);
-      await callback({ marker: name });
-    }
-    await telemetry.onError?.({ marker: 'onError' });
+    await triggerEveryTelemetryCallback(telemetry);
 
     assert.deepStrictEqual(
-      output.map((line) => JSON.parse(line).event),
-      callbackNames,
+      new Set(output.map((line) => parseRecord(line).event)),
+      new Set(callbackNames),
     );
     assert.deepStrictEqual(
-      errors.map((line) => JSON.parse(line).event),
+      errors.map((line) => parseRecord(line).event),
       ['onError'],
     );
     assert.strictEqual(telemetry.onStepFinish, undefined);

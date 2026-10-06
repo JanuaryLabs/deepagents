@@ -45,6 +45,16 @@ import {
   toolOutput,
 } from '@deepagents/context';
 
+import { isUIMessage, requireUIMessage } from '../../ui-message-guards.ts';
+
+function messageOf(entry: MessageData): UIMessage {
+  return requireUIMessage(entry.data, `stored ${entry.name} message`);
+}
+
+function isSyntheticEntry(entry: MessageData): boolean {
+  return isUIMessage(entry.data) && isSyntheticReminderMessage(entry.data);
+}
+
 const testUsage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
   outputTokens: { total: 5, text: 5, reasoning: 0 },
@@ -126,7 +136,8 @@ class DelayedAssistantStore extends InMemoryContextStore {
     if (
       messages.length === 1 &&
       message?.name === 'assistant' &&
-      (message.data as UIMessage).parts.length > 0
+      isUIMessage(message.data) &&
+      message.data.parts.length > 0
     ) {
       await sleep(50);
     }
@@ -287,9 +298,7 @@ describe('steer reminders integration (chat flow)', () => {
       'everyNToolCalls(5) must fire on the next model call after tools 5 and 10',
     );
     const syntheticReminders = entries.filter(
-      (entry) =>
-        entry.name === 'user' &&
-        isSyntheticReminderMessage(entry.data as UIMessage),
+      (entry) => entry.name === 'user' && isSyntheticEntry(entry),
     );
     assert.strictEqual(
       syntheticReminders.length,
@@ -311,7 +320,7 @@ describe('steer reminders integration (chat flow)', () => {
     assert.strictEqual(completedTools, 4);
     const assistants = entries
       .filter((entry) => entry.name === 'assistant')
-      .map((entry) => entry.data as UIMessage);
+      .map((entry) => messageOf(entry));
     assert.deepStrictEqual(
       assistants.map((message) => ({
         tools: message.parts.flatMap((part) =>
@@ -354,7 +363,7 @@ describe('steer reminders integration (chat flow)', () => {
       entries
         .filter((entry) => entry.name === 'assistant')
         .map((entry) => {
-          const message = entry.data as UIMessage;
+          const message = messageOf(entry);
           return {
             tools: message.parts.flatMap((part) =>
               isToolUIPart(part) ? [part.toolCallId] : [],
@@ -450,12 +459,8 @@ describe('steer reminders integration (chat flow)', () => {
     );
 
     const syntheticReviews = (await storedEntries(store, 'plan-review'))
-      .filter(
-        (entry) =>
-          entry.name === 'user' &&
-          isSyntheticReminderMessage(entry.data as UIMessage),
-      )
-      .map((entry) => textOf(entry.data as UIMessage));
+      .filter((entry) => entry.name === 'user' && isSyntheticEntry(entry))
+      .map((entry) => textOf(messageOf(entry)));
     assert.strictEqual(syntheticReviews.length, 1);
     assert.ok(syntheticReviews[0].includes(reviewQuestion));
     assert.ok(
@@ -562,7 +567,7 @@ describe('steer reminders integration (chat flow)', () => {
       `expected user → assistant(pre) → user(synth) → assistant(post); got ${JSON.stringify(chain.map((e) => e.name))}`,
     );
 
-    const synth = chain[2].data as UIMessage;
+    const synth = messageOf(chain[2]);
     assert.ok(
       isSyntheticReminderMessage(synth),
       'middle user must be synthetic steer',
@@ -571,13 +576,13 @@ describe('steer reminders integration (chat flow)', () => {
       textOf(synth).includes('<system-reminder>RECAP</system-reminder>'),
     );
 
-    const preSteer = chain[1].data as UIMessage;
+    const preSteer = messageOf(chain[1]);
     assert.ok(
       preSteer.parts.length > 0,
       'pre-steer assistant must hold step-0 content',
     );
     assert.ok(
-      textOf(chain[3].data as UIMessage).includes('post-steer answer'),
+      textOf(messageOf(chain[3])).includes('post-steer answer'),
       'post-steer assistant must hold the final step content',
     );
 
@@ -591,7 +596,7 @@ describe('steer reminders integration (chat flow)', () => {
       parts: m.parts.filter((p) => !p.type.startsWith('data-')),
     });
     const storedUi = chain
-      .map((e) => stripData(e.data as UIMessage))
+      .map((e) => stripData(messageOf(e)))
       .filter((m) => !(m.role === 'assistant' && m.parts.length === 0));
     const storedModel = await convertToModelMessages(storedUi, {
       ignoreIncompleteToolCalls: true,
@@ -632,8 +637,7 @@ describe('steer reminders integration (chat flow)', () => {
 
     const chain = await storedEntries(store, 'spam');
     const synthCount = chain.filter(
-      (e) =>
-        e.name === 'user' && isSyntheticReminderMessage(e.data as UIMessage),
+      (e) => e.name === 'user' && isSyntheticEntry(e),
     ).length;
     // Two mid-loop steps (before the final text step) each fire — the engine
     // applies no firing control; dedup is the caller's job via once().
@@ -668,16 +672,13 @@ describe('steer reminders integration (chat flow)', () => {
 
     const chain = await storedEntries(store, 'latch');
     const synths = chain.filter(
-      (e) =>
-        e.name === 'user' && isSyntheticReminderMessage(e.data as UIMessage),
+      (e) => e.name === 'user' && isSyntheticEntry(e),
     );
     assert.strictEqual(synths.length, 1, `once() must latch to one fire`);
+    const synth = messageOf(synths[0]);
+    assert.ok(isSyntheticReminderMessage(synth));
     assert.deepStrictEqual(
-      (
-        synths[0].data as UIMessage as {
-          metadata: { synthetic: { onceIds: string[] } };
-        }
-      ).metadata.synthetic.onceIds,
+      synth.metadata.synthetic.onceIds,
       ['nudge'],
       'the synth records the once id for durable suppression',
     );
@@ -722,8 +723,7 @@ describe('steer reminders integration (chat flow)', () => {
 
     const chain = await storedEntries(store, chatId);
     const synthCount = chain.filter(
-      (e) =>
-        e.name === 'user' && isSyntheticReminderMessage(e.data as UIMessage),
+      (e) => e.name === 'user' && isSyntheticEntry(e),
     ).length;
     assert.strictEqual(
       synthCount,
@@ -775,8 +775,8 @@ describe('steer reminders integration (chat flow)', () => {
     const firedRun2 = chain.some(
       (e) =>
         e.name === 'user' &&
-        isSyntheticReminderMessage(e.data as UIMessage) &&
-        textOf(e.data as UIMessage).includes('run2-nudge'),
+        isSyntheticEntry(e) &&
+        textOf(messageOf(e)).includes('run2-nudge'),
     );
     assert.ok(
       firedRun2,
@@ -810,8 +810,7 @@ describe('steer reminders integration (chat flow)', () => {
 
       const chain = await storedEntries(store, `order-${order}`);
       const synthCount = chain.filter(
-        (e) =>
-          e.name === 'user' && isSyntheticReminderMessage(e.data as UIMessage),
+        (e) => e.name === 'user' && isSyntheticEntry(e),
       ).length;
       assert.strictEqual(
         synthCount,
@@ -841,7 +840,7 @@ describe('steer reminders integration (chat flow)', () => {
       chain.map((e) => e.name),
       ['user', 'assistant'],
     );
-    assert.ok(textOf(chain[1].data as UIMessage).includes('just text'));
+    assert.ok(textOf(messageOf(chain[1])).includes('just text'));
   });
 
   it('two steer reminders firing at the same boundary merge into one synthetic user (no consecutive users)', async () => {
@@ -863,14 +862,14 @@ describe('steer reminders integration (chat flow)', () => {
       chain.map((e) => e.name),
       ['user', 'assistant', 'user', 'assistant'],
     );
-    const synth = chain[2].data as UIMessage;
+    const synth = messageOf(chain[2]);
     assert.ok(isSyntheticReminderMessage(synth));
     const synthText = textOf(synth);
     assert.ok(synthText.includes('FIRST') && synthText.includes('SECOND'));
 
     // No two consecutive user messages once converted for the model.
     const storedUi = chain
-      .map((e) => e.data as UIMessage)
+      .map((e) => messageOf(e))
       .filter((m) => !(m.role === 'assistant' && m.parts.length === 0));
     const roles = rolesOf(
       await convertToModelMessages(storedUi, {
@@ -911,16 +910,13 @@ describe('steer reminders integration (chat flow)', () => {
     const chain = await storedEntries(store, 'throws');
     // The turn completed and produced its final assistant content.
     assert.ok(
-      textOf(chain[chain.length - 1].data as UIMessage).includes('survived'),
+      textOf(messageOf(chain[chain.length - 1])).includes('survived'),
       'turn must complete despite a throwing predicate',
     );
-    const synth = chain.find(
-      (e) =>
-        e.name === 'user' && isSyntheticReminderMessage(e.data as UIMessage),
-    );
+    const synth = chain.find((e) => e.name === 'user' && isSyntheticEntry(e));
     assert.ok(synth, 'the non-throwing steer must still fire');
-    assert.ok(textOf(synth.data as UIMessage).includes('OK'));
-    assert.ok(!textOf(synth.data as UIMessage).includes('BOOM'));
+    assert.ok(textOf(messageOf(synth)).includes('OK'));
+    assert.ok(!textOf(messageOf(synth)).includes('BOOM'));
   });
 
   it('no steer configured: a multi-step loop persists a single assistant (no split)', async () => {
@@ -951,12 +947,9 @@ describe('steer reminders integration (chat flow)', () => {
     await drain(await chat(chatAgent));
 
     const chain = await storedEntries(store, 'strip');
-    const synth = chain.find(
-      (e) =>
-        e.name === 'user' && isSyntheticReminderMessage(e.data as UIMessage),
-    );
+    const synth = chain.find((e) => e.name === 'user' && isSyntheticEntry(e));
     assert.ok(synth);
-    const stripped = stripReminders(synth.data as UIMessage);
+    const stripped = stripReminders(messageOf(synth));
     assert.ok(
       !textOf(stripped).includes('SECRET'),
       'stripped synthetic steer must not leak the reminder text',
@@ -1014,8 +1007,7 @@ describe('steer reminders integration (chat flow)', () => {
     const chain = await storedEntries(store, 'gr');
     const names = chain.map((e) => e.name);
     const synthCount = chain.filter(
-      (e) =>
-        e.name === 'user' && isSyntheticReminderMessage(e.data as UIMessage),
+      (e) => e.name === 'user' && isSyntheticEntry(e),
     ).length;
 
     assert.strictEqual(
@@ -1025,7 +1017,7 @@ describe('steer reminders integration (chat flow)', () => {
     );
     const storedToolParts = chain
       .filter((entry) => entry.name === 'assistant')
-      .flatMap((entry) => (entry.data as UIMessage).parts)
+      .flatMap((entry) => messageOf(entry).parts)
       .filter(isToolUIPart);
     assert.strictEqual(
       storedToolParts.length,
@@ -1102,17 +1094,13 @@ describe('steer reminders integration (chat flow)', () => {
     );
     const toolTypes = chain
       .filter((entry) => entry.name === 'assistant')
-      .flatMap((entry) => (entry.data as UIMessage).parts)
+      .flatMap((entry) => messageOf(entry).parts)
       .filter(isToolUIPart)
       .map((part) => part.type);
     assert.deepStrictEqual(toolTypes, ['tool-firstTool', 'tool-secondTool']);
     const reminderTexts = chain
-      .filter(
-        (entry) =>
-          entry.name === 'user' &&
-          isSyntheticReminderMessage(entry.data as UIMessage),
-      )
-      .map((entry) => textOf(entry.data as UIMessage));
+      .filter((entry) => entry.name === 'user' && isSyntheticEntry(entry))
+      .map((entry) => textOf(messageOf(entry)));
     assert.deepStrictEqual(reminderTexts, [
       '<system-reminder>FIRST TOOL</system-reminder>',
       '<system-reminder>SECOND TOOL</system-reminder>',
@@ -1183,8 +1171,7 @@ describe('steer reminders integration (chat flow)', () => {
 
       const chain = await storedEntries(store, 'recur');
       const synthCount = chain.filter(
-        (e) =>
-          e.name === 'user' && isSyntheticReminderMessage(e.data as UIMessage),
+        (e) => e.name === 'user' && isSyntheticEntry(e),
       ).length;
       // elapsed (from the real user, never reset by a nudge) is past 60s at all
       // three mid-loop steps, so a bare elapsedExceeds fires at each.

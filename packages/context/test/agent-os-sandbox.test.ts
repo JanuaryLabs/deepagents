@@ -1,18 +1,22 @@
 import assert from 'node:assert';
-import { after, before, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 import { scheduler } from 'node:timers/promises';
 
 import {
   AgentOsCreationError,
   AgentOsNotAvailableError,
   AgentOsSandboxError,
-  type DisposableSandbox,
   createAgentOsSandbox,
   useAgentOsSandbox,
 } from '@deepagents/context';
 import { StreamHarness } from '@deepagents/test';
 
 const streamHarness = new StreamHarness();
+
+async function agentOsSoftware(): Promise<unknown> {
+  const { default: software } = await import('@rivet-dev/agent-os-common');
+  return software;
+}
 
 async function isAgentOsAvailable(): Promise<boolean> {
   try {
@@ -40,17 +44,10 @@ describe('Agent OS Sandbox', async () => {
   }
 
   describe('createAgentOsSandbox', { skip: !available }, () => {
-    let common: unknown;
-
-    before(async () => {
-      const mod = await import('@rivet-dev/agent-os-common');
-      common = mod.default;
-    });
-
     describe('instance creation', () => {
       it('creates sandbox with software packages', async () => {
         const sandbox = await createAgentOsSandbox({
-          software: [common],
+          software: [await agentOsSoftware()],
         });
 
         try {
@@ -64,36 +61,36 @@ describe('Agent OS Sandbox', async () => {
     });
 
     describe('command execution', () => {
-      let sandbox: DisposableSandbox;
-
-      before(async () => {
-        sandbox = await createAgentOsSandbox({
-          software: [common],
-        });
-      });
-
-      after(async () => {
-        await sandbox.dispose();
-      });
-
       it('captures stdout correctly', async () => {
+        await using sandbox = await createAgentOsSandbox({
+          software: [await agentOsSoftware()],
+        });
         const result = await sandbox.executeCommand('echo "test output"');
         assert.strictEqual(result.exitCode, 0);
         assert.strictEqual(result.stdout.trim(), 'test output');
       });
 
       it('captures stderr correctly', async () => {
+        await using sandbox = await createAgentOsSandbox({
+          software: [await agentOsSoftware()],
+        });
         const result = await sandbox.executeCommand('echo "error" >&2');
         assert.strictEqual(result.exitCode, 0);
         assert.strictEqual(result.stderr.trim(), 'error');
       });
 
       it('preserves exit codes', async () => {
+        await using sandbox = await createAgentOsSandbox({
+          software: [await agentOsSoftware()],
+        });
         const result = await sandbox.executeCommand('exit 42');
         assert.strictEqual(result.exitCode, 42);
       });
 
       it('handles multi-line output', async () => {
+        await using sandbox = await createAgentOsSandbox({
+          software: [await agentOsSoftware()],
+        });
         const result = await sandbox.executeCommand(
           'echo "line1"; echo "line2"; echo "line3"',
         );
@@ -103,6 +100,9 @@ describe('Agent OS Sandbox', async () => {
       });
 
       it('executes Bash-only array syntax', async () => {
+        await using sandbox = await createAgentOsSandbox({
+          software: [await agentOsSoftware()],
+        });
         const result = await sandbox.executeCommand(
           'values=(one two); printf \'%s\\n\' "${values[1]}"',
         );
@@ -112,17 +112,10 @@ describe('Agent OS Sandbox', async () => {
     });
 
     describe('abort signal', () => {
-      let sandbox: DisposableSandbox;
-
-      before(async () => {
-        sandbox = await createAgentOsSandbox({ software: [common] });
-      });
-
-      after(async () => {
-        await sandbox.dispose();
-      });
-
       it('returns a partial result when signal aborts mid-run', async () => {
+        await using sandbox = await createAgentOsSandbox({
+          software: [await agentOsSoftware()],
+        });
         const controller = new AbortController();
         const readyPath = '/tmp/execute-command-abort-ready';
         const resultPromise = sandbox.executeCommand(
@@ -149,6 +142,9 @@ describe('Agent OS Sandbox', async () => {
       });
 
       it('short-circuits when signal is already aborted', async () => {
+        await using sandbox = await createAgentOsSandbox({
+          software: [await agentOsSoftware()],
+        });
         const controller = new AbortController();
         controller.abort();
         const start = Date.now();
@@ -163,6 +159,9 @@ describe('Agent OS Sandbox', async () => {
       });
 
       it('runs to completion when signal is never aborted', async () => {
+        await using sandbox = await createAgentOsSandbox({
+          software: [await agentOsSoftware()],
+        });
         const controller = new AbortController();
         const result = await sandbox.executeCommand('echo ok', {
           signal: controller.signal,
@@ -173,22 +172,19 @@ describe('Agent OS Sandbox', async () => {
     });
 
     describe('spawn (streaming)', () => {
-      let sandbox: DisposableSandbox;
-
-      before(async () => {
-        sandbox = await createAgentOsSandbox({ software: [common] });
-      });
-
-      after(async () => {
-        await sandbox.dispose();
-      });
-
-      it('exposes spawn on the sandbox', () => {
+      it('exposes spawn on the sandbox', async () => {
+        await using sandbox = await createAgentOsSandbox({
+          software: [await agentOsSoftware()],
+        });
         assert.strictEqual(typeof sandbox.spawn, 'function');
       });
 
       it('streams stdout chunks via Web ReadableStream and exits cleanly', async () => {
-        const proc = sandbox.spawn!('echo a; echo b; echo c');
+        await using sandbox = await createAgentOsSandbox({
+          software: [await agentOsSoftware()],
+        });
+        assert.ok(sandbox.spawn);
+        const proc = sandbox.spawn('echo a; echo b; echo c');
         const decoder = new TextDecoder();
         const chunks: string[] = [];
         for await (const chunk of proc.stdout) {
@@ -208,7 +204,11 @@ describe('Agent OS Sandbox', async () => {
       });
 
       it('captures output emitted without a trailing newline', async () => {
-        const proc = sandbox.spawn!('printf %s "no-newline-output-payload"');
+        await using sandbox = await createAgentOsSandbox({
+          software: [await agentOsSoftware()],
+        });
+        assert.ok(sandbox.spawn);
+        const proc = sandbox.spawn('printf %s "no-newline-output-payload"');
         const decoder = new TextDecoder();
         let out = '';
         for await (const chunk of proc.stdout) {
@@ -220,7 +220,11 @@ describe('Agent OS Sandbox', async () => {
       });
 
       it('forwards env to the spawned process', async () => {
-        const proc = sandbox.spawn!('echo $GREETING', {
+        await using sandbox = await createAgentOsSandbox({
+          software: [await agentOsSoftware()],
+        });
+        assert.ok(sandbox.spawn);
+        const proc = sandbox.spawn('echo $GREETING', {
           env: { GREETING: 'hello-spawn' },
         });
         const decoder = new TextDecoder();
@@ -233,9 +237,13 @@ describe('Agent OS Sandbox', async () => {
       });
 
       it('returns a short-circuited process when signal is already aborted', async () => {
+        await using sandbox = await createAgentOsSandbox({
+          software: [await agentOsSoftware()],
+        });
+        assert.ok(sandbox.spawn);
         const controller = new AbortController();
         controller.abort();
-        const proc = sandbox.spawn!('echo unreached', {
+        const proc = sandbox.spawn('echo unreached', {
           signal: controller.signal,
         });
         await using reader = streamHarness.reader(proc.stdout);
@@ -250,8 +258,12 @@ describe('Agent OS Sandbox', async () => {
       });
 
       it('on abort, kills the process and exit reports SIGKILL', async () => {
+        await using sandbox = await createAgentOsSandbox({
+          software: [await agentOsSoftware()],
+        });
+        assert.ok(sandbox.spawn);
         const controller = new AbortController();
-        const proc = sandbox.spawn!('echo before; sleep 5; echo after', {
+        const proc = sandbox.spawn('echo before; sleep 5; echo after', {
           signal: controller.signal,
         });
 
@@ -280,19 +292,10 @@ describe('Agent OS Sandbox', async () => {
     });
 
     describe('file operations', () => {
-      let sandbox: DisposableSandbox;
-
-      before(async () => {
-        sandbox = await createAgentOsSandbox({
-          software: [common],
-        });
-      });
-
-      after(async () => {
-        await sandbox.dispose();
-      });
-
       it('writes and reads a file', async () => {
+        await using sandbox = await createAgentOsSandbox({
+          software: [await agentOsSoftware()],
+        });
         await sandbox.writeFiles([
           { path: '/tmp/test.txt', content: 'hello world' },
         ]);
@@ -302,6 +305,9 @@ describe('Agent OS Sandbox', async () => {
       });
 
       it('writes multiple files', async () => {
+        await using sandbox = await createAgentOsSandbox({
+          software: [await agentOsSoftware()],
+        });
         await sandbox.writeFiles([
           { path: '/tmp/file1.txt', content: 'content1' },
           { path: '/tmp/file2.txt', content: 'content2' },
@@ -314,6 +320,9 @@ describe('Agent OS Sandbox', async () => {
       });
 
       it('preserves newlines and special characters', async () => {
+        await using sandbox = await createAgentOsSandbox({
+          software: [await agentOsSoftware()],
+        });
         const specialContent = 'line1\nline2\ttab\n';
         await sandbox.writeFiles([
           { path: '/tmp/special.txt', content: specialContent },
@@ -364,7 +373,7 @@ describe('Agent OS Sandbox', async () => {
     describe('cleanup', () => {
       it('dispose is idempotent', async () => {
         const sandbox = await createAgentOsSandbox({
-          software: [common],
+          software: [await agentOsSoftware()],
         });
 
         await sandbox.dispose();
@@ -374,16 +383,9 @@ describe('Agent OS Sandbox', async () => {
   });
 
   describe('useAgentOsSandbox', { skip: !available }, () => {
-    let common: unknown;
-
-    before(async () => {
-      const mod = await import('@rivet-dev/agent-os-common');
-      common = mod.default;
-    });
-
     it('auto-disposes on successful completion', async () => {
       const result = await useAgentOsSandbox(
-        { software: [common] },
+        { software: [await agentOsSoftware()] },
         async (sandbox) => {
           const output = await sandbox.executeCommand('echo "auto-dispose"');
           return output.stdout.trim();
@@ -395,17 +397,20 @@ describe('Agent OS Sandbox', async () => {
 
     it('auto-disposes even when function throws', async () => {
       await assert.rejects(
-        useAgentOsSandbox({ software: [common] }, async (sandbox) => {
-          await sandbox.executeCommand('echo alive');
-          throw new Error('intentional test error');
-        }),
+        useAgentOsSandbox(
+          { software: [await agentOsSoftware()] },
+          async (sandbox) => {
+            await sandbox.executeCommand('echo alive');
+            throw new Error('intentional test error');
+          },
+        ),
         /intentional test error/,
       );
     });
 
     it('returns the value from the callback', async () => {
       const result = await useAgentOsSandbox(
-        { software: [common] },
+        { software: [await agentOsSoftware()] },
         async (sandbox) => {
           const output = await sandbox.executeCommand('echo callback-value');
           return {

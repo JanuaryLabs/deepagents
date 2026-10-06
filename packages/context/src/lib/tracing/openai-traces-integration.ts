@@ -14,6 +14,7 @@ import { type TracingProcessor, createTracingProcessor } from './processor.ts';
 import {
   errorToSpanError,
   normalizeForJson,
+  normalizeObjectForJson,
   normalizeRecordArray,
   normalizeUsage,
 } from './serialization.ts';
@@ -221,9 +222,13 @@ export function createOpenAITracesIntegration(
 
       span.ended_at = now();
 
-      const data = span.span_data as FunctionSpanData;
+      const data = span.span_data;
       if (event.toolOutput.type === 'tool-result') {
-        if (includeSensitive && event.recordOutputs !== false) {
+        if (
+          data.type === 'function' &&
+          includeSensitive &&
+          event.recordOutputs !== false
+        ) {
           data.output = normalizeForJson(event.toolOutput.output);
         }
       } else {
@@ -251,11 +256,13 @@ export function createOpenAITracesIntegration(
 
       span.ended_at = now();
 
-      const data = span.span_data as GenerationSpanData;
-      if (includeSensitive && event.recordOutputs !== false) {
-        data.output = normalizeRecordArray(event.response.messages);
+      const data = span.span_data;
+      if (data.type === 'generation') {
+        if (includeSensitive && event.recordOutputs !== false) {
+          data.output = normalizeRecordArray(event.response.messages);
+        }
+        data.usage = normalizeUsage(event.usage);
       }
-      data.usage = normalizeUsage(event.usage);
       if (event.response.id != null) {
         state.responseIds.add(event.response.id);
         responseIdToRun.set(event.response.id, state);
@@ -361,10 +368,10 @@ export function createOpenAITracesIntegration(
 function isGenerateTextStartEvent(
   event: unknown,
 ): event is GenerateTextStartEvent {
-  if (event == null || typeof event !== 'object') {
+  if (event == null || typeof event !== 'object' || !('operationId' in event)) {
     return false;
   }
-  const operationId = (event as { operationId?: unknown }).operationId;
+  const { operationId } = event;
   return operationId === 'ai.generateText' || operationId === 'ai.streamText';
 }
 
@@ -389,18 +396,8 @@ function normalizeMetadata(
     return undefined;
   }
 
-  const normalized = normalizeForJson(metadata);
-  if (
-    normalized == null ||
-    typeof normalized !== 'object' ||
-    Array.isArray(normalized)
-  ) {
-    return undefined;
-  }
-
-  return Object.keys(normalized).length > 0
-    ? (normalized as Record<string, unknown>)
-    : undefined;
+  const normalized = normalizeObjectForJson(metadata);
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
 function getOutputType(output: unknown): string | undefined {
@@ -410,10 +407,10 @@ function getOutputType(output: unknown): string | undefined {
 
   if (
     typeof output === 'object' &&
-    'type' in (output as Record<string, unknown>) &&
-    typeof (output as Record<string, unknown>).type === 'string'
+    'type' in output &&
+    typeof output.type === 'string'
   ) {
-    return (output as Record<string, unknown>).type as string;
+    return output.type;
   }
 
   if (typeof output === 'object' && output.constructor?.name != null) {

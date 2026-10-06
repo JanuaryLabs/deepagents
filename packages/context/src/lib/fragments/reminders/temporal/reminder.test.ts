@@ -11,6 +11,7 @@ import {
   createBashTool,
   createVirtualSandbox,
   dateReminder,
+  isRecord,
   localeReminder,
   monthReminder,
   seasonReminder,
@@ -21,6 +22,7 @@ import {
 } from '@deepagents/context';
 
 import { getTextParts } from '../../../text.ts';
+import { requireUIMessage } from '../../../ui-message-guards.ts';
 
 async function createVirtualAgentSandbox() {
   return createBashTool({
@@ -334,8 +336,9 @@ describe('dateReminder', () => {
       });
       const persisted = getLastUserMessage(messages);
 
+      assert.ok(isRecord(persisted.metadata));
       assert.deepStrictEqual(
-        (persisted.metadata as { locale: unknown }).locale,
+        persisted.metadata.locale,
         { language: 'Japanese', timeZone: 'Asia/Tokyo' },
         'caller-supplied metadata.locale must flow through save() intact',
       );
@@ -860,14 +863,10 @@ describe('localeReminder', () => {
     const storedUser = storedMessages.find((m) => m.name === 'user');
     assert.ok(storedUser, 'expected a stored user message');
 
-    const metadata = (storedUser.data as UIMessage).metadata as
-      | Record<string, unknown>
-      | undefined;
-    const locale = metadata?.locale as
-      | { language: string; timeZone: string }
-      | undefined;
-
-    assert.ok(locale, 'expected locale metadata');
+    const { metadata } = requireUIMessage(storedUser.data, 'stored user');
+    assert.ok(isRecord(metadata), 'expected locale metadata');
+    const { locale } = metadata;
+    assert.ok(isRecord(locale), 'expected locale metadata');
     assert.strictEqual(locale.language, 'French');
     assert.strictEqual(locale.timeZone, 'Europe/Paris');
   });

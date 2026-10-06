@@ -19,7 +19,7 @@ const contextualTool = tool<Record<string, never>, string, RequiredContext>({
 const tools = { contextualTool };
 type Sandbox = Parameters<typeof agent<typeof tools>>[0]['sandbox'];
 
-function verifyToolContextContract(
+async function verifyToolContextContract(
   sandbox: Sandbox,
   baseContext: BaseContext,
   requiredContext: RequiredContext,
@@ -29,9 +29,9 @@ function verifyToolContextContract(
     sandbox,
   });
 
-  plainAgent.generate();
-  plainAgent.stream();
-  chat(plainAgent);
+  await plainAgent.generate();
+  await plainAgent.stream();
+  await chat(plainAgent);
 
   const validAgent = agent({
     name: 'valid',
@@ -40,23 +40,23 @@ function verifyToolContextContract(
   });
   const toolsContext = { contextualTool: requiredContext };
 
-  validAgent.generate({ toolsContext });
+  await validAgent.generate({ toolsContext });
 
   // @ts-expect-error Contextual tools keep their context required.
-  validAgent.generate();
+  await validAgent.generate();
 
-  validAgent.generate({
+  await validAgent.generate({
     // @ts-expect-error Agent calls keep the context selected at construction.
     toolsContext: { contextualTool: baseContext },
   });
 
-  chat(validAgent, { toolsContext });
+  await chat(validAgent, { toolsContext });
 
   // @ts-expect-error chat requires the context inferred from the agent tools.
-  chat(validAgent, { toolsContext: { contextualTool: baseContext } });
+  await chat(validAgent, { toolsContext: { contextualTool: baseContext } });
 
   // @ts-expect-error chat never fabricates a missing tool context.
-  chat(validAgent);
+  await chat(validAgent);
 
   const subagentTools = { subagent: validAgent.asTool() };
   const validParent = agent({
@@ -65,29 +65,29 @@ function verifyToolContextContract(
     tools: subagentTools,
   });
 
-  validParent.generate({ toolsContext: { subagent: toolsContext } });
+  await validParent.generate({ toolsContext: { subagent: toolsContext } });
 
-  validParent.generate({
+  await validParent.generate({
     // @ts-expect-error asTool propagates its agent's required context.
     toolsContext: { subagent: { contextualTool: baseContext } },
   });
 
   const outputSchema = z.object({ value: z.string() });
   const plainOutput = structuredOutput({ schema: outputSchema });
-  plainOutput.generate();
-  plainOutput.stream();
+  await plainOutput.generate();
+  await plainOutput.stream();
 
   const validOutput = structuredOutput({
     schema: outputSchema,
     tools,
   });
 
-  validOutput.generate({ toolsContext });
+  await validOutput.generate({ toolsContext });
 
   // @ts-expect-error Contextual structured output tools require context.
-  validOutput.generate();
+  await validOutput.generate();
 
-  validOutput.generate({
+  await validOutput.generate({
     // @ts-expect-error Structured output infers the same tool context contract.
     toolsContext: { contextualTool: baseContext },
   });

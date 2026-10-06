@@ -57,20 +57,16 @@ export function toolCall(options: ToolCallOptions): WhenPredicate {
       ) {
         return false;
       }
-      if (
-        options.input &&
-        !options.input((part as { input?: unknown }).input)
-      ) {
+      if (options.input && !options.input(part.input)) {
         return false;
       }
       if (options.output) {
         if (part.state !== 'output-available') return false;
-        if (!options.output((part as { output?: unknown }).output))
-          return false;
+        if (!options.output(part.output)) return false;
       }
       if (options.errorText) {
         if (part.state !== 'output-error') return false;
-        const text = (part as { errorText?: string }).errorText ?? '';
+        const text = part.errorText ?? '';
         if (!options.errorText(text)) return false;
       }
       return true;
