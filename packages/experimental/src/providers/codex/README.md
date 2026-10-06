@@ -83,6 +83,9 @@ const accounts = createCodexAccounts({
 });
 
 const pending = await accounts.connect(userId);
+if (pending.status !== 'pending') {
+  throw new Error('ChatGPT account is not awaiting sign-in');
+}
 // Show pending.userCode and open pending.verificationUrl; completion arrives
 // through onChange as `connected` (or `error`).
 

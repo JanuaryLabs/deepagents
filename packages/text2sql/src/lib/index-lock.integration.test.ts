@@ -1,9 +1,9 @@
 import assert from 'node:assert';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtempDisposable, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import { after, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { Sqlite as TestSqlite } from '@deepagents/test';
@@ -65,12 +65,6 @@ function eventTypes(events: Text2SqlIndexProgressEvent[]): string[] {
   return events.map((event) => event.type);
 }
 
-async function tempCacheDir(): Promise<string> {
-  const dir = await mkdtemp(path.join(tmpdir(), 'text2sql-cache-'));
-  after(() => rm(dir, { recursive: true, force: true }));
-  return dir;
-}
-
 describe('AdapterIndexer with an injected cache and lock', () => {
   it('runs a single introspection for concurrent index calls on the same adapter', async () => {
     await using database = await testSqlite.database();
@@ -83,7 +77,10 @@ describe('AdapterIndexer with an injected cache and lock', () => {
     });
 
     const introspections = countIntrospections(adapter);
-    const cache = new FileIndexCache({ dir: await tempCacheDir() });
+    await using directory = await mkdtempDisposable(
+      path.join(tmpdir(), 'text2sql-cache-'),
+    );
+    const cache = new FileIndexCache({ dir: directory.path });
     const lock = new KeyMutexLock();
     const indexer = new AdapterIndexer({
       adapters: { main: adapter },
@@ -164,7 +161,10 @@ describe('AdapterIndexer with a cache', () => {
     });
 
     const introspections = countIntrospections(adapter);
-    const cache = new FileIndexCache({ dir: await tempCacheDir() });
+    await using directory = await mkdtempDisposable(
+      path.join(tmpdir(), 'text2sql-cache-'),
+    );
+    const cache = new FileIndexCache({ dir: directory.path });
     const indexer = new AdapterIndexer({
       adapters: { main: adapter },
       cache,
@@ -221,7 +221,10 @@ describe('AdapterIndexer with a lock but no cache', () => {
 
 describe('FileIndexCache shared across indexers', () => {
   it('deduplicates introspection across separate indexers sharing a dir + lock', async () => {
-    const dir = await tempCacheDir();
+    await using directory = await mkdtempDisposable(
+      path.join(tmpdir(), 'text2sql-cache-'),
+    );
+    const dir = directory.path;
     const lock = new KeyMutexLock();
 
     await using hostADatabase = await testSqlite.database();
@@ -293,7 +296,10 @@ describe('FileIndexCache corrupt-file resilience', () => {
       grounding: [],
     });
 
-    const dir = await tempCacheDir();
+    await using directory = await mkdtempDisposable(
+      path.join(tmpdir(), 'text2sql-cache-'),
+    );
+    const dir = directory.path;
     const introspections = countIntrospections(adapter);
     const indexer = new AdapterIndexer({
       adapters: { main: adapter },
@@ -325,7 +331,10 @@ describe('FileIndexCache corrupt-file resilience', () => {
 
 describe('FileIndexLock serializes concurrent introspection', () => {
   it('runs a single introspection for concurrent indexers sharing a dir + FileIndexLock', async () => {
-    const dir = await tempCacheDir();
+    await using directory = await mkdtempDisposable(
+      path.join(tmpdir(), 'text2sql-cache-'),
+    );
+    const dir = directory.path;
 
     await using hostADatabase = await testSqlite.database();
     hostADatabase.connection.exec(
@@ -374,7 +383,10 @@ describe('FileIndexLock serializes concurrent introspection', () => {
 
 describe('FileIndexLock run() contract', () => {
   it('creates a missing lock dir and returns the critical section result', async () => {
-    const dir = path.join(await tempCacheDir(), 'nested', 'locks');
+    await using directory = await mkdtempDisposable(
+      path.join(tmpdir(), 'text2sql-cache-'),
+    );
+    const dir = path.join(directory.path, 'nested', 'locks');
     const lock = new FileIndexLock({ dir });
 
     const result = await lock.run('adapter', async () => 'value');
@@ -383,7 +395,10 @@ describe('FileIndexLock run() contract', () => {
   });
 
   it('releases the lock even when the critical section throws', async () => {
-    const lock = new FileIndexLock({ dir: await tempCacheDir() });
+    await using directory = await mkdtempDisposable(
+      path.join(tmpdir(), 'text2sql-cache-'),
+    );
+    const lock = new FileIndexLock({ dir: directory.path });
 
     await assert.rejects(
       () => lock.run('adapter', () => Promise.reject(new Error('boom'))),
@@ -405,42 +420,41 @@ describe('AdapterIndexer.indexAdapter (single-adapter entry point)', () => {
       execute: (sql) => database.connection.prepare(sql).all(),
       grounding: [],
     });
-    const dir = await mkdtemp(path.join(tmpdir(), 'text2sql-cache-'));
-    try {
-      const introspections = countIntrospections(adapter);
-      const indexer = new AdapterIndexer({
-        adapters: { main: adapter },
-        cache: new FileIndexCache({ dir }),
-        lock: new KeyMutexLock(),
-      });
+    await using directory = await mkdtempDisposable(
+      path.join(tmpdir(), 'text2sql-cache-'),
+    );
+    const dir = directory.path;
+    const introspections = countIntrospections(adapter);
+    const indexer = new AdapterIndexer({
+      adapters: { main: adapter },
+      cache: new FileIndexCache({ dir }),
+      lock: new KeyMutexLock(),
+    });
 
-      const firstEvents: Text2SqlIndexProgressEvent[] = [];
-      const first = await indexer.indexAdapter('main', {
-        onProgress: (event) => firstEvents.push(event),
-      });
+    const firstEvents: Text2SqlIndexProgressEvent[] = [];
+    const first = await indexer.indexAdapter('main', {
+      onProgress: (event) => firstEvents.push(event),
+    });
 
-      const secondEvents: Text2SqlIndexProgressEvent[] = [];
-      const second = await indexer.indexAdapter('main', {
-        onProgress: (event) => secondEvents.push(event),
-      });
+    const secondEvents: Text2SqlIndexProgressEvent[] = [];
+    const second = await indexer.indexAdapter('main', {
+      onProgress: (event) => secondEvents.push(event),
+    });
 
-      assert.ok(
-        Array.isArray(first),
-        'a cache miss introspects and returns a fragment array',
-      );
-      assert.strictEqual(
-        introspections.count(),
-        1,
-        'the warm second call reuses the cache instead of re-introspecting',
-      );
-      assert.ok(eventTypes(firstEvents).includes('adapter:cache-miss'));
-      assert.ok(!eventTypes(firstEvents).includes('adapter:cache-hit'));
-      assert.ok(eventTypes(secondEvents).includes('adapter:cache-hit'));
-      assert.ok(!eventTypes(secondEvents).includes('adapter:cache-miss'));
-      assert.deepStrictEqual(second, JSON.parse(JSON.stringify(first)));
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    assert.ok(
+      Array.isArray(first),
+      'a cache miss introspects and returns a fragment array',
+    );
+    assert.strictEqual(
+      introspections.count(),
+      1,
+      'the warm second call reuses the cache instead of re-introspecting',
+    );
+    assert.ok(eventTypes(firstEvents).includes('adapter:cache-miss'));
+    assert.ok(!eventTypes(firstEvents).includes('adapter:cache-hit'));
+    assert.ok(eventTypes(secondEvents).includes('adapter:cache-hit'));
+    assert.ok(!eventTypes(secondEvents).includes('adapter:cache-miss'));
+    assert.deepStrictEqual(second, JSON.parse(JSON.stringify(first)));
   });
 
   it('runs a single introspection for two concurrent indexAdapter calls on the same adapter', async () => {
@@ -452,54 +466,50 @@ describe('AdapterIndexer.indexAdapter (single-adapter entry point)', () => {
       execute: (sql) => database.connection.prepare(sql).all(),
       grounding: [],
     });
-    const dir = await mkdtemp(path.join(tmpdir(), 'text2sql-cache-'));
-    try {
-      const introspections = countIntrospections(adapter);
-      const lock = new KeyMutexLock();
-      const indexer = new AdapterIndexer({
-        adapters: { main: adapter },
-        cache: new FileIndexCache({ dir }),
-        lock,
-      });
+    await using directory = await mkdtempDisposable(
+      path.join(tmpdir(), 'text2sql-cache-'),
+    );
+    const dir = directory.path;
+    const introspections = countIntrospections(adapter);
+    const lock = new KeyMutexLock();
+    const indexer = new AdapterIndexer({
+      adapters: { main: adapter },
+      cache: new FileIndexCache({ dir }),
+      lock,
+    });
 
-      const firstEvents: Text2SqlIndexProgressEvent[] = [];
-      const secondEvents: Text2SqlIndexProgressEvent[] = [];
-      const [first, second] = await Promise.all([
-        indexer.indexAdapter('main', {
-          onProgress: (event) => firstEvents.push(event),
-        }),
-        indexer.indexAdapter('main', {
-          onProgress: (event) => secondEvents.push(event),
-        }),
-      ]);
+    const firstEvents: Text2SqlIndexProgressEvent[] = [];
+    const secondEvents: Text2SqlIndexProgressEvent[] = [];
+    const [first, second] = await Promise.all([
+      indexer.indexAdapter('main', {
+        onProgress: (event) => firstEvents.push(event),
+      }),
+      indexer.indexAdapter('main', {
+        onProgress: (event) => secondEvents.push(event),
+      }),
+    ]);
 
-      assert.strictEqual(
-        introspections.count(),
-        1,
-        'introspection runs exactly once across concurrent single-adapter callers',
-      );
-      assert.deepStrictEqual(
-        lock.calls,
-        ['main', 'main'],
-        'both callers acquire the lock under the per-adapter key',
-      );
+    assert.strictEqual(
+      introspections.count(),
+      1,
+      'introspection runs exactly once across concurrent single-adapter callers',
+    );
+    assert.deepStrictEqual(
+      lock.calls,
+      ['main', 'main'],
+      'both callers acquire the lock under the per-adapter key',
+    );
 
-      const allTypes = [
-        ...eventTypes(firstEvents),
-        ...eventTypes(secondEvents),
-      ];
-      assert.strictEqual(
-        allTypes.filter((t) => t === 'adapter:cache-miss').length,
-        1,
-      );
-      assert.strictEqual(
-        allTypes.filter((t) => t === 'adapter:cache-hit').length,
-        1,
-      );
-      assert.deepStrictEqual(second, JSON.parse(JSON.stringify(first)));
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    const allTypes = [...eventTypes(firstEvents), ...eventTypes(secondEvents)];
+    assert.strictEqual(
+      allTypes.filter((t) => t === 'adapter:cache-miss').length,
+      1,
+    );
+    assert.strictEqual(
+      allTypes.filter((t) => t === 'adapter:cache-hit').length,
+      1,
+    );
+    assert.deepStrictEqual(second, JSON.parse(JSON.stringify(first)));
   });
 
   it('returns raw adapter fragments without the <database> wrapper that index() adds', async () => {
@@ -511,45 +521,42 @@ describe('AdapterIndexer.indexAdapter (single-adapter entry point)', () => {
       execute: (sql) => database.connection.prepare(sql).all(),
       grounding: [],
     });
-    const dir = await mkdtemp(path.join(tmpdir(), 'text2sql-cache-'));
-    try {
-      const indexer = new AdapterIndexer({
-        adapters: { main: adapter },
-        cache: new FileIndexCache({ dir }),
-        lock: new KeyMutexLock(),
-      });
+    await using directory = await mkdtempDisposable(
+      path.join(tmpdir(), 'text2sql-cache-'),
+    );
+    const dir = directory.path;
+    const indexer = new AdapterIndexer({
+      adapters: { main: adapter },
+      cache: new FileIndexCache({ dir }),
+      lock: new KeyMutexLock(),
+    });
 
-      const raw = await indexer.indexAdapter('main');
-      const wrapped = await indexer.index({ adapterNames: ['main'] });
+    const raw = await indexer.indexAdapter('main');
+    const wrapped = await indexer.index({ adapterNames: ['main'] });
 
-      assert.strictEqual(
-        wrapped.length,
-        1,
-        'index() emits one wrapper fragment per adapter',
-      );
-      assert.strictEqual(wrapped[0].name, 'main');
-      assert.ok(
-        raw.every((f) => f.name !== 'main' && f.name !== 'database'),
-        'indexAdapter returns the raw schema with no adapter/database wrapper',
-      );
+    assert.strictEqual(
+      wrapped.length,
+      1,
+      'index() emits one wrapper fragment per adapter',
+    );
+    assert.strictEqual(wrapped[0].name, 'main');
+    assert.ok(
+      raw.every((f) => f.name !== 'main' && f.name !== 'database'),
+      'indexAdapter returns the raw schema with no adapter/database wrapper',
+    );
 
-      const children = (wrapped[0].data ?? []) as Array<{
-        name: string;
-        data?: unknown;
-      }>;
-      assert.deepStrictEqual(
-        children[0],
-        { name: 'database', data: 'main' },
-        'index() prepends a <database> name leaf that indexAdapter omits',
-      );
-      assert.deepStrictEqual(
-        JSON.parse(JSON.stringify(children.slice(1))),
-        JSON.parse(JSON.stringify(raw)),
-        'the wrapper body minus the database leaf is exactly the raw fragments',
-      );
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    const children = wrapped[0].data;
+    assert.ok(Array.isArray(children));
+    assert.deepStrictEqual(
+      children[0],
+      { name: 'database', data: 'main' },
+      'index() prepends a <database> name leaf that indexAdapter omits',
+    );
+    assert.deepStrictEqual(
+      JSON.parse(JSON.stringify(children.slice(1))),
+      JSON.parse(JSON.stringify(raw)),
+      'the wrapper body minus the database leaf is exactly the raw fragments',
+    );
   });
 
   it('rejects an unknown adapter name and lists the available adapters', async () => {

@@ -49,6 +49,9 @@ const accounts = createClaudeAccounts({
 });
 
 const pending = await accounts.connect(userId);
+if (pending.status !== 'pending') {
+  throw new Error('Claude account is not awaiting sign-in');
+}
 // Open pending.authorizationUrl; the user pastes the code Claude shows.
 await accounts.complete(userId, pastedCode);
 

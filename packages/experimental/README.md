@@ -6,14 +6,18 @@ stable `@deepagents/*` surface. APIs here may change without notice.
 ## `@deepagents/experimental/providers/codex`
 
 `codex('gpt-5.5')` creates an AI SDK model using an existing ChatGPT login from
-`codex login`. Zukhruf continues to own tools, history, and turn execution. See
-the [provider API and credential behavior](./src/providers/codex/README.md).
+`codex login`. Apps that own user accounts can use `createCodexAccounts()` for
+per-user ChatGPT device sign-in instead. Zukhruf continues to own tools, history,
+and turn execution. See the
+[provider API and credential behavior](./src/providers/codex/README.md).
 
 ## `@deepagents/experimental/providers/claude`
 
 `claude('claude-sonnet-4-6')` creates an AI SDK model using the existing Claude Code
-login. It follows the same provider protocol while Zukhruf owns task execution.
-See the [provider API and credential behavior](./src/providers/claude/README.md).
+login. Apps that own user accounts can use `createClaudeAccounts()` for per-user
+Claude Pro or Max PKCE sign-in instead. It follows the same provider protocol
+while Zukhruf owns task execution. See the
+[provider API and credential behavior](./src/providers/claude/README.md).
 
 ## `@deepagents/experimental/coding-agent-reminders`
 
