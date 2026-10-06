@@ -290,8 +290,10 @@ try {
       item.object === 'trace.span' && item.span_data.type === 'function',
   );
   assert.ok(functionSpan, 'expected a traced bash function span');
-  assert.equal(functionSpan.span_data.name, 'bash');
-  assert.match(JSON.stringify(functionSpan.span_data.output), /fileChanges/);
+  const spanData = functionSpan.span_data;
+  assert.ok(spanData.type === 'function', 'expected a function span');
+  assert.equal(spanData.name, 'bash');
+  assert.match(JSON.stringify(spanData.output), /fileChanges/);
 
   const summary = {
     passed: true,

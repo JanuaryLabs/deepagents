@@ -2,11 +2,11 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": ".",
-    "outDir": "dist/eval",
-    "tsBuildInfoFile": "dist/tsconfig.eval.tsbuildinfo",
+    "outDir": "dist/scripts",
+    "tsBuildInfoFile": "dist/tsconfig.scripts.tsbuildinfo",
     "types": ["node"]
   },
-  "include": ["src/evals/**/*.ts", "src/evals/**/*.json", "../../global.d.ts"],
+  "include": ["scripts/**/*.ts", "../../global.d.ts"],
   "references": [
     {
       "path": "./tsconfig.lib.json"

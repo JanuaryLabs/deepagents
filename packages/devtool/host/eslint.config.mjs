@@ -4,33 +4,19 @@ import baseConfig, {
   packageJsonDependencyChecks,
 } from '../../../eslint.config.mjs';
 
-const [severity, options] =
-  packageJsonDependencyChecks.rules['@nx/dependency-checks'];
-
+// The React preset comes first, so the root config's settings win.
 export default [
-  ...baseConfig,
   ...nx.configs['flat/react'],
+  ...baseConfig,
   {
+    // Copied Shadcn registry files: keep them updateable without local rewrites.
     files: ['ui/src/components/ui/**/*.{ts,tsx}', 'ui/src/hooks/use-mobile.ts'],
     rules: {
       eqeqeq: 'off',
       'jsx-a11y/anchor-has-content': 'off',
       'react-hooks/set-state-in-effect': 'off',
+      '@typescript-eslint/consistent-type-assertions': 'off',
     },
   },
-  {
-    ...packageJsonDependencyChecks,
-    rules: {
-      '@nx/dependency-checks': [
-        severity,
-        {
-          ...options,
-          ignoredFiles: [
-            '{projectRoot}/ui/src/**/*.{ts,tsx}',
-            '{projectRoot}/ui/vite.config.ts',
-          ],
-        },
-      ],
-    },
-  },
+  packageJsonDependencyChecks(),
 ];

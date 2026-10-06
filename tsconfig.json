@@ -92,6 +92,21 @@
     },
     {
       "path": "./demo/zukhruf-research-bot"
+    },
+    {
+      "path": "./demo/microsandbox-text2sql"
+    },
+    {
+      "path": "./demo/daytona-text2sql"
+    },
+    {
+      "path": "./demo/docker-text2sql"
+    },
+    {
+      "path": "./demo/text2sql-daemon"
+    },
+    {
+      "path": "./demo/minio"
     }
   ]
 }

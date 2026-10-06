@@ -1,0 +1,24 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": ".",
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": ["**/*.ts"],
+  "references": [
+    {
+      "path": "../text2sql-daemon"
+    },
+    {
+      "path": "../../packages/agent"
+    },
+    {
+      "path": "../../packages/text2sql"
+    },
+    {
+      "path": "../../packages/context"
+    }
+  ]
+}

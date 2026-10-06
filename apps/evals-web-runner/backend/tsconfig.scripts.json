@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist/scripts",
+    "tsBuildInfoFile": "dist/tsconfig.scripts.tsbuildinfo"
+  },
+  "include": ["openapi.ts"],
+  "exclude": [],
+  "references": [
+    {
+      "path": "./tsconfig.app.json"
+    }
+  ]
+}

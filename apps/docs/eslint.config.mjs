@@ -2,16 +2,12 @@ import nx from '@nx/eslint-plugin';
 
 import baseConfig from '../../eslint.config.mjs';
 
+// The React preset comes first, so the root config's settings win.
 export default [
-  ...baseConfig,
   ...nx.configs['flat/react'],
+  ...baseConfig,
   {
     ignores: ['.source/**'],
-  },
-  {
-    files: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'],
-    // Override or add rules here
-    rules: {},
   },
   {
     files: ['app/routes/docs.tsx'],

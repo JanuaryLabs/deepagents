@@ -177,8 +177,30 @@
       }
     ],
     "lint": {
+      "inputs": [
+        "default",
+        "^default",
+        "{workspaceRoot}/eslint.config.mjs",
+        "{workspaceRoot}/tsconfig.base.json",
+        {
+          "externalDependencies": [
+            "eslint",
+            "@zukhruf/eslint",
+            "typescript-eslint",
+            "typescript",
+            "eslint-plugin-import-x",
+            "eslint-plugin-functional",
+            "@nx/eslint-plugin",
+            "jsonc-eslint-parser",
+            "eslint-config-prettier"
+          ]
+        }
+      ],
       "options": {
-        "command": "eslint . --fix"
+        "command": "eslint . --fix",
+        "env": {
+          "NODE_OPTIONS": "--max-old-space-size=8192"
+        }
       }
     }
   },

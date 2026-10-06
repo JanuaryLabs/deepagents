@@ -1,6 +1,12 @@
 import nx from '@nx/eslint-plugin';
+import zukhruf from '@zukhruf/eslint';
+import { dependencyPolicy, moduleBoundaries } from '@zukhruf/eslint/nx';
+import prettier from 'eslint-config-prettier';
+import { defineConfig } from 'eslint/config';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+
+const jsonc = await import('jsonc-eslint-parser');
 
 const packagesDir = join(import.meta.dirname, 'packages');
 const privatePackages = [];
@@ -23,31 +29,32 @@ for (const dir of readdirSync(packagesDir)) {
 }
 
 /**
- * Shared package.json dependency validation for publishable packages.
- * The checked file set is the build target's `production` inputs (nx.json),
- * which already excludes test and eval files. Private workspace packages
- * (resolved via workspace symlinks) must never be written into a
- * package.json, so the fixer is told to ignore them.
+ * Shared package.json dependency validation for publishable packages. The
+ * checked file set is each project's build inputs (`production` in nx.json),
+ * which already leaves out tests and evals. Private workspace packages
+ * (resolved via workspace symlinks) must never be written into a package.json,
+ * so the fixer is told to ignore them. Arguments are further packages the
+ * check ignores in that project.
  */
-export const packageJsonDependencyChecks = {
+export const packageJsonDependencyChecks = (...ignoredDependencies) => ({
   files: ['**/*.json'],
   rules: {
     '@nx/dependency-checks': [
       'error',
-      {
-        ignoredDependencies: privatePackages,
-      },
+      dependencyPolicy({
+        ignoredDependencies: [...privatePackages, ...ignoredDependencies],
+      }),
     ],
   },
-  languageOptions: {
-    parser: await import('jsonc-eslint-parser'),
-  },
-};
+  languageOptions: { parser: jsonc },
+});
 
-export default [
-  ...nx.configs['flat/base'],
-  ...nx.configs['flat/typescript'],
-  ...nx.configs['flat/javascript'],
+const typescript = ['**/*.ts', '**/*.tsx', '**/*.cts', '**/*.mts'];
+const source = [...typescript, '**/*.js', '**/*.jsx', '**/*.cjs', '**/*.mjs'];
+const tests = ['**/*.{test,spec}.{ts,tsx,cts,mts,js,jsx,cjs,mjs}'];
+
+export default defineConfig(
+  nx.configs['flat/base'],
   {
     ignores: [
       '**/dist',
@@ -59,29 +66,22 @@ export default [
     ],
   },
   {
+    plugins: { zukhruf },
+    extends: ['zukhruf/base', 'zukhruf/tests', 'zukhruf/react'],
+  },
+  {
     files: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'],
     rules: {
-      'no-unused-private-class-members': 'off',
-      '@typescript-eslint/no-unused-vars': [
-        'warn',
-        { ignoreUsingDeclarations: true },
-      ],
       '@nx/enforce-module-boundaries': [
         'error',
-        {
-          enforceBuildableLibDependency: true,
-          allow: ['^.*/eslint(\\.base)?\\.config\\.[cm]?js$'],
+        moduleBoundaries({
           depConstraints: [
-            {
-              sourceTag: '*',
-              onlyDependOnLibsWithTags: ['*'],
-            },
             {
               sourceTag: 'scope:public',
               onlyDependOnLibsWithTags: ['scope:public'],
             },
           ],
-        },
+        }),
       ],
     },
   },
@@ -114,22 +114,52 @@ export default [
     },
   },
   {
-    files: [
-      '**/*.ts',
-      '**/*.tsx',
-      '**/*.cts',
-      '**/*.mts',
-      '**/*.js',
-      '**/*.jsx',
-      '**/*.cjs',
-      '**/*.mjs',
-    ],
-    // Override or add rules here
+    files: source,
     rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        { ignoreUsingDeclarations: true },
+      ],
       '@typescript-eslint/ban-ts-comment': 'off',
-      '@typescript-eslint/no-empty-interface': 'off',
       '@typescript-eslint/no-empty-object-type': 'off',
-      '@typescript-eslint/no-empty-function': 'off',
+      // @zukhruf/eslint's base turns these off; they were warnings here
+      // before the move, and stay warnings.
+      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-non-null-assertion': 'warn',
     },
   },
-];
+  // Transient: these checks are new here and have findings that the next
+  // commits fix package by package. Each line goes when its findings are gone;
+  // the last commit removes the block. A severity alone keeps the options
+  // @zukhruf/eslint gave the rule.
+  {
+    files: typescript,
+    rules: {
+      '@typescript-eslint/consistent-type-assertions': 'warn',
+      '@typescript-eslint/no-floating-promises': 'warn',
+      '@typescript-eslint/no-misused-promises': 'warn',
+      'zukhruf/no-enum': 'warn',
+    },
+  },
+  {
+    files: source,
+    rules: {
+      '@typescript-eslint/parameter-properties': 'warn',
+      'import-x/no-duplicates': 'warn',
+      'import-x/no-unassigned-import': 'warn',
+    },
+  },
+  {
+    files: typescript,
+    ignores: [...tests, '**/*.fixture.ts'],
+    rules: { 'functional/no-let': 'warn' },
+  },
+  {
+    files: tests,
+    rules: {
+      'zukhruf/no-test-lifecycle-hooks': 'warn',
+      'zukhruf/require-msw-error-on-unhandled-request': 'warn',
+    },
+  },
+  prettier,
+);

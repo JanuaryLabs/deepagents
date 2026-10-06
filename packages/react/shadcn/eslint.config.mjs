@@ -1,6 +1,12 @@
-import baseConfig from '../../../eslint.config.mjs';
+import nx from '@nx/eslint-plugin';
 
+import baseConfig, {
+  packageJsonDependencyChecks,
+} from '../../../eslint.config.mjs';
+
+// The React preset comes first, so the root config's settings win.
 export default [
+  ...nx.configs['flat/react'],
   ...baseConfig,
   {
     settings: { react: { version: '19' } },
@@ -15,21 +21,5 @@ export default [
       '@typescript-eslint/consistent-type-assertions': 'off',
     },
   },
-  {
-    files: ['**/*.json'],
-    rules: {
-      '@nx/dependency-checks': [
-        'error',
-        {
-          ignoredFiles: [
-            '{projectRoot}/eslint.config.{js,cjs,mjs}',
-            '{projectRoot}/vite.config.{js,ts,mjs,mts}',
-          ],
-        },
-      ],
-    },
-    languageOptions: {
-      parser: await import('jsonc-eslint-parser'),
-    },
-  },
+  packageJsonDependencyChecks(),
 ];

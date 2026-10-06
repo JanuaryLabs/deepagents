@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist/typecheck/server",
+    "tsBuildInfoFile": "dist/typecheck/tsconfig.server.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": ["server.ts"]
+}

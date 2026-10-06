@@ -1,10 +1,14 @@
 import nx from '@nx/eslint-plugin';
 
-import baseConfig from '../../../eslint.config.mjs';
+import baseConfig, {
+  packageJsonDependencyChecks,
+} from '../../../eslint.config.mjs';
 
+// The React preset comes first, so the root config's settings win. External
+// state managers are banned for every package by zukhruf/no-state-managers.
 export default [
-  ...baseConfig,
   ...nx.configs['flat/react'],
+  ...baseConfig,
   {
     settings: { react: { version: '19' } },
   },
@@ -16,21 +20,6 @@ export default [
         {
           patterns: [
             {
-              group: [
-                'zustand',
-                'zustand/*',
-                'jotai',
-                'jotai/*',
-                'redux',
-                '@reduxjs/toolkit',
-                'react-redux',
-                'mobx',
-                'mobx-react',
-              ],
-              message:
-                'Keep shared chat state inside React context, server-state modules, or host-owned adapters.',
-            },
-            {
               group: ['@deepagents/agent', '@deepagents/agent/*'],
               message:
                 'The React chat module consumes AI SDK and context interfaces, not an agent runtime.',
@@ -40,21 +29,5 @@ export default [
       ],
     },
   },
-  {
-    files: ['**/*.json'],
-    rules: {
-      '@nx/dependency-checks': [
-        'error',
-        {
-          ignoredFiles: [
-            '{projectRoot}/eslint.config.{js,cjs,mjs}',
-            '{projectRoot}/vite.config.{js,ts,mjs,mts}',
-          ],
-        },
-      ],
-    },
-    languageOptions: {
-      parser: await import('jsonc-eslint-parser'),
-    },
-  },
+  packageJsonDependencyChecks(),
 ];
