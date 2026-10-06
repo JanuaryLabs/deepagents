@@ -199,9 +199,10 @@
       "options": {
         "command": "eslint . --fix",
         "env": {
-          "NODE_OPTIONS": "--max-old-space-size=8192"
+          "NODE_OPTIONS": "--max-old-space-size=12288"
         }
-      }
+      },
+      "parallelism": false
     }
   },
   "release": {
