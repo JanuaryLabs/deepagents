@@ -123,6 +123,6 @@
     "@electric-sql/pglite": "^0.5.4",
     "@types/proper-lockfile": "^4.1.4",
     "just-bash": "^3.2.0",
-    "nock": "^14.0.16"
+    "msw": "^3.0.2"
   }
 }

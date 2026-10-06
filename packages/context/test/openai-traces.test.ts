@@ -1,9 +1,10 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { type Telemetry, isStepCount, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import nock from 'nock';
+import { HttpResponse, http } from 'msw';
+import { setupServer } from 'msw/node';
 import assert from 'node:assert';
-import { afterEach, beforeEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 import {
   BatchTraceProcessor,
@@ -66,14 +67,19 @@ function traceMetadataValue<T = unknown>(
 
 function captureIngestRequests() {
   const captured: IngestBody[] = [];
-  nock('https://api.openai.com')
-    .persist()
-    .post('/v1/traces/ingest', (body) => {
-      captured.push(body as IngestBody);
-      return true;
-    })
-    .reply(200, { ok: true });
-  return captured;
+  const server = setupServer(
+    http.post<never, IngestBody>(
+      'https://api.openai.com/v1/traces/ingest',
+      async ({ request }) => {
+        captured.push(await request.json());
+        return HttpResponse.json({ ok: true });
+      },
+    ),
+  );
+  server.listen({ onUnhandledFrame: 'error' });
+  return Object.assign(captured, {
+    [Symbol.dispose]: () => server.close(),
+  });
 }
 
 function spansOfType(body: IngestBody, type: string): OpenAISpan[] {
@@ -251,19 +257,11 @@ async function flushTelemetry() {
   await new Promise((resolve) => setTimeout(resolve, 25));
 }
 
-beforeEach(() => {
-  nock.cleanAll();
-});
-
-afterEach(() => {
-  nock.cleanAll();
-});
-
 describe('OpenAI Traces Integration', () => {
   describe('createOpenAITracesIntegration', () => {
     it('produces correct trace and spans for a simple streamText call', async () => {
       const { streamText } = await import('ai');
-      const captured = captureIngestRequests();
+      using captured = captureIngestRequests();
 
       const integration = createOpenAITracesIntegration({
         apiKey: 'test-key',
@@ -293,8 +291,7 @@ describe('OpenAI Traces Integration', () => {
       const items = captured[0].data;
 
       const trace = items.find((item) => item.object === 'trace') as
-        | OpenAITrace
-        | undefined;
+        OpenAITrace | undefined;
       assert.ok(trace, 'should have a trace');
       assert.strictEqual(trace.workflow_name, 'test-workflow');
       assert.strictEqual(trace.group_id, 'group-123');
@@ -350,7 +347,7 @@ describe('OpenAI Traces Integration', () => {
 
     it('can be reused without leaking trace state between runs', async () => {
       const { streamText } = await import('ai');
-      const captured = captureIngestRequests();
+      using captured = captureIngestRequests();
 
       const integration = createOpenAITracesIntegration({
         apiKey: 'test-key',
@@ -395,7 +392,7 @@ describe('OpenAI Traces Integration', () => {
 
     it('supports overlapping runs on the same integration instance', async () => {
       const { streamText } = await import('ai');
-      const captured = captureIngestRequests();
+      using captured = captureIngestRequests();
 
       const integration = createOpenAITracesIntegration({
         apiKey: 'test-key',
@@ -449,7 +446,7 @@ describe('OpenAI Traces Integration', () => {
 
     it('matches interleaved callbacks by event identity instead of stack order', async () => {
       const { streamText } = await import('ai');
-      const captured = captureIngestRequests();
+      using captured = captureIngestRequests();
       const integration = createOpenAITracesIntegration({
         apiKey: 'test-key',
         batch: { scheduleDelayMs: 60_000 },
@@ -510,7 +507,7 @@ describe('OpenAI Traces Integration', () => {
     it('captures multi-step runs with one generation span per step', async () => {
       const { streamText, tool } = await import('ai');
       const { z } = await import('zod');
-      const captured = captureIngestRequests();
+      using captured = captureIngestRequests();
 
       const integration = createOpenAITracesIntegration({
         apiKey: 'test-key',
@@ -562,7 +559,7 @@ describe('OpenAI Traces Integration', () => {
     it('produces function spans for tool calls', async () => {
       const { streamText, tool } = await import('ai');
       const { z } = await import('zod');
-      const captured = captureIngestRequests();
+      using captured = captureIngestRequests();
 
       const integration = createOpenAITracesIntegration({
         apiKey: 'test-key',
@@ -622,7 +619,7 @@ describe('OpenAI Traces Integration', () => {
     it('records tool failures using span error data', async () => {
       const { streamText, tool } = await import('ai');
       const { z } = await import('zod');
-      const captured = captureIngestRequests();
+      using captured = captureIngestRequests();
       const integration = createOpenAITracesIntegration({
         apiKey: 'test-key',
         workflowName: 'failing-tool-workflow',
@@ -669,7 +666,7 @@ describe('OpenAI Traces Integration', () => {
     it('respects includeSensitiveData=false for generation and function spans', async () => {
       const { streamText, tool } = await import('ai');
       const { z } = await import('zod');
-      const captured = captureIngestRequests();
+      using captured = captureIngestRequests();
 
       const integration = createOpenAITracesIntegration({
         apiKey: 'test-key',
@@ -895,7 +892,7 @@ describe('OpenAI Traces Integration', () => {
 describe('OpenAI Traces wire format', () => {
   it('sends generation span input as an array of message objects on the wire', async () => {
     const { streamText } = await import('ai');
-    const captured = captureIngestRequests();
+    using captured = captureIngestRequests();
 
     const integration = createOpenAITracesIntegration({
       apiKey: 'test-key',
@@ -935,7 +932,7 @@ describe('OpenAI Traces wire format', () => {
 
   it('sends generation span output as an array of message objects on the wire', async () => {
     const { streamText } = await import('ai');
-    const captured = captureIngestRequests();
+    using captured = captureIngestRequests();
 
     const integration = createOpenAITracesIntegration({
       apiKey: 'test-key',
@@ -973,7 +970,7 @@ describe('OpenAI Traces wire format', () => {
   it('serializes function span input and output as JSON strings on the wire', async () => {
     const { streamText, tool } = await import('ai');
     const { z } = await import('zod');
-    const captured = captureIngestRequests();
+    using captured = captureIngestRequests();
 
     const integration = createOpenAITracesIntegration({
       apiKey: 'test-key',
@@ -1023,7 +1020,7 @@ describe('OpenAI Traces wire format', () => {
 
   it('does not include total_tokens in generation span_data.usage on the wire', async () => {
     const { streamText } = await import('ai');
-    const captured = captureIngestRequests();
+    using captured = captureIngestRequests();
 
     const integration = createOpenAITracesIntegration({
       apiKey: 'test-key',
@@ -1057,7 +1054,7 @@ describe('OpenAI Traces wire format', () => {
   });
 
   it('omits function span input/output from the wire when their in-memory value is null', async () => {
-    const captured = captureIngestRequests();
+    using captured = captureIngestRequests();
     const exporter = new OpenAITracesExporter({ apiKey: 'test-key' });
 
     await exporter.export([
@@ -1091,7 +1088,7 @@ describe('OpenAI Traces wire format', () => {
   });
 
   it('stringifies transcription span input and output on the wire', async () => {
-    const captured = captureIngestRequests();
+    using captured = captureIngestRequests();
     const exporter = new OpenAITracesExporter({ apiKey: 'test-key' });
 
     await exporter.export([
@@ -1136,7 +1133,7 @@ describe('OpenAI Traces wire format', () => {
   it('validates the full wire schema across generation and function spans in one flow', async () => {
     const { streamText, tool } = await import('ai');
     const { z } = await import('zod');
-    const captured = captureIngestRequests();
+    using captured = captureIngestRequests();
 
     const integration = createOpenAITracesIntegration({
       apiKey: 'test-key',
@@ -1188,7 +1185,7 @@ describe('OpenAI Traces wire format', () => {
 
   it('disambiguates concurrent runs with distinct prompts and no other discriminator', async () => {
     const { streamText } = await import('ai');
-    const captured = captureIngestRequests();
+    using captured = captureIngestRequests();
 
     const integration = createOpenAITracesIntegration({
       apiKey: 'test-key',

@@ -1,7 +1,8 @@
 import { InMemoryFs } from 'just-bash';
-import nock from 'nock';
+import { HttpResponse, http } from 'msw';
+import { setupServer } from 'msw/node';
 import assert from 'node:assert';
-import { before, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 import {
   ContextEngine,
@@ -9,7 +10,6 @@ import {
   XmlRenderer,
   createBashTool,
   createVirtualSandbox,
-  getModelsRegistry,
   user,
 } from '@deepagents/context';
 
@@ -35,16 +35,19 @@ const modelsDevResponse = {
   },
 };
 
-describe('ContextEngine.estimate() with message codecs', () => {
-  before(async () => {
-    nock('https://models.dev')
-      .persist()
-      .get('/api.json')
-      .reply(200, modelsDevResponse);
-    await getModelsRegistry().load();
-  });
+function stubModelsDev() {
+  const server = setupServer(
+    http.get('https://models.dev/api.json', () =>
+      HttpResponse.json(modelsDevResponse),
+    ),
+  );
+  server.listen({ onUnhandledFrame: 'error' });
+  return { [Symbol.dispose]: () => server.close() };
+}
 
+describe('ContextEngine.estimate() with message codecs', () => {
   it('counts pending message tokens from encoded UIMessage content', async () => {
+    using _modelsDev = stubModelsDev();
     const shortEngine = new ContextEngine({
       userId: 'test-user',
       store: new InMemoryContextStore(),
@@ -84,6 +87,7 @@ describe('ContextEngine.estimate() with message codecs', () => {
   });
 
   it('counts persisted message tokens from stored UIMessage content', async () => {
+    using _modelsDev = stubModelsDev();
     const shortEngine = new ContextEngine({
       userId: 'test-user',
       store: new InMemoryContextStore(),

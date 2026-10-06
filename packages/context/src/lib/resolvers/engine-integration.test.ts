@@ -1,7 +1,8 @@
 import { InMemoryFs } from 'just-bash';
-import nock from 'nock';
+import { HttpResponse, http } from 'msw';
+import { setupServer } from 'msw/node';
 import assert from 'node:assert';
-import { before, describe, it, mock } from 'node:test';
+import { describe, it, mock } from 'node:test';
 
 import {
   ContextEngine,
@@ -43,14 +44,17 @@ const modelsDevResponse = {
   },
 };
 
-describe('engine + resolver chain integration', () => {
-  before(() => {
-    nock('https://models.dev')
-      .persist()
-      .get('/api.json')
-      .reply(200, modelsDevResponse);
-  });
+function stubModelsDev() {
+  const server = setupServer(
+    http.get('https://models.dev/api.json', () =>
+      HttpResponse.json(modelsDevResponse),
+    ),
+  );
+  server.listen({ onUnhandledFrame: 'error' });
+  return { [Symbol.dispose]: () => server.close() };
+}
 
+describe('engine + resolver chain integration', () => {
   it('materializes async loaders in resolve()', async () => {
     const engine = newEngine();
     engine.set(
@@ -231,6 +235,7 @@ describe('engine + resolver chain integration', () => {
   });
 
   it('estimate() materializes loaders before counting tokens', async () => {
+    using _modelsDev = stubModelsDev();
     const engine = newEngine();
     const sandbox = await createVirtualAgentSandbox();
     const longString = 'x'.repeat(2000);
@@ -247,6 +252,7 @@ describe('engine + resolver chain integration', () => {
   });
 
   it('estimate() invokes a loader exactly once (caching)', async () => {
+    using _modelsDev = stubModelsDev();
     const engine = newEngine();
     const sandbox = await createVirtualAgentSandbox();
     const loader = mock.fn(async () => 'estimate-content');
@@ -259,6 +265,7 @@ describe('engine + resolver chain integration', () => {
   });
 
   it('inspect() materializes loaders before rendering', async () => {
+    using _modelsDev = stubModelsDev();
     const engine = newEngine();
     const sandbox = await createVirtualAgentSandbox();
     engine.set(fragment('readme', async () => 'inspected-content'));

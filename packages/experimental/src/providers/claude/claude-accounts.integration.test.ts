@@ -1,6 +1,7 @@
 import { MemoryStore } from '@opencoredev/loginwithchatgpt-core';
 import { generateText } from 'ai';
-import nock from 'nock';
+import { http } from 'msw';
+import { setupServer } from 'msw/node';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
@@ -28,39 +29,33 @@ function interceptWire(
   handle: (request: WireRequest) => Response | Promise<Response>,
 ) {
   const requests: WireRequest[] = [];
-  nock.disableNetConnect();
-  for (const origin of ORIGINS) {
-    for (const method of ['GET', 'POST']) {
-      nock(origin)
-        .persist()
-        .intercept(() => true, method)
-        .reply(async function (uri, body) {
-          const wire: WireRequest = {
-            url: origin + uri,
-            authorization: this.req.headers.authorization ?? null,
-            apiKey: this.req.headers['x-api-key'] ?? null,
-            body: typeof body === 'object' ? body : undefined,
-          };
-          requests.push(wire);
-          const response = await handle(wire);
-          return [
-            response.status,
-            Buffer.from(await response.arrayBuffer()),
-            Object.fromEntries(response.headers),
-          ];
-        });
-    }
-  }
+  const server = setupServer(
+    ...ORIGINS.map((origin) =>
+      http.all(`${origin}/*`, async ({ request }) => {
+        const body = await request.text();
+        const wire: WireRequest = {
+          url: request.url,
+          authorization: request.headers.get('authorization'),
+          apiKey: request.headers.get('x-api-key'),
+          body:
+            body && request.headers.get('content-type')?.includes('json')
+              ? JSON.parse(body)
+              : undefined,
+        };
+        requests.push(wire);
+        return handle(wire);
+      }),
+    ),
+  );
+  server.listen({ onUnhandledFrame: 'error' });
   return Object.assign(requests, {
-    [Symbol.dispose]: () => {
-      nock.cleanAll();
-      nock.enableNetConnect();
-    },
+    [Symbol.dispose]: () => server.close(),
   });
 }
 
-function unexpected(request: WireRequest): never {
-  throw new Error(`Unexpected request to ${request.url}`);
+/** Fails the request at the network level, as an unreachable host would. */
+function unexpected(): Response {
+  return Response.error();
 }
 
 function tokens(
@@ -119,7 +114,7 @@ test('signing in with the pasted code connects the account and authenticates its
   using requests = interceptWire((request) => {
     if (request.url === TOKEN_URL) return tokens('access-1', 'refresh-1');
     if (request.url === MESSAGES_URL) return message('hi');
-    return unexpected(request);
+    return unexpected();
   });
 
   const pending = await accounts.connect('owner-a');
@@ -169,7 +164,7 @@ test('a code from another sign-in attempt keeps the sign-in pending without cont
   const accounts = createClaudeAccounts({ store: new MemoryStore() });
   using requests = interceptWire((request) => {
     if (request.url === TOKEN_URL) return tokens('access-1', 'refresh-1');
-    return unexpected(request);
+    return unexpected();
   });
 
   const pending = await accounts.connect('owner-a');
@@ -196,7 +191,7 @@ test('Anthropic throttling keeps the sign-in retryable', async () => {
   const accounts = createClaudeAccounts({ store: new MemoryStore() });
   let exchanges = 0;
   using _wire = interceptWire((request) => {
-    if (request.url !== TOKEN_URL) return unexpected(request);
+    if (request.url !== TOKEN_URL) return unexpected();
     exchanges++;
     return exchanges === 1
       ? new Response('slow down', { status: 429 })
@@ -218,7 +213,7 @@ test('Anthropic throttling keeps the sign-in retryable', async () => {
 test('a rejected code ends the sign-in without exposing the response body', async () => {
   const accounts = createClaudeAccounts({ store: new MemoryStore() });
   using _wire = interceptWire((request) => {
-    if (request.url !== TOKEN_URL) return unexpected(request);
+    if (request.url !== TOKEN_URL) return unexpected();
     return Response.json(
       { error: 'invalid_grant', error_description: 'secret-exchange-detail' },
       { status: 400 },
@@ -242,7 +237,7 @@ test('disconnecting while the code exchange is in flight saves nothing', async (
   const exchanging = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   using _wire = interceptWire(async (request) => {
-    if (request.url !== TOKEN_URL) return unexpected(request);
+    if (request.url !== TOKEN_URL) return unexpected();
     exchanging.resolve();
     await release.promise;
     return tokens('access-1', 'refresh-1');
@@ -283,7 +278,7 @@ test('concurrent requests on an expiring token refresh once and keep the account
       return tokens('access-2', 'refresh-2');
     }
     if (request.url === MESSAGES_URL) return message('hi');
-    return unexpected(request);
+    return unexpected();
   });
 
   await signIn(accounts, 'owner-a');
@@ -326,7 +321,7 @@ test('a revoked refresh token disconnects the account and reports it', async () 
         { status: 400 },
       );
     }
-    return unexpected(request);
+    return unexpected();
   });
 
   await signIn(accounts, 'owner-a');
@@ -358,7 +353,7 @@ test('a failed refresh keeps the account and hides the token endpoint body', asy
         : tokens('access-2', 'refresh-2');
     }
     if (request.url === MESSAGES_URL) return message('recovered');
-    return unexpected(request);
+    return unexpected();
   });
 
   await signIn(accounts, 'owner-a');
@@ -390,7 +385,7 @@ test('a rejected access token is refreshed once and the request retried', async 
         ? Response.json({ type: 'error' }, { status: 401 })
         : message('after refresh');
     }
-    return unexpected(request);
+    return unexpected();
   });
 
   await signIn(accounts, 'owner-a');
@@ -420,7 +415,7 @@ test('an access token still rejected after refresh fails the request but keeps t
     if (request.url === MESSAGES_URL) {
       return Response.json({ type: 'error' }, { status: 401 });
     }
-    return unexpected(request);
+    return unexpected();
   });
 
   await signIn(accounts, 'owner-a');
@@ -447,7 +442,7 @@ test('a refresh finishing after a disconnect cannot reconnect the account', asyn
       await release.promise;
       return tokens('access-2', 'refresh-2');
     }
-    return unexpected(request);
+    return unexpected();
   });
 
   await signIn(accounts, 'owner-a');
@@ -470,7 +465,7 @@ test('models are listed across every page for the connected account', async () =
     if (request.url === TOKEN_URL) return tokens('access-1', 'refresh-1');
     const url = new URL(request.url);
     if (url.origin + url.pathname !== 'https://api.anthropic.com/v1/models') {
-      return unexpected(request);
+      return unexpected();
     }
     return url.searchParams.get('after_id') === 'claude-sonnet-5-5'
       ? Response.json({
@@ -522,7 +517,7 @@ test('a profile outage keeps the connection and a later read fills in the identi
           })
         : new Response('unavailable', { status: 503 });
     }
-    return unexpected(request);
+    return unexpected();
   });
 
   const duringOutage = await signIn(accounts, 'owner-a');
@@ -548,7 +543,7 @@ test('each owner authenticates with its own account', async () => {
       return tokens(`access-${owner}`, `refresh-${owner}`);
     }
     if (request.url === MESSAGES_URL) return message('hi');
-    return unexpected(request);
+    return unexpected();
   });
 
   await signIn(accounts, 'owner-a');
@@ -572,7 +567,7 @@ test('each owner authenticates with its own account', async () => {
 test('owners sign in independently at the same time', async () => {
   const accounts = createClaudeAccounts({ store: new MemoryStore() });
   using _wire = interceptWire((request) => {
-    if (request.url !== TOKEN_URL) return unexpected(request);
+    if (request.url !== TOKEN_URL) return unexpected();
     const owner = String(request.body?.code).replace('code-', '');
     return tokens(`access-${owner}`, `refresh-${owner}`, {
       account: { email_address: `${owner}@example.com` },
@@ -628,7 +623,7 @@ test("disconnecting one owner does not disturb another owner's refresh", async (
       return tokens('access-owner-b-2', 'refresh-owner-b-2');
     }
     if (request.url === MESSAGES_URL) return message('hi');
-    return unexpected(request);
+    return unexpected();
   });
 
   await signIn(accounts, 'owner-a');
@@ -653,7 +648,7 @@ test('a sign-in abandoned during the code exchange cannot report over a new sign
   const exchanging = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   using _wire = interceptWire(async (request) => {
-    if (request.url !== TOKEN_URL) return unexpected(request);
+    if (request.url !== TOKEN_URL) return unexpected();
     exchanging.resolve();
     await release.promise;
     return Response.json({ error: 'invalid_grant' }, { status: 400 });
@@ -722,7 +717,7 @@ test('a store that cannot save ends the sign-in with an error instead of throwin
   const accounts = createClaudeAccounts({ store });
   using _wire = interceptWire((request) => {
     if (request.url === TOKEN_URL) return tokens('access-1', 'refresh-1');
-    return unexpected(request);
+    return unexpected();
   });
 
   const completed = await signIn(accounts, 'owner-a');

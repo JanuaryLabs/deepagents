@@ -1,7 +1,8 @@
 import { InMemoryFs } from 'just-bash';
-import nock from 'nock';
+import { HttpResponse, http } from 'msw';
+import { setupServer } from 'msw/node';
 import assert from 'node:assert';
-import { before, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 import {
   ContextEngine,
@@ -11,7 +12,6 @@ import {
   assistantText,
   createBashTool,
   createVirtualSandbox,
-  getModelsRegistry,
   hint,
   reminder,
   role,
@@ -40,16 +40,19 @@ const modelsDevResponse = {
   },
 };
 
-describe('ContextEngine.inspect()', () => {
-  before(async () => {
-    nock('https://models.dev')
-      .persist()
-      .get('/api.json')
-      .reply(200, modelsDevResponse);
-    await getModelsRegistry().load();
-  });
+function stubModelsDev() {
+  const server = setupServer(
+    http.get('https://models.dev/api.json', () =>
+      HttpResponse.json(modelsDevResponse),
+    ),
+  );
+  server.listen({ onUnhandledFrame: 'error' });
+  return { [Symbol.dispose]: () => server.close() };
+}
 
+describe('ContextEngine.inspect()', () => {
   it('should return all expected fields with empty context', async () => {
+    using _modelsDev = stubModelsDev();
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       userId: 'test-user',
@@ -86,6 +89,7 @@ describe('ContextEngine.inspect()', () => {
   });
 
   it('should include context fragments in output', async () => {
+    using _modelsDev = stubModelsDev();
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       userId: 'test-user',
@@ -117,6 +121,7 @@ describe('ContextEngine.inspect()', () => {
   });
 
   it('should include pending messages', async () => {
+    using _modelsDev = stubModelsDev();
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       userId: 'test-user',
@@ -143,6 +148,7 @@ describe('ContextEngine.inspect()', () => {
   });
 
   it('should include persisted messages after save', async () => {
+    using _modelsDev = stubModelsDev();
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       userId: 'test-user',
@@ -170,6 +176,7 @@ describe('ContextEngine.inspect()', () => {
   });
 
   it('should keep reminder text visible in inspect persisted data and graph preview', async () => {
+    using _modelsDev = stubModelsDev();
     const partMode = true;
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
@@ -227,6 +234,7 @@ describe('ContextEngine.inspect()', () => {
   });
 
   it('should provide accurate token estimates', async () => {
+    using _modelsDev = stubModelsDev();
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       userId: 'test-user',
@@ -254,6 +262,7 @@ describe('ContextEngine.inspect()', () => {
   });
 
   it('should include graph data', async () => {
+    using _modelsDev = stubModelsDev();
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       userId: 'test-user',
@@ -283,6 +292,7 @@ describe('ContextEngine.inspect()', () => {
   });
 
   it('should throw on invalid model ID', async () => {
+    using _modelsDev = stubModelsDev();
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       userId: 'test-user',
@@ -300,6 +310,7 @@ describe('ContextEngine.inspect()', () => {
   });
 
   it('should be JSON-serializable', async () => {
+    using _modelsDev = stubModelsDev();
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       userId: 'test-user',

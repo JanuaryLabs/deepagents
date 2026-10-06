@@ -1,6 +1,7 @@
 import { MemoryStore } from '@opencoredev/loginwithchatgpt-core';
 import { generateText } from 'ai';
-import nock from 'nock';
+import { http } from 'msw';
+import { setupServer } from 'msw/node';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
@@ -28,44 +29,34 @@ function interceptWire(
   handle: (request: WireRequest) => Response | Promise<Response>,
 ) {
   const requests: WireRequest[] = [];
-  nock.disableNetConnect();
-  for (const origin of ORIGINS) {
-    for (const method of ['GET', 'POST']) {
-      nock(origin)
-        .persist()
-        .intercept(() => true, method)
-        .reply(async function (uri, body) {
-          const url = new URL(origin + uri);
-          const wire: WireRequest = {
-            url: url.origin + url.pathname,
-            headers: new Headers(this.req.headers),
-            body:
-              typeof body === 'object'
-                ? body
-                : body
-                  ? Object.fromEntries(new URLSearchParams(body))
-                  : undefined,
-          };
-          requests.push(wire);
-          const response = await handle(wire);
-          return [
-            response.status,
-            Buffer.from(await response.arrayBuffer()),
-            Object.fromEntries(response.headers),
-          ];
-        });
-    }
-  }
+  const server = setupServer(
+    ...ORIGINS.map((origin) =>
+      http.all(`${origin}/*`, async ({ request }) => {
+        const url = new URL(request.url);
+        const body = await request.text();
+        const wire: WireRequest = {
+          url: url.origin + url.pathname,
+          headers: request.headers,
+          body: !body
+            ? undefined
+            : request.headers.get('content-type')?.includes('json')
+              ? JSON.parse(body)
+              : Object.fromEntries(new URLSearchParams(body)),
+        };
+        requests.push(wire);
+        return handle(wire);
+      }),
+    ),
+  );
+  server.listen({ onUnhandledFrame: 'error' });
   return Object.assign(requests, {
-    [Symbol.dispose]: () => {
-      nock.cleanAll();
-      nock.enableNetConnect();
-    },
+    [Symbol.dispose]: () => server.close(),
   });
 }
 
-function unexpected(request: WireRequest): never {
-  throw new Error(`Unexpected request to ${request.url}`);
+/** Fails the request at the network level, as an unreachable host would. */
+function unexpected(): Response {
+  return Response.error();
 }
 
 function idToken(accountId: string) {
@@ -195,7 +186,7 @@ test('device sign-in connects the account and authenticates its models', async (
     if (signInResponse) return signInResponse;
     if (request.url === TOKEN_URL) return tokens('access-1', 'refresh-1');
     if (request.url === RESPONSES_URL) return reply('hi');
-    return unexpected(request);
+    return unexpected();
   });
 
   try {
@@ -253,7 +244,7 @@ test('an authorization arriving after the owner cancelled the sign-in saves noth
       await release.promise;
     }
     if (request.url === TOKEN_URL) return tokens('access-1', 'refresh-1');
-    return deviceSignIn(request) ?? unexpected(request);
+    return deviceSignIn(request) ?? unexpected();
   });
 
   try {
@@ -283,7 +274,7 @@ test('a failed device code request is reported and sign-in can start again', asy
     if (request.url === USERCODE_URL && ++codeRequests === 1) {
       return new Response('secret-device-detail', { status: 503 });
     }
-    return deviceSignIn(request) ?? unexpected(request);
+    return deviceSignIn(request) ?? unexpected();
   });
 
   try {
@@ -317,7 +308,7 @@ test('a revoked refresh token disconnects the account and reports it', async () 
         { status: 401 },
       );
     }
-    return deviceSignIn(request) ?? unexpected(request);
+    return deviceSignIn(request) ?? unexpected();
   });
 
   try {
@@ -361,7 +352,7 @@ test('concurrent requests on an expiring token refresh once and keep the account
       return tokens('access-2', 'refresh-2');
     }
     if (request.url === RESPONSES_URL) return reply('hi');
-    return deviceSignIn(request) ?? unexpected(request);
+    return deviceSignIn(request) ?? unexpected();
   });
 
   try {
@@ -406,7 +397,7 @@ test('a failed refresh keeps the account and hides the token endpoint body', asy
         : tokens('access-2', 'refresh-2');
     }
     if (request.url === RESPONSES_URL) return reply('recovered');
-    return deviceSignIn(request) ?? unexpected(request);
+    return deviceSignIn(request) ?? unexpected();
   });
 
   try {
@@ -442,7 +433,7 @@ test('a rejected access token is refreshed once and the request retried', async 
         ? Response.json({ detail: 'Unauthorized' }, { status: 401 })
         : reply('after refresh');
     }
-    return deviceSignIn(request) ?? unexpected(request);
+    return deviceSignIn(request) ?? unexpected();
   });
 
   try {
@@ -478,7 +469,7 @@ test('a refresh finishing after a disconnect cannot reconnect the account', asyn
       await release.promise;
       return tokens('access-2', 'refresh-2');
     }
-    return deviceSignIn(request) ?? unexpected(request);
+    return deviceSignIn(request) ?? unexpected();
   });
 
   try {
@@ -508,7 +499,7 @@ test('models are listed for the connected account', async () => {
         models: [{ slug: 'gpt-5.5' }, { slug: 'gpt-5.5-mini' }],
       });
     }
-    return deviceSignIn(request) ?? unexpected(request);
+    return deviceSignIn(request) ?? unexpected();
   });
 
   try {
@@ -541,7 +532,7 @@ test('a sign-in rejected at authorization is reported without the response body 
         { status: 400 },
       );
     }
-    return deviceSignIn(request) ?? unexpected(request);
+    return deviceSignIn(request) ?? unexpected();
   });
 
   try {
@@ -561,7 +552,7 @@ test('connecting again while a sign-in is pending keeps the same code', async ()
   const accounts = createCodexAccounts({ store: new MemoryStore() });
   using requests = interceptWire((request) => {
     if (request.url === POLL_URL) return new Response(null, { status: 403 });
-    return deviceSignIn(request) ?? unexpected(request);
+    return deviceSignIn(request) ?? unexpected();
   });
 
   try {
@@ -589,7 +580,7 @@ test('a connection without an account identifier fails model requests before sen
         expires_in: 3600,
       });
     }
-    return deviceSignIn(request) ?? unexpected(request);
+    return deviceSignIn(request) ?? unexpected();
   });
 
   try {
