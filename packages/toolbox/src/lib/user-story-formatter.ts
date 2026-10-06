@@ -1,7 +1,5 @@
-import { tool } from 'ai';
+import { type ToolExecutionOptions, tool } from 'ai';
 import z from 'zod';
-
-import { toState } from './state.ts';
 
 const AcceptanceCriteriaSchema = z.object({
   criterion: z.string().describe('A specific, testable acceptance criterion'),
@@ -34,6 +32,7 @@ const UserStorySchema = z.object({
     .optional()
     .describe('The epic or feature group this story belongs to'),
 });
+type UserStory = z.infer<typeof UserStorySchema>;
 
 export const user_story_formatter_tool = tool({
   description: `Tool for formatting and recording user stories in a standardized format.
@@ -53,8 +52,10 @@ export const user_story_formatter_tool = tool({
     3. Return a formatted version for immediate review
 `,
   inputSchema: UserStorySchema,
-  execute: async (story, options) => {
-    const context = toState<{ userStories: (typeof story)[] }>(options);
+  execute: async (
+    story,
+    { context }: ToolExecutionOptions<{ userStories?: UserStory[] }>,
+  ) => {
     context.userStories ??= [];
     context.userStories.push(story);
 

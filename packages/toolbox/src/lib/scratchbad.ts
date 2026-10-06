@@ -1,7 +1,5 @@
-import { tool } from 'ai';
+import { type ToolExecutionOptions, tool } from 'ai';
 import z from 'zod';
-
-import { toState } from './state.ts';
 
 export const scratchpad_tool = tool({
   description: `Tool for strategic reflection on research progress and decision-making.
@@ -26,8 +24,10 @@ export const scratchpad_tool = tool({
       .string()
       .describe('Your detailed reflection on research progress.'),
   }),
-  execute: async ({ reflection }, options) => {
-    const context = toState<{ scratchpad: string }>(options);
+  execute: async (
+    { reflection },
+    { context }: ToolExecutionOptions<{ scratchpad: string }>,
+  ) => {
     context.scratchpad += `- ${reflection}\n`;
     return `Reflection recorded. Current scratchpad now:\n---\n${context.scratchpad}`;
   },

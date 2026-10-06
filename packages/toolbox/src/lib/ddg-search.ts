@@ -1,9 +1,18 @@
 import { tool } from 'ai';
 import * as ddg from 'duck-duck-scrape';
-import { uniqBy } from 'lodash-es';
 import { z } from 'zod';
 
 export type Source = 'text' | 'news' | 'images';
+
+const searchTimes = {
+  d: ddg.SearchTimeType.DAY,
+  w: ddg.SearchTimeType.WEEK,
+  m: ddg.SearchTimeType.MONTH,
+  y: ddg.SearchTimeType.YEAR,
+} satisfies Record<
+  z.output<typeof ddgSearchSchema>['time'],
+  ddg.SearchTimeType
+>;
 
 export async function serp({
   query,
@@ -17,10 +26,7 @@ export async function serp({
       'STRICT'
       // input.safesearch.toUpperCase() as keyof typeof ddg.SafeSearchType
     ];
-  const time =
-    ddg.SearchTimeType[
-      (input.time || 'y')?.toUpperCase() as keyof typeof ddg.SearchTimeType
-    ];
+  const time = searchTimes[input.time ?? 'y'];
 
   if (source === 'text') {
     const res = await ddg.search(
@@ -76,15 +82,6 @@ export async function serp({
     source: r.source,
   }));
   return { items, total: res.results.length, vqd: res.vqd } as const;
-}
-
-async function performSearch(query: string) {
-  const results = await serp({
-    source: 'news',
-    query: query,
-  });
-  const result = uniqBy(results.items as { link: string }[], (it) => it.link);
-  return result as typeof results.items;
 }
 
 export const ddgSearchSchema = z.object({

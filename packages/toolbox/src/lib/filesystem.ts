@@ -1,4 +1,4 @@
-import { dynamicTool, jsonSchema, tool } from 'ai';
+import { type ToolExecutionOptions, dynamicTool, jsonSchema, tool } from 'ai';
 import FastGlob from 'fast-glob';
 import spawn from 'nano-spawn';
 import { readFile, readdir, stat } from 'node:fs/promises';
@@ -9,7 +9,10 @@ import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import * as connectors from '@deepagents/retrieval/connectors';
 import { ignorePatterns } from '@deepagents/retrieval/connectors';
 
-import { toState } from './state.ts';
+/** Tool context: the repository the file tools read from. */
+export type RepoContext = {
+  repo_path: string;
+};
 
 export const read_file_tool = tool({
   description: `Use this tool to read a file from the filesystem. Supports reading entire files or specific line ranges.`,
@@ -32,8 +35,10 @@ export const read_file_tool = tool({
         'Ending line number (1-indexed). If omitted, reads to the end. Maximum 200 lines can be read at once.',
       ),
   }),
-  execute: async ({ filePath, lineStart, lineEnd }, options) => {
-    const context = toState<{ repo_path: string }>(options);
+  execute: async (
+    { filePath, lineStart, lineEnd },
+    { context }: ToolExecutionOptions<RepoContext>,
+  ) => {
     const fullPath = join(context.repo_path, filePath);
 
     const stats = await stat(fullPath);
@@ -88,8 +93,10 @@ export const read_dir_tool = tool({
       .default('./')
       .describe('Relative path to the directory. Defaults to "./"'),
   }),
-  execute: async ({ dir_path }, options) => {
-    const context = toState<{ repo_path: string }>(options);
+  execute: async (
+    { dir_path },
+    { context }: ToolExecutionOptions<RepoContext>,
+  ) => {
     return readdir(join(context.repo_path, dir_path), 'utf-8');
   },
 });
@@ -102,8 +109,10 @@ export const glob_tool = tool({
   inputSchema: z.object({
     pattern: z.string().min(1).describe('A glob pattern to match files. '),
   }),
-  execute: async ({ pattern }, options) => {
-    const context = toState<{ repo_path: string }>(options);
+  execute: async (
+    { pattern },
+    { context }: ToolExecutionOptions<RepoContext>,
+  ) => {
     const files = await FastGlob(pattern, {
       dot: true,
       cwd: context.repo_path,
@@ -127,8 +136,10 @@ export const search_files_tool = tool({
       .int()
       .describe('Max directory depth to search. defaults to 31.'),
   }),
-  execute: async ({ pattern, max_results = 100, depth }, options) => {
-    const context = toState<{ repo_path: string }>(options);
+  execute: async (
+    { pattern, max_results = 100, depth },
+    { context }: ToolExecutionOptions<RepoContext>,
+  ) => {
     const ignore = await ignorePatterns(context.repo_path);
     const files = await FastGlob(pattern, {
       dot: false,
@@ -145,8 +156,10 @@ export const search_files_tool = tool({
 export const file_exists_tool = tool({
   description: 'Check if a file exists in the repository.',
   inputSchema: z.object({ filePath: z.string().min(1) }),
-  execute: async ({ filePath }, options) => {
-    const context = toState<{ repo_path: string }>(options);
+  execute: async (
+    { filePath },
+    { context }: ToolExecutionOptions<RepoContext>,
+  ) => {
     return stat(join(context.repo_path, filePath))
       .then(() => true)
       .catch(() => false);
@@ -168,7 +181,7 @@ export const search_content_tool = dynamicTool({
       },
     },
   }),
-  async execute(input: any, options) {
+  async execute(input: any, { context }) {
     const keys = Object.keys(input).filter((k) => k !== 'query');
     if (keys.length > 0) {
       return `Invalid input: only "query" is supported. Found extra keys: ${keys.join(', ')}`;
@@ -176,11 +189,14 @@ export const search_content_tool = dynamicTool({
     if (typeof input.query !== 'string' || input.query.trim().length === 0) {
       return 'Invalid input: "query" must be a non-empty string.';
     }
+    const repoPath = context.repo_path;
+    if (typeof repoPath !== 'string') {
+      return 'Invalid context: "repo_path" must be a string.';
+    }
     try {
-      const context = toState<{ repo_path: string }>(options);
       const results = await similaritySearch(input.query, {
         connector: connectors.repo(
-          context.repo_path,
+          repoPath,
           ['.ts', '.tsx', '.md', '.prisma'],
           'never',
         ),
@@ -189,7 +205,7 @@ export const search_content_tool = dynamicTool({
         embedder: fastembed(),
       });
       const contents = results.map((it) => {
-        const source = relative(context.repo_path, it.document_id);
+        const source = relative(repoPath, it.document_id);
         const filename = basename(source);
         return {
           source: source,

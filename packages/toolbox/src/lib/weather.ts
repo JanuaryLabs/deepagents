@@ -46,11 +46,9 @@ export const getWeatherTool = tool({
     const url = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Weather API failed: ${res.status}`);
-    const data = (await res.json()) as ForecastResponse;
-
-    const current = data?.current;
-    const daily = data?.daily;
-    if (!current || !daily) throw new Error('Malformed weather API response');
+    const forecast = forecastResponse.safeParse(await res.json());
+    if (!forecast.success) throw new Error('Malformed weather API response');
+    const { current, daily } = forecast.data;
 
     const weatherCode = Number(current.weather_code);
     const mapped = mapWeatherCode(weatherCode);
@@ -74,40 +72,32 @@ export const getWeatherTool = tool({
   },
 });
 
-interface GeocodeItem {
-  id: number;
-  name: string;
-  latitude: number;
-  longitude: number;
-  elevation?: number;
-  country_code?: string;
-  admin1?: string;
-  timezone?: string;
-}
+const geocodeResponse = z.object({
+  results: z
+    .array(
+      z.object({
+        name: z.string(),
+        latitude: z.number(),
+        longitude: z.number(),
+        country_code: z.string().optional(),
+        admin1: z.string().optional(),
+      }),
+    )
+    .optional(),
+});
 
-interface GeocodeResponse {
-  results?: GeocodeItem[];
-}
-
-interface ForecastCurrent {
-  time: string;
-  interval: number;
-  temperature_2m: number;
-  relative_humidity_2m: number;
-  wind_speed_10m: number;
-  weather_code: number;
-}
-
-interface ForecastDaily {
-  time: string[];
-  temperature_2m_max: number[];
-  temperature_2m_min: number[];
-}
-
-interface ForecastResponse {
-  current: ForecastCurrent;
-  daily: ForecastDaily;
-}
+const forecastResponse = z.object({
+  current: z.object({
+    temperature_2m: z.number(),
+    relative_humidity_2m: z.number(),
+    wind_speed_10m: z.number(),
+    weather_code: z.number(),
+  }),
+  daily: z.object({
+    temperature_2m_max: z.array(z.number()),
+    temperature_2m_min: z.array(z.number()),
+  }),
+});
 
 async function geocodeLocation(location: string): Promise<{
   latitude: number;
@@ -133,8 +123,8 @@ async function geocodeLocation(location: string): Promise<{
   )}&count=1&language=en&format=json`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Geocoding failed: ${res.status}`);
-  const data = (await res.json()) as GeocodeResponse;
-  const first = data?.results?.[0];
+  const { results } = geocodeResponse.parse(await res.json());
+  const first = results?.[0];
   if (!first) throw new Error(`Location not found: ${location}`);
   const nameParts = [first.name, first.admin1, first.country_code].filter(
     Boolean,

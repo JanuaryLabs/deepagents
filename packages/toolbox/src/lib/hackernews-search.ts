@@ -1,55 +1,64 @@
-import { tool } from 'ai';
+import { type ToolExecutionOptions, tool } from 'ai';
 import { z } from 'zod';
 
-import { toState } from './state.ts';
+// The fields these tools read from Algolia's HN API. Search hits omit the
+// keys a hit type lacks; items send them as null.
+const hnSearchItem = z.object({
+  objectID: z.string(),
+  title: z.string().nullish(),
+  url: z.string().nullish(),
+  author: z.string(),
+  points: z.number().nullish(),
+  story_text: z.string().nullish(),
+  comment_text: z.string().nullish(),
+  num_comments: z.number().nullish(),
+  created_at_i: z.number(),
+  _tags: z.array(z.string()),
+});
+export type HNSearchItem = z.infer<typeof hnSearchItem>;
 
-export interface HNSearchItem {
-  objectID: string;
-  title: string | null;
-  url: string | null;
-  author: string;
-  points: number | null;
-  story_text: string | null;
-  comment_text: string | null;
-  num_comments: number | null;
-  created_at: string;
-  created_at_i: number;
-  _tags: string[];
+const hnSearchResponse = z.object({
+  query: z.string(),
+  hits: z.array(hnSearchItem),
+  nbHits: z.number(),
+  page: z.number(),
+  nbPages: z.number(),
+  hitsPerPage: z.number(),
+});
+export type HNSearchResponse = z.infer<typeof hnSearchResponse>;
+
+const hnItemResponse = z.object({
+  id: z.number(),
+  created_at_i: z.number(),
+  type: z.enum(['story', 'comment', 'poll', 'pollopt', 'show', 'ask', 'job']),
+  author: z.string(),
+  title: z.string().nullish(),
+  url: z.string().nullish(),
+  text: z.string().nullish(),
+  points: z.number().nullish(),
+  story_title: z.string().nullish(),
+});
+export type HNItemResponse = z.infer<typeof hnItemResponse>;
+
+const hnUserResponse = z.object({
+  username: z.string(),
+  about: z.string().nullish(),
+  karma: z.number(),
+});
+export type HNUserResponse = z.infer<typeof hnUserResponse>;
+
+export interface HackerNewsSource {
+  title?: string | null;
+  hn_url?: string;
+  story_url?: string | null;
+  story_text?: string | null;
+  comment_text?: string | null;
 }
 
-export interface HNSearchResponse {
-  query: string;
-  hits: HNSearchItem[];
-  nbHits: number;
-  page: number;
-  nbPages: number;
-  hitsPerPage: number;
-}
-
-export interface HNItemResponse {
-  id: string;
-  created_at: string;
-  created_at_i: number;
-  type: 'story' | 'comment' | 'poll' | 'pollopt' | 'show' | 'ask' | 'job';
-  author: string;
-  title?: string;
-  url?: string;
-  text?: string;
-  points?: number;
-  parent_id?: string;
-  children?: HNItemResponse[];
-  story_id?: string;
-  story_title?: string;
-  story_url?: string;
-}
-
-export interface HNUserResponse {
-  username: string;
-  about?: string;
-  karma: number;
-  created_at: string;
-  created_at_i: number;
-}
+/** Tool context: the HN tools collect every story they surface here. */
+export type HackerNewsContext = {
+  hackernews_sources?: HackerNewsSource[];
+};
 
 function buildTags(options: {
   type?: 'story' | 'comment' | 'all';
@@ -161,8 +170,7 @@ async function searchHackerNewsAPI(params: {
       );
     }
 
-    const data = await response.json();
-    return data as HNSearchResponse;
+    return hnSearchResponse.parse(await response.json());
   } catch (error) {
     throw new Error(
       `Failed to search HackerNews: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -186,8 +194,7 @@ async function fetchHNItem(id: string): Promise<HNItemResponse> {
       );
     }
 
-    const data = await response.json();
-    return data as HNItemResponse;
+    return hnItemResponse.parse(await response.json());
   } catch (error) {
     throw new Error(
       `Failed to fetch HN item: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -211,8 +218,7 @@ async function fetchHNUser(username: string): Promise<HNUserResponse> {
       );
     }
 
-    const data = await response.json();
-    return data as HNUserResponse;
+    return hnUserResponse.parse(await response.json());
   } catch (error) {
     throw new Error(
       `Failed to fetch HN user: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -224,7 +230,7 @@ function formatDate(timestamp: number): string {
   return new Date(timestamp * 1000).toLocaleString();
 }
 
-function formatHNLink(id: string): string {
+function formatHNLink(id: string | number): string {
   return `https://news.ycombinator.com/item?id=${id}`;
 }
 
@@ -248,7 +254,7 @@ function formatStoryItem(
     lines.push(`   URL: ${hit.url}`);
   }
 
-  if (hit.points !== null) {
+  if (typeof hit.points === 'number') {
     lines.push(
       `   ${hit.points} points | by ${hit.author} | ${hit.num_comments || 0} comments`,
     );
@@ -306,7 +312,7 @@ function formatMixedItem(
     if (hit.url) {
       lines.push(`   URL: ${hit.url}`);
     }
-    if (hit.points !== null) {
+    if (typeof hit.points === 'number') {
       lines.push(`   ${hit.points} points | ${hit.num_comments || 0} comments`);
     }
     if (hit.story_text) {
@@ -387,7 +393,7 @@ function formatItemDetails(item: HNItemResponse): string {
       lines.push(`URL: ${item.url}`);
     }
     lines.push(`By: ${item.author}`);
-    if (item.points !== undefined) {
+    if (typeof item.points === 'number') {
       lines.push(`Points: ${item.points}`);
     }
     lines.push(`Date: ${formatDate(item.created_at_i)}`);
@@ -415,7 +421,6 @@ function formatUserProfile(user: HNUserResponse): string {
 
   lines.push(`User: ${user.username}`);
   lines.push(`Karma: ${user.karma.toLocaleString()}`);
-  lines.push(`Member since: ${formatDate(user.created_at_i)}`);
 
   if (user.about) {
     lines.push(`\nAbout:\n${user.about}`);
@@ -513,15 +518,11 @@ export const search_by_query = tool({
       .default(20)
       .describe('Results per page (max 1000)'),
   }),
-  execute: async (input, options) => {
-    const context = toState<{
-      hackernews_sources: {
-        title: string;
-        hn_url: string;
-        story_url: string;
-      }[];
-    }>(options);
-    context.hackernews_sources ??= [];
+  execute: async (
+    input,
+    { context }: ToolExecutionOptions<HackerNewsContext>,
+  ) => {
+    const sources = (context.hackernews_sources ??= []);
 
     const numericFilters = buildNumericFilters({
       timeFilter: input.timeFilter,
@@ -538,7 +539,7 @@ export const search_by_query = tool({
       hitsPerPage: input.hitsPerPage,
     });
 
-    fillContext(context, response);
+    fillContext(sources, response);
     return formatStoryResults(response);
   },
 });
@@ -582,15 +583,11 @@ export const search_by_author = tool({
       .default(20)
       .describe('Results per page (max 1000)'),
   }),
-  execute: async (input, options) => {
-    const context = toState<{
-      hackernews_sources: {
-        title: string;
-        hn_url: string;
-        story_url: string;
-      }[];
-    }>(options);
-    context.hackernews_sources ??= [];
+  execute: async (
+    input,
+    { context }: ToolExecutionOptions<HackerNewsContext>,
+  ) => {
+    const sources = (context.hackernews_sources ??= []);
 
     const tags = buildTags({ type: input.type, author: input.author });
     const numericFilters = buildNumericFilters({
@@ -606,7 +603,7 @@ export const search_by_author = tool({
       hitsPerPage: input.hitsPerPage,
     });
 
-    fillContext(context, response);
+    fillContext(sources, response);
     return formatAuthorResults(response);
   },
 });
@@ -617,15 +614,11 @@ export const get_story_item = tool({
   inputSchema: z.object({
     storyId: z.string().describe('HackerNews story ID. Example: "38709478"'),
   }),
-  execute: async (input, options) => {
-    const context = toState<{
-      hackernews_sources: {
-        title: string;
-        hn_url: string;
-        story_url: string;
-      }[];
-    }>(options);
-    context.hackernews_sources ??= [];
+  execute: async (
+    input,
+    { context }: ToolExecutionOptions<HackerNewsContext>,
+  ) => {
+    const sources = (context.hackernews_sources ??= []);
 
     const item = await fetchHNItem(input.storyId);
 
@@ -635,7 +628,7 @@ export const get_story_item = tool({
       );
     }
 
-    context.hackernews_sources.push({
+    sources.push({
       title: item.title || 'Untitled',
       hn_url: `https://news.ycombinator.com/item?id=${item.id}`,
       story_url: item.url || '',
@@ -684,15 +677,11 @@ export const get_front_page_stories = tool({
       .default(30)
       .describe('Results per page (max 50)'),
   }),
-  execute: async (input, options) => {
-    const context = toState<{
-      hackernews_sources: {
-        title: string;
-        hn_url: string;
-        story_url: string;
-      }[];
-    }>(options);
-    context.hackernews_sources ??= [];
+  execute: async (
+    input,
+    { context }: ToolExecutionOptions<HackerNewsContext>,
+  ) => {
+    const sources = (context.hackernews_sources ??= []);
 
     const response = await searchHackerNewsAPI({
       tags: 'front_page',
@@ -701,7 +690,7 @@ export const get_front_page_stories = tool({
       hitsPerPage: input.hitsPerPage,
     });
 
-    fillContext(context, response);
+    fillContext(sources, response);
     return formatStoryResults(response);
   },
 });
@@ -785,15 +774,11 @@ export const search_ask_hn = tool({
       .default(20)
       .describe('Results per page (max 1000)'),
   }),
-  execute: async (input, options) => {
-    const context = toState<{
-      hackernews_sources: {
-        title: string;
-        hn_url: string;
-        story_url: string;
-      }[];
-    }>(options);
-    context.hackernews_sources ??= [];
+  execute: async (
+    input,
+    { context }: ToolExecutionOptions<HackerNewsContext>,
+  ) => {
+    const sources = (context.hackernews_sources ??= []);
 
     const numericFilters = buildNumericFilters({
       timeFilter: input.timeFilter,
@@ -810,7 +795,7 @@ export const search_ask_hn = tool({
       hitsPerPage: input.hitsPerPage,
     });
 
-    fillContext(context, response);
+    fillContext(sources, response);
     return formatStoryResults(response);
   },
 });
@@ -859,15 +844,11 @@ export const search_show_hn = tool({
       .default(20)
       .describe('Results per page (max 1000)'),
   }),
-  execute: async (input, options) => {
-    const context = toState<{
-      hackernews_sources: {
-        title: string;
-        hn_url: string;
-        story_url: string;
-      }[];
-    }>(options);
-    context.hackernews_sources ??= [];
+  execute: async (
+    input,
+    { context }: ToolExecutionOptions<HackerNewsContext>,
+  ) => {
+    const sources = (context.hackernews_sources ??= []);
 
     const numericFilters = buildNumericFilters({
       timeFilter: input.timeFilter,
@@ -884,7 +865,7 @@ export const search_show_hn = tool({
       hitsPerPage: input.hitsPerPage,
     });
 
-    fillContext(context, response);
+    fillContext(sources, response);
     return formatStoryResults(response);
   },
 });
@@ -921,15 +902,11 @@ export const search_jobs = tool({
       .default(20)
       .describe('Results per page (max 1000)'),
   }),
-  execute: async (input, options) => {
-    const context = toState<{
-      hackernews_sources: {
-        title: string;
-        hn_url: string;
-        story_url: string;
-      }[];
-    }>(options);
-    context.hackernews_sources ??= [];
+  execute: async (
+    input,
+    { context }: ToolExecutionOptions<HackerNewsContext>,
+  ) => {
+    const sources = (context.hackernews_sources ??= []);
 
     const numericFilters = buildNumericFilters({
       timeFilter: input.timeFilter,
@@ -944,7 +921,7 @@ export const search_jobs = tool({
       hitsPerPage: input.hitsPerPage,
     });
 
-    fillContext(context, response);
+    fillContext(sources, response);
     return formatJobResults(response);
   },
 });
@@ -979,15 +956,11 @@ export const search_polls = tool({
       .default(20)
       .describe('Results per page (max 1000)'),
   }),
-  execute: async (input, options) => {
-    const context = toState<{
-      hackernews_sources: {
-        title: string;
-        hn_url: string;
-        story_url: string;
-      }[];
-    }>(options);
-    context.hackernews_sources ??= [];
+  execute: async (
+    input,
+    { context }: ToolExecutionOptions<HackerNewsContext>,
+  ) => {
+    const sources = (context.hackernews_sources ??= []);
 
     const numericFilters = buildNumericFilters({
       timeFilter: input.timeFilter,
@@ -1002,7 +975,7 @@ export const search_polls = tool({
       hitsPerPage: input.hitsPerPage,
     });
 
-    fillContext(context, response);
+    fillContext(sources, response);
     return formatStoryResults(response);
   },
 });
@@ -1060,15 +1033,11 @@ export const search_by_domain = tool({
       .default(20)
       .describe('Results per page (max 1000)'),
   }),
-  execute: async (input, options) => {
-    const context = toState<{
-      hackernews_sources: {
-        title: string;
-        hn_url: string;
-        story_url: string;
-      }[];
-    }>(options);
-    context.hackernews_sources ??= [];
+  execute: async (
+    input,
+    { context }: ToolExecutionOptions<HackerNewsContext>,
+  ) => {
+    const sources = (context.hackernews_sources ??= []);
 
     const numericFilters = buildNumericFilters({
       timeFilter: input.timeFilter,
@@ -1103,8 +1072,8 @@ export const search_by_domain = tool({
       );
     }
 
-    const data = (await response.json()) as HNSearchResponse;
-    fillContext(context, data);
+    const data = hnSearchResponse.parse(await response.json());
+    fillContext(sources, data);
     return formatStoryResults(data);
   },
 });
@@ -1152,15 +1121,11 @@ export const search_highly_discussed = tool({
       .default(20)
       .describe('Results per page (max 1000)'),
   }),
-  execute: async (input, options) => {
-    const context = toState<{
-      hackernews_sources: {
-        title: string;
-        hn_url: string;
-        story_url: string;
-      }[];
-    }>(options);
-    context.hackernews_sources ??= [];
+  execute: async (
+    input,
+    { context }: ToolExecutionOptions<HackerNewsContext>,
+  ) => {
+    const sources = (context.hackernews_sources ??= []);
 
     const numericFilters = buildNumericFilters({
       timeFilter: input.timeFilter,
@@ -1177,7 +1142,7 @@ export const search_highly_discussed = tool({
       hitsPerPage: input.hitsPerPage,
     });
 
-    fillContext(context, response);
+    fillContext(sources, response);
     return formatStoryResults(response);
   },
 });
@@ -1225,15 +1190,11 @@ export const search_trending = tool({
       .default(30)
       .describe('Results per page (max 100)'),
   }),
-  execute: async (input, options) => {
-    const context = toState<{
-      hackernews_sources: {
-        title: string;
-        hn_url: string;
-        story_url: string;
-      }[];
-    }>(options);
-    context.hackernews_sources ??= [];
+  execute: async (
+    input,
+    { context }: ToolExecutionOptions<HackerNewsContext>,
+  ) => {
+    const sources = (context.hackernews_sources ??= []);
 
     const numericFilters = buildNumericFilters({
       maxAgeHours: input.maxAgeHours,
@@ -1249,25 +1210,14 @@ export const search_trending = tool({
       hitsPerPage: input.hitsPerPage,
     });
 
-    fillContext(context, response);
+    fillContext(sources, response);
     return formatStoryResults(response);
   },
 });
 
-function fillContext(
-  context: {
-    hackernews_sources: {
-      title?: string | null;
-      hn_url?: string | null;
-      story_url?: string | null;
-      story_text?: string | null;
-      comment_text?: string | null;
-    }[];
-  },
-  result: HNSearchResponse,
-) {
+function fillContext(sources: HackerNewsSource[], result: HNSearchResponse) {
   result.hits.forEach((hit) => {
-    context.hackernews_sources.push({
+    sources.push({
       title: hit.title,
       hn_url: hit.objectID
         ? `https://news.ycombinator.com/item?id=${hit.objectID}`
