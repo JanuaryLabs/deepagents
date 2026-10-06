@@ -1,7 +1,24 @@
 import { Readability } from '@mozilla/readability';
 import Parser from 'rss-parser';
 
-const rssParser = new Parser({
+type FeedFields = {
+  copyright?: string;
+  language?: string;
+  managingEditor?: string;
+  webMaster?: string;
+  lastBuildDate?: string;
+};
+
+type ItemFields = {
+  category?: string;
+  creator?: string;
+  enclosure?: Parser.Enclosure;
+  guid?: string;
+  author?: string;
+  'content:encoded'?: string;
+};
+
+const rssParser = new Parser<FeedFields, ItemFields>({
   customFields: {
     feed: ['copyright', 'language', 'managingEditor', 'webMaster'],
     item: ['category', 'creator', 'enclosure', 'guid'],
@@ -18,21 +35,20 @@ async function parseRSSFeed(feedUrl: string) {
       description: feed.description || '',
       link: feed.link || '',
       language: feed.language || 'en',
-      lastBuildDate: (feed as any).lastBuildDate || new Date().toISOString(),
+      lastBuildDate: feed.lastBuildDate || new Date().toISOString(),
       items: feed.items.map((item) => ({
         title: item.title || '',
         description: item.content || item.summary || item.contentSnippet || '',
         link: item.link || '',
         pubDate: item.pubDate || item.isoDate || '',
-        author: item.creator || (item as any).author || '',
+        author: item.creator || item.author || '',
         categories: Array.isArray(item.categories)
           ? item.categories
           : item.category
             ? [item.category]
             : [],
         guid: item.guid || item.guid || '',
-        contentEncoded:
-          (item as any)['content:encoded'] || (item as any).content || '',
+        contentEncoded: item['content:encoded'] || item.content || '',
       })),
     };
   } catch (error) {

@@ -23,18 +23,21 @@ export type Corpus = {
   metadata?: Record<string, any> | undefined;
 };
 
+export interface SearchResult {
+  content: string;
+  distance: number;
+  document_id: string;
+  metadata: Record<string, unknown> | null;
+}
+
 export interface Store {
   search: (
     query: string,
     options: SearchOptions,
     embedder: Embedder,
-  ) => Promise<any[]>;
+  ) => Promise<SearchResult[]>;
   sourceExists: (sourceId: string) => Promise<boolean> | boolean;
   sourceExpired: (sourceId: string) => Promise<boolean> | boolean;
   setSourceExpiry: (sourceId: string, expiryDate: Date) => Promise<void> | void;
-  index: (
-    sourceId: string,
-    corpus: Corpus,
-    expiryDate?: Date,
-  ) => Promise<void>;
+  index: (sourceId: string, corpus: Corpus, expiryDate?: Date) => Promise<void>;
 }

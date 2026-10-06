@@ -185,7 +185,7 @@ export async function collectFiles(
   extensions: string[],
 ): Promise<AsyncIterable<string>> {
   const exts = extensions.map((ext) => ext.replace(/^\./, ''));
-  return fg.stream(
+  const entries = fg.stream(
     extensions.length > 1 ? `**/*.{${exts.join(',')}}` : `**/*.${exts[0]}`,
     {
       dot: false,
@@ -195,5 +195,13 @@ export async function collectFiles(
       cwd: repo,
       ignore: await ignorePatterns(repo),
     },
-  ) as AsyncIterable<string>;
+  );
+  return (async function* () {
+    for await (const entry of entries) {
+      if (typeof entry !== 'string') {
+        throw new TypeError('fast-glob yielded a non-path entry');
+      }
+      yield entry;
+    }
+  })();
 }

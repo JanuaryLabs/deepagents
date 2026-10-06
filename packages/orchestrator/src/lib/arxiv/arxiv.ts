@@ -55,7 +55,7 @@ export async function queryArxivPaper(
     embedder: fastembed(),
   });
 
-  return results.slice(0, 5).map((r) => r.content);
+  return results.slice(0, 5);
 }
 
 const queryPaperTool = tool({

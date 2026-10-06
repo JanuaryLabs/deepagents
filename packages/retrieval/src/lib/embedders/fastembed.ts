@@ -6,24 +6,26 @@ import { tensorToEmbeddings } from './huggingface.js';
 /**
  * Stable model identifiers retained from the former `fastembed` adapter.
  */
-export enum EmbeddingModel {
-  AllMiniLML6V2 = 'fast-all-MiniLM-L6-v2',
-  BGEBaseEN = 'fast-bge-base-en',
-  BGEBaseENV15 = 'fast-bge-base-en-v1.5',
-  BGESmallEN = 'fast-bge-small-en',
-  BGESmallENV15 = 'fast-bge-small-en-v1.5',
-  BGESmallZH = 'fast-bge-small-zh-v1.5',
-  MLE5Large = 'fast-multilingual-e5-large',
-}
+export const EmbeddingModels = {
+  AllMiniLML6V2: 'fast-all-MiniLM-L6-v2',
+  BGEBaseEN: 'fast-bge-base-en',
+  BGEBaseENV15: 'fast-bge-base-en-v1.5',
+  BGESmallEN: 'fast-bge-small-en',
+  BGESmallENV15: 'fast-bge-small-en-v1.5',
+  BGESmallZH: 'fast-bge-small-zh-v1.5',
+  MLE5Large: 'fast-multilingual-e5-large',
+} as const;
+export type EmbeddingModel =
+  (typeof EmbeddingModels)[keyof typeof EmbeddingModels];
 
 const transformerModels: Record<EmbeddingModel, string> = {
-  [EmbeddingModel.AllMiniLML6V2]: 'Xenova/all-MiniLM-L6-v2',
-  [EmbeddingModel.BGEBaseEN]: 'Xenova/bge-base-en',
-  [EmbeddingModel.BGEBaseENV15]: 'Xenova/bge-base-en-v1.5',
-  [EmbeddingModel.BGESmallEN]: 'Xenova/bge-small-en',
-  [EmbeddingModel.BGESmallENV15]: 'Xenova/bge-small-en-v1.5',
-  [EmbeddingModel.BGESmallZH]: 'Xenova/bge-small-zh-v1.5',
-  [EmbeddingModel.MLE5Large]: 'Xenova/multilingual-e5-large',
+  [EmbeddingModels.AllMiniLML6V2]: 'Xenova/all-MiniLM-L6-v2',
+  [EmbeddingModels.BGEBaseEN]: 'Xenova/bge-base-en',
+  [EmbeddingModels.BGEBaseENV15]: 'Xenova/bge-base-en-v1.5',
+  [EmbeddingModels.BGESmallEN]: 'Xenova/bge-small-en',
+  [EmbeddingModels.BGESmallENV15]: 'Xenova/bge-small-en-v1.5',
+  [EmbeddingModels.BGESmallZH]: 'Xenova/bge-small-zh-v1.5',
+  [EmbeddingModels.MLE5Large]: 'Xenova/multilingual-e5-large',
 };
 
 export interface FastEmbedOptions {
@@ -39,7 +41,7 @@ export interface FastEmbedOptions {
  */
 export function fastembed(options: FastEmbedOptions = {}): Embedder {
   const {
-    model: modelId = EmbeddingModel.BGESmallENV15,
+    model: modelId = EmbeddingModels.BGESmallENV15,
     batchSize = 256,
     cacheDir,
   } = options;

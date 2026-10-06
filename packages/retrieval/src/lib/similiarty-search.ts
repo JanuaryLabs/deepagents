@@ -45,12 +45,11 @@ export async function similaritySearch(
       { sourceId: config.connector.sourceId, topN: 50 },
       config.embedder,
     )
-    .then(
-      (results) =>
-        results.map((it) => ({
-          ...it,
-          similarity: 1 - it.distance,
-          distance: it.distance,
-        })) as any[],
+    .then((results) =>
+      results.map((it) => ({
+        ...it,
+        similarity: 1 - it.distance,
+        distance: it.distance,
+      })),
     );
 }

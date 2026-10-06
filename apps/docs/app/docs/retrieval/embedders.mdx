@@ -35,7 +35,7 @@ const results = await similaritySearch('authentication', {
 ### Options
 
 ```typescript
-import { EmbeddingModel } from 'fastembed';
+import type { EmbeddingModel } from '@deepagents/retrieval';
 
 fastembed({
   model?: EmbeddingModel;  // Embedding model (default: BGESmallENV15)
@@ -46,35 +46,34 @@ fastembed({
 
 ## Available Models
 
-| Model | ID | Dimensions | Notes |
-|-------|-----|------------|-------|
-| BGE-small-en-v1.5 | `EmbeddingModel.BGESmallENV15` | 384 | Default, good balance |
-| BGE-base-en-v1.5 | `EmbeddingModel.BGEBaseENV15` | 768 | Higher quality, slower |
-| BGE-small-en | `EmbeddingModel.BGESmallEN` | 384 | Earlier version |
-| BGE-base-en | `EmbeddingModel.BGEBaseEN` | 768 | Earlier version |
-| BGE-small-zh | `EmbeddingModel.BGESmallZH` | 384 | Chinese language |
-| All-MiniLM-L6-v2 | `EmbeddingModel.AllMiniLML6V2` | 384 | Fast, lightweight |
-| MLE5-Large | `EmbeddingModel.MLE5Large` | 1024 | Highest quality |
+| Model             | ID                              | Dimensions | Notes                  |
+| ----------------- | ------------------------------- | ---------- | ---------------------- |
+| BGE-small-en-v1.5 | `EmbeddingModels.BGESmallENV15` | 384        | Default, good balance  |
+| BGE-base-en-v1.5  | `EmbeddingModels.BGEBaseENV15`  | 768        | Higher quality, slower |
+| BGE-small-en      | `EmbeddingModels.BGESmallEN`    | 384        | Earlier version        |
+| BGE-base-en       | `EmbeddingModels.BGEBaseEN`     | 768        | Earlier version        |
+| BGE-small-zh      | `EmbeddingModels.BGESmallZH`    | 384        | Chinese language       |
+| All-MiniLM-L6-v2  | `EmbeddingModels.AllMiniLML6V2` | 384        | Fast, lightweight      |
+| MLE5-Large        | `EmbeddingModels.MLE5Large`     | 1024       | Highest quality        |
 
 ### Model Selection
 
 ```typescript
-import { fastembed } from '@deepagents/retrieval';
-import { EmbeddingModel } from 'fastembed';
+import { EmbeddingModels, fastembed } from '@deepagents/retrieval';
 
 // High quality (slower, more memory)
 const highQuality = fastembed({
-  model: EmbeddingModel.BGEBaseENV15,
+  model: EmbeddingModels.BGEBaseENV15,
 });
 
 // Fast and lightweight
 const fast = fastembed({
-  model: EmbeddingModel.AllMiniLML6V2,
+  model: EmbeddingModels.AllMiniLML6V2,
 });
 
 // Chinese content
 const chinese = fastembed({
-  model: EmbeddingModel.BGESmallZH,
+  model: EmbeddingModels.BGESmallZH,
 });
 ```
 
@@ -83,19 +82,18 @@ const chinese = fastembed({
 The store dimension **must match** your embedding model's output dimension:
 
 ```typescript
-import { fastembed, nodeSQLite } from '@deepagents/retrieval';
-import { EmbeddingModel } from 'fastembed';
+import { EmbeddingModels, fastembed, nodeSQLite } from '@deepagents/retrieval';
 
 // 384-dimension models
 const embedder384 = fastembed(); // BGE-small-en-v1.5
 const store384 = nodeSQLite('./384.db', 384);
 
 // 768-dimension models
-const embedder768 = fastembed({ model: EmbeddingModel.BGEBaseENV15 });
+const embedder768 = fastembed({ model: EmbeddingModels.BGEBaseENV15 });
 const store768 = nodeSQLite('./768.db', 768);
 
 // 1024-dimension models
-const embedder1024 = fastembed({ model: EmbeddingModel.MLE5Large });
+const embedder1024 = fastembed({ model: EmbeddingModels.MLE5Large });
 const store1024 = nodeSQLite('./1024.db', 1024);
 ```
 
@@ -129,6 +127,7 @@ const embedder = fastembed({
 ```
 
 Default cache location varies by OS:
+
 - macOS: `~/Library/Caches/fastembed`
 - Linux: `~/.cache/fastembed`
 - Windows: `%LOCALAPPDATA%\fastembed`
@@ -168,39 +167,45 @@ const customEmbedder: Embedder = async (documents) => {
 ### Quality vs Speed Trade-off
 
 ```typescript
-import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
+import {
+  EmbeddingModels,
+  fastembed,
+  nodeSQLite,
+  similaritySearch,
+} from '@deepagents/retrieval';
 import { local } from '@deepagents/retrieval/connectors';
-import { EmbeddingModel } from 'fastembed';
 
 // For development: fast iteration
 const devEmbedder = fastembed({
-  model: EmbeddingModel.AllMiniLML6V2,
+  model: EmbeddingModels.AllMiniLML6V2,
   batchSize: 32,
 });
 const devStore = nodeSQLite('./dev.db', 384);
 
 // For production: highest quality
 const prodEmbedder = fastembed({
-  model: EmbeddingModel.BGEBaseENV15,
+  model: EmbeddingModels.BGEBaseENV15,
   batchSize: 16,
 });
 const prodStore = nodeSQLite('./prod.db', 768);
 
 // Use environment to switch
-const embedder = process.env.NODE_ENV === 'production'
-  ? prodEmbedder
-  : devEmbedder;
+const embedder =
+  process.env.NODE_ENV === 'production' ? prodEmbedder : devEmbedder;
 
-const store = process.env.NODE_ENV === 'production'
-  ? prodStore
-  : devStore;
+const store = process.env.NODE_ENV === 'production' ? prodStore : devStore;
 ```
 
 ### Reusable Embedder Instance
 
 ```typescript
-import { fastembed, nodeSQLite, similaritySearch, ingest } from '@deepagents/retrieval';
-import { local, github } from '@deepagents/retrieval/connectors';
+import {
+  fastembed,
+  ingest,
+  nodeSQLite,
+  similaritySearch,
+} from '@deepagents/retrieval';
+import { github, local } from '@deepagents/retrieval/connectors';
 
 // Create embedder once, reuse across operations
 const embedder = fastembed();
@@ -231,7 +236,7 @@ const results = await similaritySearch('routing', {
 ### Memory-Efficient Processing
 
 ```typescript
-import { fastembed, nodeSQLite, ingest } from '@deepagents/retrieval';
+import { fastembed, ingest, nodeSQLite } from '@deepagents/retrieval';
 import { local } from '@deepagents/retrieval/connectors';
 
 // For large codebases, use smaller batches

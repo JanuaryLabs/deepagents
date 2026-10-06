@@ -53,7 +53,7 @@ Data Sources → Connectors → Chunking → Embeddings → Vector Store → Sea
 ## Quick Example
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { local } from '@deepagents/retrieval/connectors';
 
 // Create a vector store (384 dimensions for BGE-small model)
@@ -68,7 +68,9 @@ const results = await similaritySearch('How do I authenticate users?', {
 
 // Results include content, similarity score, and metadata
 for (const result of results) {
-  console.log(`[${result.similarity.toFixed(2)}] ${result.content.slice(0, 100)}...`);
+  console.log(
+    `[${result.similarity.toFixed(2)}] ${result.content.slice(0, 100)}...`,
+  );
 }
 ```
 
@@ -88,6 +90,7 @@ type Connector = {
 ```
 
 Available connectors:
+
 - **[local](/docs/retrieval/local)** - Local filesystem with glob patterns
 - **[github](/docs/retrieval/github)** - GitHub files, releases, and repositories
 - **[rss](/docs/retrieval/rss)** - RSS feeds with article extraction
@@ -100,14 +103,14 @@ Available connectors:
 Embedders convert text into vector representations. The package includes FastEmbed with multiple model options:
 
 ```typescript
-import { fastembed } from '@deepagents/retrieval';
+import { EmbeddingModels, fastembed } from '@deepagents/retrieval';
 
 // Default: BGE-small-en-v1.5 (384 dimensions)
 const embedder = fastembed();
 
 // Or specify a different model
 const embedder = fastembed({
-  model: EmbeddingModel.AllMiniLML6V2,
+  model: EmbeddingModels.AllMiniLML6V2,
   batchSize: 32,
 });
 ```
@@ -144,25 +147,21 @@ const connector = local('**/*.md', {
 
 ```typescript
 import {
-  // Core functions
-  similaritySearch,
-  ingest,
-
-  // Embedders
-  fastembed,
-
-  // Stores
-  nodeSQLite,
-  SQLiteStore,
-
-  // Utilities
-  cid,
-
-  // Types
-  type Store,
-  type Embedder,
   type Chunk,
   type Corpus,
+  type Embedder,
+  SQLiteStore,
+  // Types
+  type Store,
+  // Utilities
+  cid,
+  // Embedders
+  fastembed,
+  ingest,
+  // Stores
+  nodeSQLite,
+  // Core functions
+  similaritySearch,
 } from '@deepagents/retrieval';
 ```
 
@@ -170,13 +169,13 @@ import {
 
 ```typescript
 import {
-  local,
   github,
-  rss,
+  linear,
+  local,
   pdf,
   pdfFile,
-  linear,
   repo,
+  rss,
 } from '@deepagents/retrieval/connectors';
 ```
 

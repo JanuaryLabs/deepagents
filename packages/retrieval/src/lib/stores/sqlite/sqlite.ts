@@ -6,6 +6,7 @@ import type {
   Corpus,
   Embedder,
   SearchOptions,
+  SearchResult,
   Store,
 } from '../store.js';
 import sql from './sqlite.sql.js';
@@ -94,10 +95,7 @@ export class SQLiteStore implements Store {
         embedding: vectorBlob,
         k: topN ?? DEFAULT_TOP_N,
       });
-      return rows.map((r: any) => ({
-        ...r,
-        metadata: safeParseMetadata(r.metadata),
-      }));
+      return rows.map(toSearchResult);
     }
 
     const rows = this.#searchBySource({
@@ -105,10 +103,7 @@ export class SQLiteStore implements Store {
       embedding: vectorBlob,
       k: topN ?? DEFAULT_TOP_N,
     });
-    return rows.map((r: any) => ({
-      ...r,
-      metadata: safeParseMetadata(r.metadata),
-    }));
+    return rows.map(toSearchResult);
   }
   #upsertSource(inputs: { sourceId: string }) {
     const stmt = this.#db.prepare(dedent`
@@ -254,12 +249,39 @@ export function vectorToBlob(vector: number[] | Float32Array): Buffer {
   return Buffer.from(floatArray.buffer);
 }
 
-function safeParseMetadata(value: any) {
-  if (value == null) return null;
-  if (typeof value === 'object') return value;
+function toSearchResult(row: unknown): SearchResult {
+  if (
+    typeof row !== 'object' ||
+    row === null ||
+    !('content' in row) ||
+    typeof row.content !== 'string' ||
+    !('distance' in row) ||
+    typeof row.distance !== 'number' ||
+    !('document_id' in row) ||
+    typeof row.document_id !== 'string' ||
+    !('metadata' in row) ||
+    (row.metadata !== null && typeof row.metadata !== 'string')
+  ) {
+    throw new Error('Unexpected vector search row');
+  }
+  return {
+    content: row.content,
+    distance: row.distance,
+    document_id: row.document_id,
+    metadata: parseMetadata(row.metadata),
+  };
+}
+
+function parseMetadata(value: string | null): Record<string, unknown> | null {
+  if (value === null) return null;
   try {
-    return JSON.parse(String(value));
+    const parsed: unknown = JSON.parse(value);
+    return isRecord(parsed) ? parsed : null;
   } catch {
     return null;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

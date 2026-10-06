@@ -13,29 +13,62 @@ interface ReleaseFetchOptions {
   includePrerelease?: boolean;
 }
 
+interface Release {
+  tag_name: string;
+  name: string | null;
+  body: string | null;
+  updated_at: string;
+  published_at: string;
+  html_url: string;
+  draft: boolean;
+  prerelease: boolean;
+}
+
+function isRelease(value: unknown): value is Release {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'tag_name' in value &&
+    typeof value.tag_name === 'string' &&
+    'name' in value &&
+    (value.name === null || typeof value.name === 'string') &&
+    'body' in value &&
+    (value.body === null || typeof value.body === 'string') &&
+    'updated_at' in value &&
+    typeof value.updated_at === 'string' &&
+    'published_at' in value &&
+    typeof value.published_at === 'string' &&
+    'html_url' in value &&
+    typeof value.html_url === 'string' &&
+    'draft' in value &&
+    typeof value.draft === 'boolean' &&
+    'prerelease' in value &&
+    typeof value.prerelease === 'boolean'
+  );
+}
+
 function fs(path: string) {
   const [owner, repo, ...filePath] = path.split('/');
   return {
     readFile: async () => {
       const url = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath.join('/')}`;
       const res = await fetch(url);
-      const data = (await res.json()) as { content: string };
+      const data: unknown = await res.json();
+      if (
+        typeof data !== 'object' ||
+        data === null ||
+        !('content' in data) ||
+        typeof data.content !== 'string'
+      ) {
+        throw new Error(`GitHub returned no file content for ${path}`);
+      }
       return atob(data.content);
     },
     release: async (repo: string, opts: ReleaseFetchOptions = {}) => {
       const [owner, repoName] = repo.split('/');
       const perPage = 100; // always fetch max per page for efficiency
       const maxPages = 10; // internal safety cap, not user configurable
-      const releases: Array<{
-        tag_name: string;
-        name: string | null;
-        body: string | null;
-        updated_at: string;
-        published_at: string;
-        html_url: string;
-        draft: boolean;
-        prerelease: boolean;
-      }> = [];
+      const releases: Release[] = [];
       let stop = false;
 
       for (let page = 1; page <= maxPages && !stop; page++) {
@@ -44,7 +77,10 @@ function fs(path: string) {
           headers: { Accept: 'application/vnd.github+json' },
         });
         if (!res.ok) break;
-        const pageData = (await res.json()) as typeof releases;
+        const pageData: unknown = await res.json();
+        if (!Array.isArray(pageData) || !pageData.every(isRelease)) {
+          throw new Error(`Unexpected GitHub releases response for ${repo}`);
+        }
         if (!pageData.length) break;
         for (const rel of pageData) {
           if (!opts.includeDrafts && rel.draft) continue;

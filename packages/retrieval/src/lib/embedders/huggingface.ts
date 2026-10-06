@@ -9,8 +9,7 @@ export type FeatureExtractionFn = FeatureExtractionPipeline;
 
 export interface EmbeddingOptions {
   extractorFn: () =>
-    | Promise<FeatureExtractionPipeline>
-    | FeatureExtractionPipeline;
+    Promise<FeatureExtractionPipeline> | FeatureExtractionPipeline;
   pooling?: 'mean' | 'cls';
   normalize?: boolean;
 }
@@ -41,22 +40,23 @@ export function tensorToEmbeddings(tensor: Tensor) {
       `Data length mismatch: got ${tensor.data.length}, expected ${expectedLen} (batch=${batchSize}, hidden=${hiddenSize})`,
     );
   }
+  const data = tensor.data;
+  if (!(data instanceof Float32Array)) {
+    throw new Error(`Expected float32 embeddings, got ${tensor.type}`);
+  }
   // Reuse the underlying typed array without copying; we'll copy when creating Buffer for SQLite
   const embeddings: Float32Array[] = [];
   const dimensions = tensor.dims[tensor.dims.length - 1];
   for (let i = 0; i < batchSize; i++) {
     const start = i * hiddenSize;
-    embeddings.push(
-      (tensor.data as Float32Array).subarray(start, start + hiddenSize),
-    );
+    embeddings.push(data.subarray(start, start + hiddenSize));
   }
   return { embeddings, dimensions };
 }
 
 export function huggingface(
   extractorFn: () =>
-    | Promise<FeatureExtractionPipeline>
-    | FeatureExtractionPipeline,
+    Promise<FeatureExtractionPipeline> | FeatureExtractionPipeline,
 ): Embedder {
   return (documents) => textEmbeddings(documents, { extractorFn });
 }
