@@ -6,17 +6,21 @@ export class Container implements AsyncDisposable {
   readonly containerId: string;
   readonly host = '127.0.0.1';
   readonly port: number;
+  readonly command: (
+    args: string[],
+  ) => Promise<Awaited<ReturnType<typeof spawn>>>;
+  readonly disconnect: () => Promise<void>;
 
   constructor(
     containerId: string,
     port: number,
-    readonly command: (
-      args: string[],
-    ) => Promise<Awaited<ReturnType<typeof spawn>>>,
-    readonly disconnect: () => Promise<void>,
+    command: Container['command'],
+    disconnect: Container['disconnect'],
   ) {
     this.containerId = containerId;
     this.port = port;
+    this.command = command;
+    this.disconnect = disconnect;
   }
 
   // Keep these bound: readiness probes and database handles pass them around.

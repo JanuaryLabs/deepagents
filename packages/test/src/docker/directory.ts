@@ -14,11 +14,19 @@ import { DockerHost, quote } from './host.ts';
 
 /** A disposable fixture directory on the selected daemon's host filesystem. */
 export class DockerDirectory implements AsyncDisposable {
+  readonly path: string;
+  readonly host: DockerHost;
+  readonly #record: string | undefined;
+
   private constructor(
-    readonly path: string,
-    readonly host: DockerHost,
-    private readonly record?: string,
-  ) {}
+    path: string,
+    host: DockerHost,
+    record: string | undefined,
+  ) {
+    this.path = path;
+    this.host = host;
+    this.#record = record;
+  }
 
   static async create(host: DockerHost): Promise<DockerDirectory> {
     const id = randomUUID();
@@ -87,6 +95,6 @@ export class DockerDirectory implements AsyncDisposable {
     if (this.host.remote)
       await this.host.shell(`rm -rf -- ${quote(this.path)}`);
     else await rm(this.path, { recursive: true, force: true });
-    if (this.record) await rm(this.record, { force: true });
+    if (this.#record) await rm(this.#record, { force: true });
   }
 }

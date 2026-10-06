@@ -2,8 +2,21 @@ import command from 'nano-spawn';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
+import { z } from 'zod';
 
 import { Docker, timebox } from '@deepagents/test';
+
+const inspectedMounts = z.array(
+  z.object({
+    Mounts: z.array(z.object({ Type: z.string(), Name: z.string() })),
+  }),
+);
+const inspectedIdentity = z.array(
+  z.object({
+    Name: z.string(),
+    Config: z.object({ Labels: z.record(z.string(), z.string()) }),
+  }),
+);
 
 test('disposing an owned container removes its anonymous volumes', async (t) => {
   const docker = new Docker();
@@ -13,9 +26,7 @@ test('disposing an owned container removes its anonymous volumes', async (t) => 
     env: { POSTGRES_PASSWORD: 'test' },
   });
   const { stdout } = await docker.command(['inspect', container.containerId]);
-  const [{ Mounts: mounts }] = JSON.parse(stdout) as {
-    Mounts: { Type: string; Name: string }[];
-  }[];
+  const [{ Mounts: mounts }] = inspectedMounts.parse(JSON.parse(stdout));
   const volumes = mounts.filter((mount) => mount.Type === 'volume');
   assert.ok(volumes.length > 0, 'the image declares an anonymous data volume');
   t.after(async () => {
@@ -150,7 +161,7 @@ test(
     // Reproduce a creator dying between Docker create and start. Preserve the
     // actual identity metadata instead of duplicating the library's hash logic.
     const { stdout } = await command('docker', ['inspect', first.containerId]);
-    const [inspection] = JSON.parse(stdout);
+    const [inspection] = inspectedIdentity.parse(JSON.parse(stdout));
     await first.cleanup();
     await t.waitFor(
       async () => {
@@ -164,9 +175,9 @@ test(
       },
       { timeout: 5_000 },
     );
-    const labelArgs = Object.entries(
-      inspection.Config.Labels as Record<string, string>,
-    ).flatMap(([key, value]) => ['--label', `${key}=${value}`]);
+    const labelArgs = Object.entries(inspection.Config.Labels).flatMap(
+      ([key, value]) => ['--label', `${key}=${value}`],
+    );
     await command('docker', [
       'create',
       '--rm',

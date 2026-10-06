@@ -13,7 +13,11 @@ export const quote = (value: string): string =>
 
 /** Resolve with the Docker CLI so its native context/environment precedence wins. */
 export class DockerHost {
-  private constructor(readonly endpoint: string) {}
+  readonly endpoint: string;
+
+  private constructor(endpoint: string) {
+    this.endpoint = endpoint;
+  }
 
   static async resolve(): Promise<DockerHost> {
     const { stdout } = await command('docker', [
@@ -161,7 +165,7 @@ export class DockerHost {
         const closed = new Promise<void>((resolve, reject) =>
           server.close((error) =>
             error &&
-            (error as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING'
+            !('code' in error && error.code === 'ERR_SERVER_NOT_RUNNING')
               ? reject(error)
               : resolve(),
           ),
@@ -186,7 +190,7 @@ export class DockerHost {
         {
           maxRetryTime: 15_000,
           shouldRetry: ({ error }) =>
-            !spawnError && (error as NodeJS.ErrnoException).code === 'ENOENT',
+            !spawnError && 'code' in error && error.code === 'ENOENT',
         },
       );
       server.listen(0, '127.0.0.1');
