@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 
 import {
@@ -109,8 +109,11 @@ export default function NewEvalPage() {
     },
   );
 
-  useEffect(() => {
-    if (!prefillData) return;
+  // Copy the source run's settings into the form once per loaded run. Doing it
+  // during render, not in an effect, keeps the empty form from painting first.
+  const [prefilledFrom, setPrefilledFrom] = useState<typeof prefillData>();
+  if (prefillData && prefillData !== prefilledFrom) {
+    setPrefilledFrom(prefillData);
     const cfg = (prefillData.run.config ?? {}) as Record<string, unknown>;
     setName(
       typeof cfg.suiteName === 'string' ? cfg.suiteName : prefillData.run.name,
@@ -138,7 +141,7 @@ export default function NewEvalPage() {
     if (typeof cfg.inputField === 'string') setInputField(cfg.inputField);
     if (typeof cfg.expectedField === 'string')
       setExpectedField(cfg.expectedField);
-  }, [prefillData]);
+  }
 
   const sortedPrompts = useMemo(
     () => [...(prompts ?? [])].sort((a, b) => b.created_at - a.created_at),

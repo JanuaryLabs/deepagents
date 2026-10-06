@@ -1,13 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 
-import '../../api.ts';
-import { CaseTable } from '../../components/CaseTable.tsx';
-import { RunStatusBadge } from '../../components/RunStatusBadge.tsx';
-import { StatsGrid } from '../../components/StatsGrid.tsx';
-import { useAction, useData } from '../../hooks/use-client.ts';
-import { useSuiteEvents } from '../../hooks/use-suite-events.ts';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -24,6 +18,13 @@ import {
   TableCell,
   TableRow,
 } from '@deepagents/react-shadcn';
+
+import '../../api.ts';
+import { CaseTable } from '../../components/CaseTable.tsx';
+import { RunStatusBadge } from '../../components/RunStatusBadge.tsx';
+import { StatsGrid } from '../../components/StatsGrid.tsx';
+import { useAction, useData } from '../../hooks/use-client.ts';
+import { useSuiteEvents } from '../../hooks/use-suite-events.ts';
 
 interface ScoreEntry {
   scorer_name: string;
@@ -68,10 +69,7 @@ export default function RunDetailPage() {
   const [editName, setEditName] = useState('');
   const [progressMap, setProgressMap] = useState<Record<string, number>>({});
 
-  const runningIds = useMemo(
-    () => (data?.run.status === 'running' ? [data.run.id] : []),
-    [data?.run.status, data?.run.id],
-  );
+  const runningIds = data?.run.status === 'running' ? [data.run.id] : [];
 
   useSuiteEvents(runningIds, {
     onCaseScored: ({ runId, completed, totalCases }) => {
