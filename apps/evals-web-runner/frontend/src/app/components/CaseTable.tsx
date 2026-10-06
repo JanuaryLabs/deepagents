@@ -6,8 +6,7 @@ import {
   getExpandedRowModel,
   useReactTable,
 } from '@tanstack/react-table';
-import { Fragment, useMemo } from 'react';
-import { useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 
 import {
   Table,

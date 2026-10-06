@@ -9,8 +9,7 @@ import type {
   StreamUpdateResult,
   StreamUpdater,
 } from './stream-store.ts';
-import { collectStreamFailures } from './stream-store.ts';
-import { StreamStore } from './stream-store.ts';
+import { StreamStore, collectStreamFailures } from './stream-store.ts';
 
 export class SqliteStreamStore extends StreamStore {
   #db: DatabaseSync;
