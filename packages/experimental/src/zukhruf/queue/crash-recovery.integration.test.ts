@@ -1,10 +1,10 @@
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
+import spawn, { SubprocessError } from 'nano-spawn';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 import { join } from 'node:path';
+import { createInterface } from 'node:readline';
 import { describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { PgBoss } from 'pg-boss';
@@ -136,6 +136,7 @@ function isProcessAlive(pid: number): boolean {
 describe('zukhruf crash recovery — worker process killed mid-turn', () => {
   it('stops an owned crash-worker when its parent test process exits', async (t) => {
     await using container = await testPostgres.database();
+    await using resources = new AsyncDisposableStack();
 
     const ownerSource = `
           import { spawn } from 'node:child_process';
@@ -149,47 +150,46 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
           fixture.stderr.pipe(process.stderr);
           setInterval(() => {}, 1 << 30);
         `;
-    const owner = spawn(
+    const subprocess = spawn(
       process.execPath,
       ['--input-type=module', '--eval', ownerSource],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      { stdin: 'ignore' },
     );
-    const ownerExit = once(owner, 'exit');
-    let output = '';
-    let fixturePid: number | undefined;
-    owner.stdout?.setEncoding('utf8');
-    owner.stderr?.setEncoding('utf8');
-    owner.stdout?.on('data', (chunk: string) => {
-      output += chunk;
-    });
-    owner.stderr?.on('data', (chunk: string) => {
-      output += chunk;
-    });
-
-    try {
-      await t.waitFor(
-        () => {
-          const match = output.match(/FIXTURE (\d+)[\s\S]*WORKER READY/);
-          assert.ok(match, output);
-          fixturePid = Number(match[1]);
-        },
-        { interval: 100, timeout: 30_000 },
-      );
-
-      owner.kill('SIGTERM');
-      await ownerExit;
-      const ownedFixturePid = fixturePid;
-      assert.ok(ownedFixturePid !== undefined);
-      await t.waitFor(
-        () => assert.equal(isProcessAlive(ownedFixturePid), false),
-        { interval: 100, timeout: 5_000 },
-      );
-    } finally {
+    const completed = Promise.allSettled([subprocess]);
+    const owner = await subprocess.nodeChildProcess;
+    resources.defer(async () => {
       owner.kill('SIGKILL');
-      if (fixturePid !== undefined && isProcessAlive(fixturePid)) {
-        process.kill(fixturePid, 'SIGKILL');
-      }
+      await completed;
+    });
+    assert.ok(owner.stdout);
+    using lines = createInterface({
+      input: owner.stdout,
+      signal: AbortSignal.timeout(30_000),
+    });
+    const output = lines[Symbol.asyncIterator]();
+    const first = await output.next();
+    assert.ok(!first.done, 'owner exited before reporting the fixture PID');
+    const match = first.value.match(/^FIXTURE (\d+)$/);
+    assert.ok(match, first.value);
+    const fixturePid = Number(match[1]);
+    resources.defer(() => {
+      if (isProcessAlive(fixturePid)) process.kill(fixturePid, 'SIGKILL');
+    });
+
+    for await (const line of output) {
+      if (line !== 'WORKER READY') continue;
+      owner.kill('SIGTERM');
+      await assert.rejects(subprocess, {
+        name: 'SubprocessError',
+        signalName: 'SIGTERM',
+      });
+      await t.waitFor(() => assert.equal(isProcessAlive(fixturePid), false), {
+        interval: 100,
+        timeout: 5_000,
+      });
+      return;
     }
+    assert.fail('owner output ended before WORKER READY');
   });
 
   it('heartbeat lapse fails the job; the DLQ reconciler flips the stream and unblocks the chat', async () => {
@@ -233,35 +233,45 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
     const runtime = await runtimeSetup.initialize(stack);
     const conversation = { chatId: 'crash-chat', userId: 'u1' };
 
-    let child: ReturnType<typeof spawn> | undefined;
-    let childExit: Promise<unknown[]> | undefined;
-    let worker: AsyncDisposable | undefined;
     try {
+      await using resources = new AsyncDisposableStack();
       const first = await runtime.enqueue(
         conversation,
         userTurn(crypto.randomUUID(), 'a very long task'),
       );
 
-      child = spawn(process.execPath, [fixture, container.connectionString], {
-        stdio: ['ignore', 'pipe', 'pipe'],
+      const subprocess = spawn(
+        process.execPath,
+        [fixture, container.connectionString],
+        { stdin: 'ignore' },
+      );
+      const completed = Promise.allSettled([subprocess]);
+      const child = await subprocess.nodeChildProcess;
+      resources.defer(async () => {
+        child.kill('SIGKILL');
+        await completed;
       });
-      const childStderr: string[] = [];
-      child.stderr?.setEncoding('utf8');
-      child.stderr?.on('data', (data) => childStderr.push(data));
-      childExit = once(child, 'exit');
 
       try {
         await waitForStatus(streamStore, first.id, ['running'], 30_000);
       } catch (error) {
+        child.kill('SIGKILL');
+        const result = await subprocess.catch((failure: unknown) => {
+          assert.ok(failure instanceof SubprocessError);
+          return failure;
+        });
         throw new Error(
-          `${(error as Error).message}\nchild stderr:\n${childStderr.join('')}`,
+          `${(error as Error).message}\nchild stderr:\n${result.stderr}`,
         );
       }
 
       child.kill('SIGKILL');
-      await childExit;
+      await assert.rejects(subprocess, {
+        name: 'SubprocessError',
+        signalName: 'SIGKILL',
+      });
 
-      worker = await runtime.work();
+      await using worker = await runtime.work();
       await waitForStatus(streamStore, first.id, ['failed'], 120_000);
       const failed = await streamStore.getStream(first.id);
       assert.ok(failed?.error, 'orphaned stream carries an error message');
@@ -288,9 +298,6 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
         'DLQ reconciler deleted the crashed source job and the successor was GC-ed on commit — no orphan job accumulates in the main queue',
       );
     } finally {
-      child?.kill('SIGKILL');
-      if (childExit) await childExit;
-      if (worker) await worker[Symbol.asyncDispose]();
       await boss.stop({ graceful: false });
       mailboxStore.close();
       await streamStore.close();

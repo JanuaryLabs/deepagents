@@ -11,8 +11,9 @@ import {
 import { mkdtempDisposable } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
+import { text as streamText } from 'node:stream/consumers';
 import { describe, it } from 'node:test';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 
 import {
   ContextEngine,
@@ -24,10 +25,9 @@ import { Sqlite as TestSqlite } from '@deepagents/test';
 
 const sqlite = new TestSqlite();
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PKG_ROOT = path.resolve(__dirname, '..');
+const PKG_ROOT = path.resolve(import.meta.dirname, '..');
 const BIN = path.join(PKG_ROOT, 'dist', 'bin', 'sql.js');
-const FIXTURE = path.join(__dirname, 'fixtures', 'cli-adapters.ts');
+const FIXTURE = path.join(import.meta.dirname, 'fixtures', 'cli-adapters.ts');
 
 interface SpawnResult {
   stdout: string;
@@ -70,7 +70,7 @@ function buildEnv(opts: RunOpts): NodeJS.ProcessEnv {
 
 async function runBin(args: string[], opts: RunOpts): Promise<SpawnResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn('node', ['--no-warnings', BIN, ...args], {
+    const child = spawn(process.execPath, ['--no-warnings', BIN, ...args], {
       cwd: opts.cwd,
       env: buildEnv(opts),
     });
@@ -100,28 +100,12 @@ function mkfifo(p: string): void {
   }
 }
 
-function readFifo(p: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let data = '';
-    const stream = createReadStream(p, { encoding: 'utf-8' });
-    stream.on('data', (chunk) => {
-      data += chunk;
-    });
-    stream.on('end', () => resolve(data));
-    stream.on('error', reject);
-  });
-}
-
 function ndjsonTypes(raw: string): string[] {
   return raw
     .trim()
     .split('\n')
     .filter(Boolean)
     .map((line) => (JSON.parse(line) as { type: string }).type);
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function writeAdaptersModule(
@@ -210,7 +194,7 @@ describe('sql binary', () => {
     assert.equal(result.stderr, '');
     const sqlDir = path.join(realpathSync(cwd), 'sql');
     const expected = new RegExp(
-      `^results stored in ${escapeRegExp(sqlDir)}/[a-f0-9-]+\\.json\\ncolumns: id, name\\nrows: 2\\n$`,
+      `^results stored in ${RegExp.escape(sqlDir)}/[a-f0-9-]+\\.json\\ncolumns: id, name\\nrows: 2\\n$`,
     );
     assert.match(result.stdout, expected);
 
@@ -267,7 +251,7 @@ describe('sql binary', () => {
     assert.equal(result.exitCode, 0, result.stderr);
     assert.match(
       result.stdout,
-      new RegExp(`^results stored in ${escapeRegExp(outDir)}/`),
+      new RegExp(`^results stored in ${RegExp.escape(outDir)}/`),
     );
     assert.equal(readdirSync(outDir).length, 1);
   });
@@ -292,7 +276,7 @@ describe('sql binary', () => {
     assert.equal(result.exitCode, 0, result.stderr);
     assert.match(
       result.stdout,
-      new RegExp(`^results stored in ${escapeRegExp(flagDir)}/`),
+      new RegExp(`^results stored in ${RegExp.escape(flagDir)}/`),
     );
     assert.equal(readdirSync(flagDir).length, 1);
   });
@@ -313,7 +297,7 @@ describe('sql binary', () => {
     assert.equal(result.exitCode, 0, result.stderr);
     assert.match(
       result.stdout,
-      new RegExp(`^results stored in ${escapeRegExp(outDir)}/`),
+      new RegExp(`^results stored in ${RegExp.escape(outDir)}/`),
     );
     assert.equal(readdirSync(outDir).length, 1);
   });
@@ -798,7 +782,9 @@ describe('sql binary', () => {
     );
     mkfifo(fifoPath);
 
-    const readerPromise = readFifo(fifoPath);
+    const readerPromise = streamText(
+      createReadStream(fifoPath, { encoding: 'utf-8' }),
+    );
     const result = await runBin(['index'], { cwd, eventsPathEnv: fifoPath });
 
     assert.equal(result.exitCode, 0, result.stderr);
@@ -834,7 +820,7 @@ describe('sql binary', () => {
     );
     mkfifo(fifoPath);
 
-    const child = spawn('node', ['--no-warnings', BIN, 'index'], {
+    const child = spawn(process.execPath, ['--no-warnings', BIN, 'index'], {
       cwd,
       env: buildEnv({ cwd, eventsPathEnv: fifoPath }),
     });
@@ -852,7 +838,9 @@ describe('sql binary', () => {
     });
 
     await sawWarning;
-    const readerData = readFifo(fifoPath);
+    const readerData = streamText(
+      createReadStream(fifoPath, { encoding: 'utf-8' }),
+    );
     const exitCode = await new Promise<number>((resolve, reject) => {
       child.on('error', reject);
       child.on('close', (code) => resolve(code ?? 0));
@@ -861,7 +849,7 @@ describe('sql binary', () => {
     assert.equal(exitCode, 0, stderr);
     assert.match(
       stderr,
-      new RegExp(`waiting for reader on FIFO ${escapeRegExp(fifoPath)}`),
+      new RegExp(`waiting for reader on FIFO ${RegExp.escape(fifoPath)}`),
     );
 
     const types = ndjsonTypes(await readerData);
