@@ -7,7 +7,7 @@ import { read_dir_tool, read_file_tool } from '@deepagents/toolbox';
 
 type IgnoreAgentContext = { repo_path: string };
 
-export const ignoreAgent = agent<IgnoreAgentContext>({
+export const ignoreAgent = agent<unknown, IgnoreAgentContext>({
   name: 'Ignore Agent',
   model: groq('openai/gpt-oss-20b'),
   prompt: instructions({

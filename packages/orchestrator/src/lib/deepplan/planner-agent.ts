@@ -321,14 +321,5 @@ export async function plan(
   });
 
   const output = await plannerOutput.generate();
-  return createExecutionContext(
-    userRequest,
-    output as {
-      understanding: string;
-      variables: Record<string, unknown>;
-      constraints: string[];
-      success_criteria: string;
-      steps: { description: string; expected_outcome: string }[];
-    },
-  );
+  return createExecutionContext(userRequest, output);
 }

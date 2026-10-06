@@ -59,7 +59,7 @@ const write_section_tool = tool({
   },
 });
 
-const writer = agent<SectionAgentContext>({
+const writer = agent<unknown, SectionAgentContext>({
   name: 'Wiki Writer',
   model: lmstudio('qwen/qwen3-8b'),
   // model: groq('openai/gpt-oss-120b'),
@@ -203,7 +203,7 @@ type IsolatedSectionAgentContext = {
   tree: string;
   toc: string[];
 };
-const sectionWriterAgent = agent<IsolatedSectionAgentContext>({
+const sectionWriterAgent = agent<unknown, IsolatedSectionAgentContext>({
   name: 'Section Writer',
   // model: lmstudio('qwen/qwen3-8b'),
   model: groq('openai/gpt-oss-20b'),
@@ -221,7 +221,7 @@ type StitchAgentContext = {
   tree: string;
   toc: string[];
 };
-const stitchAgent = agent<StitchAgentContext>({
+const stitchAgent = agent<unknown, StitchAgentContext>({
   name: 'Stitch Agent',
   model: groq('moonshotai/kimi-k2-instruct-0905'),
   prompt: instructions({

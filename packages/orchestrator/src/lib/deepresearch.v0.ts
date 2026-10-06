@@ -88,9 +88,8 @@ async function generateSearchQueries(
     `User Query: ${input}\n\nRepository Context Summary:\n${repoContext}`,
     {},
   );
-  const result = output as { items?: string[] };
   return uniqBy(
-    (result.items ?? []).map((s: string) => s.trim()).filter(Boolean),
+    output.items.map((s: string) => s.trim()).filter(Boolean),
     (s: string) => s.toLowerCase(),
   );
 }
@@ -132,12 +131,11 @@ ${repoContext}
 Based on the above information, determine if further research is needed. If yes, provide up to four new search queries. If the research is complete and sufficient, indicate that no more research is needed.`;
 
   try {
-    const { output } = await generate(newSearchQueriesAgent, prompt, {});
-    const result = output as {
-      needsMoreResearch: boolean;
-      newQueries: string[];
-      reasoning?: string;
-    };
+    const { output: result } = await generate(
+      newSearchQueriesAgent,
+      prompt,
+      {},
+    );
 
     if (!result.needsMoreResearch) {
       console.log(
@@ -180,8 +178,7 @@ ${contextCombined}`;
 async function isPageUseful(userQuery: string, pageText: string) {
   const prompt = `User Query: ${userQuery}\n\nRepo file content\n\n${pageText}\n\nDecide if the page is useful.`;
   const { output } = await generate(pageUsefulnessAgent, prompt, {} as const);
-  const result = output as { answer: 'Yes' | 'No' };
-  return result.answer === 'Yes';
+  return output.answer === 'Yes';
 }
 
 async function extractRelevantContext(
@@ -278,16 +275,22 @@ if (import.meta.main) {
   const iterLimit = 2;
   const aggregatedContexts: string[] = [];
   const allSearchQueries: string[] = [];
-  let iteration = 0;
   const repoContext = await gatherRepoContext();
-  let searchQueriesResult = await generateSearchQueries(userQuery, repoContext);
+  const initialSearchQueries = await generateSearchQueries(
+    userQuery,
+    repoContext,
+  );
   const performSearch = search();
 
-  while (iteration < iterLimit) {
+  const research = async (
+    searchQueries: string[],
+    iteration: number,
+  ): Promise<void> => {
+    if (iteration >= iterLimit) return;
     const iterationContexts: string[] = [];
 
-    allSearchQueries.push(...searchQueriesResult);
-    const searchResults = await performSearch(searchQueriesResult);
+    allSearchQueries.push(...searchQueries);
+    const searchResults = await performSearch(searchQueries);
 
     await Promise.all(
       Object.entries(searchResults).map(async ([source, query]) => {
@@ -306,21 +309,22 @@ if (import.meta.main) {
       aggregatedContexts.push(...iterationContexts);
     }
 
-    searchQueriesResult = await getNewSearchQueries(
+    const newSearchQueries = await getNewSearchQueries(
       userQuery,
       allSearchQueries,
       aggregatedContexts,
       repoContext,
     );
-    if (searchQueriesResult.length === 0) {
+    if (newSearchQueries.length === 0) {
       console.log('No further research needed. Exiting loop.');
-      break;
-    } else {
-      allSearchQueries.push(...searchQueriesResult);
+      return;
     }
+    allSearchQueries.push(...newSearchQueries);
 
-    iteration += 1;
-  }
+    await research(newSearchQueries, iteration + 1);
+  };
+
+  await research(initialSearchQueries, 0);
 
   console.log('\nGenerating final report...');
   console.log('Search queries performed:', allSearchQueries);

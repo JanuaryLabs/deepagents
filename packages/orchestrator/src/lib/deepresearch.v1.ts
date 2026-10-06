@@ -110,7 +110,7 @@ const paragraphSummaryAgent = agent({
   output: ParagraphSummaryOutputSchema,
 });
 
-const finalReportAgent = agent<{ userQuery: string }>({
+const finalReportAgent = agent<unknown, { userQuery: string }>({
   name: 'final_report',
   model: openai('gpt-4.1'),
   prompt: (context) => `
@@ -120,18 +120,15 @@ const finalReportAgent = agent<{ userQuery: string }>({
   `,
 });
 
-type OutlineOutput = z.infer<typeof OutlineOutputSchema>;
-
 async function planOutline(userQuery: string) {
   const { output } = await generate(
     outlineAgent,
     `USER QUERY: ${userQuery}`,
     {},
   );
-  const result = output as OutlineOutput;
   return {
-    reportTitle: result.reportTitle,
-    paragraphs: result.sections.map(
+    reportTitle: output.reportTitle,
+    paragraphs: output.sections.map(
       (p: { title: string; content: string }) => ({
         title: p.title.trim(),
         content: p.content.trim(),
@@ -145,8 +142,6 @@ async function planOutline(userQuery: string) {
   } satisfies ResearchState;
 }
 
-type FirstSearchOutput = z.infer<typeof FirstSearchOutputSchema>;
-
 async function planFirstSearch(userQuery: string, paragraph: ParagraphPlan) {
   const { output } = await generate(
     firstSearchPlannerAgent,
@@ -157,10 +152,8 @@ async function planFirstSearch(userQuery: string, paragraph: ParagraphPlan) {
     ],
     { userQuery },
   );
-  return output as FirstSearchOutput;
+  return output;
 }
-
-type ReflectionSearchOutput = z.infer<typeof ReflectionSearchOutputSchema>;
 
 async function planReflectionSearch(
   userQuery: string,
@@ -175,7 +168,7 @@ async function planReflectionSearch(
     })}`,
     { userQuery },
   );
-  return output as ReflectionSearchOutput;
+  return output;
 }
 
 async function summarizeParagraph(
@@ -191,7 +184,6 @@ async function summarizeParagraph(
     search_query: searchQuery,
     search_results: snippets.slice(0, 8),
   };
-  type ParagraphSummaryOutput = z.infer<typeof ParagraphSummaryOutputSchema>;
   const { output } = await generate(
     paragraphSummaryAgent,
     [
@@ -207,8 +199,7 @@ async function summarizeParagraph(
     ],
     { userQuery },
   );
-  const out = output as ParagraphSummaryOutput;
-  paragraph.research.latestSummary = out.paragraph_latest_state.trim();
+  paragraph.research.latestSummary = output.paragraph_latest_state.trim();
 }
 
 async function runWebSearch(query: string) {

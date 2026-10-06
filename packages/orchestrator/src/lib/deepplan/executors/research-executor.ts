@@ -197,7 +197,7 @@ export const researchExecutor = agent({
     </OutputFormat>
   `,
   tools: {
-    browser_search: (groq as any).tools.browserSearch({}),
+    browser_search: groq.tools.browserSearch({}),
     scratchpad: scratchpad_tool,
   },
 });

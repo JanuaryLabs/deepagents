@@ -33,13 +33,12 @@ import {
 // const { output: research_brief } = await generate(researchTopicAgent, clarification.verification, {})
 const research_brief = `I want a comprehensive research report on opening a coworking space in Amman, Jordan that includes detailed market insights (size, growth trends, target demographics, and demand drivers), a competitor analysis (existing coworking providers, their locations, pricing models, amenities, and market share), an assessment of demand and pricing elasticity, key operational considerations (optimal locations, regulatory and licensing requirements, staffing needs, technology and infrastructure, cost structure, revenue projections, and risk factors), and actionable recommendations for a go‑to‑market strategy. Any dimensions not explicitly specified (e.g., preferred target customer segment, budget constraints, or timeline) should be treated as open‑ended and explored broadly.`;
 
-execute(leadResearcherAgent, [user(research_brief)], {
+const result = await execute(leadResearcherAgent, [user(research_brief)], {
   max_concurrent_research_units: 3,
   max_researcher_iterations: 3,
   research_iterations: 0,
-}).then((result) => {
-  printer.stdout(result, { reasoning: false });
 });
+await printer.stdout(result, { reasoning: false });
 
 // await startResearch(research_brief);
 

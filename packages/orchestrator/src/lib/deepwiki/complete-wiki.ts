@@ -22,7 +22,7 @@ type SectionAgentContext = {
 };
 
 // Agent for writing leaf sections
-const sectionWriterAgent = agent<SectionAgentContext>({
+const sectionWriterAgent = agent<unknown, SectionAgentContext>({
   name: 'Section Writer',
   model: wrapLanguageModel({
     // model: groq('moonshotai/kimi-k2-instruct-0905'),
@@ -39,7 +39,7 @@ const sectionWriterAgent = agent<SectionAgentContext>({
 });
 
 // Agent for writing parent TOC pages
-const tocPageAgent = agent<SectionAgentContext>({
+const tocPageAgent = agent<unknown, SectionAgentContext>({
   name: 'TOC Page Writer',
   model: wrapLanguageModel({
     model: groq('moonshotai/kimi-k2-instruct-0905'),

@@ -55,6 +55,6 @@ export const researcherAgent = agent({
   prompt: research_system_prompt,
   tools: {
     think_tool: scratchpad_tool,
-    browser_search: (groq as any).tools.browserSearch({}),
+    browser_search: groq.tools.browserSearch({}),
   },
 });

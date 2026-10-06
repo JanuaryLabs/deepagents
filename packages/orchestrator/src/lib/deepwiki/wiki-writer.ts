@@ -24,7 +24,7 @@ type SectionAgentContext = {
   scratchpad: string;
 };
 
-const sectionWriter = agent<SectionAgentContext>({
+const sectionWriter = agent<unknown, SectionAgentContext>({
   name: 'wiki-section-writer',
   model: wrapLanguageModel({
     // model: lmstudio('openai/gpt-oss-20b'),

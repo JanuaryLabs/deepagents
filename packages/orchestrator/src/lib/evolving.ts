@@ -231,7 +231,7 @@ async function runAdaptationCycle() {
       ],
       {},
     );
-    const { revisedPrompt } = output as { revisedPrompt: string };
+    const { revisedPrompt } = output;
 
     // Save and use revised prompt for next iteration
     await savePrompt(revisedPrompt);
@@ -241,4 +241,4 @@ async function runAdaptationCycle() {
   console.log('\n========== Adaptation Complete ==========');
 }
 
-runAdaptationCycle();
+await runAdaptationCycle();

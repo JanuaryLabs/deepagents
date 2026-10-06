@@ -128,12 +128,9 @@ const state = {
 //   stream(searchAgent, [user(`How do I build an agent?`)], state),
 // );
 
-stream(
+const result = await stream(
   searchAgent,
   [user(`How can we build an sqlite readonly agent chatbot?`)],
   state,
-).then((result) => {
-  Readable.fromWeb(result.textStream as any).pipe(
-    createWriteStream('output.md'),
-  );
-});
+);
+Readable.fromWeb(result.textStream).pipe(createWriteStream('output.md'));

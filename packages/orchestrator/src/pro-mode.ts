@@ -116,7 +116,7 @@ export async function proMode(
 }
 
 const result = await proMode('How to build deepresearch agent?', 5);
-for (let i = 0; i < result.candidates.length; i++) {
-  await writeFile(`candidate_${i + 1}.txt`, result.candidates[i]);
+for (const [i, candidate] of result.candidates.entries()) {
+  await writeFile(`candidate_${i + 1}.txt`, candidate);
 }
 await writeFile('final_answer.txt', result.final);

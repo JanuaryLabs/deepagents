@@ -284,11 +284,7 @@ export async function replan(context: ExecutionContext) {
     schema: ReplanDecisionSchema,
   });
 
-  const output = await replannerOutput.generate();
-  const decision = output as {
-    remaining_steps: typeof context.current_plan;
-    should_continue: boolean;
-  };
+  const decision = await replannerOutput.generate();
   return {
     ...context,
     current_plan: decision.remaining_steps,
