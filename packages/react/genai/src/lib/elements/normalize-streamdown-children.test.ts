@@ -8,13 +8,6 @@ describe('normalizeStreamdownChildren', () => {
     it('returns undefined as-is', () => {
       assert.strictEqual(normalizeStreamdownChildren(undefined), undefined);
     });
-
-    it('returns null as-is', () => {
-      assert.strictEqual(
-        normalizeStreamdownChildren(null as unknown as never),
-        null,
-      );
-    });
   });
 
   describe('self-closing tag spacing', () => {

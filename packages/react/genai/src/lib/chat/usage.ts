@@ -2,6 +2,7 @@ import type { UIMessage } from 'ai';
 import { get } from 'lodash-es';
 import { useMemo } from 'react';
 
+import { isRecord } from '@deepagents/context/browser';
 import {
   formatCompactNumber,
   formatNullableNumber,
@@ -87,11 +88,9 @@ export function parseUsage(source: unknown): UsageDisplay | null {
 }
 
 export function parseMetadataUsage(metadata: unknown): UsageDisplay | null {
-  if (!metadata || typeof metadata !== 'object') return null;
+  if (!isRecord(metadata)) return null;
 
-  const record = metadata as Record<string, unknown>;
-
-  return parseUsage(record.totalUsage ?? record.usage);
+  return parseUsage(metadata.totalUsage ?? metadata.usage);
 }
 
 function diffUsage(
@@ -165,7 +164,7 @@ function computeUsageTracking(messages: UIMessage[]): UsageTracking {
   for (const message of messages) {
     if (message.role !== 'assistant') continue;
 
-    const metadata = message.metadata as Record<string, unknown> | undefined;
+    const metadata = isRecord(message.metadata) ? message.metadata : undefined;
 
     const usage = parseUsage(metadata?.usage);
     const totalUsage = parseUsage(metadata?.totalUsage);

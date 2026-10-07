@@ -687,7 +687,8 @@ export const PromptInput = ({
       return new Promise((resolve) => {
         const reader = new FileReader();
 
-        reader.onloadend = () => resolve(reader.result as string);
+        reader.onloadend = () =>
+          resolve(typeof reader.result === 'string' ? reader.result : null);
         reader.onerror = () => resolve(null);
         reader.readAsDataURL(blob);
       });
@@ -715,9 +716,9 @@ export const PromptInput = ({
     const text = usingProvider
       ? controller.textInput.value
       : (() => {
-          const formData = new FormData(form);
+          const message = new FormData(form).get('message');
 
-          return (formData.get('message') as string) || '';
+          return typeof message === 'string' ? message : '';
         })();
 
     // Reset form immediately after capturing text to avoid race condition

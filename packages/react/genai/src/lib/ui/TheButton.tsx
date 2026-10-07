@@ -64,7 +64,8 @@ function isComponent(
     typeof value === 'object' &&
     value !== null &&
     '$$typeof' in value &&
-    typeof (value as Record<string, unknown>).render === 'function'
+    'render' in value &&
+    typeof value.render === 'function'
   );
 }
 

@@ -55,7 +55,7 @@ export function CopyAssistantMessageAction({
     <ChatActionButton
       aria-label={copied ? 'Copied' : 'Copy message'}
       className={cn('p-1.5', className)}
-      onClick={() => copy(extractAssistantRawText(message))}
+      onClick={() => void copy(extractAssistantRawText(message))}
       icon={
         copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />
       }
@@ -71,7 +71,7 @@ export function RegenerateAction({ className }: { className?: string }) {
     <ChatActionButton
       aria-label="Regenerate response"
       className={cn('p-1.5', className)}
-      onClick={() => regenerate({ messageId: message.id })}
+      onClick={() => void regenerate({ messageId: message.id })}
       icon={<RefreshCw className="size-3.5" />}
     />
   );
@@ -89,7 +89,7 @@ export function CopyAssistantMessageJsonAction({
     <ChatActionButton
       aria-label={copied ? 'Copied' : 'Copy debug JSON'}
       className={cn('p-1.5', className)}
-      onClick={() => copy(JSON.stringify(message, null, 2))}
+      onClick={() => void copy(JSON.stringify(message, null, 2))}
       icon={
         copied ? (
           <Check className="size-3.5" />

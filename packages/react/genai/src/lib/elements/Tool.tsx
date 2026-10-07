@@ -1,4 +1,4 @@
-import type { ToolUIPart } from 'ai';
+import type { DynamicToolUIPart, ToolUIPart } from 'ai';
 import {
   CheckCircleIcon,
   ChevronDownIcon,
@@ -31,7 +31,7 @@ export const Tool = ({ className, ...props }: ToolProps) => (
 
 export type ToolHeaderProps = {
   title?: string;
-  type: ToolUIPart['type'];
+  type: ToolUIPart['type'] | DynamicToolUIPart['type'];
   state: ToolUIPart['state'];
   className?: string;
 };
@@ -144,16 +144,6 @@ export const ToolOutput = ({
     return null;
   }
 
-  let Output = <div>{output as ReactNode}</div>;
-
-  if (typeof output === 'object' && !isValidElement(output)) {
-    Output = (
-      <CodeBlock code={JSON.stringify(output, null, 2)} language="json" />
-    );
-  } else if (typeof output === 'string') {
-    Output = <CodeBlock code={output} language="json" />;
-  }
-
   return (
     <div className={cn('space-y-2 p-4', className)} {...props}>
       <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
@@ -168,8 +158,24 @@ export const ToolOutput = ({
         )}
       >
         {errorText && <div>{errorText}</div>}
-        {Output}
+        {renderToolOutput(output)}
       </div>
     </div>
   );
 };
+
+function renderToolOutput(output: ToolUIPart['output']): ReactNode {
+  if (typeof output === 'string') {
+    return <CodeBlock code={output} language="json" />;
+  }
+  if (isValidElement(output)) {
+    return <div>{output}</div>;
+  }
+  if (typeof output === 'object') {
+    return <CodeBlock code={JSON.stringify(output, null, 2)} language="json" />;
+  }
+  if (typeof output === 'number' || typeof output === 'bigint') {
+    return <div>{output}</div>;
+  }
+  return <div />;
+}

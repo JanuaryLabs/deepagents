@@ -112,7 +112,7 @@ export class ChatManager {
     }
 
     if (this._enableResume && !this._resumed) {
-      this.chat.resumeStream();
+      void this.chat.resumeStream();
       this._resumed = true;
     }
 
@@ -184,7 +184,7 @@ export class ChatManager {
     if (!this.chat) return;
     this._hasSubmitted = true;
     this.sentAwaitingStatus = true;
-    this.chat.sendMessage({
+    void this.chat.sendMessage({
       role: 'user',
       parts: [{ type: 'text', text: message.prompt }],
       metadata: message.uploads
@@ -240,7 +240,7 @@ export class ChatManager {
 
   stop(): void {
     if (!this.chat) return;
-    this.chat.stop();
+    void this.chat.stop();
   }
 
   resetChat(prompt?: string): void {

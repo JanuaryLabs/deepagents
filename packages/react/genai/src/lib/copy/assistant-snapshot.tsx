@@ -84,7 +84,7 @@ export function AssistantSnapshot({
           size="icon-sm"
           variant="ghost"
           loading={isCopying}
-          onClick={handleCopy}
+          onClick={() => void handleCopy()}
           aria-label={label}
           icon={
             feedback?.kind === 'success' ? (

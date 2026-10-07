@@ -134,7 +134,7 @@ export const CodeBlockCopyButton = ({
       await copy(code);
       onCopy?.();
     } catch (error) {
-      onError?.(error as Error);
+      onError?.(error instanceof Error ? error : new Error(String(error)));
     }
   };
 
@@ -143,7 +143,7 @@ export const CodeBlockCopyButton = ({
   return (
     <Button
       className={cn('shrink-0', className)}
-      onClick={copyToClipboard}
+      onClick={() => void copyToClipboard()}
       size="icon"
       variant="ghost"
       {...props}

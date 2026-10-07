@@ -1,6 +1,8 @@
 import type { ChatStatus, UIMessage } from 'ai';
 import { isReasoningUIPart, isTextUIPart, isToolUIPart } from 'ai';
 
+import { isRecord } from '@deepagents/context/browser';
+
 export function thinking(status: ChatStatus, message: UIMessage) {
   if (status === 'error' || status === 'ready') {
     return null;
@@ -27,8 +29,8 @@ export function thinking(status: ChatStatus, message: UIMessage) {
       return lastPart.text;
     }
     if (isToolUIPart(lastPart)) {
-      if (lastPart.input) {
-        const input = lastPart.input as Record<string, unknown>;
+      const input = lastPart.input;
+      if (isRecord(input)) {
         const candidates = ['reasoning', 'thoughts', 'thought', 'hint'];
         for (const candidate of candidates) {
           const value = input[candidate];

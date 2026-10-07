@@ -83,7 +83,7 @@ function FileSubmitHarness({ file }: { file: File }) {
       <button
         type="button"
         onClick={() =>
-          submit({
+          void submit({
             prompt: 'look [Image #1]',
             persistedPrompt: 'look [Image #1]',
             files: [file],
@@ -102,7 +102,7 @@ function SubmitHarness() {
   return (
     <button
       type="button"
-      onClick={() => submit({ prompt: 'hello', persistedPrompt: 'hello' })}
+      onClick={() => void submit({ prompt: 'hello', persistedPrompt: 'hello' })}
     >
       Send
     </button>

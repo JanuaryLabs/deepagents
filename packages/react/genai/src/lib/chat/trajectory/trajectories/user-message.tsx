@@ -3,6 +3,7 @@ import { memo, useMemo, useState } from 'react';
 
 import {
   type UserReminderMetadata,
+  isRecord,
   stripReminders,
 } from '@deepagents/context/browser';
 import { PersistedPromptText } from '@deepagents/react-input/browser';
@@ -30,9 +31,12 @@ export function MessageMetadata({
   );
 }
 
+function metadataField(message: UIMessage, key: string): unknown {
+  return isRecord(message.metadata) ? message.metadata[key] : undefined;
+}
+
 function extractReminders(message: UIMessage): UserReminderMetadata[] {
-  const raw = (message.metadata as Record<string, unknown> | undefined)
-    ?.reminders;
+  const raw = metadataField(message, 'reminders');
   if (!Array.isArray(raw)) return [];
   return raw.filter((r): r is UserReminderMetadata => {
     if (!r || typeof r !== 'object') return false;
@@ -47,8 +51,7 @@ function extractReminders(message: UIMessage): UserReminderMetadata[] {
 }
 
 function extractUploads(message: UIMessage) {
-  const raw = (message.metadata as Record<string, unknown> | undefined)
-    ?.uploads;
+  const raw = metadataField(message, 'uploads');
   return Array.isArray(raw)
     ? raw.flatMap((value) => {
         const receipt = uploadReceiptSchema.safeParse(value);
@@ -199,9 +202,7 @@ export function UserMessageContent({
 }: {
   message: UIMessage;
 }) {
-  const remindersRef = (
-    rawMessage.metadata as Record<string, unknown> | undefined
-  )?.reminders;
+  const remindersRef = metadataField(rawMessage, 'reminders');
   const { message, reminders } = useMemo(
     () => ({
       message: stripReminders(rawMessage),
@@ -210,8 +211,7 @@ export function UserMessageContent({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- remindersRef is the load-bearing change signal: rawMessage identity often stays stable while its `metadata.reminders` array swaps in place during streaming
     [rawMessage, remindersRef],
   );
-  const rawAlias = (rawMessage.metadata as Record<string, unknown> | undefined)
-    ?.alias;
+  const rawAlias = metadataField(rawMessage, 'alias');
   const alias =
     typeof rawAlias === 'string' && rawAlias.trim().length > 0
       ? rawAlias

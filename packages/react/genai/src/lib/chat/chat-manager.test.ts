@@ -189,7 +189,7 @@ async function makeBusy(
   result: { current: TestChatHelpers },
 ): Promise<void> {
   await act(async () => {
-    manager.submit(plainSubmission('primer'));
+    await manager.submit(plainSubmission('primer'));
   });
   await waitFor(() => {
     expect(isBusy(result.current.status)).toBe(true);
@@ -204,7 +204,7 @@ describe('ChatManager', () => {
       const { result, unmount } = renderChatManager(manager, { transport });
       try {
         await act(async () => {
-          manager.submit(plainSubmission('hello'));
+          await manager.submit(plainSubmission('hello'));
         });
 
         await waitFor(() => {
@@ -225,7 +225,7 @@ describe('ChatManager', () => {
       const { result, unmount } = renderChatManager(manager, { transport });
       try {
         await act(async () => {
-          manager.submit({
+          await manager.submit({
             ...plainSubmission('hello'),
             metadata: { alias: 'test-skill' },
           });
@@ -250,7 +250,7 @@ describe('ChatManager', () => {
       try {
         expect(manager.hasSubmitted).toBe(false);
         await act(async () => {
-          manager.submit(plainSubmission('hello'));
+          await manager.submit(plainSubmission('hello'));
         });
         expect(manager.hasSubmitted).toBe(true);
       } finally {
@@ -259,9 +259,9 @@ describe('ChatManager', () => {
       }
     });
 
-    it('submit is a no-op before bind', () => {
+    it('submit is a no-op before bind', async () => {
       const manager = createManager({ onResetChat: () => {} });
-      manager.submit(plainSubmission('hello'));
+      await manager.submit(plainSubmission('hello'));
       expect(manager.hasSubmitted).toBe(false);
     });
   });
@@ -279,7 +279,7 @@ describe('ChatManager', () => {
         const before = result.current.messages.length;
 
         await act(async () => {
-          manager.submit(plainSubmission('queued'));
+          await manager.submit(plainSubmission('queued'));
         });
 
         expect(result.current.messages.length).toBe(before);
@@ -303,7 +303,7 @@ describe('ChatManager', () => {
         const before = result.current.messages.length;
 
         await act(async () => {
-          manager.submit(plainSubmission('direct'));
+          await manager.submit(plainSubmission('direct'));
         });
 
         await waitFor(() => {
@@ -328,8 +328,8 @@ describe('ChatManager', () => {
         await makeBusy(manager, result);
 
         await act(async () => {
-          manager.submit(plainSubmission('first'));
-          manager.submit(plainSubmission('second'));
+          await manager.submit(plainSubmission('first'));
+          await manager.submit(plainSubmission('second'));
         });
         expect(manager.queue.length).toBe(2);
 
@@ -360,7 +360,7 @@ describe('ChatManager', () => {
         await makeBusy(manager, result);
 
         await act(async () => {
-          manager.submit(plainSubmission('queued'));
+          await manager.submit(plainSubmission('queued'));
         });
         expect(manager.queue.length).toBe(1);
 
@@ -391,8 +391,8 @@ describe('ChatManager', () => {
         await makeBusy(manager, result);
 
         await act(async () => {
-          manager.submit(plainSubmission('a'));
-          manager.submit(plainSubmission('b'));
+          await manager.submit(plainSubmission('a'));
+          await manager.submit(plainSubmission('b'));
         });
         manager.removeFromQueue(manager.queue[0].id);
 
@@ -415,8 +415,8 @@ describe('ChatManager', () => {
         await makeBusy(manager, result);
 
         await act(async () => {
-          manager.submit(plainSubmission('a'));
-          manager.submit(plainSubmission('b'));
+          await manager.submit(plainSubmission('a'));
+          await manager.submit(plainSubmission('b'));
         });
         manager.clearQueue();
 
@@ -438,7 +438,7 @@ describe('ChatManager', () => {
         await makeBusy(manager, result);
 
         await act(async () => {
-          manager.submit({
+          await manager.submit({
             prompt: 'List the latest conversations.\n\nfrom today',
             persistedPrompt: '/prompts:recent from today',
             editableSource: {
@@ -727,7 +727,7 @@ describe('ChatManager', () => {
       try {
         await makeBusy(manager, result);
         await act(async () => {
-          manager.submit(plainSubmission('queued'));
+          await manager.submit(plainSubmission('queued'));
         });
         expect(manager.queue.length).toBe(1);
 

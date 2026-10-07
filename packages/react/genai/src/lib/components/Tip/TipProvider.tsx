@@ -122,7 +122,7 @@ export function TipProvider<C>({
   const pick = useEffectEvent(() => {
     if (selecting.current) return;
     selecting.current = true;
-    selectTip(tips, context, session)
+    void selectTip(tips, context, session)
       .then((result) => {
         if (result) {
           setTip(result.text);

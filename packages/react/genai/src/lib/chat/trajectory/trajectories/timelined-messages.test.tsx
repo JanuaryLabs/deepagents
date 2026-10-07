@@ -46,10 +46,6 @@ vi.mock('../../usage.ts', () => ({
   formatUsageBreakdown: () => '',
 }));
 
-vi.mock('@deepagents/context/browser', () => ({
-  stripReminders: (msg: UIMessage) => msg,
-}));
-
 let messageCounter = 0;
 
 function makeUserMessage(

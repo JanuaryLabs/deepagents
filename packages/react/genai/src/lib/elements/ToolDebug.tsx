@@ -35,7 +35,7 @@ export function DynamicToolDebug({ part }: { part: DynamicToolUIPart }) {
   return (
     <Tool open={open} onOpenChange={setOpen}>
       {}
-      <ToolHeader state={part.state} type={part.type as 'tool-dynamic'} />
+      <ToolHeader state={part.state} type={part.type} />
       <ToolContent>
         <ToolInput input={part.input} />
         <ToolOutput

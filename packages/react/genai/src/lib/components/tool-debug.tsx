@@ -42,7 +42,7 @@ export function DynamicToolDebug({ part }: { part: DynamicToolUIPart }) {
         title={`Executing ${part.toolName}`}
         state={part.state}
 
-        type={part.type as 'tool-dynamic'}
+        type={part.type}
       />
       <ToolContent>
         <ToolInput input={part.input} />
