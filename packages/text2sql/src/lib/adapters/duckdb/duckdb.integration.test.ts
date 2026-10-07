@@ -65,6 +65,53 @@ it('executes grounded DuckDB friendly SQL through the public adapter', async () 
   );
 });
 
+it('rejects an execute() result that holds no rows array', async () => {
+  await using database = await duckdb.database();
+  const { connection } = database;
+  await connection.run(`
+    CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR NOT NULL);
+    INSERT INTO users VALUES (1, 'Ada');
+  `);
+  const query = 'SELECT id, name FROM users';
+  // The policy checks before execution read rows through the same execute
+  // function, so only the query under test gets the shape DuckDB rejects.
+  const execute = async (sql: string) => {
+    const rows = (await connection.runAndReadAll(sql)).getRowObjectsJson();
+    return sql === query ? { recordset: rows } : rows;
+  };
+  const adapter = new DuckDB({ execute, grounding: [tables()] });
+
+  await assert.rejects(
+    adapter.execute(query),
+    /DuckDB execute\(\) must return an array of rows/,
+  );
+});
+
+for (const [shape, wrap] of [
+  ['{ data }', (rows: unknown[]) => ({ data: rows })],
+  ['{ rows }', (rows: unknown[]) => ({ rows })],
+] as const) {
+  it(`reads the rows of an execute() result shaped ${shape}`, async () => {
+    await using database = await duckdb.database();
+    const { connection } = database;
+    await connection.run(`
+      CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR NOT NULL);
+      INSERT INTO users VALUES (1, 'Ada'), (2, 'Grace');
+    `);
+    const execute = async (sql: string) =>
+      wrap((await connection.runAndReadAll(sql)).getRowObjectsJson());
+    const adapter = new DuckDB({ execute, grounding: [tables()] });
+
+    assert.deepEqual(
+      await adapter.execute('SELECT id, name FROM users ORDER BY id'),
+      [
+        { id: 1, name: 'Ada' },
+        { id: 2, name: 'Grace' },
+      ],
+    );
+  });
+}
+
 it('supports native DuckDB pivot and as-of join syntax', async () => {
   await using database = await duckdb.database();
   const { connection } = database;
