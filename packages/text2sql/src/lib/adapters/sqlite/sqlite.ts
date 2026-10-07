@@ -49,33 +49,6 @@ export type SqliteAdapterOptions = {
   grounding: GroundingFn[];
 };
 
-type ColumnRow = {
-  name: string | null | undefined;
-  type: string | null | undefined;
-  pk?: number | null | undefined;
-};
-
-type IndexListRow = {
-  seq?: number | null | undefined;
-  name?: string | null | undefined;
-  unique?: number | null | undefined;
-  origin?: string | null | undefined;
-};
-
-type IndexInfoRow = {
-  seqno?: number | null | undefined;
-  cid?: number | null | undefined;
-  name?: string | null | undefined;
-};
-type ForeignKeyRow = {
-  id: number | null | undefined;
-  table: string | null | undefined;
-  from: string | null | undefined;
-  to: string | null | undefined;
-};
-
-const LOW_CARDINALITY_LIMIT = 20;
-
 export function formatError(sql: string, error: unknown) {
   const errorMessage =
     error instanceof Error
@@ -136,10 +109,6 @@ export class Sqlite extends Adapter {
     } catch (error) {
       return JSON.stringify(formatError(sql, error));
     }
-  }
-
-  #quoteIdentifier(name: string) {
-    return `'${name.replace(/'/g, "''")}'`;
   }
 
   protected override async queryRows(sql: string): Promise<unknown[]> {
