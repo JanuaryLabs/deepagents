@@ -4,7 +4,6 @@ import { Adapter, type GroundingFn } from '../adapter.ts';
 import { PostHogSqlPolicyAnalyzer } from './posthog.sql-policy.ts';
 import type {
   PostHogQueryRequest,
-  PostHogQueryResponse,
   PostHogQueryValues,
   PostHogTransport,
 } from './types.ts';

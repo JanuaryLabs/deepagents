@@ -10,7 +10,6 @@ import type { GroundingContext } from '../groundings/context.ts';
 import type { View } from '../groundings/view.grounding.ts';
 import type { PostHog } from './posthog.ts';
 import type {
-  PostHogDatabaseField,
   PostHogDatabaseFieldType,
   PostHogDatabaseTable,
   PostHogDatabaseTableType,

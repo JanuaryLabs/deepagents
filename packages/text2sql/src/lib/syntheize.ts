@@ -1,6 +1,5 @@
 import { groq } from '@ai-sdk/groq';
 import { writeFileSync } from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
 import pg from 'pg';
 import z from 'zod';
 

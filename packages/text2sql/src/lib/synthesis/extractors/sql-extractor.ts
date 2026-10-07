@@ -5,7 +5,6 @@ import z from 'zod';
 import {
   ContextEngine,
   InMemoryContextStore,
-  createBashTool,
   fragment,
   persona,
   structuredOutput,

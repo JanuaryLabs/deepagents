@@ -4,9 +4,6 @@ import z from 'zod';
 
 import { agent, thirdPersonPrompt } from '@deepagents/agent';
 
-import type { Introspection } from '../adapters/adapter.ts';
-import { databaseSchemaPrompt } from '../prompt.ts';
-
 type SuggestionsAgentContext = {
   context?: string;
   adapterInfo?: string;

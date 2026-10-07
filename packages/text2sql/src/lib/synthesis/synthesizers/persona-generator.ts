@@ -8,7 +8,6 @@ import {
   type ContextFragment,
   InMemoryContextStore,
   XmlRenderer,
-  createBashTool,
   fragment,
   guardrail,
   persona as personaFragment,

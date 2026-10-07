@@ -7,7 +7,6 @@ import { type AgentModel } from '@deepagents/agent';
 import {
   ContextEngine,
   InMemoryContextStore,
-  createBashTool,
   fragment,
   guardrail,
   persona as personaFragment,
