@@ -130,13 +130,23 @@ describe('createBinaryBridges', () => {
 describe('path argument detection', () => {
   // Helper to run command and check if path was resolved
   async function testPathDetection(arg: string, shouldResolve: boolean) {
+    // Bridge node itself rather than the host's echo: GNU echo answers flags
+    // such as --version instead of printing them.
     const bash = new Bash({
       fs: new ReadWriteFs({ root: process.cwd() }),
-      customCommands: createBinaryBridges('echo'),
+      customCommands: createBinaryBridges({
+        name: 'argv',
+        binaryPath: process.execPath,
+      }),
     });
+    const printArgs =
+      'process.stdout.write(process.argv.slice(1).join(String.fromCharCode(32)))';
 
-    // Echo just returns args, so we can check what was passed
-    const result = await bash.exec(`echo ${arg}`);
+    // The bridge passes `-` flags through untouched; `--` keeps node from
+    // reading the argument under test as its own option.
+    const result = await bash.exec(
+      `argv --eval=${JSON.stringify(printArgs)} -- ${arg}`,
+    );
 
     if (shouldResolve) {
       // If path was resolved, it should be an absolute path
