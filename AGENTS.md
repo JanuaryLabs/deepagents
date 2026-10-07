@@ -4,6 +4,8 @@
 
 - **Reproduce first.** For any bug fix — even with a pre-diagnosed root cause — reproduce the failure live (a throwaway scratchpad script against the real CLI/API/library) before writing the red test or the fix. Reproduction confirms the diagnosis, yields real fixture payloads for tests, and surfaces adjacent breaks the diagnosis missed.
 
+- **Cite a package call site before proposing new capability.** A gap that only a demo, eval, or test exercises is not a gap. Name the `packages/` call site (file:line) that needs the capability, or drop the proposal — never justify it with a deployment scenario nobody has wired up.
+
 ## Testing
 
 - Focus on **integration tests** that test entire flows, not unit tests for individual functions.
