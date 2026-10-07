@@ -1,9 +1,6 @@
 import spawn, { SubprocessError } from 'nano-spawn';
 
-import {
-  DockerSandboxError,
-  PackageInstallError,
-} from '../docker-sandbox-errors.ts';
+import { PackageInstallError } from '../docker-sandbox-errors.ts';
 import { shellQuote } from '../shell-quote.ts';
 import type { CommandResult } from '../types.ts';
 
@@ -52,7 +49,14 @@ export function isDebianBased(image: string): boolean {
   return debianPatterns.some((pattern) => lower.includes(pattern));
 }
 
+/** The container CLI an installer runs commands with, and the error it raises. */
+export interface InstallerCli {
+  binary: string;
+  SandboxError: new (message: string, containerId?: string) => Error;
+}
+
 export function createInstallerContext(
+  cli: InstallerCli,
   containerId: string,
   image: string,
 ): InstallerContext {
@@ -66,7 +70,7 @@ export function createInstallerContext(
 
   const exec = async (command: string): Promise<CommandResult> => {
     try {
-      const result = await spawn('docker', [
+      const result = await spawn(cli.binary, [
         'exec',
         containerId,
         'sh',
@@ -95,7 +99,7 @@ export function createInstallerContext(
       const attempt = (async () => {
         const result = await exec('uname -m');
         if (result.exitCode !== 0) {
-          throw new DockerSandboxError(
+          throw new cli.SandboxError(
             `Failed to detect container architecture: ${result.stderr}`,
             containerId,
           );

@@ -1,8 +1,28 @@
+import { SubprocessError } from 'nano-spawn';
 import { type ChildProcess } from 'node:child_process';
 import { Readable } from 'node:stream';
 
 import { shellQuote } from './shell-quote.ts';
-import type { ExitInfo, SandboxProcess } from './types.ts';
+import type { CommandResult, ExitInfo, SandboxProcess } from './types.ts';
+
+/**
+ * The result of a CLI command that nano-spawn rejected: its output and exit
+ * code, with the error message standing in for an empty stderr.
+ */
+export function commandResultFrom(error: unknown): CommandResult {
+  if (error instanceof SubprocessError) {
+    return {
+      stdout: error.stdout,
+      stderr: error.stderr || error.message,
+      exitCode: error.exitCode ?? 1,
+    };
+  }
+  return {
+    stdout: '',
+    stderr: error instanceof Error ? error.message : '',
+    exitCode: 1,
+  };
+}
 
 /**
  * Bridge a Node `child_process` — a `docker exec` / `container exec` child —

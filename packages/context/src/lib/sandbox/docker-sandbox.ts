@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { toSandboxProcess } from './cli-process.ts';
+import { commandResultFrom, toSandboxProcess } from './cli-process.ts';
 import type {
   CommonSandboxOptions,
   ContainerEngine,
@@ -552,7 +552,12 @@ export const dockerEngine: ContainerEngine<DockerCommonOptions> = {
 
   defaultImage: 'bash:5.3-alpine3.24',
 
-  createInstallerContext,
+  createInstallerContext: (containerId, image) =>
+    createInstallerContext(
+      { binary: 'docker', SandboxError: DockerSandboxError },
+      containerId,
+      image,
+    ),
 
   async imageExists(tag: string): Promise<boolean> {
     try {
@@ -772,18 +777,7 @@ async function executeDockerCommand(
       const result = await spawn('docker', execArgs(command));
       return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
     } catch (error) {
-      if (error instanceof SubprocessError) {
-        return {
-          stdout: error.stdout,
-          stderr: error.stderr || error.message,
-          exitCode: error.exitCode ?? 1,
-        };
-      }
-      return {
-        stdout: '',
-        stderr: error instanceof Error ? error.message : '',
-        exitCode: 1,
-      };
+      return commandResultFrom(error);
     }
   }
 

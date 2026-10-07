@@ -21,15 +21,12 @@ import type {
   SandboxVolume,
 } from './container-engine.ts';
 import { ContainerfileStrategy, RuntimeStrategy } from './container-sandbox.ts';
-import { PackageInstallError } from './docker-sandbox-errors.ts';
 import {
   type Installer,
-  type InstallerContext,
-  type PackageManager,
-  isDebianBased,
+  createInstallerContext,
 } from './installers/installer.ts';
 import { shellQuote } from './shell-quote.ts';
-import type { CommandResult, DisposableSandbox } from './types.ts';
+import type { DisposableSandbox } from './types.ts';
 
 export {
   AppleContainerCreationError,
@@ -332,7 +329,13 @@ export const appleEngine: ContainerEngine<AppleContainerCommonOptions> = {
 
   defaultImage: 'docker.io/library/bash:5.3-alpine3.24',
 
-  createInstallerContext: createAppleInstallerContext,
+  // The Docker installer suite, driven through `container exec`.
+  createInstallerContext: (containerId, image) =>
+    createInstallerContext(
+      { binary: CLI, SandboxError: AppleContainerSandboxError },
+      containerId,
+      image,
+    ),
 
   async imageExists(tag: string): Promise<boolean> {
     try {
@@ -392,125 +395,6 @@ export const appleEngine: ContainerEngine<AppleContainerCommonOptions> = {
       new AppleContainerVolumeRemoveError(name, reason),
   },
 };
-
-/**
- * Apple-container installer context: the Docker installer suite (`pkg`, `npm`,
- * `pip`, `urlBinary`, `githubRelease`, `bin`) runs against this, driving the
- * container through `container exec` instead of `docker exec`. The installer
- * classes are shared verbatim; only this exec/arch/package-manager wiring is
- * forked.
- */
-function createAppleInstallerContext(
-  containerId: string,
-  image: string,
-): InstallerContext {
-  const packageManager: PackageManager = isDebianBased(image)
-    ? 'apt-get'
-    : 'apk';
-
-  let archPromise: Promise<string> | null = null;
-  const ensuredTools = new Set<string>();
-  let aptUpdated = false;
-
-  const exec = async (command: string): Promise<CommandResult> => {
-    try {
-      const result = await spawn(CLI, [
-        'exec',
-        containerId,
-        'sh',
-        '-c',
-        command,
-      ]);
-      return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
-    } catch (error) {
-      if (error instanceof SubprocessError) {
-        return {
-          stdout: error.stdout,
-          stderr: error.stderr,
-          exitCode: error.exitCode ?? 1,
-        };
-      }
-      return {
-        stdout: '',
-        stderr: error instanceof Error ? error.message : '',
-        exitCode: 1,
-      };
-    }
-  };
-
-  const arch = async (): Promise<string> => {
-    if (!archPromise) {
-      const attempt = (async () => {
-        const result = await exec('uname -m');
-        if (result.exitCode !== 0) {
-          throw new AppleContainerSandboxError(
-            `Failed to detect container architecture: ${result.stderr}`,
-            containerId,
-          );
-        }
-        return result.stdout.trim();
-      })();
-      archPromise = attempt.catch((err) => {
-        archPromise = null;
-        throw err;
-      });
-    }
-    return archPromise;
-  };
-
-  const installPackages = async (packages: string[]): Promise<void> => {
-    if (packages.length === 0) return;
-    const quoted = packages.map(shellQuote).join(' ');
-
-    let cmd: string;
-    if (packageManager === 'apt-get') {
-      cmd = aptUpdated
-        ? `apt-get install -y ${quoted}`
-        : `apt-get update && apt-get install -y ${quoted}`;
-    } else {
-      cmd = `apk add --no-cache ${quoted}`;
-    }
-
-    const result = await exec(cmd);
-    if (result.exitCode !== 0) {
-      throw new PackageInstallError(
-        packages,
-        image,
-        packageManager,
-        result.stderr,
-        containerId,
-      );
-    }
-    if (packageManager === 'apt-get') aptUpdated = true;
-  };
-
-  const ensureTool = async (
-    checkName: string,
-    installName?: string,
-  ): Promise<void> => {
-    const cacheKey = installName ?? checkName;
-    if (ensuredTools.has(cacheKey)) return;
-
-    const check = await exec(`which ${shellQuote(checkName)}`);
-    if (check.exitCode === 0) {
-      ensuredTools.add(cacheKey);
-      return;
-    }
-
-    await installPackages([installName ?? checkName]);
-    ensuredTools.add(cacheKey);
-  };
-
-  return {
-    containerId,
-    image,
-    packageManager,
-    arch,
-    exec,
-    installPackages,
-    ensureTool,
-  };
-}
 
 async function runAppleBuild(
   args: string[],

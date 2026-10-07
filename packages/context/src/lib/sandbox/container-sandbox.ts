@@ -1,4 +1,4 @@
-import spawn, { SubprocessError } from 'nano-spawn';
+import spawn from 'nano-spawn';
 import { spawn as childSpawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import {
   base64ReadCommand,
   base64WriteCommands,
+  commandResultFrom,
   existsCommand,
   toSandboxProcess,
 } from './cli-process.ts';
@@ -467,18 +468,7 @@ export abstract class ContainerSandboxStrategy<
         exitCode: 0,
       };
     } catch (error) {
-      if (error instanceof SubprocessError) {
-        return {
-          stdout: error.stdout,
-          stderr: error.stderr || error.message,
-          exitCode: error.exitCode ?? 1,
-        };
-      }
-      return {
-        stdout: '',
-        stderr: error instanceof Error ? error.message : '',
-        exitCode: 1,
-      };
+      return commandResultFrom(error);
     }
   }
 
