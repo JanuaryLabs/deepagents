@@ -77,11 +77,10 @@ export interface SandboxProcess {
 
 /**
  * Sandbox contract used throughout this package: buffered command execution,
- * file IO, and a lifecycle hook. Every backend (virtual, docker, agent-os)
- * implements this so callers can dispose uniformly. Backends that honor
- * `options.signal` forward it to their runner; others ignore. Pure
- * backends with no external resources (e.g. virtual-sandbox) supply a
- * no-op `dispose()`.
+ * file IO, and a lifecycle hook. Every backend implements this so callers can
+ * dispose uniformly. Backends that honor `options.signal` forward it to their
+ * runner; others ignore. Pure backends with no external resources (e.g.
+ * virtual-sandbox) supply a no-op `dispose()`.
  *
  * `spawn` is optional: only backends that can honestly expose unbuffered
  * stdio (e.g. Docker or Apple Container sandboxes) implement it. Callers

@@ -1,16 +1,15 @@
 ---
 title: Sandbox
-description: Execute real sandbox commands across Docker, Apple Container, Microsandbox, Daytona, WASM, virtual, and custom backends
+description: Execute real sandbox commands across Docker, Apple Container, Microsandbox, Daytona, virtual, and custom backends
 ---
 
 The sandbox system lets AI agents execute real commands in isolated
 environments. Choose between Docker containers for portable full binary
 execution, Apple Container lightweight VMs for stronger local isolation on
 Apple silicon, Microsandbox microVMs for local hardware-isolated OCI images,
-caller-owned Daytona sandboxes for managed remote workspaces, WASM virtual
-machines for lightweight in-process execution, virtual file systems for
-simulation, custom `Sandbox` implementations for specialized policy, or binary
-bridges to combine approaches.
+caller-owned Daytona sandboxes for managed remote workspaces, virtual file
+systems for simulation, custom `Sandbox` implementations for specialized
+policy, or binary bridges to combine approaches.
 
 ## When to Use What
 
@@ -23,14 +22,13 @@ bridges to combine approaches.
 | [`createMicrosandboxSandbox`](/docs/context/microsandbox-sandbox) + `createBashTool` | Agent needs OCI images in local microVMs with streaming process output | No |
 | `createMicrosandboxSandbox` | Direct local microVM control with get-or-create named sandboxes | No |
 | `createDaytonaSandbox(client, options)` + `createBashTool` | Managed remote sandbox with caller-owned Daytona client | No |
-| `createAgentOsSandbox` | Lightweight WASM execution, no Docker needed | No |
 | `createVirtualSandbox` | In-process bash with a virtual filesystem and optional JavaScript command support | No |
 | `createBinaryBridges` | Bridge specific host binaries into just-bash virtual FS | No |
 
 All AI-agent-facing surfaces compose the same way: pick a backend factory
 (`createDockerSandbox` / `createAppleContainerSandbox` /
 `createMicrosandboxSandbox` / `createDaytonaSandbox` /
-`createAgentOsSandbox` / `createVirtualSandbox`), then wrap it with
+`createVirtualSandbox`), then wrap it with
 `createBashTool({ sandbox })` to get the bash tool and file tools. Skill
 provisioning and discovery remain the application's responsibility. For
 per-command file-change tracking, first decorate a real backend
@@ -43,7 +41,7 @@ directory.
 
 All backends expose the buffered command + file API (`executeCommand`,
 `readFile`, `writeFiles`, `dispose`). Backends that can stream real processes,
-including Docker, Apple Container, Microsandbox, Agent OS, and Daytona
+including Docker, Apple Container, Microsandbox, and Daytona
 sandboxes, additionally expose an optional `spawn(command, options?)` for live
 streaming stdio.
 Feature-detect it with `if (!sandbox.spawn) { ... }` when writing
@@ -62,10 +60,6 @@ await using backend = await createDockerSandbox({ installers: [pkg(['jq'])] });
 await backend.executeCommand('jq --version');
 // backend.dispose() runs automatically when this scope exits
 ```
-
-<Callout type="warn">
-  Agent OS is a v0.1.0 preview. Requires optional peer dependencies `@rivet-dev/agent-os-core` and `@rivet-dev/agent-os-common`.
-</Callout>
 
 ## Quick Start: Docker + Bash Tool
 
@@ -207,48 +201,6 @@ const { bash } = await createBashTool({
 ```
 
 Binary bridges resolve virtual paths to real host paths and use the host's `PATH` for binary resolution, while restricting access via optional `allowedArgs` regex.
-
-## Quick Start: Agent OS
-
-WASM-based execution with no Docker dependency and ~6ms cold start:
-
-```typescript
-import common from '@rivet-dev/agent-os-common';
-import { createAgentOsSandbox } from '@deepagents/context';
-
-const sandbox = await createAgentOsSandbox({
-  software: [common],
-});
-
-try {
-  const result = await sandbox.executeCommand('echo "Hello from WASM!"');
-  console.log(result.stdout);
-
-  await sandbox.writeFiles([
-    { path: '/tmp/hello.txt', content: 'Written inside WASM' },
-  ]);
-
-  const content = await sandbox.readFile('/tmp/hello.txt');
-  console.log(content);
-} finally {
-  await sandbox.dispose();
-}
-```
-
-Or use `useAgentOsSandbox` for automatic cleanup:
-
-```typescript
-import common from '@rivet-dev/agent-os-common';
-import { useAgentOsSandbox } from '@deepagents/context';
-
-const output = await useAgentOsSandbox(
-  { software: [common] },
-  async (sandbox) => {
-    const result = await sandbox.executeCommand('ls /');
-    return result.stdout;
-  },
-);
-```
 
 ## Quick Start: Virtual Sandbox
 
@@ -393,6 +345,5 @@ await createBashTool({
 - [Docker Sandbox](/docs/context/docker-sandbox) - Three strategies for container creation
 - [Apple Container Sandbox](/docs/context/apple-container-sandbox) - Per-container lightweight VMs on Apple silicon
 - [Microsandbox Sandbox](/docs/context/microsandbox-sandbox) - OCI images in local microVMs
-- [Agent OS Sandbox](/docs/context/agent-os-sandbox) - WASM-based execution without Docker
 - [Subcommand Builders](/docs/context/subcommand) - Build just-bash command groups with dispatch and repair helpers
 - [Architecture: Sandbox](/docs/context/architecture-sandbox) - Strategy pattern and internals

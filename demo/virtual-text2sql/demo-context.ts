@@ -9,8 +9,8 @@ import { instructions } from '@deepagents/text2sql';
 /**
  * Shared ContextEngine for the demo. Fragments here are **sandbox-agnostic**:
  * they teach SQL semantics, query workflows, error recovery, and the
- * `sql run <db> "SELECT ..."` invocation form — every demo (docker, agent-os,
- * any future backend) gets a `sql` command via its sandbox of choice.
+ * `sql run <db> "SELECT ..."` invocation form — every demo gets a `sql`
+ * command via its sandbox of choice.
  *
  * Per-sandbox concerns (volume mounts, env wiring) stay in the individual
  * demo files. Schema seeding is also shared — see `index()`.
@@ -27,8 +27,8 @@ export default context;
 
 /**
  * Run `sql index` inside the given sandbox, read the manifest, and return the
- * generated `ContextFragment[]`. Shared by both docker and agent-os demos —
- * the sandbox's `executeCommand` and `readFile` are the only seam.
+ * generated `ContextFragment[]`. The sandbox's `executeCommand` and `readFile`
+ * are the only seam.
  */
 export async function index(
   sandbox: DisposableSandbox,

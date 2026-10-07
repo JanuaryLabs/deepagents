@@ -28,10 +28,10 @@ like store implementations, sandbox tooling, and filesystem-based skill loading.
 The server-side package also ships the sandbox primitives used by
 `@deepagents/text2sql` and other tool-driven agents. Use `createBashTool()`
 with `createVirtualSandbox()`, `createDockerSandbox()`,
-`createAppleContainerSandbox()`, `createMicrosandboxSandbox()`,
-`createDaytonaSandbox(client, options)`, or `createAgentOsSandbox()` depending
-on whether commands should run in memory, Docker, Apple Container lightweight
-VMs, Microsandbox microVMs, managed Daytona sandboxes, or Agent OS.
+`createAppleContainerSandbox()`, `createMicrosandboxSandbox()`, or
+`createDaytonaSandbox(client, options)` depending on whether commands should
+run in memory, Docker, Apple Container lightweight VMs, Microsandbox microVMs,
+or managed Daytona sandboxes.
 Virtual sandboxes can opt into in-process JavaScript execution with
 `createVirtualSandbox({ javascript: true, ... })`.
 

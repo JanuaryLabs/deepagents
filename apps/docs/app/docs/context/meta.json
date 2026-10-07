@@ -45,7 +45,6 @@
     "docker-sandbox",
     "apple-container-sandbox",
     "microsandbox-sandbox",
-    "agent-os-sandbox",
     "subcommand",
     "architecture-sandbox",
     "---Observability---",
