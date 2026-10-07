@@ -228,8 +228,7 @@ export class SqliteStreamStore extends StreamStore {
   async appendChunks(chunks: StreamChunkData[]): Promise<void> {
     if (chunks.length === 0) return;
     const failures = collectStreamFailures(chunks);
-    this.#db.exec('BEGIN TRANSACTION');
-    try {
+    this.#transaction(() => {
       for (const chunk of chunks) {
         this.#stmt(
           `INSERT INTO stream_chunks (streamId, seq, data, createdAt)
@@ -256,11 +255,7 @@ export class SqliteStreamStore extends StreamStore {
           }
         }
       }
-      this.#db.exec('COMMIT');
-    } catch (error) {
-      this.#db.exec('ROLLBACK');
-      throw error;
-    }
+    });
   }
 
   async getChunks(

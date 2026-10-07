@@ -996,6 +996,26 @@ describe('Stream Chunks', () => {
       assert.strictEqual(chunks[2].seq, 2);
     });
 
+    it("rejects with SQLite's disk-full error when the database runs out of space mid-append", async () => {
+      using connection = new DatabaseSync(':memory:');
+      const store = new SqliteStreamStore(connection);
+      const stream = createStream();
+      await store.createStream(stream);
+      // Capping the page count stands in for a full disk: SQLite ends the
+      // transaction itself when a write cannot get another page.
+      const { page_count } = connection.prepare('PRAGMA page_count').get() as {
+        page_count: number;
+      };
+      connection.exec(`PRAGMA max_page_count = ${page_count}`);
+
+      await assert.rejects(
+        store.appendChunks([
+          createChunk(stream.id, 0, textDeltaChunk(0, 'x'.repeat(200_000))),
+        ]),
+        { errcode: 13, message: /database or disk is full/ },
+      );
+    });
+
     it('should retrieve chunks from a given sequence', async () => {
       await using database = await sqlite.database();
       const store = new SqliteStreamStore(database.connection);
