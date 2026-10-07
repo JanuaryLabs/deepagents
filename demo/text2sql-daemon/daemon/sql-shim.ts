@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 import { cac } from 'cac';
-import { JSONRPCClient, JSONRPCErrorException } from 'json-rpc-2.0';
+import {
+  JSONRPCClient,
+  JSONRPCErrorException,
+  type JSONRPCResponse,
+  isJSONRPCResponse,
+} from 'json-rpc-2.0';
 import * as path from 'node:path';
 import { v7 } from 'uuid';
 
@@ -62,27 +67,64 @@ const client = new JSONRPCClient(async (jsonRPCRequest) => {
   } catch {
     fail(`daemon returned non-JSON body: ${text.slice(0, 200)}`);
   }
-  client.receive(body as never);
+  if (!isResponsePayload(body)) {
+    fail(`daemon returned a non-JSON-RPC body: ${text.slice(0, 200)}`);
+  }
+  client.receive(body);
 });
 
-async function rpc<T>(method: string, params?: unknown): Promise<T> {
+async function rpc(method: string, params?: unknown): Promise<unknown> {
   try {
-    return (await client.request(method, params)) as T;
+    return await client.request(method, params);
   } catch (error) {
     if (error instanceof JSONRPCErrorException) fail(error.message);
     throw error;
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((v) => typeof v === 'string');
+}
+
+/** One response or a batch. `isJSONRPCResponse` reads properties, so it only gets objects. */
+function isResponsePayload(
+  value: unknown,
+): value is JSONRPCResponse | JSONRPCResponse[] {
+  const isResponse = (item: unknown) =>
+    isRecord(item) && isJSONRPCResponse(item);
+  return Array.isArray(value) ? value.every(isResponse) : isResponse(value);
+}
+
+/** `text2sql.run`'s result (`Text2SqlRunResult`). */
 interface RunResult {
   rows: unknown[];
   columns: string[];
 }
 
+function isRunResult(value: unknown): value is RunResult {
+  return (
+    isRecord(value) && Array.isArray(value.rows) && isStringArray(value.columns)
+  );
+}
+
+/** `text2sql.index`'s result in the daemon. */
 interface IndexResult {
   fragments: unknown[];
   resolvedNames: string[];
   events?: unknown[];
+}
+
+function isIndexResult(value: unknown): value is IndexResult {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.fragments) &&
+    isStringArray(value.resolvedNames) &&
+    (value.events === undefined || Array.isArray(value.events))
+  );
 }
 
 async function runCommand(
@@ -93,7 +135,9 @@ async function runCommand(
   const sql = sqlParts.join(' ').trim();
   if (!sql) fail('no query provided');
 
-  const result = await rpc<RunResult>('text2sql.run', { db, sql });
+  const result = await rpc('text2sql.run', { db, sql });
+  if (!isRunResult(result))
+    fail('daemon returned an invalid text2sql.run result');
 
   const { mkdir, writeFile } = await import('node:fs/promises');
 
@@ -114,7 +158,7 @@ async function validateCommand(
 ): Promise<number> {
   const sql = sqlParts.join(' ').trim();
   if (!sql) fail('no query provided');
-  await rpc<{ sql: string }>('text2sql.validate', { db, sql });
+  await rpc('text2sql.validate', { db, sql });
   process.stdout.write('valid\n');
   return 0;
 }
@@ -128,7 +172,10 @@ async function indexCommand(
   if (names.length > 0) params.names = names;
   if (verbose) params.emitEvents = true;
 
-  const result = await rpc<IndexResult>('text2sql.index', params);
+  const result = await rpc('text2sql.index', params);
+  if (!isIndexResult(result)) {
+    fail('daemon returned an invalid text2sql.index result');
+  }
 
   const { mkdir, writeFile } = await import('node:fs/promises');
 

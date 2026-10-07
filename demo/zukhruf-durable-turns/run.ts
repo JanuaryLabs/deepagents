@@ -58,15 +58,7 @@ console.log(
 );
 
 const reader = first.stream.getReader();
-let deltas = 0;
-while (deltas < 5) {
-  const { done, value } = await reader.read();
-  if (done) break;
-  if (value.type === 'text-delta') {
-    process.stdout.write(value.delta);
-    deltas += 1;
-  }
-}
+const deltas = await printTextDeltas(reader, 5);
 await reader.cancel();
 console.log(
   `\n\n[detached after ${deltas} chunks] the root keeps running: it spawns the specialist in a separate chat and waits for its FINAL_ANSWER with wait_agent.\n`,
@@ -87,3 +79,17 @@ await statusLog;
 console.log(
   `\n[done] the specialist's FINAL_ANSWER was consumed inside the root turn; root and specialist used independent histories, streams, mailboxes, and queue keys. Root container "sandbox-${conversation.chatId}" remains attached to its chat.\n`,
 );
+
+/** Prints up to `limit` text deltas from `source`; returns how many it printed. */
+async function printTextDeltas(source: typeof reader, limit: number) {
+  let printed = 0;
+  while (printed < limit) {
+    const { done, value } = await source.read();
+    if (done) break;
+    if (value.type === 'text-delta') {
+      process.stdout.write(value.delta);
+      printed += 1;
+    }
+  }
+  return printed;
+}

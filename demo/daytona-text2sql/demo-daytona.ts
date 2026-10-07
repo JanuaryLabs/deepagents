@@ -103,12 +103,17 @@ const demoAgent = agent({
   maxGuardrailRetries: 3,
 });
 
-let text =
-  'List the top 5 longest films in pagila and store them in a file in artifacts folder.';
+await converse(
+  'List the top 5 longest films in pagila and store them in a file in artifacts folder.',
+);
 
-while (true) {
-  await context.continue(user(text));
-  const stream = await chat(demoAgent);
-  await printer.readableStream(stream);
-  text = await input();
+/** Answers `question`, then every question typed after it, until the process exits. */
+async function converse(question: string): Promise<never> {
+  let text = question;
+  while (true) {
+    await context.continue(user(text));
+    const stream = await chat(demoAgent);
+    await printer.readableStream(stream);
+    text = await input();
+  }
 }

@@ -3,6 +3,7 @@ import {
   type ContextFragment,
   type DisposableSandbox,
   InMemoryContextStore,
+  isFragment,
 } from '@deepagents/context';
 import { instructions } from '@deepagents/text2sql';
 
@@ -37,8 +38,20 @@ export async function index(
   if (result.exitCode !== 0) {
     throw new Error(`sql index failed: ${result.stderr}`);
   }
-  const manifest = JSON.parse(result.stdout) as { fragmentsPath: string };
-  return JSON.parse(
+  const manifest: unknown = JSON.parse(result.stdout);
+  if (
+    typeof manifest !== 'object' ||
+    manifest === null ||
+    !('fragmentsPath' in manifest) ||
+    typeof manifest.fragmentsPath !== 'string'
+  ) {
+    throw new Error(`sql index printed no fragmentsPath: ${result.stdout}`);
+  }
+  const fragments: unknown = JSON.parse(
     await sandbox.readFile(manifest.fragmentsPath),
-  ) as ContextFragment[];
+  );
+  if (!Array.isArray(fragments) || !fragments.every(isFragment)) {
+    throw new Error(`${manifest.fragmentsPath} is not a list of fragments`);
+  }
+  return fragments;
 }

@@ -4,6 +4,7 @@ import { setupServer } from 'msw/node';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { z } from 'zod';
 
 import { WhatsAppGroup } from '@deepagents/demo-zukhruf-whatsapp';
 
@@ -11,14 +12,18 @@ import participants from './participants.ts';
 
 const RESPONSES = 'https://api.openai.com/v1/responses';
 
-/** The Responses API request body the OpenAI provider sends. */
-interface ResponsesRequest {
-  input: Array<{
-    role?: string;
-    type?: string;
-    content?: unknown;
-  }>;
-}
+/** The part of an OpenAI Responses request body these handlers read. */
+const responsesRequestSchema = z.looseObject({
+  input: z.array(
+    z.looseObject({
+      role: z.string().optional(),
+      type: z.string().optional(),
+      content: z.unknown().optional(),
+    }),
+  ),
+});
+
+type ResponsesRequest = z.infer<typeof responsesRequestSchema>;
 
 function itemText(content: unknown): string {
   if (typeof content === 'string') return content;
@@ -141,7 +146,7 @@ test('every member sees a group message concurrently and only volunteers publish
   const calls: Record<string, ResponsesRequest[]> = {};
   const openaiApi = setupServer(
     http.post(RESPONSES, async ({ request }) => {
-      const body = (await request.json()) as ResponsesRequest;
+      const body = responsesRequestSchema.parse(await request.json());
       const name = /You are (?<name>\w+) in a WhatsApp-style group chat/.exec(
         systemText(body),
       )?.groups?.name;

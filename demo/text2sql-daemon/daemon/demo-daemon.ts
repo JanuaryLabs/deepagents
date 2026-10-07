@@ -4,8 +4,10 @@ import { logger } from 'hono/logger';
 import {
   JSONRPCErrorCode,
   JSONRPCErrorException,
+  type JSONRPCRequest,
   JSONRPCServer,
   createJSONRPCErrorResponse,
+  isJSONRPCRequest,
 } from 'json-rpc-2.0';
 
 import {
@@ -58,13 +60,29 @@ function requireString(
 
 function asObject(params: unknown, method: string): Record<string, unknown> {
   if (params == null) return {};
-  if (typeof params !== 'object' || Array.isArray(params)) {
+  if (!isRecord(params)) {
     throw new JSONRPCErrorException(
       `${method}: params must be an object`,
       JSONRPCErrorCode.InvalidParams,
     );
   }
-  return params as Record<string, unknown>;
+  return params;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((n) => typeof n === 'string');
+}
+
+/** One request or a batch. `isJSONRPCRequest` reads properties, so it only gets objects. */
+function isRequestPayload(
+  value: unknown,
+): value is JSONRPCRequest | JSONRPCRequest[] {
+  const isRequest = (item: unknown) => isRecord(item) && isJSONRPCRequest(item);
+  return Array.isArray(value) ? value.every(isRequest) : isRequest(value);
 }
 
 const server = new JSONRPCServer({
@@ -94,16 +112,13 @@ server.addMethod('text2sql.run', async (params) => {
 server.addMethod('text2sql.index', async (params) => {
   const obj = asObject(params, 'text2sql.index');
   const names = obj.names;
-  if (names !== undefined) {
-    if (!Array.isArray(names) || !names.every((n) => typeof n === 'string')) {
-      throw new JSONRPCErrorException(
-        'text2sql.index: "names" must be an array of strings',
-        JSONRPCErrorCode.InvalidParams,
-      );
-    }
+  if (names !== undefined && !isStringArray(names)) {
+    throw new JSONRPCErrorException(
+      'text2sql.index: "names" must be an array of strings',
+      JSONRPCErrorCode.InvalidParams,
+    );
   }
-  const requested = names as string[] | undefined;
-  const resolvedNames = requested ?? text2Sql.adapterNames();
+  const resolvedNames = names ?? text2Sql.adapterNames();
   const emitEvents = obj.emitEvents === true;
   const events: unknown[] = [];
   const fragments = await text2Sql.index({
@@ -175,7 +190,17 @@ app.post('/rpc', async (c) => {
       400,
     );
   }
-  const response = await server.receive(body as never);
+  if (!isRequestPayload(body)) {
+    return c.json(
+      createJSONRPCErrorResponse(
+        null,
+        JSONRPCErrorCode.InvalidRequest,
+        'invalid request',
+      ),
+      400,
+    );
+  }
+  const response = await server.receive(body);
   return response == null ? c.body(null, 204) : c.json(response);
 });
 
@@ -183,17 +208,25 @@ const httpServer = serve({ fetch: app.fetch, port: PORT }, ({ port }) => {
   console.log(`[daemon] listening on http://127.0.0.1:${port} (POST /rpc)`);
 });
 
-let shuttingDown = false;
-const shutdown = async (signal: NodeJS.Signals) => {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  console.log(`[daemon] ${signal} received, shutting down`);
-  await new Promise<void>((resolve) => httpServer.close(() => resolve()));
-  await pool.end().catch((err: Error) => {
-    console.log(`[daemon] pool.end() failed: ${err.message}`);
-  });
-  process.exit(0);
-};
+/** Closes the server and the pool, then exits; a later signal joins the first shutdown. */
+class Shutdown {
+  #closing: Promise<void> | undefined;
 
-process.once('SIGINT', () => void shutdown('SIGINT'));
-process.once('SIGTERM', () => void shutdown('SIGTERM'));
+  run(signal: NodeJS.Signals): Promise<void> {
+    this.#closing ??= this.#close(signal);
+    return this.#closing;
+  }
+
+  async #close(signal: NodeJS.Signals) {
+    console.log(`[daemon] ${signal} received, shutting down`);
+    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    await pool.end().catch((err: Error) => {
+      console.log(`[daemon] pool.end() failed: ${err.message}`);
+    });
+    process.exit(0);
+  }
+}
+
+const shutdown = new Shutdown();
+process.once('SIGINT', () => void shutdown.run('SIGINT'));
+process.once('SIGTERM', () => void shutdown.run('SIGTERM'));
