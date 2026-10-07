@@ -11,6 +11,25 @@ interface SuiteEventCallbacks {
   onRunEnd?: (runId: string) => void;
 }
 
+/** The run's progress that events.route.ts adds to each `case:scored` event. */
+function readProgress(
+  data: string,
+): Pick<CaseScored, 'completed' | 'totalCases'> | undefined {
+  const event: unknown = JSON.parse(data);
+  if (
+    typeof event !== 'object' ||
+    event === null ||
+    !('completed' in event) ||
+    !('totalCases' in event)
+  ) {
+    return undefined;
+  }
+  const { completed, totalCases } = event;
+  return typeof completed === 'number' && typeof totalCases === 'number'
+    ? { completed, totalCases }
+    : undefined;
+}
+
 export function useSuiteEvents(
   runningRunIds: string[],
   callbacks: SuiteEventCallbacks,
@@ -32,12 +51,9 @@ export function useSuiteEvents(
       const es = new EventSource(`/api/runs/${runId}/events`);
 
       es.addEventListener('case:scored', (e) => {
-        const data = JSON.parse(e.data);
-        caseScored({
-          runId,
-          completed: data.completed,
-          totalCases: data.totalCases,
-        });
+        // An event without progress has nothing to show; run:end refreshes the run.
+        const progress = readProgress(e.data);
+        if (progress) caseScored({ runId, ...progress });
       });
 
       es.addEventListener('run:end', () => {
