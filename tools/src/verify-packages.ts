@@ -156,6 +156,11 @@ try {
     '@deepagents/toolbox/filesystem.js',
     '@deepagents/orchestrator/deepplan/plan-and-solve.js',
   );
+  // mcp-consumer.test.ts is the workspace's MCP test, so it takes the
+  // workspace's test fixtures at the version the workspace pins.
+  const workspaceManifest = JSON.parse(
+    readFileSync(join(workspace, 'package.json'), 'utf8'),
+  );
   writeFileSync(
     join(consumer, 'package.json'),
     JSON.stringify({
@@ -171,6 +176,8 @@ try {
         '@types/react-dom': '19.2.5',
         ai: '^7.0.127',
         '@ai-sdk/mcp': '^2.0.66',
+        '@zukhruf/testing':
+          workspaceManifest.devDependencies['@zukhruf/testing'],
         react: '19.2.8',
         'react-dom': '19.2.8',
       },
