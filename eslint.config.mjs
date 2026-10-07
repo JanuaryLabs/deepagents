@@ -126,6 +126,20 @@ export default defineConfig(
       // before the move, and stay warnings.
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-non-null-assertion': 'warn',
+      // Loading these modules is the point of importing them: stylesheets,
+      // env.ts / startup.ts modules that set up the process on load, and
+      // jest-dom's vitest entry, which registers its matchers.
+      'import-x/no-unassigned-import': [
+        'error',
+        {
+          allow: [
+            '**/*.{css,scss,sass}',
+            '**/env.ts',
+            '**/startup.ts',
+            '@testing-library/jest-dom/vitest',
+          ],
+        },
+      ],
     },
   },
   // Transient: these checks are new here and have findings that the next
