@@ -7,7 +7,6 @@ import { useData } from '../../hooks/use-client.ts';
 import { useSuiteEvents } from '../../hooks/use-suite-events.ts';
 import { formatDuration, formatTokens } from '../../lib/format.ts';
 import {
-  Button,
   Progress,
   Skeleton,
   Table,
@@ -16,6 +15,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  buttonVariants,
 } from '@deepagents/react-shadcn';
 
 export default function RunListPage() {
@@ -93,13 +93,12 @@ export default function RunListPage() {
             {data.totalRuns} run{data.totalRuns !== 1 ? 's' : ''}
           </p>
         </div>
-        <Button
-          render={<Link to="/evals/new" />}
-          variant="outline"
-          size="sm"
+        <Link
+          to="/evals/new"
+          className={buttonVariants({ variant: 'outline', size: 'sm' })}
         >
           New Eval
-        </Button>
+        </Link>
       </div>
 
       <div className="space-y-6">

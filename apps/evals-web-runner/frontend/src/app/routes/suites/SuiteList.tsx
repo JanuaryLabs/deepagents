@@ -2,7 +2,6 @@ import { Link } from 'react-router';
 
 import {
   Badge,
-  Button,
   Skeleton,
   Table,
   TableBody,
@@ -10,6 +9,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  buttonVariants,
 } from '@deepagents/react-shadcn';
 
 import { useData } from '../../hooks/use-client.ts';
@@ -43,13 +43,12 @@ export default function SuiteList() {
             <p className="text-muted-foreground text-sm">
               {suites.length} suite{suites.length !== 1 ? 's' : ''}
             </p>
-            <Button
-              render={<Link to="/evals/new" />}
-              variant="outline"
-              size="sm"
+            <Link
+              to="/evals/new"
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
             >
               New Eval
-            </Button>
+            </Link>
           </div>
 
           <div className="rounded-lg border">

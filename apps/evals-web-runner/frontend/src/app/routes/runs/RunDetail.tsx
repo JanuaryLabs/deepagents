@@ -17,6 +17,7 @@ import {
   TableBody,
   TableCell,
   TableRow,
+  buttonVariants,
 } from '@deepagents/react-shadcn';
 
 import {
@@ -212,13 +213,12 @@ export default function RunDetailPage() {
             >
               {retryMutation.isPending ? 'Retrying\u2026' : 'Retry'}
             </Button>
-            <Button
-              render={<Link to={`/evals/new?from=${run.id}`} />}
-              variant="outline"
-              size="sm"
+            <Link
+              to={`/evals/new?from=${run.id}`}
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
             >
               Add Run
-            </Button>
+            </Link>
             <Button
               variant="ghost"
               size="sm"
