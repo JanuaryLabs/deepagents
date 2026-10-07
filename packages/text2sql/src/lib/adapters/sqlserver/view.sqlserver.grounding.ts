@@ -1,4 +1,3 @@
-import type { Adapter } from '../adapter.ts';
 import { nameRow, viewDefinitionRow } from '../groundings/rows.ts';
 import {
   type View,
@@ -6,9 +5,10 @@ import {
   type ViewGroundingConfig,
 } from '../groundings/view.grounding.ts';
 import { columnRow } from './sqlserver-rows.ts';
+import type { SqlServer } from './sqlserver.ts';
 
 export interface SqlServerViewGroundingConfig extends ViewGroundingConfig {
-  /** Schemas to include (defaults to excluding INFORMATION_SCHEMA and sys) */
+  /** Schemas to include (defaults to the adapter's schemas option) */
   schemas?: string[];
 }
 
@@ -16,13 +16,13 @@ export interface SqlServerViewGroundingConfig extends ViewGroundingConfig {
  * SQL Server implementation of ViewGrounding.
  */
 export class SqlServerViewGrounding extends ViewGrounding {
-  #adapter: Adapter;
+  #adapter: SqlServer;
   #schemas?: string[];
 
-  constructor(adapter: Adapter, config: SqlServerViewGroundingConfig = {}) {
+  constructor(adapter: SqlServer, config: SqlServerViewGroundingConfig = {}) {
     super(config);
     this.#adapter = adapter;
-    this.#schemas = config.schemas;
+    this.#schemas = config.schemas ?? adapter.schemas;
   }
 
   protected override async getAllViewNames(): Promise<string[]> {

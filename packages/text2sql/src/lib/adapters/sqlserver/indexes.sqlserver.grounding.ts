@@ -18,22 +18,15 @@ const indexRow = z.object({
   key_ordinal: z.number(),
 });
 
-export interface SqlServerIndexesGroundingConfig extends IndexesGroundingConfig {
-  /** Schemas to include (defaults to excluding INFORMATION_SCHEMA and sys) */
-  schemas?: string[];
-}
-
 /**
  * SQL Server implementation of IndexesGrounding.
  */
 export class SqlServerIndexesGrounding extends IndexesGrounding {
   #adapter: Adapter;
-  #schemas?: string[];
 
-  constructor(adapter: Adapter, config: SqlServerIndexesGroundingConfig = {}) {
+  constructor(adapter: Adapter, config: IndexesGroundingConfig = {}) {
     super(config);
     this.#adapter = adapter;
-    this.#schemas = config.schemas;
   }
 
   protected override async getIndexes(

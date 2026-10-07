@@ -1,12 +1,13 @@
 import { z } from 'zod';
 
-import type { Adapter, Relationship, Table } from '../adapter.ts';
+import type { Relationship, Table } from '../adapter.ts';
 import { nameRow } from '../groundings/rows.ts';
 import {
   TableGrounding,
   type TableGroundingConfig,
 } from '../groundings/table.grounding.ts';
 import { columnRow } from './sqlserver-rows.ts';
+import type { SqlServer } from './sqlserver.ts';
 
 /** A foreign-key column pair from INFORMATION_SCHEMA.KEY_COLUMN_USAGE. */
 const relationshipRow = z.object({
@@ -20,7 +21,7 @@ const relationshipRow = z.object({
 });
 
 export interface SqlServerTableGroundingConfig extends TableGroundingConfig {
-  /** Schemas to include (defaults to excluding INFORMATION_SCHEMA and sys) */
+  /** Schemas to include (defaults to the adapter's schemas option) */
   schemas?: string[];
 }
 
@@ -31,13 +32,13 @@ export interface SqlServerTableGroundingConfig extends TableGroundingConfig {
  * so no caching is needed like SQLite.
  */
 export class SqlServerTableGrounding extends TableGrounding {
-  #adapter: Adapter;
+  #adapter: SqlServer;
   #schemas?: string[];
 
-  constructor(adapter: Adapter, config: SqlServerTableGroundingConfig = {}) {
+  constructor(adapter: SqlServer, config: SqlServerTableGroundingConfig = {}) {
     super(config);
     this.#adapter = adapter;
-    this.#schemas = config.schemas;
+    this.#schemas = config.schemas ?? adapter.schemas;
   }
 
   protected override async getAllTableNames(): Promise<string[]> {

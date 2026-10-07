@@ -1,12 +1,13 @@
 import { z } from 'zod';
 
-import type { Adapter, Relationship, Table } from '../adapter.ts';
+import type { Relationship, Table } from '../adapter.ts';
 import { nameRow } from '../groundings/rows.ts';
 import {
   TableGrounding,
   type TableGroundingConfig,
 } from '../groundings/table.grounding.ts';
 import { columnRow } from './postgres-rows.ts';
+import type { Postgres } from './postgres.ts';
 
 /** One column pair of a foreign key, read from pg_constraint. */
 const relationshipRow = z.object({
@@ -20,7 +21,7 @@ const relationshipRow = z.object({
 });
 
 export interface PostgresTableGroundingConfig extends TableGroundingConfig {
-  /** Schemas to include (defaults to excluding pg_catalog and information_schema) */
+  /** Schemas to include (defaults to the adapter's schemas option) */
   schemas?: string[];
 }
 
@@ -31,13 +32,13 @@ export interface PostgresTableGroundingConfig extends TableGroundingConfig {
  * so no caching is needed like SQLite.
  */
 export class PostgresTableGrounding extends TableGrounding {
-  #adapter: Adapter;
+  #adapter: Postgres;
   #schemas?: string[];
 
-  constructor(adapter: Adapter, config: PostgresTableGroundingConfig = {}) {
+  constructor(adapter: Postgres, config: PostgresTableGroundingConfig = {}) {
     super(config);
     this.#adapter = adapter;
-    this.#schemas = config.schemas;
+    this.#schemas = config.schemas ?? adapter.schemas;
   }
 
   protected override async getAllTableNames(): Promise<string[]> {

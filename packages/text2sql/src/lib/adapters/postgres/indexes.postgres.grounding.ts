@@ -18,22 +18,15 @@ const indexRow = z.object({
   column_position: z.number(),
 });
 
-export interface PostgresIndexesGroundingConfig extends IndexesGroundingConfig {
-  /** Schemas to include (defaults to excluding pg_catalog and information_schema) */
-  schemas?: string[];
-}
-
 /**
  * PostgreSQL implementation of IndexesGrounding.
  */
 export class PostgresIndexesGrounding extends IndexesGrounding {
   #adapter: Adapter;
-  #schemas?: string[];
 
-  constructor(adapter: Adapter, config: PostgresIndexesGroundingConfig = {}) {
+  constructor(adapter: Adapter, config: IndexesGroundingConfig = {}) {
     super(config);
     this.#adapter = adapter;
-    this.#schemas = config.schemas;
   }
 
   protected override async getIndexes(

@@ -135,6 +135,14 @@ export class Postgres extends Adapter {
     return `SELECT ${columnList} FROM ${tableIdentifier} LIMIT ${limit}`;
   }
 
+  /**
+   * The schemas introspection is limited to; table and view discovery use
+   * them unless a grounding lists its own.
+   */
+  get schemas(): string[] | undefined {
+    return this.#options.schemas;
+  }
+
   protected override async queryRows(sql: string): Promise<unknown[]> {
     const result: unknown = await this.#options.execute(sql);
 

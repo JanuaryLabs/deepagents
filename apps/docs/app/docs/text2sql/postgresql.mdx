@@ -83,11 +83,12 @@ See [Grounding](/docs/text2sql/grounding) for the full list of available groundi
 
 ## Schema Filtering
 
-By default, the adapter excludes system schemas (`pg_catalog`, `information_schema`). To limit introspection to specific schemas:
+By default, the adapter excludes system schemas (`pg_catalog`, `information_schema`). To limit introspection to specific schemas, set `schemas`. The `tables()` and `views()` groundings then discover only tables and views in those schemas:
 
 ```typescript
 new Postgres({
   execute: async (sql) => pool.query(sql).then((r) => r.rows),
+  grounding: [tables(), views()],
   schemas: ['public', 'sales', 'inventory'],
 });
 ```

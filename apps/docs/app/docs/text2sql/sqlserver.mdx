@@ -140,11 +140,12 @@ See [Grounding](/docs/text2sql/grounding) for the full list of available groundi
 
 ## Schema Filtering
 
-By default, the adapter excludes system schemas (`INFORMATION_SCHEMA`, `sys`). To limit introspection to specific schemas:
+By default, the adapter excludes system schemas (`INFORMATION_SCHEMA`, `sys`). To limit introspection to specific schemas, set `schemas`. The `tables()` and `views()` groundings then discover only tables and views in those schemas:
 
 ```typescript
 new SqlServer({
   execute: async (sql) => pool.request().query(sql).then(r => r.recordset),
+  grounding: [tables(), views()],
   schemas: ['dbo', 'sales', 'inventory'],
 });
 ```

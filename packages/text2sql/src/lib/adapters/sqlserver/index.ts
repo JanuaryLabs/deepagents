@@ -1,4 +1,4 @@
-import { type Adapter } from '../adapter.ts';
+import { type Adapter, groundingFor } from '../adapter.ts';
 import { type ColumnStatsGroundingConfig } from '../groundings/column-stats.grounding.ts';
 import { type ColumnValuesGroundingConfig } from '../groundings/column-values.grounding.ts';
 import { type ConstraintGroundingConfig } from '../groundings/constraint.grounding.ts';
@@ -21,7 +21,10 @@ export * from './sqlserver.ts';
 export { SqlServerSqlPolicyAnalyzer } from './sqlserver.sql-policy.ts';
 
 export function tables(config: TableGroundingConfig = {}) {
-  return (adapter: Adapter) => new SqlServerTableGrounding(adapter, config);
+  return groundingFor(
+    SqlServer,
+    (adapter) => new SqlServerTableGrounding(adapter, config),
+  );
 }
 
 export function info(config: InfoGroundingConfig = {}) {
@@ -29,9 +32,10 @@ export function info(config: InfoGroundingConfig = {}) {
 }
 
 export function views(config: ViewGroundingConfig = {}) {
-  return (adapter: Adapter) => {
-    return new SqlServerViewGrounding(adapter, config);
-  };
+  return groundingFor(
+    SqlServer,
+    (adapter) => new SqlServerViewGrounding(adapter, config),
+  );
 }
 
 export function columnStats(config: ColumnStatsGroundingConfig = {}) {
