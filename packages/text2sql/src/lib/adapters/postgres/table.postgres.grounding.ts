@@ -8,15 +8,15 @@ import {
 } from '../groundings/table.grounding.ts';
 import { columnRow } from './postgres-rows.ts';
 
-/** A foreign key column joined across information_schema constraint views. */
+/** One column pair of a foreign key, read from pg_constraint. */
 const relationshipRow = z.object({
-  constraint_name: z.string().nullable(),
-  table_schema: z.string().nullable(),
-  table_name: z.string().nullable(),
-  column_name: z.string().nullable(),
-  foreign_table_schema: z.string().nullable(),
-  foreign_table_name: z.string().nullable(),
-  foreign_column_name: z.string().nullable(),
+  constraint_name: z.string(),
+  table_schema: z.string(),
+  table_name: z.string(),
+  column_name: z.string(),
+  foreign_table_schema: z.string(),
+  foreign_table_name: z.string(),
+  foreign_column_name: z.string(),
 });
 
 export interface PostgresTableGroundingConfig extends TableGroundingConfig {
@@ -27,7 +27,7 @@ export interface PostgresTableGroundingConfig extends TableGroundingConfig {
 /**
  * PostgreSQL implementation of TableGrounding.
  *
- * PostgreSQL can query incoming relationships directly via information_schema,
+ * PostgreSQL can query incoming relationships directly via pg_constraint,
  * so no caching is needed like SQLite.
  */
 export class PostgresTableGrounding extends TableGrounding {
@@ -83,97 +83,71 @@ export class PostgresTableGrounding extends TableGrounding {
     tableName: string,
   ): Promise<Relationship[]> {
     const { schema, table } = this.#adapter.parseTableName(tableName);
-
-    const rows = await this.#adapter.runQuery(
-      `
-      SELECT
-        tc.constraint_name,
-        tc.table_schema,
-        tc.table_name,
-        kcu.column_name,
-        ccu.table_schema AS foreign_table_schema,
-        ccu.table_name AS foreign_table_name,
-        ccu.column_name AS foreign_column_name
-      FROM information_schema.table_constraints AS tc
-      JOIN information_schema.key_column_usage AS kcu
-        ON tc.constraint_name = kcu.constraint_name
-        AND tc.table_schema = kcu.table_schema
-      JOIN information_schema.constraint_column_usage AS ccu
-        ON ccu.constraint_name = tc.constraint_name
-        AND ccu.table_schema = tc.table_schema
-      WHERE tc.constraint_type = 'FOREIGN KEY'
-        AND tc.table_schema = '${this.#adapter.escapeString(schema)}'
-        AND tc.table_name = '${this.#adapter.escapeString(table)}'
-      ORDER BY tc.constraint_name, kcu.ordinal_position
-    `,
-      relationshipRow,
+    return this.#foreignKeys(
+      `nsp.nspname = '${this.#adapter.escapeString(schema)}'
+        AND rel.relname = '${this.#adapter.escapeString(table)}'`,
     );
-
-    return this.#groupRelationships(rows);
   }
 
   protected override async findIncomingRelations(
     tableName: string,
   ): Promise<Relationship[]> {
     const { schema, table } = this.#adapter.parseTableName(tableName);
+    return this.#foreignKeys(
+      `ref_nsp.nspname = '${this.#adapter.escapeString(schema)}'
+        AND ref_rel.relname = '${this.#adapter.escapeString(table)}'`,
+    );
+  }
 
-    // PostgreSQL can query incoming relations directly - no cache needed
+  /**
+   * The foreign keys matching `where`. unnest(conkey, confkey) WITH
+   * ORDINALITY pairs each column with the column it references by position,
+   * and each side carries its own schema, so composite and cross-schema keys
+   * come back whole.
+   */
+  async #foreignKeys(where: string): Promise<Relationship[]> {
     const rows = await this.#adapter.runQuery(
       `
       SELECT
-        tc.constraint_name,
-        tc.table_schema,
-        tc.table_name,
-        kcu.column_name,
-        ccu.table_schema AS foreign_table_schema,
-        ccu.table_name AS foreign_table_name,
-        ccu.column_name AS foreign_column_name
-      FROM information_schema.table_constraints AS tc
-      JOIN information_schema.key_column_usage AS kcu
-        ON tc.constraint_name = kcu.constraint_name
-        AND tc.table_schema = kcu.table_schema
-      JOIN information_schema.constraint_column_usage AS ccu
-        ON ccu.constraint_name = tc.constraint_name
-        AND ccu.table_schema = tc.table_schema
-      WHERE tc.constraint_type = 'FOREIGN KEY'
-        AND ccu.table_schema = '${this.#adapter.escapeString(schema)}'
-        AND ccu.table_name = '${this.#adapter.escapeString(table)}'
-      ORDER BY tc.constraint_name, kcu.ordinal_position
+        con.conname AS constraint_name,
+        nsp.nspname AS table_schema,
+        rel.relname AS table_name,
+        att.attname AS column_name,
+        ref_nsp.nspname AS foreign_table_schema,
+        ref_rel.relname AS foreign_table_name,
+        ref_att.attname AS foreign_column_name
+      FROM pg_constraint AS con
+      JOIN pg_class AS rel ON rel.oid = con.conrelid
+      JOIN pg_namespace AS nsp ON nsp.oid = rel.relnamespace
+      JOIN pg_class AS ref_rel ON ref_rel.oid = con.confrelid
+      JOIN pg_namespace AS ref_nsp ON ref_nsp.oid = ref_rel.relnamespace
+      CROSS JOIN LATERAL unnest(con.conkey, con.confkey)
+        WITH ORDINALITY AS key(attnum, ref_attnum, ord)
+      JOIN pg_attribute AS att
+        ON att.attrelid = con.conrelid AND att.attnum = key.attnum
+      JOIN pg_attribute AS ref_att
+        ON ref_att.attrelid = con.confrelid AND ref_att.attnum = key.ref_attnum
+      WHERE con.contype = 'f'
+        AND ${where}
+      ORDER BY nsp.nspname, rel.relname, con.conname, key.ord
     `,
       relationshipRow,
     );
 
-    return this.#groupRelationships(rows);
-  }
-
-  #groupRelationships(
-    rows: z.output<typeof relationshipRow>[],
-  ): Relationship[] {
     const relationships = new Map<string, Relationship>();
-    const defaultSchema = this.#adapter.defaultSchema ?? 'public';
-
     for (const row of rows) {
-      if (!row.table_name || !row.foreign_table_name || !row.constraint_name) {
-        continue;
-      }
-
-      const schema = row.table_schema ?? defaultSchema;
-      const referencedSchema = row.foreign_table_schema ?? defaultSchema;
-      const key = `${schema}.${row.table_name}:${row.constraint_name}`;
-
+      const table = `${row.table_schema}.${row.table_name}`;
+      const key = `${table}:${row.constraint_name}`;
       const relationship = relationships.get(key) ?? {
-        table: `${schema}.${row.table_name}`,
+        table,
         from: [],
-        referenced_table: `${referencedSchema}.${row.foreign_table_name}`,
+        referenced_table: `${row.foreign_table_schema}.${row.foreign_table_name}`,
         to: [],
       };
-
-      relationship.from.push(row.column_name ?? 'unknown');
-      relationship.to.push(row.foreign_column_name ?? 'unknown');
-
+      relationship.from.push(row.column_name);
+      relationship.to.push(row.foreign_column_name);
       relationships.set(key, relationship);
     }
-
     return Array.from(relationships.values());
   }
 }
