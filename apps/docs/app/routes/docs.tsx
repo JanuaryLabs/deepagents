@@ -1,4 +1,4 @@
-import type * as PageTree from 'fumadocs-core/page-tree';
+import { useFumadocsLoader } from 'fumadocs-core/source/client';
 import browserCollections from 'fumadocs-mdx:collections/browser';
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 // import { DocsLayout } from 'fumadocs-ui/layouts/notebook';
@@ -22,7 +22,7 @@ export async function loader({ params }: Route.LoaderArgs) {
 
   return {
     path: page.path,
-    tree: source.getPageTree(),
+    tree: await source.serializePageTree(source.getPageTree()),
   };
 }
 
@@ -48,12 +48,10 @@ function DocsContent({ path }: { path: string }) {
 }
 
 export default function Page({ loaderData }: Route.ComponentProps) {
-  const { tree, path } = loaderData as unknown as Awaited<
-    ReturnType<typeof loader>
-  >;
+  const { tree, path } = useFumadocsLoader(loaderData);
 
   return (
-    <DocsLayout {...baseOptions()} tree={tree as PageTree.Root} tabMode="top">
+    <DocsLayout {...baseOptions()} tree={tree} tabMode="top">
       <DocsContent path={path} />
     </DocsLayout>
   );
