@@ -186,7 +186,21 @@ export function createCodexAccounts(options: CodexAccountsOptions) {
     if (existing.status !== 'unauthenticated') return existing;
     const { revision } = await vault.snapshot(owner);
 
-    const config = resolveConfig();
+    // The library sends the device code request, the polls and the code
+    // exchange without a signal. This fetch gives each the sign-in's, so a
+    // cancel also stops the request in flight.
+    const abort = new AbortController();
+    const config = resolveConfig({
+      fetch: (input, init) => {
+        const signal = requestSignal(input, init);
+        return globalThis.fetch(input, {
+          ...init,
+          signal: signal
+            ? AbortSignal.any([signal, abort.signal])
+            : abort.signal,
+        });
+      },
+    });
     let device: DeviceCode;
     try {
       device = await requestDeviceCode(config);
@@ -203,7 +217,7 @@ export function createCodexAccounts(options: CodexAccountsOptions) {
       verificationUrl: device.verificationUrl,
       expiresAt: new Date(device.expiresAt).toISOString(),
       revision,
-      abort: new AbortController(),
+      abort,
     };
     signIns.set(owner, signIn);
     const current = emit(owner, pending(signIn));

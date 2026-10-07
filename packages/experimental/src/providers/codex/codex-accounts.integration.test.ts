@@ -22,6 +22,7 @@ const ORIGINS = ['https://auth.openai.com', 'https://chatgpt.com'];
 interface WireRequest {
   url: string;
   headers: Headers;
+  signal: AbortSignal;
   body: Record<string, any> | undefined;
 }
 
@@ -37,6 +38,7 @@ function interceptWire(
         const wire: WireRequest = {
           url: url.origin + url.pathname,
           headers: request.headers,
+          signal: request.signal,
           body: !body
             ? undefined
             : request.headers.get('content-type')?.includes('json')
@@ -52,6 +54,14 @@ function interceptWire(
   return Object.assign(requests, {
     [Symbol.dispose]: () => server.close(),
   });
+}
+
+/** Settles once the client gives up on the request. */
+function abortOf(signal: AbortSignal) {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) =>
+    signal.addEventListener('abort', () => resolve(), { once: true }),
+  );
 }
 
 /** Fails the request at the network level, as an unreachable host would. */
@@ -235,9 +245,8 @@ test('an authorization arriving after the owner cancelled the sign-in saves noth
       if (released) reported.resolve(state);
     },
   });
-  // The library sends device polls and the code exchange without the sign-in's
-  // abort signal, so a poll already in flight when the owner signs out still
-  // exchanges the code.
+  // Cancelling aborts the poll in flight, so the authorization the server sends
+  // afterwards never reaches the sign-in.
   using _wire = interceptWire(async (request) => {
     if (request.url === POLL_URL) {
       polling.resolve();
@@ -266,6 +275,106 @@ test('an authorization arriving after the owner cancelled the sign-in saves noth
     accounts.cancel('owner-a');
   }
 });
+
+test(
+  'cancelling a sign-in aborts its device poll in flight and polls no more',
+  { timeout: 5_000 },
+  async () => {
+    const polling = Promise.withResolvers<AbortSignal>();
+    const reported = Promise.withResolvers<CodexConnectionState>();
+    const accounts = createCodexAccounts({
+      store: new MemoryStore(),
+      onChange: (_owner, state) => {
+        if (state.status === 'unauthenticated') reported.resolve(state);
+      },
+    });
+    using requests = interceptWire((request) => {
+      if (request.url === POLL_URL) {
+        polling.resolve(request.signal);
+        return new Promise<never>(() => {});
+      }
+      return deviceSignIn(request) ?? unexpected();
+    });
+
+    try {
+      await accounts.connect('owner-a');
+      const poll = await polling.promise;
+      accounts.cancel('owner-a');
+      await abortOf(poll);
+      const report = await reported.promise;
+
+      assert.deepStrictEqual(report, { status: 'unauthenticated' });
+      assert.equal(requests.filter(({ url }) => url === POLL_URL).length, 1);
+    } finally {
+      accounts.cancel('owner-a');
+    }
+  },
+);
+
+test(
+  'disconnecting during sign-in aborts the device poll in flight',
+  { timeout: 5_000 },
+  async () => {
+    const polling = Promise.withResolvers<AbortSignal>();
+    const accounts = createCodexAccounts({ store: new MemoryStore() });
+    using _wire = interceptWire((request) => {
+      if (request.url === POLL_URL) {
+        polling.resolve(request.signal);
+        return new Promise<never>(() => {});
+      }
+      return deviceSignIn(request) ?? unexpected();
+    });
+
+    try {
+      await accounts.connect('owner-a');
+      const poll = await polling.promise;
+      const disconnected = await accounts.disconnect('owner-a');
+      await abortOf(poll);
+
+      assert.deepStrictEqual(disconnected, { status: 'unauthenticated' });
+    } finally {
+      accounts.cancel('owner-a');
+    }
+  },
+);
+
+test(
+  'cancelling a sign-in aborts its code exchange in flight and saves nothing',
+  { timeout: 5_000 },
+  async () => {
+    const exchanging = Promise.withResolvers<AbortSignal>();
+    const reported = Promise.withResolvers<CodexConnectionState>();
+    const accounts = createCodexAccounts({
+      store: new MemoryStore(),
+      onChange: (_owner, state) => {
+        if (state.status === 'unauthenticated') reported.resolve(state);
+      },
+    });
+    using _wire = interceptWire((request) => {
+      if (request.url === TOKEN_URL) {
+        exchanging.resolve(request.signal);
+        return new Promise<never>(() => {});
+      }
+      return deviceSignIn(request) ?? unexpected();
+    });
+
+    try {
+      await accounts.connect('owner-a');
+      const exchange = await exchanging.promise;
+      accounts.cancel('owner-a');
+      await abortOf(exchange);
+
+      assert.deepStrictEqual(await reported.promise, {
+        status: 'unauthenticated',
+      });
+      assert.deepStrictEqual(await accounts.state('owner-a'), {
+        status: 'unauthenticated',
+      });
+    } finally {
+      accounts.cancel('owner-a');
+    }
+  },
+);
 
 test('a failed device code request is reported and sign-in can start again', async () => {
   const accounts = createCodexAccounts({ store: new MemoryStore() });
