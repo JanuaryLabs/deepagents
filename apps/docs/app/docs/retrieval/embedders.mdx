@@ -3,11 +3,11 @@ title: Embedders
 description: Configure embedding models for vector representations
 ---
 
-Embedders convert text into vector representations (embeddings) that enable semantic similarity search. The retrieval package includes FastEmbed with multiple model options.
+Embedders convert text into vector representations (embeddings) that enable semantic similarity search. The retrieval package includes a local `fastembed()` embedder with stable model identifiers and multiple model options.
 
 ## FastEmbed
 
-FastEmbed is a lightweight, fast embedding library that runs locally. It downloads models on first use and caches them for subsequent runs.
+`fastembed()` is the package's local embedding adapter. It preserves the historical FastEmbed-style API while running model inference through Transformers.js, downloading models on first use, and caching them for subsequent runs.
 
 ### Import
 
@@ -101,7 +101,7 @@ Mismatched dimensions will cause runtime errors.
 
 ## Batch Processing
 
-FastEmbed processes embeddings in batches to optimize memory usage:
+`fastembed()` processes embeddings in batches to optimize memory usage:
 
 ```typescript
 // Custom batch size for memory-constrained environments
