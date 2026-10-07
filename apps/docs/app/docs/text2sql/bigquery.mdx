@@ -21,7 +21,7 @@ Reuse the shared `model` setup from
 ```typescript
 import { BigQuery as BigQueryClient } from '@google-cloud/bigquery';
 
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { BigQuery } from '@deepagents/text2sql/bigquery';
 import * as bigquery from '@deepagents/text2sql/bigquery';
 
@@ -29,7 +29,6 @@ const projectId = process.env.BQ_PROJECT_ID!;
 const client = new BigQueryClient({ projectId });
 
 const text2sql = new Text2Sql({
-  model,
   adapters: {
     main: new BigQuery({
       projectId,
@@ -57,7 +56,6 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
-  lock: new FileIndexLock(),
 });
 ```
 

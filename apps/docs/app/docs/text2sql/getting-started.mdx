@@ -42,9 +42,9 @@ import { groq } from '@ai-sdk/groq';
 const model = groq('openai/gpt-oss-20b');
 ```
 
-Reuse `model` in the adapter-specific examples below. The adapter-map key
-(`main` in these examples) becomes the required second argument to
-`text2sql.toSql(..., 'main')` and the `<db>` selector in
+Reuse `model` in the `toSql()` example below. The adapter-map key (`main` in
+these examples) is the name you pass to `text2sql.index({ names: ['main'] })`
+and the `<db>` selector in
 `sql validate <db> "..."` / `sql run <db> "..."` when the package CLI is
 installed inside the sandbox. This is the configured connection name, not the
 SQL-level database or schema name. When exactly one adapter is configured,
@@ -71,7 +71,7 @@ name from the wrapper tag.
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
 
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
@@ -84,9 +84,7 @@ const adapter = new Sqlite({
 
 // Create the Text2SQL instance
 const text2sql = new Text2Sql({
-  model,
   adapters: { main: adapter },
-  lock: new FileIndexLock(),
 });
 ```
 </Tab>
@@ -94,7 +92,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import pg from 'pg';
 
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Postgres } from '@deepagents/text2sql/postgres';
 import * as postgres from '@deepagents/text2sql/postgres';
 
@@ -110,9 +108,7 @@ const adapter = new Postgres({
 });
 
 const text2sql = new Text2Sql({
-  model,
   adapters: { main: adapter },
-  lock: new FileIndexLock(),
 });
 ```
 
@@ -121,7 +117,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import { DuckDBInstance } from '@duckdb/node-api';
 
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { DuckDB } from '@deepagents/text2sql/duckdb';
 import * as duckdb from '@deepagents/text2sql/duckdb';
 
@@ -138,9 +134,7 @@ const adapter = new DuckDB({
 });
 
 const text2sql = new Text2Sql({
-  model,
   adapters: { main: adapter },
-  lock: new FileIndexLock(),
 });
 ```
 
@@ -149,7 +143,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import sql from 'mssql';
 
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { SqlServer } from '@deepagents/text2sql/sqlserver';
 import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
@@ -169,9 +163,7 @@ const adapter = new SqlServer({
 });
 
 const text2sql = new Text2Sql({
-  model,
   adapters: { main: adapter },
-  lock: new FileIndexLock(),
 });
 ```
 </Tab>
@@ -179,7 +171,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import mysql from 'mysql2/promise';
 
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Mysql } from '@deepagents/text2sql/mysql';
 import * as mysqlGrounding from '@deepagents/text2sql/mysql';
 
@@ -198,9 +190,7 @@ const adapter = new Mysql({
 });
 
 const text2sql = new Text2Sql({
-  model,
   adapters: { main: adapter },
-  lock: new FileIndexLock(),
 });
 ```
 
@@ -209,7 +199,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import { BigQuery as BigQueryClient } from '@google-cloud/bigquery';
 
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { BigQuery } from '@deepagents/text2sql/bigquery';
 import * as bigquery from '@deepagents/text2sql/bigquery';
 
@@ -234,9 +224,7 @@ const adapter = new BigQuery({
 });
 
 const text2sql = new Text2Sql({
-  model,
   adapters: { main: adapter },
-  lock: new FileIndexLock(),
 });
 ```
 </Tab>
@@ -244,7 +232,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import { createClient } from '@clickhouse/client';
 
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { ClickHouse } from '@deepagents/text2sql/clickhouse';
 import * as clickhouse from '@deepagents/text2sql/clickhouse';
 
@@ -265,15 +253,13 @@ const adapter = new ClickHouse({
 });
 
 const text2sql = new Text2Sql({
-  model,
   adapters: { main: adapter },
-  lock: new FileIndexLock(),
 });
 ```
 </Tab>
 <Tab value="PostHog">
 ```typescript
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import {
   PostHog,
   createPostHogTransport,
@@ -293,9 +279,7 @@ const adapter = new PostHog({
 });
 
 const text2sql = new Text2Sql({
-  model,
   adapters: { main: adapter },
-  lock: new FileIndexLock(),
 });
 ```
 </Tab>
@@ -305,13 +289,19 @@ const text2sql = new Text2Sql({
 
 ### Generate SQL Only
 
-Use `toSql()` to generate SQL without executing it:
+Use `index()` to get the schema fragments. Then use `toSql()` to generate SQL
+without executing it:
 
 ```typescript
-const sql = await text2sql.toSql(
-  'Show me the top 10 customers by total purchases',
-  'main',
-);
+import { toSql } from '@deepagents/text2sql';
+
+const fragments = await text2sql.index({ names: ['main'] });
+const { sql } = await toSql({
+  input: 'Show me the top 10 customers by total purchases',
+  adapter,
+  fragments,
+  model,
+});
 
 console.log(sql);
 // SELECT c.CustomerId, c.FirstName, c.LastName, SUM(i.Total) as TotalPurchases
@@ -397,7 +387,7 @@ default-export the adapter map the CLI should load. If you are mounting your
 app source into the container, point `TEXT2SQL_ADAPTERS` at that mounted module;
 otherwise upload or write the file before calling `chat()`.
 
-`toSql()` is stateless. It reads cached schema fragments, but it does not write
+`toSql()` is stateless. It uses only the fragments you give it, and it does not write
 messages, titles, or usage into your `ContextStore`. Use the `chat()` helper
 above when you want multi-turn persistence. See
 [Build Conversations](/docs/text2sql/build-conversations) for the full pattern.
@@ -425,11 +415,8 @@ const indexResult = await sandbox.sandbox.executeCommand(
 
 Set `TEXT2SQL_INDEX_CACHE_DIR` (and optionally `TEXT2SQL_INDEX_VERSION` as an
 invalidation namespace) to make the CLI back schema indexing with a
-`FileIndexCache`; without either, `sql index` introspects fresh every run. The
-CLI always wires a `FileIndexLock` to serialize concurrent indexing — its
-directory comes from `TEXT2SQL_INDEX_LOCK_DIR`, falling back to
-`TEXT2SQL_INDEX_CACHE_DIR`. See the package README's "Schema index caching &
-coordination" section for the injected `cache`/`lock` model.
+`FileIndexCache`; without either, `sql index` introspects fresh every run. See
+the package README's "Schema index caching" section for the injected `cache`.
 
 Set `TEXT2SQL_INDEX_EVENTS_PATH` to write the NDJSON progress stream to a
 fixed path instead of the auto-generated `index-<id>.events.ndjson`. The
@@ -455,10 +442,10 @@ symptom is recognizable rather than a silent hang.
 When Text2SQL processes a query, it:
 
 1. **Runs grounding** - Introspects your database schema (tables, columns, relationships, indexes, constraints).
-2. **Builds SQL context** - `toSql()` uses cached schema fragments. Chat flows use fragments from `AdapterIndexer` or `sql index`, then resolve the stored conversation thread from your context store.
+2. **Builds SQL context** - `toSql()` uses the fragments from `index()`. Chat flows use fragments from `AdapterIndexer` or `sql index`, then resolve the stored conversation thread from your context store.
 3. **Generates SQL** - The model maps the request to the available schema.
 4. **Validates** - The adapter validates the generated SQL before it is returned or executed.
-5. **Returns results** - `toSql()` returns the SQL string; the `chat()` helper streams an end-user answer from indexed schema fragments, Text2SQL instructions, and sandbox query results.
+5. **Returns results** - `toSql()` returns the SQL in `result.sql`; the `chat()` helper streams an end-user answer from indexed schema fragments, Text2SQL instructions, and sandbox query results.
 
 The `chat()` helper also injects Text2SQL's built-in SQL workflow guidance and
 any extra fragments you add to your `ContextEngine`.

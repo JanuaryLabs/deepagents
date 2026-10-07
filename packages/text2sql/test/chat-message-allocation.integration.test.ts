@@ -24,7 +24,6 @@ import {
 import {
   AdapterIndexer,
   FileIndexCache,
-  FileIndexLock,
   TEXT2SQL_INDEX_PROGRESS_CHUNK,
   instructions,
 } from '@deepagents/text2sql';
@@ -144,7 +143,6 @@ describe('Text2Sql client message allocation', () => {
               const fragments = await new AdapterIndexer({
                 adapters,
                 cache,
-                lock: new FileIndexLock({ namespace: generateId() }),
               }).index({
                 onProgress: (event) =>
                   writer.write({

@@ -26,7 +26,6 @@ import {
   createVirtualSandbox,
 } from '@deepagents/context';
 import {
-  FileIndexLock,
   Text2Sql,
   createSqlCommand,
   sqlValidateReminder,
@@ -48,7 +47,6 @@ function sqlCommand() {
   });
   const text2Sql = new Text2Sql({
     adapters: { mem },
-    lock: new FileIndexLock(),
   });
   return createSqlCommand(text2Sql).command;
 }

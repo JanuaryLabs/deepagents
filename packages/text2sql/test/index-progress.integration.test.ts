@@ -25,7 +25,6 @@ import {
   Adapter,
   AdapterIndexer,
   FileIndexCache,
-  FileIndexLock,
   type IndexCache,
   type IntrospectionProgress,
   TEXT2SQL_INDEX_PROGRESS_CHUNK,
@@ -213,7 +212,6 @@ function chatStream(args: {
       const fragments = await new AdapterIndexer({
         adapters: args.adapters,
         cache: args.cache,
-        lock: new FileIndexLock({ namespace: generateId() }),
       }).index({
         onProgress: (event) =>
           writer.write({

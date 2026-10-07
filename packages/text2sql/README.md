@@ -37,7 +37,7 @@ Requires Node.js LTS
 import { groq } from '@ai-sdk/groq';
 import pg from 'pg';
 
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql, toSql } from '@deepagents/text2sql';
 import {
   Postgres,
   columnValues,
@@ -69,22 +69,24 @@ const adapter = new Postgres({
   ],
 });
 
-const text2sql = new Text2Sql({
-  model: groq('openai/gpt-oss-20b'),
-  adapters: { main: adapter },
-  lock: new FileIndexLock(),
-});
+const text2sql = new Text2Sql({ adapters: { main: adapter } });
 
-// Generate SQL
-const sql = await text2sql.toSql(
-  'Show me the top 10 customers by revenue',
-  'main',
-);
+const fragments = await text2sql.index({ names: ['main'] });
+const { sql } = await toSql({
+  input: 'Show me the top 10 customers by revenue',
+  adapter,
+  fragments,
+  model: groq('openai/gpt-oss-20b'),
+});
 console.log(sql);
 ```
 
+`index()` introspects the database schema and returns it as context fragments.
+`toSql()` gives these fragments to the model and validates the SQL that the
+model writes.
+
 The adapter-map key (`main` here) is the adapter name. Reuse that same key in
-`text2sql.toSql(..., 'main')` and in any `sql validate <db> "..."` /
+`text2sql.index({ names: ['main'] })` and in any `sql validate <db> "..."` /
 `sql run <db> "..."` calls from a sandbox where the package CLI is installed.
 This is the configured connection name, not the SQL-level database or schema
 name (for example, SQLite's default `main` schema).
@@ -223,7 +225,7 @@ The `sql` CLI caches introspected schema only when you opt in via env: set
 `TEXT2SQL_INDEX_CACHE_DIR` (where cache files live) and/or
 `TEXT2SQL_INDEX_VERSION` (an invalidation token — bump it when the schema
 changes). With neither set, every `sql index` introspects fresh. See
-[Schema index caching & coordination](#schema-index-caching--coordination) for
+[Schema index caching](#schema-index-caching) for
 the underlying injectable primitives.
 
 For in-process or virtual-sandbox usage (without installing the package CLI),
@@ -234,16 +236,11 @@ import { InMemoryFs, createVirtualSandbox } from '@deepagents/context';
 import {
   type CreateSqlCommandOptions,
   type CreateSqlCommandResult,
-  FileIndexLock,
   Text2Sql,
   createSqlCommand,
 } from '@deepagents/text2sql';
 
-const text2sql = new Text2Sql({
-  model,
-  adapters: { main: adapter },
-  lock: new FileIndexLock(),
-});
+const text2sql = new Text2Sql({ adapters: { main: adapter } });
 
 const commandOptions: CreateSqlCommandOptions = {
   outputDir: '/sql-artifacts',
@@ -318,9 +315,9 @@ the model loop. Shell-escaped dollar-prefixed PostHog properties such as
 ## Fragments
 
 Inject domain knowledge by setting fragments on the `ContextEngine` you build
-for the agent. Those fragments affect every `chat()` turn. If you need direct
-SQL generation with extra fragments, use the lower-level `toSql({ fragments })`
-helper exported from `@deepagents/text2sql`.
+for the agent. Those fragments affect every `chat()` turn. For direct SQL
+generation, give `toSql({ fragments })` the fragments from `index()` and your
+own fragments.
 
 ```typescript
 import {
@@ -399,79 +396,70 @@ for await (const chunk of followUp) {
 }
 ```
 
-## Schema index caching & coordination
+## Schema index caching
 
 Schema introspection is the expensive part of indexing. `Text2Sql` and
-`AdapterIndexer` own no storage and no locking — you inject them, keyed per
-adapter. A `lock` is **required**; a `cache` is optional:
+`AdapterIndexer` own no storage. You can give them a cache. The cache key is
+the adapter name:
 
 ```typescript
 export interface IndexCache {
   read(key: string): Promise<ContextFragment[] | null>;
   write(key: string, fragments: ContextFragment[]): Promise<void>;
 }
-
-export interface IndexLock {
-  // Acquire (waiting if held elsewhere), run fn, release — even on throw.
-  // Reject if the lock can't be acquired (callers fail closed).
-  run<T>(key: string, fn: () => Promise<T>): Promise<T>;
-}
 ```
 
-- **`lock` only** (no `cache`) → introspection is serialized but not
-  deduplicated: each waiter re-introspects, because the cache recheck under the
-  lock is what turns serialization into single-flight.
-- **`lock` + `cache`** → introspection is single-flight: concurrent callers for
-  the same adapter wait on the lock, then read the warm cache the holder wrote.
+- **No `cache`**: each `index()` call introspects the database.
+- **A `cache`**: `index()` reads the cache first. On a miss, it introspects the
+  database and writes the result to the cache.
 
-File-backed `IndexCache` and `IndexLock` implementations ship as composable
-primitives:
+The package ships a file-backed cache:
 
 ```typescript
-import { FileIndexCache, FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { FileIndexCache, Text2Sql } from '@deepagents/text2sql';
 
 const text2sql = new Text2Sql({
-  model,
   adapters: { main: adapter },
-  // Point both `dir`s at a shared volume to share one cache + lock across
-  // processes on the same filesystem.
   cache: new FileIndexCache({ dir: '/var/cache/text2sql', namespace: 'v1' }),
-  lock: new FileIndexLock({ dir: '/var/cache/text2sql', namespace: 'v1' }),
 });
 ```
 
-`FileIndexCache` writes atomically (temp + rename) and treats a file that does
-not parse to context fragments as a miss, so a torn read self-heals into a
-re-introspect. `FileIndexLock`
-(built on `proper-lockfile`, options `{ dir?, namespace?, stale?, retries? }`)
-serializes processes that share a POSIX filesystem; a held lock auto-refreshes
-its mtime so a slow introspection is not mistaken for a crash, and acquisition
-fails closed once retries are exhausted. Both `dir`s default to the OS temp
-directory.
+`FileIndexCache` writes atomically (temp + rename). It treats a file that does
+not parse to context fragments as a miss, so a torn read causes a new
+introspection. `dir` defaults to the OS temp directory.
 
-### Horizontally-scaled deployments
+### Introspect once for concurrent callers
 
-Running many processes/containers against one database (e.g. a fleet of
-daemons)? Two coordination tiers:
+`index()` does not make callers wait for each other. When two callers miss the
+cache at the same time, both introspect the database. The result stays
+correct, because each write replaces the whole cache file.
 
-- The **lock alone** serializes introspection — never two concurrent
-  introspections of the same database (caps peak DB load). The shipped
-  `FileIndexLock` covers processes that share a POSIX filesystem (one host, or a
-  shared volume — NFSv4 / EFS); for hosts without a shared filesystem, back it
-  with a distributed lock you already operate (a Redis lock, a Postgres
-  `pg_advisory_lock`, etc.).
-- The **lock plus a shared cache directory** gives fleet-wide single-flight:
-  the lock holder writes the cache on the shared volume, and every waiter reads
-  it instead of re-introspecting.
+To let only one caller introspect, acquire a key around `index()`. This example
+uses [`@zukhruf/mutex`](https://www.npmjs.com/package/@zukhruf/mutex):
 
-> On object-storage-backed volumes (GCS/S3 FUSE) `rename` is not atomic and
-> file locks are unreliable — that is exactly why the lock and cache are
-> injectable. Use a real distributed lock; the `FileIndexCache` parse-as-miss
-> behavior plus the post-lock recheck tolerate a non-atomic write.
+```typescript
+import { Mutex, SqliteStore } from '@zukhruf/mutex';
 
-See `demo/text2sql-daemon` for a daemon that injects a `FileIndexCache`
-(`TEXT2SQL_INDEX_CACHE_DIR` / `TEXT2SQL_INDEX_VERSION`) and a `pg_advisory_lock`
-backed `IndexLock`.
+const mutex = new Mutex(new SqliteStore('/var/lib/my-app/locks'));
+
+const fragments = await mutex.acquire('text2sql:main', () =>
+  text2sql.index({ names: ['main'] }),
+);
+```
+
+The first caller introspects the database and writes the cache. The other
+callers wait. When each waiter gets the key, its `index()` call reads the cache
+that the first caller wrote.
+
+`SqliteStore` shares keys between the processes on one host. For a fleet of
+hosts, acquire the key from a service that all hosts share, and give all hosts
+the same cache. `demo/text2sql-daemon` uses a Postgres advisory lock for the
+key and a `FileIndexCache` from `TEXT2SQL_INDEX_CACHE_DIR` /
+`TEXT2SQL_INDEX_VERSION`.
+
+> On object-storage-backed volumes (GCS/S3 FUSE) `rename` is not atomic. The
+> `FileIndexCache` parse-as-miss behavior tolerates a torn write: the next
+> `index()` call introspects again.
 
 ## Streaming Index Progress
 
@@ -484,12 +472,11 @@ import { createUIMessageStream } from 'ai';
 
 import {
   AdapterIndexer,
-  FileIndexLock,
   TEXT2SQL_INDEX_PROGRESS_CHUNK,
   type Text2SqlIndexProgressEvent,
 } from '@deepagents/text2sql';
 
-const indexer = new AdapterIndexer({ adapters, lock: new FileIndexLock() });
+const indexer = new AdapterIndexer({ adapters });
 
 await context.continue(user('Show me top 10 customers'));
 

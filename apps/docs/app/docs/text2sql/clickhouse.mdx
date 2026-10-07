@@ -23,7 +23,7 @@ Reuse the shared `model` setup from
 ```typescript
 import { createClient } from '@clickhouse/client';
 
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { ClickHouse } from '@deepagents/text2sql/clickhouse';
 import * as clickhouse from '@deepagents/text2sql/clickhouse';
 
@@ -39,7 +39,6 @@ const query = async (sql: string) => {
 };
 
 const text2sql = new Text2Sql({
-  model,
   adapters: {
     main: new ClickHouse({
       defaultDatabase: 'analytics',
@@ -55,7 +54,6 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
-  lock: new FileIndexLock(),
 });
 ```
 

@@ -58,10 +58,7 @@ export interface CreateSqlCommandResult {
  *
  * @example
  * ```ts
- * const text2Sql = new Text2Sql({
- *   adapters: { pagila },
- *   lock: new FileIndexLock(),
- * });
+ * const text2Sql = new Text2Sql({ adapters: { pagila } });
  * const { command } = createSqlCommand(text2Sql);
  * const sandbox = await createVirtualSandbox({
  *   fs: new InMemoryFs(),

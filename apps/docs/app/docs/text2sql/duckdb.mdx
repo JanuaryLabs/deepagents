@@ -20,7 +20,7 @@ Reuse the shared `model` setup from
 ```typescript
 import { DuckDBInstance } from '@duckdb/node-api';
 
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { DuckDB } from '@deepagents/text2sql/duckdb';
 import * as duckdb from '@deepagents/text2sql/duckdb';
 
@@ -42,7 +42,6 @@ const execute = async (sql: string) => {
 };
 
 const text2sql = new Text2Sql({
-  model,
   adapters: {
     main: new DuckDB({
       execute,
@@ -58,7 +57,6 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
-  lock: new FileIndexLock(),
 });
 ```
 

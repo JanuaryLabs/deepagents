@@ -11,7 +11,7 @@ import { it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { z } from 'zod';
 
-import { type IndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql, toSql } from '@deepagents/text2sql';
 import {
   PostHog,
   PostHogApiError,
@@ -671,13 +671,14 @@ it('runs generated HogQL through the public Text2Sql flow', async () => {
     },
   };
   const adapter = new PostHog({ transport, grounding: [schema()] });
-  const text2sql = new Text2Sql({
-    adapters: { analytics: adapter },
-    model: mockModel('SELECT count() AS signups FROM events'),
-    lock: passthroughLock,
-  });
+  const text2sql = new Text2Sql({ adapters: { analytics: adapter } });
 
-  const sql = await text2sql.toSql('How many events are there?', 'analytics');
+  const { sql } = await toSql({
+    input: 'How many events are there?',
+    adapter,
+    fragments: await text2sql.index({ names: ['analytics'] }),
+    model: mockModel('SELECT count() AS signups FROM events'),
+  });
   assert.match(sql, /SELECT\s+count\(\) AS signups/i);
   const metadataBeforeRun = metadataCalls;
   assert.deepEqual(await text2sql.run('analytics', sql), {
@@ -686,12 +687,6 @@ it('runs generated HogQL through the public Text2Sql flow', async () => {
   });
   assert.equal(metadataCalls - metadataBeforeRun, 2);
 });
-
-const passthroughLock: IndexLock = {
-  async run<T>(_key: string, fn: () => Promise<T>): Promise<T> {
-    return fn();
-  },
-};
 
 function schemaFixture() {
   const field = (name: string, type: string, schemaValid = true) => ({

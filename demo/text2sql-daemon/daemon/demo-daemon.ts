@@ -33,8 +33,8 @@ const text2Sql = new Text2Sql({
     cacheDir || cacheNamespace
       ? new FileIndexCache({ dir: cacheDir, namespace: cacheNamespace })
       : undefined,
-  lock: new PgAdvisoryIndexLock(pool),
 });
+const indexLock = new PgAdvisoryIndexLock(pool);
 
 const adapterNames = text2Sql.adapterNames();
 console.log(
@@ -121,10 +121,12 @@ server.addMethod('text2sql.index', async (params) => {
   const resolvedNames = names ?? text2Sql.adapterNames();
   const emitEvents = obj.emitEvents === true;
   const events: unknown[] = [];
-  const fragments = await text2Sql.index({
-    names: resolvedNames,
-    onProgress: emitEvents ? (event) => events.push(event) : undefined,
-  });
+  const fragments = await indexLock.run('text2sql:index', () =>
+    text2Sql.index({
+      names: resolvedNames,
+      onProgress: emitEvents ? (event) => events.push(event) : undefined,
+    }),
+  );
   return emitEvents
     ? { fragments, resolvedNames, events }
     : { fragments, resolvedNames };

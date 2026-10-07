@@ -12,7 +12,6 @@ import {
 } from '@deepagents/context';
 import {
   FileIndexCache,
-  FileIndexLock,
   Text2Sql,
   createSqlCommand,
 } from '@deepagents/text2sql';
@@ -26,7 +25,6 @@ const text2Sql = new Text2Sql({
   cache: cacheNamespace
     ? new FileIndexCache({ namespace: cacheNamespace })
     : undefined,
-  lock: new FileIndexLock({ namespace: cacheNamespace }),
 });
 const { command: sqlCommand } = createSqlCommand(text2Sql);
 

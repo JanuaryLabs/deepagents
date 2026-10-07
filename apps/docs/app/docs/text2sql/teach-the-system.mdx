@@ -78,9 +78,8 @@ Use that engine when building the chat agent
 
 ## Teach Direct SQL Generation with `toSql()`
 
-The high-level `Text2Sql.toSql()` method only uses schema fragments from
-adapter indexing. If you want direct SQL generation with extra business vocabulary, use
-the lower-level `toSql()` helper:
+`toSql()` uses only the fragments that you give it. Add business vocabulary
+next to the schema fragments:
 
 ```typescript
 import { groq } from '@ai-sdk/groq';

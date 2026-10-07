@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 
 import { render } from '@deepagents/context';
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Sqlite, info, tables } from '@deepagents/text2sql/sqlite';
 
 function sqliteAdapter(ddl: string) {
@@ -24,7 +23,6 @@ describe('index() database name label', () => {
           `CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT);`,
         ),
       },
-      lock: new FileIndexLock({ namespace: randomUUID() }),
     });
 
     const fragments = await text2Sql.index();
@@ -54,7 +52,6 @@ describe('index() database name label', () => {
         sales: sqliteAdapter(`CREATE TABLE orders (id INTEGER);`),
         analytics: sqliteAdapter(`CREATE TABLE events (id INTEGER);`),
       },
-      lock: new FileIndexLock({ namespace: randomUUID() }),
     });
 
     const out = render('system', ...(await text2Sql.index()));

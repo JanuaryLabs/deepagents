@@ -12,7 +12,7 @@ can stream user-facing answers grounded in validated query results.
 - **Natural Language to SQL**: Ask questions in plain English, get executable SQL
 - **Schema-Aware**: Automatically analyzes your database structure, relationships, and data patterns
 - **Multi-Database Support**: Works with PostgreSQL, SQLite, DuckDB, SQL Server, MySQL/MariaDB, BigQuery, ClickHouse, and PostHog HogQL
-- **Teachable**: Add domain knowledge through context fragments or low-level `toSql({ fragments })` calls
+- **Teachable**: Add domain knowledge through context fragments or `toSql({ fragments })` calls
 - **Conversation Memory**: Multi-turn chat backed by your `ContextEngine` store
 - **Safe by Default**: Generates read-only queries with output limits
 
@@ -22,7 +22,7 @@ can stream user-facing answers grounded in validated query results.
 import { groq } from '@ai-sdk/groq';
 import { DatabaseSync } from 'node:sqlite';
 
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql, toSql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
@@ -33,23 +33,23 @@ const adapter = new Sqlite({
 });
 
 const text2sql = new Text2Sql({
-  model: groq('openai/gpt-oss-20b'),
   adapters: { main: adapter },
-  lock: new FileIndexLock(),
 });
 
-// Generate SQL from natural language
-const sql = await text2sql.toSql(
-  'Show me top 10 customers by total purchases',
-  'main',
-);
+const fragments = await text2sql.index({ names: ['main'] });
+const { sql } = await toSql({
+  input: 'Show me top 10 customers by total purchases',
+  adapter,
+  fragments,
+  model: groq('openai/gpt-oss-20b'),
+});
 // SELECT c.CustomerId, c.FirstName, c.LastName, SUM(i.Total) as TotalPurchases
 // FROM Customer c JOIN Invoice i ON c.CustomerId = i.CustomerId
 // GROUP BY c.CustomerId ORDER BY TotalPurchases DESC LIMIT 10
 ```
 
 `main` is the adapter-map key. Reuse that same name in
-`text2sql.toSql(..., 'main')` and in any `sql validate <db> "..."` /
+`text2sql.index({ names: ['main'] })` and in any `sql validate <db> "..."` /
 `sql run <db> "..."` calls from a sandbox where the package CLI is installed.
 It is the configured connection name, not the SQL-level database or schema name.
 
@@ -61,7 +61,7 @@ front with `isValidAdapterName(name)` or `validateAdapterNames(names)`.
 
 | API                                                                                     | Description                                                                                                                                                   |
 | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Text2Sql#toSql(input, adapterName)`                                                    | Generate SQL without executing, routed to one adapter                                                                                                         |
+| `toSql({ input, adapter, fragments, model })`                                           | Generate SQL without executing, from the schema fragments that `index()` returns                                                                             |
 | `Text2Sql#toPairs(adapterName, factory)`                                                | Generate training pairs from one configured adapter                                                                                                           |
 | `AdapterIndexer#index({ adapterNames?, onProgress? })`                                  | Introspect adapters and return schema fragments — each prefixed with a `<database>` connection-name label — with optional progress events                     |
 | `createSqlCommand(text2Sql, options?: CreateSqlCommandOptions): CreateSqlCommandResult` | Wrap a `Text2Sql` instance as a `customCommands` entry for just-bash (`sql run`, `sql validate`) in virtual sandboxes                                         |

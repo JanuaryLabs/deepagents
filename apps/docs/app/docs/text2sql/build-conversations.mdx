@@ -22,14 +22,10 @@ import {
   errorRecoveryGuardrail,
   user,
 } from '@deepagents/context';
-import {
-  AdapterIndexer,
-  FileIndexLock,
-  instructions,
-} from '@deepagents/text2sql';
+import { AdapterIndexer, instructions } from '@deepagents/text2sql';
 
 const context = new ContextEngine({ store, chatId, userId });
-const indexer = new AdapterIndexer({ adapters, lock: new FileIndexLock() });
+const indexer = new AdapterIndexer({ adapters });
 context.set(...instructions(), ...(await indexer.index()));
 
 const ai = agent({
@@ -65,12 +61,11 @@ import { createUIMessageStream } from 'ai';
 import { chat, user } from '@deepagents/context';
 import {
   AdapterIndexer,
-  FileIndexLock,
   TEXT2SQL_INDEX_PROGRESS_CHUNK,
   instructions,
 } from '@deepagents/text2sql';
 
-const indexer = new AdapterIndexer({ adapters, lock: new FileIndexLock() });
+const indexer = new AdapterIndexer({ adapters });
 
 const stream = createUIMessageStream({
   execute: async ({ writer }) => {
@@ -108,16 +103,15 @@ scope it. Each written schema fragment starts with a `<database>` leaf naming
 that adapter's configured connection name — the exact value the model passes to
 `sql validate <db>` and `sql run <db>`.
 
-For cross-run reuse, inject a cache alongside the required lock —
-`new AdapterIndexer({ adapters, cache, lock })` (or
-`new Text2Sql({ ..., cache, lock })`). The shipped `FileIndexCache({ dir, namespace })`
+For cross-run reuse, inject a cache — `new AdapterIndexer({ adapters, cache })`
+(or `new Text2Sql({ ..., cache })`). The shipped `FileIndexCache({ dir, namespace })`
 is file-backed; `namespace` is the invalidation token (bump it when the schema
 changes), and `dir` defaults to the OS temp dir. Without a cache, indexing
-introspects fresh on every call. When you scale horizontally, point every
-instance at a shared cache `dir` and pass a distributed `lock` so the fleet
-collapses concurrent introspection into a single flight. The package README's
-"Schema index caching & coordination" section documents the full `cache`/`lock`
-model. The sandbox CLI (`sql index`) wires a `FileIndexCache` from
+introspects fresh on every call. `index()` does not make concurrent callers
+wait for each other. To introspect only once when many instances start
+together, give them a shared cache `dir` and acquire a key around `index()`.
+The package README's "Schema index caching" section shows how. The sandbox CLI
+(`sql index`) wires a `FileIndexCache` from
 `TEXT2SQL_INDEX_CACHE_DIR` and the `TEXT2SQL_INDEX_VERSION` namespace.
 
 To live-tail progress from another process, set `TEXT2SQL_INDEX_EVENTS_PATH`

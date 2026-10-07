@@ -73,7 +73,7 @@ const assistant = agent({
 await execute(assistant, 'Hello!', {});`,
 
   text2sql: `import { groq } from '@ai-sdk/groq';
-import { Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql, toSql } from '@deepagents/text2sql';
 import { Postgres } from '@deepagents/text2sql/postgres';
 
 const adapter = new Postgres({
@@ -84,13 +84,15 @@ const adapter = new Postgres({
   grounding: [],
 });
 
-const text2sql = new Text2Sql({
-  version: 'v1',
-  adapters: { main: adapter },
+const text2sql = new Text2Sql({ adapters: { main: adapter } });
+
+const fragments = await text2sql.index({ names: ['main'] });
+await toSql({
+  input: 'Show all customers',
+  adapter,
+  fragments,
   model: groq('gpt-oss-20b'),
 });
-
-await text2sql.toSql('Show all customers', 'main');
 
 // For multi-turn streaming chat, build the agent yourself with
 // agent + chat from @deepagents/context — see /docs/text2sql.`,

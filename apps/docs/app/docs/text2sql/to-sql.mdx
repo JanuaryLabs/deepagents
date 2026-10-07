@@ -3,13 +3,14 @@ title: Generate SQL
 description: Convert natural language to SQL queries without execution
 ---
 
-The high-level `Text2Sql.toSql()` method generates SQL without executing it. It
-uses cached schema fragments from adapter indexing, runs the SQL generation agent, and
-returns the final SQL string after adapter formatting and validation.
+The `toSql()` function generates SQL without executing it. You give it the
+question, the adapter, the schema fragments, and the model. It runs the SQL
+generation agent and returns the final SQL after adapter formatting and
+validation.
 
-The second argument is the configured adapter name — the same key you used in
-`adapters` when constructing `Text2Sql`. It is required, even when only one
-adapter is configured.
+Get the schema fragments from `Text2Sql.index()`. Pass the configured adapter
+name in `names` — the same key you used in `adapters` when constructing
+`Text2Sql`.
 
 Adapter names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`. If you create adapter
 maps dynamically, validate the keys before constructing `Text2Sql` with
@@ -18,19 +19,24 @@ maps dynamically, validate the keys before constructing `Text2Sql` with
 ## Basic Usage
 
 ```typescript
-const sql = await text2sql.toSql(
-  'Show me top 10 customers by revenue',
-  'main',
-);
+import { groq } from '@ai-sdk/groq';
+import { toSql } from '@deepagents/text2sql';
+
+const fragments = await text2sql.index({ names: ['main'] });
+
+const { sql } = await toSql({
+  input: 'Show me top 10 customers by revenue',
+  adapter,
+  fragments,
+  model: groq('openai/gpt-oss-20b'),
+});
 
 console.log(sql);
 ```
 
 ## How It Works
 
-When you call `toSql()`:
-
-1. **Load schema** - Adapter indexing introspects the adapter or returns cached fragments.
+1. **Load schema** - `index()` introspects the adapter or returns cached fragments.
 2. **Generate SQL** - The SQL agent maps the question to the available schema.
 3. **Format** - The adapter normalizes the generated SQL for its dialect.
 4. **Validate** - The adapter validates the SQL before it is returned.
@@ -42,7 +48,7 @@ If you plan to execute the returned SQL outside the chat agent loop, validate
 it again in your own execution pipeline:
 
 ```typescript
-const sql = await text2sql.toSql('Show me sales data', 'main');
+const { sql } = await toSql({ input: 'Show me sales data', adapter, fragments, model });
 
 const error = await adapter.validate(sql);
 if (error) {
@@ -52,47 +58,42 @@ if (error) {
 
 ## Adding Extra Fragments
 
-`Text2Sql.toSql()` uses cached schema fragments from adapter indexing. If you want direct SQL
-generation with extra business vocabulary or guardrails, call the lower-level
-`toSql()` helper exported from `@deepagents/text2sql` and pass your own
-fragments explicitly:
+Add business vocabulary or guardrails next to the schema fragments:
 
 ```typescript
-import { groq } from '@ai-sdk/groq';
 import { term } from '@deepagents/context';
-import { toSql } from '@deepagents/text2sql';
 
-const model = groq('openai/gpt-oss-20b');
-
-const result = await toSql({
+const { sql } = await toSql({
   input: 'Show ARR by plan',
-  // Reuse your configured database adapter from Getting Started.
   adapter,
   model,
   fragments: [
-    ...(await adapter.introspect()),
+    ...(await text2sql.index({ names: ['main'] })),
     term('ARR', 'annual recurring revenue'),
   ],
 });
-
-console.log(result.sql);
 ```
 
 ## Error Handling
 
-`toSql()` includes retry logic that feeds validation failures back into the
-model:
+`toSql()` feeds validation failures back into the model and retries. Set
+`maxRetries` to change the number of attempts (default: 3):
 
 ```typescript
-const sql = await text2sql.toSql('Show revenue by customer', 'main');
-console.log(sql);
+const { sql } = await toSql({
+  input: 'Show revenue by customer',
+  adapter,
+  fragments,
+  model,
+  maxRetries: 5,
+});
 ```
 
 ## When to Use toSql() vs a Chat Agent
 
-`toSql()` is a method on `Text2Sql`. The streaming chat agent is built by the
-caller using `agent` + `chat` from `@deepagents/context` plus `instructions()`
-and schema fragments from `AdapterIndexer` or `sql index` — see
+The streaming chat agent is built by the caller using `agent` + `chat` from
+`@deepagents/context` plus `instructions()` and schema fragments from
+`AdapterIndexer` or `sql index` — see
 [Build Conversations](/docs/text2sql/build-conversations).
 
 | Feature | `toSql()` | Chat agent (`chat(ai)`) |
@@ -100,7 +101,7 @@ and schema fragments from `AdapterIndexer` or `sql index` — see
 | Returns | SQL string | Streamed user-facing answer |
 | Execution | No execution | Executes via the sandbox-installed `sql validate <db> "..."` and `sql run <db> "..."` CLI |
 | Persistent context | Schema cache only | Full conversation thread from your context store |
-| Extra fragments | Use low-level `toSql({ fragments })` | Set fragments on your `ContextEngine` |
+| Extra fragments | Add them to `fragments` | Set fragments on your `ContextEngine` |
 | Streaming | No | Yes |
 | Best for | Previews, review flows, offline execution | Interactive data assistants |
 
@@ -123,37 +124,39 @@ and schema fragments from `AdapterIndexer` or `sql index` — see
 ### Simple Query
 
 ```typescript
-const sql = await text2sql.toSql('Count total orders', 'main');
+const { sql } = await toSql({ input: 'Count total orders', adapter, fragments, model });
 // SELECT COUNT(*) AS total_orders FROM orders
 ```
 
 ### Complex Aggregation
 
 ```typescript
-const sql = await text2sql.toSql(
-  'Show monthly revenue trends for the last 12 months',
-  'main',
-);
+const { sql } = await toSql({
+  input: 'Show monthly revenue trends for the last 12 months',
+  adapter,
+  fragments,
+  model,
+});
 ```
 
 ### Multi-Table Join
 
 ```typescript
-const sql = await text2sql.toSql(
-  'Which artists have the most albums in our catalog?',
-  'main',
-);
+const { sql } = await toSql({
+  input: 'Which artists have the most albums in our catalog?',
+  adapter,
+  fragments,
+  model,
+});
 ```
 
 ## Performance
 
-Query generation is fast:
-
-- **Introspection**: every call introspects the schema unless you inject a cache
+- **Introspection**: each `index()` call introspects the schema, unless you give `Text2Sql` a cache
 - **Retry attempts**: up to three attempts on validation errors
 
-To skip repeated introspection, pass a `cache` (e.g. `FileIndexCache`) to
-`new Text2Sql({ ... })`; without one, schema indexing runs fresh on each call.
-A `lock` is now required — pass `new FileIndexLock()`, or a distributed lock for
-a fleet. See the package README's "Schema index caching & coordination" section
-for the injected `cache`/`lock` model and its invalidation namespace.
+Call `index()` once and reuse its fragments for many `toSql()` calls. To reuse
+the schema across processes, pass a `cache` (for example `FileIndexCache`) to
+`new Text2Sql({ ... })`. See the package README's "Schema index caching"
+section for the cache, its invalidation namespace, and how to introspect once
+for concurrent callers.

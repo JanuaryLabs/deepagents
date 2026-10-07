@@ -13,7 +13,7 @@ and PostHog executes the accepted query.
 PostHog uses native `fetch`, so no additional client package is required.
 
 ```typescript
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql, toSql } from '@deepagents/text2sql';
 import {
   PostHog,
   createPostHogTransport,
@@ -38,15 +38,16 @@ const adapter = new PostHog({
 });
 
 const text2sql = new Text2Sql({
-  model,
   adapters: { posthog: adapter },
-  lock: new FileIndexLock(),
 });
 
-const hogql = await text2sql.toSql(
-  'How many signup events happened in the last 7 days?',
-  'posthog',
-);
+const fragments = await text2sql.index({ names: ['posthog'] });
+const { sql: hogql } = await toSql({
+  input: 'How many signup events happened in the last 7 days?',
+  adapter,
+  fragments,
+  model,
+});
 const result = await text2sql.run('posthog', hogql);
 ```
 

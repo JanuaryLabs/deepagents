@@ -16,9 +16,8 @@ import { JsonCache } from './file-cache.ts';
  *
  * `key` is a stable per-adapter identifier; the same key is reused for the same
  * adapter across processes, so a cache shared across a fleet lets one process's
- * write satisfy another's read. Pair with an
- * {@link import('./index-lock.ts').IndexLock} keyed by the same value to make
- * concurrent introspection single-flight.
+ * write satisfy another's read. Indexing does not make concurrent callers wait
+ * for each other: to introspect once, the host acquires a key around `index()`.
  */
 export interface IndexCache {
   read(key: string): Promise<ContextFragment[] | null>;

@@ -3,11 +3,7 @@ import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { z } from 'zod';
 
-import {
-  FileIndexLock,
-  Text2Sql,
-  Text2SqlValidationError,
-} from '@deepagents/text2sql';
+import { Text2Sql, Text2SqlValidationError } from '@deepagents/text2sql';
 import {
   DuckDB,
   columnStats,
@@ -238,7 +234,6 @@ it('isolates named DuckDB connections with different grounded scopes', async () 
         grounding: [tables({ filter: ['tickets'] })],
       }),
     },
-    lock: new FileIndexLock(),
   });
 
   assert.deepEqual(await text2sql.run('crm', 'SELECT name FROM customers'), {
@@ -291,7 +286,6 @@ it('joins explicitly grounded relations across attached DuckDB catalogs', async 
         ],
       }),
     },
-    lock: new FileIndexLock(),
   });
 
   assert.deepEqual(

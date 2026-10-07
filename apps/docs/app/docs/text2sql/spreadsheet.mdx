@@ -8,7 +8,7 @@ The Spreadsheet adapter loads Excel (.xlsx/.xls) and CSV/TSV files into an in-me
 ## Basic Setup
 
 ```typescript
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql, toSql } from '@deepagents/text2sql';
 import { Spreadsheet, tables, info } from '@deepagents/text2sql/spreadsheet';
 
 // Reuse model from Getting Started.
@@ -18,16 +18,16 @@ const adapter = new Spreadsheet({
 });
 
 const text2sql = new Text2Sql({
-  model,
   adapters: { main: adapter },
-  lock: new FileIndexLock(),
 });
 
-// Query your spreadsheet with natural language
-const sql = await text2sql.toSql(
-  'What are the top 5 products by revenue?',
-  'main',
-);
+const fragments = await text2sql.index({ names: ['main'] });
+const { sql } = await toSql({
+  input: 'What are the top 5 products by revenue?',
+  adapter,
+  fragments,
+  model,
+});
 
 // Don't forget to close when done
 adapter.close();
@@ -188,7 +188,7 @@ const incomplete = await adapter.execute(`
 ## Full Example
 
 ```typescript
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql, toSql } from '@deepagents/text2sql';
 import {
   Spreadsheet,
   tables,
@@ -209,20 +209,20 @@ const adapter = new Spreadsheet({
 });
 
 const text2sql = new Text2Sql({
-  model,
   adapters: { main: adapter },
-  lock: new FileIndexLock(),
 });
 
 // Introspect schema
 const schema = await adapter.introspect();
 console.log('Schema:', schema);
 
-// Natural language queries
-const topCustomers = await text2sql.toSql(
-  'Who are the top 10 customers by total order amount?',
-  'main',
-);
+const fragments = await text2sql.index({ names: ['main'] });
+const { sql: topCustomers } = await toSql({
+  input: 'Who are the top 10 customers by total order amount?',
+  adapter,
+  fragments,
+  model,
+});
 console.log('SQL:', topCustomers);
 
 const results = await adapter.execute(topCustomers);

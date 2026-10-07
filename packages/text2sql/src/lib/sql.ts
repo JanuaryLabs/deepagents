@@ -1,4 +1,3 @@
-import { type AgentModel } from '@deepagents/agent';
 import type { ContextFragment } from '@deepagents/context';
 
 import {
@@ -7,16 +6,12 @@ import {
 } from './adapter-index.ts';
 import { validateAdapterNames } from './adapter-name.ts';
 import { type Adapter } from './adapters/adapter.ts';
-import { toSql } from './agents/sql.agent.ts';
 import { type IndexCache } from './index-cache.ts';
-import { type IndexLock } from './index-lock.ts';
 import { type ExtractedPair, type PairProducer } from './synthesis/types.ts';
 
 export interface Text2SqlConfig {
   adapters: Record<string, Adapter>;
-  model?: AgentModel;
   cache?: IndexCache;
-  lock: IndexLock;
 }
 
 export interface Text2SqlRunResult {
@@ -119,7 +114,6 @@ export class Text2Sql {
     this.#indexer = new AdapterIndexer({
       adapters: config.adapters,
       cache: config.cache,
-      lock: config.lock,
     });
   }
 
@@ -129,14 +123,6 @@ export class Text2Sql {
       throw new Text2SqlUnknownAdapterError(name, this.adapterNames());
     }
     return adapter;
-  }
-
-  #requireModel(op: string): AgentModel {
-    const model = this.#config.model;
-    if (!model) {
-      throw new Error(`Text2Sql.${op}() requires a model in Text2SqlConfig`);
-    }
-    return model;
   }
 
   adapterNames(): string[] {
@@ -203,19 +189,6 @@ export class Text2Sql {
       adapterNames: options.names,
       onProgress: options.onProgress,
     });
-  }
-
-  async toSql(input: string, adapterName: string): Promise<string> {
-    const adapter = this.#requireAdapter(adapterName);
-    const model = this.#requireModel('toSql');
-    const fragments = await this.#indexer.indexAdapter(adapterName);
-    const result = await toSql({
-      input,
-      adapter,
-      fragments,
-      model,
-    });
-    return result.sql;
   }
 
   async toPairs<T extends PairProducer>(

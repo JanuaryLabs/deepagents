@@ -24,12 +24,11 @@ Reuse the shared `model` setup from
 <Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'DuckDB', 'SQL Server', 'MySQL/MariaDB', 'BigQuery', 'ClickHouse']}>
 <Tab value="PostgreSQL">
 ```typescript
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Postgres } from '@deepagents/text2sql/postgres';
 import * as postgres from '@deepagents/text2sql/postgres';
 
 const text2sql = new Text2Sql({
-  model,
   adapters: {
     main: new Postgres({
       execute: async (sql) => pool.query(sql).then(r => r.rows),
@@ -45,18 +44,16 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
-  lock: new FileIndexLock(),
 });
 ```
 </Tab>
 <Tab value="SQLite">
 ```typescript
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
 const text2sql = new Text2Sql({
-  model,
   adapters: {
     main: new Sqlite({
       execute: (sql) => db.prepare(sql).all(),
@@ -72,7 +69,6 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
-  lock: new FileIndexLock(),
 });
 ```
 </Tab>
@@ -80,7 +76,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import { DuckDBInstance } from '@duckdb/node-api';
 
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { DuckDB } from '@deepagents/text2sql/duckdb';
 import * as duckdb from '@deepagents/text2sql/duckdb';
 
@@ -90,7 +86,6 @@ const instance = await DuckDBInstance.create('./analytics.duckdb', {
 const connection = await instance.connect();
 
 const text2sql = new Text2Sql({
-  model,
   adapters: {
     main: new DuckDB({
       execute: async (sql) => {
@@ -109,18 +104,16 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
-  lock: new FileIndexLock(),
 });
 ```
 </Tab>
 <Tab value="SQL Server">
 ```typescript
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { SqlServer } from '@deepagents/text2sql/sqlserver';
 import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
 const text2sql = new Text2Sql({
-  model,
   adapters: {
     main: new SqlServer({
       execute: async (sql) => {
@@ -139,18 +132,16 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
-  lock: new FileIndexLock(),
 });
 ```
 </Tab>
 <Tab value="MySQL/MariaDB">
 ```typescript
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Mysql } from '@deepagents/text2sql/mysql';
 import * as mysqlGrounding from '@deepagents/text2sql/mysql';
 
 const text2sql = new Text2Sql({
-  model,
   adapters: {
     main: new Mysql({
       execute: async (sql) => {
@@ -169,7 +160,6 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
-  lock: new FileIndexLock(),
 });
 ```
 </Tab>
@@ -177,14 +167,13 @@ const text2sql = new Text2Sql({
 ```typescript
 import { BigQuery as BigQueryClient } from '@google-cloud/bigquery';
 
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { BigQuery } from '@deepagents/text2sql/bigquery';
 import * as bigquery from '@deepagents/text2sql/bigquery';
 
 const client = new BigQueryClient({ projectId: process.env.BQ_PROJECT_ID });
 
 const text2sql = new Text2Sql({
-  model,
   adapters: {
     main: new BigQuery({
       projectId: process.env.BQ_PROJECT_ID,
@@ -207,18 +196,16 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
-  lock: new FileIndexLock(),
 });
 ```
 </Tab>
 <Tab value="ClickHouse">
 ```typescript
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { ClickHouse } from '@deepagents/text2sql/clickhouse';
 import * as clickhouse from '@deepagents/text2sql/clickhouse';
 
 const text2sql = new Text2Sql({
-  model,
   adapters: {
     main: new ClickHouse({
       defaultDatabase: 'analytics',
@@ -234,7 +221,6 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
-  lock: new FileIndexLock(),
 });
 ```
 </Tab>

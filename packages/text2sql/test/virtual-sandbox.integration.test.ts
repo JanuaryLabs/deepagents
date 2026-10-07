@@ -4,11 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 
 import { createVirtualSandbox } from '@deepagents/context';
-import {
-  FileIndexLock,
-  Text2Sql,
-  createSqlCommand,
-} from '@deepagents/text2sql';
+import { Text2Sql, createSqlCommand } from '@deepagents/text2sql';
 import { Sqlite, info, tables } from '@deepagents/text2sql/sqlite';
 
 function buildSandbox() {
@@ -23,7 +19,6 @@ function buildSandbox() {
 
   const text2Sql = new Text2Sql({
     adapters: { mem },
-    lock: new FileIndexLock(),
   });
   const { command } = createSqlCommand(text2Sql);
   return { command };
@@ -47,7 +42,6 @@ function buildMultiSandbox() {
 
   const text2Sql = new Text2Sql({
     adapters: { mem, other },
-    lock: new FileIndexLock(),
   });
   const { command } = createSqlCommand(text2Sql);
   return { command };

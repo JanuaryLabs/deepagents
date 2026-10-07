@@ -1,10 +1,8 @@
 import { createHash } from 'node:crypto';
 import type pg from 'pg';
 
-import type { IndexLock } from '@deepagents/text2sql';
-
 /**
- * {@link IndexLock} backed by Postgres session-level advisory locks.
+ * Runs schema indexing under a Postgres session-level advisory lock.
  *
  * Safe across separate daemon processes/containers pointed at the same
  * database: `pg_advisory_lock` blocks until the key is free, so only one holder
@@ -13,7 +11,7 @@ import type { IndexLock } from '@deepagents/text2sql';
  * {@link import('@deepagents/text2sql').FileIndexCache} directory to turn that
  * serialization into fleet-wide single-flight introspection.
  */
-export class PgAdvisoryIndexLock implements IndexLock {
+export class PgAdvisoryIndexLock {
   readonly #pool: pg.Pool;
 
   constructor(pool: pg.Pool) {

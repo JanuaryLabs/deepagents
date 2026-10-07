@@ -15,14 +15,13 @@ Reuse the shared `model` setup from
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
 
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
 const db = new DatabaseSync('./your-database.db', { readOnly: true });
 
 const text2sql = new Text2Sql({
-  model,
   adapters: {
     main: new Sqlite({
       execute: (sql) => db.prepare(sql).all(),
@@ -38,7 +37,6 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
-  lock: new FileIndexLock(),
 });
 ```
 </Tab>
@@ -46,14 +44,13 @@ const text2sql = new Text2Sql({
 ```typescript
 import Database from 'better-sqlite3';
 
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
 const db = new Database('./database.db', { readonly: true });
 
 const text2sql = new Text2Sql({
-  model,
   adapters: {
     main: new Sqlite({
       execute: (sql) => db.prepare(sql).all(),
@@ -69,7 +66,6 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
-  lock: new FileIndexLock(),
 });
 ```
 </Tab>
@@ -77,7 +73,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import initSqlJs from 'sql.js';
 
-import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
@@ -85,7 +81,6 @@ const SQL = await initSqlJs();
 const db = new SQL.Database(data);
 
 const text2sql = new Text2Sql({
-  model,
   adapters: {
     main: new Sqlite({
       execute: (sql) => {
@@ -109,7 +104,6 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
-  lock: new FileIndexLock(),
 });
 ```
 </Tab>

@@ -28,7 +28,6 @@ import {
 import {
   AdapterIndexer,
   FileIndexCache,
-  FileIndexLock,
   type IndexCache,
   instructions,
 } from '@deepagents/text2sql';
@@ -108,7 +107,6 @@ function indexFragments(adapters: Record<string, Sqlite>, cache?: IndexCache) {
   return new AdapterIndexer({
     adapters,
     cache,
-    lock: new FileIndexLock({ namespace: generateId() }),
   }).index();
 }
 

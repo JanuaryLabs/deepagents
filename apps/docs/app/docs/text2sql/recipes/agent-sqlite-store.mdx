@@ -196,12 +196,12 @@ const model = groq('openai/gpt-oss-20b');
 `ContextEngine` reads and writes the SQLite store using `chatId` + `userId` as
 the thread key. `AdapterIndexer` walks the adapter's grounding and returns
 schema fragments; without an injected `cache` (e.g. `FileIndexCache`) it
-introspects fresh each call. See the package README's "Schema index caching &
-coordination" section.
+introspects fresh each call. See the package README's "Schema index caching"
+section.
 
 ```typescript
 import { ContextEngine } from '@deepagents/context';
-import { AdapterIndexer, FileIndexLock, instructions } from '@deepagents/text2sql';
+import { AdapterIndexer, instructions } from '@deepagents/text2sql';
 
 const context = new ContextEngine({
   store,
@@ -211,7 +211,6 @@ const context = new ContextEngine({
 
 const indexer = new AdapterIndexer({
   adapters: { main: adapter },
-  lock: new FileIndexLock(),
 });
 
 context.set(...instructions(), ...(await indexer.index()));
