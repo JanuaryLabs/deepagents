@@ -1,4 +1,5 @@
 import { type MCPClient, createMCPClient } from '@ai-sdk/mcp';
+import { HttpServer } from '@zukhruf/testing/http';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -10,7 +11,6 @@ import {
   defineStack,
 } from '@deepagents/experimental/zukhruf';
 import { mcp } from '@deepagents/experimental/zukhruf/mcp';
-import { HttpServer } from '@deepagents/test';
 
 test('MCP uses real HTTP clients per runtime and closes them on failure or disposal', async () => {
   let failDiscovery = false;

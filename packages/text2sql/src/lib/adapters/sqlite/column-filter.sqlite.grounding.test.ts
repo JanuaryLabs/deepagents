@@ -1,8 +1,8 @@
+import { Sqlite as TestSqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import { z } from 'zod';
 
-import { Sqlite as TestSqlite } from '@deepagents/test';
 import { createGroundingContext } from '@deepagents/text2sql/grounding';
 import {
   Sqlite,

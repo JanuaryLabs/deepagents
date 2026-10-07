@@ -1,4 +1,6 @@
 import { PGlite } from '@electric-sql/pglite';
+import { Docker, TestRun } from '@zukhruf/testing/docker';
+import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { type TestContext, suite, test } from 'node:test';
@@ -17,9 +19,10 @@ import type {
   TurnRef,
 } from '@deepagents/experimental/zukhruf';
 import { PgBossTurnQueue } from '@deepagents/experimental/zukhruf';
-import { Postgres } from '@deepagents/test';
 
-const testPostgres = new Postgres();
+const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
+
+const testPostgres = new Postgres({ docker });
 
 /**
  * Behavioral contract every TurnQueue implementation must pass.

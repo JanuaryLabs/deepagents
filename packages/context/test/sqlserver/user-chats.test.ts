@@ -1,3 +1,5 @@
+import { Docker, TestRun } from '@zukhruf/testing/docker';
+import { SqlServer } from '@zukhruf/testing/sqlserver';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -11,9 +13,12 @@ import {
   createVirtualSandbox,
   user,
 } from '@deepagents/context';
-import { SqlServer } from '@deepagents/test';
 
-const testSqlServer = new SqlServer();
+import { waitForFtsReady } from './wait-for-fts-ready.ts';
+
+const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
+
+const testSqlServer = new SqlServer({ docker });
 
 async function createVirtualAgentSandbox() {
   return createBashTool({
@@ -816,7 +821,7 @@ describe('Message Upsert', () => {
       });
 
       // Wait for full-text index to populate (SQL Server FTS is async)
-      await container.waitForFtsReady();
+      await waitForFtsReady(container.connectionString);
 
       let results = await store.searchMessages('upsert-fts-chat', 'original');
       assert.strictEqual(results.length, 1);

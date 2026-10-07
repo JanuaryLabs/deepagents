@@ -1,3 +1,5 @@
+import { Docker, TestRun } from '@zukhruf/testing/docker';
+import { SQL_SERVER_FULL_IMAGE, SqlServer } from '@zukhruf/testing/sqlserver';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -7,9 +9,12 @@ import {
   assistantText,
   user,
 } from '@deepagents/context';
-import { SQL_SERVER_FULL_IMAGE, SqlServer } from '@deepagents/test';
 
-const testSqlServer = new SqlServer({ image: SQL_SERVER_FULL_IMAGE });
+import { waitForFtsReady } from './wait-for-fts-ready.ts';
+
+const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
+
+const testSqlServer = new SqlServer({ docker, image: SQL_SERVER_FULL_IMAGE });
 
 /**
  * SQL Server Full-Text Search tests.
@@ -75,7 +80,7 @@ describe('Full-Text Search', () => {
         );
 
         // Wait for full-text index to populate (SQL Server FTS is async)
-        await container.waitForFtsReady();
+        await waitForFtsReady(container.connectionString);
 
         const results = await store.searchMessages('chat-search', 'configure');
 
@@ -119,7 +124,7 @@ describe('Full-Text Search', () => {
         });
 
         // Wait for full-text index to populate (SQL Server FTS is async)
-        await container.waitForFtsReady();
+        await waitForFtsReady(container.connectionString);
 
         const results = await store.searchMessages('chat-rank', 'settings');
 
@@ -153,7 +158,7 @@ describe('Full-Text Search', () => {
         });
 
         // Wait for full-text index to populate (SQL Server FTS is async)
-        await container.waitForFtsReady();
+        await waitForFtsReady(container.connectionString);
 
         const results = await store.searchMessages('chat-snippet', 'configure');
 
@@ -197,7 +202,7 @@ describe('Full-Text Search', () => {
         });
 
         // Wait for full-text index to populate (SQL Server FTS is async)
-        await container.waitForFtsReady();
+        await waitForFtsReady(container.connectionString);
 
         const userResults = await store.searchMessages('chat-roles', 'Hello', {
           roles: ['user'],
@@ -240,7 +245,7 @@ describe('Full-Text Search', () => {
         }
 
         // Wait for full-text index to populate (SQL Server FTS is async)
-        await container.waitForFtsReady();
+        await waitForFtsReady(container.connectionString);
 
         const results = await store.searchMessages('chat-limit', 'quick', {
           limit: 2,
@@ -309,7 +314,7 @@ describe('Full-Text Search', () => {
         await bobEngine.save();
 
         // Wait for full-text index to populate (SQL Server FTS is async)
-        await container.waitForFtsReady();
+        await waitForFtsReady(container.connectionString);
 
         const aliceResults = await store.searchMessages(
           'alice-search-chat',
@@ -347,7 +352,7 @@ describe('Full-Text Search', () => {
         await engine.save();
 
         // Wait for full-text index to populate (SQL Server FTS is async)
-        await container.waitForFtsReady();
+        await waitForFtsReady(container.connectionString);
 
         const resultsBefore = await store.searchMessages('fts-chat', 'fox');
         assert.strictEqual(resultsBefore.length, 1);
@@ -386,7 +391,7 @@ describe('Full-Text Search', () => {
         await engine2.save();
 
         // Wait for full-text index to populate (SQL Server FTS is async)
-        await container.waitForFtsReady();
+        await waitForFtsReady(container.connectionString);
 
         await store.deleteChat('fts-chat-1');
 
@@ -414,7 +419,7 @@ describe('Full-Text Search', () => {
         await engine.save();
 
         // Wait for full-text index to populate (SQL Server FTS is async)
-        await container.waitForFtsReady();
+        await waitForFtsReady(container.connectionString);
 
         const before = await store.searchMessages('stale-fts-chat', 'xyz123');
         assert.strictEqual(before.length, 1);

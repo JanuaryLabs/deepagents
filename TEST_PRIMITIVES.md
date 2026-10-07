@@ -3,25 +3,26 @@
 Tests target the repository's current Node.js version. Prefer these native
 primitives before adding helpers or dependencies.
 
-`@deepagents/test` is for domain-free test primitives. Repeated fixture data,
+`@zukhruf/testing` is for domain-free test primitives. Each area has its own
+import path, documented in the package README. Repeated fixture data,
 product-specific harnesses, and infrastructure compositions stay with their
 tests.
 
-| Need                     | Use                                         | Important behavior                                                                                       |
-| ------------------------ | ------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Strict assertions        | `node:assert/strict`                        | Makes methods such as `equal` and `deepEqual` strict by default.                                         |
-| Delay                    | `setTimeout` from `node:timers/promises`    | Alias it to `sleep`; it supports `AbortSignal` and avoids hand-written promises.                         |
-| Retry an observation     | `TestContext.waitFor` from `node:test`      | The callback must throw or reject while waiting. Returning `false` counts as success.                    |
-| Measure a deadline       | `performance.now()`                         | Monotonic elapsed time; do not use it as a timestamp or compare it across processes.                     |
-| Temporary directory      | `mkdtempDisposable` from `node:fs/promises` | Use with `await using`; cleanup recursively removes the directory.                                       |
-| Resource cleanup         | `using` / `await using`                     | Calls `Symbol.dispose` / `Symbol.asyncDispose` in reverse declaration order, including after errors.     |
-| Deferred promise         | `Promise.withResolvers()`                   | Provides `{ promise, resolve, reject }` without capturing callbacks in a promise constructor.            |
-| Disposable timeout       | `using timer = globalThis.setTimeout(...)`  | Node timers implement `Symbol.dispose`, which cancels the timer when its scope exits.                    |
-| Wait for one event       | `once` from `node:events`                   | Register before triggering the event; it resolves with the emitted arguments.                            |
-| Current module directory | `import.meta.dirname`                       | Replaces `fileURLToPath(import.meta.url)` plus `dirname` in Node ESM files.                              |
-| Current Node executable  | `process.execPath`                          | Use when spawning another Node process instead of assuming `node` is on `PATH`.                          |
-| Non-mutating sort        | `Array.prototype.toSorted()`                | Returns a shallow sorted copy; provide `(a, b) => a - b` for numbers.                                    |
-| Bound promise settlement | `settleWithin` from `@deepagents/test`      | Rejects if a non-abortable promise does not settle in time; it does not cancel the underlying operation. |
+| Need                     | Use                                          | Important behavior                                                                                       |
+| ------------------------ | -------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Strict assertions        | `node:assert/strict`                         | Makes methods such as `equal` and `deepEqual` strict by default.                                         |
+| Delay                    | `setTimeout` from `node:timers/promises`     | Alias it to `sleep`; it supports `AbortSignal` and avoids hand-written promises.                         |
+| Retry an observation     | `TestContext.waitFor` from `node:test`       | The callback must throw or reject while waiting. Returning `false` counts as success.                    |
+| Measure a deadline       | `performance.now()`                          | Monotonic elapsed time; do not use it as a timestamp or compare it across processes.                     |
+| Temporary directory      | `mkdtempDisposable` from `node:fs/promises`  | Use with `await using`; cleanup recursively removes the directory.                                       |
+| Resource cleanup         | `using` / `await using`                      | Calls `Symbol.dispose` / `Symbol.asyncDispose` in reverse declaration order, including after errors.     |
+| Deferred promise         | `Promise.withResolvers()`                    | Provides `{ promise, resolve, reject }` without capturing callbacks in a promise constructor.            |
+| Disposable timeout       | `using timer = globalThis.setTimeout(...)`   | Node timers implement `Symbol.dispose`, which cancels the timer when its scope exits.                    |
+| Wait for one event       | `once` from `node:events`                    | Register before triggering the event; it resolves with the emitted arguments.                            |
+| Current module directory | `import.meta.dirname`                        | Replaces `fileURLToPath(import.meta.url)` plus `dirname` in Node ESM files.                              |
+| Current Node executable  | `process.execPath`                           | Use when spawning another Node process instead of assuming `node` is on `PATH`.                          |
+| Non-mutating sort        | `Array.prototype.toSorted()`                 | Returns a shallow sorted copy; provide `(a, b) => a - b` for numbers.                                    |
+| Bound promise settlement | `settleWithin` from `@zukhruf/testing/async` | Rejects if a non-abortable promise does not settle in time; it does not cancel the underlying operation. |
 
 ## Established patterns
 
@@ -72,7 +73,7 @@ custom cancellation hook.
 `StreamHarness` provides controlled producers and disposable readers:
 
 ```ts
-import { StreamHarness } from '@deepagents/test';
+import { StreamHarness } from '@zukhruf/testing/streams';
 
 const streams = new StreamHarness();
 
@@ -113,7 +114,7 @@ deadline. AI message chunks, transport behavior, and runtime fixtures stay local
 Use `HttpServer` for a disposable loopback server with a native request handler:
 
 ```ts
-import { HttpServer } from '@deepagents/test';
+import { HttpServer } from '@zukhruf/testing/http';
 
 await using server = await new HttpServer().start((_request, response) => {
   response.end('hello');
@@ -135,7 +136,7 @@ All database engines use instance acquisition and disposable handles. SQLite
 owns a local file and native connection:
 
 ```ts
-import { Sqlite } from '@deepagents/test';
+import { Sqlite } from '@zukhruf/testing/sqlite';
 
 const sqlite = new Sqlite();
 
@@ -170,7 +171,7 @@ does not change the caller's busy timeout, schema, or data.
 DuckDB owns an in-memory instance and its native connection:
 
 ```ts
-import { DuckDB } from '@deepagents/test';
+import { DuckDB } from '@zukhruf/testing/duckdb';
 
 const duckdb = new DuckDB();
 await using database = await duckdb.database();
@@ -185,7 +186,7 @@ failure. SQL fixtures and product adapter wiring stay in their own tests.
 BigQuery owns an isolated dataset in an explicitly selected cloud project:
 
 ```ts
-import { BigQuery } from '@deepagents/test';
+import { BigQuery } from '@zukhruf/testing/bigquery';
 
 const bigquery = new BigQuery({ projectId, location });
 await using database = await bigquery.dataset();
@@ -213,9 +214,11 @@ For PostgreSQL, MySQL, and SQL Server, create an engine instance and acquire a
 disposable database for each test:
 
 ```ts
-import { Postgres } from '@deepagents/test';
+import { Docker, TestRun } from '@zukhruf/testing/docker';
+import { Postgres } from '@zukhruf/testing/postgres';
 
-const postgres = new Postgres();
+const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
+const postgres = new Postgres({ docker });
 
 it('stores a record', async () => {
   await using database = await postgres.database();
@@ -246,7 +249,7 @@ behind until the container is removed. There is no idle timer or exit hook.
 List the shared containers and, after their tests finish, stop the selected IDs:
 
 ```sh
-docker ps -a --filter label=dev.deepagents.test.shared=1
+docker ps -a --filter label=dev.zukhruf.testing.shared=1
 docker stop <container-id> [<container-id> ...]
 ```
 
@@ -258,19 +261,23 @@ clean up to pick up a newer image behind the same tag.
 Use `nx run <project>:test --args="path/to/file.test.ts"` for a focused test.
 `await using server = await postgres.start()` creates a dedicated container;
 disposing that handle stops its container. For other services, use a `Docker`
-instance's `start(options)` or `reuse(options)` methods. Both return a
-`Container` with bound `exec()` and `cleanup()` operations. Explicit disposal of
-a reused container stops it for every caller. Engine `database()` handles only
-drop their isolated database. MySQL handles provide `query()`; SQL Server handles
-provide `waitForFtsReady()` for context-store catalogs.
+instance's `serve(options)` (a dedicated server) or `reuse(options)` (a shared
+one); both return a `ServiceContainer` with `host`, `port`, bound `exec()` and
+`cleanup()`. `start(options)` starts a container without a published port.
+Explicit disposal of a reused container stops it for every caller. Engine
+`database()` handles only drop their isolated database. MySQL handles provide
+`query()`. Context's SQL Server tests wait for the context store's full-text
+catalogs with `waitForFtsReady(connectionString)` from
+`packages/context/test/sqlserver/wait-for-fts-ready.ts`.
 
 ClickHouse uses a dedicated server so tests can create server-wide users, roles,
 and functions without sharing them with another suite. Select the image explicitly:
 
 ```ts
-import { ClickHouse } from '@deepagents/test';
+import { ClickHouse } from '@zukhruf/testing/clickhouse';
 
 const clickhouse = new ClickHouse({
+  docker,
   image: 'clickhouse/clickhouse-server:25.8.28.1',
 });
 await using server = await clickhouse.start();
@@ -305,10 +312,11 @@ nx run @deepagents/context:test
 # Use Docker Desktop for a run:
 DOCKER_CONTEXT=desktop-linux nx run @deepagents/context:test
 # Docker test projects run one at a time within this Nx invocation:
-nx run-many -t test --projects=@deepagents/test,@deepagents/context,@deepagents/text2sql,@deepagents/experimental
+nx run-many -t test --projects=@deepagents/context,@deepagents/text2sql,@deepagents/experimental
 ```
 
-Projects tagged `test:docker` use `tools/src/run-docker-tests.ts`. The
+Projects tagged `test:docker` run `zukhruf-docker-tests`, the supervisor bin of
+`@zukhruf/testing`. The
 supervisor resolves the selected Docker context to a concrete Unix or SSH
 endpoint once, passes that pinned endpoint to worker processes, and disables Nx
 test caching. These targets set `parallelism: false`, so Nx runs them exclusively
@@ -332,16 +340,18 @@ to the acquiring process and expire when its handle is disposed. SSH uses the
 normal SSH configuration, agent, jump hosts, and host-key checks. It needs both
 remote Docker access and permission to forward TCP connections.
 
-`await using fixture = await new Docker().directory()` creates a fixture on the
+`await using fixture = await docker.directory()` creates a fixture on the
 Docker host. Pass `fixture.path` to a bind mount, then use `mkdir`, `writeFile`,
 `readFile`, `chmod`, and `symlink` on the fixture. Build contexts, Dockerfiles,
 and seccomp files read by the Docker CLI remain local. SQL Server image choices
-and architecture-specific tests use `Docker.info().architecture`.
+and architecture-specific tests use `docker.info().architecture`.
 
 Container helpers default to one CPU and 1 GiB RAM, SQL Server to 3 GiB, and
 ClickHouse tests to 2 GiB. Database containers use private IPC. When testing
-another container API, pass `new Docker().defaults` directly to that API. It
-provides `resources` and the current run's ownership `labels`. Spread these
+another container API, pass `docker.defaults` directly to that API. It
+provides `resources` and the current run's ownership `labels`, so build the
+`docker` with `TestRun.fromEnvironment(process.env)`: without it, the labels are
+empty and the supervisor cannot remove what a killed run left. Spread these
 defaults before explicit options; merge nested `resources` or `labels` when
 overriding individual settings. Sandbox tests import their public APIs directly.
 
@@ -352,7 +362,8 @@ local SSH sockets) after failures, timeouts, and interruption. Managed Docker
 sandbox volumes inherit the sandbox labels. Shared database servers remain
 running under the existing explicit-cleanup contract; images and build caches
 also remain. If the host is unreachable, cleanup reports the ownership record
-under `.nx/docker-test-runs/`. The next run on that endpoint retries cleanup
+under `$XDG_STATE_HOME/zukhruf-testing/docker-runs/` (`~/.local/state` when
+unset). The next run on that endpoint, from any project, retries cleanup
 once the recorded processes and their worker group have exited. Signalling
 errors still trigger resource cleanup and retain the record for recovery.
 Never delete those records to hide a

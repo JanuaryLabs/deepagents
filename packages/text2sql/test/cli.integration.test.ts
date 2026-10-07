@@ -1,3 +1,4 @@
+import { Sqlite as TestSqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import {
@@ -23,7 +24,6 @@ import {
   XmlRenderer,
   isFragment,
 } from '@deepagents/context';
-import { Sqlite as TestSqlite } from '@deepagents/test';
 
 const sqlite = new TestSqlite();
 

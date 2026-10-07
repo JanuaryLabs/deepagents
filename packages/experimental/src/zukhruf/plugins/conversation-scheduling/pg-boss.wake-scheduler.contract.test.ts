@@ -1,4 +1,6 @@
 import { PGlite } from '@electric-sql/pglite';
+import { Docker, TestRun } from '@zukhruf/testing/docker';
+import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -8,9 +10,10 @@ import {
   PgBossWakeScheduler,
   type Wake,
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
-import { Postgres } from '@deepagents/test';
 
-const testPostgres = new Postgres();
+const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
+
+const testPostgres = new Postgres({ docker });
 
 test('PgBossWakeScheduler delivers opaque data at or after its due time', async () => {
   const database = new PGlite();

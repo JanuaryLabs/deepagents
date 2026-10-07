@@ -1,3 +1,4 @@
+import { StreamHarness } from '@zukhruf/testing/streams';
 import {
   type UIMessage,
   createUIMessageStream,
@@ -20,7 +21,6 @@ import {
   createVirtualSandbox,
   errorRecoveryGuardrail,
 } from '@deepagents/context';
-import { StreamHarness } from '@deepagents/test';
 import {
   Adapter,
   AdapterIndexer,

@@ -1,3 +1,5 @@
+import { Docker, TestRun } from '@zukhruf/testing/docker';
+import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -7,9 +9,10 @@ import {
   assistantText,
   user,
 } from '@deepagents/context';
-import { Postgres } from '@deepagents/test';
 
-const testPostgres = new Postgres();
+const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
+
+const testPostgres = new Postgres({ docker });
 
 describe('Full-Text Search', () => {
   describe('Search Operations', () => {

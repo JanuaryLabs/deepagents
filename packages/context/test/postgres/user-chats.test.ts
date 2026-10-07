@@ -1,3 +1,5 @@
+import { Docker, TestRun } from '@zukhruf/testing/docker';
+import { Postgres } from '@zukhruf/testing/postgres';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -11,9 +13,10 @@ import {
   createVirtualSandbox,
   user,
 } from '@deepagents/context';
-import { Postgres } from '@deepagents/test';
 
-const testPostgres = new Postgres();
+const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
+
+const testPostgres = new Postgres({ docker });
 
 async function createVirtualAgentSandbox() {
   return createBashTool({

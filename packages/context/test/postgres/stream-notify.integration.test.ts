@@ -1,3 +1,6 @@
+import { settleWithin } from '@zukhruf/testing/async';
+import { Docker, TestRun } from '@zukhruf/testing/docker';
+import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -11,11 +14,12 @@ import {
   type StreamData,
   StreamManager,
 } from '@deepagents/context';
-import { Postgres, settleWithin } from '@deepagents/test';
+
+const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
 
 const POSTGRES_18 = { image: 'postgres:18-alpine' };
 
-const testPostgres = new Postgres(POSTGRES_18);
+const testPostgres = new Postgres({ ...POSTGRES_18, docker });
 const NO_CHANGE = Symbol('no-change');
 
 function testSchema(): string {

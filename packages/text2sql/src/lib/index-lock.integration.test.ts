@@ -1,3 +1,4 @@
+import { Sqlite as TestSqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { mkdtempDisposable, readdir, writeFile } from 'node:fs/promises';
@@ -6,7 +7,6 @@ import * as path from 'node:path';
 import { describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import { Sqlite as TestSqlite } from '@deepagents/test';
 import {
   type Adapter,
   AdapterIndexer,

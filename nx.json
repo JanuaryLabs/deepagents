@@ -170,7 +170,7 @@
           "projects": ["tag:test:docker"]
         },
         "options": {
-          "command": "if [ -z \"${DOCKER_CONTEXT+x}${DOCKER_HOST+x}\" ]; then export DOCKER_CONTEXT=limerence-dokploy; fi; node ../../tools/src/run-docker-tests.ts --no-warnings --test-timeout=60000 --experimental-test-module-mocks --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=test-results.xml"
+          "command": "if [ -z \"${DOCKER_CONTEXT+x}${DOCKER_HOST+x}\" ]; then export DOCKER_CONTEXT=limerence-dokploy; fi; zukhruf-docker-tests --no-warnings --test-timeout=60000 --experimental-test-module-mocks --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=test-results.xml"
         },
         "parallelism": false,
         "cache": false

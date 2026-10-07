@@ -1,3 +1,4 @@
+import { Docker, TestRun } from '@zukhruf/testing/docker';
 import spawn from 'nano-spawn';
 import assert from 'node:assert';
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -25,9 +26,8 @@ import {
   urlBinary,
   useSandbox,
 } from '@deepagents/context';
-import { Docker } from '@deepagents/test';
 
-const docker = new Docker();
+const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
 
 function testVolumeName(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -320,7 +320,7 @@ describe('Docker Sandbox', () => {
 
     describe('volumes', () => {
       it('attaches bind volume as read-only by default', async () => {
-        await using fixture = await new Docker().directory();
+        await using fixture = await docker.directory();
         await fixture.writeFile('host-file.txt', 'from host');
         const sandbox = await createDockerSandbox({
           ...docker.defaults,
@@ -353,7 +353,7 @@ describe('Docker Sandbox', () => {
       });
 
       it('attaches bind volume as read-write when specified', async () => {
-        await using fixture = await new Docker().directory();
+        await using fixture = await docker.directory();
         await fixture.writeFile('host-file.txt', 'from host');
         const sandbox = await createDockerSandbox({
           ...docker.defaults,
@@ -1387,7 +1387,7 @@ describe('Docker Sandbox', () => {
     });
 
     it('respects volumes option', async () => {
-      await using fixture = await new Docker().directory();
+      await using fixture = await docker.directory();
       const tempDir = fixture.path;
       await fixture.writeFile('test.txt', 'mounted content');
 
@@ -1635,7 +1635,7 @@ describe('Docker Sandbox', () => {
   describe('error classes', () => {
     describe('VolumePathError', () => {
       it('identifies the missing bind source when another source is its prefix', async () => {
-        await using fixture = await new Docker().directory();
+        await using fixture = await docker.directory();
         const missing = `${fixture.path}/missing`;
         await assert.rejects(
           createDockerSandbox({

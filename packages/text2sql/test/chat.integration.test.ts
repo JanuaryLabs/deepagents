@@ -1,3 +1,4 @@
+import { Sqlite as TestSqlite } from '@zukhruf/testing/sqlite';
 import {
   type UIMessage,
   generateId,
@@ -24,7 +25,6 @@ import {
   reminder,
   user,
 } from '@deepagents/context';
-import { Sqlite as TestSqlite } from '@deepagents/test';
 import {
   AdapterIndexer,
   FileIndexCache,

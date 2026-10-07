@@ -15,7 +15,6 @@ chat flows, local retrieval, and Text2SQL assistants.
 | `@deepagents/experimental`     | Ship unstable provider, reminder, and Zukhruf runtime surfaces before they graduate into stable packages.                           |
 | `@deepagents/orchestrator`     | Prototype deep-research, deep-wiki, and plan-and-solve orchestration flows.                                                         |
 | `@deepagents/retrieval`        | Ingest local files and external sources into a SQLite vector store for semantic search.                                             |
-| `@deepagents/test`             | Provide private integration-test helpers for containers, setup, settling, and timeboxing.                                           |
 | `@deepagents/text2sql`         | Convert natural language to SQL, index database schemas, and run validated SQL through the package `sql` CLI inside a sandbox.      |
 | `@deepagents/toolbox`          | Provide reusable tools for web search, filesystems, containers, stocks, weather, and repo inspection.                               |
 | `@deepagents/devtool`          | Serve the Zukhruf development UI and expose correlated trace recording through `@deepagents/devtool/traces`.                        |

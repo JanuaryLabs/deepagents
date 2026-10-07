@@ -2,6 +2,8 @@ import type {
   LanguageModelV4FunctionTool,
   LanguageModelV4StreamPart,
 } from '@ai-sdk/provider';
+import { Docker, TestRun } from '@zukhruf/testing/docker';
+import { Postgres } from '@zukhruf/testing/postgres';
 import { type UIMessage, isToolUIPart, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
@@ -43,9 +45,10 @@ import {
   conversationScheduling,
   conversationSchedulingCapabilities,
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
-import { Postgres } from '@deepagents/test';
 
-const testPostgres = new Postgres();
+const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
+
+const testPostgres = new Postgres({ docker });
 
 const userTurn = (id: string, text: string) => ({
   message: {

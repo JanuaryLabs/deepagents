@@ -1,12 +1,12 @@
+import { Docker, TestRun } from '@zukhruf/testing/docker';
 import assert from 'node:assert';
 import { text as streamText } from 'node:stream/consumers';
 import { describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { createBashTool, createDockerSandbox } from '@deepagents/context';
-import { Docker } from '@deepagents/test';
 
-const docker = new Docker();
+const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
 
 async function readFirstChunk(
   stream: ReadableStream<Uint8Array>,

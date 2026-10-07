@@ -1,3 +1,4 @@
+import { Sqlite } from '@zukhruf/testing/sqlite';
 import type { LanguageModelUsage } from 'ai';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
@@ -11,7 +12,6 @@ import {
   assistantText,
   user,
 } from '@deepagents/context';
-import { Sqlite } from '@deepagents/test';
 
 const sqlite = new Sqlite();
 

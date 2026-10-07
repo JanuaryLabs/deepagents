@@ -1,3 +1,4 @@
+import { Sqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -8,7 +9,6 @@ import {
   reminder,
   user,
 } from '@deepagents/context';
-import { Sqlite } from '@deepagents/test';
 
 const sqlite = new Sqlite();
 

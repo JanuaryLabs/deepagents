@@ -1,4 +1,5 @@
 import type { LanguageModelV4GenerateResult } from '@ai-sdk/provider';
+import { HttpServer } from '@zukhruf/testing/http';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import type {
@@ -10,7 +11,6 @@ import { it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { z } from 'zod';
 
-import { HttpServer } from '@deepagents/test';
 import { type IndexLock, Text2Sql } from '@deepagents/text2sql';
 import {
   PostHog,

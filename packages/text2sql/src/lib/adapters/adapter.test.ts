@@ -1,7 +1,7 @@
+import { Sqlite as TestSqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { Sqlite as TestSqlite } from '@deepagents/test';
 import { Adapter, type SqlPolicyAnalyzer } from '@deepagents/text2sql';
 import { createGroundingContext } from '@deepagents/text2sql/grounding';
 import { Sqlite, tables } from '@deepagents/text2sql/sqlite';

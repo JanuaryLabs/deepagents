@@ -1,4 +1,5 @@
 import type { LanguageModelV4Prompt } from '@ai-sdk/provider';
+import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { generateText, isStepCount } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { build } from 'esbuild';
@@ -17,9 +18,8 @@ import {
   createDockerSandbox,
   withStraceFileChanges,
 } from '@deepagents/context';
-import { Docker } from '@deepagents/test';
 
-const docker = new Docker();
+const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
 
 // Native-arch image with strace + python3 baked in. ContainerfileStrategy
 // content-hash-caches the build, so the apt install runs once per machine.
@@ -879,7 +879,7 @@ describe('selfTestStrace (in-container)', () => {
   });
 
   it('reports trace-unparseable under an emulated arch', async (t) => {
-    const { architecture } = await new Docker().info();
+    const { architecture } = await docker.info();
     if (!['arm64', 'aarch64'].includes(architecture))
       return t.skip('The Docker engine runs amd64 natively');
     // amd64 under emulation on an arm64 host: strace runs but the trace is

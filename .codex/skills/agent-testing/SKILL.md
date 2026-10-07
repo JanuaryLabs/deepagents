@@ -111,7 +111,7 @@ Read [references/test-api.md](references/test-api.md) when the task is not a bas
 - `convertArrayToAsyncIterable`, `convertArrayToReadableStream`, `convertReadableStreamToArray`
 - `simulateReadableStream` from `ai`
 - `readUIMessageStream`, `isTextUIPart`, `toTextStream`, and `consumeStream` from `ai`, including their incompatible chunk and error boundaries
-- `timebox` from `@deepagents/test` for status, conversation, and other asynchronous polling
+- `timebox` from `@zukhruf/testing/async` for status, conversation, and other asynchronous polling
 
 ## Other references
 

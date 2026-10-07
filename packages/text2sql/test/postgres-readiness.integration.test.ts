@@ -1,12 +1,14 @@
+import { Docker, TestRun } from '@zukhruf/testing/docker';
+import { Postgres } from '@zukhruf/testing/postgres';
 import * as assert from 'node:assert';
 import { describe, it } from 'node:test';
 import pg from 'pg';
 
-import { Postgres } from '@deepagents/test';
+const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
 
 describe('Postgres.start readiness contract', () => {
   it('resolves to a container that accepts TCP queries immediately, no retry', async () => {
-    await using container = await new Postgres().start();
+    await using container = await new Postgres({ docker }).start();
     // The contract every caller relies on: the moment Postgres.start
     // resolves, the connection string is usable over TCP — no retry loop. A
     // readiness probe that trusted the init-time socket-only server would let

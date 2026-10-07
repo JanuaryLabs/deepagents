@@ -34,9 +34,6 @@
       "path": "./packages/elements"
     },
     {
-      "path": "./packages/test"
-    },
-    {
       "path": "./packages/evals"
     },
     {

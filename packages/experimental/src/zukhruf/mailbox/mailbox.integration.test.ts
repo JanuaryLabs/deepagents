@@ -1,3 +1,4 @@
+import { Sqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert/strict';
 import { mkdtempDisposable } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -9,7 +10,6 @@ import {
   SqliteMailboxStore,
   createInterAgentCommunication,
 } from '@deepagents/experimental/zukhruf';
-import { Sqlite } from '@deepagents/test';
 
 const root = { chatId: 'root', userId: 'user-1' };
 const researcher = { chatId: 'researcher', userId: 'user-1' };

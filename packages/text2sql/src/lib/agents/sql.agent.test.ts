@@ -1,4 +1,5 @@
 import type { LanguageModelV4GenerateResult } from '@ai-sdk/provider';
+import { Sqlite as TestSqlite } from '@zukhruf/testing/sqlite';
 import {
   APICallError,
   JSONParseError,
@@ -13,7 +14,6 @@ import { describe, it } from 'node:test';
 import z from 'zod';
 
 import { fragment } from '@deepagents/context';
-import { Sqlite as TestSqlite } from '@deepagents/test';
 import { Adapter, SQLValidationError, toSql } from '@deepagents/text2sql';
 import { Sqlite, tables } from '@deepagents/text2sql/sqlite';
 

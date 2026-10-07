@@ -1,11 +1,14 @@
+import { Docker, TestRun } from '@zukhruf/testing/docker';
+import { SqlServer } from '@zukhruf/testing/sqlserver';
 import sql from 'mssql';
 import * as assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { SqlServer } from '@deepagents/test';
 import { MssqlFs } from '@deepagents/text2sql';
 
-const testSqlServer = new SqlServer();
+const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
+
+const testSqlServer = new SqlServer({ docker });
 
 describe('MssqlFs', () => {
   describe('file operations', () => {

@@ -1,9 +1,9 @@
+import { Sqlite as TestSqlite } from '@zukhruf/testing/sqlite';
 import { generateId } from 'ai';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import { getFragmentData } from '@deepagents/context';
-import { Sqlite as TestSqlite } from '@deepagents/test';
 import {
   AdapterIndexer,
   FileIndexCache,

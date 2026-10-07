@@ -56,6 +56,7 @@
     "@vitejs/plugin-react": "6.0.3",
     "@vitest/ui": "4.1.10",
     "@zukhruf/eslint": "^0.2.0",
+    "@zukhruf/testing": "^0.3.2",
     "autoprefixer": "10.5.4",
     "chalk": "^5.6.2",
     "css-tree": "^3.2.1",

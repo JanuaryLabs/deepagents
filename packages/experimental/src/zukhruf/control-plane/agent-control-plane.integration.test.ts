@@ -1,3 +1,4 @@
+import { settleWithin } from '@zukhruf/testing/async';
 import { type UIMessage, isToolUIPart, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
@@ -29,7 +30,6 @@ import {
   defineStack,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
-import { settleWithin } from '@deepagents/test';
 
 const userTurn = (id: string, text: string) => ({
   message: {

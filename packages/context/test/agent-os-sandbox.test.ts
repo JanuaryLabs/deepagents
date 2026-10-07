@@ -1,3 +1,4 @@
+import { StreamHarness } from '@zukhruf/testing/streams';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import { scheduler } from 'node:timers/promises';
@@ -9,7 +10,6 @@ import {
   createAgentOsSandbox,
   useAgentOsSandbox,
 } from '@deepagents/context';
-import { StreamHarness } from '@deepagents/test';
 
 const streamHarness = new StreamHarness();
 

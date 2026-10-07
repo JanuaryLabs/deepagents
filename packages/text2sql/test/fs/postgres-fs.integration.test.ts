@@ -1,11 +1,14 @@
+import { Docker, TestRun } from '@zukhruf/testing/docker';
+import { Postgres } from '@zukhruf/testing/postgres';
 import * as assert from 'node:assert';
 import { describe, it } from 'node:test';
 import pg from 'pg';
 
-import { Postgres } from '@deepagents/test';
 import { PostgresFs } from '@deepagents/text2sql';
 
-const testPostgres = new Postgres();
+const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
+
+const testPostgres = new Postgres({ docker });
 
 describe('PostgresFs', () => {
   describe('file operations', () => {

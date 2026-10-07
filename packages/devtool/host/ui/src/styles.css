@@ -13,7 +13,6 @@
 @source "../../../../react/genai";
 @source "../../../../react/input";
 @source "../../../../react/shadcn";
-@source "../../../../test";
 @source "../../../history";
 /* nx-tailwind-sources:end */
 @import "tw-animate-css";

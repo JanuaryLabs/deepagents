@@ -1,4 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
+import { timebox } from '@zukhruf/testing/async';
 import assert from 'node:assert/strict';
 import { type TestContext, describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -8,7 +9,6 @@ import {
   PgBossTurnQueue,
   type TurnRef,
 } from '@deepagents/experimental/zukhruf';
-import { timebox } from '@deepagents/test';
 
 function waitFor(
   t: TestContext,

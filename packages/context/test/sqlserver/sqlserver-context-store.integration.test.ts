@@ -1,11 +1,16 @@
+import { Docker, TestRun } from '@zukhruf/testing/docker';
+import { SqlServer } from '@zukhruf/testing/sqlserver';
 import sql from 'mssql';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import { SqlServerContextStore } from '@deepagents/context';
-import { SqlServer } from '@deepagents/test';
 
-const testSqlServer = new SqlServer();
+import { waitForFtsReady } from './wait-for-fts-ready.ts';
+
+const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
+
+const testSqlServer = new SqlServer({ docker });
 
 /**
  * Integration tests for SQL Server ContextStore.
@@ -1029,7 +1034,7 @@ describe('SQL Server ContextStore Integration', () => {
         );
 
         // Wait for full-text index to populate (SQL Server FTS is async)
-        await container.waitForFtsReady();
+        await waitForFtsReady(container.connectionString);
 
         const results = await store.searchMessages('chat-search', 'configure');
 
@@ -1073,7 +1078,7 @@ describe('SQL Server ContextStore Integration', () => {
         });
 
         // Wait for full-text index to populate (SQL Server FTS is async)
-        await container.waitForFtsReady();
+        await waitForFtsReady(container.connectionString);
 
         const results = await store.searchMessages('chat-rank', 'settings');
 
@@ -1106,7 +1111,7 @@ describe('SQL Server ContextStore Integration', () => {
         });
 
         // Wait for full-text index to populate (SQL Server FTS is async)
-        await container.waitForFtsReady();
+        await waitForFtsReady(container.connectionString);
 
         const results = await store.searchMessages('chat-snippet', 'configure');
 
@@ -1146,7 +1151,7 @@ describe('SQL Server ContextStore Integration', () => {
         });
 
         // Wait for full-text index to populate (SQL Server FTS is async)
-        await container.waitForFtsReady();
+        await waitForFtsReady(container.connectionString);
 
         const userResults = await store.searchMessages('chat-roles', 'Hello', {
           roles: ['user'],
@@ -1189,7 +1194,7 @@ describe('SQL Server ContextStore Integration', () => {
         }
 
         // Wait for full-text index to populate (SQL Server FTS is async)
-        await container.waitForFtsReady();
+        await waitForFtsReady(container.connectionString);
 
         const results = await store.searchMessages('chat-limit', 'quick', {
           limit: 2,

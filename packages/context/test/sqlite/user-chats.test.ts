@@ -1,3 +1,4 @@
+import { Sqlite } from '@zukhruf/testing/sqlite';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -11,7 +12,6 @@ import {
   createVirtualSandbox,
   user,
 } from '@deepagents/context';
-import { Sqlite } from '@deepagents/test';
 
 const sqlite = new Sqlite();
 

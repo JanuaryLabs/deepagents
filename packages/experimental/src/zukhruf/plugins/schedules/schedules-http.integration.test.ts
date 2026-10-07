@@ -1,5 +1,6 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
+import { StreamHarness } from '@zukhruf/testing/streams';
 import { MockLanguageModelV4, simulateReadableStream } from 'ai/test';
 import { Hono } from 'hono';
 import assert from 'node:assert/strict';
@@ -40,7 +41,6 @@ import {
   type ScheduledTaskView,
   schedulesHttp,
 } from '@deepagents/experimental/zukhruf/schedules/http';
-import { StreamHarness } from '@deepagents/test';
 
 const MOUNT = '/zukhruf/v1';
 const SCHEDULES = `${MOUNT}/schedules`;

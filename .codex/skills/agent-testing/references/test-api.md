@@ -41,7 +41,7 @@ import {
 ## Repository polling helper
 
 ```ts
-import { timebox } from '@deepagents/test';
+import { timebox } from '@zukhruf/testing/async';
 ```
 
 Use `timebox(probe, options)` for asynchronous status, conversation, or readiness polling. The probe throws until ready and its successful value becomes the result. Set `maxRetryTime` and `minTimeout` when the test owns a specific timeout or polling cadence. AI SDK does not provide status or conversation polling.

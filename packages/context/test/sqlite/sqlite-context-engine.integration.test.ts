@@ -1,3 +1,5 @@
+import { settleWithin } from '@zukhruf/testing/async';
+import { Sqlite } from '@zukhruf/testing/sqlite';
 import { validateUIMessages } from 'ai';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
@@ -21,7 +23,6 @@ import {
   reminder,
   user,
 } from '@deepagents/context';
-import { Sqlite, settleWithin } from '@deepagents/test';
 
 const sqlite = new Sqlite();
 

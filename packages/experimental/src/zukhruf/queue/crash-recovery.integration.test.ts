@@ -1,3 +1,5 @@
+import { Docker, TestRun } from '@zukhruf/testing/docker';
+import { Postgres } from '@zukhruf/testing/postgres';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
@@ -25,9 +27,10 @@ import {
   SqliteMailboxStore,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
-import { Postgres } from '@deepagents/test';
 
-const testPostgres = new Postgres();
+const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
+
+const testPostgres = new Postgres({ docker });
 
 const userTurn = (id: string, text: string) => ({
   message: {

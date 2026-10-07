@@ -1,5 +1,11 @@
 /** Live adapter contract tests for SQL policy enforcement. */
 import type { Dataset } from '@google-cloud/bigquery';
+import { BigQuery as TestBigQuery } from '@zukhruf/testing/bigquery';
+import { Docker, TestRun } from '@zukhruf/testing/docker';
+import { type MysqlDatabase, Mysql as TestMysql } from '@zukhruf/testing/mysql';
+import { Postgres as TestPostgres } from '@zukhruf/testing/postgres';
+import { Sqlite as TestSqlite } from '@zukhruf/testing/sqlite';
+import { SqlServer as TestSqlServer } from '@zukhruf/testing/sqlserver';
 import sql from 'mssql';
 import assert from 'node:assert';
 import * as fs from 'node:fs/promises';
@@ -9,14 +15,6 @@ import { type TestContext, describe, it, mock } from 'node:test';
 import pg from 'pg';
 import { z } from 'zod';
 
-import {
-  type MysqlDatabase,
-  BigQuery as TestBigQuery,
-  Mysql as TestMysql,
-  Postgres as TestPostgres,
-  SqlServer as TestSqlServer,
-  Sqlite as TestSqlite,
-} from '@deepagents/test';
 import type { GroundingFn, SQLScopeErrorPayload } from '@deepagents/text2sql';
 import {
   BigQuery,
@@ -50,6 +48,8 @@ import {
   tables as sqlServerTables,
   views as sqlServerViews,
 } from '@deepagents/text2sql/sqlserver';
+
+const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
 
 const scopeErrorPayload = z.object({
   error: z.string(),
@@ -539,9 +539,9 @@ function createBigQueryScope(
   };
 }
 
-const testPostgres = new TestPostgres();
-const testMysql = new TestMysql();
-const testSqlServer = new TestSqlServer();
+const testPostgres = new TestPostgres({ docker });
+const testMysql = new TestMysql({ docker });
+const testSqlServer = new TestSqlServer({ docker });
 
 const adapterCases: AdapterCase[] = [
   {

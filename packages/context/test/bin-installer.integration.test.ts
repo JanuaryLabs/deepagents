@@ -1,3 +1,4 @@
+import { Docker, TestRun } from '@zukhruf/testing/docker';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -9,9 +10,8 @@ import {
   pkg,
   useSandbox,
 } from '@deepagents/context';
-import { Docker } from '@deepagents/test';
 
-const docker = new Docker();
+const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
 
 type DockerDirectory = Awaited<ReturnType<Docker['directory']>>;
 
@@ -36,7 +36,7 @@ describe('bin installer', () => {
   };
 
   it('symlinks a bind-mounted binary onto PATH using the basename', async () => {
-    await using fixture = await new Docker().directory();
+    await using fixture = await docker.directory();
     await seedHelloBinary(fixture);
     await useSandbox(
       {
@@ -54,7 +54,7 @@ describe('bin installer', () => {
   });
 
   it('follows a symlink whose target is a regular file', async () => {
-    await using fixture = await new Docker().directory();
+    await using fixture = await docker.directory();
     await seedHelloBinary(fixture);
     await fixture.symlink('hello.js', 'bin/hello-shim.js');
     await useSandbox(
@@ -73,7 +73,7 @@ describe('bin installer', () => {
   });
 
   it('honors custom name and target', async () => {
-    await using fixture = await new Docker().directory();
+    await using fixture = await docker.directory();
     await seedHelloBinary(fixture);
     await useSandbox(
       {
@@ -94,7 +94,7 @@ describe('bin installer', () => {
   });
 
   it('reports actionable error when binary is non-executable on read-only mount', async () => {
-    await using nonExec = await new Docker().directory();
+    await using nonExec = await docker.directory();
     const nonExecDir = nonExec.path;
     await nonExec.mkdir('bin');
     await nonExec.writeFile(

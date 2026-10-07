@@ -1,5 +1,6 @@
 import { Chat, type UseChatHelpers, useChat } from '@ai-sdk/react';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { StreamHarness, type StreamSource } from '@zukhruf/testing/streams';
 import type {
   ChatStatus,
   ChatTransport,
@@ -10,8 +11,6 @@ import type {
 } from 'ai';
 import { useEffect } from 'react';
 import { describe, expect, it } from 'vitest';
-
-import { StreamHarness, type StreamSource } from '@deepagents/test';
 
 import {
   ChatManager,

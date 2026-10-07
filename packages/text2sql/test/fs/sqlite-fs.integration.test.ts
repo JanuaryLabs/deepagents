@@ -1,7 +1,7 @@
+import { Sqlite } from '@zukhruf/testing/sqlite';
 import * as assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { Sqlite } from '@deepagents/test';
 import { SqliteFs } from '@deepagents/text2sql';
 
 const sqlite = new Sqlite();

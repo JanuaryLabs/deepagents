@@ -1,8 +1,8 @@
+import { DuckDB as TestDuckDB } from '@zukhruf/testing/duckdb';
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { z } from 'zod';
 
-import { DuckDB as TestDuckDB } from '@deepagents/test';
 import {
   FileIndexLock,
   Text2Sql,

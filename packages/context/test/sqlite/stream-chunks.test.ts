@@ -1,3 +1,5 @@
+import { Sqlite } from '@zukhruf/testing/sqlite';
+import { StreamHarness } from '@zukhruf/testing/streams';
 import { type UIMessageChunk, simulateReadableStream } from 'ai';
 import assert from 'node:assert';
 import { DatabaseSync } from 'node:sqlite';
@@ -23,7 +25,6 @@ import {
   createAdaptivePollingState,
   nextAdaptivePollingDelay,
 } from '@deepagents/context';
-import { Sqlite, StreamHarness } from '@deepagents/test';
 
 const sqlite = new Sqlite();
 const streamHarness = new StreamHarness();

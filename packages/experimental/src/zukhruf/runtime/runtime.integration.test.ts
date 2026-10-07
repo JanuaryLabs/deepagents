@@ -1,5 +1,6 @@
 import type { JSONSchema7, LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
+import { settleWithin, timebox } from '@zukhruf/testing/async';
 import {
   type ToolSet,
   type UIMessage,
@@ -61,7 +62,6 @@ import {
   schedules,
   schedulesCapabilities,
 } from '@deepagents/experimental/zukhruf/schedules';
-import { settleWithin, timebox } from '@deepagents/test';
 
 const usage = {
   inputTokens: {
