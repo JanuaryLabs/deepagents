@@ -6,6 +6,7 @@
   "tags": [],
   "targets": {
     "openapi": {
+      "dependsOn": ["^build"],
       "executor": "nx:run-commands",
       "outputs": ["{workspaceRoot}/.evals-sdk-it/openapi.json"],
       "options": {
