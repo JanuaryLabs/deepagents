@@ -319,8 +319,8 @@ if (import.meta.main) {
       console.log('No further research needed. Exiting loop.');
       return;
     }
-    allSearchQueries.push(...newSearchQueries);
 
+    // research() records the batch it searches.
     await research(newSearchQueries, iteration + 1);
   };
 
