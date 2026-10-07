@@ -54,9 +54,11 @@ export class Spreadsheet extends Sqlite {
     // Parse the spreadsheet file
     const sheets = parseFile(options.file);
 
-    // Create SQLite database
+    // Create SQLite database; it closes again if construction fails before
+    // the adapter takes it over.
+    using pending = new DisposableStack();
     const dbPath = options.database ?? ':memory:';
-    const db = new DatabaseSync(dbPath);
+    const db = pending.use(new DatabaseSync(dbPath));
 
     // Create tables and load data
     for (const sheet of sheets) {
@@ -72,6 +74,7 @@ export class Spreadsheet extends Sqlite {
     });
 
     this.#db = db;
+    pending.move();
   }
 
   /**
