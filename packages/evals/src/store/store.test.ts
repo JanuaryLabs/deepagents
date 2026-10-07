@@ -125,6 +125,27 @@ describe('RunStore', () => {
     }
   });
 
+  it("throws SQLite's disk-full error when the database runs out of space while saving cases", () => {
+    using db = new DatabaseSync(':memory:');
+    const store = new RunStore(db);
+    const { runId } = createRunInSuite(store, {
+      name: 'full-disk-run',
+      model: 'gpt-4',
+    });
+    const [oversized] = makeCases(runId, 1);
+    // Capping the page count stands in for a full disk: SQLite ends the
+    // transaction itself when a write cannot get another page.
+    const { page_count } = db.prepare('PRAGMA page_count').get() as {
+      page_count: number;
+    };
+    db.exec(`PRAGMA max_page_count = ${page_count}`);
+
+    assert.throws(
+      () => store.saveCases([{ ...oversized, output: 'x'.repeat(200_000) }]),
+      { errcode: 13, message: /database or disk is full/ },
+    );
+  });
+
   it('getFailingCases returns cases with scores below threshold', () => {
     using db = new DatabaseSync(':memory:');
     const store = new RunStore(db);
