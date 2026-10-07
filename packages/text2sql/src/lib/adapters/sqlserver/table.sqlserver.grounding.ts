@@ -9,15 +9,15 @@ import {
 import { columnRow } from './sqlserver-rows.ts';
 import type { SqlServer } from './sqlserver.ts';
 
-/** A foreign-key column pair from INFORMATION_SCHEMA.KEY_COLUMN_USAGE. */
+/** One column pair of a foreign key, read from sys.foreign_key_columns. */
 const relationshipRow = z.object({
-  constraint_name: z.string().nullable(),
-  table_schema: z.string().nullable(),
-  table_name: z.string().nullable(),
-  column_name: z.string().nullable(),
-  referenced_table_schema: z.string().nullable(),
-  referenced_table_name: z.string().nullable(),
-  referenced_column_name: z.string().nullable(),
+  constraint_name: z.string(),
+  table_schema: z.string(),
+  table_name: z.string(),
+  column_name: z.string(),
+  referenced_table_schema: z.string(),
+  referenced_table_name: z.string(),
+  referenced_column_name: z.string(),
 });
 
 export interface SqlServerTableGroundingConfig extends TableGroundingConfig {
@@ -28,7 +28,7 @@ export interface SqlServerTableGroundingConfig extends TableGroundingConfig {
 /**
  * SQL Server implementation of TableGrounding.
  *
- * SQL Server can query incoming relationships directly via INFORMATION_SCHEMA,
+ * SQL Server can query incoming relationships directly via sys.foreign_keys,
  * so no caching is needed like SQLite.
  */
 export class SqlServerTableGrounding extends TableGrounding {
@@ -84,97 +84,65 @@ export class SqlServerTableGrounding extends TableGrounding {
     tableName: string,
   ): Promise<Relationship[]> {
     const { schema, table } = this.#adapter.parseTableName(tableName);
-
-    const rows = await this.#adapter.runQuery(
-      `
-      SELECT
-        fk.CONSTRAINT_NAME AS constraint_name,
-        fk.TABLE_SCHEMA AS table_schema,
-        fk.TABLE_NAME AS table_name,
-        fk.COLUMN_NAME AS column_name,
-        pk.TABLE_SCHEMA AS referenced_table_schema,
-        pk.TABLE_NAME AS referenced_table_name,
-        pk.COLUMN_NAME AS referenced_column_name
-      FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS AS rc
-      JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS fk
-        ON fk.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
-      JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS pk
-        ON pk.CONSTRAINT_NAME = rc.UNIQUE_CONSTRAINT_NAME
-        AND pk.ORDINAL_POSITION = fk.ORDINAL_POSITION
-      WHERE fk.TABLE_SCHEMA = '${this.#adapter.escapeString(schema)}'
-        AND fk.TABLE_NAME = '${this.#adapter.escapeString(table)}'
-      ORDER BY fk.CONSTRAINT_NAME, fk.ORDINAL_POSITION
-    `,
-      relationshipRow,
+    return this.#foreignKeys(
+      `s.name = '${this.#adapter.escapeString(schema)}'
+        AND t.name = '${this.#adapter.escapeString(table)}'`,
     );
-
-    return this.#groupRelationships(rows);
   }
 
   protected override async findIncomingRelations(
     tableName: string,
   ): Promise<Relationship[]> {
     const { schema, table } = this.#adapter.parseTableName(tableName);
+    return this.#foreignKeys(
+      `ref_s.name = '${this.#adapter.escapeString(schema)}'
+        AND ref_t.name = '${this.#adapter.escapeString(table)}'`,
+    );
+  }
 
-    // SQL Server can query incoming relations directly - no cache needed
+  /**
+   * The foreign keys matching `where`. sys.foreign_key_columns holds one row
+   * per column pair in the key's own order, and every join goes by object id,
+   * so a key comes back whole even when it references a unique index or
+   * another schema repeats its constraint names.
+   */
+  async #foreignKeys(where: string): Promise<Relationship[]> {
     const rows = await this.#adapter.runQuery(
       `
       SELECT
-        fk.CONSTRAINT_NAME AS constraint_name,
-        fk.TABLE_SCHEMA AS table_schema,
-        fk.TABLE_NAME AS table_name,
-        fk.COLUMN_NAME AS column_name,
-        pk.TABLE_SCHEMA AS referenced_table_schema,
-        pk.TABLE_NAME AS referenced_table_name,
-        pk.COLUMN_NAME AS referenced_column_name
-      FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS AS rc
-      JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS fk
-        ON fk.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
-      JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS pk
-        ON pk.CONSTRAINT_NAME = rc.UNIQUE_CONSTRAINT_NAME
-        AND pk.ORDINAL_POSITION = fk.ORDINAL_POSITION
-      WHERE pk.TABLE_SCHEMA = '${this.#adapter.escapeString(schema)}'
-        AND pk.TABLE_NAME = '${this.#adapter.escapeString(table)}'
-      ORDER BY fk.CONSTRAINT_NAME, fk.ORDINAL_POSITION
+        fk.name AS constraint_name,
+        s.name AS table_schema,
+        t.name AS table_name,
+        COL_NAME(fkc.parent_object_id, fkc.parent_column_id) AS column_name,
+        ref_s.name AS referenced_table_schema,
+        ref_t.name AS referenced_table_name,
+        COL_NAME(fkc.referenced_object_id, fkc.referenced_column_id) AS referenced_column_name
+      FROM sys.foreign_keys AS fk
+      JOIN sys.foreign_key_columns AS fkc ON fkc.constraint_object_id = fk.object_id
+      JOIN sys.tables AS t ON t.object_id = fk.parent_object_id
+      JOIN sys.schemas AS s ON s.schema_id = t.schema_id
+      JOIN sys.tables AS ref_t ON ref_t.object_id = fk.referenced_object_id
+      JOIN sys.schemas AS ref_s ON ref_s.schema_id = ref_t.schema_id
+      WHERE ${where}
+      ORDER BY s.name, t.name, fk.name, fkc.constraint_column_id
     `,
       relationshipRow,
     );
 
-    return this.#groupRelationships(rows);
-  }
-
-  #groupRelationships(
-    rows: z.output<typeof relationshipRow>[],
-  ): Relationship[] {
     const relationships = new Map<string, Relationship>();
-    const defaultSchema = this.#adapter.defaultSchema ?? 'dbo';
-
     for (const row of rows) {
-      if (
-        !row.constraint_name ||
-        !row.table_name ||
-        !row.referenced_table_name
-      ) {
-        continue;
-      }
-
-      const schema = row.table_schema ?? defaultSchema;
-      const referencedSchema = row.referenced_table_schema ?? defaultSchema;
-      const key = `${schema}.${row.table_name}:${row.constraint_name}`;
-
+      const table = `${row.table_schema}.${row.table_name}`;
+      const key = `${table}:${row.constraint_name}`;
       const relationship = relationships.get(key) ?? {
-        table: `${schema}.${row.table_name}`,
+        table,
         from: [],
-        referenced_table: `${referencedSchema}.${row.referenced_table_name}`,
+        referenced_table: `${row.referenced_table_schema}.${row.referenced_table_name}`,
         to: [],
       };
-
-      relationship.from.push(row.column_name ?? 'unknown');
-      relationship.to.push(row.referenced_column_name ?? 'unknown');
-
+      relationship.from.push(row.column_name);
+      relationship.to.push(row.referenced_column_name);
       relationships.set(key, relationship);
     }
-
     return Array.from(relationships.values());
   }
 }
