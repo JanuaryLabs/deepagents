@@ -40,7 +40,7 @@ export class ClickHouse extends Adapter {
   }
 
   override async executeImpl(sql: string): Promise<unknown[]> {
-    return rowsFromResult(await this.#options.execute(sql));
+    return this.rowsFrom(await this.#options.execute(sql), ['data', 'rows']);
   }
 
   override async validateImpl(sql: string): Promise<string | void> {
@@ -59,7 +59,7 @@ export class ClickHouse extends Adapter {
   }
 
   protected override async queryRows(sql: string): Promise<unknown[]> {
-    return rowsFromResult(await this.#options.execute(sql));
+    return this.rowsFrom(await this.#options.execute(sql), ['data', 'rows']);
   }
 
   override quoteIdentifier(name: string): string {
@@ -84,15 +84,4 @@ export class ClickHouse extends Adapter {
       : '*';
     return `SELECT ${projection} FROM ${relation} LIMIT ${limit}`;
   }
-}
-
-function rowsFromResult(result: unknown): unknown[] {
-  if (Array.isArray(result)) return result;
-  if (typeof result === 'object' && result !== null) {
-    if ('data' in result && Array.isArray(result.data)) return result.data;
-    if ('rows' in result && Array.isArray(result.rows)) return result.rows;
-  }
-  throw new Error(
-    'ClickHouse execute() must return an array of rows, { data: rows }, or { rows }.',
-  );
 }

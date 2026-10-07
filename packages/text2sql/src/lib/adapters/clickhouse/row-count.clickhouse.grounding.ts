@@ -35,19 +35,9 @@ export class ClickHouseRowCountGrounding extends RowCountGrounding {
         `SELECT count() AS count FROM ${relation}`,
         countRow,
       );
-      return toNumber(rows[0]?.count);
+      return this.#adapter.toNumber(rows[0]?.count);
     } catch {
       return undefined;
     }
   }
-}
-
-function toNumber(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'bigint') return Number(value);
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return undefined;
 }

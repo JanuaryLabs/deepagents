@@ -51,7 +51,7 @@ export class DuckDB extends Adapter {
   }
 
   override async executeImpl(sql: string): Promise<unknown[]> {
-    return rowsFromResult(await this.#options.execute(sql));
+    return this.rowsFrom(await this.#options.execute(sql), ['data', 'rows']);
   }
 
   override async validateImpl(sql: string): Promise<string | void> {
@@ -71,7 +71,7 @@ export class DuckDB extends Adapter {
   }
 
   protected override async queryRows(sql: string): Promise<unknown[]> {
-    return rowsFromResult(await this.#options.execute(sql));
+    return this.rowsFrom(await this.#options.execute(sql), ['data', 'rows']);
   }
 
   override quoteIdentifier(name: string): string {
@@ -158,15 +158,4 @@ function validateScopeOption(name: string, values: string[] | undefined): void {
   ) {
     throw new Error(`DuckDB ${name} must contain at least one non-empty name.`);
   }
-}
-
-function rowsFromResult(result: unknown): unknown[] {
-  if (Array.isArray(result)) return result;
-  if (typeof result === 'object' && result !== null) {
-    if ('data' in result && Array.isArray(result.data)) return result.data;
-    if ('rows' in result && Array.isArray(result.rows)) return result.rows;
-  }
-  throw new Error(
-    'DuckDB execute() must return an array of rows, { data: rows }, or { rows }.',
-  );
 }

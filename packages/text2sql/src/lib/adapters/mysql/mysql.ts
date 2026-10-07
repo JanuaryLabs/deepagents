@@ -159,33 +159,18 @@ export class Mysql extends Adapter {
   protected override async queryRows(sql: string): Promise<unknown[]> {
     const result: unknown = await this.#options.execute(sql);
 
-    // Handle mysql2 results: [rows, fields]
-    if (Array.isArray(result)) {
-      // If it's [rows, fields], use the first element
-      if (
-        result.length >= 1 &&
-        Array.isArray(result[0]) &&
-        (result.length === 1 ||
-          (result.length === 2 && !Array.isArray(result[1]?.[0])))
-      ) {
-        return result[0];
-      }
-      return result;
-    }
-
-    // Handle object with rows property
+    // mysql2 returns [rows, fields]; the rows are its first element.
     if (
-      typeof result === 'object' &&
-      result !== null &&
-      'rows' in result &&
-      Array.isArray(result.rows)
+      Array.isArray(result) &&
+      result.length >= 1 &&
+      Array.isArray(result[0]) &&
+      (result.length === 1 ||
+        (result.length === 2 && !Array.isArray(result[1]?.[0])))
     ) {
-      return result.rows;
+      return result[0];
     }
 
-    throw new Error(
-      'Mysql adapter execute() must return an array of rows or an object with a rows array when introspecting.',
-    );
+    return this.rowsFrom(result, ['rows']);
   }
 }
 

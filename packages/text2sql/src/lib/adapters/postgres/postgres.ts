@@ -144,23 +144,6 @@ export class Postgres extends Adapter {
   }
 
   protected override async queryRows(sql: string): Promise<unknown[]> {
-    const result: unknown = await this.#options.execute(sql);
-
-    if (Array.isArray(result)) {
-      return result;
-    }
-
-    if (
-      typeof result === 'object' &&
-      result !== null &&
-      'rows' in result &&
-      Array.isArray(result.rows)
-    ) {
-      return result.rows;
-    }
-
-    throw new Error(
-      'Postgres adapter execute() must return an array of rows or an object with a rows array when introspecting.',
-    );
+    return this.rowsFrom(await this.#options.execute(sql), ['rows']);
   }
 }

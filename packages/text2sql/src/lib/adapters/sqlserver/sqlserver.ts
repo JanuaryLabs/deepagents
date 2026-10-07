@@ -155,32 +155,10 @@ export class SqlServer extends Adapter {
   }
 
   protected override async queryRows(sql: string): Promise<unknown[]> {
-    const result: unknown = await this.#options.execute(sql);
-
-    if (Array.isArray(result)) {
-      return result;
-    }
-
-    if (typeof result === 'object' && result !== null) {
-      if ('rows' in result && Array.isArray(result.rows)) {
-        return result.rows;
-      }
-
-      if ('recordset' in result && Array.isArray(result.recordset)) {
-        return result.recordset;
-      }
-
-      if (
-        'recordsets' in result &&
-        Array.isArray(result.recordsets) &&
-        Array.isArray(result.recordsets[0])
-      ) {
-        return result.recordsets[0];
-      }
-    }
-
-    throw new Error(
-      'SqlServer adapter execute() must return an array of rows or an object with rows/recordset properties when introspecting.',
-    );
+    return this.rowsFrom(await this.#options.execute(sql), [
+      'rows',
+      'recordset',
+      'recordsets.0',
+    ]);
   }
 }

@@ -41,24 +41,10 @@ export class MysqlRowCountGrounding extends RowCountGrounding {
         countRow,
       );
 
-      return this.#toNumber(rows[0]?.count);
+      return this.#adapter.toNumber(rows[0]?.count);
     } catch {
       return undefined;
     }
-  }
-
-  #toNumber(value: unknown): number | undefined {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
-    }
-    if (typeof value === 'bigint') {
-      return Number(value);
-    }
-    if (typeof value === 'string' && value.trim() !== '') {
-      const parsed = Number(value);
-      return Number.isFinite(parsed) ? parsed : undefined;
-    }
-    return undefined;
   }
 
   async #getCurrentDatabase(): Promise<string> {

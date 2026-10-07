@@ -542,6 +542,30 @@ export abstract class Adapter {
   protected abstract queryRows(sql: string): Promise<unknown[]> | unknown[];
 
   /**
+   * The rows in a driver's execute() result: the result itself when it is an
+   * array, otherwise the first array found at one of `paths` (dot-separated,
+   * so `recordsets.0` reads `result.recordsets[0]`).
+   */
+  protected rowsFrom(result: unknown, paths: readonly string[]): unknown[] {
+    if (Array.isArray(result)) return result;
+    for (const path of paths) {
+      const rows = path
+        .split('.')
+        .reduce<unknown>(
+          (value, key) =>
+            typeof value === 'object' && value !== null
+              ? Reflect.get(value, key)
+              : undefined,
+          result,
+        );
+      if (Array.isArray(rows)) return rows;
+    }
+    throw new Error(
+      `${this.constructor.name} execute() must return an array of rows or an object holding one at ${paths.map((path) => `result.${path}`).join(', ')}.`,
+    );
+  }
+
+  /**
    * Quote an identifier (table/column name) for safe use in SQL.
    * Each database uses different quoting styles.
    */
