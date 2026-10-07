@@ -87,6 +87,9 @@ function buildPromptTask(
   };
 }
 
+/** What a run's HTTP endpoint must answer for each case. */
+const httpTaskResponseSchema = z.object({ output: z.string() });
+
 function buildHttpTask(endpointUrl: string): TaskFn<Record<string, unknown>> {
   return async (input) => {
     const response = await fetch(endpointUrl, {
@@ -97,8 +100,11 @@ function buildHttpTask(endpointUrl: string): TaskFn<Record<string, unknown>> {
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${await response.text()}`);
     }
-    const body = (await response.json()) as { output: string };
-    return { output: body.output };
+    const body = httpTaskResponseSchema.safeParse(await response.json());
+    if (!body.success) {
+      throw new Error('The HTTP endpoint did not return a string "output"');
+    }
+    return { output: body.data.output };
   };
 }
 
@@ -180,7 +186,7 @@ export default function (router: Hono<AppBindings>) {
         throw new HTTPException(500, { message: 'Suite not found for run' });
       }
 
-      const runConfig = (run.config ?? {}) as Record<string, unknown>;
+      const runConfig: Record<string, unknown> = run.config ?? {};
 
       return c.json({
         run,
@@ -261,7 +267,7 @@ export default function (router: Hono<AppBindings>) {
         throw new HTTPException(409, { message: 'Run is already running' });
       }
 
-      const cfg = (run.config ?? {}) as Record<string, unknown>;
+      const cfg: Record<string, unknown> = run.config ?? {};
       const taskMode =
         cfg.taskMode === 'http' ? ('http' as const) : ('prompt' as const);
       const datasetName = String(cfg.dataset ?? '');

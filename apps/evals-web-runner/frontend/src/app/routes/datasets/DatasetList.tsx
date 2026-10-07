@@ -18,7 +18,7 @@ import { useAction, useData } from '../../hooks/use-client.ts';
 import { formatSize } from '../../lib/format.ts';
 
 export default function DatasetListPage() {
-  const { data: datasets, isLoading } = useData('GET /datasets');
+  const { data: datasets, isLoading } = useData('GET /datasets', {});
 
   const [hfDataset, setHfDataset] = useState('');
   const [hfConfig, setHfConfig] = useState('default');
@@ -42,8 +42,8 @@ export default function DatasetListPage() {
 
   function handleUpload(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    uploadMutation.mutate({ file: formData.get('file') as never });
+    const file = new FormData(e.currentTarget).get('file');
+    if (file instanceof File) uploadMutation.mutate({ file });
     e.currentTarget.reset();
   }
 

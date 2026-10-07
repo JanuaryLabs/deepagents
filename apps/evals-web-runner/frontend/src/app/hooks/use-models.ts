@@ -13,7 +13,7 @@ export interface ModelGroup {
 }
 
 export function useModels() {
-  const query = useData('GET /models');
+  const query = useData('GET /models', {});
 
   const grouped = useMemo(() => {
     if (!query.data) return [];

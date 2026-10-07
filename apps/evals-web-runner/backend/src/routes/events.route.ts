@@ -2,6 +2,8 @@ import type { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 
+import type { EngineEvents } from '@deepagents/evals/engine';
+
 import { validate } from '../middlewares/validator.ts';
 import evalManager from '../services/eval-manager.ts';
 import type { AppBindings } from '../store.ts';
@@ -44,13 +46,13 @@ export default function (router: Hono<AppBindings>) {
           entry.emitter.off('run:end', onRunEnd);
         };
 
-        const onCaseScored = async (data: unknown) => {
+        const writeCaseScored = async (data: EngineEvents['case:scored']) => {
           if (closed) return;
           try {
             await stream.writeSSE({
               event: 'case:scored',
               data: JSON.stringify({
-                ...(data as Record<string, unknown>),
+                ...data,
                 completed: entry.completed,
                 totalCases: entry.totalCases,
               }),
@@ -60,7 +62,7 @@ export default function (router: Hono<AppBindings>) {
           }
         };
 
-        const onRunEnd = async (data: unknown) => {
+        const writeRunEnd = async (data: EngineEvents['run:end']) => {
           if (closed) return;
           try {
             await stream.writeSSE({
@@ -72,6 +74,12 @@ export default function (router: Hono<AppBindings>) {
           }
           cleanup();
         };
+
+        // Both writers settle every failure themselves.
+        const onCaseScored = (data: EngineEvents['case:scored']) =>
+          void writeCaseScored(data);
+        const onRunEnd = (data: EngineEvents['run:end']) =>
+          void writeRunEnd(data);
 
         entry.emitter.on('case:scored', onCaseScored);
         entry.emitter.on('run:end', onRunEnd);

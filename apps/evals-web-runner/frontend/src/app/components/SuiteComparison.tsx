@@ -85,7 +85,7 @@ export function SuiteComparison({
   const captureRef = useRef<HTMLDivElement>(null);
   const [capturing, setCapturing] = useState(false);
 
-  const { data, isLoading, error } = useData(
+  const { data: comparison, isLoading, error } = useData(
     'GET /suites/{id}/compare',
     { id: suiteId, runIds: runIds.join(',') },
     { enabled: runIds.length >= 2 },
@@ -137,9 +137,8 @@ export function SuiteComparison({
     );
   }
 
-  if (!data) return null;
+  if (!comparison) return null;
 
-  const comparison = data as unknown as CompareResponse;
   const showRadar = comparison.scorerNames.length >= 3;
 
   return (
@@ -149,7 +148,7 @@ export function SuiteComparison({
           variant="outline"
           size="sm"
           disabled={capturing}
-          onClick={handleCopyAsImage}
+          onClick={() => void handleCopyAsImage()}
         >
           {capturing ? 'Capturing…' : 'Copy as Image'}
         </Button>

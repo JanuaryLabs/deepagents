@@ -42,15 +42,9 @@ Special schemas are supported only through
 
 - `import * as inputs from '../core/inputs.ts'`
 
-### Pagination, Sorting and Searching
+### Pagination
 
 - Use `toPagination` function to create pagination results from prisma queries.
-
-- Use `createOrderBy` function to create order by clauses for prisma queries.
-
-- Use `createSearch` function to create search clauses for prisma queries.
-
-- Use `createTokenizedSearch` function to create tokenized search clauses for prisma queries. useful for searching multiple words in a single field.
 
 ### Unit Test
 

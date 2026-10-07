@@ -62,7 +62,7 @@ function formatDate(timestamp: number): string {
 }
 
 export default function PromptsPage() {
-  const { data: prompts, isLoading } = useData('GET /prompts');
+  const { data: prompts, isLoading } = useData('GET /prompts', {});
 
   const [promptName, setPromptName] = useState('');
   const [promptContent, setPromptContent] = useState('');

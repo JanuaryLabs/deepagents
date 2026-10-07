@@ -55,7 +55,7 @@ export default function RunListPage() {
       }));
     },
     onRunEnd: () => {
-      queryClient.invalidateQueries({ queryKey: ['runs'] });
+      void queryClient.invalidateQueries({ queryKey: ['runs'] });
     },
   });
 

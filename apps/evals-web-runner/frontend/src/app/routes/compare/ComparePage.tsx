@@ -22,8 +22,10 @@ export default function ComparePage() {
   const [selectedBaseline, setSelectedBaseline] = useState(baselineParam);
   const [selectedCandidate, setSelectedCandidate] = useState(candidateParam);
 
-  const { data: completedRuns, isLoading: runsLoading } =
-    useData('GET /compare/runs');
+  const { data: completedRuns, isLoading: runsLoading } = useData(
+    'GET /compare/runs',
+    {},
+  );
   const {
     data: comparison,
     isLoading: compareLoading,

@@ -49,52 +49,53 @@ interface SqlAgentContext {
   fragments: ContextFragment[];
 }
 
-let cached: Promise<SqlAgentContext> | null = null;
-
-function getOrCreateContext(): Promise<SqlAgentContext> {
-  if (cached) return cached;
-
-  cached = (async () => {
-    const connectionString = process.env['MSSQL_CONNECTION_STRING'];
-    if (!connectionString) {
-      throw new Error(
-        'MSSQL_CONNECTION_STRING environment variable is not configured.',
-      );
-    }
-
-    console.log('[sql-agent] Connecting to MSSQL...');
-    const pool = await mssql.connect(parseMssqlConfig(connectionString));
-    console.log('[sql-agent] Connected to MSSQL');
-
-    const adapter = new sqlserver.SqlServer({
-      grounding: [
-        sqlserver.info(),
-        sqlserver.tables(),
-        sqlserver.views(),
-        sqlserver.constraints(),
-      ],
-      execute: async (sql: string) => {
-        const result = await pool.request().query(sql);
-        return result.recordset;
-      },
-    });
-
-    console.log('[sql-agent] Introspecting schema...');
-    const fragments = await adapter.introspect();
-    console.log(
-      '[sql-agent] Schema introspected, fragments:',
-      fragments.length,
+async function createContext(): Promise<SqlAgentContext> {
+  const connectionString = process.env['MSSQL_CONNECTION_STRING'];
+  if (!connectionString) {
+    throw new Error(
+      'MSSQL_CONNECTION_STRING environment variable is not configured.',
     );
+  }
 
-    return { adapter, fragments };
-  })();
+  console.log('[sql-agent] Connecting to MSSQL...');
+  const pool = await mssql.connect(parseMssqlConfig(connectionString));
+  console.log('[sql-agent] Connected to MSSQL');
 
-  cached.catch(() => {
-    cached = null;
+  const adapter = new sqlserver.SqlServer({
+    grounding: [
+      sqlserver.info(),
+      sqlserver.tables(),
+      sqlserver.views(),
+      sqlserver.constraints(),
+    ],
+    execute: async (sql: string) => {
+      const result = await pool.request().query(sql);
+      return result.recordset;
+    },
   });
 
-  return cached;
+  console.log('[sql-agent] Introspecting schema...');
+  const fragments = await adapter.introspect();
+  console.log('[sql-agent] Schema introspected, fragments:', fragments.length);
+
+  return { adapter, fragments };
 }
+
+/** One connection and introspection shared by every request; a failed one is retried. */
+class SqlAgentContextCache {
+  #context: Promise<SqlAgentContext> | undefined;
+
+  get(): Promise<SqlAgentContext> {
+    if (this.#context) return this.#context;
+    this.#context = createContext();
+    this.#context.catch(() => {
+      this.#context = undefined;
+    });
+    return this.#context;
+  }
+}
+
+const contexts = new SqlAgentContextCache();
 
 export default function (router: Hono<AppBindings>) {
   router.post(
@@ -116,7 +117,7 @@ export default function (router: Hono<AppBindings>) {
         model: modelString,
       });
 
-      const { adapter, fragments } = await getOrCreateContext();
+      const { adapter, fragments } = await contexts.get();
 
       const model = modelString
         ? resolveModel(modelString)

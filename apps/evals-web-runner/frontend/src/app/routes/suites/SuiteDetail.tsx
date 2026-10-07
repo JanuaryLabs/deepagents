@@ -72,7 +72,7 @@ export default function SuiteDetailPage() {
       }));
     },
     onRunEnd: () => {
-      queryClient.invalidateQueries({ queryKey: ['suite', id] });
+      void queryClient.invalidateQueries({ queryKey: ['suite', id] });
     },
   });
 
@@ -203,7 +203,7 @@ export default function SuiteDetailPage() {
               onClick={() =>
                 deleteSuiteMutation.mutate(
                   { id: suite.id },
-                  { onSuccess: () => navigate('/suites') },
+                  { onSuccess: () => void navigate('/suites') },
                 )
               }
             >

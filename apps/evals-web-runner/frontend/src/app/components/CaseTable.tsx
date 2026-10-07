@@ -25,18 +25,52 @@ interface ScoreEntry {
   reason: string | null;
 }
 
-interface CaseWithScores {
+/** One case of `GET /runs/{id}`: `CaseWithScores` from `@deepagents/evals/store`. */
+export interface CaseWithScores {
   id: string;
   run_id: string;
   idx: number;
   input: unknown;
   output: string | null;
   expected: unknown;
-  latency_ms: number;
-  tokens_in: number;
-  tokens_out: number;
+  latency_ms: number | null;
+  tokens_in: number | null;
+  tokens_out: number | null;
   error: string | null;
   scores: ScoreEntry[];
+}
+
+export function isCaseWithScores(value: unknown): value is CaseWithScores {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.run_id === 'string' &&
+    typeof value.idx === 'number' &&
+    isNullable(value.output, 'string') &&
+    isNullable(value.latency_ms, 'number') &&
+    isNullable(value.tokens_in, 'number') &&
+    isNullable(value.tokens_out, 'number') &&
+    isNullable(value.error, 'string') &&
+    Array.isArray(value.scores) &&
+    value.scores.every(isScoreEntry)
+  );
+}
+
+function isScoreEntry(value: unknown): value is ScoreEntry {
+  return (
+    isRecord(value) &&
+    typeof value.scorer_name === 'string' &&
+    typeof value.score === 'number' &&
+    isNullable(value.reason, 'string')
+  );
+}
+
+function isNullable(value: unknown, type: 'string' | 'number') {
+  return value === null || typeof value === type;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 interface CaseTableProps {
@@ -54,16 +88,16 @@ function normalizeReason(reason: string | null | undefined): string | null {
 function formatCaseError(error: string | null): string | null {
   if (!error) return null;
   try {
-    const parsed = JSON.parse(error);
+    const parsed: unknown = JSON.parse(error);
     if (typeof parsed === 'string') return parsed;
     if (parsed && typeof parsed === 'object') {
       const message =
-        typeof (parsed as { message?: unknown }).message === 'string'
-          ? (parsed as { message: string }).message
+        'message' in parsed && typeof parsed.message === 'string'
+          ? parsed.message
           : null;
       const name =
-        typeof (parsed as { name?: unknown }).name === 'string'
-          ? (parsed as { name: string }).name
+        'name' in parsed && typeof parsed.name === 'string'
+          ? parsed.name
           : null;
       if (message) return name ? `${name}: ${message}` : message;
     }
@@ -76,12 +110,12 @@ function formatCaseError(error: string | null): string | null {
 function formatCaseErrorDetails(error: string | null): string | null {
   if (!error) return null;
   try {
-    const parsed = JSON.parse(error);
+    const parsed: unknown = JSON.parse(error);
     if (typeof parsed === 'string') return parsed;
     if (parsed && typeof parsed === 'object') {
       const stack =
-        typeof (parsed as { stack?: unknown }).stack === 'string'
-          ? (parsed as { stack: string }).stack
+        'stack' in parsed && typeof parsed.stack === 'string'
+          ? parsed.stack
           : null;
       if (stack) return stack;
       return JSON.stringify(parsed, null, 2);

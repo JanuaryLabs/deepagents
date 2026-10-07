@@ -1,22 +1,24 @@
 import type { Hono } from 'hono';
+import { z } from 'zod';
 
 import { validate } from '../middlewares/validator.ts';
 import type { AppBindings } from '../store.ts';
 
-interface ModelsDevProvider {
-  id: string;
-  name: string;
-  env?: string[];
-  npm?: string;
-  models: Record<
-    string,
-    {
-      id: string;
-      name: string;
-      family?: string;
-    }
-  >;
-}
+/** https://models.dev/api.json, as far as this route reads it. */
+const modelsDevSchema = z.record(
+  z.string(),
+  z.object({
+    name: z.string(),
+    models: z.record(
+      z.string(),
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        family: z.string().optional(),
+      }),
+    ),
+  }),
+);
 
 interface ModelEntry {
   id: string;
@@ -26,39 +28,44 @@ interface ModelEntry {
   family: string;
 }
 
-let cached: { data: ModelEntry[]; expiry: number } | null = null;
-
 const CACHE_TTL = 60 * 60 * 1000;
 
-async function fetchModels(): Promise<ModelEntry[]> {
-  if (cached && Date.now() < cached.expiry) {
-    return cached.data;
-  }
+/** The models.dev catalog, cached for an hour; a non-OK refresh serves the stale copy. */
+class ModelCatalog {
+  #cached: { data: ModelEntry[]; expiry: number } | undefined;
 
-  const res = await fetch('https://models.dev/api.json');
-  if (!res.ok) {
-    if (cached) return cached.data;
-    throw new Error(`models.dev responded with ${res.status}`);
-  }
-
-  const providers = (await res.json()) as Record<string, ModelsDevProvider>;
-  const models: ModelEntry[] = [];
-
-  for (const [providerId, provider] of Object.entries(providers)) {
-    for (const model of Object.values(provider.models)) {
-      models.push({
-        id: model.id,
-        name: model.name,
-        provider: providerId,
-        providerName: provider.name,
-        family: model.family ?? '',
-      });
+  async list(): Promise<ModelEntry[]> {
+    if (this.#cached && Date.now() < this.#cached.expiry) {
+      return this.#cached.data;
     }
-  }
 
-  cached = { data: models, expiry: Date.now() + CACHE_TTL };
-  return models;
+    const res = await fetch('https://models.dev/api.json');
+    if (!res.ok) {
+      if (this.#cached) return this.#cached.data;
+      throw new Error(`models.dev responded with ${res.status}`);
+    }
+
+    const providers = modelsDevSchema.parse(await res.json());
+    const models: ModelEntry[] = [];
+
+    for (const [providerId, provider] of Object.entries(providers)) {
+      for (const model of Object.values(provider.models)) {
+        models.push({
+          id: model.id,
+          name: model.name,
+          provider: providerId,
+          providerName: provider.name,
+          family: model.family ?? '',
+        });
+      }
+    }
+
+    this.#cached = { data: models, expiry: Date.now() + CACHE_TTL };
+    return models;
+  }
 }
+
+const catalog = new ModelCatalog();
 
 export default function (router: Hono<AppBindings>) {
   /**
@@ -70,7 +77,7 @@ export default function (router: Hono<AppBindings>) {
     '/models',
     validate(() => ({})),
     async (c) => {
-      const models = await fetchModels();
+      const models = await catalog.list();
       return c.json(models);
     },
   );

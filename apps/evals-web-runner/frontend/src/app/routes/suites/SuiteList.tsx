@@ -15,7 +15,7 @@ import {
 import { useData } from '../../hooks/use-client.ts';
 
 export default function SuiteList() {
-  const { data: suites, isLoading } = useData('GET /suites');
+  const { data: suites, isLoading } = useData('GET /suites', {});
 
   return (
     <div className="p-8">

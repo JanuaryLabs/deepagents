@@ -15,9 +15,14 @@ type ValidatorConfig = Record<
   { select: unknown; against: z.ZodTypeAny }
 >;
 
-type ExtractInput<T extends ValidatorConfig> = {
-  [K in keyof T]: z.infer<T[K]['against']>;
+/** Each selected input's schema, under the input's name. */
+type InputShape<T extends ValidatorConfig> = {
+  [K in keyof T]: T[K]['against'];
 };
+
+type ExtractInput<T extends ValidatorConfig> = z.output<
+  ReturnType<typeof inputSchema<T>>
+>;
 
 type HasUndefined<T> = undefined extends T ? true : false;
 
@@ -50,29 +55,87 @@ type InferIn<T extends ValidatorConfig> = (keyof InferTarget<
     : { param: InferTarget<T, ParamsSelect, 'param'> }) &
   (keyof InferTarget<T, HeadersSelect, 'header'> extends never
     ? never
-    : { header: InferTarget<T, HeadersSelect, 'header'> }) &
-  (keyof InferTarget<T, CookieSelect, 'cookie'> extends never
-    ? never
-    : { cookie: InferTarget<T, CookieSelect, 'cookie'> });
+    : { header: InferTarget<T, HeadersSelect, 'header'> });
 
-// Marker classes
-class BodySelect {
-  #private = 0;
+type RequestPart = 'body' | 'query' | 'queries' | 'params' | 'headers';
+
+/**
+ * Where one input is read from: the selector runs once against these markers,
+ * and each request resolves them to the named part's value.
+ */
+abstract class Selection {
+  abstract readonly part: RequestPart;
+  readonly key: string;
+
+  constructor(key: string) {
+    this.key = key;
+  }
 }
-class QuerySelect {
-  #private = 0;
+class BodySelect extends Selection {
+  readonly part = 'body';
 }
-class QueriesSelect {
-  #private = 0;
+class QuerySelect extends Selection {
+  readonly part = 'query';
 }
-class ParamsSelect {
-  #private = 0;
+class QueriesSelect extends Selection {
+  readonly part = 'queries';
 }
-class HeadersSelect {
-  #private = 0;
+class ParamsSelect extends Selection {
+  readonly part = 'params';
 }
-class CookieSelect {
-  #private = 0;
+class HeadersSelect extends Selection {
+  readonly part = 'headers';
+}
+
+function selections<S extends Selection>(
+  select: (key: string) => S,
+): Record<string, S> {
+  return new Proxy<Record<string, S>>(
+    {},
+    {
+      get: (_target, key) =>
+        typeof key === 'string' ? select(key) : undefined,
+    },
+  );
+}
+
+const markers = {
+  body: selections((key) => new BodySelect(key)),
+  query: selections((key) => new QuerySelect(key)),
+  queries: selections((key) => new QueriesSelect(key)),
+  params: selections((key) => new ParamsSelect(key)),
+  headers: selections((key) => new HeadersSelect(key)),
+};
+
+function inputSchema<T extends ValidatorConfig>(config: T) {
+  const shape = Object.fromEntries(
+    Object.entries(config).map(([key, { against }]) => [key, against]),
+  );
+  assertShapeOf(shape, config);
+  return z.object(shape);
+}
+
+function assertShapeOf<T extends ValidatorConfig>(
+  shape: Record<string, z.ZodTypeAny>,
+  config: T,
+): asserts shape is InputShape<T> {
+  const keys = Object.keys(config);
+  if (
+    Object.keys(shape).length !== keys.length ||
+    keys.some((key) => shape[key] !== config[key]?.against)
+  ) {
+    throw new Error('The input schema does not match its selectors');
+  }
+}
+
+function read(select: unknown, request: Record<RequestPart, unknown>) {
+  if (!(select instanceof Selection)) return select;
+  const part = request[select.part];
+  return isRecord(part) ? part[select.key] : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 type SelectorFn<T> = (payload: {
@@ -114,6 +177,8 @@ export function validate<T extends ValidatorConfig>(
   if (!_selector) {
     throw new Error('Selector function is required');
   }
+  const config = _selector(markers);
+  const schema = inputSchema(config);
 
   return createMiddleware(async (c, next) => {
     const ct = c.req.header('content-type');
@@ -145,7 +210,7 @@ export function validate<T extends ValidatorConfig>(
         body = {};
     }
 
-    const payload = {
+    const request = {
       body,
       query: parseQueryParams(c.req.query()),
       queries: parseQueriesParams(c.req.queries()),
@@ -154,28 +219,14 @@ export function validate<T extends ValidatorConfig>(
         Object.entries(c.req.header()).map(([k, v]) => [k, v ?? '']),
       ),
     };
-
-    const config = _selector(payload as never);
-    const schema = z.object(
-      Object.entries(config).reduce(
-        (acc, [key, value]) => {
-          acc[key] = value.against;
-          return acc;
-        },
-        {} as Record<string, z.ZodTypeAny>,
-      ),
+    const input = Object.fromEntries(
+      Object.entries(config).map(([key, { select }]) => [
+        key,
+        read(select, request),
+      ]),
     );
 
-    const input = Object.entries(config).reduce(
-      (acc, [key, value]) => {
-        acc[key] = value.select;
-        return acc;
-      },
-      {} as Record<string, unknown>,
-    );
-
-    const parsed = await parse(schema, input);
-    c.set('input', parsed as ExtractInput<T>);
+    c.set('input', await parse(schema, input));
     await next();
   });
 }
@@ -186,16 +237,18 @@ export async function parse<T extends z.ZodRawShape>(
 ) {
   const result = await schema.safeParseAsync(input);
   if (!result.success) {
+    // Declared as a plain record so the OpenAPI analyzer can describe it.
+    const errors: Record<string, unknown> = result.error.flatten((issue) => ({
+      message: issue.message,
+      code: issue.code,
+      path: issue.path.join('.'),
+    })).fieldErrors;
     throw new HTTPException(400, {
       message: 'Validation failed',
       cause: {
         code: 'api/validation-failed',
         detail: 'The input data is invalid',
-        errors: result.error.flatten((issue) => ({
-          message: issue.message,
-          code: issue.code,
-          path: issue.path.join('.'),
-        })).fieldErrors as Record<string, unknown>,
+        errors,
       },
     });
   }
@@ -244,7 +297,7 @@ async function parseJson(context: Context) {
       message: 'The request body is not valid JSON',
       cause: {
         code: 'api/invalid-json',
-        detail: (error as any).message as string,
+        detail: error instanceof Error ? error.message : String(error),
       },
     });
   }

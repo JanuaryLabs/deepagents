@@ -19,32 +19,14 @@ import {
   TableRow,
 } from '@deepagents/react-shadcn';
 
-import '../../api.ts';
-import { CaseTable } from '../../components/CaseTable.tsx';
+import {
+  CaseTable,
+  isCaseWithScores,
+} from '../../components/CaseTable.tsx';
 import { RunStatusBadge } from '../../components/RunStatusBadge.tsx';
 import { StatsGrid } from '../../components/StatsGrid.tsx';
 import { useAction, useData } from '../../hooks/use-client.ts';
 import { useSuiteEvents } from '../../hooks/use-suite-events.ts';
-
-interface ScoreEntry {
-  scorer_name: string;
-  score: number;
-  reason: string | null;
-}
-
-interface CaseWithScores {
-  id: string;
-  run_id: string;
-  idx: number;
-  input: unknown;
-  output: string | null;
-  expected: unknown;
-  latency_ms: number;
-  tokens_in: number;
-  tokens_out: number;
-  error: string | null;
-  scores: ScoreEntry[];
-}
 
 export default function RunDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -80,7 +62,7 @@ export default function RunDetailPage() {
       }));
     },
     onRunEnd: () => {
-      queryClient.invalidateQueries({ queryKey: ['run', id] });
+      void queryClient.invalidateQueries({ queryKey: ['run', id] });
     },
   });
 
@@ -118,7 +100,15 @@ export default function RunDetailPage() {
   }
 
   const { run, summary, scorerNames, suite, config } = data;
-  const cases = data.cases as CaseWithScores[];
+  // The generated client types a case as `{ scores }` only; check the rest.
+  const cases: unknown[] = data.cases;
+  if (!cases.every(isCaseWithScores)) {
+    return (
+      <div className="p-8">
+        <p className="text-destructive">This run's cases could not be read.</p>
+      </div>
+    );
+  }
   const isRunning = run.status === 'running';
 
   const promptLabel =
@@ -237,7 +227,7 @@ export default function RunDetailPage() {
               onClick={() =>
                 deleteMutation.mutate(
                   { id: run.id },
-                  { onSuccess: () => navigate(`/suites/${suite.id}`) },
+                  { onSuccess: () => void navigate(`/suites/${suite.id}`) },
                 )
               }
             >

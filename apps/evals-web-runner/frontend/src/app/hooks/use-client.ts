@@ -1,6 +1,5 @@
 import { Client, type Endpoints } from '@evals/client';
 import {
-  type MutationFunctionContext,
   type UseMutationOptions,
   type UseMutationResult,
   type UseQueryOptions,
@@ -30,14 +29,13 @@ export const client = new Client({
   baseUrl: getBaseUrl(),
   fetch: (request) => {
     const teamId = localStorage.getItem('activeTeamId');
-    const req = request as unknown as Request;
-    const headers = new Headers(req.headers);
+    const headers = new Headers(request.headers);
     if (teamId) {
       headers.set('X-Team-Id', teamId);
     }
-    return fetch(new Request(req, { headers }), {
+    return fetch(new Request(request, { headers }), {
       credentials: 'include',
-    }) as any;
+    });
   },
 });
 
@@ -67,7 +65,7 @@ type MutationEndpoints = {
  */
 export function useData<E extends DataEndpoints>(
   endpoint: E,
-  input?: Endpoints[E]['input'],
+  input: Endpoints[E]['input'],
   options?: Omit<
     UseQueryOptions<
       Endpoints[E]['output'],
@@ -81,7 +79,7 @@ export function useData<E extends DataEndpoints>(
     queryKey: [endpoint, JSON.stringify(input)],
     ...options,
     meta: { endpoint, input },
-    queryFn: () => client.request(endpoint, input ?? ({} as never)),
+    queryFn: () => client.request(endpoint, input),
   });
 }
 
@@ -106,17 +104,7 @@ export function usePolling<E extends DataEndpoints>(
   });
 }
 
-type WithMutationFn<E extends keyof Endpoints> = Omit<
-  UseMutationOptions<Endpoints[E]['output'], Endpoints[E]['error'], unknown>,
-  'mutationFn' | 'mutationKey'
-> & {
-  invalidate?: DataEndpoints[];
-  mutationFn: (
-    dispatch: (input: Endpoints[E]['input']) => Promise<Endpoints[E]['output']>,
-    context: MutationFunctionContext,
-  ) => Promise<Endpoints[E]['output'] | undefined>;
-};
-type WithoutMutationFn<E extends keyof Endpoints> = Omit<
+type ActionOptions<E extends keyof Endpoints> = Omit<
   UseMutationOptions<
     Endpoints[E]['output'],
     Endpoints[E]['error'],
@@ -134,42 +122,6 @@ export type UseAction<E extends MutationEndpoints> = UseMutationResult<
 >;
 
 /**
- * A hook to perform an action on the API with a custom mutation function.
- * The `mutate` function from the result will not take any arguments.
- * The `mutationFn` receives a `dispatch` function that you can call to trigger the API request.
- *
- * @param endpoint - The API endpoint to perform the action on (e.g. 'POST /payments').
- * @param options - Options for the mutation, including a custom `mutationFn`.
- * @returns The mutation result.
- *
- * @example
- * // Create a new payment with a custom function
- * const { mutate, isPending } = useAction('POST /payments', {
- *   mutationFn: (dispatch) => dispatch({ amount: 1000, date: '2023-01-01' }),
- *   onSuccess: () => console.log('Payment created!'),
- * });
- *
- * @example
- * // Perform logic before and after the mutation
- * const { mutate, isPending } = useAction('POST /payments', {
- *  mutationFn: async (dispatch) => {
- *   // Perform some logic before the mutation
- *   await dispatch({ amount: 1000, date: '2023-01-01' });
- *   // Perform some logic after the mutation
- *   console.log('Payment created!');
- *  },
- * });
- *
- * // later in the code
- * mutate();
- */
-export function useAction<E extends MutationEndpoints>(
-  endpoint: E,
-  options: WithMutationFn<E>,
-): UseMutationResult<Endpoints[E]['output'], Endpoints[E]['error'], void>;
-
-/**
- * @overload
  * A hook to perform an action on the API.
  * The `mutate` function from the result expects the input for the endpoint.
  *
@@ -188,20 +140,8 @@ export function useAction<E extends MutationEndpoints>(
  */
 export function useAction<E extends MutationEndpoints>(
   endpoint: E,
-  options?: WithoutMutationFn<E>,
-): UseMutationResult<
-  Endpoints[E]['output'],
-  Endpoints[E]['error'],
-  Endpoints[E]['input']
->;
-export function useAction<E extends MutationEndpoints>(
-  endpoint: E,
-  options?: WithMutationFn<E> | WithoutMutationFn<E>,
-): UseMutationResult<
-  Endpoints[E]['output'],
-  Endpoints[E]['error'],
-  Endpoints[E]['input']
-> {
+  options?: ActionOptions<E>,
+): UseAction<E> {
   return useMutation<
     Endpoints[E]['output'],
     Endpoints[E]['error'],
@@ -210,15 +150,7 @@ export function useAction<E extends MutationEndpoints>(
   >({
     ...options,
     mutationKey: [endpoint],
-    mutationFn: async (input, context) => {
-      if (options && 'mutationFn' in options && options.mutationFn) {
-        return options.mutationFn(
-          (input) => client.request(endpoint, input),
-          context,
-        ) as Promise<Endpoints[E]['output']>;
-      }
-      return (await client.request(endpoint, input)) as Endpoints[E]['output'];
-    },
+    mutationFn: (input) => client.request(endpoint, input),
     onSuccess: async (data, variables, onMutateResult, context) => {
       for (const endpoint of options?.invalidate ?? []) {
         await invalidateData(endpoint);
@@ -240,7 +172,7 @@ export function useActionState<E extends MutationEndpoints>(endpoint: E) {
 
 export function fetchData<E extends DataEndpoints>(
   endpoint: E,
-  input?: Endpoints[E]['input'],
+  input: Endpoints[E]['input'],
   options?: Omit<
     UseQueryOptions<
       Endpoints[E]['output'],
@@ -254,7 +186,7 @@ export function fetchData<E extends DataEndpoints>(
     queryKey: [endpoint, JSON.stringify(input)],
     ...options,
     meta: { endpoint, input },
-    queryFn: () => client.request(endpoint, input ?? ({} as never)),
+    queryFn: () => client.request(endpoint, input),
   });
 }
 

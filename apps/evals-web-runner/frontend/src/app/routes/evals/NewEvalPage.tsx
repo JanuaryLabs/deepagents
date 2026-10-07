@@ -86,8 +86,8 @@ export default function NewEvalPage() {
   const [inputField, setInputField] = useState('');
   const [expectedField, setExpectedField] = useState('');
 
-  const { data: datasets } = useData('GET /datasets');
-  const { data: prompts } = useData('GET /prompts');
+  const { data: datasets } = useData('GET /datasets', {});
+  const { data: prompts } = useData('GET /prompts', {});
   const {
     grouped: modelGroups,
     isLoading: modelsLoading,
@@ -114,7 +114,8 @@ export default function NewEvalPage() {
   const [prefilledFrom, setPrefilledFrom] = useState<typeof prefillData>();
   if (prefillData && prefillData !== prefilledFrom) {
     setPrefilledFrom(prefillData);
-    const cfg = (prefillData.run.config ?? {}) as Record<string, unknown>;
+    // The store keeps `null` for a run created without a config.
+    const cfg: Record<string, unknown> = prefillData.run.config ?? {};
     setName(
       typeof cfg.suiteName === 'string' ? cfg.suiteName : prefillData.run.name,
     );
@@ -159,7 +160,7 @@ export default function NewEvalPage() {
 
   const submitMutation = useAction('POST /runs', {
     onSuccess: (data) => {
-      navigate(`/suites/${data.suiteId}`);
+      void navigate(`/suites/${data.suiteId}`);
     },
   });
 
@@ -334,7 +335,9 @@ export default function NewEvalPage() {
           <Label>Task Mode</Label>
           <Tabs
             value={taskMode}
-            onValueChange={(v) => setTaskMode(v as 'prompt' | 'http')}
+            onValueChange={(v) => {
+              if (v === 'prompt' || v === 'http') setTaskMode(v);
+            }}
             className="mt-1"
           >
             <TabsList>

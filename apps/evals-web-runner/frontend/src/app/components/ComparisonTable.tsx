@@ -16,14 +16,7 @@ import {
 import type { Endpoints } from '../hooks/use-client.ts';
 import { formatDelta } from '../lib/format.ts';
 
-type RegressionDetail = { exceeds: boolean; meanDelta: number };
 type ComparisonResult = Endpoints['GET /compare']['output']['result'];
-type ScorerDelta = {
-  baseline: number;
-  candidate: number;
-  change: 'improved' | 'regressed' | 'unchanged';
-  delta: number;
-};
 
 function deltaClass(change: string): string {
   if (change === 'improved') return 'text-green-600';
@@ -33,10 +26,7 @@ function deltaClass(change: string): string {
 
 export function ComparisonTable({ result }: { result: ComparisonResult }) {
   const scorerNames = Object.keys(result.scorerSummaries);
-  const regressionDetails = result.regression.details as unknown as Record<
-    string,
-    RegressionDetail
-  >;
+  const regressionDetails = result.regression.details;
 
   return (
     <div className="space-y-8">
@@ -180,11 +170,7 @@ export function ComparisonTable({ result }: { result: ComparisonResult }) {
                     {diff.index}
                   </TableCell>
                   {scorerNames.map((name) => {
-                    const deltas = diff.scorerDeltas as unknown as Record<
-                      string,
-                      ScorerDelta
-                    >;
-                    const d = deltas[name];
+                    const d = diff.scorerDeltas[name];
                     if (!d) {
                       return (
                         <Fragment key={name}>

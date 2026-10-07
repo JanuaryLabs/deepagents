@@ -39,7 +39,7 @@ export default function DatasetDetailPage() {
 
   const [offset, setOffset] = useState(0);
 
-  const { data: allDatasets } = useData('GET /datasets');
+  const { data: allDatasets } = useData('GET /datasets', {});
 
   const { data, isLoading } = useData(
     'GET /datasets/{name}/rows',
@@ -111,7 +111,7 @@ export default function DatasetDetailPage() {
               onValueChange={(v) => {
                 if (v === null) return;
                 setOffset(0);
-                navigate(`/datasets/${encodeURIComponent(v)}`);
+                void navigate(`/datasets/${encodeURIComponent(v)}`);
               }}
             >
               <SelectTrigger className="w-56">
@@ -147,26 +147,28 @@ export default function DatasetDetailPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.rows.map((_row, i) => {
-                const row = _row as Record<string, unknown>;
+              {data.rows.map((row, i) => {
                 return (
                   <TableRow key={offset + i}>
                     <TableCell className="text-muted-foreground">
                       {offset + i + 1}
                     </TableCell>
-                    {data.columns.map((col) => (
-                      <TableCell
-                        key={col}
-                        className="max-w-xs truncate"
-                        title={
-                          typeof row[col] === 'string'
-                            ? (row[col] as string)
-                            : JSON.stringify(row[col])
-                        }
-                      >
-                        {truncateValue(row[col])}
-                      </TableCell>
-                    ))}
+                    {data.columns.map((col) => {
+                      const value: unknown = row[col];
+                      return (
+                        <TableCell
+                          key={col}
+                          className="max-w-xs truncate"
+                          title={
+                            typeof value === 'string'
+                              ? value
+                              : JSON.stringify(value)
+                          }
+                        >
+                          {truncateValue(value)}
+                        </TableCell>
+                      );
+                    })}
                   </TableRow>
                 );
               })}
