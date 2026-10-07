@@ -1,4 +1,3 @@
-import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 
@@ -46,8 +45,6 @@ export default function RunDetailPage() {
       },
     },
   );
-  const queryClient = useQueryClient();
-
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [progressMap, setProgressMap] = useState<Record<string, number>>({});
@@ -61,9 +58,6 @@ export default function RunDetailPage() {
         [runId]:
           totalCases > 0 ? Math.round((completed / totalCases) * 100) : 0,
       }));
-    },
-    onRunEnd: () => {
-      void queryClient.invalidateQueries({ queryKey: ['run', id] });
     },
   });
 

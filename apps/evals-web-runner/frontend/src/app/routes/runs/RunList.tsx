@@ -1,4 +1,3 @@
-import { useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
 
@@ -35,7 +34,6 @@ export default function RunListPage() {
       },
     },
   );
-  const queryClient = useQueryClient();
   const [progressMap, setProgressMap] = useState<Record<string, number>>({});
 
   const runningIds = useMemo(
@@ -53,9 +51,6 @@ export default function RunListPage() {
         [runId]:
           totalCases > 0 ? Math.round((completed / totalCases) * 100) : 0,
       }));
-    },
-    onRunEnd: () => {
-      void queryClient.invalidateQueries({ queryKey: ['runs'] });
     },
   });
 

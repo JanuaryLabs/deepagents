@@ -1,4 +1,3 @@
-import { useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 
@@ -49,8 +48,6 @@ export default function SuiteDetailPage() {
       },
     },
   );
-  const queryClient = useQueryClient();
-
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [selectedRunIds, setSelectedRunIds] = useState<Set<string>>(new Set());
@@ -71,9 +68,6 @@ export default function SuiteDetailPage() {
         [runId]:
           totalCases > 0 ? Math.round((completed / totalCases) * 100) : 0,
       }));
-    },
-    onRunEnd: () => {
-      void queryClient.invalidateQueries({ queryKey: ['suite', id] });
     },
   });
 

@@ -1,5 +1,7 @@
 import { useEffect, useEffectEvent } from 'react';
 
+import { invalidateData } from './use-client.ts';
+
 interface CaseScored {
   runId: string;
   completed: number;
@@ -8,8 +10,14 @@ interface CaseScored {
 
 interface SuiteEventCallbacks {
   onCaseScored?: (data: CaseScored) => void;
-  onRunEnd?: (runId: string) => void;
 }
+
+/** The data a finished run changes: the run, the runs list and its suite. */
+const RUN_END_ENDPOINTS = [
+  'GET /runs/{id}',
+  'GET /runs',
+  'GET /suites/{id}',
+] as const;
 
 /** The run's progress that events.route.ts adds to each `case:scored` event. */
 function readProgress(
@@ -37,9 +45,6 @@ export function useSuiteEvents(
   const caseScored = useEffectEvent((data: CaseScored) =>
     callbacks.onCaseScored?.(data),
   );
-  const runEnded = useEffectEvent((runId: string) =>
-    callbacks.onRunEnd?.(runId),
-  );
 
   const runIdsKey = runningRunIds.join(',');
 
@@ -57,7 +62,10 @@ export function useSuiteEvents(
       });
 
       es.addEventListener('run:end', () => {
-        runEnded(runId);
+        // Refetch every mounted view of these endpoints, whatever their input.
+        for (const endpoint of RUN_END_ENDPOINTS) {
+          void invalidateData(endpoint);
+        }
         es.close();
       });
 
