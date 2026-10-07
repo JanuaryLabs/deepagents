@@ -7,7 +7,7 @@ import type {
 
 /** Validates plugin declarations and supplies each plugin's declared bindings. */
 export class PluginBindings {
-  readonly #values: Map<AgentPluginCapability<unknown>, unknown>;
+  readonly #bindings: Map<AgentPluginCapability<unknown>, AgentPluginBinding>;
 
   constructor(
     definitions: readonly AgentPluginDefinition[] | undefined,
@@ -68,7 +68,10 @@ export class PluginBindings {
         }
       }
     }
-    this.#values = new Map<AgentPluginCapability<unknown>, unknown>();
+    this.#bindings = new Map<
+      AgentPluginCapability<unknown>,
+      AgentPluginBinding
+    >();
     const bindingNames = new Set<string>();
     if (bindings) {
       for (const binding of bindings) {
@@ -84,7 +87,7 @@ export class PluginBindings {
             `AgentRuntime: unused binding for capability "${binding.capability.name}"`,
           );
         }
-        this.#values.set(binding.capability, binding.value);
+        this.#bindings.set(binding.capability, binding);
       }
     }
   }
@@ -93,7 +96,7 @@ export class PluginBindings {
     const declared = new Set(definition.capabilities);
     if (definition.capabilities) {
       for (const capability of definition.capabilities) {
-        if (!this.#values.has(capability)) {
+        if (!this.#bindings.has(capability)) {
           throw new Error(
             `AgentRuntime: plugin "${definition.name}" requires missing capability "${capability.name}"`,
           );
@@ -107,7 +110,13 @@ export class PluginBindings {
             `AgentRuntime: plugin "${definition.name}" did not declare capability "${capability.name}"`,
           );
         }
-        return this.#values.get(capability) as Value;
+        const binding = this.#bindings.get(capability);
+        if (!binding) {
+          throw new Error(
+            `AgentRuntime: plugin "${definition.name}" requires missing capability "${capability.name}"`,
+          );
+        }
+        return capability.read(binding);
       },
     };
   }

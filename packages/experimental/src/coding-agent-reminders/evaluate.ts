@@ -2,7 +2,6 @@ import type {
   ClaudeHookInput,
   ClaudeHookOutput,
   GuardRule,
-  HookEventName,
   ReminderHookConfig,
   ReminderRule,
 } from './types.ts';
@@ -69,7 +68,7 @@ async function matchingReminders(
 ): Promise<string[]> {
   const matched: string[] = [];
   for (const rule of reminders) {
-    if (!rule.events.includes(input.hook_event_name as HookEventName)) continue;
+    if (!rule.events.some((event) => event === input.hook_event_name)) continue;
     try {
       if (!(await rule.when(input))) continue;
       matched.push(

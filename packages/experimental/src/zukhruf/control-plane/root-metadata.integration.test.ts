@@ -1,11 +1,11 @@
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
-  type AgentModel,
   type AgentSandbox,
   InMemoryContextStore,
   PollingChangeSource,
@@ -13,6 +13,8 @@ import {
   StreamManager,
   type StreamStore,
   type StreamUpdater,
+  createBashTool,
+  createVirtualSandbox,
 } from '@deepagents/context';
 import {
   AgentRuntime,
@@ -26,6 +28,12 @@ import {
   defineAgent,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
+
+async function virtualSandbox(): Promise<AgentSandbox> {
+  return createBashTool({
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+  });
+}
 
 const userTurn = (id: string, text: string) => ({
   message: {
@@ -191,8 +199,8 @@ test('enqueue only queues; worker execution initializes root metadata', async (t
             ],
           }),
         }),
-      }) as AgentModel,
-      sandbox: async () => ({}) as AgentSandbox,
+      }),
+      sandbox: virtualSandbox,
       instructions: [],
     }),
   );
@@ -256,8 +264,8 @@ test('an existing chat can only be used by its stored owner', async (t) => {
             ],
           }),
         }),
-      }) as AgentModel,
-      sandbox: async () => ({}) as AgentSandbox,
+      }),
+      sandbox: virtualSandbox,
       instructions: [],
     }),
   );
@@ -295,8 +303,8 @@ test('caller turn ids are scoped to their owning conversation', async (t) => {
   const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
-      model: {} as AgentModel,
-      sandbox: async () => ({}) as AgentSandbox,
+      model: new MockLanguageModelV4(),
+      sandbox: virtualSandbox,
       instructions: [],
     }),
   );
@@ -333,8 +341,8 @@ test('explicit cancellation rejects a stream owned by another conversation', asy
   const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
-      model: {} as AgentModel,
-      sandbox: async () => ({}) as AgentSandbox,
+      model: new MockLanguageModelV4(),
+      sandbox: virtualSandbox,
       instructions: [],
     }),
   );
@@ -381,8 +389,8 @@ test('reserved but malformed agent metadata fails closed at enqueue', async (t) 
   const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
-      model: {} as AgentModel,
-      sandbox: async () => ({}) as AgentSandbox,
+      model: new MockLanguageModelV4(),
+      sandbox: virtualSandbox,
       instructions: [],
     }),
   );
@@ -417,8 +425,8 @@ test('enqueue rejects an empty conversation before registering a stream', async 
   const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
-      model: {} as AgentModel,
-      sandbox: async () => ({}) as AgentSandbox,
+      model: new MockLanguageModelV4(),
+      sandbox: virtualSandbox,
       instructions: [],
     }),
   );
@@ -470,8 +478,8 @@ test('root initialization preserves a concurrent host metadata write', async (t)
             ],
           }),
         }),
-      }) as AgentModel,
-      sandbox: async () => ({}) as AgentSandbox,
+      }),
+      sandbox: virtualSandbox,
       instructions: [],
     }),
   );
@@ -534,8 +542,8 @@ test('a child must point to the immediate ancestor of its canonical path', async
   const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
-      model: {} as AgentModel,
-      sandbox: async () => ({}) as AgentSandbox,
+      model: new MockLanguageModelV4(),
+      sandbox: virtualSandbox,
       instructions: [],
     }),
   );
@@ -571,8 +579,8 @@ test('host delivery rejects a recipient that does not own the stored chat', asyn
   const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
-      model: {} as AgentModel,
-      sandbox: async () => ({}) as AgentSandbox,
+      model: new MockLanguageModelV4(),
+      sandbox: virtualSandbox,
       instructions: [],
     }),
   );
@@ -614,8 +622,8 @@ test('explicit cancellation rejects a conversation that does not own the stored 
   const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
-      model: {} as AgentModel,
-      sandbox: async () => ({}) as AgentSandbox,
+      model: new MockLanguageModelV4(),
+      sandbox: virtualSandbox,
       instructions: [],
     }),
   );
@@ -671,11 +679,11 @@ test('cancelling during sandbox setup prevents model sampling', async (t) => {
             }),
           };
         },
-      }) as AgentModel,
+      }),
       sandbox: async () => {
         sandboxStarted.resolve();
         await releaseSandbox.promise;
-        return {} as AgentSandbox;
+        return virtualSandbox();
       },
       instructions: [],
     }),
@@ -735,10 +743,10 @@ test('cancellation that wins the execution claim prevents model sampling', async
             }),
           };
         },
-      }) as AgentModel,
+      }),
       sandbox: async () => {
         streamStore.arm();
-        return {} as AgentSandbox;
+        return virtualSandbox();
       },
       instructions: [],
     }),
@@ -797,8 +805,8 @@ test('cancellation after execution claim aborts pending provider setup', async (
             }),
           };
         },
-      }) as AgentModel,
-      sandbox: async () => ({}) as AgentSandbox,
+      }),
+      sandbox: virtualSandbox,
       instructions: [],
     }),
   );

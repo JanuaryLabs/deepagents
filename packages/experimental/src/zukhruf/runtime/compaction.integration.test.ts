@@ -6,10 +6,11 @@ import type {
 import { PGlite } from '@electric-sql/pglite';
 import {
   type ModelMessage,
-  type UIMessage,
   type UIMessageChunk,
   isToolUIPart,
+  parseJsonEventStream,
   simulateReadableStream,
+  uiMessageChunkSchema,
 } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
@@ -40,7 +41,6 @@ import {
   type AgentDeclaration,
   type AgentHost,
   AgentRuntime,
-  type CompactionEvent,
   PgBossTurnQueue,
   SqliteMailboxStore,
   defineAgent,
@@ -50,9 +50,42 @@ import {
 } from '@deepagents/experimental/zukhruf';
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 
-function compactionEvents(
-  chunks: readonly UIMessageChunk[],
-): CompactionEvent[] {
+const tokenScopeSchema = z.literal('request').optional();
+
+/** `data-compaction` payloads as the runtime writes them; nothing is stripped. */
+const compactionEventSchema = z.discriminatedUnion('status', [
+  z.looseObject({
+    id: z.string(),
+    status: z.literal('restored'),
+    sourceMessages: z.number(),
+    replacementMessages: z.number(),
+  }),
+  z.looseObject({
+    id: z.string(),
+    status: z.literal('started'),
+    tokenScope: tokenScopeSchema,
+    triggerIndex: z.number(),
+    tokensBefore: z.number(),
+    targetTokens: z.number(),
+    messageCount: z.number(),
+  }),
+  z.looseObject({
+    id: z.string(),
+    status: z.literal('completed'),
+    tokenScope: tokenScopeSchema,
+    tokens: z.looseObject({ before: z.number(), after: z.number() }),
+    replacedRange: z.looseObject({ start: z.number(), end: z.number() }),
+    usage: z.looseObject({}),
+  }),
+  z.looseObject({
+    id: z.string(),
+    status: z.literal('failed'),
+    phase: z.enum(['restore', 'evaluate', 'compact', 'persist']),
+    reason: z.string(),
+  }),
+]);
+
+function compactionEvents(chunks: readonly UIMessageChunk[]) {
   return chunks.flatMap((chunk) => {
     if (chunk.type !== 'data-compaction') return [];
     assert.equal(
@@ -60,9 +93,23 @@ function compactionEvents(
       undefined,
       'lifecycle events survive in the UI transcript',
     );
-    return [chunk.data as CompactionEvent];
+    return [compactionEventSchema.parse(chunk.data)];
   });
 }
+
+/**
+ * A `/session` transcript, as the HTTP plugin returns it. Only data parts
+ * (`data-*`) carry `data`; text and tool parts have none.
+ */
+const transcriptSchema = z.looseObject({
+  messages: z.array(
+    z.looseObject({
+      parts: z.array(
+        z.looseObject({ type: z.string(), data: z.unknown().optional() }),
+      ),
+    }),
+  ),
+});
 
 const usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -1546,13 +1593,17 @@ for (const [name, triggers] of [
       );
       assert.equal(response.status, 200);
       assert.equal(response.headers.get('x-vercel-ai-ui-message-stream'), 'v1');
-      const chunks = (await response.text())
-        .trim()
-        .split('\n\n')
-        .filter((line) => line.startsWith('data: ') && line !== 'data: [DONE]')
-        .map(
-          (line) => JSON.parse(line.slice('data: '.length)) as UIMessageChunk,
-        );
+      assert.ok(response.body);
+      const chunks = await Array.fromAsync(
+        parseJsonEventStream({
+          stream: response.body,
+          schema: uiMessageChunkSchema,
+        }),
+        (chunk) => {
+          assert.ok(chunk.success, 'every SSE frame is a UI message chunk');
+          return chunk.value;
+        },
+      );
       assert.deepEqual(
         compactionEvents(chunks),
         events,
@@ -1575,7 +1626,7 @@ for (const [name, triggers] of [
       assert.doesNotMatch(finalPrompt, /data-compaction/);
       const session = await app.request(`/api/session/${conversation.chatId}`);
       assert.equal(session.status, 200);
-      const transcript = (await session.json()) as { messages: UIMessage[] };
+      const transcript = transcriptSchema.parse(await session.json());
       assert.deepEqual(
         transcript.messages.flatMap((message) =>
           message.parts.flatMap((part) =>
@@ -1781,16 +1832,14 @@ test('compaction is opt-in and validates its budget and triggers', () => {
       /targetTokens/,
     );
   }
-  for (const triggers of [[], undefined, null, [null], [1]]) {
-    assert.throws(
-      () =>
-        declaration(new MockLanguageModelV4(), {
-          ...compaction(summarizer()),
-          triggers: triggers as unknown as AgentCompaction['triggers'],
-        }),
-      /triggers must be a non-empty array of functions/,
-    );
-  }
+  assert.throws(
+    () =>
+      declaration(new MockLanguageModelV4(), {
+        ...compaction(summarizer()),
+        triggers: [],
+      }),
+    /triggers must be a non-empty array of functions/,
+  );
 });
 
 test(

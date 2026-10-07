@@ -6,7 +6,14 @@ import { randomUUID } from 'node:crypto';
 import test, { type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Pool } from 'pg';
-import { type Db, PgBoss, fromPglite } from 'pg-boss';
+import {
+  type Db,
+  PgBoss,
+  type WorkOptions,
+  type WorkWithMetadataHandler,
+  fromPglite,
+} from 'pg-boss';
+import { z } from 'zod';
 
 import {
   type ScheduledTaskTransaction,
@@ -26,6 +33,10 @@ const FAST_POLLING = {
 interface TestExecutionConfig {
   destination: string;
 }
+
+const testExecutionConfigSchema = z.object({
+  destination: z.string(),
+}) satisfies z.ZodType<TestExecutionConfig>;
 
 type ExecutionState =
   | {
@@ -166,6 +177,7 @@ async function pgliteHarness(
       return result;
     });
   const scheduled = new ScheduledTasks({
+    executionConfigSchema: testExecutionConfigSchema,
     boss,
     queue,
     queueOptions: { notify: true },
@@ -295,22 +307,28 @@ test('duplicate delivery of one occurrence creates one run and one successor', a
     timezone: 'UTC',
     executionConfig: { destination: 'duplicate' },
   });
-  type Work = (...args: unknown[]) => Promise<string>;
-  const mutableBoss = boss as unknown as { work: Work };
-  const originalWork = mutableBoss.work.bind(boss);
+  const originalWork = boss.work.bind(boss);
   let duplicated = false;
-  mutableBoss.work = (name, options, candidate) =>
-    originalWork(name, options, async (jobs: unknown[]) => {
-      const handler = candidate as (jobs: unknown[]) => Promise<void>;
-      await handler(jobs);
-      if (!duplicated) {
-        duplicated = true;
+  // Mirrors the call ScheduledTasks.work makes: metadata jobs, one handler.
+  const redeliverOnce = t.mock.method(
+    boss,
+    'work',
+    (
+      name: string,
+      options: WorkOptions & { includeMetadata: true },
+      handler: WorkWithMetadataHandler<unknown>,
+    ) =>
+      originalWork(name, options, async (jobs) => {
         await handler(jobs);
-      }
-    });
+        if (!duplicated) {
+          duplicated = true;
+          await handler(jobs);
+        }
+      }),
+  );
   await using _worker = await scheduled.work(FAST_POLLING);
   void _worker;
-  mutableBoss.work = originalWork;
+  redeliverOnce.mock.restore();
 
   await t.waitFor(
     async () => {
@@ -534,6 +552,7 @@ test('a queued run survives coordinator and pg-boss restart', async (t) => {
   firstBoss.on('error', () => {});
   await firstBoss.start();
   const first = new ScheduledTasks({
+    executionConfigSchema: testExecutionConfigSchema,
     boss: firstBoss,
     queue,
     reconciliationIntervalMs: 50,
@@ -556,6 +575,7 @@ test('a queued run survives coordinator and pg-boss restart', async (t) => {
   secondBoss.on('error', () => {});
   await secondBoss.start();
   const restarted = new ScheduledTasks({
+    executionConfigSchema: testExecutionConfigSchema,
     boss: secondBoss,
     queue,
     reconciliationIntervalMs: 50,
@@ -605,6 +625,7 @@ test('real PostgreSQL competing workers launch one execution for one run', async
   const executor = new TestExecutor();
   const queue = `scheduled-workers-${randomUUID()}`;
   const first = new ScheduledTasks({
+    executionConfigSchema: testExecutionConfigSchema,
     boss: firstBoss,
     queue,
     reconciliationIntervalMs: 50,
@@ -612,6 +633,7 @@ test('real PostgreSQL competing workers launch one execution for one run', async
     executor,
   });
   const second = new ScheduledTasks({
+    executionConfigSchema: testExecutionConfigSchema,
     boss: secondBoss,
     queue,
     reconciliationIntervalMs: 50,
@@ -673,6 +695,7 @@ test('real PostgreSQL commits duplicate management calls as one schedule and run
   const executor = new TestExecutor();
   const queue = `scheduled-postgres-${randomUUID()}`;
   const scheduled = new ScheduledTasks({
+    executionConfigSchema: testExecutionConfigSchema,
     boss,
     queue,
     reconciliationIntervalMs: 50,

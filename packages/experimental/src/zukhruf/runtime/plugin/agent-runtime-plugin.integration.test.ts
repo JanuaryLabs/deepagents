@@ -1,3 +1,4 @@
+import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
@@ -9,8 +10,12 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
 import {
-  type AgentModel,
   type AgentSandbox,
+  InMemoryContextStore,
+  PollingChangeSource,
+  SqliteStreamStore,
+  StreamManager,
+  createBashTool,
   createVirtualSandbox,
 } from '@deepagents/context';
 import {
@@ -18,21 +23,75 @@ import {
   type AgentPluginDefinition,
   type AgentPluginHost,
   AgentRuntime,
-  type AgentStack,
   type SandboxContext,
+  SqliteMailboxStore,
+  type TurnActivity,
+  TurnQueue,
+  type TurnRef,
   defineAgent,
   defineSandbox,
   defineStack,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
 
+/** Turns are never scheduled by runtimes that are only initialized. */
+class UnusedTurnQueue extends TurnQueue {
+  override async push(): Promise<void> {
+    throw unusedQueue();
+  }
+
+  override async getTurnActivity(): Promise<TurnActivity> {
+    throw unusedQueue();
+  }
+
+  override async getCurrentTurn(): Promise<TurnRef | undefined> {
+    throw unusedQueue();
+  }
+
+  override async cancel(): Promise<void> {
+    throw unusedQueue();
+  }
+
+  override async consume(): Promise<AsyncDisposable> {
+    throw unusedQueue();
+  }
+
+  override async resumeParked(): Promise<void> {
+    throw unusedQueue();
+  }
+}
+
+function unusedQueue(): Error {
+  return new Error('this test never schedules a turn');
+}
+
+/** In-memory adapters for runtimes that are initialized but never worked. */
+function adapters(resources: AsyncDisposableStack) {
+  const streamStore = new SqliteStreamStore(':memory:');
+  resources.defer(() => streamStore.close());
+  return {
+    store: new InMemoryContextStore(),
+    streams: new StreamManager({
+      store: streamStore,
+      changeSource: new PollingChangeSource({ reads: streamStore }),
+    }),
+    queue: new UnusedTurnQueue(),
+    mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
+  };
+}
+
+async function virtualSandbox(): Promise<AgentSandbox> {
+  return createBashTool({
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+  });
+}
+
 const tool = defineTool({
   description: 'Test tool.',
   inputSchema: z.object({}).strict(),
   execute: () => Promise.resolve({ ok: true }),
 });
-const options = {} as Awaited<ReturnType<AgentStack>>;
-const stack = defineStack(async () => options);
+const stack = defineStack(async (resources) => adapters(resources));
 
 function plugin<Instance extends object>(
   name: string,
@@ -48,8 +107,8 @@ function declaration(
 ) {
   return defineAgent({
     name: 'root',
-    model: {} as AgentModel,
-    sandbox: async () => ({}) as AgentSandbox,
+    model: new MockLanguageModelV4(),
+    sandbox: virtualSandbox,
     instructions: [],
     tools,
     plugins,
@@ -65,14 +124,14 @@ test('one exported definition materializes fresh bound plugin instances per host
   );
   const agent = declaration([stateful]);
   const firstSetup = new AgentRuntime(agent);
-  const firstStack = defineStack(async () => ({
-    ...options,
+  const firstStack = defineStack(async (resources) => ({
+    ...adapters(resources),
     bindings: [value.bind('first')],
   }));
   await using first = await firstSetup.initialize(firstStack);
   const secondSetup = new AgentRuntime(agent);
-  const secondStack = defineStack(async () => ({
-    ...options,
+  const secondStack = defineStack(async (resources) => ({
+    ...adapters(resources),
     bindings: [value.bind('second')],
   }));
   await using second = await secondSetup.initialize(secondStack);
@@ -102,8 +161,8 @@ test('AgentRuntime validates capability bindings during initialization', async (
     /plugin "requiring" requires missing capability "test.required"/,
   );
   const duplicateBindingRuntime = new AgentRuntime(agent);
-  const duplicateBindingRuntimeStack = defineStack(async () => ({
-    ...options,
+  const duplicateBindingRuntimeStack = defineStack(async (resources) => ({
+    ...adapters(resources),
     bindings: [required.bind('one'), required.bind('two')],
   }));
   await assert.rejects(
@@ -111,8 +170,8 @@ test('AgentRuntime validates capability bindings during initialization', async (
     /duplicate binding for capability "test.required"/,
   );
   const unusedBindingRuntime = new AgentRuntime(agent);
-  const unusedBindingRuntimeStack = defineStack(async () => ({
-    ...options,
+  const unusedBindingRuntimeStack = defineStack(async (resources) => ({
+    ...adapters(resources),
     bindings: [required.bind('value'), unknown.bind('unused')],
   }));
   await assert.rejects(
@@ -135,8 +194,8 @@ test('one binding may satisfy several plugins requiring one capability', async (
   );
   const value = {};
   const runtimeSetup = new AgentRuntime(declaration([first, second]));
-  const stack = defineStack(async () => ({
-    ...options,
+  const stack = defineStack(async (resources) => ({
+    ...adapters(resources),
     bindings: [shared.bind(value)],
   }));
   await using runtime = await runtimeSetup.initialize(stack);
@@ -189,8 +248,8 @@ test('AgentRuntime rejects conflicting capability identities and undeclared acce
       ]),
     ]),
   );
-  const undeclaredCapabilityRuntimeStack = defineStack(async () => ({
-    ...options,
+  const undeclaredCapabilityRuntimeStack = defineStack(async (resources) => ({
+    ...adapters(resources),
     bindings: [declared.bind('value')],
   }));
   await assert.rejects(
@@ -341,8 +400,8 @@ test('code_mode is reserved only when code mode is enabled', async () => {
   const runtime = new AgentRuntime(declaration([custom]));
   await using host = await runtime.initialize(stack);
   const codeModeRuntime = new AgentRuntime(declaration([custom]));
-  const codeModeRuntimeStack = defineStack(async () => ({
-    ...options,
+  const codeModeRuntimeStack = defineStack(async (resources) => ({
+    ...adapters(resources),
     multiAgent: { nonCodeModeOnly: false },
   }));
   await assert.rejects(
@@ -563,16 +622,16 @@ test('AgentRuntime rejects context collisions and subagent plugins', async () =>
 
   const child = defineAgent({
     name: 'child',
-    model: {} as AgentModel,
-    sandbox: async () => ({}) as AgentSandbox,
+    model: new MockLanguageModelV4(),
+    sandbox: virtualSandbox,
     instructions: [],
     plugins: [plugin('child-plugin', () => ({}))],
   });
   const childPluginsRuntime = new AgentRuntime(
     defineAgent({
       name: 'root',
-      model: {} as AgentModel,
-      sandbox: async () => ({}) as AgentSandbox,
+      model: new MockLanguageModelV4(),
+      sandbox: virtualSandbox,
       instructions: [],
       subagents: [child],
     }),
@@ -602,7 +661,7 @@ test('host.sandbox attaches the configured root sandbox before the conversation 
   const runtime = new AgentRuntime(
     defineAgent({
       name: 'root',
-      model: {} as AgentModel,
+      model: new MockLanguageModelV4(),
       sandbox: defineSandbox(async (context) => {
         contexts.push(context);
         return createVirtualSandbox({ fs: new InMemoryFs() });

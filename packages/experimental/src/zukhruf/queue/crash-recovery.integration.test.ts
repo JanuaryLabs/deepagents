@@ -17,6 +17,7 @@ import {
   PostgresContextStore,
   PostgresStreamStore,
   StreamManager,
+  type StreamPart,
   createBashTool,
   createVirtualSandbox,
 } from '@deepagents/context';
@@ -56,16 +57,11 @@ const fixture = join(import.meta.dirname, 'crash-worker.fixture.ts');
 function fastModel(calls: string[]) {
   return new MockLanguageModelV4({
     doStream: async ({ prompt }) => {
-      const messages = prompt as Array<{
-        role: string;
-        content: Array<{ type: string; text?: string }>;
-      }>;
       const text =
-        messages
-          .filter((m) => m.role === 'user')
+        prompt
+          .flatMap((message) => (message.role === 'user' ? [message] : []))
           .at(-1)
-          ?.content.filter((p) => p.type === 'text')
-          .map((p) => p.text ?? '')
+          ?.content.flatMap((part) => (part.type === 'text' ? [part.text] : []))
           .join('') ?? '';
       calls.push(text);
       return {
@@ -116,13 +112,10 @@ async function waitForStatus(
   );
 }
 
-async function collectText(stream: ReadableStream) {
+async function collectText(stream: ReadableStream<StreamPart>) {
   let text = '';
-  for await (const part of stream as ReadableStream<{
-    type: string;
-    delta?: string;
-  }>) {
-    if (part.type === 'text-delta') text += part.delta ?? '';
+  for await (const part of stream) {
+    if (part.type === 'text-delta') text += part.delta;
   }
   return text;
 }
@@ -264,7 +257,7 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
           return failure;
         });
         throw new Error(
-          `${(error as Error).message}\nchild stderr:\n${result.stderr}`,
+          `${error instanceof Error ? error.message : String(error)}\nchild stderr:\n${result.stderr}`,
         );
       }
 

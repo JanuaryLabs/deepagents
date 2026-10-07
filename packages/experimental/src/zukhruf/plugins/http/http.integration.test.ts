@@ -1,9 +1,13 @@
 import { Hono } from 'hono';
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { z } from 'zod';
 
 import type { StreamPart } from '@deepagents/context';
-import type { AgentPluginDefinition } from '@deepagents/experimental/zukhruf';
+import type {
+  AgentPluginBindings,
+  AgentPluginDefinition,
+} from '@deepagents/experimental/zukhruf';
 import {
   type HttpEnv,
   type HttpProjection,
@@ -13,6 +17,23 @@ import {
 } from '@deepagents/experimental/zukhruf/http';
 
 type TestRuntime = Parameters<typeof http>[0];
+
+/** Error bodies the HTTP plugin's error handler writes as `{ cause, error }`. */
+const errorBodySchema = z.looseObject({
+  cause: z.looseObject({ code: z.string() }),
+});
+
+/** The 202 body written for an accepted turn. */
+const acceptedBodySchema = z.looseObject({
+  ok: z.boolean(),
+  sessionId: z.string(),
+  turnId: z.string(),
+});
+
+/** `/info` discovery: each capability is published under its mounted href. */
+const discoverySchema = z.looseObject({
+  capabilities: z.record(z.string(), z.looseObject({ href: z.string() })),
+});
 
 const MOUNT_PATH = '/zukhruf/v1';
 const mounted = (path: string) => `${MOUNT_PATH}${path}`;
@@ -28,6 +49,13 @@ const runtimeInfo = {
     },
   ],
 } satisfies TestRuntime['info'];
+
+/** Plugins created in these tests declare no capabilities. */
+const unboundCapabilities: AgentPluginBindings = {
+  get(capability) {
+    throw new Error(`capability "${capability.name}" is not bound`);
+  },
+};
 
 const emptyEngine = {
   getMessages: () => Promise.resolve([]),
@@ -150,13 +178,9 @@ test('POST /zukhruf/v1/session/:sessionId creates, retries, and continues one cl
     });
 
   const first = await send();
-  const firstBody = (await first.json()) as {
-    ok: boolean;
-    sessionId: string;
-    turnId: string;
-  };
+  const firstBody = acceptedBodySchema.parse(await first.json());
   const retry = await send();
-  const retryBody = (await retry.json()) as typeof firstBody;
+  const retryBody = acceptedBodySchema.parse(await retry.json());
   const continuation = {
     id: 'message-2',
     role: 'user' as const,
@@ -272,7 +296,7 @@ test('POST /zukhruf/v1/session validates its public boundary', async (t) => {
       headers: { 'content-type': 'application/json' },
     });
     assert.equal(response.status, 400);
-    const body = (await response.json()) as { cause: { code: string } };
+    const body = errorBodySchema.parse(await response.json());
     assert.equal(body.cause.code, 'api/validation-failed');
   });
 
@@ -337,7 +361,7 @@ test('POST /zukhruf/v1/session validates its public boundary', async (t) => {
       headers: { 'content-type': 'application/json' },
     });
     assert.equal(response.status, 400);
-    const body = (await response.json()) as { cause: { code: string } };
+    const body = errorBodySchema.parse(await response.json());
     assert.equal(body.cause.code, 'api/invalid-json');
   });
 
@@ -701,15 +725,13 @@ test('GET /zukhruf/v1/session/:sessionId/stream returns 404 without a durable st
 
   const response = await app.request(path);
   assert.equal(response.status, 404);
-  const body = (await response.json()) as { cause: { code: string } };
+  const body = errorBodySchema.parse(await response.json());
   assert.equal(body.cause.code, 'zukhruf/session-stream-not-found');
 
   const wrongMethod = await app.request(path, { method: 'POST' });
   assert.equal(wrongMethod.status, 405);
   assert.equal(wrongMethod.headers.get('allow'), 'GET');
-  const wrongMethodBody = (await wrongMethod.json()) as {
-    cause: { code: string };
-  };
+  const wrongMethodBody = errorBodySchema.parse(await wrongMethod.json());
   assert.equal(wrongMethodBody.cause.code, 'api/method-not-allowed');
 });
 
@@ -741,7 +763,7 @@ test('GET /zukhruf/v1/info and health expose runtime and deployment metadata', a
   const protectedInfo = await unauthenticated.request(mounted('/info'));
   assert.equal(protectedInfo.status, 401);
   assert.equal(
-    ((await protectedInfo.json()) as { cause: { code: string } }).cause.code,
+    errorBodySchema.parse(await protectedInfo.json()).cause.code,
     'api/unauthenticated',
   );
 });
@@ -754,11 +776,9 @@ test('discovery follows the host-selected Hono mount', async () => {
   });
   app.route('/chosen/by-host', http(createRuntime()));
 
-  const discovery = (await (
-    await app.request('/chosen/by-host/info')
-  ).json()) as {
-    capabilities: Record<string, { href: string }>;
-  };
+  const discovery = discoverySchema.parse(
+    await (await app.request('/chosen/by-host/info')).json(),
+  );
   assert.deepEqual(discovery.capabilities, {
     history: { href: '/chosen/by-host/history' },
     chat: { href: '/chosen/by-host/session' },
@@ -788,7 +808,7 @@ test('GET /zukhruf/v1/history exposes runtime observations', async () => {
 
   const history = await app.request(mounted('/history'));
   assert.equal(history.status, 200);
-  assert.equal(((await history.json()) as unknown[]).length, 1);
+  assert.equal(z.array(z.unknown()).parse(await history.json()).length, 1);
   assert.deepEqual(observedUsers, ['user-1']);
 });
 
@@ -813,19 +833,16 @@ test('HTTP projections bind installed plugins behind the transport boundary', as
     };
   });
   const runtime = createRuntime({
-    plugin: ((definition) => {
+    plugin(definition) {
       assert.equal(definition, notices);
-      return reader;
-    }) as TestRuntime['plugin'],
+      return definition.create(unboundCapabilities);
+    },
   });
 
   const app = createApp(runtime, noticesHttp);
   assert.deepEqual(
-    (
-      (await (await app.request(mounted('/info'))).json()) as {
-        capabilities: Record<string, { href: string }>;
-      }
-    ).capabilities.notices,
+    discoverySchema.parse(await (await app.request(mounted('/info'))).json())
+      .capabilities.notices,
     { href: mounted('/notices') },
   );
   assert.deepEqual(await (await app.request(mounted('/notices'))).json(), {
@@ -854,11 +871,8 @@ test('HTTP projections bind installed plugins behind the transport boundary', as
   );
   const absent = createApp(createRuntime());
   assert.equal(
-    (
-      (await (await absent.request(mounted('/info'))).json()) as {
-        capabilities: Record<string, unknown>;
-      }
-    ).capabilities.notices,
+    discoverySchema.parse(await (await absent.request(mounted('/info'))).json())
+      .capabilities.notices,
     undefined,
   );
   assert.equal((await absent.request(mounted('/notices'))).status, 404);

@@ -1,5 +1,6 @@
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -10,6 +11,8 @@ import {
   SqliteStreamStore,
   StreamManager,
   type StreamStore,
+  createBashTool,
+  createVirtualSandbox,
 } from '@deepagents/context';
 import {
   AgentRuntime,
@@ -21,6 +24,12 @@ import {
   defineAgent,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
+
+async function virtualSandbox(): Promise<AgentSandbox> {
+  return createBashTool({
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+  });
+}
 
 const userTurn = (id: string, text: string) => ({
   message: {
@@ -194,7 +203,7 @@ test('concurrent identical spawn_agent calls reserve one canonical child path', 
       return textResponse('spawns submitted');
     },
   });
-  const sandbox = async () => ({}) as AgentSandbox;
+  const sandbox = virtualSandbox;
   const worker = defineAgent({
     name: 'worker',
     model: new MockLanguageModelV4({
@@ -279,7 +288,7 @@ test('spawn_agent retries an enqueue gap but does not restart a completed child 
       return textResponse('spawn submitted');
     },
   });
-  const sandbox = async () => ({}) as AgentSandbox;
+  const sandbox = virtualSandbox;
   const worker = defineAgent({
     name: 'worker',
     model: new MockLanguageModelV4({

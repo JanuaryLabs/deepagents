@@ -39,6 +39,58 @@ import {
   http,
 } from '@deepagents/experimental/zukhruf/http';
 
+const childActivitySchema = z.looseObject({
+  id: z.string(),
+  type: z.enum(['spawn', 'message', 'followup', 'interrupt', 'completion']),
+  at: z.number(),
+  actorPath: z.string(),
+  targetPath: z.string(),
+  streamId: z.string(),
+  outcome: z.enum(['completed', 'failed', 'cancelled']).optional(),
+});
+
+/** Child progress as the conversation status projector publishes it. */
+const childProgressSchema = z.looseObject({
+  chatId: z.string(),
+  treeId: z.string(),
+  path: z.string(),
+  parentChatId: z.string(),
+  declarationName: z.string(),
+  state: z.enum([
+    'pending',
+    'queued',
+    'running',
+    'waitingOnApproval',
+    'waitingOnUserInput',
+    'completed',
+    'failed',
+    'interrupted',
+  ]),
+  activities: z.partialRecord(
+    childActivitySchema.shape.type,
+    childActivitySchema,
+  ),
+}) satisfies z.ZodType<ChildProgress>;
+
+/** Owner events as the `/events` stream frames them; nothing is stripped. */
+const ownerEventSchema = z.union([
+  z.strictObject({ type: z.literal('ready') }),
+  z.looseObject({
+    type: z.literal('change'),
+    resource: z.string(),
+    id: z.string(),
+    child: childProgressSchema.optional(),
+  }),
+]) satisfies z.ZodType<OwnerEvent>;
+
+/** `/history` entries with the child progress each conversation reports. */
+const historySchema = z.array(
+  z.looseObject({
+    chatId: z.string(),
+    children: z.array(childProgressSchema).optional(),
+  }),
+);
+
 const usage = {
   inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
   outputTokens: { total: 1, text: 1, reasoning: 0 },
@@ -210,7 +262,7 @@ test(
       });
       app.route('/runtime', http(observer));
       const listen = async (userId: string) => {
-        const events: OwnerEvent[] = [];
+        const events: z.output<typeof ownerEventSchema>[] = [];
         const result = await app.request('/runtime/events', {
           headers: { 'x-user': userId },
           signal: abort.signal,
@@ -233,7 +285,9 @@ test(
                 const frame = buffer.slice(0, end);
                 buffer = buffer.slice(end + 2);
                 if (frame.startsWith('data: '))
-                  events.push(JSON.parse(frame.slice(6)) as OwnerEvent);
+                  events.push(
+                    ownerEventSchema.parse(JSON.parse(frame.slice(6))),
+                  );
               }
             }
           })(),
@@ -291,10 +345,7 @@ test(
         const result = await app.request('/runtime/history', {
           headers: { 'x-user': conversation.userId },
         });
-        const history = (await result.json()) as {
-          chatId: string;
-          children?: ChildProgress[];
-        }[];
+        const history = historySchema.parse(await result.json());
         return (
           history.find((item) => item.chatId === conversation.chatId)
             ?.children ?? []
@@ -409,22 +460,18 @@ test(
             'followup',
             'interrupt',
             'completion',
-          ]) {
+          ] as const) {
             assert.ok(
               childEvents.some(
                 (event) =>
-                  event.type === 'change' &&
-                  (event.child as ChildProgress).activities[
-                    kind as keyof ChildProgress['activities']
-                  ],
+                  event.type === 'change' && event.child?.activities[kind],
               ),
             );
           }
           assert.ok(
             childEvents.some(
               (event) =>
-                event.type === 'change' &&
-                (event.child as ChildProgress).state === 'interrupted',
+                event.type === 'change' && event.child?.state === 'interrupted',
             ),
           );
           assert.ok(
@@ -447,16 +494,10 @@ test(
       );
       for (const event of ownerEvents)
         if (event.type === 'change' && event.child)
-          assert.notEqual(
-            (event.child as ChildProgress).treeId,
-            otherProject.chatId,
-          );
+          assert.notEqual(event.child.treeId, otherProject.chatId);
       for (const event of otherEvents)
         if (event.type === 'change' && event.child)
-          assert.equal(
-            (event.child as ChildProgress).treeId,
-            otherProject.chatId,
-          );
+          assert.equal(event.child.treeId, otherProject.chatId);
       assert.equal(JSON.stringify(ownerEvents).includes('private'), false);
       assert.equal((await snapshot()).length, 4);
       assert.equal((await snapshot(secondProject)).length, 1);

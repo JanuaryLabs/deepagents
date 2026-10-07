@@ -1,9 +1,11 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
+import { z } from 'zod';
 
 import {
   type AgentSandbox,
@@ -11,6 +13,8 @@ import {
   SqliteContextStore,
   SqliteStreamStore,
   StreamManager,
+  createBashTool,
+  createVirtualSandbox,
 } from '@deepagents/context';
 import {
   AgentRuntime,
@@ -29,6 +33,12 @@ import {
   conversationScheduling,
   conversationSchedulingCapabilities,
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
+
+async function virtualSandbox(): Promise<AgentSandbox> {
+  return createBashTool({
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+  });
+}
 
 const usage = {
   inputTokens: {
@@ -171,17 +181,28 @@ function cronCreatingModel() {
   });
 }
 
+/** `metadata.zukhruf.scheduling` as the conversation scheduler writes it. */
+const cronMetadataSchema = z.looseObject({
+  zukhruf: z.looseObject({
+    scheduling: z
+      .looseObject({
+        cron: z.record(
+          z.string(),
+          z.looseObject({ generation: z.number(), nextRunAt: z.number() }),
+        ),
+      })
+      .optional(),
+  }),
+});
+
 function cronDefinition(
   metadata: Record<string, unknown> | undefined,
   definitionId: string,
 ) {
-  const definition = (
-    metadata?.zukhruf as {
-      scheduling?: {
-        cron?: Record<string, { generation: number; nextRunAt: number }>;
-      };
-    }
-  )?.scheduling?.cron?.[definitionId];
+  const definition =
+    cronMetadataSchema.safeParse(metadata).data?.zukhruf.scheduling?.cron[
+      definitionId
+    ];
   assert.ok(definition, `expected cron definition ${definitionId}`);
   return definition;
 }
@@ -209,7 +230,7 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4({}),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -232,7 +253,7 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
     defineAgent({
       name: 'root',
       model: cronCreatingModel(),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),

@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { PgBoss, fromPglite } from 'pg-boss';
+import { z } from 'zod';
 
 import {
   type AgentSandbox,
@@ -27,6 +28,19 @@ import {
   createInterAgentCommunication,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
+
+/** The addressing every queued `TurnRef` payload carries. */
+const queuedTurnSchema = z.looseObject({
+  streamId: z.string(),
+  chatId: z.string(),
+  userId: z.string(),
+  kind: z.enum(['message', 'recovery', 'mailbox']),
+});
+
+/** Message metadata the turn executor writes for delivered mail. */
+const communicationMessageMetadataSchema = z.object({
+  interAgentCommunication: z.looseObject({ content: z.string() }),
+});
 
 function streamsFor(store: StreamStore): StreamManager {
   return new StreamManager({
@@ -143,7 +157,7 @@ describe('zukhruf runtime mailbox delivery', () => {
     const jobs = await h.boss.findJobs(h.turnQueue.queue, {
       key: researcher.chatId,
     });
-    const wake = jobs[0]?.data as TurnRef | undefined;
+    const wake = queuedTurnSchema.optional().parse(jobs[0]?.data);
     assert.ok(wake);
     assert.equal(wake?.kind, 'mailbox');
 
@@ -233,7 +247,7 @@ describe('zukhruf runtime mailbox delivery', () => {
       1,
       'one trigger schedules exactly one target turn',
     );
-    const wake = jobs[0]?.data as TurnRef | undefined;
+    const wake = queuedTurnSchema.optional().parse(jobs[0]?.data);
     assert.ok(wake);
     assert.equal(wake.kind, 'mailbox');
     assert.deepStrictEqual(
@@ -287,11 +301,8 @@ describe('zukhruf runtime mailbox delivery', () => {
     assert.deepStrictEqual(
       mailboxHistory.map(
         (message) =>
-          (
-            message.metadata as {
-              interAgentCommunication: { content: string };
-            }
-          ).interAgentCommunication.content,
+          communicationMessageMetadataSchema.parse(message.metadata)
+            .interAgentCommunication.content,
       ),
       ['message 1', 'message 2', 'message 3', 'message 4'],
     );

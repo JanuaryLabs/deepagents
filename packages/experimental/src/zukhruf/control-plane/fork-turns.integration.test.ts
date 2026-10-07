@@ -1,5 +1,6 @@
 import { type ToolSet, type UIMessage, simulateReadableStream, tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
 import { z } from 'zod';
@@ -11,6 +12,8 @@ import {
   SqliteStreamStore,
   StreamManager,
   type StreamStore,
+  createBashTool,
+  createVirtualSandbox,
 } from '@deepagents/context';
 import {
   AgentRuntime,
@@ -22,6 +25,12 @@ import {
   defineAgent,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
+
+async function virtualSandbox(): Promise<AgentSandbox> {
+  return createBashTool({
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+  });
+}
 
 const userTurn = (id: string, text: string) => ({
   message: {
@@ -232,7 +241,7 @@ async function spawnAfter(
       return textResponse('child complete');
     },
   });
-  const sandbox = async () => ({}) as AgentSandbox;
+  const sandbox = virtualSandbox;
   const worker = defineAgent({
     name: 'worker',
     model: childModel,

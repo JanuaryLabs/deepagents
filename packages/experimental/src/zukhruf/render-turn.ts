@@ -1,6 +1,8 @@
 import type { UIMessageChunk } from 'ai';
 import { styleText } from 'node:util';
 
+import { isRecord } from '@deepagents/context';
+
 const dim = (text: string) => styleText('dim', text);
 const red = (text: string) => styleText('red', text);
 
@@ -12,7 +14,7 @@ function oneLine(value: unknown, max = 88): string {
 }
 
 function describeToolCall(toolName: string, input: unknown): string {
-  const args = (input ?? {}) as Record<string, unknown>;
+  const args: Record<string, unknown> = isRecord(input) ? input : {};
   switch (toolName) {
     case 'spawn_agent':
       return `⇄ spawn ${args.agent_type} "${args.task_name}" — ${args.message}`;

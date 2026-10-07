@@ -1,10 +1,4 @@
-import {
-  type JSONSchema7,
-  type Tool,
-  type ToolExecuteFunction,
-  type ToolSet,
-  tool,
-} from 'ai';
+import type { JSONSchema7, Tool, ToolExecuteFunction, ToolSet } from 'ai';
 
 export type ClientToolSet = Record<
   string,
@@ -52,6 +46,7 @@ export function defineTool<OUTPUT, CONTEXT extends Record<string, unknown>>(
 export function defineTool<CONTEXT extends Record<string, unknown>>(
   definition: ZukhrufTool<never, never, CONTEXT>,
 ): ZukhrufTool<never, never, CONTEXT>;
+/** Typing helper like the AI SDK's `tool()`, which returns its argument as is. */
 export function defineTool(definition: unknown): unknown {
-  return tool(definition as Tool);
+  return definition;
 }

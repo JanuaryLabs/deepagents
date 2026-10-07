@@ -6,9 +6,9 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import test from 'node:test';
+import { z } from 'zod';
 
 import {
-  type AgentModel,
   InMemoryContextStore,
   PollingChangeSource,
   SqliteStreamStore,
@@ -31,7 +31,6 @@ import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 import {
   type PublishedUpload,
   UPLOAD_MEDIA_TYPES,
-  type UploadsOptions,
   uploads,
 } from '@deepagents/experimental/zukhruf/uploads';
 import {
@@ -39,6 +38,35 @@ import {
   type UploadReceipt,
   uploadsHttp,
 } from '@deepagents/experimental/zukhruf/uploads/http';
+
+/** Error bodies the HTTP plugin's error handler writes as `{ cause, error }`. */
+const errorBodySchema = z.looseObject({
+  cause: z.looseObject({ code: z.string() }),
+});
+
+/** `/info` discovery, keyed by capability name. */
+const discoverySchema = z.looseObject({
+  capabilities: z.record(z.string(), z.unknown()),
+});
+
+/** The receipt the upload route writes. */
+const receiptSchema = z.strictObject({
+  path: z.string(),
+  name: z.string(),
+  mediaType: z.enum(UPLOAD_MEDIA_TYPES),
+  size: z.number(),
+  url: z.string(),
+}) satisfies z.ZodType<UploadReceipt>;
+
+/** `publish_upload`'s JSON tool output. */
+const publishedUploadSchema = z.strictObject({
+  fileId: z.string(),
+  path: z.string(),
+  mediaType: z.enum(UPLOAD_MEDIA_TYPES),
+  name: z.string(),
+  href: z.string(),
+  url: z.string().optional(),
+}) satisfies z.ZodType<PublishedUpload>;
 
 const MOUNT = '/zukhruf/v1';
 const USER_HEADER = 'x-test-user';
@@ -202,7 +230,7 @@ async function harness(
   const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'uploads-agent',
-      model: model as unknown as AgentModel,
+      model,
       sandbox: defineSandbox(async () => createVirtualSandbox({ fs })),
       instructions: [],
       plugins: [uploaded],
@@ -349,7 +377,7 @@ test('uploads() requires an absolute sandbox directory and an absolute public UR
     /directory must be an absolute sandbox path/,
   );
   assert.throws(
-    () => uploads({} as UploadsOptions),
+    () => uploads({ directory: '' }),
     /directory must be an absolute sandbox path/,
   );
   assert.throws(
@@ -385,12 +413,12 @@ test('discovery advertises the uploads capability only when it is composed', asy
   await using withoutCapability = await harness({ withUploads: false });
   const sessionId = randomUUID();
 
-  const present = (await (
-    await request(withCapability.app, `${MOUNT}/info`)
-  ).json()) as { capabilities: Record<string, unknown> };
-  const absent = (await (
-    await request(withoutCapability.app, `${MOUNT}/info`)
-  ).json()) as { capabilities: Record<string, unknown> };
+  const present = discoverySchema.parse(
+    await (await request(withCapability.app, `${MOUNT}/info`)).json(),
+  );
+  const absent = discoverySchema.parse(
+    await (await request(withoutCapability.app, `${MOUNT}/info`)).json(),
+  );
 
   assert.deepEqual(present.capabilities.uploads, {
     href: `${MOUNT}/session`,
@@ -427,7 +455,7 @@ test('POST /session/:sessionId/uploads stores the image in the session sandbox a
   const response = await upload(h.app, sessionId, {
     filename: 'screen shot.png',
   });
-  const receipt = (await response.json()) as UploadReceipt;
+  const receipt = receiptSchema.parse(await response.json());
 
   assert.equal(response.status, 201);
   assert.equal(response.headers.get('cache-control'), 'no-store');
@@ -444,12 +472,14 @@ test('POST /session/:sessionId/uploads stores the image in the session sandbox a
     PNG_PIXEL,
   );
 
-  const jpeg = (await (
-    await upload(h.app, sessionId, {
-      filename: 'photo.jpg',
-      contentType: 'image/jpeg; charset=binary',
-    })
-  ).json()) as UploadReceipt;
+  const jpeg = receiptSchema.parse(
+    await (
+      await upload(h.app, sessionId, {
+        filename: 'photo.jpg',
+        contentType: 'image/jpeg; charset=binary',
+      })
+    ).json(),
+  );
   assert.equal(jpeg.mediaType, 'image/jpeg');
   assert.match(jpeg.path, /\.jpg$/);
 
@@ -461,9 +491,11 @@ test('POST /session/:sessionId/uploads stores the image in the session sandbox a
     ['audio/mp4', MP4_HEADER, 'voice.m4a', /\.m4a$/],
   ];
   for (const [contentType, body, filename, extension] of stored) {
-    const receipt = (await (
-      await upload(h.app, sessionId, { body, contentType, filename })
-    ).json()) as UploadReceipt;
+    const receipt = receiptSchema.parse(
+      await (
+        await upload(h.app, sessionId, { body, contentType, filename })
+      ).json(),
+    );
     assert.deepEqual(
       { mediaType: receipt.mediaType, name: receipt.name, size: receipt.size },
       { mediaType: contentType, name: filename, size: body.byteLength },
@@ -497,7 +529,7 @@ test('POST /session/:sessionId/uploads requires a URI-encoded x-upload-filename 
   for (const response of [missing, malformed]) {
     assert.equal(response.status, 400);
     assert.equal(
-      ((await response.json()) as { cause: { code: string } }).cause.code,
+      errorBodySchema.parse(await response.json()).cause.code,
       'api/validation-failed',
     );
   }
@@ -507,9 +539,9 @@ test('POST /session/:sessionId/uploads requires a URI-encoded x-upload-filename 
 test('GET /session/:sessionId/uploads/:fileId serves the bytes to the owner only', async () => {
   await using h = await harness();
   const sessionId = randomUUID();
-  const { url } = (await (
-    await upload(h.app, sessionId, { filename: 'pixel.png' })
-  ).json()) as UploadReceipt;
+  const { url } = receiptSchema.parse(
+    await (await upload(h.app, sessionId, { filename: 'pixel.png' })).json(),
+  );
   const path = new URL(url).pathname;
 
   const served = await request(h.app, path);
@@ -549,7 +581,7 @@ test('GET /session/:sessionId/uploads/:fileId serves the bytes to the owner only
   for (const response of [foreign, missing, traversal]) {
     assert.equal(response.status, 404);
     assert.equal(
-      ((await response.json()) as { cause: { code: string } }).cause.code,
+      errorBodySchema.parse(await response.json()).cause.code,
       'zukhruf/upload-not-found',
     );
   }
@@ -558,13 +590,15 @@ test('GET /session/:sessionId/uploads/:fileId serves the bytes to the owner only
 test('GET /session/:sessionId/uploads/:fileId honours single byte ranges so media elements can seek', async () => {
   await using h = await harness();
   const sessionId = randomUUID();
-  const { url } = (await (
-    await upload(h.app, sessionId, {
-      body: MP4_HEADER,
-      contentType: 'video/mp4',
-      filename: 'clip.mp4',
-    })
-  ).json()) as UploadReceipt;
+  const { url } = receiptSchema.parse(
+    await (
+      await upload(h.app, sessionId, {
+        body: MP4_HEADER,
+        contentType: 'video/mp4',
+        filename: 'clip.mp4',
+      })
+    ).json(),
+  );
   const path = new URL(url).pathname;
   const total = MP4_HEADER.byteLength;
 
@@ -645,7 +679,7 @@ test('POST /session/:sessionId/uploads rejects anything but a supported media ty
   for (const response of [text, svg, untyped]) {
     assert.equal(response.status, 415);
     assert.equal(
-      ((await response.json()) as { cause: { code: string } }).cause.code,
+      errorBodySchema.parse(await response.json()).cause.code,
       'zukhruf/unsupported-media-type',
     );
   }
@@ -676,7 +710,7 @@ test('POST /session/:sessionId/uploads rejects declared and streamed oversized b
   for (const response of [streamed, declared]) {
     assert.equal(response.status, 413);
     assert.equal(
-      ((await response.json()) as { cause: { code: string } }).cause.code,
+      errorBodySchema.parse(await response.json()).cause.code,
       'api/payload-too-large',
     );
   }
@@ -705,9 +739,9 @@ test('POST /session/:sessionId accepts any well-formed user message, https file 
 test('receipts under message.metadata.uploads reach the model as a reminder listing only this session own sandbox paths', async () => {
   await using h = await harness();
   const sessionId = randomUUID();
-  const receipt = (await (
-    await upload(h.app, sessionId, { filename: 'pixel.png' })
-  ).json()) as UploadReceipt;
+  const receipt = receiptSchema.parse(
+    await (await upload(h.app, sessionId, { filename: 'pixel.png' })).json(),
+  );
   const fileId = posix.basename(receipt.path);
   const outsideDirectory = {
     path: '/etc/passwd',
@@ -733,13 +767,15 @@ test('receipts under message.metadata.uploads reach the model as a reminder list
     mediaType: receipt.mediaType,
   };
 
-  const clip = (await (
-    await upload(h.app, sessionId, {
-      body: MP4_HEADER,
-      contentType: 'video/mp4',
-      filename: 'clip.mp4',
-    })
-  ).json()) as UploadReceipt;
+  const clip = receiptSchema.parse(
+    await (
+      await upload(h.app, sessionId, {
+        body: MP4_HEADER,
+        contentType: 'video/mp4',
+        filename: 'clip.mp4',
+      })
+    ).json(),
+  );
 
   const attached = await turn(h.app, sessionId, {
     parts: [{ type: 'text', text: 'What is in [Image #1] and [Video #2]?' }],
@@ -809,7 +845,7 @@ test('publish_upload adopts a file the agent rendered into the session and the G
         part.type === 'tool-result' && part.toolName === 'publish_upload',
     );
   assert.ok(result?.type === 'tool-result' && result.output.type === 'json');
-  const published = result.output.value as unknown as PublishedUpload;
+  const published = publishedUploadSchema.parse(result.output.value);
   const fileId = published.fileId;
   assert.match(fileId, /^[0-9a-f-]{36}\.mp4$/);
   assert.deepEqual(published, {

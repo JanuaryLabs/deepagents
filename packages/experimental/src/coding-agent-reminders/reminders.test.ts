@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { z } from 'zod';
 
+import { isRecord } from '@deepagents/context';
 import * as reminderApi from '@deepagents/experimental/coding-agent-reminders';
 import {
   type ClaudeHookInput,
@@ -19,9 +21,13 @@ import {
 } from '@deepagents/experimental/coding-agent-reminders';
 
 test('package declares classifier runtime dependencies directly', async () => {
-  const packageJson = JSON.parse(
-    await readFile(new URL('../../package.json', import.meta.url), 'utf8'),
-  ) as { dependencies?: Record<string, string> };
+  const packageJson = z
+    .object({ dependencies: z.record(z.string(), z.string()).optional() })
+    .parse(
+      JSON.parse(
+        await readFile(new URL('../../package.json', import.meta.url), 'utf8'),
+      ),
+    );
 
   assert.equal(packageJson.dependencies?.['tiny-tfidf'], '^1.0.0');
 });
@@ -132,8 +138,7 @@ test('tool predicates inspect every call in a PostToolBatch fixture', async () =
   assert.equal(
     await toolCall({
       name: 'Read',
-      input: (input) =>
-        (input as { file_path?: string }).file_path === '/tmp/a.ts',
+      input: (input) => isRecord(input) && input.file_path === '/tmp/a.ts',
       output: (output) => output === 'alpha',
     })(batch),
     true,

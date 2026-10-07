@@ -208,6 +208,7 @@ export function createCompaction<TOOLS extends ToolSet>(
       'instructions' | 'toolsContext' | 'experimental_sandbox'
     >,
   ) => {
+    const toolsContext: Readonly<Record<string, unknown>> = input.toolsContext;
     const tools =
       settings.tools === undefined
         ? []
@@ -225,10 +226,7 @@ export function createCompaction<TOOLS extends ToolSet>(
                   : [
                       typeof tool.description === 'function'
                         ? tool.description({
-                            context:
-                              input.toolsContext[
-                                name as keyof typeof input.toolsContext
-                              ],
+                            context: toolsContext[name],
                             experimental_sandbox: input.experimental_sandbox,
                           })
                         : tool.description,

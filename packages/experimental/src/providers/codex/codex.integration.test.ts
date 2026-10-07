@@ -43,6 +43,9 @@ import {
   defineStack,
 } from '@deepagents/experimental/zukhruf';
 
+/** Responses API `input` items; message items may omit `type`. */
+const responsesInput = z.array(z.looseObject({ type: z.string().optional() }));
+
 function accessToken(expiresAt = Date.now() + 3_600_000) {
   return `header.${Buffer.from(JSON.stringify({ exp: expiresAt / 1000 })).toString('base64url')}.signature`;
 }
@@ -286,7 +289,7 @@ test('the public model keeps host tool execution and stateless follow-up history
   assert.equal(followup.usage.inputTokens, 12);
   assert.equal(followup.reasoningText, 'Checking the marker.');
   assert.equal(followup.response.id, 'response-1');
-  const input = requests[2].input as Array<Record<string, unknown>>;
+  const input = responsesInput.parse(requests[2].input);
   assert.ok(
     input.some(
       (item) => item.type === 'function_call' && item.call_id === 'call-1',
@@ -632,7 +635,7 @@ test('Zukhruf executes a host tool and persists history across queued turns', as
   }
   assert.equal(executions, 1);
   assert.equal(requests.length, 3);
-  const history = requests[2].input as Array<Record<string, unknown>>;
+  const history = responsesInput.parse(requests[2].input);
   assert.ok(
     history.some(
       (item) => item.type === 'function_call_output' && item.output === 'blue',

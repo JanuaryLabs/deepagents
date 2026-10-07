@@ -32,6 +32,11 @@ import {
   defineTool,
 } from '@deepagents/experimental/zukhruf';
 
+/** Message metadata the turn executor writes for delivered mail. */
+const communicationMessageMetadataSchema = z.object({
+  interAgentCommunication: z.looseObject({ content: z.string() }),
+});
+
 const userTurn = (id: string, text: string) => ({
   message: {
     id,
@@ -273,7 +278,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
           firstStepStarted.resolve();
           await releaseFirstStep.promise;
           return {
-            stream: simulateReadableStream({
+            stream: simulateReadableStream<LanguageModelV4StreamPart>({
               chunks: [
                 {
                   type: 'tool-call',
@@ -289,12 +294,12 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
                   finishReason: { unified: 'tool-calls', raw: '' },
                   usage,
                 },
-              ] as LanguageModelV4StreamPart[],
+              ],
             }),
           };
         }
         return {
-          stream: simulateReadableStream({
+          stream: simulateReadableStream<LanguageModelV4StreamPart>({
             chunks: [
               { type: 'text-start', id: 'text-2' },
               { type: 'text-delta', id: 'text-2', delta: 'finished' },
@@ -304,7 +309,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
                 finishReason: { unified: 'stop', raw: '' },
                 usage,
               },
-            ] as LanguageModelV4StreamPart[],
+            ],
           }),
         };
       },
@@ -347,10 +352,9 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
       const history = await h.runtime.observe(researcher).engine.getMessages();
       assert.deepStrictEqual(
         history.flatMap((message) => {
-          const content = (
-            message.metadata as
-              { interAgentCommunication?: { content?: string } } | undefined
-          )?.interAgentCommunication?.content;
+          const content = communicationMessageMetadataSchema.safeParse(
+            message.metadata,
+          ).data?.interAgentCommunication.content;
           return content ? [content] : [];
         }),
         ['new evidence while active'],
@@ -688,7 +692,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
         calls++;
         if (calls === 1) {
           return {
-            stream: simulateReadableStream({
+            stream: simulateReadableStream<LanguageModelV4StreamPart>({
               chunks: [
                 {
                   type: 'tool-call',
@@ -701,12 +705,12 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
                   finishReason: { unified: 'tool-calls', raw: '' },
                   usage,
                 },
-              ] as LanguageModelV4StreamPart[],
+              ],
             }),
           };
         }
         return {
-          stream: simulateReadableStream({
+          stream: simulateReadableStream<LanguageModelV4StreamPart>({
             chunks: [
               { type: 'text-start', id: 'text-2' },
               {
@@ -720,7 +724,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
                 finishReason: { unified: 'stop', raw: '' },
                 usage,
               },
-            ] as LanguageModelV4StreamPart[],
+            ],
           }),
         };
       },
@@ -784,10 +788,9 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
       const history = await h.runtime.observe(researcher).engine.getMessages();
       assert.deepStrictEqual(
         history.flatMap((message) => {
-          const content = (
-            message.metadata as
-              { interAgentCommunication?: { content?: string } } | undefined
-          )?.interAgentCommunication?.content;
+          const content = communicationMessageMetadataSchema.safeParse(
+            message.metadata,
+          ).data?.interAgentCommunication.content;
           return content ? [content] : [];
         }),
         [],

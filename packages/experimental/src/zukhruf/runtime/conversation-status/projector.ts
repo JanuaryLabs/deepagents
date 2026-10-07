@@ -49,6 +49,15 @@ export type ConversationStatusEvent =
 type ProjectorEvent =
   ConversationStatusEvent | { type: 'error'; error: unknown };
 
+/** One projector event as it travels through the untyped `events.on` iterator. */
+class ProjectorEventDelivery {
+  readonly event: ProjectorEvent;
+
+  constructor(event: ProjectorEvent) {
+    this.event = event;
+  }
+}
+
 export interface ConversationStatusProjectorOptions {
   store: ContextStore;
   streams: StreamManager;
@@ -233,10 +242,12 @@ export class ConversationStatusProjector {
     return {
       async *[Symbol.asyncIterator]() {
         try {
-          for await (const [event] of events) {
-            const projected = event as ProjectorEvent;
-            if (projected.type === 'error') throw projected.error;
-            yield projected;
+          for await (const args of events) {
+            const [delivery]: unknown[] = args;
+            if (!(delivery instanceof ProjectorEventDelivery)) continue;
+            const { event } = delivery;
+            if (event.type === 'error') throw event.error;
+            yield event;
           }
         } finally {
           await detach();
@@ -288,7 +299,7 @@ export class ConversationStatusProjector {
     }
     if (isDeepStrictEqual(this.#last.get(key), change)) return false;
     this.#last.set(key, change);
-    this.#emitter.emit('event', change);
+    this.#emit(change);
     return true;
   }
 
@@ -332,16 +343,16 @@ export class ConversationStatusProjector {
       ready.resolve();
       for await (const event of events) {
         if (event.type === 'reset') {
-          this.#emitter.emit('event', event);
+          this.#emit(event);
         } else {
           await this.#reconcile(event.conversation);
         }
       }
       if (!remote.abort.signal.aborted) {
-        this.#emitter.emit('event', {
+        this.#emit({
           type: 'error',
           error: new Error('Conversation status change source ended'),
-        } satisfies ProjectorEvent);
+        });
       }
     } catch (error) {
       if (!connected) ready.reject(error);
@@ -349,14 +360,15 @@ export class ConversationStatusProjector {
         connected &&
         !(error instanceof Error && error.name === 'AbortError')
       ) {
-        this.#emitter.emit('event', {
-          type: 'error',
-          error,
-        } satisfies ProjectorEvent);
+        this.#emit({ type: 'error', error });
       }
     } finally {
       if (this.#remote === remote) this.#remote = undefined;
     }
+  }
+
+  #emit(event: ProjectorEvent): void {
+    this.#emitter.emit('event', new ProjectorEventDelivery(event));
   }
 
   static #key({ chatId, userId }: ConversationId): string {

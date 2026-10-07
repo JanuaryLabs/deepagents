@@ -3,17 +3,21 @@ import { PGlite } from '@electric-sql/pglite';
 import { StreamHarness } from '@zukhruf/testing/streams';
 import { MockLanguageModelV4, simulateReadableStream } from 'ai/test';
 import { Hono } from 'hono';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test, { type TestContext } from 'node:test';
 import { PgBoss, fromPglite } from 'pg-boss';
+import { z } from 'zod';
 
-import type { AgentModel, AgentSandbox } from '@deepagents/context';
 import {
+  type AgentSandbox,
   InMemoryContextStore,
   PollingChangeSource,
   SqliteStreamStore,
   StreamManager,
+  createBashTool,
+  createVirtualSandbox,
 } from '@deepagents/context';
 import {
   type AgentHost,
@@ -33,6 +37,7 @@ import {
   http,
 } from '@deepagents/experimental/zukhruf/http';
 import {
+  type ScheduleTarget,
   schedules,
   schedulesCapabilities,
 } from '@deepagents/experimental/zukhruf/schedules';
@@ -41,6 +46,12 @@ import {
   type ScheduledTaskView,
   schedulesHttp,
 } from '@deepagents/experimental/zukhruf/schedules/http';
+
+async function virtualSandbox(): Promise<AgentSandbox> {
+  return createBashTool({
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+  });
+}
 
 const MOUNT = '/zukhruf/v1';
 const SCHEDULES = `${MOUNT}/schedules`;
@@ -171,8 +182,8 @@ async function harness(options: { withSchedules?: boolean } = {}) {
   const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'scheduled-agent',
-      model: completingModel() as unknown as AgentModel,
-      sandbox: async () => ({}) as AgentSandbox,
+      model: completingModel(),
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [scheduled],
     }),
@@ -233,13 +244,83 @@ function json(body: unknown) {
   return { body: JSON.stringify(body), method: 'POST' };
 }
 
-const definition = {
+const definition: {
+  name: string;
+  prompt: string;
+  recurrence: string;
+  timezone: string;
+  target: ScheduleTarget;
+} = {
   name: 'Daily brief',
   prompt: 'Summarise what needs attention today.',
   recurrence: '0 8 * * 1-5',
   timezone: 'Asia/Amman',
-  target: { kind: 'new-conversation' as const },
+  target: { kind: 'new-conversation' },
 };
+
+const targetSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('new-conversation') }),
+  z.strictObject({
+    kind: z.literal('existing-conversation'),
+    chatId: z.string(),
+  }),
+]) satisfies z.ZodType<ScheduleTarget>;
+
+/** A task exactly as `toTaskView` writes it. */
+const taskViewSchema = z.strictObject({
+  id: z.string(),
+  name: z.string(),
+  prompt: z.string(),
+  recurrence: z.string(),
+  timezone: z.string(),
+  target: targetSchema,
+  status: z.enum(['active', 'paused', 'completed', 'archived']),
+  nextRunAt: z.number().nullable(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+  archivedAt: z.number().nullable(),
+}) satisfies z.ZodType<ScheduledTaskView>;
+
+/** A run exactly as `toRunView` writes it. */
+const runViewSchema = z.strictObject({
+  id: z.string(),
+  taskId: z.string(),
+  trigger: z.enum(['scheduled', 'manual']),
+  occurrenceAt: z.number(),
+  prompt: z.string(),
+  target: targetSchema,
+  status: z.enum([
+    'dispatching',
+    'running',
+    'completed',
+    'failed',
+    'cancelled',
+  ]),
+  reviewStatus: z.enum(['pending_review', 'reviewed', 'archived']).nullable(),
+  conversation: z
+    .strictObject({ chatId: z.string(), turnId: z.string() })
+    .nullable(),
+  startedAt: z.number().nullable(),
+  finishedAt: z.number().nullable(),
+  error: z.string().nullable(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+}) satisfies z.ZodType<ScheduledRunView>;
+
+/** Owner events as the `/events` stream frames them. */
+const ownerEventSchema = z.union([
+  z.strictObject({ type: z.literal('ready') }),
+  z.looseObject({
+    type: z.literal('change'),
+    resource: z.string(),
+    id: z.string(),
+  }),
+]) satisfies z.ZodType<OwnerEvent>;
+
+/** `/info` discovery, keyed by capability name. */
+const discoverySchema = z.looseObject({
+  capabilities: z.record(z.string(), z.unknown()),
+});
 
 async function createTask(
   app: Hono<HttpEnv>,
@@ -253,7 +334,7 @@ async function createTask(
     user,
   });
   assert.equal(response.status, 200);
-  return { key, task: (await response.json()) as ScheduledTaskView };
+  return { key, task: taskViewSchema.parse(await response.json()) };
 }
 
 function eventReader(response: Response) {
@@ -269,7 +350,9 @@ function eventReader(response: Response) {
           const frame = buffered.slice(0, boundary);
           buffered = buffered.slice(boundary + 2);
           if (frame.startsWith('data: ')) {
-            return JSON.parse(frame.slice('data: '.length)) as OwnerEvent;
+            return ownerEventSchema.parse(
+              JSON.parse(frame.slice('data: '.length)),
+            );
           }
           continue;
         }
@@ -293,16 +376,10 @@ test('discovery advertises the schedules capability only when it is composed', a
     await request(withoutCapability.app, `${MOUNT}/info`)
   ).json();
 
-  assert.deepEqual(
-    (present as { capabilities: Record<string, unknown> }).capabilities
-      .schedules,
-    { href: SCHEDULES },
-  );
-  assert.equal(
-    (absent as { capabilities: Record<string, unknown> }).capabilities
-      .schedules,
-    undefined,
-  );
+  assert.deepEqual(discoverySchema.parse(present).capabilities.schedules, {
+    href: SCHEDULES,
+  });
+  assert.equal(discoverySchema.parse(absent).capabilities.schedules, undefined);
   assert.equal(
     (await request(withoutCapability.app, `${SCHEDULES}/tasks`)).status,
     404,
@@ -333,7 +410,7 @@ test('owner events announce schedule task and worker-run changes without leaking
     method: 'POST',
     idempotencyKey: randomUUID(),
   });
-  const run = (await accepted.json()) as ScheduledRunView;
+  const run = runViewSchema.parse(await accepted.json());
   assert.deepEqual(await events.next(), {
     type: 'change',
     resource: 'schedule-run',
@@ -389,7 +466,10 @@ test('task lifecycle is idempotent, owner-scoped, and free of scheduler bookkeep
   const listed = await request(app, `${SCHEDULES}/tasks`);
   assert.equal(listed.headers.get('cache-control'), 'no-store');
   assert.deepEqual(
-    ((await listed.json()) as ScheduledTaskView[]).map(({ id }) => id),
+    z
+      .array(taskViewSchema)
+      .parse(await listed.json())
+      .map(({ id }) => id),
     [task.id],
   );
 
@@ -410,7 +490,7 @@ test('task lifecycle is idempotent, owner-scoped, and free of scheduler bookkeep
   const paused = await request(app, `${SCHEDULES}/tasks/${task.id}/pause`, {
     method: 'POST',
   });
-  assert.equal(((await paused.json()) as ScheduledTaskView).status, 'paused');
+  assert.equal(taskViewSchema.parse(await paused.json()).status, 'paused');
 
   const edited = await request(app, `${SCHEDULES}/tasks/${task.id}`, {
     body: JSON.stringify({
@@ -426,14 +506,14 @@ test('task lifecycle is idempotent, owner-scoped, and free of scheduler bookkeep
     method: 'PATCH',
   });
   assert.equal(
-    ((await renamed.json()) as ScheduledTaskView).name,
+    taskViewSchema.parse(await renamed.json()).name,
     'Weekday brief',
   );
 
   const resumed = await request(app, `${SCHEDULES}/tasks/${task.id}/resume`, {
     method: 'POST',
   });
-  assert.equal(((await resumed.json()) as ScheduledTaskView).status, 'active');
+  assert.equal(taskViewSchema.parse(await resumed.json()).status, 'active');
 
   const earlyPurge = await request(app, `${SCHEDULES}/tasks/${task.id}`, {
     method: 'DELETE',
@@ -443,7 +523,7 @@ test('task lifecycle is idempotent, owner-scoped, and free of scheduler bookkeep
   const archived = await request(app, `${SCHEDULES}/tasks/${task.id}/archive`, {
     method: 'POST',
   });
-  const archivedTask = (await archived.json()) as ScheduledTaskView;
+  const archivedTask = taskViewSchema.parse(await archived.json());
   assert.equal(archivedTask.status, 'archived');
   assert.equal(archivedTask.nextRunAt, null);
 
@@ -502,7 +582,7 @@ test('Run now carries scheduled provenance into its own fresh conversation', asy
     idempotencyKey: key,
   });
   assert.equal(accepted.status, 202);
-  const run = (await accepted.json()) as ScheduledRunView;
+  const run = runViewSchema.parse(await accepted.json());
   assert.deepEqual(
     { taskId: run.taskId, trigger: run.trigger, status: run.status },
     { taskId: task.id, trigger: 'manual', status: 'dispatching' },
@@ -528,7 +608,7 @@ test('Run now carries scheduled provenance into its own fresh conversation', asy
     method: 'POST',
     idempotencyKey: key,
   });
-  assert.equal(((await repeat.json()) as ScheduledRunView).id, run.id);
+  assert.equal(runViewSchema.parse(await repeat.json()).id, run.id);
 
   await t.waitFor(() => assert.equal(queue.turns.length, 1), {
     interval: 20,
@@ -575,7 +655,7 @@ test('the inbox retains unreviewed runs until review is explicit', async (t) => 
     method: 'POST',
     idempotencyKey: randomUUID(),
   });
-  const run = (await accepted.json()) as ScheduledRunView;
+  const run = runViewSchema.parse(await accepted.json());
   await t.waitFor(() => assert.equal(queue.turns.length, 1), {
     interval: 20,
     timeout: 10_000,
@@ -590,7 +670,7 @@ test('the inbox retains unreviewed runs until review is explicit', async (t) => 
 
   const opened = await request(app, `${SCHEDULES}/runs/${run.id}`);
   assert.equal(
-    ((await opened.json()) as ScheduledRunView).reviewStatus,
+    runViewSchema.parse(await opened.json()).reviewStatus,
     'pending_review',
     'opening a run never reviews it',
   );
@@ -615,16 +695,17 @@ test('the inbox retains unreviewed runs until review is explicit', async (t) => 
     method: 'POST',
   });
   assert.equal(
-    ((await reviewed.json()) as ScheduledRunView).reviewStatus,
+    runViewSchema.parse(await reviewed.json()).reviewStatus,
     'reviewed',
   );
   assert.deepEqual(await inbox(app), []);
   assert.deepEqual(
-    (
-      (await (
-        await request(app, `${SCHEDULES}/tasks/${task.id}/runs`)
-      ).json()) as ScheduledRunView[]
-    ).map(({ id }) => id),
+    z
+      .array(runViewSchema)
+      .parse(
+        await (await request(app, `${SCHEDULES}/tasks/${task.id}/runs`)).json(),
+      )
+      .map(({ id }) => id),
     [run.id],
     'review never removes a run from its task history',
   );
@@ -650,7 +731,7 @@ test('a run targeting an existing conversation keeps that conversation', async (
     target: {
       kind: 'existing-conversation',
       chatId: conversation.chatId,
-    } as never,
+    },
   });
   assert.deepEqual(task.target, {
     kind: 'existing-conversation',
@@ -661,7 +742,7 @@ test('a run targeting an existing conversation keeps that conversation', async (
     method: 'POST',
     idempotencyKey: randomUUID(),
   });
-  const run = (await accepted.json()) as ScheduledRunView;
+  const run = runViewSchema.parse(await accepted.json());
   await t.waitFor(() => assert.equal(queue.turns.length, 1), {
     interval: 20,
     timeout: 10_000,
@@ -680,7 +761,7 @@ async function inbox(app: Hono<HttpEnv>, user = OWNER) {
   const response = await request(app, `${SCHEDULES}/runs/inbox`, { user });
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('cache-control'), 'no-store');
-  return (await response.json()) as ScheduledRunView[];
+  return z.array(runViewSchema).parse(await response.json());
 }
 
 async function waitForRun(
@@ -694,7 +775,7 @@ async function waitForRun(
     async () => {
       const response = await request(app, `${SCHEDULES}/runs/${runId}`);
       assert.equal(response.status, 200);
-      run = (await response.json()) as ScheduledRunView;
+      run = runViewSchema.parse(await response.json());
       assert.equal(run.status, status);
     },
     { interval: 20, timeout: 10_000 },

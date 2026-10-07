@@ -9,6 +9,7 @@ import type {
   Queue,
 } from 'pg-boss';
 import rrulePackage from 'rrule';
+import { z } from 'zod';
 
 import { pgBossNotifications } from '../../queue/pg-boss-notifications.ts';
 
@@ -259,6 +260,8 @@ export interface ScheduledTaskTransaction {
 
 export interface ScheduledTasksOptions<ExecutionConfig extends object> {
   boss: PgBoss;
+  /** Reads each persisted execution config back from its stored JSON. */
+  executionConfigSchema: z.ZodType<ExecutionConfig>;
   queue: string;
   queueOptions?: Omit<Queue, 'name'>;
   reconciliationIntervalMs: number;
@@ -288,52 +291,108 @@ interface ReconcileJob {
 
 type ScheduledJob = OccurrenceJob | DispatchJob | ReconcileJob;
 
-type TaskRow = {
-  id: string;
-  owner_id: string;
-  idempotency_key: string;
-  name: string;
-  prompt: string;
-  recurrence: string;
-  timezone: string;
-  execution_config: unknown;
-  status: ScheduledTaskStatus;
-  generation: number | string;
-  next_run_at: number | string | bigint | null;
-  next_wake_id: string | null;
-  created_at: number | string | bigint;
-  updated_at: number | string | bigint;
-  archived_at: number | string | bigint | null;
-};
+/** `bigint` columns: node-postgres returns strings, PGlite numbers or bigints. */
+const millisColumn = z.union([z.number(), z.string(), z.bigint()]);
 
-type RunRow = {
-  id: string;
-  task_id: string;
-  owner_id: string;
-  trigger: 'scheduled' | 'manual';
-  idempotency_key: string | null;
-  occurrence_at: number | string | bigint;
-  prompt: string;
-  execution_config: unknown;
-  status: ScheduledRunStatus;
-  review_status: ScheduledRunReviewStatus | null;
-  external_execution_id: string | null;
-  dispatch_job_id: string;
-  reconciliation_job_id: string | null;
-  next_check_at: number | string | bigint | null;
-  started_at: number | string | bigint | null;
-  finished_at: number | string | bigint | null;
-  title: string | null;
-  summary: string | null;
-  error: string | null;
-  created_at: number | string | bigint;
-  updated_at: number | string | bigint;
-};
+const taskRowSchema = z.object({
+  id: z.string(),
+  owner_id: z.string(),
+  idempotency_key: z.string(),
+  name: z.string(),
+  prompt: z.string(),
+  recurrence: z.string(),
+  timezone: z.string(),
+  execution_config: z.unknown(),
+  status: z.enum([
+    'active',
+    'paused',
+    'completed',
+    'archived',
+  ]) satisfies z.ZodType<ScheduledTaskStatus>,
+  generation: z.union([z.number(), z.string()]),
+  next_run_at: millisColumn.nullable(),
+  next_wake_id: z.string().nullable(),
+  created_at: millisColumn,
+  updated_at: millisColumn,
+  archived_at: millisColumn.nullable(),
+});
+
+type TaskRow = z.output<typeof taskRowSchema>;
+
+const runStatusSchema = z.enum([
+  'dispatching',
+  'running',
+  'completed',
+  'failed',
+  'cancelled',
+]) satisfies z.ZodType<ScheduledRunStatus>;
+
+const reviewStatusSchema = z.enum([
+  'pending_review',
+  'reviewed',
+  'archived',
+]) satisfies z.ZodType<ScheduledRunReviewStatus>;
+
+const runRowSchema = z.object({
+  id: z.string(),
+  task_id: z.string(),
+  owner_id: z.string(),
+  trigger: z.enum(['scheduled', 'manual']),
+  idempotency_key: z.string().nullable(),
+  occurrence_at: millisColumn,
+  prompt: z.string(),
+  execution_config: z.unknown(),
+  status: runStatusSchema,
+  review_status: reviewStatusSchema.nullable(),
+  external_execution_id: z.string().nullable(),
+  dispatch_job_id: z.string(),
+  reconciliation_job_id: z.string().nullable(),
+  next_check_at: millisColumn.nullable(),
+  started_at: millisColumn.nullable(),
+  finished_at: millisColumn.nullable(),
+  title: z.string().nullable(),
+  summary: z.string().nullable(),
+  error: z.string().nullable(),
+  created_at: millisColumn,
+  updated_at: millisColumn,
+});
+
+type RunRow = z.output<typeof runRowSchema>;
+
+const taskRowsSchema = z.array(taskRowSchema);
+const runRowsSchema = z.array(runRowSchema);
+
+const runJobsRowSchema = runRowSchema.pick({
+  dispatch_job_id: true,
+  reconciliation_job_id: true,
+  status: true,
+});
+
+const scheduledJobSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('occurrence'),
+    ownerId: z.string(),
+    taskId: z.string(),
+    occurrenceAt: z.number(),
+    generation: z.number(),
+  }),
+  z.object({
+    kind: z.literal('dispatch'),
+    ownerId: z.string(),
+    runId: z.string(),
+  }),
+  z.object({
+    kind: z.literal('reconcile'),
+    ownerId: z.string(),
+    runId: z.string(),
+  }),
+]) satisfies z.ZodType<ScheduledJob>;
 
 /** Durable Scheduled Tasks implementation backed by PostgreSQL and pg-boss. */
 export class ScheduledTasks<ExecutionConfig extends object> {
   readonly #boss: PgBoss;
   readonly #database: Db;
+  readonly #executionConfigSchema: z.ZodType<ExecutionConfig>;
   readonly #executor: ScheduledExecutionAdapter<ExecutionConfig>;
   readonly #queue: string;
   readonly #queueOptions: Omit<Queue, 'name'> | undefined;
@@ -352,6 +411,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
     }
     this.#boss = options.boss;
     this.#database = options.boss.getDb();
+    this.#executionConfigSchema = options.executionConfigSchema;
     this.#executor = options.executor;
     this.#queueOptions = options.queueOptions;
     this.#reconciliationIntervalMs = options.reconciliationIntervalMs;
@@ -464,8 +524,8 @@ export class ScheduledTasks<ExecutionConfig extends object> {
           now,
         ],
       );
-      const inserted = rows[0] as TaskRow | undefined;
-      if (inserted) return toTask<ExecutionConfig>(inserted);
+      const inserted = taskRowSchema.optional().parse(rows[0]);
+      if (inserted) return this.#task(inserted);
 
       await this.#cancelJob(database, wakeId);
       const concurrent = await this.#taskByKey(
@@ -493,7 +553,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
         ORDER BY created_at, id`,
       [required(ownerId, 'Scheduled Task owner')],
     );
-    return (rows as TaskRow[]).map(toTask<ExecutionConfig>);
+    return taskRowsSchema.parse(rows).map((row) => this.#task(row));
   }
 
   async listRuns(
@@ -509,7 +569,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
         required(taskId, 'Scheduled Task id'),
       ],
     );
-    return (rows as RunRow[]).map(toRun<ExecutionConfig>);
+    return runRowsSchema.parse(rows).map((row) => this.#run(row));
   }
 
   async getRun(
@@ -533,7 +593,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
         ORDER BY finished_at DESC, id`,
       [required(ownerId, 'Scheduled Task owner')],
     );
-    return (rows as RunRow[]).map(toRun<ExecutionConfig>);
+    return runRowsSchema.parse(rows).map((row) => this.#run(row));
   }
 
   async pause(
@@ -562,7 +622,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
           RETURNING *`,
         [now, task.id, task.ownerId],
       );
-      return toTask<ExecutionConfig>(requiredRow<TaskRow>(rows, 'pause'));
+      return this.#task(requiredRow(taskRowSchema, rows, 'pause'));
     });
   }
 
@@ -612,7 +672,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
           RETURNING *`,
         [generation, nextRunAt, wakeId, Date.now(), task.id, task.ownerId],
       );
-      return toTask<ExecutionConfig>(requiredRow<TaskRow>(rows, 'resume'));
+      return this.#task(requiredRow(taskRowSchema, rows, 'resume'));
     });
   }
 
@@ -705,7 +765,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
           task.ownerId,
         ],
       );
-      return toTask<ExecutionConfig>(requiredRow<TaskRow>(rows, 'update'));
+      return this.#task(requiredRow(taskRowSchema, rows, 'update'));
     });
   }
 
@@ -755,8 +815,8 @@ export class ScheduledTasks<ExecutionConfig extends object> {
           dispatchJobId,
         ],
       );
-      const inserted = rows[0] as RunRow | undefined;
-      if (inserted) return toRun<ExecutionConfig>(inserted);
+      const inserted = runRowSchema.optional().parse(rows[0]);
+      if (inserted) return this.#run(inserted);
       await this.#cancelJob(database, dispatchJobId);
       const concurrent = await this.#manualRun(database, task.id, key);
       if (!concurrent) throw new Error('Scheduled Run create lost its row');
@@ -784,7 +844,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
           RETURNING *`,
         [now, task.id, task.ownerId],
       );
-      return toTask<ExecutionConfig>(requiredRow<TaskRow>(rows, 'archive'));
+      return this.#task(requiredRow(taskRowSchema, rows, 'archive'));
     });
   }
 
@@ -804,9 +864,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
           WHERE task_id = $1 AND owner_id = $2`,
         [task.id, task.ownerId],
       );
-      const runs = rows as Array<
-        Pick<RunRow, 'dispatch_job_id' | 'reconciliation_job_id' | 'status'>
-      >;
+      const runs = z.array(runJobsRowSchema).parse(rows);
       if (
         runs.some(
           ({ status }) => status === 'dispatching' || status === 'running',
@@ -943,7 +1001,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
       ) {
         return;
       }
-      const task = toTask<ExecutionConfig>(row);
+      const task = this.#task(row);
       const now = Date.now();
       const runId = randomUUID();
       const dispatchJobId = await this.#sendNow(database, {
@@ -1020,7 +1078,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
     if (!row || row.status !== 'dispatching' || row.dispatch_job_id !== jobId) {
       return;
     }
-    const run = toRun<ExecutionConfig>(row);
+    const run = this.#run(row);
     let executionId: string;
     try {
       const launched = await this.#executor.launch({
@@ -1118,7 +1176,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
     ) {
       return;
     }
-    const run = toRun<ExecutionConfig>(row);
+    const run = this.#run(row);
     let observed: ScheduledExecutionObservation;
     try {
       observed = await this.#executor.inspect({
@@ -1256,7 +1314,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
           RETURNING *`,
         [reviewStatus, Date.now(), run.id, run.ownerId],
       );
-      return toRun<ExecutionConfig>(requiredRow<RunRow>(rows, 'review'));
+      return this.#run(requiredRow(runRowSchema, rows, 'review'));
     });
   }
 
@@ -1274,7 +1332,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
         RETURNING *`,
       [now, run.id, run.ownerId],
     );
-    return toRun<ExecutionConfig>(requiredRow<RunRow>(rows, 'cancel'));
+    return this.#run(requiredRow(runRowSchema, rows, 'cancel'));
   }
 
   async #sendNow(database: Db, data: ScheduledJob): Promise<string> {
@@ -1321,7 +1379,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
         `Scheduled Task "${taskId}" was not found`,
       );
     }
-    return toTask<ExecutionConfig>(row);
+    return this.#task(row);
   }
 
   async #taskRow(
@@ -1335,7 +1393,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
         WHERE id = $1 AND owner_id = $2${forUpdate ? ' FOR UPDATE' : ''}`,
       [taskId, ownerId],
     );
-    return rows[0] as TaskRow | undefined;
+    return taskRowSchema.optional().parse(rows[0]);
   }
 
   async #taskByKey(
@@ -1348,8 +1406,8 @@ export class ScheduledTasks<ExecutionConfig extends object> {
         WHERE owner_id = $1 AND idempotency_key = $2`,
       [ownerId, idempotencyKey],
     );
-    const row = rows[0] as TaskRow | undefined;
-    return row ? toTask<ExecutionConfig>(row) : undefined;
+    const row = taskRowSchema.optional().parse(rows[0]);
+    return row ? this.#task(row) : undefined;
   }
 
   async #requiredRun(
@@ -1371,7 +1429,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
         `Scheduled Run "${runId}" was not found`,
       );
     }
-    return toRun<ExecutionConfig>(row);
+    return this.#run(row);
   }
 
   async #runRow(
@@ -1385,7 +1443,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
         WHERE id = $1 AND owner_id = $2${forUpdate ? ' FOR UPDATE' : ''}`,
       [runId, ownerId],
     );
-    return rows[0] as RunRow | undefined;
+    return runRowSchema.optional().parse(rows[0]);
   }
 
   async #manualRun(
@@ -1398,8 +1456,16 @@ export class ScheduledTasks<ExecutionConfig extends object> {
         WHERE task_id = $1 AND trigger = 'manual' AND idempotency_key = $2`,
       [taskId, idempotencyKey],
     );
-    const row = rows[0] as RunRow | undefined;
-    return row ? toRun<ExecutionConfig>(row) : undefined;
+    const row = runRowSchema.optional().parse(rows[0]);
+    return row ? this.#run(row) : undefined;
+  }
+
+  #task(row: TaskRow): ScheduledTask<ExecutionConfig> {
+    return toTask(row, this.#executionConfigSchema.parse(row.execution_config));
+  }
+
+  #run(row: RunRow): ScheduledRun<ExecutionConfig> {
+    return toRun(row, this.#executionConfigSchema.parse(row.execution_config));
   }
 }
 
@@ -1585,24 +1651,13 @@ function validateJob(value: unknown): ScheduledJob {
   if (!value || typeof value !== 'object') {
     throw new Error('Scheduled Tasks job payload must be an object');
   }
-  const job = value as Partial<ScheduledJob>;
-  if (
-    (job.kind === 'dispatch' || job.kind === 'reconcile') &&
-    typeof job.ownerId === 'string' &&
-    typeof job.runId === 'string'
-  ) {
-    return job as DispatchJob | ReconcileJob;
+  const job = scheduledJobSchema.safeParse(value);
+  if (!job.success) {
+    throw new Error('Scheduled Tasks job payload is invalid', {
+      cause: job.error,
+    });
   }
-  if (
-    job.kind === 'occurrence' &&
-    typeof job.ownerId === 'string' &&
-    typeof job.taskId === 'string' &&
-    typeof job.occurrenceAt === 'number' &&
-    typeof job.generation === 'number'
-  ) {
-    return job as OccurrenceJob;
-  }
-  throw new Error('Scheduled Tasks job payload is invalid');
+  return job.data;
 }
 
 type PersistedScheduledChange = {
@@ -1656,6 +1711,7 @@ function parseScheduledChange(
 
 function toTask<ExecutionConfig extends object>(
   row: TaskRow,
+  executionConfig: ExecutionConfig,
 ): ScheduledTask<ExecutionConfig> {
   return {
     id: row.id,
@@ -1665,7 +1721,7 @@ function toTask<ExecutionConfig extends object>(
     prompt: row.prompt,
     recurrence: row.recurrence,
     timezone: row.timezone,
-    executionConfig: row.execution_config as ExecutionConfig,
+    executionConfig,
     status: row.status,
     generation: Number(row.generation),
     nextRunAt: toMillis(row.next_run_at),
@@ -1677,6 +1733,7 @@ function toTask<ExecutionConfig extends object>(
 
 function toRun<ExecutionConfig extends object>(
   row: RunRow,
+  executionConfig: ExecutionConfig,
 ): ScheduledRun<ExecutionConfig> {
   return {
     id: row.id,
@@ -1685,7 +1742,7 @@ function toRun<ExecutionConfig extends object>(
     trigger: row.trigger,
     occurrenceAt: Number(row.occurrence_at),
     prompt: row.prompt,
-    executionConfig: row.execution_config as ExecutionConfig,
+    executionConfig,
     status: row.status,
     reviewStatus: row.review_status,
     externalExecutionId: row.external_execution_id,
@@ -1703,8 +1760,12 @@ function toMillis(value: number | string | bigint | null): number | null {
   return value === null ? null : Number(value);
 }
 
-function requiredRow<Row>(rows: unknown[], operation: string): Row {
-  const row = rows[0] as Row | undefined;
+function requiredRow<Row>(
+  schema: z.ZodType<Row>,
+  rows: unknown[],
+  operation: string,
+): Row {
+  const row = schema.optional().parse(rows[0]);
   if (!row)
     throw new Error(`Scheduled Tasks ${operation} did not return a row`);
   return row;

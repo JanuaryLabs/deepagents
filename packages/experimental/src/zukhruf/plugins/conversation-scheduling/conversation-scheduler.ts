@@ -2,6 +2,8 @@ import { CronExpressionParser } from 'cron-parser';
 import { v5 as uuidv5 } from 'uuid';
 import { z } from 'zod';
 
+import { isRecord } from '@deepagents/context';
+
 import { conversationNamespace } from '../../control-plane/agent-turn-id.ts';
 import type { ConversationId } from '../../mailbox/types.ts';
 import type { AgentPluginHost } from '../../runtime/agent-runtime.ts';
@@ -621,10 +623,10 @@ export class ConversationScheduler {
   }
 
   static #record(value: unknown): Record<string, unknown> {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    if (!isRecord(value)) {
       throw new Error('Invalid metadata.zukhruf state');
     }
-    return value as Record<string, unknown>;
+    return value;
   }
 
   static #resolveTimezone(timezone: string): string {

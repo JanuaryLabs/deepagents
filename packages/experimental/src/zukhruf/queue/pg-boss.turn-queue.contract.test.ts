@@ -8,10 +8,13 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import {
   type ConstructorOptions,
   type FindJobsOptions,
-  type JobWithMetadata,
   PgBoss,
+  type Queue,
+  type WorkHandler,
+  type WorkOptions,
   fromPglite,
 } from 'pg-boss';
+import { z } from 'zod';
 
 import type {
   PgBossTurnQueueOptions,
@@ -23,6 +26,14 @@ import { PgBossTurnQueue } from '@deepagents/experimental/zukhruf';
 const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
 
 const testPostgres = new Postgres({ docker });
+
+/** The addressing every queued `TurnRef` payload carries. */
+const queuedTurnSchema = z.looseObject({
+  streamId: z.string(),
+  chatId: z.string(),
+  userId: z.string(),
+  kind: z.enum(['message', 'recovery', 'mailbox']),
+});
 
 /**
  * Behavioral contract every TurnQueue implementation must pass.
@@ -741,7 +752,9 @@ suite('PgBossTurnQueue real PostgreSQL scheduler regressions', () => {
       (_, index) => `fifo-regression-${index}`,
     );
     const turnNumbers = [1, 2, 3, 4, 5];
-    const seen = new Map(chatIds.map((chatId) => [chatId, [] as string[]]));
+    const seen = new Map<string, string[]>(
+      chatIds.map((chatId) => [chatId, []]),
+    );
 
     for (const chatId of chatIds) {
       for (const turnNumber of turnNumbers) {
@@ -793,7 +806,9 @@ suite('PgBossTurnQueue real PostgreSQL scheduler regressions', () => {
         (_, index) => `multi-consumer-fifo-${index}`,
       );
       const turnNumbers = [1, 2, 3, 4, 5];
-      const seen = new Map(chatIds.map((chatId) => [chatId, [] as string[]]));
+      const seen = new Map<string, string[]>(
+        chatIds.map((chatId) => [chatId, []]),
+      );
       const active = new Map(chatIds.map((chatId) => [chatId, 0]));
       const maxActive = new Map(chatIds.map((chatId) => [chatId, 0]));
 
@@ -1002,7 +1017,7 @@ async function pgliteQueueHarness(): Promise<TurnQueueHarness> {
   };
 }
 
-test('does not delete or overlap a turn claimed after the cancellation snapshot', async () => {
+test('does not delete or overlap a turn claimed after the cancellation snapshot', async (t) => {
   const pglite = new PGlite();
   const boss = new PgBoss({ db: fromPglite(pglite), backend: 'pglite' });
   boss.on('error', () => {});
@@ -1018,25 +1033,26 @@ test('does not delete or overlap a turn claimed after the cancellation snapshot'
   await queue.push(first);
   await queue.push(second);
 
-  type FindTurns = (
-    name: string,
-    options?: FindJobsOptions,
-  ) => Promise<JobWithMetadata<TurnRef>[]>;
-  const mutableBoss = boss as unknown as { findJobs: FindTurns };
-  const originalFindJobs = mutableBoss.findJobs.bind(boss);
+  const originalFindJobs = boss.findJobs.bind(boss);
   const snapshotTaken = Promise.withResolvers<void>();
   const releaseSnapshot = Promise.withResolvers<void>();
-  mutableBoss.findJobs = async (name, options) => {
-    const jobs = await originalFindJobs(name, options);
-    if (
-      (options?.data as Partial<TurnRef> | undefined)?.streamId ===
-      first.streamId
-    ) {
-      snapshotTaken.resolve();
-      await releaseSnapshot.promise;
-    }
-    return jobs;
-  };
+  const pauseSnapshot = t.mock.method(
+    boss,
+    'findJobs',
+    async (name: string, options?: FindJobsOptions) => {
+      const jobs = await originalFindJobs(name, options);
+      const data = options?.data;
+      if (
+        data !== undefined &&
+        'streamId' in data &&
+        data.streamId === first.streamId
+      ) {
+        snapshotTaken.resolve();
+        await releaseSnapshot.promise;
+      }
+      return jobs;
+    },
+  );
 
   const firstStarted = Promise.withResolvers<void>();
   const releaseFirst = Promise.withResolvers<void>();
@@ -1126,7 +1142,7 @@ test('does not delete or overlap a turn claimed after the cancellation snapshot'
   } finally {
     releaseSnapshot.resolve();
     releaseFirst.resolve();
-    mutableBoss.findJobs = originalFindJobs;
+    pauseSnapshot.mock.restore();
     await cancelling?.catch(() => undefined);
     await worker?.[Symbol.asyncDispose]();
     await boss.stop({ graceful: false });
@@ -1134,7 +1150,7 @@ test('does not delete or overlap a turn claimed after the cancellation snapshot'
   }
 });
 
-test('delivers cancellation to a local handler registered after cancel returns', async () => {
+test('delivers cancellation to a local handler registered after cancel returns', async (t) => {
   const pglite = new PGlite();
   const boss = new PgBoss({ db: fromPglite(pglite), backend: 'pglite' });
   boss.on('error', () => {});
@@ -1147,25 +1163,26 @@ test('delivers cancellation to a local handler registered after cancel returns',
   const first = ref('late-registration', 1);
   const second = ref('late-registration', 2);
 
-  type Work = (...args: unknown[]) => Promise<string>;
-  const mutableBoss = boss as unknown as { work: Work };
-  const originalWork = mutableBoss.work.bind(boss);
+  const originalWork = boss.work.bind(boss);
   const claimed = Promise.withResolvers<void>();
   const registerHandler = Promise.withResolvers<void>();
-  mutableBoss.work = async (...args) => {
-    const [name, options, candidate] = args;
-    const handler = candidate as (
-      jobs: Array<{ data: TurnRef }>,
-    ) => Promise<void>;
-    return originalWork(name, options, async (jobs: unknown) => {
-      const turns = jobs as Array<{ data: TurnRef }>;
-      if (name === queue.queue && turns[0]?.data.streamId === first.streamId) {
-        claimed.resolve();
-        await registerHandler.promise;
-      }
-      return handler(turns);
-    });
-  };
+  // Mirrors the calls PgBossTurnQueue.consume makes: one batch handler per queue.
+  const holdFirstClaim = t.mock.method(
+    boss,
+    'work',
+    (name: string, options: WorkOptions, handler: WorkHandler<unknown>) =>
+      originalWork(name, options, async (jobs) => {
+        if (
+          name === queue.queue &&
+          queuedTurnSchema.safeParse(jobs[0]?.data).data?.streamId ===
+            first.streamId
+        ) {
+          claimed.resolve();
+          await registerHandler.promise;
+        }
+        return handler(jobs);
+      }),
+  );
 
   const firstStarted = Promise.withResolvers<void>();
   const releaseFirst = Promise.withResolvers<void>();
@@ -1239,7 +1256,7 @@ test('delivers cancellation to a local handler registered after cancel returns',
   } finally {
     registerHandler.resolve();
     releaseFirst.resolve();
-    mutableBoss.work = originalWork;
+    holdFirstClaim.mock.restore();
     await otherWorker?.[Symbol.asyncDispose]();
     await worker?.[Symbol.asyncDispose]();
     await boss.stop({ graceful: false });
@@ -1247,7 +1264,7 @@ test('delivers cancellation to a local handler registered after cancel returns',
   }
 });
 
-test('fails fast when a custom-adapter schema is omitted and accepts it explicitly', async () => {
+test('fails fast when a custom-adapter schema is omitted and accepts it explicitly', async (t) => {
   const pglite = new PGlite();
   const schema = 'custom_pgboss';
   const decoyBoss = new PgBoss({
@@ -1288,14 +1305,16 @@ test('fails fast when a custom-adapter schema is omitted and accepts it explicit
       /pass the PgBoss schema in options\.schema/,
     );
 
-    type CreateQueue = (...args: unknown[]) => Promise<void>;
-    const mutableBoss = boss as unknown as { createQueue: CreateQueue };
-    const originalCreateQueue = mutableBoss.createQueue.bind(boss);
+    const originalCreateQueue = boss.createQueue.bind(boss);
     const createdQueues: string[] = [];
-    mutableBoss.createQueue = async (...args) => {
-      createdQueues.push(String(args[0]));
-      return originalCreateQueue(...args);
-    };
+    const recordCreatedQueues = t.mock.method(
+      boss,
+      'createQueue',
+      async (name: string, options?: Omit<Queue, 'name'>) => {
+        createdQueues.push(name);
+        return originalCreateQueue(name, options);
+      },
+    );
     const queue = new PgBossTurnQueue(boss, {
       pollingIntervalSeconds: 0.5,
       schema,
@@ -1303,7 +1322,7 @@ test('fails fast when a custom-adapter schema is omitted and accepts it explicit
     try {
       await queue.initialize();
     } finally {
-      mutableBoss.createQueue = originalCreateQueue;
+      recordCreatedQueues.mock.restore();
     }
     assert.deepStrictEqual(createdQueues, [queue.deadLetterQueue, queue.queue]);
     const queued = ref('custom-schema', 1);

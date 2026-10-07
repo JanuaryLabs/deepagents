@@ -24,6 +24,19 @@ interface MaterializedAgentPlugin {
   readonly instance: AgentPluginInstance;
 }
 
+/**
+ * Plugins are materialized only by calling `definition.create`, so the
+ * instance of the plugin created from `definition` has its instance type.
+ */
+function createdFrom<Instance extends object>(
+  plugin: MaterializedAgentPlugin,
+  definition: AgentPluginDefinition<Instance>,
+): plugin is MaterializedAgentPlugin & {
+  readonly instance: AgentPluginInstance & Instance;
+} {
+  return plugin.definition === definition;
+}
+
 /** Owns plugin instances, their composed contributions, and initialization resources. */
 export class PluginManager implements AsyncDisposable {
   readonly collaborationTools: ReturnType<typeof createCollaborationTools>;
@@ -97,15 +110,15 @@ export class PluginManager implements AsyncDisposable {
   get<Instance extends object>(
     definition: AgentPluginDefinition<Instance>,
   ): AgentPluginInstance & Instance {
-    const plugin = this.#plugins.find(
-      ({ definition: candidate }) => candidate === definition,
+    const plugin = this.#plugins.find((candidate) =>
+      createdFrom(candidate, definition),
     );
     if (!plugin) {
       throw new Error(
         `AgentRuntime: plugin "${definition.name}" does not belong to this runtime`,
       );
     }
-    return plugin.instance as AgentPluginInstance & Instance;
+    return plugin.instance;
   }
 
   configureTelemetry(

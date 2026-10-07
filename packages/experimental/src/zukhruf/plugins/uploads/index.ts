@@ -29,9 +29,8 @@ const extensionByMediaType = {
 
 export type UploadMediaType = keyof typeof extensionByMediaType;
 
-export const UPLOAD_MEDIA_TYPES = Object.keys(
-  extensionByMediaType,
-) as readonly UploadMediaType[];
+export const UPLOAD_MEDIA_TYPES: readonly UploadMediaType[] =
+  Object.keys(extensionByMediaType).filter(isUploadMediaType);
 
 /** Every extension the store writes, plus the `jpeg` spelling it accepts on read. */
 const mediaTypeByExtension: Readonly<Record<string, UploadMediaType>> = {

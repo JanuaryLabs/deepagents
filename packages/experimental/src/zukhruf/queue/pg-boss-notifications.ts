@@ -1,6 +1,8 @@
 import { EventEmitter, on } from 'node:events';
 import type { PgBoss } from 'pg-boss';
 
+const RESET = Symbol('reset');
+
 export type PgBossNotification<Value> =
   { type: 'change'; value: Value } | { type: 'reset' };
 
@@ -18,19 +20,18 @@ export async function pgBossNotifications<Value>(
     throw new Error('pg-boss database does not support LISTEN');
   }
 
+  // The emitter carries raw payloads; values are parsed as they are read so
+  // every yielded notification is typed by `parse` rather than by the emitter.
   const emitter = new EventEmitter();
   const notifications = on(emitter, 'notification', { signal });
   let ready = false;
   const handle = await listen(
     channel,
     (payload) => {
-      const value = parse(payload);
-      if (value !== undefined) {
-        emitter.emit('notification', { type: 'change', value });
-      }
+      emitter.emit('notification', payload);
     },
     () => {
-      if (ready) emitter.emit('notification', { type: 'reset' });
+      if (ready) emitter.emit('notification', RESET);
     },
   );
   ready = true;
@@ -42,8 +43,14 @@ export async function pgBossNotifications<Value>(
   return {
     async *[Symbol.asyncIterator]() {
       try {
-        for await (const [notification] of notifications) {
-          yield notification as PgBossNotification<Value>;
+        for await (const event of notifications) {
+          const [payload]: unknown[] = event;
+          if (payload === RESET) {
+            yield { type: 'reset' };
+          } else if (typeof payload === 'string') {
+            const value = parse(payload);
+            if (value !== undefined) yield { type: 'change', value };
+          }
         }
       } finally {
         await handle.close();

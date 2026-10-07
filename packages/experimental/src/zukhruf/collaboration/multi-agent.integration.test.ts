@@ -1,6 +1,7 @@
 import type { LanguageModelV4FunctionTool } from '@ai-sdk/provider';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { mkdtempDisposable, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -15,6 +16,8 @@ import {
   SqliteStreamStore,
   StreamManager,
   type StreamStore,
+  createBashTool,
+  createVirtualSandbox,
 } from '@deepagents/context';
 import {
   type AgentHost,
@@ -29,6 +32,12 @@ import {
   defineAgent,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
+
+async function virtualSandbox(): Promise<AgentSandbox> {
+  return createBashTool({
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+  });
+}
 
 const userTurn = (id: string, text: string) => ({
   message: {
@@ -172,6 +181,14 @@ function systemText(prompt: unknown): string {
     .join('\n');
 }
 
+/** Every `virtualSandbox` contributes these; assertions look past them. */
+const SANDBOX_TOOLS: ReadonlySet<string> = new Set([
+  'bash',
+  'readFile',
+  'writeFile',
+] satisfies (keyof AgentSandbox['tools'])[]);
+
+/** Function tools the model sees, apart from the sandbox's own. */
 function functionTools(tools: unknown): LanguageModelV4FunctionTool[] {
   return Array.isArray(tools)
     ? tools.filter(
@@ -179,7 +196,10 @@ function functionTools(tools: unknown): LanguageModelV4FunctionTool[] {
           typeof candidate === 'object' &&
           candidate !== null &&
           'type' in candidate &&
-          candidate.type === 'function',
+          candidate.type === 'function' &&
+          'name' in candidate &&
+          typeof candidate.name === 'string' &&
+          !SANDBOX_TOOLS.has(candidate.name),
       )
     : [];
 }
@@ -210,20 +230,20 @@ test('host config injects root guidance, spawn guidance, namespace, and wait bou
     defineAgent({
       name: 'root',
       model,
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       subagents: [
         defineAgent({
           name: 'reviewer',
           description: 'Reviews the current change.',
           model,
-          sandbox: async () => ({}) as AgentSandbox,
+          sandbox: virtualSandbox,
           instructions: [],
         }),
         defineAgent({
           name: 'worker',
           model,
-          sandbox: async () => ({}) as AgentSandbox,
+          sandbox: virtualSandbox,
           instructions: [],
         }),
       ],
@@ -282,12 +302,9 @@ test('host config injects root guidance, spawn guidance, namespace, and wait bou
     /reviewer: Reviews the current change\., worker/,
   );
   const wait = tools.find((tool) => tool.name === 'wait_agent');
-  const timeoutSchema = (
-    wait?.inputSchema as {
-      properties?: { timeout_ms?: { minimum?: number; maximum?: number } };
-    }
-  ).properties?.timeout_ms;
-  assert.equal(timeoutSchema?.maximum, 333);
+  const timeoutSchema = wait?.inputSchema.properties?.timeout_ms;
+  assert.ok(typeof timeoutSchema === 'object');
+  assert.equal(timeoutSchema.maximum, 333);
 });
 
 test('wait_agent clamps a below-minimum timeout and reports it to the model', async () => {
@@ -327,7 +344,7 @@ test('wait_agent clamps a below-minimum timeout and reports it to the model', as
       defineAgent({
         name: 'root',
         model,
-        sandbox: async () => ({}) as AgentSandbox,
+        sandbox: virtualSandbox,
         instructions: [],
       }),
     );
@@ -378,7 +395,7 @@ test('subagent guidance replaces root guidance on a child turn', async (t) => {
         return textResponse('done');
       },
     }),
-    sandbox: async () => ({}) as AgentSandbox,
+    sandbox: virtualSandbox,
     instructions: [],
   });
   const runtimeSetup = new AgentRuntime(
@@ -456,7 +473,7 @@ test('spawn output is the canonical task name without agent_path', async (t) => 
   const child = defineAgent({
     name: 'worker',
     model,
-    sandbox: async () => ({}) as AgentSandbox,
+    sandbox: virtualSandbox,
     instructions: [],
   });
   const runtimeSetup = new AgentRuntime(
@@ -514,7 +531,7 @@ test('plugin-contributed subagent uses AI SDK code mode collaboration', async (t
     defineAgent({
       name: 'root',
       model,
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [
         {
@@ -580,7 +597,7 @@ test('interrupt_agent reports not_found for a missing target', async (t) => {
     defineAgent({
       name: 'root',
       model,
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
     }),
   );
@@ -598,7 +615,7 @@ test('interrupt_agent reports not_found for a missing target', async (t) => {
 });
 
 test('host config rejects invalid namespaces and wait bounds', async () => {
-  const sandbox = async () => ({}) as AgentSandbox;
+  const sandbox = virtualSandbox;
   const declaration = defineAgent({
     name: 'root',
     model: new MockLanguageModelV4({
@@ -674,7 +691,7 @@ test('default guidance tells root and child agents the Codex concurrency slots',
   const child = defineAgent({
     name: 'worker',
     model: capturing('worker'),
-    sandbox: async () => ({}) as AgentSandbox,
+    sandbox: virtualSandbox,
     instructions: [],
   });
   const runtimeSetup = new AgentRuntime(

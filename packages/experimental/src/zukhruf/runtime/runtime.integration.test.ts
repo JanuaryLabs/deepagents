@@ -1,4 +1,8 @@
-import type { JSONSchema7, LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import type {
+  JSONSchema7,
+  LanguageModelV4Prompt,
+  LanguageModelV4StreamPart,
+} from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
 import { settleWithin, timebox } from '@zukhruf/testing/async';
 import {
@@ -50,7 +54,6 @@ import {
   PgBossConversationStatusChangeSource,
   PgBossTurnQueue,
   SqliteMailboxStore,
-  type TurnRef,
   defineAgent,
   defineSandbox,
   defineStack,
@@ -88,19 +91,29 @@ interface ModelTrack {
   calls: string[];
 }
 
-function lastUserText(prompt: unknown): string {
-  const messages = prompt as Array<{
-    role: string;
-    content: Array<{ type: string; text?: string }>;
-  }>;
-  const lastUser = messages.filter((m) => m.role === 'user').at(-1);
+function lastUserText(prompt: LanguageModelV4Prompt): string {
+  const lastUser = prompt
+    .flatMap((message) => (message.role === 'user' ? [message] : []))
+    .at(-1);
   return (
     lastUser?.content
-      .filter((part) => part.type === 'text')
-      .map((part) => part.text ?? '')
+      .flatMap((part) => (part.type === 'text' ? [part.text] : []))
       .join('') ?? ''
   );
 }
+
+/** The addressing every queued `TurnRef` payload carries. */
+const queuedTurnSchema = z.looseObject({
+  streamId: z.string(),
+  chatId: z.string(),
+  userId: z.string(),
+  kind: z.enum(['message', 'recovery', 'mailbox']),
+});
+
+/** The element catalog snapshot the runtime keeps in `metadata.zukhruf`. */
+const elementsMetadataSchema = z.looseObject({
+  zukhruf: z.looseObject({ elements: z.unknown() }),
+});
 
 /**
  * Replies `reply:<user text>`; throws when the user text contains "boom".
@@ -1939,7 +1952,8 @@ describe('zukhruf runtime — background executor', () => {
     ).at(-1);
     assert.equal(head?.id, first.id);
     assert.equal(
-      (head?.metadata as { clientState?: string } | undefined)?.clientState,
+      z.looseObject({ clientState: z.string() }).parse(head?.metadata)
+        .clientState,
       'ready',
     );
   });
@@ -2252,7 +2266,7 @@ describe('zukhruf runtime — background executor', () => {
     );
     const snapshot = await h.store.getChat(conversation.chatId);
     assert.deepEqual(
-      (snapshot?.metadata?.zukhruf as { elements: unknown }).elements,
+      elementsMetadataSchema.parse(snapshot?.metadata).zukhruf.elements,
       elements,
     );
 
@@ -2265,7 +2279,7 @@ describe('zukhruf runtime — background executor', () => {
     );
     const cleared = await h.store.getChat(conversation.chatId);
     assert.deepEqual(
-      (cleared?.metadata?.zukhruf as { elements: unknown }).elements,
+      elementsMetadataSchema.parse(cleared?.metadata).zukhruf.elements,
       [],
     );
   });
@@ -2393,7 +2407,8 @@ describe('zukhruf runtime — background executor', () => {
         key: conversation.chatId,
       });
       parkedState = jobs.find(
-        (job) => (job.data as TurnRef).streamId === followup.id,
+        (job) =>
+          queuedTurnSchema.safeParse(job.data).data?.streamId === followup.id,
       )?.state;
       if (parkedState === 'cancelled') break;
       await sleep(25);
@@ -3173,7 +3188,8 @@ describe('zukhruf runtime — cross-process conversation status', () => {
       try {
         for await (const event of subscription) void event;
       } catch (error) {
-        assert.equal((error as Error).name, 'AbortError');
+        assert.ok(error instanceof Error);
+        assert.equal(error.name, 'AbortError');
       } finally {
         finished = true;
       }

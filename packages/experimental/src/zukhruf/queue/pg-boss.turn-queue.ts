@@ -1,5 +1,8 @@
 import type { JobWithMetadata, PgBoss } from 'pg-boss';
 import { v7 as uuidv7 } from 'uuid';
+import { z } from 'zod';
+
+import { isRecord } from '@deepagents/context';
 
 import {
   type ConsumeContext,
@@ -21,6 +24,9 @@ export interface PgBossTurnQueueOptions {
 }
 
 const MAX_TIMEOUT_MS = 2_147_483_647;
+
+/** A `<schema>.queue` catalog row, selected as `table_name AS "table"`. */
+const queueCatalogRowSchema = z.object({ table: z.string() });
 
 /**
  * TurnQueue on pg-boss.
@@ -67,8 +73,10 @@ export class PgBossTurnQueue extends TurnQueue {
     super();
     this.#boss = boss;
     this.#queue = options.queue ?? 'zukhruf-turns';
-    const configuredSchema = (boss.getDb() as { config?: { schema?: unknown } })
-      .config?.schema;
+    // pg-boss's own pooled database exposes its config; custom adapters may not.
+    const db = boss.getDb();
+    const configuredSchema =
+      'config' in db && isRecord(db.config) ? db.config.schema : undefined;
     const bossSchema =
       typeof configuredSchema === 'string' ? configuredSchema : undefined;
     this.#schema = options.schema ?? bossSchema ?? 'pgboss';
@@ -134,9 +142,11 @@ export class PgBossTurnQueue extends TurnQueue {
          WHERE name = $1`,
         [this.#queue],
       );
+      const catalogRow = queueCatalogRowSchema.safeParse(catalog.rows[0]);
       if (
         catalog.rows.length !== 1 ||
-        (catalog.rows[0] as { table?: unknown }).table !== this.#table
+        !catalogRow.success ||
+        catalogRow.data.table !== this.#table
       ) {
         throw new Error('queue catalog does not match');
       }
@@ -395,7 +405,7 @@ export class PgBossTurnQueue extends TurnQueue {
       Math.min(MAX_TIMEOUT_MS, Math.max(1, nextExpiry - Date.now())),
     );
     this.#cancelIntentExpiryTimer = timer;
-    (timer as { unref?: () => void }).unref?.();
+    timer.unref();
   }
 
   async #deleteIfStillQueued(ids: string[]): Promise<void> {

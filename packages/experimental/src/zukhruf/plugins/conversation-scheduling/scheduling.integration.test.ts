@@ -6,6 +6,7 @@ import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { type UIMessage, isToolUIPart, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { mkdtempDisposable } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -25,6 +26,9 @@ import {
   SqliteStreamStore,
   type StoredChatData,
   StreamManager,
+  createBashTool,
+  createVirtualSandbox,
+  isRecord,
 } from '@deepagents/context';
 import {
   type AgentHost,
@@ -47,6 +51,12 @@ import {
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
 
 const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
+
+async function virtualSandbox(): Promise<AgentSandbox> {
+  return createBashTool({
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+  });
+}
 
 const testPostgres = new Postgres({ docker });
 
@@ -314,12 +324,39 @@ function dynamicState(metadata: Record<string, unknown> | undefined): unknown {
 function storedSchedulingState(
   metadata: Record<string, unknown> | undefined,
 ): { dispatching?: unknown; dynamic?: unknown } | undefined {
-  const zukhruf = metadata?.zukhruf;
-  if (typeof zukhruf !== 'object' || zukhruf === null) return;
-  const scheduling = (zukhruf as { scheduling?: unknown }).scheduling;
-  if (typeof scheduling !== 'object' || scheduling === null) return;
+  const scheduling = storedZukhruf(metadata).scheduling;
+  if (!isRecord(scheduling)) return;
   return scheduling;
 }
+
+/** The stored `metadata.zukhruf` record, or an empty one when absent. */
+function storedZukhruf(
+  metadata: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const zukhruf = metadata?.zukhruf;
+  return isRecord(zukhruf) ? zukhruf : {};
+}
+
+/** Conversation metadata that carries the runtime's `zukhruf` record. */
+const zukhrufMetadataSchema = z.looseObject({ zukhruf: z.looseObject({}) });
+
+/** Message metadata the conversation scheduler stamps on scheduled turns. */
+const scheduledOriginSchema = z.looseObject({
+  zukhruf: z.looseObject({ origin: z.string() }),
+});
+
+/** The fields of ScheduleWakeup's tool output these tests read. */
+const scheduleWakeupOutputSchema = z.looseObject({
+  clampedDelaySeconds: z.number(),
+  wasClamped: z.boolean(),
+});
+
+/** `metadata.zukhruf.scheduling` as the conversation scheduler writes it. */
+const cronSchedulingMetadataSchema = z.looseObject({
+  zukhruf: z.looseObject({
+    scheduling: z.looseObject({ cron: z.record(z.string(), z.unknown()) }),
+  }),
+});
 
 function functionToolNames(tools: unknown): string[] {
   if (!Array.isArray(tools)) return [];
@@ -497,7 +534,7 @@ test('configured runtime injects top-level Claude-compatible scheduling tools', 
     defineAgent({
       name: 'root',
       model,
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -552,7 +589,7 @@ test('CronCreate, CronList, and CronDelete run through the model loop in one con
     defineAgent({
       name: 'root',
       model: toolModel(commands, seenUserText),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -634,7 +671,7 @@ test('CronCreate reports the exact next run and timezone for a one-shot cron', a
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -735,7 +772,7 @@ test('parallel model tool calls preserve concurrent cron creates and deletes', a
     defineAgent({
       name: 'root',
       model,
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -783,7 +820,7 @@ test('ScheduleWakeup fires an ask and persists scheduled provenance', async (t) 
     defineAgent({
       name: 'root',
       model: toolModel(commands, seenUserText),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -804,13 +841,11 @@ test('ScheduleWakeup fires an ask and persists scheduled provenance', async (t) 
   const scheduleTool = last(
     await runtime.observe(conversation).engine.getMessages(),
   ).parts.find(isToolUIPart);
+  const scheduleOutput = scheduleWakeupOutputSchema.parse(scheduleTool?.output);
   assert.deepEqual(
     {
-      clampedDelaySeconds: (
-        scheduleTool?.output as { clampedDelaySeconds?: number }
-      )?.clampedDelaySeconds,
-      wasClamped: (scheduleTool?.output as { wasClamped?: boolean })
-        ?.wasClamped,
+      clampedDelaySeconds: scheduleOutput.clampedDelaySeconds,
+      wasClamped: scheduleOutput.wasClamped,
     },
     { clampedDelaySeconds: 600, wasClamped: false },
   );
@@ -821,8 +856,7 @@ test('ScheduleWakeup fires an ask and persists scheduled provenance', async (t) 
   const scheduledTurn = h.queue.turns[0];
   assert.ok(scheduledTurn?.kind === 'message');
   assert.equal(
-    (scheduledTurn.message?.metadata as { zukhruf?: { origin?: string } })
-      ?.zukhruf?.origin,
+    scheduledOriginSchema.parse(scheduledTurn.message?.metadata).zukhruf.origin,
     'scheduled',
   );
   assert.equal(messageText(scheduledTurn), 'scheduled prompt');
@@ -839,8 +873,7 @@ test('ScheduleWakeup fires an ask and persists scheduled provenance', async (t) 
       ),
   );
   assert.deepEqual(
-    (scheduledUser?.metadata as { zukhruf?: { origin?: string } })?.zukhruf
-      ?.origin,
+    scheduledOriginSchema.parse(scheduledUser?.metadata).zukhruf.origin,
     'scheduled',
   );
 });
@@ -865,7 +898,7 @@ test('ScheduleWakeup rejects delays outside its supported window', async (t) => 
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -933,7 +966,7 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
     defineAgent({
       name: 'root',
       model,
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -952,7 +985,7 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
     metadata: {
       ...metadata,
       zukhruf: {
-        ...(metadata?.zukhruf as Record<string, unknown>),
+        ...storedZukhruf(metadata),
         scheduling: {
           cron: {
             '00000000-0000-4000-8000-000000000001': {
@@ -1064,7 +1097,7 @@ test('unconfigured runtime exposes no scheduling tools', async (t) => {
           };
         },
       }),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
     }),
   );
@@ -1093,7 +1126,7 @@ test('runtime rejects an invalid scheduling timezone during initialization', asy
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4({}),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1118,7 +1151,7 @@ test('one conversation-scheduling definition creates a fresh instance per runtim
   const declaration = defineAgent({
     name: 'root',
     model: new MockLanguageModelV4({}),
-    sandbox: async () => ({}) as AgentSandbox,
+    sandbox: virtualSandbox,
     instructions: [],
     plugins: [plugin],
   });
@@ -1146,7 +1179,7 @@ test('conversation availability reaches every plugin before reporting failures',
     defineAgent({
       name: 'root',
       model: toolModel(new Map(), []),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [
         {
@@ -1198,7 +1231,7 @@ test('failed wake insertion does not commit a cron definition', async (t) => {
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1219,7 +1252,7 @@ test('failed wake insertion does not commit a cron definition', async (t) => {
   assert.equal(scheduler.wakes.size, 0);
   const chat = await h.store.getChat(conversation.chatId);
   assert.equal(
-    (chat?.metadata?.zukhruf as { scheduling?: unknown }).scheduling,
+    zukhrufMetadataSchema.parse(chat?.metadata).zukhruf.scheduling,
     undefined,
   );
 });
@@ -1240,7 +1273,7 @@ test('retrying a completed CronCreate tool call reuses its definition and wake',
     defineAgent({
       name: 'root',
       model,
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     });
@@ -1269,11 +1302,9 @@ test('retrying a completed CronCreate tool call reuses its definition and wake',
   assert.deepEqual([...scheduler.wakes.values()], [firstWake]);
   const chat = await h.store.getChat(conversation.chatId);
   assert.ok(chat?.metadata);
-  const scheduling = (
-    chat.metadata.zukhruf as {
-      scheduling: { cron: Record<string, unknown> };
-    }
-  ).scheduling;
+  const { scheduling } = cronSchedulingMetadataSchema.parse(
+    chat.metadata,
+  ).zukhruf;
   assert.equal(Object.keys(scheduling.cron).length, 1);
   assert.ok(!('version' in scheduling));
 });
@@ -1300,7 +1331,7 @@ test('retry after enqueue-before-dispatch-clear executes one scheduled turn', as
     defineAgent({
       name: 'root',
       model: toolModel(commands, seenUserText),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1377,7 +1408,7 @@ test('retry after claim-before-enqueue executes one scheduled turn', async (t) =
     defineAgent({
       name: 'root',
       model: toolModel(commands, seenUserText),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1425,7 +1456,7 @@ test('deleting a claimed cron before materialization prevents its scheduled ask'
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1480,7 +1511,7 @@ test('deleting a claimed cron during successor insertion prevents its scheduled 
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1540,7 +1571,7 @@ test('failed successor insertion leaves the current cron retryable', async (t) =
     defineAgent({
       name: 'root',
       model: toolModel(commands, seenUserText),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1601,7 +1632,7 @@ test('pg-boss can retry successor insertion through a prolonged outage', async (
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1670,7 +1701,7 @@ test('ScheduleWakeup replacement and stop leave cron definitions active', async 
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1738,7 +1769,7 @@ test('a queued scheduled turn can be cancelled through AgentObservation', async 
     defineAgent({
       name: 'root',
       model: toolModel(commands, seenUserText),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1784,7 +1815,7 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1815,8 +1846,7 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
   const catchUp = h.queue.turns[0];
   assert.ok(catchUp?.kind === 'message');
   assert.equal(
-    (catchUp.message?.metadata as { zukhruf?: { origin?: string } })?.zukhruf
-      ?.origin,
+    scheduledOriginSchema.parse(catchUp.message?.metadata).zukhruf.origin,
     'scheduled',
   );
   assert.equal(messageText(catchUp), 'cancel catch-up');
@@ -1843,7 +1873,7 @@ test('an overdue occurrence waits for approval before materializing', async (t) 
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       tools: {
         publish: defineTool({
@@ -1872,15 +1902,14 @@ test('an overdue occurrence waits for approval before materializing', async (t) 
   await runTurn(runtime, h.queue, conversation, 'needs approval');
   mock.timers.tick(10 * 60_000);
   await scheduler.fire(wake.id);
-  assert.deepEqual(h.queue.turns, []);
+  assert.equal(h.queue.turns.length, 0);
 
   await submitApproval(runtime, conversation, 'call-publish-needs approval');
   await h.queue.runNext();
-  const [catchUp] = h.queue.turns as TurnRef[];
+  const [catchUp] = h.queue.turns;
   assert.ok(catchUp?.kind === 'message');
   assert.equal(
-    (catchUp.message?.metadata as { zukhruf?: { origin?: string } })?.zukhruf
-      ?.origin,
+    scheduledOriginSchema.parse(catchUp.message?.metadata).zukhruf.origin,
     'scheduled',
   );
   assert.equal(messageText(catchUp), 'approval catch-up');
@@ -1906,7 +1935,7 @@ test('a non-recurring cron fires once and removes its definition', async (t) => 
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1952,7 +1981,7 @@ test('recurrence keeps the timezone persisted at creation across runtime restart
   const declaration = defineAgent({
     name: 'root',
     model: toolModel(commands, []),
-    sandbox: async () => ({}) as AgentSandbox,
+    sandbox: virtualSandbox,
     instructions: [],
     plugins: [conversationScheduling()],
   });
@@ -2002,7 +2031,7 @@ test('cron definitions are isolated by conversation and user across runtimes', a
   const declaration = defineAgent({
     name: 'root',
     model: toolModel(commands, []),
-    sandbox: async () => ({}) as AgentSandbox,
+    sandbox: virtualSandbox,
     instructions: [],
     plugins: [conversationScheduling()],
   });
@@ -2076,7 +2105,7 @@ test('scheduling tools bind to the current root, child, and sibling conversation
     ['list root cron', { name: 'CronList', input: {} }],
   ]);
   const model = toolModel(commands, []);
-  const sandbox = async () => ({}) as AgentSandbox;
+  const sandbox = virtualSandbox;
   const worker = defineAgent({
     name: 'worker',
     model,
@@ -2157,7 +2186,7 @@ test('resume ignores scheduling metadata while scheduling tools fail closed', as
         new Map([['list malformed', { name: 'CronList', input: {} }]]),
         [],
       ),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -2176,7 +2205,7 @@ test('resume ignores scheduling metadata while scheduling tools fail closed', as
     metadata: {
       ...metadata,
       zukhruf: {
-        ...(metadata?.zukhruf as Record<string, unknown>),
+        ...storedZukhruf(metadata),
         scheduling: { version: 99, cron: {} },
       },
     },
@@ -2220,7 +2249,7 @@ test('CronCreate rejects six-field and unreachable expressions', async (t) => {
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -2262,7 +2291,7 @@ test('CronCreate enforces the 50-definition conversation cap', async (t) => {
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: async () => ({}) as AgentSandbox,
+      sandbox: virtualSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -2301,7 +2330,7 @@ test('CronCreate enforces the 50-definition conversation cap', async (t) => {
     metadata: {
       ...metadata,
       zukhruf: {
-        ...(metadata?.zukhruf as Record<string, unknown>),
+        ...storedZukhruf(metadata),
         scheduling: { cron },
       },
     },
@@ -2344,7 +2373,7 @@ test('a dynamic wake remains usable across a context-store restart', async (t) =
   const declaration = defineAgent({
     name: 'root',
     model: toolModel(commands, seenUserText),
-    sandbox: async () => ({}) as AgentSandbox,
+    sandbox: virtualSandbox,
     instructions: [],
     plugins: [conversationScheduling()],
   });
@@ -2404,7 +2433,7 @@ test('a cron wake remains usable across a context-store restart', async (t) => {
   const declaration = defineAgent({
     name: 'root',
     model: toolModel(commands, seenUserText),
-    sandbox: async () => ({}) as AgentSandbox,
+    sandbox: virtualSandbox,
     instructions: [],
     plugins: [conversationScheduling()],
   });
@@ -2466,7 +2495,7 @@ test('a recurring cron does not fire when its first occurrence is beyond its sev
       defineAgent({
         name: 'root',
         model: toolModel(commands, []),
-        sandbox: async () => ({}) as AgentSandbox,
+        sandbox: virtualSandbox,
         instructions: [],
         plugins: [conversationScheduling()],
       }),
@@ -2530,7 +2559,7 @@ test('duplicate wake delivery across runtimes advances PostgreSQL state once', a
   const declaration = defineAgent({
     name: 'root',
     model: toolModel(commands, seenUserText),
-    sandbox: async () => ({}) as AgentSandbox,
+    sandbox: virtualSandbox,
     instructions: [],
     plugins: [conversationScheduling()],
   });

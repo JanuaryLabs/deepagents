@@ -207,18 +207,17 @@ export class AgentHistoryForker {
     const storedMessages = await Promise.all(
       sourceMessageIds.map((id) => this.#store.getMessage(id)),
     );
-    if (
-      storedMessages.some(
-        (message) =>
-          message === undefined ||
-          message.chatId !== parent.conversation.chatId,
-      )
-    ) {
-      throw new Error(
-        'spawn_agent: persisted parent-history snapshot is unavailable',
-      );
-    }
-    const stored = storedMessages as MessageData[];
+    const stored = storedMessages.map((message) => {
+      if (
+        message === undefined ||
+        message.chatId !== parent.conversation.chatId
+      ) {
+        throw new Error(
+          'spawn_agent: persisted parent-history snapshot is unavailable',
+        );
+      }
+      return message;
+    });
     const messages = await validateUIMessages({
       messages: stored.map((message) => message.data),
     });

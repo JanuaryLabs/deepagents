@@ -4,7 +4,7 @@ import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert/strict';
 import { suite, test } from 'node:test';
-import { PgBoss, fromPglite } from 'pg-boss';
+import { type Db, PgBoss, fromPglite } from 'pg-boss';
 
 import {
   type ConversationId,
@@ -193,23 +193,26 @@ test('a pg-boss database without LISTEN support is rejected at subscribe time', 
 test('a live listener emits reset on reconnect but not on initial connect', async () => {
   let reconnect = () => {};
   let closes = 0;
-  const boss = {
-    getDb: () => ({
-      listen: async (
-        _channel: string,
-        _onNotification: (payload: string) => void,
-        onReconnect: () => void,
-      ) => {
-        onReconnect();
-        reconnect = onReconnect;
-        return {
-          close: async () => {
-            closes += 1;
-          },
-        };
-      },
-    }),
-  } as unknown as PgBoss;
+  // A database adapter whose LISTEN connection the test reconnects by hand.
+  const db: Db = {
+    async executeSql() {
+      throw new Error('this test only listens');
+    },
+    listen: async (
+      _channel: string,
+      _onNotification: (payload: string) => void,
+      onReconnect: () => void,
+    ) => {
+      onReconnect();
+      reconnect = onReconnect;
+      return {
+        close: async () => {
+          closes += 1;
+        },
+      };
+    },
+  };
+  const boss = new PgBoss({ db });
   const source = new PgBossConversationStatusChangeSource(boss);
   const events = await source.subscribe(new AbortController().signal);
   const iterator = events[Symbol.asyncIterator]();

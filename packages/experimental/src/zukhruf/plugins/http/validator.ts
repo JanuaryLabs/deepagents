@@ -1,5 +1,5 @@
 import { parse as parseContentType } from 'fast-content-type-parse';
-import type { Context, MiddlewareHandler, ValidationTargets } from 'hono';
+import type { Context, MiddlewareHandler } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { HTTPException } from 'hono/http-exception';
 import z from 'zod';
@@ -17,82 +17,51 @@ type ValidatorConfig = Record<
   { select: unknown; against: z.ZodTypeAny }
 >;
 
-type ExtractInput<T extends ValidatorConfig> = {
-  [K in keyof T]: z.infer<T[K]['against']>;
+/** Each selected input's schema, under the input's name. */
+type InputShape<T extends ValidatorConfig> = {
+  [K in keyof T]: T[K]['against'];
 };
 
-type HasUndefined<T> = undefined extends T ? true : false;
-
-type InferTarget<
-  T extends ValidatorConfig,
-  S,
-  Target extends keyof ValidationTargets,
-> = {
-  [K in keyof T as T[K]['select'] extends S ? K : never]: HasUndefined<
-    z.infer<T[K]['against']>
-  > extends true
-    ? z.infer<T[K]['against']> | undefined
-    : z.infer<T[K]['against']> extends ValidationTargets[Target]
-      ? z.infer<T[K]['against']>
-      : z.infer<T[K]['against']>;
-};
-
-type InferIn<T extends ValidatorConfig> = (keyof InferTarget<
-  T,
-  QuerySelect | QueriesSelect,
-  'query'
-> extends never
-  ? never
-  : { query: InferTarget<T, QuerySelect | QueriesSelect, 'query'> }) &
-  (keyof InferTarget<T, BodySelect, 'json'> extends never
-    ? never
-    : { json: InferTarget<T, BodySelect, 'json'> }) &
-  (keyof InferTarget<T, ParamsSelect, 'param'> extends never
-    ? never
-    : { param: InferTarget<T, ParamsSelect, 'param'> }) &
-  (keyof InferTarget<T, HeadersSelect, 'header'> extends never
-    ? never
-    : { header: InferTarget<T, HeadersSelect, 'header'> }) &
-  (keyof InferTarget<T, CookieSelect, 'cookie'> extends never
-    ? never
-    : { cookie: InferTarget<T, CookieSelect, 'cookie'> });
-
-// Marker classes
-class BodySelect {
-  #private = 0;
-}
-class QuerySelect {
-  #private = 0;
-}
-class QueriesSelect {
-  #private = 0;
-}
-class ParamsSelect {
-  #private = 0;
-}
-class HeadersSelect {
-  #private = 0;
-}
-class CookieSelect {
-  #private = 0;
-}
-
-type SelectorFn<T> = (payload: {
-  body: Record<string, BodySelect>;
-  query: Record<string, QuerySelect>;
-  queries: Record<string, QueriesSelect>;
-  params: Record<string, ParamsSelect>;
-  headers: Record<string, HeadersSelect>;
-}) => T;
-type ValidateMiddleware<T extends ValidatorConfig> = MiddlewareHandler<
-  {
-    Variables: {
-      input: ExtractInput<T>;
-    };
-  },
-  string,
-  { in: InferIn<T> }
+type ExtractInput<T extends ValidatorConfig> = z.output<
+  ReturnType<typeof inputSchema<T>>
 >;
+
+/** The parsed request parts a selector picks its inputs from. */
+interface RequestPayload {
+  body: unknown;
+  query: Record<string, string | null | undefined>;
+  queries: Record<string, (string | null)[]>;
+  params: Record<string, string>;
+  headers: Record<string, string | undefined>;
+}
+
+type SelectorFn<T> = (payload: RequestPayload) => T;
+type ValidateMiddleware<T extends ValidatorConfig> = MiddlewareHandler<{
+  Variables: {
+    input: ExtractInput<T>;
+  };
+}>;
+
+function inputSchema<T extends ValidatorConfig>(config: T) {
+  const shape = Object.fromEntries(
+    Object.entries(config).map(([key, { against }]) => [key, against]),
+  );
+  assertInputShape(shape, config);
+  return z.object(shape);
+}
+
+function assertInputShape<T extends ValidatorConfig>(
+  shape: Record<string, z.ZodTypeAny>,
+  config: T,
+): asserts shape is InputShape<T> {
+  const keys = Object.keys(config);
+  if (
+    Object.keys(shape).length !== keys.length ||
+    keys.some((key) => shape[key] !== config[key]?.against)
+  ) {
+    throw new Error('The input schema does not match its selectors');
+  }
+}
 
 export function validate<T extends ValidatorConfig>(
   selector: SelectorFn<T>,
@@ -148,7 +117,7 @@ export function validate<T extends ValidatorConfig>(
         body = {};
     }
 
-    const payload = {
+    const payload: RequestPayload = {
       body,
       query: parseQueryParams(c.req.query()),
       queries: parseQueriesParams(c.req.queries()),
@@ -156,27 +125,11 @@ export function validate<T extends ValidatorConfig>(
       headers: c.req.header(),
     };
 
-    const config = _selector(payload as never);
-    const schema = z.object(
-      Object.entries(config).reduce<Record<string, z.ZodTypeAny>>(
-        (acc, [key, value]) => {
-          acc[key] = value.against;
-          return acc;
-        },
-        {},
-      ),
+    const config = _selector(payload);
+    const input = Object.fromEntries(
+      Object.entries(config).map(([key, { select }]) => [key, select]),
     );
-
-    const input = Object.entries(config).reduce<Record<string, unknown>>(
-      (acc, [key, value]) => {
-        acc[key] = value.select;
-        return acc;
-      },
-      {},
-    );
-
-    const parsed = await parse(schema, input);
-    c.set('input', parsed as ExtractInput<T>);
+    c.set('input', await parse(inputSchema(config), input));
     await next();
   });
 }

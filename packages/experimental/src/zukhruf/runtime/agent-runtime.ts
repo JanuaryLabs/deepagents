@@ -91,13 +91,31 @@ export interface AgentPluginBinding {
 
 export class AgentPluginCapability<Value> {
   readonly name: string;
+  /** Each value this capability bound, keyed by the binding that carries it. */
+  readonly #bound = new WeakMap<
+    AgentPluginBinding,
+    { readonly value: Value }
+  >();
 
   constructor(name: string) {
     this.name = name;
   }
 
   bind(value: Value): AgentPluginBinding {
-    return { capability: this, value };
+    const binding: AgentPluginBinding = { capability: this, value };
+    this.#bound.set(binding, { value });
+    return binding;
+  }
+
+  /** Reads the value of a binding this capability created with `bind`. */
+  read(binding: AgentPluginBinding): Value {
+    const bound = this.#bound.get(binding);
+    if (!bound) {
+      throw new Error(
+        `AgentRuntime: binding for capability "${this.name}" was not created by its bind()`,
+      );
+    }
+    return bound.value;
   }
 }
 

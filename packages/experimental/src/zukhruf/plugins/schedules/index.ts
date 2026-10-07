@@ -1,5 +1,6 @@
 import { isToolUIPart } from 'ai';
 import type { JobPollingOptions, PgBoss } from 'pg-boss';
+import { z } from 'zod';
 
 import {
   AgentPluginCapability,
@@ -38,6 +39,19 @@ export interface ScheduleExecutionConfig {
 }
 
 type ExecutionConfig = ScheduleExecutionConfig;
+
+/** Persisted execution configs, as `normalizeExecutionConfig` writes them. */
+const executionConfigSchema = z.object({
+  target: z
+    .discriminatedUnion('kind', [
+      z.object({ kind: z.literal('new-conversation') }),
+      z.object({
+        kind: z.literal('existing-conversation'),
+        chatId: z.string(),
+      }),
+    ])
+    .optional(),
+}) satisfies z.ZodType<ExecutionConfig>;
 
 export type ScheduleControl = Pick<
   ScheduledTasks<ExecutionConfig>,
@@ -114,6 +128,7 @@ class SchedulesPlugin implements Schedules {
     this.#workerOptions = workerOptions;
     this.#scheduled = new ScheduledTasks({
       ...options,
+      executionConfigSchema,
       executor: {
         launch: (input) => this.#launch(input),
         inspect: (input) => this.#inspect(input),

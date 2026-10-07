@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { z } from 'zod';
 
 import {
   type MailboxEndTurnResult,
@@ -47,6 +48,33 @@ const DDL = `
 `;
 
 const BUSY_TIMEOUT_MS = 5_000;
+
+const conversationIdSchema = z.object({
+  chatId: z.string(),
+  userId: z.string(),
+});
+
+/** One `InterAgentCommunication` as `enqueue` serializes it. */
+const communicationSchema = z.object({
+  id: z.string(),
+  type: z.enum(InterAgentCommunicationTypes),
+  author: conversationIdSchema,
+  recipient: conversationIdSchema,
+  otherRecipients: z.array(conversationIdSchema),
+  content: z.string(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  triggerTurn: z.boolean(),
+}) satisfies z.ZodType<InterAgentCommunication>;
+
+const mailboxItemRowsSchema = z.array(
+  z.object({
+    sequence: z.number(),
+    communication: z
+      .string()
+      .transform((text): unknown => JSON.parse(text))
+      .pipe(communicationSchema),
+  }),
+);
 
 /** SQLite-backed mailbox for durable cross-process delivery. */
 export class SqliteMailboxStore extends MailboxStore implements Disposable {
@@ -185,22 +213,17 @@ export class SqliteMailboxStore extends MailboxStore implements Disposable {
     leadingQueueOnly: boolean,
   ): InterAgentCommunication[] {
     return this.#transaction(() => {
-      const rows = this.#database
-        .prepare(
-          `SELECT sequence, communication
-             FROM zukhruf_mailbox_items
-            WHERE recipient_chat_id = ?
-              AND recipient_user_id = ?
-            ORDER BY sequence`,
-        )
-        .all(recipient.chatId, recipient.userId) as Array<{
-        sequence: number;
-        communication: string;
-      }>;
-      const items = rows.map((row) => ({
-        sequence: row.sequence,
-        communication: JSON.parse(row.communication) as InterAgentCommunication,
-      }));
+      const items = mailboxItemRowsSchema.parse(
+        this.#database
+          .prepare(
+            `SELECT sequence, communication
+               FROM zukhruf_mailbox_items
+              WHERE recipient_chat_id = ?
+                AND recipient_user_id = ?
+              ORDER BY sequence`,
+          )
+          .all(recipient.chatId, recipient.userId),
+      );
       const firstTrigger = leadingQueueOnly
         ? items.findIndex(({ communication }) => communication.triggerTurn)
         : -1;
