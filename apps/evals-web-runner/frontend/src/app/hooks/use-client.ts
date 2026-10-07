@@ -25,19 +25,7 @@ function getBaseUrl(): string {
   const basePath = baseHref.replace(/\/$/, '');
   return `${window.location.origin}${basePath}/api`;
 }
-export const client = new Client({
-  baseUrl: getBaseUrl(),
-  fetch: (request) => {
-    const teamId = localStorage.getItem('activeTeamId');
-    const headers = new Headers(request.headers);
-    if (teamId) {
-      headers.set('X-Team-Id', teamId);
-    }
-    return fetch(new Request(request, { headers }), {
-      credentials: 'include',
-    });
-  },
-});
+export const client = new Client({ baseUrl: getBaseUrl() });
 
 type DataEndpoints = {
   [K in keyof Endpoints]: K extends `${'GET'} ${string}` ? K : never;
