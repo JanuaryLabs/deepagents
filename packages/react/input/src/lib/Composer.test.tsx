@@ -1687,7 +1687,10 @@ describe('Composer editing shortcuts', () => {
     );
     const comment = screen.getByRole('textbox', {
       name: /annotation comment/i,
-    }) as HTMLInputElement;
+    });
+    if (!(comment instanceof HTMLInputElement)) {
+      throw new Error('The annotation comment is not an <input>.');
+    }
 
     await user.click(comment);
     comment.setSelectionRange(comment.value.length, comment.value.length);
