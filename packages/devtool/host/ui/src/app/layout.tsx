@@ -1,4 +1,4 @@
-import { type CSSProperties, useCallback, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   type LoaderFunctionArgs,
   Outlet,
@@ -78,7 +78,7 @@ export function AppLayout() {
       <SidebarProvider
         defaultOpen={sidebarOpen}
         className="h-screen min-h-0"
-        style={{ '--sidebar-width': '18rem' } as CSSProperties}
+        style={{ '--sidebar-width': '18rem' }}
       >
         <DevtoolSidebar />
         <SidebarInset className="min-h-0">

@@ -71,6 +71,8 @@ export interface AgentTraceReader {
   ): Promise<AgentTrace | undefined>;
 }
 
+type SpanType = 'agent' | 'generation' | 'function';
+
 interface FlatSpan {
   trace_id: string;
   span_id: string;
@@ -133,8 +135,13 @@ function projectTrace(
       span.attributes[ATTR_GEN_AI_OPERATION_NAME] === 'invoke_agent',
   );
   const visible = spans
-    .filter((span) => spanType(span))
-    .sort((left, right) => left.start_time.localeCompare(right.start_time));
+    .flatMap((span) => {
+      const type = spanType(span);
+      return type ? [{ span, type }] : [];
+    })
+    .sort((left, right) =>
+      left.span.start_time.localeCompare(right.span.start_time),
+    );
   const byId = new Map(spans.map((span) => [span.span_id, span]));
   const generationByStep = new Map(
     spans.flatMap((span) =>
@@ -143,8 +150,8 @@ function projectTrace(
         : [],
     ),
   );
-  const projected = visible.map((span) =>
-    projectSpan(span, byId, generationByStep, context.agentName),
+  const projected = visible.map(({ span, type }) =>
+    projectSpan(span, type, byId, generationByStep, context.agentName),
   );
   return {
     id: traceId,
@@ -157,7 +164,8 @@ function projectTrace(
     finishReason:
       firstString(root?.attributes[ATTR_GEN_AI_RESPONSE_FINISH_REASONS]) ??
       null,
-    usage: readUsage(root?.attributes) ?? sumUsage(visible),
+    usage:
+      readUsage(root?.attributes) ?? sumUsage(visible.map(({ span }) => span)),
     recording: {
       inputs: recordingState(
         root?.attributes[RECORD_INPUTS],
@@ -186,11 +194,11 @@ function projectTrace(
 
 function projectSpan(
   span: FlatSpan,
+  type: SpanType,
   byId: ReadonlyMap<string, FlatSpan>,
   generationByStep: ReadonlyMap<string, string>,
   agentName: string,
 ): AgentTraceSpan {
-  const type = spanType(span) as 'agent' | 'generation' | 'function';
   const input = jsonAttribute(
     span.attributes,
     type === 'function'
@@ -258,33 +266,36 @@ function visibleParent(
 }
 
 function readContext(spans: FlatSpan[]) {
-  const attributes = spans.find(({ attributes }) =>
-    [
-      ATTR_SESSION_ID,
-      ATTR_USER_ID,
-      STREAM_ID,
-      ATTR_GEN_AI_AGENT_NAME,
-      AGENT_PATH,
-    ].every((key) => typeof attributes[key] === 'string'),
-  )?.attributes;
-  if (!attributes) return undefined;
-  return {
-    chatId: attributes[ATTR_SESSION_ID] as string,
-    userId: attributes[ATTR_USER_ID] as string,
-    streamId: attributes[STREAM_ID] as string,
-    agentName: attributes[ATTR_GEN_AI_AGENT_NAME] as string,
-    agentPath: attributes[AGENT_PATH] as string,
-  };
+  for (const { attributes } of spans) {
+    const chatId = attributes[ATTR_SESSION_ID];
+    const userId = attributes[ATTR_USER_ID];
+    const streamId = attributes[STREAM_ID];
+    const agentName = attributes[ATTR_GEN_AI_AGENT_NAME];
+    const agentPath = attributes[AGENT_PATH];
+    if (
+      typeof chatId === 'string' &&
+      typeof userId === 'string' &&
+      typeof streamId === 'string' &&
+      typeof agentName === 'string' &&
+      typeof agentPath === 'string'
+    ) {
+      return { chatId, userId, streamId, agentName, agentPath };
+    }
+  }
+  return undefined;
 }
 
-function spanType(
-  span: FlatSpan,
-): 'agent' | 'generation' | 'function' | undefined {
-  return {
-    operation: 'agent',
-    languageModel: 'generation',
-    tool: 'function',
-  }[String(span.attributes[SPAN_TYPE])] as ReturnType<typeof spanType>;
+function spanType(span: FlatSpan): SpanType | undefined {
+  switch (span.attributes[SPAN_TYPE]) {
+    case 'operation':
+      return 'agent';
+    case 'languageModel':
+      return 'generation';
+    case 'tool':
+      return 'function';
+    default:
+      return undefined;
+  }
 }
 
 function readUsage(attributes: Record<string, unknown> | undefined) {
@@ -353,24 +364,44 @@ async function readSpans(path: string): Promise<FlatSpan[]> {
   if (lines.at(-1) === '') lines.pop();
   return lines.flatMap((line, index) => {
     if (!line.trim()) return [];
-    let span: FlatSpan;
+    let span: unknown;
     try {
       span = JSON.parse(line);
     } catch (error) {
       if (index === lines.length - 1 && !contents.endsWith('\n')) return [];
       throw error;
     }
-    if (
-      !span ||
-      typeof span.trace_id !== 'string' ||
-      typeof span.span_id !== 'string' ||
-      !Number.isFinite(Date.parse(span.start_time)) ||
-      !isRecord(span.attributes)
-    ) {
+    if (!isFlatSpan(span)) {
       throw new TypeError(`Invalid Halo trace record in "${path}"`);
     }
     return [span];
   });
+}
+
+/** The record `fileTelemetry()` appends for each span (see `flattenSpan`). */
+function isFlatSpan(value: unknown): value is FlatSpan {
+  return (
+    isRecord(value) &&
+    typeof value.trace_id === 'string' &&
+    typeof value.span_id === 'string' &&
+    typeof value.parent_span_id === 'string' &&
+    typeof value.name === 'string' &&
+    typeof value.kind === 'string' &&
+    typeof value.start_time === 'string' &&
+    Number.isFinite(Date.parse(value.start_time)) &&
+    typeof value.end_time === 'string' &&
+    isRecord(value.status) &&
+    typeof value.status.code === 'string' &&
+    typeof value.status.message === 'string' &&
+    isRecord(value.attributes) &&
+    Array.isArray(value.events) &&
+    value.events.every(
+      (event) =>
+        isRecord(event) &&
+        typeof event.name === 'string' &&
+        isRecord(event.attributes),
+    )
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

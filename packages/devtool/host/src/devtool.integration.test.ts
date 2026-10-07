@@ -5,19 +5,22 @@ import {
   ATTR_SESSION_ID,
   ATTR_USER_ID,
 } from '@opentelemetry/semantic-conventions/incubating';
+import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
 import assert from 'node:assert/strict';
 import { mkdtempDisposable, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { z } from 'zod';
 
-import type { AgentModel, AgentSandbox } from '@deepagents/context';
+import type { AgentSandbox } from '@deepagents/context';
 import {
   InMemoryContextStore,
   PollingChangeSource,
   SqliteStreamStore,
   StreamManager,
+  createBashTool,
 } from '@deepagents/context';
 import { devtool } from '@deepagents/devtool';
 import { fileTelemetry, tracesHttp } from '@deepagents/devtool/traces';
@@ -69,6 +72,26 @@ const HISTORY_URL = `${ZUKHRUF_MOUNT_PATH}/history`;
 const INFO_URL = `${ZUKHRUF_MOUNT_PATH}/info`;
 const TRACE_ID = '1'.repeat(32);
 
+/**
+ * These turns never reach the sandbox: a real toolkit over a backend that
+ * refuses every call.
+ */
+function unusedSandbox(): Promise<AgentSandbox> {
+  const refuse = () =>
+    Promise.reject(new Error('This test does not use the sandbox.'));
+  return createBashTool({
+    sandbox: {
+      executeCommand: refuse,
+      readFile: refuse,
+      writeFiles: refuse,
+      exists: () => Promise.resolve(false),
+      dispose: () => Promise.resolve(),
+      [Symbol.asyncDispose]: () => Promise.resolve(),
+    },
+    promptOptions: { toolPrompt: '' },
+  });
+}
+
 function telemetryRecords(
   conversation: { chatId: string; userId: string },
   streamId: string,
@@ -115,8 +138,8 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
   const runtime = new AgentRuntime(
     defineAgent({
       name: 'devtool-test',
-      model: { provider: 'test', modelId: 'test' } as AgentModel,
-      sandbox: async () => ({}) as AgentSandbox,
+      model: new MockLanguageModelV4({ provider: 'test', modelId: 'test' }),
+      sandbox: unusedSandbox,
       instructions: [],
       plugins: [traceTelemetry],
     }),
@@ -177,7 +200,9 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
 
   const history = await app.request(HISTORY_URL, asUser);
   assert.equal(history.status, 200);
-  const [entry] = (await history.json()) as Array<Record<string, unknown>>;
+  const [entry] = z
+    .array(z.record(z.string(), z.unknown()))
+    .parse(await history.json());
   assert.equal(entry.chatId, conversation.chatId);
   assert.equal(entry.title, 'First conversation');
   assert.deepEqual(entry.status, { type: 'idle' });
@@ -187,11 +212,11 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
     asUser,
   );
   assert.equal(traceList.status, 200);
-  const [trace] = (await traceList.json()) as Array<{
-    id: string;
-    streamId: string;
-    status: string;
-  }>;
+  const [trace] = z
+    .array(
+      z.object({ id: z.string(), streamId: z.string(), status: z.string() }),
+    )
+    .parse(await traceList.json());
   assert.deepEqual(
     { id: trace.id, streamId: trace.streamId, status: trace.status },
     { id: TRACE_ID, streamId: turn.id, status: 'queued' },
@@ -201,9 +226,9 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
     asUser,
   );
   assert.equal(traceDetail.status, 200);
-  const detail = (await traceDetail.json()) as {
-    spans: Array<{ type: string }>;
-  };
+  const detail = z
+    .object({ spans: z.array(z.object({ type: z.string() })) })
+    .parse(await traceDetail.json());
   assert.deepEqual(
     detail.spans.map(({ type }) => type),
     ['agent'],

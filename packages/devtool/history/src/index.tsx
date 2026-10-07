@@ -201,6 +201,22 @@ export function isConversationEvent(
   );
 }
 
+/** One entry of the runtime's `/history` response (`AgentHistoryItem`). */
+export function isHistoryRecord(value: unknown): value is HistoryRecord {
+  return (
+    isRecord(value) &&
+    typeof value.chatId === 'string' &&
+    typeof value.userId === 'string' &&
+    (value.title === undefined || typeof value.title === 'string') &&
+    typeof value.createdAt === 'number' &&
+    typeof value.updatedAt === 'number' &&
+    typeof value.messageCount === 'number' &&
+    isConversationStatus(value.status) &&
+    (value.children === undefined ||
+      (Array.isArray(value.children) && value.children.every(isChildProgress)))
+  );
+}
+
 function parseRuntimeEvent(data: string): RuntimeEvent | undefined {
   let event: unknown;
   try {
@@ -227,7 +243,7 @@ function parseRuntimeEvent(data: string): RuntimeEvent | undefined {
   ) {
     return undefined;
   }
-  return event as RuntimeEvent;
+  return { ...event, type: 'change', resource: event.resource, id: event.id };
 }
 
 function isConversationStatus(value: unknown): value is ConversationStatus {
@@ -265,9 +281,9 @@ function isChildProgress(value: unknown): value is ChildProgress {
       typeof activity.at === 'number' &&
       Number.isFinite(activity.at) &&
       (activity.outcome === undefined ||
-        ['completed', 'failed', 'cancelled'].includes(
-          activity.outcome as string,
-        )) &&
+        activity.outcome === 'completed' ||
+        activity.outcome === 'failed' ||
+        activity.outcome === 'cancelled') &&
       ['id', 'actorPath', 'targetPath', 'streamId'].every(
         (key) => typeof activity[key] === 'string',
       ),

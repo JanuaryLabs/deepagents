@@ -59,7 +59,6 @@ import {
 
 import { loadRuntime } from '../app/runtime-data.ts';
 import {
-  type ScheduleCommand,
   type ScheduleDefinitionInput,
   type ScheduleMutation,
   type ScheduledRunView,
@@ -80,8 +79,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export function ScheduledRoute() {
-  const href = useLoaderData<typeof loader>().discovery?.capabilities.schedules
-    ?.href;
+  const href =
+    useLoaderData<typeof loader>().discovery?.capabilities.schedules?.href;
   if (!href) return null;
   return <ScheduledWorkspace href={href} />;
 }
@@ -261,7 +260,7 @@ function TaskDetail({
           <TaskActions
             task={task}
             command={command}
-            onPurged={() => navigate('/scheduled/tasks')}
+            onPurged={() => void navigate('/scheduled/tasks')}
           />
           <Button
             className="size-8 rounded-full"
@@ -283,7 +282,7 @@ function TaskDetail({
             size="icon"
             variant="ghost"
             aria-label="Close"
-            onClick={() => navigate('/scheduled/tasks')}
+            onClick={() => void navigate('/scheduled/tasks')}
           >
             <XIcon />
           </Button>
@@ -439,10 +438,11 @@ function TaskDetail({
         <Button
           variant="outline"
           disabled={task.target.kind !== 'existing-conversation'}
-          onClick={() =>
-            task.target.kind === 'existing-conversation' &&
-            navigate(`/chat/${encodeURIComponent(task.target.chatId)}`)
-          }
+          onClick={() => {
+            if (task.target.kind === 'existing-conversation') {
+              void navigate(`/chat/${encodeURIComponent(task.target.chatId)}`);
+            }
+          }}
         >
           Open chat <ExternalLinkIcon />
         </Button>
@@ -515,7 +515,7 @@ function RunDetail({
             size="icon"
             variant="ghost"
             aria-label="Close"
-            onClick={() => navigate(back)}
+            onClick={() => void navigate(back)}
           >
             <XIcon />
           </Button>
@@ -584,10 +584,13 @@ function RunDetail({
         <Button
           variant="outline"
           disabled={!entry.conversation}
-          onClick={() =>
-            entry.conversation &&
-            navigate(`/chat/${encodeURIComponent(entry.conversation.chatId)}`)
-          }
+          onClick={() => {
+            if (entry.conversation) {
+              void navigate(
+                `/chat/${encodeURIComponent(entry.conversation.chatId)}`,
+              );
+            }
+          }}
         >
           Open chat <ExternalLinkIcon />
         </Button>
@@ -606,8 +609,8 @@ function TaskActions({
   onPurged: () => void;
 }) {
   const archived = task.status === 'archived';
-  const run = (kind: ScheduleCommand['kind']) =>
-    command.mutate({ kind, taskId: task.id } as ScheduleCommand);
+  const run = (kind: 'run' | 'archive') =>
+    command.mutate({ kind, taskId: task.id });
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -760,7 +763,7 @@ function CreateTaskDialog({
                     setDraft(blankDefinition());
                     onClose();
                     if (task && 'status' in task) {
-                      navigate(`/scheduled/tasks/${task.id}`);
+                      void navigate(`/scheduled/tasks/${task.id}`);
                     }
                   },
                 },

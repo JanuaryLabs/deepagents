@@ -8,6 +8,7 @@ import {
   useNavigate,
   useRevalidator,
 } from 'react-router';
+import { z } from 'zod';
 
 import { ChildProgressList } from '@deepagents/devtool-history';
 import {
@@ -34,6 +35,9 @@ import { INTERACTIVE_ELEMENTS } from '../app/elements.tsx';
 import { loadRuntime } from '../app/runtime-data.ts';
 import { TOOL_REGISTRY } from '../app/tools.tsx';
 import { ChatCompaction } from './chat-compaction.tsx';
+
+/** The session read; `validateUIMessages` checks each message. */
+const sessionSchema = z.object({ messages: z.array(z.unknown()) });
 
 export async function loader(args: LoaderFunctionArgs) {
   const { params, request } = args;
@@ -72,15 +76,17 @@ export async function loader(args: LoaderFunctionArgs) {
     if (!response.ok) {
       throw new Error(`Session request failed: ${response.status}`);
     }
-    const body = (await response.json()) as { messages?: unknown };
-    if (!Array.isArray(body.messages)) {
+    const body = sessionSchema.safeParse(await response.json());
+    if (!body.success) {
       throw new Error('Session response did not include messages');
     }
     return {
       ...runtime,
       chatId,
       conversation,
-      initialMessages: await validateUIMessages({ messages: body.messages }),
+      initialMessages: await validateUIMessages({
+        messages: body.data.messages,
+      }),
       sessionExists: true,
       sessionError: false,
     };
@@ -169,9 +175,9 @@ function ChatSession({
       chatId={chatId}
       initialMessages={initialMessages}
       onFinish={() => void revalidate()}
-      onResetChat={(nextChatId) =>
-        navigate(`/chat?chatId=${encodeURIComponent(nextChatId)}`)
-      }
+      onResetChat={(nextChatId) => {
+        void navigate(`/chat?chatId=${encodeURIComponent(nextChatId)}`);
+      }}
       resume={sessionExists}
       registry={TOOL_REGISTRY}
       transport={transport}
@@ -225,7 +231,7 @@ function ChatMessages() {
           </CompactMessages.Item>
         ))}
       </CompactMessages.List>
-      <CompactMessages.Error error={error} onRetry={regenerate} />
+      <CompactMessages.Error error={error} onRetry={() => void regenerate()} />
       <CompactMessages.Thinking />
     </CompactMessages.Root>
   );

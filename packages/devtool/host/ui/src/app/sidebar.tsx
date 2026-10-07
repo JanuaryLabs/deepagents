@@ -58,8 +58,9 @@ export function DevtoolSidebar() {
 
 export function NewChatButton({ iconOnly = false }: { iconOnly?: boolean }) {
   const navigate = useNavigate();
-  const startNewChat = () =>
-    navigate(`/chat?chatId=${encodeURIComponent(crypto.randomUUID())}`);
+  const startNewChat = () => {
+    void navigate(`/chat?chatId=${encodeURIComponent(crypto.randomUUID())}`);
+  };
 
   if (iconOnly) {
     return (
@@ -119,12 +120,13 @@ function PrimaryNavigation() {
 function RunsNavigation() {
   const navigate = useNavigate();
   const { discovery, history, historyError } = useLoaderData<typeof loader>();
-  const selected = useMatches().at(-1)?.loaderData as
-    { chatId?: string; conversation?: HistoryRecord } | undefined;
-  const selectedChatId = selected?.conversation?.chatId ?? selected?.chatId;
+  const selectedChatId = selectedChatIdOf(useMatches().at(-1)?.loaderData);
   const select = useCallback(
-    (entry: HistoryRecord) =>
-      navigate(generatePath('/chat/:sessionId', { sessionId: entry.chatId })),
+    (entry: HistoryRecord) => {
+      void navigate(
+        generatePath('/chat/:sessionId', { sessionId: entry.chatId }),
+      );
+    },
     [navigate],
   );
 
@@ -192,4 +194,22 @@ function RunsNavigation() {
       </SidebarGroupContent>
     </SidebarGroup>
   );
+}
+
+/** The deepest route's conversation, else the `?chatId=` it loaded. */
+function selectedChatIdOf(loaderData: unknown): string | undefined {
+  if (typeof loaderData !== 'object' || loaderData === null) return undefined;
+  const conversation =
+    'conversation' in loaderData ? loaderData.conversation : undefined;
+  if (
+    typeof conversation === 'object' &&
+    conversation !== null &&
+    'chatId' in conversation &&
+    typeof conversation.chatId === 'string'
+  ) {
+    return conversation.chatId;
+  }
+  return 'chatId' in loaderData && typeof loaderData.chatId === 'string'
+    ? loaderData.chatId
+    : undefined;
 }

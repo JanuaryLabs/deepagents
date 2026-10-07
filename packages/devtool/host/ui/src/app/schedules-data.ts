@@ -4,6 +4,7 @@ import {
   useMutation,
   useQuery,
 } from '@tanstack/react-query';
+import { z } from 'zod';
 
 import type {
   ScheduledRunView,
@@ -15,6 +16,51 @@ import { queryClient } from './runtime-data.ts';
 export type { ScheduledRunView, ScheduledTaskView };
 
 export type ScheduleTargetInput = ScheduledTaskView['target'];
+
+const scheduleTargetSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('new-conversation') }),
+  z.object({ kind: z.literal('existing-conversation'), chatId: z.string() }),
+]);
+
+const scheduledTaskSchema: z.ZodType<ScheduledTaskView> = z.object({
+  id: z.string(),
+  name: z.string(),
+  prompt: z.string(),
+  recurrence: z.string(),
+  timezone: z.string(),
+  target: scheduleTargetSchema,
+  status: z.enum(['active', 'paused', 'completed', 'archived']),
+  nextRunAt: z.number().nullable(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+  archivedAt: z.number().nullable(),
+});
+
+const scheduledRunSchema: z.ZodType<ScheduledRunView> = z.object({
+  id: z.string(),
+  taskId: z.string(),
+  trigger: z.enum(['scheduled', 'manual']),
+  occurrenceAt: z.number(),
+  prompt: z.string(),
+  target: scheduleTargetSchema,
+  status: z.enum([
+    'dispatching',
+    'running',
+    'completed',
+    'failed',
+    'cancelled',
+  ]),
+  reviewStatus: z.enum(['pending_review', 'reviewed', 'archived']).nullable(),
+  conversation: z.object({ chatId: z.string(), turnId: z.string() }).nullable(),
+  startedAt: z.number().nullable(),
+  finishedAt: z.number().nullable(),
+  error: z.string().nullable(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+
+/** Body of a failed Zukhruf request: `{ error, cause }`. */
+const errorBodySchema = z.object({ error: z.string() });
 
 export interface ScheduleDefinitionInput {
   name: string;
@@ -28,7 +74,8 @@ export function useScheduledTasks(href: string | undefined) {
   return useQuery({
     queryKey: ['schedules', 'tasks', href],
     queryFn: href
-      ? ({ signal }) => read<ScheduledTaskView[]>(`${href}/tasks`, { signal })
+      ? ({ signal }) =>
+          read(`${href}/tasks`, { signal }, z.array(scheduledTaskSchema))
       : skipToken,
   });
 }
@@ -38,7 +85,7 @@ export function usePendingReview(href: string | undefined) {
     queryKey: ['schedules', 'inbox', href],
     queryFn: href
       ? ({ signal }) =>
-          read<ScheduledRunView[]>(`${href}/runs/inbox`, { signal })
+          read(`${href}/runs/inbox`, { signal }, z.array(scheduledRunSchema))
       : skipToken,
   });
 }
@@ -49,7 +96,11 @@ export function useTaskRuns(href: string | undefined, taskId?: string) {
     queryFn:
       href && taskId
         ? ({ signal }) =>
-            read<ScheduledRunView[]>(`${href}/tasks/${taskId}/runs`, { signal })
+            read(
+              `${href}/tasks/${taskId}/runs`,
+              { signal },
+              z.array(scheduledRunSchema),
+            )
         : skipToken,
   });
 }
@@ -60,7 +111,7 @@ export function useScheduledRun(href: string | undefined, runId?: string) {
     queryFn:
       href && runId
         ? ({ signal }) =>
-            read<ScheduledRunView>(`${href}/runs/${runId}`, { signal })
+            read(`${href}/runs/${runId}`, { signal }, scheduledRunSchema)
         : skipToken,
   });
 }
@@ -96,55 +147,75 @@ export function useScheduleCommand(href: string | undefined): ScheduleMutation {
 async function send(href: string, command: ScheduleCommand) {
   switch (command.kind) {
     case 'create':
-      return write<ScheduledTaskView>(`${href}/tasks`, {
-        body: command.definition,
-        idempotencyKey: crypto.randomUUID(),
-        method: 'POST',
-      });
+      return write(
+        `${href}/tasks`,
+        {
+          body: command.definition,
+          idempotencyKey: crypto.randomUUID(),
+          method: 'POST',
+        },
+        scheduledTaskSchema,
+      );
     case 'update':
-      return write<ScheduledTaskView>(`${href}/tasks/${command.taskId}`, {
-        body: command.definition,
-        method: 'PATCH',
-      });
+      return write(
+        `${href}/tasks/${command.taskId}`,
+        { body: command.definition, method: 'PATCH' },
+        scheduledTaskSchema,
+      );
     case 'pause':
     case 'resume':
     case 'archive':
-      return write<ScheduledTaskView>(
+      return write(
         `${href}/tasks/${command.taskId}/${command.kind}`,
         { method: 'POST' },
+        scheduledTaskSchema,
       );
     case 'run':
-      return write<ScheduledRunView>(`${href}/tasks/${command.taskId}/run`, {
-        idempotencyKey: crypto.randomUUID(),
-        method: 'POST',
-      });
+      return write(
+        `${href}/tasks/${command.taskId}/run`,
+        { idempotencyKey: crypto.randomUUID(), method: 'POST' },
+        scheduledRunSchema,
+      );
     case 'purge':
-      return write<undefined>(`${href}/tasks/${command.taskId}`, {
-        method: 'DELETE',
-      });
+      // 204 No Content.
+      await request(`${href}/tasks/${command.taskId}`, { method: 'DELETE' });
+      return undefined;
     case 'cancel':
     case 'review':
-      return write<ScheduledRunView>(
+      return write(
         `${href}/runs/${command.runId}/${command.kind}`,
         { method: 'POST' },
+        scheduledRunSchema,
       );
   }
 }
 
-async function read<T>(url: string, init: RequestInit): Promise<T> {
+async function read<T>(
+  url: string,
+  init: RequestInit,
+  schema: z.ZodType<T>,
+): Promise<T> {
   const response = await fetch(url, init);
   if (!response.ok) throw await scheduleError(response);
-  return response.json() as Promise<T>;
+  return schema.parse(await response.json());
 }
 
 async function write<T>(
   url: string,
-  options: {
-    body?: unknown;
-    idempotencyKey?: string;
-    method: 'POST' | 'PATCH' | 'DELETE';
-  },
+  options: RequestOptions,
+  schema: z.ZodType<T>,
 ): Promise<T> {
+  const response = await request(url, options);
+  return schema.parse(await response.json());
+}
+
+interface RequestOptions {
+  body?: unknown;
+  idempotencyKey?: string;
+  method: 'POST' | 'PATCH' | 'DELETE';
+}
+
+async function request(url: string, options: RequestOptions) {
   const headers = new Headers();
   if (options.body) headers.set('content-type', 'application/json');
   if (options.idempotencyKey) {
@@ -156,13 +227,14 @@ async function write<T>(
     method: options.method,
   });
   if (!response.ok) throw await scheduleError(response);
-  return response.status === 204
-    ? (undefined as T)
-    : (response.json() as Promise<T>);
+  return response;
 }
 
 async function scheduleError(response: Response): Promise<Error> {
-  const body = (await response.json().catch(() => undefined)) as
-    { error?: string } | undefined;
-  return new Error(body?.error ?? `Request failed: ${response.status}`);
+  const body = errorBodySchema.safeParse(
+    await response.json().catch(() => undefined),
+  );
+  return new Error(
+    body.success ? body.data.error : `Request failed: ${response.status}`,
+  );
 }

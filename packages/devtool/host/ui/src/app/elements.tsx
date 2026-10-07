@@ -9,7 +9,9 @@ function FollowUp({ question }: { question?: string }) {
     <button
       type="button"
       className="text-muted-foreground hover:bg-accent hover:text-accent-foreground my-1 inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition-colors"
-      onClick={() => submit({ prompt: question, persistedPrompt: question })}
+      onClick={() =>
+        void submit({ prompt: question, persistedPrompt: question })
+      }
     >
       <CornerDownRight className="size-3.5" />
       {question}

@@ -218,7 +218,7 @@ function WizardNavigation() {
   return (
     <StepNavigation
       onBack={handleBack}
-      onNext={handleNext}
+      onNext={() => void handleNext()}
       isFirst={isFirst}
       isLast={isLast}
       canProceed={canProceed}

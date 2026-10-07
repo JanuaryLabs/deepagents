@@ -1,17 +1,28 @@
 import { QueryClient } from '@tanstack/react-query';
+import { z } from 'zod';
 
-import type { HistoryRecord } from '@deepagents/devtool-history';
+import {
+  type HistoryRecord,
+  isHistoryRecord,
+} from '@deepagents/devtool-history';
 
-export type Discovery = {
-  capabilities: {
-    chat: { href: string };
-    history: { href: string };
-    events: { href: string };
-    traces?: { href: string };
-    schedules?: { href: string };
-    uploads?: { href: string; mediaTypes?: string[] };
-  };
-};
+const capabilitySchema = z.object({ href: z.string() });
+
+/** The runtime's `/info` response, as far as the DevTool reads it. */
+const discoverySchema = z.object({
+  capabilities: z.object({
+    chat: capabilitySchema,
+    history: capabilitySchema,
+    events: capabilitySchema,
+    traces: capabilitySchema.optional(),
+    schedules: capabilitySchema.optional(),
+    uploads: capabilitySchema
+      .extend({ mediaTypes: z.array(z.string()).optional() })
+      .optional(),
+  }),
+});
+
+export type Discovery = z.infer<typeof discoverySchema>;
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -33,7 +44,7 @@ export async function loadRuntime(signal: AbortSignal) {
   try {
     const loadedDiscovery = await queryClient.fetchQuery({
       queryKey: ['runtime', 'discovery', infoPath],
-      queryFn: () => read<Discovery>(infoPath, signal),
+      queryFn: async () => discoverySchema.parse(await read(infoPath, signal)),
       staleTime: Infinity,
     });
     discovery = loadedDiscovery;
@@ -43,10 +54,9 @@ export async function loadRuntime(signal: AbortSignal) {
         'history',
         loadedDiscovery.capabilities.history.href,
       ],
-      queryFn: () =>
-        read<HistoryRecord[]>(
-          loadedDiscovery.capabilities.history.href,
-          signal,
+      queryFn: async () =>
+        parseHistory(
+          await read(loadedDiscovery.capabilities.history.href, signal),
         ),
     });
     return { discovery, history, historyError: false };
@@ -55,8 +65,15 @@ export async function loadRuntime(signal: AbortSignal) {
   }
 }
 
-async function read<T>(url: string, signal: AbortSignal) {
+async function read(url: string, signal: AbortSignal): Promise<unknown> {
   const response = await fetch(url, { signal });
   if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-  return response.json() as Promise<T>;
+  return response.json();
+}
+
+function parseHistory(body: unknown): HistoryRecord[] {
+  if (!Array.isArray(body) || !body.every(isHistoryRecord)) {
+    throw new Error('History response is not a list of conversations');
+  }
+  return body;
 }

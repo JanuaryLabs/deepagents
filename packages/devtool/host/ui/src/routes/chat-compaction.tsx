@@ -5,8 +5,8 @@ import {
   CircleAlertIcon,
   MinusIcon,
 } from 'lucide-react';
+import { z } from 'zod';
 
-import type { CompactionEvent } from '@deepagents/experimental/zukhruf';
 import {
   Alert,
   AlertDescription,
@@ -22,6 +22,49 @@ import {
   Spinner,
 } from '@deepagents/react-shadcn';
 
+/**
+ * The `data-compaction` payloads Zukhruf streams (`CompactionEvent`), as far as
+ * this view reads them.
+ */
+const compactionEventSchema = z.discriminatedUnion('status', [
+  z.object({
+    id: z.string(),
+    status: z.literal('restored'),
+    sourceMessages: z.number(),
+    replacementMessages: z.number(),
+  }),
+  z.object({
+    id: z.string(),
+    status: z.literal('started'),
+    tokenScope: z.literal('request').optional(),
+    triggerIndex: z.number(),
+    targetTokens: z.number(),
+    messageCount: z.number(),
+  }),
+  z.object({
+    id: z.string(),
+    status: z.literal('completed'),
+    tokenScope: z.literal('request').optional(),
+    tokens: z.object({ before: z.number(), after: z.number() }),
+  }),
+  z.object({
+    id: z.string(),
+    status: z.literal('failed'),
+    phase: z.enum(['restore', 'evaluate', 'compact', 'persist']),
+    reason: z.enum([
+      'no-safe-boundary',
+      'protected-history',
+      'incomplete-summary',
+      'empty-summary',
+      'summary-too-large',
+      'request-overhead',
+      'error',
+    ]),
+  }),
+]);
+
+type CompactionEvent = z.infer<typeof compactionEventSchema>;
+
 export function ChatCompaction({
   message,
   running,
@@ -29,9 +72,11 @@ export function ChatCompaction({
   message: UIMessage;
   running: boolean;
 }) {
-  const events = message.parts.flatMap((part) =>
-    part.type === 'data-compaction' ? [part.data as CompactionEvent] : [],
-  );
+  const events = message.parts.flatMap((part) => {
+    if (part.type !== 'data-compaction') return [];
+    const event = compactionEventSchema.safeParse(part.data);
+    return event.success ? [event.data] : [];
+  });
   const groups = Map.groupBy(events, (event) => event.id);
   return Array.from(groups, ([id, events]) => (
     <CompactionEntry key={id} events={events} running={running} />

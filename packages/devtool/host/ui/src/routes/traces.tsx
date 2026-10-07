@@ -32,9 +32,7 @@ export function TracesRoute() {
     <ConversationTraces conversation={conversation} href={tracesHref} />
   ) : conversation ? (
     <ConversationSummary conversation={conversation} />
-  ) : (
-    null
-  );
+  ) : null;
 }
 
 function ConversationTraces({
@@ -47,15 +45,16 @@ function ConversationTraces({
   const { traceId } = useParams();
   const navigate = useNavigate();
   const selectTrace = useCallback(
-    (nextTraceId: string, replace: boolean) =>
-      navigate(
+    (nextTraceId: string, replace: boolean) => {
+      void navigate(
         generatePath('/history/:userId/:chatId/traces/:traceId', {
           chatId: conversation.chatId,
           traceId: nextTraceId,
           userId: conversation.userId,
         }),
         { replace },
-      ),
+      );
+    },
     [conversation.chatId, conversation.userId, navigate],
   );
   return (

@@ -16,12 +16,13 @@ import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
-import type { AgentModel, AgentSandbox } from '@deepagents/context';
+import type { AgentSandbox } from '@deepagents/context';
 import {
   InMemoryContextStore,
   PollingChangeSource,
   SqliteStreamStore,
   StreamManager,
+  createBashTool,
 } from '@deepagents/context';
 import {
   FileTraceAdapter,
@@ -52,6 +53,28 @@ const USER_HEADER = 'x-test-user';
 const ZUKHRUF_MOUNT_PATH = '/zukhruf/v1';
 const INFO_URL = `${ZUKHRUF_MOUNT_PATH}/info`;
 const TRACES_HREF = `${ZUKHRUF_MOUNT_PATH}/traces`;
+
+const traceSummaries = z.array(z.record(z.string(), z.unknown()));
+
+/**
+ * These turns never reach the sandbox: a real toolkit over a backend that
+ * refuses every call.
+ */
+function unusedSandbox(): Promise<AgentSandbox> {
+  const refuse = () =>
+    Promise.reject(new Error('This test does not use the sandbox.'));
+  return createBashTool({
+    sandbox: {
+      executeCommand: refuse,
+      readFile: refuse,
+      writeFiles: refuse,
+      exists: () => Promise.resolve(false),
+      dispose: () => Promise.resolve(),
+      [Symbol.asyncDispose]: () => Promise.resolve(),
+    },
+    promptOptions: { toolPrompt: '' },
+  });
+}
 
 class ControlledTurnQueue extends TurnQueue {
   readonly #turns: TurnRef[] = [];
@@ -159,9 +182,9 @@ async function readCapabilities(app: Hono<HttpEnv>, userId: string) {
   const body = await response.text();
   return {
     body,
-    capabilities: (
-      JSON.parse(body) as { capabilities: Record<string, { href: string }> }
-    ).capabilities,
+    capabilities: z
+      .object({ capabilities: z.record(z.string(), z.unknown()) })
+      .parse(JSON.parse(body)).capabilities,
   };
 }
 
@@ -249,8 +272,8 @@ function createDeclaration(
 ) {
   return defineAgent({
     name: 'trace-agent',
-    model: { provider: 'test', modelId: 'test' } as AgentModel,
-    sandbox: async () => ({}) as AgentSandbox,
+    model: new MockLanguageModelV4({ provider: 'test', modelId: 'test' }),
+    sandbox: unusedSandbox,
     instructions: [],
     telemetry,
     plugins,
@@ -322,16 +345,17 @@ test('fileTelemetry() composes plugin integrations with agent policy and serves 
   const persistedSpans = (await readFile(telemetry, 'utf8'))
     .trim()
     .split('\n')
-    .map(
-      (line) =>
-        JSON.parse(line) as {
-          trace_id: string;
-          span_id: string;
-          start_time: string;
-          kind: string;
-          status: { code: string };
-          attributes: Record<string, unknown>;
-        },
+    .map((line) =>
+      z
+        .looseObject({
+          trace_id: z.string(),
+          span_id: z.string(),
+          start_time: z.string(),
+          kind: z.string(),
+          status: z.looseObject({ code: z.string() }),
+          attributes: z.record(z.string(), z.unknown()),
+        })
+        .parse(JSON.parse(line)),
     );
   assert(persistedSpans.length > 0);
   assert(
@@ -374,9 +398,7 @@ test('fileTelemetry() composes plugin integrations with agent policy and serves 
   const listResponse = await app.request(listUrl, asUser('user-1'));
   assert.equal(listResponse.status, 200);
   assert.equal(listResponse.headers.get('cache-control'), 'no-store');
-  const traceList = (await listResponse.json()) as Array<
-    Record<string, unknown>
-  >;
+  const traceList = traceSummaries.parse(await listResponse.json());
   assert.equal(traceList.length, 1);
   assert.deepEqual(
     {
@@ -404,15 +426,19 @@ test('fileTelemetry() composes plugin integrations with agent policy and serves 
   const traceUrl = `${listUrl}/${String(traceList[0].id)}`;
   const traceResponse = await app.request(traceUrl, asUser('user-1'));
   assert.equal(traceResponse.status, 200);
-  const trace = (await traceResponse.json()) as {
-    spans: Array<{
-      id: string;
-      type: string;
-      parentId: string | null;
-      input?: unknown;
-      output?: unknown;
-    }>;
-  };
+  const trace = z
+    .looseObject({
+      spans: z.array(
+        z.looseObject({
+          id: z.string(),
+          type: z.string(),
+          parentId: z.string().nullable(),
+          input: z.unknown().optional(),
+          output: z.unknown().optional(),
+        }),
+      ),
+    })
+    .parse(await traceResponse.json());
   assert.deepEqual(
     trace.spans.map(({ type }) => type),
     ['agent', 'generation', 'function', 'generation'],
@@ -438,19 +464,32 @@ test('fileTelemetry() composes plugin integrations with agent policy and serves 
     'failed',
   );
   assert.equal(observedStarts, 2);
-  const failedTraces = (await (
-    await app.request(listUrl, asUser('user-1'))
-  ).json()) as Array<Record<string, unknown>>;
+  const failedTraces = traceSummaries.parse(
+    await (await app.request(listUrl, asUser('user-1'))).json(),
+  );
   const failedTrace = failedTraces.find(
     ({ streamId }) => streamId === failedTurn.id,
   );
   assert(failedTrace);
   assert.equal(failedTrace.status, 'failed');
-  const failedDetail = (await (
-    await app.request(`${listUrl}/${String(failedTrace.id)}`, asUser('user-1'))
-  ).json()) as {
-    spans: Array<{ type: string; status: string; error?: unknown }>;
-  };
+  const failedDetail = z
+    .looseObject({
+      spans: z.array(
+        z.looseObject({
+          type: z.string(),
+          status: z.string(),
+          error: z.unknown().optional(),
+        }),
+      ),
+    })
+    .parse(
+      await (
+        await app.request(
+          `${listUrl}/${String(failedTrace.id)}`,
+          asUser('user-1'),
+        )
+      ).json(),
+    );
   assert.deepEqual(
     failedDetail.spans
       .filter(({ status }) => status === 'failed')
@@ -473,7 +512,9 @@ test('fileTelemetry() composes plugin integrations with agent policy and serves 
   );
   assert.equal(missingTrace.status, 404);
   assert.equal(
-    ((await missingTrace.json()) as { cause: { code: string } }).cause.code,
+    z
+      .object({ cause: z.object({ code: z.string() }) })
+      .parse(await missingTrace.json()).cause.code,
     'traces/trace-not-found',
   );
 
@@ -491,7 +532,10 @@ test('fileTelemetry() composes plugin integrations with agent policy and serves 
     tracesHttp(traceTelemetry),
   ).request(listUrl, asUser('user-1'));
   assert.equal(restartedResponse.status, 200);
-  assert.equal(((await restartedResponse.json()) as unknown[]).length, 2);
+  assert.equal(
+    z.array(z.unknown()).parse(await restartedResponse.json()).length,
+    2,
+  );
   await restartedWorker[Symbol.asyncDispose]();
 });
 

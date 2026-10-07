@@ -7,6 +7,7 @@ import {
   Loader2Icon,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { z } from 'zod';
 
 import {
   type HistoryRecord,
@@ -16,35 +17,53 @@ import {
 } from '@deepagents/devtool-history';
 import { cn } from '@deepagents/react-shadcn';
 
-type RecordingState = 'recorded' | 'not-recorded';
-type TraceStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+const recordingStateSchema = z.enum(['recorded', 'not-recorded']);
+const spanStatusSchema = z.enum([
+  'running',
+  'completed',
+  'failed',
+  'cancelled',
+]);
 
-interface AgentTraceSummary {
-  id: string;
-  startedAt: string | null;
-  endedAt: string | null;
-  status: TraceStatus;
-}
+/**
+ * A trace as `tracesHttp()` serves it. Its status is the turn's durable status
+ * when the turn is known, so it can also be `queued`.
+ */
+const traceSummarySchema = z.object({
+  id: z.string(),
+  startedAt: z.string().nullable(),
+  endedAt: z.string().nullable(),
+  status: z.enum(['queued', 'running', 'completed', 'failed', 'cancelled']),
+});
 
-interface AgentTraceSpan {
-  id: string;
-  parentId: string | null;
-  startedAt: string;
-  endedAt: string | null;
-  status: TraceStatus;
-  type: string;
-  name: string;
-  input?: unknown;
-  output?: unknown;
-  usage?: unknown;
-  error?: unknown;
-  data: Record<string, unknown>;
-}
+/** Every field is kept: the inspector's raw tab shows the span as served. */
+const traceSpanSchema = z.looseObject({
+  id: z.string(),
+  parentId: z.string().nullable(),
+  startedAt: z.string(),
+  endedAt: z.string().nullable(),
+  status: spanStatusSchema,
+  type: z.string(),
+  name: z.string(),
+  input: z.unknown().optional(),
+  output: z.unknown().optional(),
+  usage: z.unknown().optional(),
+  error: z.unknown().optional(),
+  data: z.record(z.string(), z.unknown()),
+});
 
-type AgentTrace = AgentTraceSummary & {
-  recording: { inputs: RecordingState; outputs: RecordingState };
-  spans: AgentTraceSpan[];
-};
+const traceSchema = traceSummarySchema.extend({
+  recording: z.object({
+    inputs: recordingStateSchema,
+    outputs: recordingStateSchema,
+  }),
+  spans: z.array(traceSpanSchema),
+});
+
+type RecordingState = z.infer<typeof recordingStateSchema>;
+type AgentTraceSummary = z.infer<typeof traceSummarySchema>;
+type AgentTraceSpan = z.infer<typeof traceSpanSchema>;
+type AgentTrace = z.infer<typeof traceSchema>;
 
 export function TracesView({
   conversation,
@@ -73,7 +92,7 @@ export function TracesView({
         });
         if (!response.ok)
           throw new Error(`Trace request failed: ${response.status}`);
-        const next = (await response.json()) as AgentTraceSummary[];
+        const next = z.array(traceSummarySchema).parse(await response.json());
         setTraces(next);
         setError(false);
         setLoading(false);
@@ -106,7 +125,7 @@ export function TracesView({
         );
         if (!response.ok)
           throw new Error(`Trace detail failed: ${response.status}`);
-        const next = (await response.json()) as AgentTrace;
+        const next = traceSchema.parse(await response.json());
         setDetail(next);
         setSelectedSpanId((current) =>
           next.spans.some(({ id }) => id === current)

@@ -7,7 +7,7 @@ import {
   createMemoryRouter,
   useLocation,
 } from 'react-router';
-import { afterEach, expect, it, vi } from 'vitest';
+import { expect, it, vi } from 'vitest';
 
 import { RuntimeEventsProvider } from '@deepagents/devtool-history';
 import { SidebarProvider } from '@deepagents/react-shadcn';
@@ -29,33 +29,34 @@ const capabilities = {
 };
 
 class FakeEventSource extends EventTarget {
-  constructor(readonly url: string) {
+  readonly url: string;
+
+  constructor(url: string) {
     super();
+    this.url = url;
   }
 
   close() {}
 }
 
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-});
-
 it('puts a client-generated durable chat ID in the new-chat URL', () => {
   vi.spyOn(crypto, 'randomUUID').mockReturnValue(sessionId);
+  try {
+    render(
+      <MemoryRouter initialEntries={['/history']}>
+        <NewChatButton iconOnly />
+        <Location />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
 
-  render(
-    <MemoryRouter initialEntries={['/history']}>
-      <NewChatButton iconOnly />
-      <Location />
-    </MemoryRouter>,
-  );
-  fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
-
-  expect(screen.getByTestId('location').textContent).toBe(
-    `/chat?chatId=${sessionId}`,
-  );
+    expect(screen.getByTestId('location').textContent).toBe(
+      `/chat?chatId=${sessionId}`,
+    );
+  } finally {
+    cleanup();
+    vi.restoreAllMocks();
+  }
 });
 
 it('loads the same query chat ID before creation and after reload', async () => {
@@ -89,30 +90,33 @@ it('loads the same query chat ID before creation and after reload', async () => 
     .fn<typeof fetch>()
     .mockResolvedValue(Response.json({ sessionId, messages }));
   vi.stubGlobal('fetch', request);
+  try {
+    const first = await load(`/chat?chatId=${sessionId}`);
+    expect(request).not.toHaveBeenCalled();
+    expect(first).toMatchObject({
+      chatId: sessionId,
+      conversation: undefined,
+      initialMessages: undefined,
+      sessionExists: false,
+      sessionError: false,
+    });
 
-  const first = await load(`/chat?chatId=${sessionId}`);
-  expect(request).not.toHaveBeenCalled();
-  expect(first).toMatchObject({
-    chatId: sessionId,
-    conversation: undefined,
-    initialMessages: undefined,
-    sessionExists: false,
-    sessionError: false,
-  });
-
-  const reloaded = await load(`/chat?chatId=${sessionId}`);
-  expect(reloaded).toMatchObject({
-    chatId: sessionId,
-    conversation: history,
-    initialMessages: messages,
-    sessionExists: true,
-    sessionError: false,
-  });
-  expect(request).toHaveBeenCalledOnce();
-  expect(request).toHaveBeenCalledWith(
-    `${api}/${sessionId}`,
-    expect.objectContaining({ signal: expect.any(AbortSignal) }),
-  );
+    const reloaded = await load(`/chat?chatId=${sessionId}`);
+    expect(reloaded).toMatchObject({
+      chatId: sessionId,
+      conversation: history,
+      initialMessages: messages,
+      sessionExists: true,
+      sessionError: false,
+    });
+    expect(request).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledWith(
+      `${api}/${sessionId}`,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 it('highlights a query chat as soon as it appears in Runs', async () => {
@@ -126,42 +130,47 @@ it('highlights a query chat as soon as it appears in Runs', async () => {
     status: { type: 'idle' as const },
   };
   vi.stubGlobal('EventSource', FakeEventSource);
-  const router = createMemoryRouter(
-    [
-      {
-        path: '/',
-        element: (
-          <RuntimeEventsProvider href={eventsHref} onEvent={() => {}}>
-            <SidebarProvider>
-              <DevtoolSidebar />
-              <Outlet />
-            </SidebarProvider>
-          </RuntimeEventsProvider>
-        ),
-        loader: () => ({
-          discovery: { capabilities },
-          history: [history],
-          historyError: false,
-        }),
-        children: [
-          {
-            path: 'chat',
-            element: null,
-            loader: () => ({ chatId: sessionId, conversation: undefined }),
-          },
-        ],
-      },
-    ],
-    { initialEntries: [`/chat?chatId=${sessionId}`] },
-  );
+  try {
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/',
+          element: (
+            <RuntimeEventsProvider href={eventsHref} onEvent={() => {}}>
+              <SidebarProvider>
+                <DevtoolSidebar />
+                <Outlet />
+              </SidebarProvider>
+            </RuntimeEventsProvider>
+          ),
+          loader: () => ({
+            discovery: { capabilities },
+            history: [history],
+            historyError: false,
+          }),
+          children: [
+            {
+              path: 'chat',
+              element: null,
+              loader: () => ({ chatId: sessionId, conversation: undefined }),
+            },
+          ],
+        },
+      ],
+      { initialEntries: [`/chat?chatId=${sessionId}`] },
+    );
 
-  render(<RouterProvider router={router} />);
+    render(<RouterProvider router={router} />);
 
-  expect(
-    (
-      await screen.findByRole('button', { name: /New conversation/ })
-    ).getAttribute('aria-current'),
-  ).toBe('true');
+    expect(
+      (
+        await screen.findByRole('button', { name: /New conversation/ })
+      ).getAttribute('aria-current'),
+    ).toBe('true');
+  } finally {
+    cleanup();
+    vi.unstubAllGlobals();
+  }
 });
 
 it('only offers file attachments when the runtime advertises uploads, accepting what it lists', async () => {
@@ -196,24 +205,30 @@ it('only offers file attachments when the runtime advertises uploads, accepting 
     return render(<RouterProvider router={router} />);
   };
 
-  const withoutUploads = renderChat(undefined);
-  await screen.findByLabelText('Rich prompt composer');
-  expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull();
-  withoutUploads.unmount();
+  try {
+    const withoutUploads = renderChat(undefined);
+    await screen.findByLabelText('Rich prompt composer');
+    expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull();
+    withoutUploads.unmount();
 
-  const withUploads = renderChat({ href: api });
-  expect(
-    await screen.findByRole('button', { name: 'Attach files' }),
-  ).toBeTruthy();
-  expect(
-    screen.getByLabelText('Attach media files').getAttribute('accept'),
-  ).toBe('image/*,video/*,audio/*');
-  withUploads.unmount();
+    const withUploads = renderChat({ href: api });
+    expect(
+      await screen.findByRole('button', { name: 'Attach files' }),
+    ).toBeTruthy();
+    expect(
+      screen.getByLabelText('Attach media files').getAttribute('accept'),
+    ).toBe('image/*,video/*,audio/*');
+    withUploads.unmount();
 
-  renderChat({ href: api, mediaTypes: ['image/png', 'video/mp4'] });
-  expect(
-    (await screen.findByLabelText('Attach media files')).getAttribute('accept'),
-  ).toBe('image/png,video/mp4');
+    renderChat({ href: api, mediaTypes: ['image/png', 'video/mp4'] });
+    expect(
+      (await screen.findByLabelText('Attach media files')).getAttribute(
+        'accept',
+      ),
+    ).toBe('image/png,video/mp4');
+  } finally {
+    cleanup();
+  }
 });
 
 function load(path: string) {
