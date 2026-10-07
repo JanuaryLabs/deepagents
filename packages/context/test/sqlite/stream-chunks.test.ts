@@ -944,6 +944,38 @@ describe('Stream Chunks', () => {
       assert.equal(results.filter(({ updated }) => updated).length, 1);
       assert.equal(await first.getStreamStatus(stream.id), 'running');
     });
+
+    it("rejects with SQLite's busy error when another process holds the write lock past the busy timeout", async () => {
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream();
+      await store.createStream(stream);
+      // The caller owns this connection; a short timeout keeps the wait brief.
+      database.connection.exec('PRAGMA busy_timeout = 50');
+      await using lock = await sqlite.writeLock(database.path, 2_000);
+
+      await assert.rejects(
+        store.updateStream(stream.id, () => ({ status: 'running' })),
+        { errcode: 5, message: /database is locked/ },
+      );
+    });
+
+    it("waits for another process's write transaction and then applies the update", async () => {
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const stream = createStream();
+      await store.createStream(stream);
+
+      {
+        await using lock = await sqlite.writeLock(database.path, 200);
+        const result = await store.updateStream(stream.id, () => ({
+          status: 'running',
+        }));
+        assert.equal(result.updated, true);
+      }
+
+      assert.equal(await store.getStreamStatus(stream.id), 'running');
+    });
   });
 
   describe('appendChunks / getChunks', () => {
