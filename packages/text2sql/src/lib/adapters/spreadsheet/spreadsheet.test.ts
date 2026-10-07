@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { mkdtempDisposable } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import XLSX from 'xlsx';
 
@@ -548,6 +549,28 @@ describe('Spreadsheet Adapter', () => {
 
       // Database file should exist
       assert.ok(fs.existsSync(dbPath), 'Database file should be created');
+    });
+
+    it("throws SQLite's disk-full error when the database runs out of space while loading a sheet", async () => {
+      await using directory = await mkdtempDisposable(
+        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      );
+      const csvPath = path.join(directory.path, 'notes.csv');
+      createCSV(
+        csvPath,
+        Array.from({ length: 20 }, (_, id) => ({ id, note: 'x'.repeat(2000) })),
+      );
+      // A shared-cache in-memory database lets this connection cap the page
+      // count of the connection the adapter opens; the cap stands in for a
+      // full disk, so SQLite ends the load transaction itself.
+      const database = `file:sheet-${crypto.randomUUID()}?mode=memory&cache=shared`;
+      using holder = new DatabaseSync(database);
+      holder.exec('PRAGMA max_page_count = 3');
+
+      assert.throws(
+        () => new Spreadsheet({ file: csvPath, database, grounding: [] }),
+        { errcode: 13, message: /database or disk is full/ },
+      );
     });
   });
 

@@ -19,6 +19,23 @@ describe('SqliteFs', () => {
       assert.strictEqual(result, content);
     });
 
+    it('rejects with the error SQLite ended the write transaction with', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });
+      // SqliteFs opens its own connection, so a full disk cannot be staged
+      // on it. A RAISE(ROLLBACK) trigger makes SQLite end the transaction
+      // itself the same way.
+      database.connection.exec(`
+        CREATE TRIGGER fail_chunk_write BEFORE INSERT ON fs_chunks
+        BEGIN SELECT RAISE(ROLLBACK, 'chunk write failed'); END
+      `);
+
+      await assert.rejects(sqliteFs.writeFile('/test.txt', 'Hello, World!'), {
+        errcode: 1811,
+        message: 'chunk write failed',
+      });
+    });
+
     it('should write and read binary content', async () => {
       await using database = await sqlite.database();
       const sqliteFs = new SqliteFs({ dbPath: database.path, root: '/' });

@@ -206,7 +206,11 @@ export class SqliteFs implements IFileSystem {
       this.#db.exec('COMMIT');
       return result;
     } catch (error) {
-      this.#db.exec('ROLLBACK');
+      try {
+        this.#db.exec('ROLLBACK');
+      } catch {
+        // Preserve the operation error when SQLite already ended the transaction.
+      }
       throw error;
     }
   }
