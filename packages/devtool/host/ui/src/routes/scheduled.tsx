@@ -406,7 +406,11 @@ function TaskDetail({
         </div>
         {runs.isPending ? (
           <Skeleton className="h-10 w-full" />
-        ) : runs.data?.length ? (
+        ) : runs.isError ? (
+          <p className="text-muted-foreground text-sm">
+            Previous runs unavailable.
+          </p>
+        ) : runs.data.length ? (
           <ul>
             {runs.data.map((run) => (
               <li key={run.id}>
@@ -609,8 +613,9 @@ function TaskActions({
   onPurged: () => void;
 }) {
   const archived = task.status === 'archived';
-  const run = (kind: 'run' | 'archive') =>
-    command.mutate({ kind, taskId: task.id });
+  // Run now keeps its key until a run starts: a retry after a failure sends it
+  // again, so the server does not start a second run.
+  const [runKey, setRunKey] = useState(() => crypto.randomUUID());
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -626,11 +631,22 @@ function TaskActions({
         }
       />
       <DropdownMenuContent align="end">
-        <DropdownMenuItem disabled={archived} onClick={() => run('run')}>
+        <DropdownMenuItem
+          disabled={archived}
+          onClick={() =>
+            command.mutate(
+              { kind: 'run', taskId: task.id, idempotencyKey: runKey },
+              { onSuccess: () => setRunKey(crypto.randomUUID()) },
+            )
+          }
+        >
           <PlayIcon /> Run now
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem disabled={archived} onClick={() => run('archive')}>
+        <DropdownMenuItem
+          disabled={archived}
+          onClick={() => command.mutate({ kind: 'archive', taskId: task.id })}
+        >
           <ArchiveIcon /> Archive
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -661,16 +677,21 @@ function CreateTaskDialog({
 }) {
   const navigate = useNavigate();
   const { history } = useLoaderData<typeof loader>();
-  const [draft, setDraft] = useState(blankDefinition);
+  const [submission, setSubmission] = useState(() =>
+    newSubmission(blankDefinition()),
+  );
+  const draft = submission.definition;
   const patch = (values: Partial<ScheduleDefinitionInput>) =>
-    setDraft((current) => ({ ...current, ...values }));
+    setSubmission((current) =>
+      newSubmission({ ...current.definition, ...values }),
+    );
 
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
         if (next) return;
-        setDraft(blankDefinition());
+        setSubmission(newSubmission(blankDefinition()));
         onClose();
       }}
     >
@@ -757,10 +778,14 @@ function CreateTaskDialog({
             disabled={!draft.name.trim() || !draft.prompt.trim()}
             onClick={() =>
               command.mutate(
-                { kind: 'create', definition: draft },
+                {
+                  kind: 'create',
+                  definition: draft,
+                  idempotencyKey: submission.idempotencyKey,
+                },
                 {
                   onSuccess: (task) => {
-                    setDraft(blankDefinition());
+                    setSubmission(newSubmission(blankDefinition()));
                     onClose();
                     if (task && 'status' in task) {
                       void navigate(`/scheduled/tasks/${task.id}`);
@@ -1041,6 +1066,14 @@ function EmptyTasks({ onCreate }: { onCreate: () => void }) {
       </Button>
     </Empty>
   );
+}
+
+/**
+ * A draft and the idempotency key that sends it. Editing the draft makes a new
+ * submission: the server refuses a key it has seen with a different definition.
+ */
+function newSubmission(definition: ScheduleDefinitionInput) {
+  return { definition, idempotencyKey: crypto.randomUUID() };
 }
 
 function blankDefinition(): ScheduleDefinitionInput {

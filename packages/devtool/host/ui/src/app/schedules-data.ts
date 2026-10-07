@@ -116,14 +116,23 @@ export function useScheduledRun(href: string | undefined, runId?: string) {
   });
 }
 
+/**
+ * `idempotencyKey` names one submission. Send the same key again to retry it:
+ * the server answers a repeated key with what it already created.
+ */
 export type ScheduleCommand =
-  | { kind: 'create'; definition: ScheduleDefinitionInput }
+  | {
+      kind: 'create';
+      definition: ScheduleDefinitionInput;
+      idempotencyKey: string;
+    }
   | {
       kind: 'update';
       taskId: string;
       definition: Partial<ScheduleDefinitionInput>;
     }
-  | { kind: 'pause' | 'resume' | 'archive' | 'run'; taskId: string }
+  | { kind: 'pause' | 'resume' | 'archive'; taskId: string }
+  | { kind: 'run'; taskId: string; idempotencyKey: string }
   | { kind: 'purge'; taskId: string }
   | { kind: 'cancel' | 'review'; runId: string };
 
@@ -151,7 +160,7 @@ async function send(href: string, command: ScheduleCommand) {
         `${href}/tasks`,
         {
           body: command.definition,
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: command.idempotencyKey,
           method: 'POST',
         },
         scheduledTaskSchema,
@@ -173,7 +182,7 @@ async function send(href: string, command: ScheduleCommand) {
     case 'run':
       return write(
         `${href}/tasks/${command.taskId}/run`,
-        { idempotencyKey: crypto.randomUUID(), method: 'POST' },
+        { idempotencyKey: command.idempotencyKey, method: 'POST' },
         scheduledRunSchema,
       );
     case 'purge':
