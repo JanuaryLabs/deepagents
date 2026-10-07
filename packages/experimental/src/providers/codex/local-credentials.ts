@@ -7,12 +7,12 @@ import {
   isAccessTokenExpired,
   resolveConfig,
 } from '@opencoredev/loginwithchatgpt-core';
+import { Mutex, SqliteStore } from '@zukhruf/mutex';
 import { writeFile as atomicWriteFile } from 'atomically';
 import { createHash } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { lock } from 'proper-lockfile';
 import { z } from 'zod';
 
 const nativeLogin = z.looseObject({
@@ -48,11 +48,8 @@ export async function getLocalCodexAuth(
   if (!isAccessTokenExpired(initial.tokens)) return auth(initial.tokens);
 
   // Coordinate refreshes across provider instances and worker processes.
-  const release = await lock(home, {
-    lockfilePath: join(home, '.deepagents-chatgpt.lock'),
-    retries: { retries: 20, minTimeout: 50, maxTimeout: 1000 },
-  });
-  try {
+  const mutex = new Mutex(new SqliteStore(join(home, '.deepagents-locks')));
+  return mutex.acquire('chatgpt', async () => {
     for (let attempt = 0; attempt < 3; attempt++) {
       signal?.throwIfAborted();
       const current = await snapshot(home);
@@ -107,9 +104,7 @@ export async function getLocalCodexAuth(
     throw new Error(
       'The local Codex login changed repeatedly during refresh. Retry the request.',
     );
-  } finally {
-    await release();
-  }
+  });
 }
 
 function auth(tokens: { accessToken: string; accountId: string }): CodexAuth {

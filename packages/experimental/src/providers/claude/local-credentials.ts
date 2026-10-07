@@ -1,9 +1,9 @@
+import { Mutex, SqliteStore } from '@zukhruf/mutex';
 import { writeFile as atomicWriteFile } from 'atomically';
 import { createHash } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
-import { lock } from 'proper-lockfile';
 import { z } from 'zod';
 
 import { CLAUDE_CLIENT_ID, CLAUDE_TOKEN_URL } from './oauth.ts';
@@ -45,11 +45,8 @@ export async function getLocalClaudeAuth(
   if (initial.value.claudeAiOauth.expiresAt > Date.now() + 60_000)
     return initial.value.claudeAiOauth.accessToken;
 
-  const release = await lock(home, {
-    lockfilePath: join(home, '.deepagents-claude.lock'),
-    retries: { retries: 20, minTimeout: 50, maxTimeout: 1000 },
-  });
-  try {
+  const mutex = new Mutex(new SqliteStore(join(home, '.deepagents-locks')));
+  return mutex.acquire('claude', async () => {
     for (let attempt = 0; attempt < 3; attempt++) {
       signal?.throwIfAborted();
       const current = await snapshot(home, directory);
@@ -103,9 +100,7 @@ export async function getLocalClaudeAuth(
     throw new Error(
       'The local Claude login changed repeatedly during refresh. Retry the request.',
     );
-  } finally {
-    await release();
-  }
+  });
 }
 
 async function snapshot(home: string, directory: string) {

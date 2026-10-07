@@ -1,4 +1,5 @@
 import type { KeyValueStore } from '@opencoredev/loginwithchatgpt-core';
+import { MemoryStore, Mutex } from '@zukhruf/mutex';
 
 export interface TokenSnapshot<T> {
   tokens: T | undefined;
@@ -7,23 +8,6 @@ export interface TokenSnapshot<T> {
 
 export type RefreshResult<T> =
   { status: 'refreshed'; tokens: T } | { status: 'revoked' };
-
-/** Runs operations for the same key one after another. */
-export function createKeyedQueue() {
-  const tails = new Map<string, Promise<void>>();
-  return function run<R>(key: string, operation: () => Promise<R>) {
-    const result = (tails.get(key) ?? Promise.resolve()).then(operation);
-    const tail = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    tails.set(key, tail);
-    void tail.then(() => {
-      if (tails.get(key) === tail) tails.delete(key);
-    });
-    return result;
-  };
-}
 
 /**
  * Compare-and-swap over an app-owned store, so a stale refresh or sign-in
@@ -35,24 +19,24 @@ export function createTokenVault<T>(
   parse: (value: unknown) => T | undefined,
 ) {
   const revisions = new Map<string, number>();
-  const serialized = createKeyedQueue();
+  const serialized = new Mutex(new MemoryStore());
   const revision = (owner: string) => revisions.get(owner) ?? 0;
 
   return {
     snapshot: (owner: string) =>
-      serialized(owner, async (): Promise<TokenSnapshot<T>> => ({
+      serialized.acquire(owner, async (): Promise<TokenSnapshot<T>> => ({
         tokens: parse(await store.get(owner)),
         revision: revision(owner),
       })),
     commit: (owner: string, tokens: T, expectedRevision: number) =>
-      serialized(owner, async () => {
+      serialized.acquire(owner, async () => {
         if (revision(owner) !== expectedRevision) return false;
         await store.set(owner, tokens);
         revisions.set(owner, revision(owner) + 1);
         return true;
       }),
     clear: (owner: string, expectedRevision?: number) =>
-      serialized(owner, async () => {
+      serialized.acquire(owner, async () => {
         if (
           expectedRevision !== undefined &&
           revision(owner) !== expectedRevision
@@ -84,7 +68,7 @@ export function createTokenResolver<
   conflicted(): Error;
   onRevoked(owner: string): void;
 }) {
-  const exclusive = createKeyedQueue();
+  const exclusive = new Mutex(new MemoryStore());
 
   async function resolve(
     owner: string,
@@ -113,10 +97,10 @@ export function createTokenResolver<
 
   return {
     fresh: (owner: string, signal?: AbortSignal) =>
-      exclusive(owner, () => resolve(owner, undefined, signal)),
+      exclusive.acquire(owner, () => resolve(owner, undefined, signal)),
     /** Replaces an access token the server rejected, refreshing at most once. */
     replace: (owner: string, rejected: string, signal?: AbortSignal) =>
-      exclusive(owner, () => resolve(owner, rejected, signal)),
+      exclusive.acquire(owner, () => resolve(owner, rejected, signal)),
   };
 }
 

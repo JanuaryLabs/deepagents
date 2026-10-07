@@ -1,3 +1,4 @@
+import { MemoryStore, Mutex } from '@zukhruf/mutex';
 import type { UIMessage } from 'ai';
 import { EventEmitter, on } from 'node:events';
 import { isDeepStrictEqual } from 'node:util';
@@ -83,7 +84,7 @@ export class ConversationStatusProjector {
   readonly #changeSource?: ConversationStatusChangeSource;
   readonly #emitter = new EventEmitter();
   readonly #last = new Map<string, ConversationStatusChange>();
-  readonly #publishing = new Map<string, Promise<void>>();
+  readonly #publishing = new Mutex(new MemoryStore());
   #subscribers = 0;
   #remote?: {
     abort: AbortController;
@@ -268,13 +269,7 @@ export class ConversationStatusProjector {
     step: (key: string) => Promise<void>,
   ): Promise<void> {
     const key = ConversationStatusProjector.#key(conversation);
-    const previous = this.#publishing.get(key) ?? Promise.resolve();
-    const next = previous.then(() => step(key));
-    this.#publishing.set(key, next);
-    void next.finally(() => {
-      if (this.#publishing.get(key) === next) this.#publishing.delete(key);
-    });
-    return next;
+    return this.#publishing.acquire(key, () => step(key));
   }
 
   async #project(conversation: ConversationId, key: string): Promise<boolean> {
