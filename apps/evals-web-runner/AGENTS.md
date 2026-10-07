@@ -7,7 +7,16 @@
 ### API
 
 - Don't duplicate error handling - it's already global
-- For existence checks without using data: `await prisma.modelName.findUniqueOrThrow({ where: { id } })`
+- The backend reads and writes data through the evals store (`RunStore` from `@deepagents/evals/store`). A route gets the store with `c.get('store')`.
+- To check that a record exists, call its store getter. A getter returns `undefined` when the record does not exist. Throw a 404 in that case:
+
+```ts
+const run = store.getRun(id);
+if (!run) {
+  throw new HTTPException(404, { message: 'Run not found' });
+}
+```
+
 - Custom error messages only when necessary
 - To throw errors use `HTTPException` class from Hono:
 
@@ -30,9 +39,14 @@ throw new HTTPException(400, {
 
 ### Generating the client
 
-Two parts, first is generating openapi and that can done through `NX_DAEMON=false nx run db:build` and then generating the client itself through running the frontend build `NX_DAEMON=false nx run frontend:build`.
+The frontend calls the backend through a generated client, `@evals/client`. The `frontend:generate-sdk` target makes it in two steps:
 
-Note: the client is automatically generated via vite plugin. Never attempt to modify the generated client code directly.
+1. `backend:openapi` writes the OpenAPI spec of the backend routes to `.evals-sdk-it/openapi.json`.
+2. The generator writes the client from that spec to `.evals-sdk-it`.
+
+The frontend `build` and `typecheck` targets run `generate-sdk` for you. To run it alone, use `NX_DAEMON=false nx run frontend:generate-sdk`.
+
+Do not edit the generated client. Change the backend route, then generate the client again.
 
 ### API Input Validation
 
@@ -44,7 +58,7 @@ Special schemas are supported only through
 
 ### Pagination
 
-- Use `toPagination` function to create pagination results from prisma queries.
+- Use the `toPagination` function to make the response of a paginated list.
 
 ### Unit Test
 
@@ -55,14 +69,14 @@ node --test <target-filename>.test.ts
 ### Using the API
 
 ```ts
-const { data: history } = useData('GET /history');
+const { data: suites } = useData('GET /suites', {});
 ```
 
-Use data returns same signture as useQuery from tanstack react query package
+`useData` returns the same result as `useQuery` from TanStack Query.
 
 ### Client Data Hooks
 
-- Use the generated hooks from `packages/ui` (`useData`, `useAction`) for all API interaction in React components. Avoid raw `fetch`.
+- Use `useData` and `useAction` from `frontend/src/app/hooks/use-client.ts` for all API calls in React components. Do not call `fetch` directly.
 - Prefer server-managed state over duplicating data in component or local storage; reserve `localStorage` only for ephemeral UI preferences (e.g. theme).
 - Use the `invalidate` option in `useAction` to refresh dependent queries after mutations rather than manual refetch logic.
 - Do not create parallel caches; rely solely on React Query plus generated client typing for consistency and correctness.
@@ -122,7 +136,7 @@ Use `Button` and `Spinner` from `@deepagents/react-shadcn` for buttons that trig
 
 ### Local Database
 
-You can inspect the database to help with debugging. Creds are in `compose.dev.yml` (`postgres/postgres`, DB `limerence`, port `5432`).
+The backend keeps its data in one SQLite file. `EVALS_DB_PATH` sets the path of that file. When `EVALS_DB_PATH` is not set, the path is `.evals/store.db` in the working directory of the backend. To debug, open this file and examine the data.
 
 ## UI Skills
 
