@@ -19,7 +19,6 @@ import {
 } from '@deepagents/text2sql';
 
 import adapters, { pool } from './demo-adapters.ts';
-import { PgAdvisoryIndexLock } from './pg-advisory-lock.ts';
 
 const PORT = Number(process.env.PORT ?? '4747');
 const VALIDATION_ERROR_CODE = -32000;
@@ -34,7 +33,6 @@ const text2Sql = new Text2Sql({
       ? new FileIndexCache({ dir: cacheDir, namespace: cacheNamespace })
       : undefined,
 });
-const indexLock = new PgAdvisoryIndexLock(pool);
 
 const adapterNames = text2Sql.adapterNames();
 console.log(
@@ -121,12 +119,10 @@ server.addMethod('text2sql.index', async (params) => {
   const resolvedNames = names ?? text2Sql.adapterNames();
   const emitEvents = obj.emitEvents === true;
   const events: unknown[] = [];
-  const fragments = await indexLock.run('text2sql:index', () =>
-    text2Sql.index({
-      names: resolvedNames,
-      onProgress: emitEvents ? (event) => events.push(event) : undefined,
-    }),
-  );
+  const fragments = await text2Sql.index({
+    names: resolvedNames,
+    onProgress: emitEvents ? (event) => events.push(event) : undefined,
+  });
   return emitEvents
     ? { fragments, resolvedNames, events }
     : { fragments, resolvedNames };

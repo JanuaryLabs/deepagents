@@ -452,10 +452,8 @@ callers wait. When each waiter gets the key, its `index()` call reads the cache
 that the first caller wrote.
 
 `SqliteStore` shares keys between the processes on one host. For a fleet of
-hosts, acquire the key from a service that all hosts share, and give all hosts
-the same cache. `demo/text2sql-daemon` uses a Postgres advisory lock for the
-key and a `FileIndexCache` from `TEXT2SQL_INDEX_CACHE_DIR` /
-`TEXT2SQL_INDEX_VERSION`.
+hosts, acquire the key from a service that all hosts share, for example a
+Postgres advisory lock, and give all hosts the same cache.
 
 > On object-storage-backed volumes (GCS/S3 FUSE) `rename` is not atomic. The
 > `FileIndexCache` parse-as-miss behavior tolerates a torn write: the next
