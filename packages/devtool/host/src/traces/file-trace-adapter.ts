@@ -16,6 +16,7 @@ import {
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
+import type { StreamStatus } from '@deepagents/context';
 import type { ConversationId } from '@deepagents/experimental/zukhruf';
 
 const AGENT_PATH = 'deepagents.agent.path';
@@ -38,7 +39,8 @@ export interface AgentTraceSummary {
   workflowName: string;
   startedAt: string | null;
   endedAt: string | null;
-  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  /** The durable turn's status when the HTTP layer can read it, so a turn can be `queued`. */
+  status: StreamStatus;
   stepCount: number;
   finishReason: string | null;
   usage: { inputTokens: number; outputTokens: number };

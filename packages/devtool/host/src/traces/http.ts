@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 
+import type { StreamStatus } from '@deepagents/context';
 import type {
   AgentPluginDefinition,
   ConversationId,
@@ -38,9 +39,10 @@ function traceRoutes(reader: AgentTraceReader, runtime: HttpRuntime) {
     });
     return context.json(
       await Promise.all(
-        (await reader.list(conversation)).map((trace) =>
-          withDurableStatus(runtime, trace),
-        ),
+        (await reader.list(conversation)).map(async (trace) => ({
+          ...trace,
+          status: await durableStatus(runtime, trace),
+        })),
       ),
       200,
       NO_STORE,
@@ -62,7 +64,11 @@ function traceRoutes(reader: AgentTraceReader, runtime: HttpRuntime) {
         },
       });
     }
-    return context.json(await withDurableStatus(runtime, trace), 200, NO_STORE);
+    return context.json(
+      { ...trace, status: await durableStatus(runtime, trace) },
+      200,
+      NO_STORE,
+    );
   });
   return app;
 }
@@ -86,12 +92,13 @@ async function requireConversation(
   });
 }
 
-async function withDurableStatus<Trace extends AgentTraceSummary>(
+/** The durable turn's status, or the trace's own once the turn is gone. */
+async function durableStatus(
   runtime: Pick<HttpRuntime, 'observe'>,
-  trace: Trace,
-): Promise<Trace> {
+  trace: AgentTraceSummary,
+): Promise<StreamStatus> {
   const turn = await runtime
     .observe({ chatId: trace.chatId, userId: trace.userId })
     .status(trace.streamId);
-  return { ...trace, status: turn?.status ?? trace.status };
+  return turn?.status ?? trace.status;
 }
