@@ -59,10 +59,6 @@ vi.mock('../../usage.ts', () => ({
   formatUsageBreakdown: () => '',
 }));
 
-vi.mock('@deepagents/context/browser', () => ({
-  stripReminders: (msg: UIMessage) => msg,
-}));
-
 function makeToolGroupMessage(): UIMessage {
   return {
     id: 'asst-tools',
