@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/retrieval/src",
   "projectType": "library",
-  "tags": ["scope:public"],
+  "tags": ["scope:public", "test:node"],
   "targets": {
     "build": {
       "executor": "@nx/esbuild:esbuild",
@@ -11,6 +11,7 @@
       "options": {
         "bundle": false
       }
-    }
+    },
+    "test": {}
   }
 }

@@ -1,6 +1,7 @@
 export default `-- Embedding store schema
 -- Use <%= DIMENSION %> placeholder replaced at runtime.
 
+PRAGMA busy_timeout = 5000;
 PRAGMA page_size = 32768;
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
@@ -47,4 +48,4 @@ BEGIN
   WHERE source_id = OLD.source_id
     AND document_id = OLD.id;
 END;
-`
+`;

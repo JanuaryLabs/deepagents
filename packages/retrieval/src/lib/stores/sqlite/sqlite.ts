@@ -31,12 +31,16 @@ export class SQLiteStore implements Store {
   }
 
   #transaction(callback: () => void) {
+    this.#db.exec('BEGIN IMMEDIATE');
     try {
-      this.#db.exec('BEGIN IMMEDIATE');
       callback();
       this.#db.exec('COMMIT');
     } catch (error) {
-      this.#db.exec('ROLLBACK');
+      try {
+        this.#db.exec('ROLLBACK');
+      } catch {
+        // Preserve the operation error when SQLite already ended the transaction.
+      }
       throw error;
     }
   }

@@ -6,7 +6,12 @@
     "tsBuildInfoFile": "dist/tsconfig.spec.tsbuildinfo",
     "types": ["node"]
   },
-  "include": ["src/**/*.test.ts", "src/**/*.spec.ts", "../../global.d.ts"],
+  "include": [
+    "src/**/*.test.ts",
+    "src/**/*.spec.ts",
+    "test/**/*.ts",
+    "../../global.d.ts"
+  ],
   "references": [
     {
       "path": "./tsconfig.lib.json"
