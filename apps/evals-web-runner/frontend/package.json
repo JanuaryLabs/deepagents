@@ -14,7 +14,21 @@
     "@tanstack/react-table": "^8.21.3",
     "html-to-image": "^1.11.13",
     "recharts": "^3.9.2",
-    "sonner": "^2.0.7"
+    "sonner": "^2.0.7",
+    "react": "19.2.8",
+    "lucide-react": "^1.33.0",
+    "react-router": "8.2.0",
+    "react-dom": "19.2.8",
+    "@base-ui/react": "^1.7.0",
+    "class-variance-authority": "^0.7.1",
+    "react-day-picker": "^10.0.1",
+    "embla-carousel-react": "^8.6.0",
+    "cmdk": "^1.1.1",
+    "input-otp": "^1.5.0",
+    "@shadcn/react": "^0.3.0",
+    "react-resizable-panels": "^4.12.3",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

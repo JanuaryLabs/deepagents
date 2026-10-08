@@ -1,8 +1,6 @@
 import nx from '@nx/eslint-plugin';
 
-import baseConfig, {
-  packageJsonDependencyChecks,
-} from '../../../eslint.config.mjs';
+import baseConfig from '../../../eslint.config.mjs';
 
 // The React preset comes first, so the root config's settings win.
 export default [
@@ -21,5 +19,4 @@ export default [
       '@typescript-eslint/consistent-type-assertions': 'off',
     },
   },
-  packageJsonDependencyChecks(),
 ];

@@ -1,20 +1,16 @@
 import nx from '@nx/eslint-plugin';
 import zukhruf from '@zukhruf/eslint';
-import { dependencyPolicy, moduleBoundaries } from '@zukhruf/eslint/nx';
+import { manifest, moduleBoundaries } from '@zukhruf/eslint/nx';
 import prettier from 'eslint-config-prettier';
 import { defineConfig } from 'eslint/config';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-const jsonc = await import('jsonc-eslint-parser');
-
 const packagesDir = join(import.meta.dirname, 'packages');
-const privatePackages = [];
 for (const dir of readdirSync(packagesDir)) {
   const packageJsonPath = join(packagesDir, dir, 'package.json');
   if (!existsSync(packageJsonPath)) continue;
   const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
-  if (packageJson.private) privatePackages.push(packageJson.name);
 
   const projectJsonPath = join(packagesDir, dir, 'project.json');
   const tags = existsSync(projectJsonPath)
@@ -28,46 +24,38 @@ for (const dir of readdirSync(packagesDir)) {
   }
 }
 
-/**
- * Shared package.json dependency validation for publishable packages. The
- * checked file set is each project's build inputs (`production` in nx.json),
- * which already leaves out tests and evals. Private workspace packages
- * (resolved via workspace symlinks) must never be written into a package.json,
- * so the fixer is told to ignore them. Arguments are further packages the
- * check ignores in that project.
- */
-export const packageJsonDependencyChecks = (...ignoredDependencies) => ({
-  files: ['**/*.json'],
-  rules: {
-    '@nx/dependency-checks': [
-      'error',
-      dependencyPolicy({
-        ignoredDependencies: [...privatePackages, ...ignoredDependencies],
-      }),
-    ],
-  },
-  languageOptions: { parser: jsonc },
-});
-
 const typescript = ['**/*.ts', '**/*.tsx', '**/*.cts', '**/*.mts'];
 const source = [...typescript, '**/*.js', '**/*.jsx', '**/*.cjs', '**/*.mjs'];
 const tests = ['**/*.{test,spec}.{ts,tsx,cts,mts,js,jsx,cjs,mjs}'];
 
 export default defineConfig(
   nx.configs['flat/base'],
+  { ignores: ['**/.venv'] },
   {
-    ignores: [
-      '**/dist',
-      '**/vite.config.*.timestamp*',
-      '**/vitest.config.*.timestamp*',
-      '**/build',
-      '**/.react-router',
-      '**/.venv',
+    plugins: { zukhruf, manifest },
+    extends: [
+      'zukhruf/base',
+      'zukhruf/tests',
+      'zukhruf/react',
+      'manifest/recommended',
     ],
   },
   {
-    plugins: { zukhruf },
-    extends: ['zukhruf/base', 'zukhruf/tests', 'zukhruf/react'],
+    files: ['**/package.json'],
+    rules: {
+      'manifest/dependency-checks': [
+        'error',
+        {
+          projects: {
+            // xlsx installs from the SheetJS CDN tarball, since npm stops at
+            // 0.18.5. The check compares only semver, file:, workspace: and *
+            // specifiers, so it flags the URL, and its fix would write
+            // "0.20.3", which npm cannot install.
+            'packages/text2sql': { ignoredDependencies: ['xlsx'] },
+          },
+        },
+      ],
+    },
   },
   {
     files: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'],
@@ -88,26 +76,8 @@ export default defineConfig(
   {
     files: [
       '**/*.eval.ts',
-      '**/*.test.ts',
-      '**/*.test.tsx',
-      '**/*.test.js',
-      '**/*.test.jsx',
-      '**/*.spec.ts',
-      '**/*.spec.tsx',
-      '**/*.spec.js',
-      '**/*.spec.jsx',
-      '**/*.fixture.ts',
-      '**/*.fixture.tsx',
-      '**/*.fixture.js',
-      '**/*.fixture.jsx',
-      '**/test/**/*.ts',
-      '**/test/**/*.tsx',
-      '**/test/**/*.js',
-      '**/test/**/*.jsx',
-      '**/tests/**/*.ts',
-      '**/tests/**/*.tsx',
-      '**/tests/**/*.js',
-      '**/tests/**/*.jsx',
+      '**/*.{test,spec,fixture}.{ts,tsx,js,jsx}',
+      '**/{test,tests}/**/*.{ts,tsx,js,jsx}',
     ],
     rules: {
       '@nx/enforce-module-boundaries': 'off',
@@ -152,7 +122,11 @@ export default defineConfig(
       '@typescript-eslint/consistent-type-assertions': 'warn',
       '@typescript-eslint/no-floating-promises': 'warn',
       '@typescript-eslint/no-misused-promises': 'warn',
+      '@typescript-eslint/only-throw-error': 'warn',
+      '@typescript-eslint/switch-exhaustiveness-check': 'warn',
       'zukhruf/no-enum': 'warn',
+      'zukhruf/no-phase-flag': 'warn',
+      'zukhruf/no-promise-field': 'warn',
     },
   },
   {
@@ -170,10 +144,7 @@ export default defineConfig(
   },
   {
     files: tests,
-    rules: {
-      'zukhruf/no-test-lifecycle-hooks': 'warn',
-      'zukhruf/require-msw-error-on-unhandled-request': 'warn',
-    },
+    rules: { 'zukhruf/no-test-lifecycle-hooks': 'warn' },
   },
   prettier,
 );
