@@ -383,60 +383,46 @@ describe('Docker Sandbox', () => {
       });
 
       it('attaches an existing Docker volume and keeps it after dispose', async () => {
-        const volumeName = testVolumeName('deepagents-external');
-        await spawn('docker', [
-          'volume',
-          'create',
-          ...Object.entries(docker.defaults.labels).flatMap(([key, value]) => [
-            '--label',
-            `${key}=${value}`,
-          ]),
-          volumeName,
-        ]);
+        await using volume = await docker.volume();
+
+        const writer = await createDockerSandbox({
+          ...docker.defaults,
+          volumes: [
+            {
+              type: 'volume',
+              name: volume.name,
+              containerPath: '/data',
+              readOnly: false,
+            },
+          ],
+        });
 
         try {
-          const writer = await createDockerSandbox({
-            ...docker.defaults,
-            volumes: [
-              {
-                type: 'volume',
-                name: volumeName,
-                containerPath: '/data',
-                readOnly: false,
-              },
-            ],
-          });
-
-          try {
-            const writeResult = await writer.executeCommand(
-              'echo "persisted" > /data/file.txt',
-            );
-            assert.strictEqual(writeResult.exitCode, 0);
-          } finally {
-            await writer.dispose();
-          }
-
-          const reader = await createDockerSandbox({
-            ...docker.defaults,
-            volumes: [
-              {
-                type: 'volume',
-                name: volumeName,
-                containerPath: '/data',
-              },
-            ],
-          });
-
-          try {
-            const readResult =
-              await reader.executeCommand('cat /data/file.txt');
-            assert.strictEqual(readResult.exitCode, 0);
-            assert.strictEqual(readResult.stdout.trim(), 'persisted');
-          } finally {
-            await reader.dispose();
-          }
+          const writeResult = await writer.executeCommand(
+            'echo "persisted" > /data/file.txt',
+          );
+          assert.strictEqual(writeResult.exitCode, 0);
         } finally {
-          await removeDockerVolume(volumeName);
+          await writer.dispose();
+        }
+
+        const reader = await createDockerSandbox({
+          ...docker.defaults,
+          volumes: [
+            {
+              type: 'volume',
+              name: volume.name,
+              containerPath: '/data',
+            },
+          ],
+        });
+
+        try {
+          const readResult = await reader.executeCommand('cat /data/file.txt');
+          assert.strictEqual(readResult.exitCode, 0);
+          assert.strictEqual(readResult.stdout.trim(), 'persisted');
+        } finally {
+          await reader.dispose();
         }
       });
 
@@ -529,40 +515,27 @@ describe('Docker Sandbox', () => {
       });
 
       it('throws VolumeCreateError when managed volume already exists', async () => {
-        const volumeName = testVolumeName('deepagents-existing-managed');
-        await spawn('docker', [
-          'volume',
-          'create',
-          ...Object.entries(docker.defaults.labels).flatMap(([key, value]) => [
-            '--label',
-            `${key}=${value}`,
-          ]),
-          volumeName,
-        ]);
+        await using volume = await docker.volume();
 
-        try {
-          await assert.rejects(
-            createDockerSandbox({
-              ...docker.defaults,
-              volumes: [
-                {
-                  type: 'volume',
-                  name: volumeName,
-                  containerPath: '/data',
-                  lifecycle: 'managed',
-                },
-              ],
-            }),
-            (err: Error) => {
-              assert.ok(err instanceof VolumeCreateError);
-              assert.strictEqual(err.name, 'VolumeCreateError');
-              assert.strictEqual(err.volume, volumeName);
-              return true;
-            },
-          );
-        } finally {
-          await removeDockerVolume(volumeName);
-        }
+        await assert.rejects(
+          createDockerSandbox({
+            ...docker.defaults,
+            volumes: [
+              {
+                type: 'volume',
+                name: volume.name,
+                containerPath: '/data',
+                lifecycle: 'managed',
+              },
+            ],
+          }),
+          (err: Error) => {
+            assert.ok(err instanceof VolumeCreateError);
+            assert.strictEqual(err.name, 'VolumeCreateError');
+            assert.strictEqual(err.volume, volume.name);
+            return true;
+          },
+        );
       });
 
       it('preserves original configuration error when managed volume cleanup fails', async () => {
@@ -1221,33 +1194,19 @@ describe('Docker Sandbox', () => {
         // never naturally be in this state. This covers external/handoff
         // scenarios where another process created the container.
         const name = uniqueName();
-        const containerId = `sandbox-${name}`;
+        await using container = await docker.start({
+          image: 'bash:5.3-alpine3.24',
+          name: `sandbox-${name}`,
+          command: ['tail', '-f', '/dev/null'],
+        });
+        await spawn('docker', ['stop', container.containerId]);
 
-        await spawn('docker', [
-          'run',
-          '-d',
-          '--name',
-          containerId,
-          'bash:5.3-alpine3.24',
-          'tail',
-          '-f',
-          '/dev/null',
-        ]);
-        await spawn('docker', ['stop', containerId]);
+        const sandbox = await createDockerSandbox({ ...docker.defaults, name });
+        const result = await sandbox.executeCommand('echo back-online');
+        assert.strictEqual(result.exitCode, 0);
+        assert.strictEqual(result.stdout.trim(), 'back-online');
 
-        try {
-          const sandbox = await createDockerSandbox({
-            ...docker.defaults,
-            name,
-          });
-          const result = await sandbox.executeCommand('echo back-online');
-          assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(result.stdout.trim(), 'back-online');
-
-          await sandbox.dispose();
-        } finally {
-          await removeContainer(containerId);
-        }
+        await sandbox.dispose();
       });
 
       it('rejects names that are not Docker-legal', async () => {
