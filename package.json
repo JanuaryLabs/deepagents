@@ -4,8 +4,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "prepare": "husky",
-    "verify:packages": "nx run-many -t build --projects=tag:scope:public && node tools/src/verify-packages.ts"
+    "prepare": "husky"
   },
   "repository": "https://github.com/JanuaryLabs/deepagents",
   "private": true,

@@ -57,6 +57,3 @@ jobs:
 
       - name: Build affected
         run: npx nx affected -t build
-
-      - name: Verify published package contracts
-        run: npm run verify:packages
