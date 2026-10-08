@@ -1,3 +1,4 @@
+import { validate } from '@sdk-it/hono/runtime';
 import { safeParse as parseContentType } from 'fast-content-type-parse';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -11,7 +12,6 @@ import {
   mountPath,
   projectHttp,
 } from '../http/index.ts';
-import { validate } from '../http/validator.ts';
 import {
   UPLOAD_MEDIA_TYPES,
   type UploadMediaType,

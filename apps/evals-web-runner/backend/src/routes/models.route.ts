@@ -1,7 +1,7 @@
+import { validate } from '@sdk-it/hono/runtime';
 import type { Hono } from 'hono';
 import { z } from 'zod';
 
-import { validate } from '../middlewares/validator.ts';
 import type { AppBindings } from '../store.ts';
 
 /** https://models.dev/api.json, as far as this route reads it. */

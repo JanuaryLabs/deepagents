@@ -1,3 +1,4 @@
+import { validate } from '@sdk-it/hono/runtime';
 import type { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import mssql from 'mssql';
@@ -7,7 +8,6 @@ import type { ContextFragment } from '@deepagents/context';
 import { toSql } from '@deepagents/text2sql';
 import sqlserver, { type SqlServer } from '@deepagents/text2sql/sqlserver';
 
-import { validate } from '../middlewares/validator.ts';
 import { resolveModel } from '../services/model-resolver.ts';
 import type { AppBindings } from '../store.ts';
 

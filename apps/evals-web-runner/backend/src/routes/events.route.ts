@@ -1,10 +1,10 @@
+import { validate } from '@sdk-it/hono/runtime';
 import type { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 
 import type { EngineEvents } from '@deepagents/evals/engine';
 
-import { validate } from '../middlewares/validator.ts';
 import evalManager from '../services/eval-manager.ts';
 import type { AppBindings } from '../store.ts';
 

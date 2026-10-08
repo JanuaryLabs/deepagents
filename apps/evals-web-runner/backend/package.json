@@ -9,6 +9,7 @@
     "@deepagents/evals": "*",
     "@deepagents/text2sql": "*",
     "@hono/node-server": "^2.0.10",
+    "@sdk-it/hono": "^0.46.7",
     "hono": "^4.12.30",
     "mssql": "^12.7.0",
     "zod": "^4.4.3"

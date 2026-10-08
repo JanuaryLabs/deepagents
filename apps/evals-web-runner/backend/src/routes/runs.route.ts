@@ -1,3 +1,4 @@
+import { validate } from '@sdk-it/hono/runtime';
 import type { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
@@ -21,7 +22,6 @@ import {
 import type { CaseWithScores } from '@deepagents/evals/store';
 
 import * as inputs from '../core/inputs.ts';
-import { validate } from '../middlewares/validator.ts';
 import { datasetPath } from '../services/dataset-store.ts';
 import evalManager from '../services/eval-manager.ts';
 import { resolveModel } from '../services/model-resolver.ts';

@@ -1,9 +1,9 @@
+import { validate } from '@sdk-it/hono/runtime';
 import type { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
 
 import * as inputs from '../core/inputs.ts';
-import { validate } from '../middlewares/validator.ts';
 import type { AppBindings } from '../store.ts';
 
 export default function (router: Hono<AppBindings>) {

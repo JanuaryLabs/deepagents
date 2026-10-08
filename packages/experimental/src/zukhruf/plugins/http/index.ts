@@ -1,3 +1,4 @@
+import { validate } from '@sdk-it/hono/runtime';
 import {
   type JSONSchema7,
   type UIMessage,
@@ -20,7 +21,6 @@ import type {
   AgentPluginDefinition,
   AgentPluginInstance,
 } from '../../runtime/agent-runtime.ts';
-import { validate } from './validator.ts';
 
 export type HttpEnv = { Variables: { userId: string } };
 

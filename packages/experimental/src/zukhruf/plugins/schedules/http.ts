@@ -1,3 +1,4 @@
+import { validate } from '@sdk-it/hono/runtime';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
@@ -10,7 +11,6 @@ import {
   type HttpProjection,
   projectHttp,
 } from '../http/index.ts';
-import { validate } from '../http/validator.ts';
 import type {
   ScheduleExecutionConfig,
   ScheduleTarget,

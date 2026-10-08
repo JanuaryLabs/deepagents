@@ -1,7 +1,7 @@
+import { parse } from '@sdk-it/hono/runtime';
 import z from 'zod';
 
 import { stringBoolean } from './core/inputs.ts';
-import { parse } from './middlewares/validator.ts';
 
 const env = z.object({
   NODE_ENV: z.enum(['development', 'production']).default('development'),
