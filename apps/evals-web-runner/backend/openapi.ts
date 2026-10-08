@@ -1,11 +1,10 @@
-import { defaultTypesMap } from '@sdk-it/core';
+import { type OpenAPIDocument, defaultTypesMap } from '@sdk-it/core';
 import { analyze } from '@sdk-it/generic';
 import { responseAnalyzer } from '@sdk-it/hono';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { cwd } from 'node:process';
 import { fileURLToPath } from 'node:url';
-import type { OpenAPIObject } from 'openapi3-ts/oas31';
 
 const { paths, components, tags } = await analyze(
   'apps/evals-web-runner/backend/tsconfig.app.json',
@@ -28,11 +27,10 @@ const { paths, components, tags } = await analyze(
   },
 );
 
-const spec: OpenAPIObject = {
+const spec: OpenAPIDocument = {
   openapi: '3.1.0',
   info: { title: 'Agent API', version: '1.0.0' },
   tags: tags.map((tag) => ({ name: tag })),
-  security: [{ ApiKeyAuth: [] }, { BearerAuth: [] }],
   paths,
   components: {
     ...components,
@@ -55,20 +53,6 @@ const spec: OpenAPIObject = {
       JsonArray: {
         type: 'array',
         items: { $ref: '#/components/schemas/JsonValue' },
-      } as const,
-    },
-    securitySchemes: {
-      BearerAuth: {
-        type: 'http',
-        scheme: 'bearer',
-        description:
-          'Use Authorization: Bearer <token> for session tokens or API keys.',
-      } as const,
-      ApiKeyAuth: {
-        type: 'apiKey',
-        in: 'header',
-        name: 'X-API-Key',
-        description: 'Use X-API-Key: <key>.',
       } as const,
     },
   },
