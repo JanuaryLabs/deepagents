@@ -42,8 +42,10 @@ jobs:
       - name: Check runner Docker
         run: docker info
 
+      # nx.json runs 14 tasks at once, which suits a workstation. On the runner,
+      # four demo builds at once used all its memory and the kernel killed one.
       - name: Test affected
-        run: npx nx affected -t test
+        run: npx nx affected -t test --parallel=3
 
       - name: Publish test results
         uses: mikepenz/action-junit-report@v6
@@ -56,4 +58,4 @@ jobs:
           include_passed: true
 
       - name: Build affected
-        run: npx nx affected -t build
+        run: npx nx affected -t build --parallel=3
