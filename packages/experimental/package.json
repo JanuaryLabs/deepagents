@@ -21,61 +21,73 @@
   "exports": {
     "./package.json": "./package.json",
     ".": {
+      "@deepagents/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./coding-agent-reminders": {
+      "@deepagents/source": "./src/coding-agent-reminders/index.ts",
       "types": "./dist/coding-agent-reminders/index.d.ts",
       "import": "./dist/coding-agent-reminders/index.js",
       "default": "./dist/coding-agent-reminders/index.js"
     },
     "./providers/codex": {
+      "@deepagents/source": "./src/providers/codex/index.ts",
       "types": "./dist/providers/codex/index.d.ts",
       "import": "./dist/providers/codex/index.js",
       "default": "./dist/providers/codex/index.js"
     },
     "./providers/claude": {
+      "@deepagents/source": "./src/providers/claude/index.ts",
       "types": "./dist/providers/claude/index.d.ts",
       "import": "./dist/providers/claude/index.js",
       "default": "./dist/providers/claude/index.js"
     },
     "./zukhruf": {
+      "@deepagents/source": "./src/zukhruf/index.ts",
       "types": "./dist/zukhruf/index.d.ts",
       "import": "./dist/zukhruf/index.js",
       "default": "./dist/zukhruf/index.js"
     },
     "./zukhruf/mcp": {
+      "@deepagents/source": "./src/zukhruf/plugins/mcp/index.ts",
       "types": "./dist/zukhruf/plugins/mcp/index.d.ts",
       "import": "./dist/zukhruf/plugins/mcp/index.js",
       "default": "./dist/zukhruf/plugins/mcp/index.js"
     },
     "./zukhruf/http": {
+      "@deepagents/source": "./src/zukhruf/plugins/http/index.ts",
       "types": "./dist/zukhruf/plugins/http/index.d.ts",
       "import": "./dist/zukhruf/plugins/http/index.js",
       "default": "./dist/zukhruf/plugins/http/index.js"
     },
     "./zukhruf/conversation-scheduling": {
+      "@deepagents/source": "./src/zukhruf/plugins/conversation-scheduling/index.ts",
       "types": "./dist/zukhruf/plugins/conversation-scheduling/index.d.ts",
       "import": "./dist/zukhruf/plugins/conversation-scheduling/index.js",
       "default": "./dist/zukhruf/plugins/conversation-scheduling/index.js"
     },
     "./zukhruf/schedules": {
+      "@deepagents/source": "./src/zukhruf/plugins/schedules/index.ts",
       "types": "./dist/zukhruf/plugins/schedules/index.d.ts",
       "import": "./dist/zukhruf/plugins/schedules/index.js",
       "default": "./dist/zukhruf/plugins/schedules/index.js"
     },
     "./zukhruf/schedules/http": {
+      "@deepagents/source": "./src/zukhruf/plugins/schedules/http.ts",
       "types": "./dist/zukhruf/plugins/schedules/http.d.ts",
       "import": "./dist/zukhruf/plugins/schedules/http.js",
       "default": "./dist/zukhruf/plugins/schedules/http.js"
     },
     "./zukhruf/uploads": {
+      "@deepagents/source": "./src/zukhruf/plugins/uploads/index.ts",
       "types": "./dist/zukhruf/plugins/uploads/index.d.ts",
       "import": "./dist/zukhruf/plugins/uploads/index.js",
       "default": "./dist/zukhruf/plugins/uploads/index.js"
     },
     "./zukhruf/uploads/http": {
+      "@deepagents/source": "./src/zukhruf/plugins/uploads/http.ts",
       "types": "./dist/zukhruf/plugins/uploads/http.d.ts",
       "import": "./dist/zukhruf/plugins/uploads/http.js",
       "default": "./dist/zukhruf/plugins/uploads/http.js"

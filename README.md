@@ -51,3 +51,38 @@ nx run text2sql:build
 Tests use the Node.js test runner under the Nx target. Import package modules
 in tests, not relative source paths, so private class identities stay aligned
 with built package output.
+
+## Use a package's source from another repo
+
+Each export of a package has a `@deepagents/source` condition first. This
+condition points at the source in `src/`. The other conditions point at the
+build in `dist/`. A repo that sets no condition gets `dist/`.
+
+To change a package and a repo that uses it together, link the package. Then
+run the other repo with the condition and with the text loader of this repo:
+
+```bash
+npm link                                  # in packages/<package>
+npm link @deepagents/<package>            # in the other repo
+NODE_OPTIONS="--conditions=@deepagents/source --import <deepagents>/tools/src/text-loader.ts" node …
+```
+
+The source imports `.sql`, `.md` and `.txt` files as text. The build does
+this with esbuild. Without the loader, Node.js stops with
+`ERR_UNKNOWN_FILE_EXTENSION`.
+
+Node.js cannot run some source files, so these exports need a bundler that
+sets the condition, for example Vite with `resolve.conditions`:
+
+- `@deepagents/retrieval` and `@deepagents/toolbox`: relative imports end in
+  `.js`.
+- `@deepagents/react-shadcn`: relative imports have no extension.
+- `@deepagents/react-genai`, `@deepagents/react-input/browser` and
+  `@deepagents/devtool-history`: the source is `.tsx`.
+
+This repo does not set the condition in `customConditions`. The esbuild build
+writes declarations with no project references, so it would compile the
+source of each package that it imports.
+
+Set the condition only while the package is linked. The published package has
+no `src/`, so Node.js stops with `ERR_MODULE_NOT_FOUND`.

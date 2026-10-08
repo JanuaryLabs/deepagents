@@ -18,11 +18,13 @@
   "exports": {
     "./package.json": "./package.json",
     "./connectors": {
+      "@deepagents/source": "./src/lib/connectors/index.ts",
       "types": "./dist/lib/connectors/index.d.ts",
       "import": "./dist/lib/connectors/index.js",
       "default": "./dist/lib/connectors/index.js"
     },
     ".": {
+      "@deepagents/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"

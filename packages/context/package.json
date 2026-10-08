@@ -18,31 +18,37 @@
   "exports": {
     "./package.json": "./package.json",
     ".": {
+      "@deepagents/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./browser": {
+      "@deepagents/source": "./src/browser.ts",
       "types": "./dist/browser.d.ts",
       "import": "./dist/browser.js",
       "default": "./dist/browser.js"
     },
     "./tracing": {
+      "@deepagents/source": "./src/lib/tracing/index.ts",
       "types": "./dist/lib/tracing/index.d.ts",
       "import": "./dist/lib/tracing/index.js",
       "default": "./dist/lib/tracing/index.js"
     },
     "./telemetry": {
+      "@deepagents/source": "./src/lib/telemetry/index.ts",
       "types": "./dist/lib/telemetry/index.d.ts",
       "import": "./dist/lib/telemetry/index.js",
       "default": "./dist/lib/telemetry/index.js"
     },
     "./telemetry/file": {
+      "@deepagents/source": "./src/lib/telemetry/file/index.ts",
       "types": "./dist/lib/telemetry/file/index.d.ts",
       "import": "./dist/lib/telemetry/file/index.js",
       "default": "./dist/lib/telemetry/file/index.js"
     },
     "./sandbox/strace": {
+      "@deepagents/source": "./src/lib/sandbox/strace/index.ts",
       "types": "./dist/lib/sandbox/strace/index.d.ts",
       "import": "./dist/lib/sandbox/strace/index.js",
       "default": "./dist/lib/sandbox/strace/index.js"

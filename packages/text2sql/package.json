@@ -21,61 +21,73 @@
   "exports": {
     "./package.json": "./package.json",
     ".": {
+      "@deepagents/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./grounding": {
+      "@deepagents/source": "./src/lib/adapters/groundings/index.ts",
       "types": "./dist/lib/adapters/groundings/index.d.ts",
       "import": "./dist/lib/adapters/groundings/index.js",
       "default": "./dist/lib/adapters/groundings/index.js"
     },
     "./sqlite": {
+      "@deepagents/source": "./src/lib/adapters/sqlite/index.ts",
       "types": "./dist/lib/adapters/sqlite/index.d.ts",
       "import": "./dist/lib/adapters/sqlite/index.js",
       "default": "./dist/lib/adapters/sqlite/index.js"
     },
     "./postgres": {
+      "@deepagents/source": "./src/lib/adapters/postgres/index.ts",
       "types": "./dist/lib/adapters/postgres/index.d.ts",
       "import": "./dist/lib/adapters/postgres/index.js",
       "default": "./dist/lib/adapters/postgres/index.js"
     },
     "./sqlserver": {
+      "@deepagents/source": "./src/lib/adapters/sqlserver/index.ts",
       "types": "./dist/lib/adapters/sqlserver/index.d.ts",
       "import": "./dist/lib/adapters/sqlserver/index.js",
       "default": "./dist/lib/adapters/sqlserver/index.js"
     },
     "./mysql": {
+      "@deepagents/source": "./src/lib/adapters/mysql/index.ts",
       "types": "./dist/lib/adapters/mysql/index.d.ts",
       "import": "./dist/lib/adapters/mysql/index.js",
       "default": "./dist/lib/adapters/mysql/index.js"
     },
     "./bigquery": {
+      "@deepagents/source": "./src/lib/adapters/bigquery/index.ts",
       "types": "./dist/lib/adapters/bigquery/index.d.ts",
       "import": "./dist/lib/adapters/bigquery/index.js",
       "default": "./dist/lib/adapters/bigquery/index.js"
     },
     "./clickhouse": {
+      "@deepagents/source": "./src/lib/adapters/clickhouse/index.ts",
       "types": "./dist/lib/adapters/clickhouse/index.d.ts",
       "import": "./dist/lib/adapters/clickhouse/index.js",
       "default": "./dist/lib/adapters/clickhouse/index.js"
     },
     "./posthog": {
+      "@deepagents/source": "./src/lib/adapters/posthog/index.ts",
       "types": "./dist/lib/adapters/posthog/index.d.ts",
       "import": "./dist/lib/adapters/posthog/index.js",
       "default": "./dist/lib/adapters/posthog/index.js"
     },
     "./duckdb": {
+      "@deepagents/source": "./src/lib/adapters/duckdb/index.ts",
       "types": "./dist/lib/adapters/duckdb/index.d.ts",
       "import": "./dist/lib/adapters/duckdb/index.js",
       "default": "./dist/lib/adapters/duckdb/index.js"
     },
     "./synthesis": {
+      "@deepagents/source": "./src/lib/synthesis/index.ts",
       "types": "./dist/lib/synthesis/index.d.ts",
       "import": "./dist/lib/synthesis/index.js",
       "default": "./dist/lib/synthesis/index.js"
     },
     "./spreadsheet": {
+      "@deepagents/source": "./src/lib/adapters/spreadsheet/index.ts",
       "types": "./dist/lib/adapters/spreadsheet/index.d.ts",
       "import": "./dist/lib/adapters/spreadsheet/index.js",
       "default": "./dist/lib/adapters/spreadsheet/index.js"

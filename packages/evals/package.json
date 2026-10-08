@@ -18,41 +18,49 @@
   "exports": {
     "./package.json": "./package.json",
     ".": {
+      "@deepagents/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./engine": {
+      "@deepagents/source": "./src/engine/index.ts",
       "types": "./dist/engine/index.d.ts",
       "import": "./dist/engine/index.js",
       "default": "./dist/engine/index.js"
     },
     "./scorers": {
+      "@deepagents/source": "./src/scorers/index.ts",
       "types": "./dist/scorers/index.d.ts",
       "import": "./dist/scorers/index.js",
       "default": "./dist/scorers/index.js"
     },
     "./store": {
+      "@deepagents/source": "./src/store/index.ts",
       "types": "./dist/store/index.d.ts",
       "import": "./dist/store/index.js",
       "default": "./dist/store/index.js"
     },
     "./dataset": {
+      "@deepagents/source": "./src/dataset/index.ts",
       "types": "./dist/dataset/index.d.ts",
       "import": "./dist/dataset/index.js",
       "default": "./dist/dataset/index.js"
     },
     "./comparison": {
+      "@deepagents/source": "./src/comparison/index.ts",
       "types": "./dist/comparison/index.d.ts",
       "import": "./dist/comparison/index.js",
       "default": "./dist/comparison/index.js"
     },
     "./reporters": {
+      "@deepagents/source": "./src/reporters/index.ts",
       "types": "./dist/reporters/index.d.ts",
       "import": "./dist/reporters/index.js",
       "default": "./dist/reporters/index.js"
     },
     "./evaluate": {
+      "@deepagents/source": "./src/evaluate/index.ts",
       "types": "./dist/evaluate/index.d.ts",
       "import": "./dist/evaluate/index.js",
       "default": "./dist/evaluate/index.js"

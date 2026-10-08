@@ -18,11 +18,13 @@
   "exports": {
     "./package.json": "./package.json",
     ".": {
+      "@deepagents/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./context": {
+      "@deepagents/source": "./src/context/index.ts",
       "types": "./dist/context/index.d.ts",
       "import": "./dist/context/index.js",
       "default": "./dist/context/index.js"
