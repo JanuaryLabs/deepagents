@@ -80,6 +80,25 @@ sets the condition, for example Vite with `resolve.conditions`:
 - `@deepagents/react-genai`, `@deepagents/react-input/browser` and
   `@deepagents/devtool-history`: the source is `.tsx`.
 
+In the `tsconfig.json` of the other repo:
+
+```json
+{
+  "compilerOptions": {
+    "customConditions": ["@deepagents/source"],
+    "allowImportingTsExtensions": true
+  },
+  "include": ["src", "<deepagents>/global.d.ts"]
+}
+```
+
+TypeScript then checks the source of the package with the options of the
+other repo. The source imports its own files with the `.ts` extension, so the
+other repo needs `allowImportingTsExtensions`. If the other repo emits
+JavaScript, use `rewriteRelativeImportExtensions` instead. `global.d.ts`
+declares the `.sql`, `.md` and `.txt` modules and `tiny-tfidf`, which the
+source imports.
+
 This repo does not set the condition in `customConditions`. The esbuild build
 writes declarations with no project references, so it would compile the
 source of each package that it imports.
