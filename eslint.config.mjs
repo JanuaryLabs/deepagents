@@ -122,7 +122,6 @@ export default defineConfig(
       '@typescript-eslint/consistent-type-assertions': 'warn',
       '@typescript-eslint/no-floating-promises': 'warn',
       '@typescript-eslint/no-misused-promises': 'warn',
-      '@typescript-eslint/only-throw-error': 'warn',
       'zukhruf/no-enum': 'warn',
       'zukhruf/no-phase-flag': 'warn',
       'zukhruf/no-promise-field': 'warn',
