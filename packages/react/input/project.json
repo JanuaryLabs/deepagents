@@ -2,6 +2,5 @@
   "name": "@deepagents/react-input",
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/react/input/src",
-  "projectType": "library",
-  "tags": ["scope:public"]
+  "projectType": "library"
 }

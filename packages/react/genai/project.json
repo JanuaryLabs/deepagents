@@ -3,5 +3,5 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/react/genai/src",
   "projectType": "library",
-  "tags": ["scope:public", "layer:app-agnostic"]
+  "tags": ["layer:app-agnostic"]
 }

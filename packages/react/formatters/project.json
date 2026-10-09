@@ -2,6 +2,5 @@
   "name": "@deepagents/react-formatters",
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/react/formatters/src",
-  "projectType": "library",
-  "tags": ["scope:public"]
+  "projectType": "library"
 }

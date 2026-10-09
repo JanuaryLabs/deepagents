@@ -3,7 +3,7 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/devtool/history/src",
   "projectType": "library",
-  "tags": ["scope:public", "test:node"],
+  "tags": ["test:node"],
   "targets": {
     "test": {
       "options": {

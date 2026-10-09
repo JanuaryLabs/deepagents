@@ -3,26 +3,6 @@ import zukhruf from '@zukhruf/eslint';
 import { manifest, moduleBoundaries } from '@zukhruf/eslint/nx';
 import prettier from 'eslint-config-prettier';
 import { defineConfig } from 'eslint/config';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
-
-const packagesDir = join(import.meta.dirname, 'packages');
-for (const dir of readdirSync(packagesDir)) {
-  const packageJsonPath = join(packagesDir, dir, 'package.json');
-  if (!existsSync(packageJsonPath)) continue;
-  const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
-
-  const projectJsonPath = join(packagesDir, dir, 'project.json');
-  const tags = existsSync(projectJsonPath)
-    ? (JSON.parse(readFileSync(projectJsonPath, 'utf8')).tags ?? [])
-    : (packageJson.nx?.tags ?? []);
-  const expectedTag = packageJson.private ? 'scope:private' : 'scope:public';
-  if (!tags.includes(expectedTag)) {
-    throw new Error(
-      `packages/${dir} must be tagged "${expectedTag}" to match the "private" flag in its package.json (module-boundary constraints depend on it).`,
-    );
-  }
-}
 
 const typescript = ['**/*.ts', '**/*.tsx', '**/*.cts', '**/*.mts'];
 const source = [...typescript, '**/*.js', '**/*.jsx', '**/*.cjs', '**/*.mjs'];
@@ -65,8 +45,8 @@ export default defineConfig(
         moduleBoundaries({
           depConstraints: [
             {
-              sourceTag: 'scope:public',
-              onlyDependOnLibsWithTags: ['scope:public'],
+              sourceTag: 'npm:public',
+              onlyDependOnLibsWithTags: ['npm:public'],
             },
           ],
         }),
