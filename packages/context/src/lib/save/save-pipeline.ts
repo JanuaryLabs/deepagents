@@ -35,16 +35,20 @@ export interface SaveResult {
 export class SavePipeline {
   #engine: SavePipelineEngine;
   #pending: ContextFragment[];
-  #shouldBranch = true;
+  readonly #shouldBranch: boolean;
 
-  constructor(engine: SavePipelineEngine, pending: ContextFragment[]) {
+  constructor(
+    engine: SavePipelineEngine,
+    pending: ContextFragment[],
+    shouldBranch: boolean,
+  ) {
     this.#engine = engine;
     this.#pending = pending;
+    this.#shouldBranch = shouldBranch;
   }
 
-  async applyUpdateBranching(shouldBranch: boolean): Promise<this> {
-    this.#shouldBranch = shouldBranch;
-    if (!shouldBranch) return this;
+  async applyUpdateBranching(): Promise<this> {
+    if (!this.#shouldBranch) return this;
 
     for (const fragment of this.#pending) {
       if (!fragment.id) continue;

@@ -40,7 +40,6 @@ const chunkRow = z.object({
 export class SqliteStreamStore extends StreamStore {
   #db: DatabaseSync;
   #statements = new Map<string, ReturnType<DatabaseSync['prepare']>>();
-  #closed = false;
 
   #stmt(sql: string): ReturnType<DatabaseSync['prepare']> {
     let stmt = this.#statements.get(sql);
@@ -52,8 +51,7 @@ export class SqliteStreamStore extends StreamStore {
   }
 
   close(): void {
-    if (this.#closed) return;
-    this.#closed = true;
+    if (!this.#db.isOpen) return;
     this.#statements.clear();
     this.#db.close();
   }

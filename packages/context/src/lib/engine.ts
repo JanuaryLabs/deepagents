@@ -866,9 +866,13 @@ export class ContextEngine {
 
     const pending = this.#pendingMessages;
     this.#pendingMessages = [];
-    const pipeline = new SavePipeline(this.#asSavePipelineEngine(), pending);
+    const pipeline = new SavePipeline(
+      this.#asSavePipelineEngine(),
+      pending,
+      options?.branch ?? true,
+    );
     try {
-      await pipeline.applyUpdateBranching(options?.branch ?? true);
+      await pipeline.applyUpdateBranching();
       await this.#foldUserReminders(pending);
       return await pipeline.persist();
     } catch (error) {

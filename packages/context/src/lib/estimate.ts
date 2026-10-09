@@ -1,4 +1,5 @@
 import { encode } from 'gpt-tokenizer';
+import pMemoize from 'p-memoize';
 import { z } from 'zod';
 
 import type { ContextFragment } from './fragments.ts';
@@ -121,16 +122,19 @@ export function inputPricePerMillion(model: ModelInfo): number {
  */
 export class ModelsRegistry {
   #cache: Map<string, ModelInfo> = new Map();
-  #loaded = false;
   #tokenizers: Map<string, Tokenizer> = new Map();
   #defaultTokenizer: Tokenizer = defaultTokenizer;
+  /** Fetches once; concurrent calls share the fetch, and a failed one runs again. */
+  readonly #load = pMemoize(() => this.#fetchModels());
 
   /**
    * Load models data from models.dev API
    */
   async load(): Promise<void> {
-    if (this.#loaded) return;
+    await this.#load();
+  }
 
+  async #fetchModels(): Promise<void> {
     const response = await fetch('https://models.dev/api.json');
     if (!response.ok) {
       throw new Error(`Failed to fetch models: ${response.statusText}`);
@@ -153,8 +157,6 @@ export class ModelsRegistry {
         this.#cache.set(`${providerId}:${modelId}`, info);
       }
     }
-
-    this.#loaded = true;
   }
 
   /**

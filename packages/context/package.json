@@ -80,7 +80,8 @@
     "tiny-tfidf": "^1.0.0",
     "yaml": "^2.9.0",
     "zod": "^4.4.3",
-    "@ai-sdk/openai": "^4.0.83"
+    "@ai-sdk/openai": "^4.0.83",
+    "p-memoize": "^8.0.0"
   },
   "devDependencies": {
     "@daytona/sdk": "^0.198.0",
