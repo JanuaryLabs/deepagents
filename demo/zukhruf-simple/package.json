@@ -8,7 +8,6 @@
     ".": "./agent.ts"
   },
   "scripts": {
-    "build": "tsc --build tsconfig.json",
     "start": "node server.ts",
     "test": "node --test --no-warnings --test-timeout=60000 webmcp.integration.test.ts"
   },
@@ -16,7 +15,7 @@
     "targets": {
       "test": {
         "dependsOn": [
-          "build"
+          "^build"
         ]
       }
     }

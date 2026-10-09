@@ -8,14 +8,13 @@
     ".": "./agent.ts"
   },
   "scripts": {
-    "build": "tsc --build tsconfig.json",
     "test": "node --test --no-warnings --test-timeout=30000 agent.integration.test.ts"
   },
   "nx": {
     "targets": {
       "test": {
         "dependsOn": [
-          "build"
+          "^build"
         ]
       }
     }
