@@ -49,7 +49,6 @@ class PlanExecuteStateManager {
   private state: PlanExecuteState;
   private pendingWork: PendingWork[] = [];
   private workFeedback: WorkFeedback[] = [];
-  private isLocked = false;
 
   constructor(initialInput: string) {
     this.state = {
@@ -62,19 +61,6 @@ class PlanExecuteStateManager {
 
   private generateStepId(): StepId {
     return `step_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }
-
-  private async withLock<T>(operation: () => Promise<T> | T): Promise<T> {
-    if (this.isLocked) {
-      throw new Error('State is locked - concurrent modification detected');
-    }
-
-    this.isLocked = true;
-    try {
-      return await operation();
-    } finally {
-      this.isLocked = false;
-    }
   }
 
   getCurrentState() {
@@ -146,44 +132,40 @@ class PlanExecuteStateManager {
     return [...this.pendingWork];
   }
 
-  async approveWork(stepId: StepId): Promise<void> {
-    return this.withLock(async () => {
-      const workIndex = this.pendingWork.findIndex((w) => w.id === stepId);
-      if (workIndex === -1) {
-        throw new Error(`No pending work found for step ID ${stepId}`);
-      }
+  approveWork(stepId: StepId): void {
+    const workIndex = this.pendingWork.findIndex((w) => w.id === stepId);
+    if (workIndex === -1) {
+      throw new Error(`No pending work found for step ID ${stepId}`);
+    }
 
-      const work = this.pendingWork[workIndex];
-      // Remove from pending and add to completed
-      this.pendingWork.splice(workIndex, 1);
-      this.addCompletedStep(stepId, work.result);
-    });
+    const work = this.pendingWork[workIndex];
+    // Remove from pending and add to completed
+    this.pendingWork.splice(workIndex, 1);
+    this.addCompletedStep(stepId, work.result);
   }
 
-  async rejectWork(stepId: StepId, feedback: string): Promise<void> {
-    return this.withLock(async () => {
-      const workIndex = this.pendingWork.findIndex((w) => w.id === stepId);
-      if (workIndex === -1) {
-        throw new Error(`No pending work found for step ID ${stepId}`);
-      }
+  rejectWork(stepId: StepId, feedback: string): void {
+    const workIndex = this.pendingWork.findIndex((w) => w.id === stepId);
+    if (workIndex === -1) {
+      throw new Error(`No pending work found for step ID ${stepId}`);
+    }
 
-      const work = this.pendingWork[workIndex];
-      // Remove from pending and add feedback
-      this.pendingWork.splice(workIndex, 1);
+    const work = this.pendingWork[workIndex];
+    // Remove from pending and add feedback
+    this.pendingWork.splice(workIndex, 1);
 
-      const feedbackEntry: WorkFeedback = {
-        id: stepId,
-        description: work.description,
-        feedback,
-        needsRevision: true,
-        createdAt: new Date(),
-      };
+    const feedbackEntry: WorkFeedback = {
+      id: stepId,
+      description: work.description,
+      feedback,
+      needsRevision: true,
+      createdAt: new Date(),
+    };
 
-      this.workFeedback.push(feedbackEntry);
-      console.log(
-        `❌ Work rejected: ${work.description} - Feedback: ${feedback}`,
-      );
-    });
+    this.workFeedback.push(feedbackEntry);
+    console.log(
+      `❌ Work rejected: ${work.description} - Feedback: ${feedback}`,
+    );
   }
 
   getWorkFeedback(): WorkFeedback[] {
@@ -256,7 +238,6 @@ class PlanExecuteStateManager {
       pendingWork: this.pendingWork.length,
       activeFeedback: this.workFeedback.length,
       orphanedFeedback: this.findOrphanedFeedback().length,
-      isLocked: this.isLocked,
       isComplete: this.isComplete(),
     };
   }
@@ -406,7 +387,7 @@ function createStateTools() {
         { context }: ToolExecutionOptions<PlanExecuteContext>,
       ) => {
         try {
-          await context.approveWork(stepId);
+          context.approveWork(stepId);
           return `Work approved and marked complete: step ${stepId}`;
         } catch (error) {
           return `Error approving work: ${error instanceof Error ? error.message : 'Unknown error'}`;
@@ -427,7 +408,7 @@ function createStateTools() {
         { context }: ToolExecutionOptions<PlanExecuteContext>,
       ) => {
         try {
-          await context.rejectWork(stepId, feedback);
+          context.rejectWork(stepId, feedback);
           return `Work rejected with feedback: step ${stepId}`;
         } catch (error) {
           return `Error rejecting work: ${error instanceof Error ? error.message : 'Unknown error'}`;
