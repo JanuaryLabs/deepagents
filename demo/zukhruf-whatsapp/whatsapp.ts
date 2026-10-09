@@ -103,12 +103,11 @@ export class WhatsAppGroup implements AsyncDisposable {
 
     await boss.start();
     for (const [index, participant] of options.participants.entries()) {
-      const queue = new PgBossTurnQueue(boss, {
+      const queue = await PgBossTurnQueue.create(boss, {
         queue: `zukhruf-whatsapp-${index}`,
         pollingIntervalSeconds: 0.5,
         schema: 'pgboss',
       });
-      await queue.initialize();
 
       const runtime = new AgentRuntime(
         createParticipantAgent(participant, (message) =>

@@ -146,11 +146,10 @@ test('authors a missing skill before a fresh general task agent uses it', async 
   );
   boss.on('error', () => {});
   await boss.start();
-  const queue = new PgBossTurnQueue(boss, {
+  const queue = await PgBossTurnQueue.create(boss, {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
   });
-  await queue.initialize();
   const streamStore = resources.adopt(
     new SqliteStreamStore(':memory:'),
     (store) => store.close(),

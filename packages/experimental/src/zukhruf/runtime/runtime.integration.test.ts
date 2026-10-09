@@ -54,6 +54,8 @@ import {
   PgBossConversationStatusChangeSource,
   PgBossTurnQueue,
   SqliteMailboxStore,
+  TurnQueue,
+  type TurnRef,
   defineAgent,
   defineSandbox,
   defineStack,
@@ -511,13 +513,40 @@ function declaration(
   };
 }
 
-class FailOnceResumeParkedQueue extends PgBossTurnQueue {
+/** Fails the first parked-turn revival that reaches the queue. */
+class FailOnceResumeParkedQueue extends TurnQueue {
+  readonly #inner: TurnQueue;
   readonly #faults = [new Error('simulated parked-turn revival outage')];
+
+  constructor(inner: TurnQueue) {
+    super();
+    this.#inner = inner;
+  }
+
+  override push(turn: TurnRef) {
+    return this.#inner.push(turn);
+  }
+
+  override getTurnActivity(conversation: Pick<TurnRef, 'chatId' | 'userId'>) {
+    return this.#inner.getTurnActivity(conversation);
+  }
+
+  override getCurrentTurn(conversation: Pick<TurnRef, 'chatId' | 'userId'>) {
+    return this.#inner.getCurrentTurn(conversation);
+  }
+
+  override cancel(streamId: string) {
+    return this.#inner.cancel(streamId);
+  }
+
+  override consume(...args: Parameters<TurnQueue['consume']>) {
+    return this.#inner.consume(...args);
+  }
 
   override async resumeParked(chatId: string): Promise<void> {
     const fault = this.#faults.shift();
     if (fault) throw fault;
-    await super.resumeParked(chatId);
+    await this.#inner.resumeParked(chatId);
   }
 }
 
@@ -525,7 +554,8 @@ async function harness(
   model: AgentDeclaration['model'],
   tools?: ToolSet,
   options?: {
-    queueFactory?: (boss: PgBoss) => PgBossTurnQueue;
+    /** Wraps the real queue; the runtime uses the returned one. */
+    queueFactory?: (queue: PgBossTurnQueue) => TurnQueue;
     runtime?: (infrastructure: {
       boss: PgBoss;
     }) => Partial<Awaited<ReturnType<AgentStack>>>;
@@ -549,13 +579,11 @@ async function harness(
   );
   boss.on('error', () => {});
   await boss.start();
-  const queue =
-    options?.queueFactory?.(boss) ??
-    new PgBossTurnQueue(boss, {
-      pollingIntervalSeconds: 0.5,
-      schema: 'pgboss',
-    });
-  await queue.initialize();
+  const queue = await PgBossTurnQueue.create(boss, {
+    pollingIntervalSeconds: 0.5,
+    schema: 'pgboss',
+  });
+  const runtimeQueue = options?.queueFactory?.(queue) ?? queue;
   const streamStore = resources.adopt(
     new SqliteStreamStore(':memory:'),
     (value) => value.close(),
@@ -578,7 +606,7 @@ async function harness(
   const stack = defineStack(async () => ({
     store,
     streams,
-    queue,
+    queue: runtimeQueue,
     mailboxStore,
     ...(composition?.bindings ? { bindings: composition.bindings } : {}),
     ...options?.runtime?.({ boss }),
@@ -2382,11 +2410,7 @@ describe('zukhruf runtime — background executor', () => {
   it('repairs parked-turn revival in the worker after the resumed turn settles', async (t) => {
     const { track, tools, model } = approvalSetup();
     await using h = await harness(model, tools, {
-      queueFactory: (boss) =>
-        new FailOnceResumeParkedQueue(boss, {
-          pollingIntervalSeconds: 0.5,
-          schema: 'pgboss',
-        }),
+      queueFactory: (queue) => new FailOnceResumeParkedQueue(queue),
     });
     await using _worker = await h.runtime.work({ concurrency: 2 });
     void _worker;
@@ -3218,11 +3242,10 @@ describe('zukhruf runtime — cross-process conversation status', () => {
         ),
       }),
     });
-    const observerQueue = new PgBossTurnQueue(h.boss, {
+    const observerQueue = await PgBossTurnQueue.create(h.boss, {
       pollingIntervalSeconds: 0.5,
       schema: 'pgboss',
     });
-    await observerQueue.initialize();
     const observerSetup = new AgentRuntime(declaration(model));
     const observerStack = defineStack(async () => ({
       store: h.store,

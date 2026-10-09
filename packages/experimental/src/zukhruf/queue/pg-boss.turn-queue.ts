@@ -28,6 +28,19 @@ const MAX_TIMEOUT_MS = 2_147_483_647;
 /** A `<schema>.queue` catalog row, selected as `table_name AS "table"`. */
 const queueCatalogRowSchema = z.object({ table: z.string() });
 
+/** Options after defaults and checks, as the queue opens with them. */
+interface PgBossTurnQueueSettings {
+  readonly queue: string;
+  readonly schema: string;
+  readonly expireInSeconds: number;
+  readonly heartbeatSeconds: number;
+  readonly pollingIntervalSeconds: number;
+}
+
+function deadLetterQueueOf(queue: string): string {
+  return `${queue}-dead`;
+}
+
 /**
  * TurnQueue on pg-boss.
  *
@@ -56,54 +69,143 @@ const queueCatalogRowSchema = z.object({ table: z.string() });
  * The `PgBoss` instance is borrowed: the caller `start()`s and `stop()`s it.
  */
 export class PgBossTurnQueue extends TurnQueue {
-  #boss: PgBoss;
-  #queue: string;
-  #schema: string;
-  #schemaConfigurationError?: string;
-  #table?: string;
-  #expireInSeconds: number;
-  #cancelIntentTtlMs: number;
-  #heartbeatSeconds: number;
-  #pollingIntervalSeconds: number;
-  #active = new Map<string, Set<AbortController>>();
-  #cancelIntents = new Map<string, number>();
-  #cancelIntentExpiryTimer?: ReturnType<typeof globalThis.setTimeout>;
+  readonly #boss: PgBoss;
+  readonly #queue: string;
+  readonly #schema: string;
+  readonly #table: string;
+  readonly #cancelIntentTtlMs: number;
+  readonly #pollingIntervalSeconds: number;
+  readonly #active = new Map<string, Set<AbortController>>();
+  /** Cancels that arrived before a local worker runs the turn; each expires on its own timer. */
+  readonly #cancelIntents = new Map<
+    string,
+    { expiresAt: number; timer: ReturnType<typeof globalThis.setTimeout> }
+  >();
 
-  constructor(boss: PgBoss, options: PgBossTurnQueueOptions = {}) {
+  private constructor(
+    boss: PgBoss,
+    settings: PgBossTurnQueueSettings,
+    table: string,
+  ) {
     super();
     this.#boss = boss;
-    this.#queue = options.queue ?? 'zukhruf-turns';
+    this.#queue = settings.queue;
+    this.#schema = settings.schema;
+    this.#table = table;
+    this.#cancelIntentTtlMs = settings.expireInSeconds * 1_000;
+    this.#pollingIntervalSeconds = settings.pollingIntervalSeconds;
+  }
+
+  /**
+   * Opens the queue: creates the turn queue and its dead-letter queue when
+   * they are missing, and checks that the schema is the PgBoss schema.
+   */
+  static async create(
+    boss: PgBoss,
+    options: PgBossTurnQueueOptions = {},
+  ): Promise<PgBossTurnQueue> {
+    const settings = PgBossTurnQueue.#settings(boss, options);
+    const table = await PgBossTurnQueue.#openQueue(boss, settings);
+    return new PgBossTurnQueue(boss, settings, table);
+  }
+
+  static #settings(
+    boss: PgBoss,
+    options: PgBossTurnQueueOptions,
+  ): PgBossTurnQueueSettings {
     // pg-boss's own pooled database exposes its config; custom adapters may not.
     const db = boss.getDb();
     const configuredSchema =
       'config' in db && isRecord(db.config) ? db.config.schema : undefined;
     const bossSchema =
       typeof configuredSchema === 'string' ? configuredSchema : undefined;
-    this.#schema = options.schema ?? bossSchema ?? 'pgboss';
-    if (options.schema === undefined && bossSchema === undefined) {
-      this.#schemaConfigurationError =
-        'PgBossTurnQueue cannot read the schema from a custom PgBoss database adapter; pass the PgBoss schema in options.schema';
-    } else if (
-      options.schema !== undefined &&
-      bossSchema !== undefined &&
-      options.schema !== bossSchema
-    ) {
-      this.#schemaConfigurationError = `PgBossTurnQueue schema "${options.schema}" does not match the PgBoss schema "${bossSchema}"`;
-    }
-    this.#expireInSeconds = options.expireInSeconds ?? 3600;
-    this.#cancelIntentTtlMs = this.#expireInSeconds * 1_000;
+    const expireInSeconds = options.expireInSeconds ?? 3600;
+    const cancelIntentTtlMs = expireInSeconds * 1_000;
     if (
-      !Number.isFinite(this.#expireInSeconds) ||
-      this.#expireInSeconds <= 0 ||
-      !Number.isSafeInteger(this.#cancelIntentTtlMs) ||
-      this.#cancelIntentTtlMs > Number.MAX_SAFE_INTEGER - Date.now()
+      !Number.isFinite(expireInSeconds) ||
+      expireInSeconds <= 0 ||
+      !Number.isSafeInteger(cancelIntentTtlMs) ||
+      cancelIntentTtlMs > Number.MAX_SAFE_INTEGER - Date.now()
     ) {
       throw new Error(
         'PgBossTurnQueue expireInSeconds must be a finite positive duration',
       );
     }
-    this.#heartbeatSeconds = options.heartbeatSeconds ?? 30;
-    this.#pollingIntervalSeconds = options.pollingIntervalSeconds ?? 1;
+    if (options.schema === undefined && bossSchema === undefined) {
+      throw new Error(
+        'PgBossTurnQueue cannot read the schema from a custom PgBoss database adapter; pass the PgBoss schema in options.schema',
+      );
+    }
+    if (
+      options.schema !== undefined &&
+      bossSchema !== undefined &&
+      options.schema !== bossSchema
+    ) {
+      throw new Error(
+        `PgBossTurnQueue schema "${options.schema}" does not match the PgBoss schema "${bossSchema}"`,
+      );
+    }
+    return {
+      queue: options.queue ?? 'zukhruf-turns',
+      schema: options.schema ?? bossSchema ?? 'pgboss',
+      expireInSeconds,
+      heartbeatSeconds: options.heartbeatSeconds ?? 30,
+      pollingIntervalSeconds: options.pollingIntervalSeconds ?? 1,
+    };
+  }
+
+  /** Creates the queues when they are missing; returns the turn queue's job table. */
+  static async #openQueue(
+    boss: PgBoss,
+    settings: PgBossTurnQueueSettings,
+  ): Promise<string> {
+    const deadLetterQueue = deadLetterQueueOf(settings.queue);
+    if (!(await boss.getQueue(deadLetterQueue))) {
+      await boss.createQueue(deadLetterQueue);
+    }
+    let queue = await boss.getQueue(settings.queue);
+    if (!queue) {
+      await boss.createQueue(settings.queue, {
+        policy: 'key_strict_fifo',
+        retryLimit: 0,
+        expireInSeconds: settings.expireInSeconds,
+        heartbeatSeconds: settings.heartbeatSeconds,
+        deleteAfterSeconds: 0,
+        deadLetter: deadLetterQueue,
+      });
+      queue = await boss.getQueue(settings.queue);
+    }
+    if (!queue) {
+      throw new Error(`Queue "${settings.queue}" was not initialized`);
+    }
+    const { table } = queue;
+    try {
+      const catalog = await boss.getDb().executeSql(
+        `SELECT table_name AS "table"
+         FROM ${PgBossTurnQueue.#quoteIdentifier(settings.schema)}."queue"
+         WHERE name = $1`,
+        [settings.queue],
+      );
+      const catalogRow = queueCatalogRowSchema.safeParse(catalog.rows[0]);
+      if (
+        catalog.rows.length !== 1 ||
+        !catalogRow.success ||
+        catalogRow.data.table !== table
+      ) {
+        throw new Error('queue catalog does not match');
+      }
+      await boss
+        .getDb()
+        .executeSql(
+          `SELECT 1 FROM ${PgBossTurnQueue.#relationOf(settings.schema, table)} WHERE false`,
+        );
+    } catch (cause) {
+      throw new Error(
+        `PgBossTurnQueue schema "${settings.schema}" does not match the PgBoss queue; pass the PgBoss schema in options.schema`,
+        { cause },
+      );
+    }
+    return table;
   }
 
   get queue(): string {
@@ -111,54 +213,7 @@ export class PgBossTurnQueue extends TurnQueue {
   }
 
   get deadLetterQueue(): string {
-    return `${this.#queue}-dead`;
-  }
-
-  async initialize(): Promise<void> {
-    if (this.#schemaConfigurationError) {
-      throw new Error(this.#schemaConfigurationError);
-    }
-    if (!(await this.#boss.getQueue(this.deadLetterQueue))) {
-      await this.#boss.createQueue(this.deadLetterQueue);
-    }
-    let queue = await this.#boss.getQueue(this.#queue);
-    if (!queue) {
-      await this.#boss.createQueue(this.#queue, {
-        policy: 'key_strict_fifo',
-        retryLimit: 0,
-        expireInSeconds: this.#expireInSeconds,
-        heartbeatSeconds: this.#heartbeatSeconds,
-        deleteAfterSeconds: 0,
-        deadLetter: this.deadLetterQueue,
-      });
-      queue = await this.#boss.getQueue(this.#queue);
-    }
-    if (!queue) throw new Error(`Queue "${this.#queue}" was not initialized`);
-    this.#table = queue.table;
-    try {
-      const catalog = await this.#boss.getDb().executeSql(
-        `SELECT table_name AS "table"
-         FROM ${PgBossTurnQueue.#quoteIdentifier(this.#schema)}."queue"
-         WHERE name = $1`,
-        [this.#queue],
-      );
-      const catalogRow = queueCatalogRowSchema.safeParse(catalog.rows[0]);
-      if (
-        catalog.rows.length !== 1 ||
-        !catalogRow.success ||
-        catalogRow.data.table !== this.#table
-      ) {
-        throw new Error('queue catalog does not match');
-      }
-      await this.#boss
-        .getDb()
-        .executeSql(`SELECT 1 FROM ${this.#relation()} WHERE false`);
-    } catch (cause) {
-      throw new Error(
-        `PgBossTurnQueue schema "${this.#schema}" does not match the PgBoss queue; pass the PgBoss schema in options.schema`,
-        { cause },
-      );
-    }
+    return deadLetterQueueOf(this.#queue);
   }
 
   async push(turn: TurnRef): Promise<void> {
@@ -374,50 +429,31 @@ export class PgBossTurnQueue extends TurnQueue {
   }
 
   #rememberCancelIntent(streamId: string): void {
-    this.#pruneCancelIntents();
-    this.#cancelIntents.set(streamId, Date.now() + this.#cancelIntentTtlMs);
-    this.#scheduleCancelIntentExpiry();
+    this.#forgetCancelIntent(streamId);
+    this.#armCancelIntent(streamId, Date.now() + this.#cancelIntentTtlMs);
+  }
+
+  #armCancelIntent(streamId: string, expiresAt: number): void {
+    // setTimeout clamps delays past MAX_TIMEOUT_MS, so a longer intent re-arms.
+    const timer = globalThis.setTimeout(
+      () => {
+        if (Date.now() < expiresAt) this.#armCancelIntent(streamId, expiresAt);
+        else this.#cancelIntents.delete(streamId);
+      },
+      Math.min(MAX_TIMEOUT_MS, Math.max(1, expiresAt - Date.now())),
+    );
+    timer.unref();
+    this.#cancelIntents.set(streamId, { expiresAt, timer });
   }
 
   #hasCancelIntent(streamId: string): boolean {
-    this.#pruneCancelIntents();
-    return this.#cancelIntents.has(streamId);
-  }
-
-  #pruneCancelIntents(): void {
-    const now = Date.now();
-    for (const [streamId, expiresAt] of this.#cancelIntents) {
-      if (expiresAt <= now) this.#cancelIntents.delete(streamId);
-    }
-    this.#scheduleCancelIntentExpiry();
+    const intent = this.#cancelIntents.get(streamId);
+    return intent !== undefined && intent.expiresAt > Date.now();
   }
 
   #forgetCancelIntent(streamId: string): void {
+    globalThis.clearTimeout(this.#cancelIntents.get(streamId)?.timer);
     this.#cancelIntents.delete(streamId);
-    this.#scheduleCancelIntentExpiry();
-  }
-
-  #scheduleCancelIntentExpiry(): void {
-    if (this.#cancelIntentExpiryTimer !== undefined) {
-      globalThis.clearTimeout(this.#cancelIntentExpiryTimer);
-      this.#cancelIntentExpiryTimer = undefined;
-    }
-    let nextExpiry = Number.POSITIVE_INFINITY;
-    for (const expiresAt of this.#cancelIntents.values()) {
-      nextExpiry = Math.min(nextExpiry, expiresAt);
-    }
-    if (!Number.isFinite(nextExpiry)) return;
-
-    const timer = globalThis.setTimeout(
-      () => {
-        if (this.#cancelIntentExpiryTimer !== timer) return;
-        this.#cancelIntentExpiryTimer = undefined;
-        this.#pruneCancelIntents();
-      },
-      Math.min(MAX_TIMEOUT_MS, Math.max(1, nextExpiry - Date.now())),
-    );
-    this.#cancelIntentExpiryTimer = timer;
-    timer.unref();
   }
 
   /**
@@ -433,9 +469,6 @@ export class PgBossTurnQueue extends TurnQueue {
   }
 
   async #deleteIfStillQueued(ids: string[]): Promise<void> {
-    if (!this.#table) {
-      throw new Error('PgBossTurnQueue.initialize() must run before cancel()');
-    }
     await this.#boss.getDb().executeSql(
       `DELETE FROM ${this.#relation()}
        WHERE name = $1
@@ -446,12 +479,11 @@ export class PgBossTurnQueue extends TurnQueue {
   }
 
   #relation(): string {
-    if (!this.#table) {
-      throw new Error(
-        'PgBossTurnQueue.initialize() must resolve its job table',
-      );
-    }
-    return `${PgBossTurnQueue.#quoteIdentifier(this.#schema)}.${PgBossTurnQueue.#quoteIdentifier(this.#table)}`;
+    return PgBossTurnQueue.#relationOf(this.#schema, this.#table);
+  }
+
+  static #relationOf(schema: string, table: string): string {
+    return `${PgBossTurnQueue.#quoteIdentifier(schema)}.${PgBossTurnQueue.#quoteIdentifier(table)}`;
   }
 
   static #quoteIdentifier(identifier: string): string {

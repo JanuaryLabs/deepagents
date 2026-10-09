@@ -252,13 +252,13 @@ User submissions, regeneration, client tool output, and approval responses all a
 
 ### pg-boss implementation _(Built — `queue/pg-boss.turn-queue.ts`)_
 
-`PgBossTurnQueue(boss /* borrowed */, {queue?, schema?})` on pg-boss v12 (all
+`await PgBossTurnQueue.create(boss /* borrowed */, {queue?, schema?})` on pg-boss v12 (all
 semantics live-verified):
 
 - **Schema is explicit for custom database adapters** — pg-boss does not expose the configured
   schema through its custom-adapter interface. Callers using `fromPglite` or another custom adapter
   must pass the same `schema` to `PgBossTurnQueue`; the built-in database path is read directly.
-  Initialization validates the queue catalog/table without creating transient probe queues, so
+  `create()` validates the queue catalog/table without creating transient probe queues, so
   preprovisioned least-privilege deployments do not need catalog-write permission at startup.
 - **`key_strict_fifo` policy + `singletonKey = chatId`** — per-chat serialization is structural:
   1 active per key, unlimited queued, strict push order, failed job blocks the key.

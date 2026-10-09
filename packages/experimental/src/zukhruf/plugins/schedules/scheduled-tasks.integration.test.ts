@@ -66,9 +66,8 @@ class TestExecutor {
     prompt: string;
     executionConfig: TestExecutionConfig;
   }> = [];
+  beforeLaunch: (() => Promise<void>) | undefined;
   afterLaunch: (() => void) | undefined;
-  launchGate: Promise<void> | undefined;
-  launchStarted: (() => void) | undefined;
 
   async launch(input: {
     runId: string;
@@ -80,8 +79,7 @@ class TestExecutor {
     executionConfig: TestExecutionConfig;
   }): Promise<{ executionId: string }> {
     this.launches.push(input);
-    this.launchStarted?.();
-    await this.launchGate;
+    await this.beforeLaunch?.();
     let execution = [...this.executions.values()].find(
       ({ runId }) => runId === input.runId,
     );
@@ -449,8 +447,10 @@ test('cancelling during launch cancels the external execution instead of orphani
   const { executor, scheduled } = harness;
   const started = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
-  executor.launchStarted = started.resolve;
-  executor.launchGate = release.promise;
+  executor.beforeLaunch = async () => {
+    started.resolve();
+    await release.promise;
+  };
   await using _worker = await scheduled.work(FAST_POLLING);
   void _worker;
   const task = await scheduled.create('owner-1', {
@@ -779,8 +779,10 @@ test('ScheduledTasks can drain an active dispatch before releasing its resources
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   await using h = await pgliteHarness(({ executor }) => {
-    executor.launchStarted = () => entered.resolve();
-    executor.launchGate = release.promise;
+    executor.beforeLaunch = async () => {
+      entered.resolve();
+      await release.promise;
+    };
   });
   const task = await h.scheduled.create('owner', {
     idempotencyKey: 'drain',

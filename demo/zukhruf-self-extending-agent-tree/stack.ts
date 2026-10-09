@@ -22,11 +22,10 @@ export default defineStack(async (resources) => {
   );
   boss.on('error', (error) => console.error('[queue error]', error));
   await boss.start();
-  const queue = new PgBossTurnQueue(boss, {
+  const queue = await PgBossTurnQueue.create(boss, {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
   });
-  await queue.initialize();
   const streamStore = new SqliteStreamStore(
     resources.use(new DatabaseSync(':memory:')),
   );

@@ -79,7 +79,6 @@ const mailboxItemRowsSchema = z.array(
 /** SQLite-backed mailbox for durable cross-process delivery. */
 export class SqliteMailboxStore extends MailboxStore implements Disposable {
   #database: DatabaseSync;
-  #closed = false;
 
   constructor(path: string) {
     super();
@@ -273,8 +272,7 @@ export class SqliteMailboxStore extends MailboxStore implements Disposable {
   }
 
   close(): void {
-    if (this.#closed) return;
-    this.#closed = true;
+    if (!this.#database.isOpen) return;
     this.#database.close();
   }
 

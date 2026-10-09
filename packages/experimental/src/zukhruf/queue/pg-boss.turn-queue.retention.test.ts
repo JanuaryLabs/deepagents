@@ -51,11 +51,10 @@ async function makeQueue() {
   });
   boss.on('error', () => {});
   await boss.start();
-  const queue = new PgBossTurnQueue(boss, {
+  const queue = await PgBossTurnQueue.create(boss, {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
   });
-  await queue.initialize();
   return {
     queue,
     boss,

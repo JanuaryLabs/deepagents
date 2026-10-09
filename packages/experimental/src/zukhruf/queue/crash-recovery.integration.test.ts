@@ -205,11 +205,10 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
     });
     boss.on('error', () => {});
     await boss.start();
-    const queue = new PgBossTurnQueue(boss, {
+    const queue = await PgBossTurnQueue.create(boss, {
       heartbeatSeconds: 10,
       pollingIntervalSeconds: 0.5,
     });
-    await queue.initialize();
 
     const calls: string[] = [];
     const mailboxStore = new SqliteMailboxStore(':memory:');

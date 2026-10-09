@@ -1,3 +1,4 @@
+import { Latch } from '@zukhruf/async';
 import { MemoryStore, Mutex } from '@zukhruf/mutex';
 import type { UIMessage } from 'ai';
 import { EventEmitter, on } from 'node:events';
@@ -68,6 +69,24 @@ export interface ConversationStatusProjectorOptions {
   changeSource?: ConversationStatusChangeSource;
 }
 
+/** No subscriber holds the remote change source. */
+class Detached {
+  // A private member keeps the type nominal: an empty class would also
+  // describe RemoteAttachment, and `instanceof` could not narrow the union.
+  readonly #detached = true;
+}
+
+const DETACHED = new Detached();
+
+/** The one remote change source subscription that every current subscriber shares. */
+class RemoteAttachment {
+  readonly abort = new AbortController();
+  /** Opens when the source subscribes: with nothing, or with the error that stopped it. */
+  readonly connected = new Latch<{ error: unknown } | undefined>();
+  /** Opens when the consume loop has stopped. */
+  readonly ended = new Latch();
+}
+
 /**
  * Derives conversation status from durable state and publishes changes.
  *
@@ -86,11 +105,7 @@ export class ConversationStatusProjector {
   readonly #last = new Map<string, ConversationStatusChange>();
   readonly #publishing = new Mutex(new MemoryStore());
   #subscribers = 0;
-  #remote?: {
-    abort: AbortController;
-    ready: Promise<void>;
-    done: Promise<void>;
-  };
+  #remote: RemoteAttachment | Detached = DETACHED;
 
   constructor(options: ConversationStatusProjectorOptions) {
     this.#store = options.store;
@@ -302,40 +317,37 @@ export class ConversationStatusProjector {
     this.#subscribers += 1;
     const source = this.#changeSource;
     if (!source) return;
-    if (!this.#remote) {
-      const abort = new AbortController();
-      const ready = Promise.withResolvers<void>();
-      const remote = { abort, ready: ready.promise, done: Promise.resolve() };
+    let remote = this.#remote;
+    if (!(remote instanceof RemoteAttachment)) {
+      remote = new RemoteAttachment();
       this.#remote = remote;
-      remote.done = this.#consumeRemote(source, remote, ready);
+      void this.#consumeRemote(source, remote);
     }
-    try {
-      await this.#remote.ready;
-    } catch (error) {
+    const failure = await remote.connected.wait();
+    if (failure) {
       await this.#detachRemote();
-      throw error;
+      throw failure.error;
     }
   }
 
   async #detachRemote(): Promise<void> {
     this.#subscribers -= 1;
-    if (this.#subscribers > 0 || !this.#remote) return;
     const remote = this.#remote;
+    if (this.#subscribers > 0 || !(remote instanceof RemoteAttachment)) return;
     remote.abort.abort();
-    this.#remote = undefined;
-    await remote.done;
+    this.#remote = DETACHED;
+    await remote.ended.wait();
   }
 
   async #consumeRemote(
     source: ConversationStatusChangeSource,
-    remote: { abort: AbortController; ready: Promise<void> },
-    ready: PromiseWithResolvers<void>,
+    remote: RemoteAttachment,
   ): Promise<void> {
     let connected = false;
     try {
       const events = await source.subscribe(remote.abort.signal);
       connected = true;
-      ready.resolve();
+      remote.connected.open(undefined);
       for await (const event of events) {
         if (event.type === 'reset') {
           this.#emit(event);
@@ -350,7 +362,7 @@ export class ConversationStatusProjector {
         });
       }
     } catch (error) {
-      if (!connected) ready.reject(error);
+      if (!connected) remote.connected.open({ error });
       if (
         connected &&
         !(error instanceof Error && error.name === 'AbortError')
@@ -358,7 +370,8 @@ export class ConversationStatusProjector {
         this.#emit({ type: 'error', error });
       }
     } finally {
-      if (this.#remote === remote) this.#remote = undefined;
+      if (this.#remote === remote) this.#remote = DETACHED;
+      remote.ended.open();
     }
   }
 

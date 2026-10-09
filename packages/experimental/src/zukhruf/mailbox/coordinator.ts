@@ -1,4 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
+import pMemoize from 'p-memoize';
 
 import type { StreamManager } from '@deepagents/context';
 
@@ -27,7 +28,6 @@ export class MailboxCoordinator {
   readonly #store: MailboxStore;
   readonly #queue: Pick<TurnQueue, 'push'>;
   readonly #streams: StreamManager;
-  readonly #wakeRequests = new Map<string, Promise<void>>();
 
   constructor(options: MailboxCoordinatorOptions) {
     this.#store = options.store;
@@ -100,14 +100,12 @@ export class MailboxCoordinator {
     }
   }
 
-  #scheduleWake(target: ConversationId): Promise<void> {
-    const key = this.#conversationKey(target);
-    const existing = this.#wakeRequests.get(key);
-    if (existing) return existing;
-
-    // This map coalesces only concurrent requests in this process. A fulfilled
-    // request is removed because another process may consume the wake.
-    const request = (async () => {
+  /**
+   * Coalesces only concurrent wake requests in this process. A settled request
+   * is not kept, because another process may consume the wake.
+   */
+  readonly #scheduleWake = pMemoize(
+    async (target: ConversationId): Promise<void> => {
       const wakeId = AgentTurnId.random(target).toString();
       await this.#streams.register(wakeId);
       try {
@@ -123,19 +121,10 @@ export class MailboxCoordinator {
         });
         throw error;
       }
-    })();
-    this.#wakeRequests.set(key, request);
-
-    const clearRequest = () => {
-      if (this.#wakeRequests.get(key) === request) {
-        this.#wakeRequests.delete(key);
-      }
-    };
-    void request.then(clearRequest, clearRequest);
-    return request;
-  }
-
-  #conversationKey(conversation: ConversationId): string {
-    return JSON.stringify([conversation.chatId, conversation.userId]);
-  }
+    },
+    {
+      cacheKey: ([target]) => JSON.stringify([target.chatId, target.userId]),
+      cache: false,
+    },
+  );
 }

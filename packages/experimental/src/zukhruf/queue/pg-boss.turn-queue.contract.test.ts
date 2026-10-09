@@ -776,10 +776,9 @@ suite('PgBossTurnQueue real PostgreSQL scheduler regressions', () => {
 
     try {
       await peerBoss.start();
-      const peerQueue = new PgBossTurnQueue(peerBoss, {
+      const peerQueue = await PgBossTurnQueue.create(peerBoss, {
         pollingIntervalSeconds: 0.5,
       });
-      await peerQueue.initialize();
 
       const chatIds = Array.from(
         { length: 8 },
@@ -965,11 +964,10 @@ async function postgresQueueHarness(
   resources.defer(() => boss.stop({ graceful: false }));
   boss.on('error', () => {});
   await boss.start();
-  const queue = new PgBossTurnQueue(boss, {
+  const queue = await PgBossTurnQueue.create(boss, {
     pollingIntervalSeconds: 0.5,
     ...options.queue,
   });
-  await queue.initialize();
   const owned = resources.move();
   return {
     connectionString: database.connectionString,
@@ -983,11 +981,10 @@ async function pgliteQueueHarness(): Promise<TurnQueueHarness> {
   const boss = new PgBoss({ db: fromPglite(pglite), backend: 'pglite' });
   boss.on('error', () => {});
   await boss.start();
-  const queue = new PgBossTurnQueue(boss, {
+  const queue = await PgBossTurnQueue.create(boss, {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
   });
-  await queue.initialize();
   return {
     queue,
     async [Symbol.asyncDispose]() {
@@ -1002,11 +999,10 @@ test('does not delete or overlap a turn claimed after the cancellation snapshot'
   const boss = new PgBoss({ db: fromPglite(pglite), backend: 'pglite' });
   boss.on('error', () => {});
   await boss.start();
-  const queue = new PgBossTurnQueue(boss, {
+  const queue = await PgBossTurnQueue.create(boss, {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
   });
-  await queue.initialize();
 
   const first = ref('interrupt-claim-race', 1);
   const second = ref('interrupt-claim-race', 2);
@@ -1118,11 +1114,10 @@ test('delivers cancellation to a local handler registered after cancel returns',
   const boss = new PgBoss({ db: fromPglite(pglite), backend: 'pglite' });
   boss.on('error', () => {});
   await boss.start();
-  const queue = new PgBossTurnQueue(boss, {
+  const queue = await PgBossTurnQueue.create(boss, {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
   });
-  await queue.initialize();
   const first = ref('late-registration', 1);
   const second = ref('late-registration', 2);
 
@@ -1241,11 +1236,10 @@ test('a consumer disposed while its claim is in flight hands the claimed turn to
   });
   boss.on('error', () => {});
   await boss.start();
-  const queue = new PgBossTurnQueue(boss, {
+  const queue = await PgBossTurnQueue.create(boss, {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
   });
-  await queue.initialize();
   let disposedRuns = 0;
   let nextRuns = 0;
   let next: AsyncDisposable | undefined;
@@ -1286,11 +1280,10 @@ test('fails fast when a custom-adapter schema is omitted and accepts it explicit
   });
   decoyBoss.on('error', () => {});
   await decoyBoss.start();
-  const decoyQueue = new PgBossTurnQueue(decoyBoss, {
+  await PgBossTurnQueue.create(decoyBoss, {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
   });
-  await decoyQueue.initialize();
   await decoyBoss.stop({ graceful: false });
 
   const boss = new PgBoss({
@@ -1301,20 +1294,16 @@ test('fails fast when a custom-adapter schema is omitted and accepts it explicit
   boss.on('error', () => {});
   await boss.start();
   try {
-    assert.throws(
-      () =>
-        new PgBossTurnQueue(boss, {
-          expireInSeconds: Number.POSITIVE_INFINITY,
-          pollingIntervalSeconds: 0.5,
-          schema,
-        }),
+    await assert.rejects(
+      PgBossTurnQueue.create(boss, {
+        expireInSeconds: Number.POSITIVE_INFINITY,
+        pollingIntervalSeconds: 0.5,
+        schema,
+      }),
       /expireInSeconds must be a finite positive duration/,
     );
-    const mismatched = new PgBossTurnQueue(boss, {
-      pollingIntervalSeconds: 0.5,
-    });
     await assert.rejects(
-      mismatched.initialize(),
+      PgBossTurnQueue.create(boss, { pollingIntervalSeconds: 0.5 }),
       /pass the PgBoss schema in options\.schema/,
     );
 
@@ -1328,12 +1317,12 @@ test('fails fast when a custom-adapter schema is omitted and accepts it explicit
         return originalCreateQueue(name, options);
       },
     );
-    const queue = new PgBossTurnQueue(boss, {
-      pollingIntervalSeconds: 0.5,
-      schema,
-    });
+    let queue: PgBossTurnQueue;
     try {
-      await queue.initialize();
+      queue = await PgBossTurnQueue.create(boss, {
+        pollingIntervalSeconds: 0.5,
+        schema,
+      });
     } finally {
       recordCreatedQueues.mock.restore();
     }

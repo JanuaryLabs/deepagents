@@ -157,11 +157,10 @@ test(
     boss.on('error', (error) => errors.push(error));
     try {
       await boss.start();
-      const queue = new PgBossTurnQueue(boss, {
+      const queue = await PgBossTurnQueue.create(boss, {
         pollingIntervalSeconds: 0.5,
         schema: 'pgboss',
       });
-      await queue.initialize();
       const scripted: LanguageModelV4StreamPart[][] = [];
       const sandbox = defineSandbox(async () =>
         createVirtualSandbox({ fs: new InMemoryFs() }),

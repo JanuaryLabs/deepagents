@@ -24,6 +24,7 @@ import {
   MessageDeliveryModes,
   PgBossTurnQueue,
   SqliteMailboxStore,
+  TurnQueue,
   type TurnRef,
   createInterAgentCommunication,
   defineStack,
@@ -66,10 +67,11 @@ const usage = {
 async function runtimeHarness(
   model: AgentDeclaration['model'],
   options?: {
+    /** Wraps the real queue; the runtime pushes through the returned one. */
     turnQueue?: (
-      boss: PgBoss,
+      queue: PgBossTurnQueue,
       mailboxStore: SqliteMailboxStore,
-    ) => PgBossTurnQueue;
+    ) => TurnQueue;
   },
 ) {
   const declaration: AgentDeclaration = {
@@ -86,19 +88,18 @@ async function runtimeHarness(
   boss.on('error', () => {});
   await boss.start();
   const mailboxStore = new SqliteMailboxStore(':memory:');
-  const turnQueue =
-    options?.turnQueue?.(boss, mailboxStore) ??
-    new PgBossTurnQueue(boss, {
-      pollingIntervalSeconds: 0.5,
-      schema: 'pgboss',
-    });
-  await turnQueue.initialize();
+  const turnQueue = await PgBossTurnQueue.create(boss, {
+    pollingIntervalSeconds: 0.5,
+    schema: 'pgboss',
+  });
+  const runtimeQueue =
+    options?.turnQueue?.(turnQueue, mailboxStore) ?? turnQueue;
   const streamStore = new SqliteStreamStore(':memory:');
   const runtimeSetup = new AgentRuntime(declaration);
   const runtimeStack = defineStack(async () => ({
     store: new InMemoryContextStore(),
     streams: streamsFor(streamStore),
-    queue: turnQueue,
+    queue: runtimeQueue,
     mailboxStore,
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack);
@@ -191,14 +192,13 @@ describe('zukhruf runtime mailbox delivery', () => {
       },
     });
     const wakePushObservations: boolean[] = [];
-    class DurabilityRecordingQueue extends PgBossTurnQueue {
+    class DurabilityRecordingQueue extends TurnQueue {
+      readonly #inner: TurnQueue;
       readonly #mailbox: SqliteMailboxStore;
 
-      constructor(boss: PgBoss, mailbox: SqliteMailboxStore) {
-        super(boss, {
-          pollingIntervalSeconds: 0.5,
-          schema: 'pgboss',
-        });
+      constructor(inner: TurnQueue, mailbox: SqliteMailboxStore) {
+        super();
+        this.#inner = inner;
         this.#mailbox = mailbox;
       }
 
@@ -206,12 +206,36 @@ describe('zukhruf runtime mailbox delivery', () => {
         if (turn.kind === 'mailbox') {
           wakePushObservations.push(await this.#mailbox.hasPending(researcher));
         }
-        return super.push(turn);
+        return this.#inner.push(turn);
+      }
+
+      override getTurnActivity(
+        conversation: Pick<TurnRef, 'chatId' | 'userId'>,
+      ) {
+        return this.#inner.getTurnActivity(conversation);
+      }
+
+      override getCurrentTurn(
+        conversation: Pick<TurnRef, 'chatId' | 'userId'>,
+      ) {
+        return this.#inner.getCurrentTurn(conversation);
+      }
+
+      override cancel(streamId: string) {
+        return this.#inner.cancel(streamId);
+      }
+
+      override consume(...args: Parameters<TurnQueue['consume']>) {
+        return this.#inner.consume(...args);
+      }
+
+      override resumeParked(chatId: string) {
+        return this.#inner.resumeParked(chatId);
       }
     }
     await using h = await runtimeHarness(model, {
-      turnQueue: (boss, mailboxStore) =>
-        new DurabilityRecordingQueue(boss, mailboxStore),
+      turnQueue: (queue, mailboxStore) =>
+        new DurabilityRecordingQueue(queue, mailboxStore),
     });
     for (let index = 1; index <= 3; index++) {
       await h.runtime.deliver(

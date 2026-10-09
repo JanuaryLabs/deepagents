@@ -145,11 +145,10 @@ test('SimpleAgent discovers and executes a website tool through native WebMCP', 
   );
   boss.on('error', (error) => assert.fail(String(error)));
   await boss.start();
-  const queue = new PgBossTurnQueue(boss, {
+  const queue = await PgBossTurnQueue.create(boss, {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
   });
-  await queue.initialize();
   const streamStore = resources.adopt(
     new SqliteStreamStore(':memory:'),
     (store) => store.close(),
