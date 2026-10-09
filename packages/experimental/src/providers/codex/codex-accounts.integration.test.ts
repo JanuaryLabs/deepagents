@@ -26,6 +26,28 @@ interface WireRequest {
   body: Record<string, any> | undefined;
 }
 
+/**
+ * msw passes a socket that sends nothing first through to the real network
+ * and keeps it after close(), so undici's global pool can hand it to a later
+ * test. Each test therefore ends with a fresh pool. Node.js sets the pool once,
+ * at load, under two keys: one pool under both on Node 24, and on Node 26 the
+ * pool plus a wrapper for older callers. The swap keeps that shape.
+ */
+async function replaceGlobalPool() {
+  const poolKey = Symbol.for('undici.globalDispatcher.2');
+  const legacyKey = Symbol.for('undici.globalDispatcher.1');
+  const pool = Reflect.get(globalThis, poolKey);
+  const legacy = Reflect.get(globalThis, legacyKey);
+  const fresh = new pool.constructor();
+  Reflect.set(globalThis, poolKey, fresh);
+  Reflect.set(
+    globalThis,
+    legacyKey,
+    legacy === pool ? fresh : new legacy.constructor(fresh),
+  );
+  await pool.destroy();
+}
+
 function interceptWire(
   handle: (request: WireRequest) => Response | Promise<Response>,
 ) {
@@ -52,7 +74,10 @@ function interceptWire(
   );
   server.listen({ onUnhandledFrame: 'error' });
   return Object.assign(requests, {
-    [Symbol.dispose]: () => server.close(),
+    [Symbol.asyncDispose]: async () => {
+      server.close();
+      await replaceGlobalPool();
+    },
   });
 }
 
@@ -188,7 +213,7 @@ test('device sign-in connects the account and authenticates its models', async (
   const changes: CodexConnectionState[] = [];
   const { accounts, signIn } = connectedAccounts(changes);
   let polls = 0;
-  using requests = interceptWire((request) => {
+  await using requests = interceptWire((request) => {
     if (request.url === POLL_URL && ++polls === 1) {
       return new Response(null, { status: 403 });
     }
@@ -247,7 +272,7 @@ test('an authorization arriving after the owner cancelled the sign-in saves noth
   });
   // Cancelling aborts the poll in flight, so the authorization the server sends
   // afterwards never reaches the sign-in.
-  using _wire = interceptWire(async (request) => {
+  await using _wire = interceptWire(async (request) => {
     if (request.url === POLL_URL) {
       polling.resolve();
       await release.promise;
@@ -288,7 +313,7 @@ test(
         if (state.status === 'unauthenticated') reported.resolve(state);
       },
     });
-    using requests = interceptWire((request) => {
+    await using requests = interceptWire((request) => {
       if (request.url === POLL_URL) {
         polling.resolve(request.signal);
         return new Promise<never>(() => {});
@@ -317,7 +342,7 @@ test(
   async () => {
     const polling = Promise.withResolvers<AbortSignal>();
     const accounts = createCodexAccounts({ store: new MemoryStore() });
-    using _wire = interceptWire((request) => {
+    await using _wire = interceptWire((request) => {
       if (request.url === POLL_URL) {
         polling.resolve(request.signal);
         return new Promise<never>(() => {});
@@ -350,7 +375,7 @@ test(
         if (state.status === 'unauthenticated') reported.resolve(state);
       },
     });
-    using _wire = interceptWire((request) => {
+    await using _wire = interceptWire((request) => {
       if (request.url === TOKEN_URL) {
         exchanging.resolve(request.signal);
         return new Promise<never>(() => {});
@@ -379,7 +404,7 @@ test(
 test('a failed device code request is reported and sign-in can start again', async () => {
   const accounts = createCodexAccounts({ store: new MemoryStore() });
   let codeRequests = 0;
-  using _wire = interceptWire((request) => {
+  await using _wire = interceptWire((request) => {
     if (request.url === USERCODE_URL && ++codeRequests === 1) {
       return new Response('secret-device-detail', { status: 503 });
     }
@@ -401,7 +426,7 @@ test('a failed device code request is reported and sign-in can start again', asy
 test('a revoked refresh token disconnects the account and reports it', async () => {
   const changes: CodexConnectionState[] = [];
   const { accounts, signIn } = connectedAccounts(changes);
-  using _wire = interceptWire((request) => {
+  await using _wire = interceptWire((request) => {
     if (
       request.url === TOKEN_URL &&
       request.body?.grant_type === 'authorization_code'
@@ -440,7 +465,7 @@ test('concurrent requests on an expiring token refresh once and keep the account
   const { accounts, signIn } = connectedAccounts();
   let validRefreshToken = 'refresh-1';
   let refreshes = 0;
-  using requests = interceptWire(async (request) => {
+  await using requests = interceptWire(async (request) => {
     if (
       request.url === TOKEN_URL &&
       request.body?.grant_type === 'authorization_code'
@@ -492,7 +517,7 @@ test('concurrent requests on an expiring token refresh once and keep the account
 test('a failed refresh keeps the account and hides the token endpoint body', async () => {
   const { accounts, signIn } = connectedAccounts();
   let refreshes = 0;
-  using _wire = interceptWire((request) => {
+  await using _wire = interceptWire((request) => {
     if (
       request.url === TOKEN_URL &&
       request.body?.grant_type === 'authorization_code'
@@ -526,7 +551,7 @@ test('a failed refresh keeps the account and hides the token endpoint body', asy
 test('a rejected access token is refreshed once and the request retried', async () => {
   const { accounts, signIn } = connectedAccounts();
   let refreshes = 0;
-  using requests = interceptWire((request) => {
+  await using requests = interceptWire((request) => {
     if (
       request.url === TOKEN_URL &&
       request.body?.grant_type === 'authorization_code'
@@ -566,7 +591,7 @@ test('a refresh finishing after a disconnect cannot reconnect the account', asyn
   const { accounts, signIn } = connectedAccounts();
   const refreshing = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
-  using _wire = interceptWire(async (request) => {
+  await using _wire = interceptWire(async (request) => {
     if (
       request.url === TOKEN_URL &&
       request.body?.grant_type === 'authorization_code'
@@ -601,7 +626,7 @@ test('a refresh finishing after a disconnect cannot reconnect the account', asyn
 
 test('models are listed for the connected account', async () => {
   const { accounts, signIn } = connectedAccounts();
-  using requests = interceptWire((request) => {
+  await using requests = interceptWire((request) => {
     if (request.url === TOKEN_URL) return tokens('access-1', 'refresh-1');
     if (request.url === MODELS_URL) {
       return Response.json({
@@ -634,7 +659,7 @@ test('a sign-in rejected at authorization is reported without the response body 
       if (state.status === 'error') failed.resolve();
     },
   });
-  using _wire = interceptWire((request) => {
+  await using _wire = interceptWire((request) => {
     if (request.url === TOKEN_URL) {
       return Response.json(
         { error: 'invalid_grant', error_description: 'secret-exchange-detail' },
@@ -659,7 +684,7 @@ test('a sign-in rejected at authorization is reported without the response body 
 
 test('connecting again while a sign-in is pending keeps the same code', async () => {
   const accounts = createCodexAccounts({ store: new MemoryStore() });
-  using requests = interceptWire((request) => {
+  await using requests = interceptWire((request) => {
     if (request.url === POLL_URL) return new Response(null, { status: 403 });
     return deviceSignIn(request) ?? unexpected();
   });
@@ -680,7 +705,7 @@ test('connecting again while a sign-in is pending keeps the same code', async ()
 
 test('a connection without an account identifier fails model requests before sending them', async () => {
   const { accounts, signIn } = connectedAccounts();
-  using requests = interceptWire((request) => {
+  await using requests = interceptWire((request) => {
     if (request.url === TOKEN_URL) {
       return Response.json({
         access_token: 'opaque-access',

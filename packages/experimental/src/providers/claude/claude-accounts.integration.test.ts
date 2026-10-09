@@ -27,6 +27,28 @@ interface WireRequest {
   body: Record<string, any> | undefined;
 }
 
+/**
+ * msw passes a socket that sends nothing first through to the real network
+ * and keeps it after close(), so undici's global pool can hand it to a later
+ * test. Each test therefore ends with a fresh pool. Node.js sets the pool once,
+ * at load, under two keys: one pool under both on Node 24, and on Node 26 the
+ * pool plus a wrapper for older callers. The swap keeps that shape.
+ */
+async function replaceGlobalPool() {
+  const poolKey = Symbol.for('undici.globalDispatcher.2');
+  const legacyKey = Symbol.for('undici.globalDispatcher.1');
+  const pool = Reflect.get(globalThis, poolKey);
+  const legacy = Reflect.get(globalThis, legacyKey);
+  const fresh = new pool.constructor();
+  Reflect.set(globalThis, poolKey, fresh);
+  Reflect.set(
+    globalThis,
+    legacyKey,
+    legacy === pool ? fresh : new legacy.constructor(fresh),
+  );
+  await pool.destroy();
+}
+
 function interceptWire(
   handle: (request: WireRequest) => Response | Promise<Response>,
 ) {
@@ -51,7 +73,10 @@ function interceptWire(
   );
   server.listen({ onUnhandledFrame: 'error' });
   return Object.assign(requests, {
-    [Symbol.dispose]: () => server.close(),
+    [Symbol.asyncDispose]: async () => {
+      server.close();
+      await replaceGlobalPool();
+    },
   });
 }
 
@@ -113,7 +138,7 @@ test('signing in with the pasted code connects the account and authenticates its
     store: new MemoryStore(),
     onChange: (_owner, state) => changes.push(state),
   });
-  using requests = interceptWire((request) => {
+  await using requests = interceptWire((request) => {
     if (request.url === TOKEN_URL) return tokens('access-1', 'refresh-1');
     if (request.url === MESSAGES_URL) return message('hi');
     return unexpected();
@@ -164,7 +189,7 @@ test('signing in with the pasted code connects the account and authenticates its
 
 test('a code from another sign-in attempt keeps the sign-in pending without contacting Anthropic', async () => {
   const accounts = createClaudeAccounts({ store: new MemoryStore() });
-  using requests = interceptWire((request) => {
+  await using requests = interceptWire((request) => {
     if (request.url === TOKEN_URL) return tokens('access-1', 'refresh-1');
     return unexpected();
   });
@@ -192,7 +217,7 @@ test('a code from another sign-in attempt keeps the sign-in pending without cont
 test('Anthropic throttling keeps the sign-in retryable', async () => {
   const accounts = createClaudeAccounts({ store: new MemoryStore() });
   let exchanges = 0;
-  using _wire = interceptWire((request) => {
+  await using _wire = interceptWire((request) => {
     if (request.url !== TOKEN_URL) return unexpected();
     exchanges++;
     return exchanges === 1
@@ -214,7 +239,7 @@ test('Anthropic throttling keeps the sign-in retryable', async () => {
 
 test('a rejected code ends the sign-in without exposing the response body', async () => {
   const accounts = createClaudeAccounts({ store: new MemoryStore() });
-  using _wire = interceptWire((request) => {
+  await using _wire = interceptWire((request) => {
     if (request.url !== TOKEN_URL) return unexpected();
     return Response.json(
       { error: 'invalid_grant', error_description: 'secret-exchange-detail' },
@@ -238,7 +263,7 @@ test('disconnecting while the code exchange is in flight saves nothing', async (
   });
   const exchanging = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
-  using _wire = interceptWire(async (request) => {
+  await using _wire = interceptWire(async (request) => {
     if (request.url !== TOKEN_URL) return unexpected();
     exchanging.resolve();
     await release.promise;
@@ -262,7 +287,7 @@ test('concurrent requests on an expiring token refresh once and keep the account
   const accounts = createClaudeAccounts({ store: new MemoryStore() });
   let validRefreshToken = 'refresh-1';
   let refreshes = 0;
-  using requests = interceptWire(async (request) => {
+  await using requests = interceptWire(async (request) => {
     if (
       request.url === TOKEN_URL &&
       request.body?.grant_type === 'authorization_code'
@@ -310,7 +335,7 @@ test('a revoked refresh token disconnects the account and reports it', async () 
     store: new MemoryStore(),
     onChange: (_owner, state) => changes.push(state),
   });
-  using _wire = interceptWire((request) => {
+  await using _wire = interceptWire((request) => {
     if (
       request.url === TOKEN_URL &&
       request.body?.grant_type === 'authorization_code'
@@ -341,7 +366,7 @@ test('a revoked refresh token disconnects the account and reports it', async () 
 test('a failed refresh keeps the account and hides the token endpoint body', async () => {
   const accounts = createClaudeAccounts({ store: new MemoryStore() });
   let refreshes = 0;
-  using _wire = interceptWire((request) => {
+  await using _wire = interceptWire((request) => {
     if (
       request.url === TOKEN_URL &&
       request.body?.grant_type === 'authorization_code'
@@ -371,7 +396,7 @@ test('a failed refresh keeps the account and hides the token endpoint body', asy
 test('a rejected access token is refreshed once and the request retried', async () => {
   const accounts = createClaudeAccounts({ store: new MemoryStore() });
   let refreshes = 0;
-  using requests = interceptWire((request) => {
+  await using requests = interceptWire((request) => {
     if (
       request.url === TOKEN_URL &&
       request.body?.grant_type === 'authorization_code'
@@ -409,7 +434,7 @@ test('a request aborted while another request refreshes the token stops waiting 
   const refreshing = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   let refreshes = 0;
-  using requests = interceptWire(async (request) => {
+  await using requests = interceptWire(async (request) => {
     if (
       request.url === TOKEN_URL &&
       request.body?.grant_type === 'authorization_code'
@@ -469,7 +494,7 @@ test('a retry aborted while another retry refreshes a rejected token stops waiti
   const refreshing = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   let refreshes = 0;
-  using _wire = interceptWire(async (request) => {
+  await using _wire = interceptWire(async (request) => {
     if (
       request.url === TOKEN_URL &&
       request.body?.grant_type === 'authorization_code'
@@ -532,7 +557,7 @@ test('a retry aborted while another retry refreshes a rejected token stops waiti
 
 test('an access token still rejected after refresh fails the request but keeps the account', async () => {
   const accounts = createClaudeAccounts({ store: new MemoryStore() });
-  using _wire = interceptWire((request) => {
+  await using _wire = interceptWire((request) => {
     if (
       request.url === TOKEN_URL &&
       request.body?.grant_type === 'authorization_code'
@@ -558,7 +583,7 @@ test('a refresh finishing after a disconnect cannot reconnect the account', asyn
   const accounts = createClaudeAccounts({ store: new MemoryStore() });
   const refreshing = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
-  using _wire = interceptWire(async (request) => {
+  await using _wire = interceptWire(async (request) => {
     if (
       request.url === TOKEN_URL &&
       request.body?.grant_type === 'authorization_code'
@@ -589,7 +614,7 @@ test('a refresh finishing after a disconnect cannot reconnect the account', asyn
 
 test('models are listed across every page for the connected account', async () => {
   const accounts = createClaudeAccounts({ store: new MemoryStore() });
-  using requests = interceptWire((request) => {
+  await using requests = interceptWire((request) => {
     if (request.url === TOKEN_URL) return tokens('access-1', 'refresh-1');
     const url = new URL(request.url);
     if (url.origin + url.pathname !== 'https://api.anthropic.com/v1/models') {
@@ -633,7 +658,7 @@ test('models are listed across every page for the connected account', async () =
 test('a profile outage keeps the connection and a later read fills in the identity', async () => {
   const accounts = createClaudeAccounts({ store: new MemoryStore() });
   let profileAvailable = false;
-  using requests = interceptWire((request) => {
+  await using requests = interceptWire((request) => {
     if (request.url === TOKEN_URL) {
       return tokens('access-1', 'refresh-1', { account: undefined });
     }
@@ -665,7 +690,7 @@ test('a profile outage keeps the connection and a later read fills in the identi
 
 test('each owner authenticates with its own account', async () => {
   const accounts = createClaudeAccounts({ store: new MemoryStore() });
-  using requests = interceptWire((request) => {
+  await using requests = interceptWire((request) => {
     if (request.url === TOKEN_URL) {
       const owner = String(request.body?.code).replace('code-', '');
       return tokens(`access-${owner}`, `refresh-${owner}`);
@@ -694,7 +719,7 @@ test('each owner authenticates with its own account', async () => {
 
 test('owners sign in independently at the same time', async () => {
   const accounts = createClaudeAccounts({ store: new MemoryStore() });
-  using _wire = interceptWire((request) => {
+  await using _wire = interceptWire((request) => {
     if (request.url !== TOKEN_URL) return unexpected();
     const owner = String(request.body?.code).replace('code-', '');
     return tokens(`access-${owner}`, `refresh-${owner}`, {
@@ -730,7 +755,7 @@ test("disconnecting one owner does not disturb another owner's refresh", async (
   const release = Promise.withResolvers<void>();
   let validRefreshToken = 'refresh-owner-b';
   let refreshes = 0;
-  using _wire = interceptWire(async (request) => {
+  await using _wire = interceptWire(async (request) => {
     if (
       request.url === TOKEN_URL &&
       request.body?.grant_type === 'authorization_code'
@@ -775,7 +800,7 @@ test('a sign-in abandoned during the code exchange cannot report over a new sign
   });
   const exchanging = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
-  using _wire = interceptWire(async (request) => {
+  await using _wire = interceptWire(async (request) => {
     if (request.url !== TOKEN_URL) return unexpected();
     exchanging.resolve();
     await release.promise;
@@ -799,7 +824,7 @@ test('a sign-in abandoned during the code exchange cannot report over a new sign
 
 test('an abandoned sign-in expires after ten minutes', async (t) => {
   const accounts = createClaudeAccounts({ store: new MemoryStore() });
-  using requests = interceptWire(unexpected);
+  await using requests = interceptWire(unexpected);
   t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
 
   const pending = await accounts.connect('owner-a');
@@ -822,7 +847,7 @@ test('unreadable stored tokens read as a disconnected account', async () => {
   // A blob written by an older or broken writer of the caller's store.
   store.set('owner-a', { apiKey: 'not-a-subscription' });
   const accounts = createClaudeAccounts({ store });
-  using _wire = interceptWire(unexpected);
+  await using _wire = interceptWire(unexpected);
 
   const state = await accounts.state('owner-a');
   const failure = await ask(accounts, 'owner-a').catch((error) => error);
@@ -843,7 +868,7 @@ test('a store that cannot save ends the sign-in with an error instead of throwin
     delete: (key: string) => memory.delete(key),
   };
   const accounts = createClaudeAccounts({ store });
-  using _wire = interceptWire((request) => {
+  await using _wire = interceptWire((request) => {
     if (request.url === TOKEN_URL) return tokens('access-1', 'refresh-1');
     return unexpected();
   });
