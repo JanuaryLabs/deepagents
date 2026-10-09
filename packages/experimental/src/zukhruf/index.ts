@@ -8,7 +8,6 @@ export * from './mailbox/types.ts';
 export type { MultiAgentHostConfig } from './multi-agent-config.ts';
 export * from './queue/pg-boss.turn-queue.ts';
 export * from './queue/turn-queue.ts';
-export * from './render-turn.ts';
 export * from './runtime/agent-runtime.ts';
 export type { CompactionEvent } from './runtime/compaction.ts';
 export type * from './runtime/conversation-status/change-source.ts';

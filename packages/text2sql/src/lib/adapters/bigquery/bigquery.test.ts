@@ -124,6 +124,7 @@ describe('BigQuery adapter class', () => {
       const adapter = new BigQuery({
         ...validOpts,
         validate: async () => {
+          // eslint-disable-next-line @typescript-eslint/only-throw-error -- validate is user code; pins non-Error formatting
           throw 'raw string error';
         },
       });
@@ -137,6 +138,7 @@ describe('BigQuery adapter class', () => {
       const adapter = new BigQuery({
         ...validOpts,
         validate: async () => {
+          // eslint-disable-next-line @typescript-eslint/only-throw-error -- validate is user code; pins non-Error formatting
           throw { message: 'obj error' };
         },
       });

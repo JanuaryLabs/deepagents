@@ -1,7 +1,8 @@
+import { consumeStream, createUIMessageStream } from 'ai';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { AgentRuntime, renderTurn } from '@deepagents/experimental/zukhruf';
+import { AgentRuntime } from '@deepagents/experimental/zukhruf';
 
 import root from './agent.ts';
 import stack from './stack.ts';
@@ -29,4 +30,13 @@ const turn = await host.enqueue(
     },
   },
 );
-await renderTurn(turn.stream);
+await consumeStream({
+  stream: createUIMessageStream({
+    execute: ({ writer }) => writer.merge(turn.stream),
+    onEnd: ({ responseMessage }) => {
+      for (const part of responseMessage.parts) {
+        if (part.type === 'text') console.log(part.text);
+      }
+    },
+  }),
+});

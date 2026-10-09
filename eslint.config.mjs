@@ -112,6 +112,26 @@ export default defineConfig(
       ],
     },
   },
+  {
+    // A React Router route module throws a Response (or data()) to show an
+    // error page, such as a 404; a returned one would render as data.
+    files: ['**/app/routes/**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/only-throw-error': [
+        'error',
+        {
+          allow: [
+            { from: 'lib', name: 'Response' },
+            {
+              from: 'package',
+              package: 'react-router',
+              name: 'DataWithResponseInit',
+            },
+          ],
+        },
+      ],
+    },
+  },
   // Transient: these checks are new here and have findings that the next
   // commits fix package by package. Each line goes when its findings are gone;
   // the last commit removes the block. A severity alone keeps the options
@@ -123,7 +143,6 @@ export default defineConfig(
       '@typescript-eslint/no-floating-promises': 'warn',
       '@typescript-eslint/no-misused-promises': 'warn',
       '@typescript-eslint/only-throw-error': 'warn',
-      '@typescript-eslint/switch-exhaustiveness-check': 'warn',
       'zukhruf/no-enum': 'warn',
       'zukhruf/no-phase-flag': 'warn',
       'zukhruf/no-promise-field': 'warn',

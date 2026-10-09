@@ -1,6 +1,7 @@
+import { consumeStream, createUIMessageStream } from 'ai';
 import { parseArgs } from 'node:util';
 
-import { AgentRuntime, renderTurn } from '@deepagents/experimental/zukhruf';
+import { AgentRuntime } from '@deepagents/experimental/zukhruf';
 
 import { createCodingAgent } from './agent.ts';
 import stack from './stack.ts';
@@ -37,4 +38,13 @@ const turn = await host.enqueue(
     trigger: 'submit-message',
   },
 );
-await renderTurn(turn.stream);
+await consumeStream({
+  stream: createUIMessageStream({
+    execute: ({ writer }) => writer.merge(turn.stream),
+    onEnd: ({ responseMessage }) => {
+      for (const part of responseMessage.parts) {
+        if (part.type === 'text') console.log(part.text);
+      }
+    },
+  }),
+});

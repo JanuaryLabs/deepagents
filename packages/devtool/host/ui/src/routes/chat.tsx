@@ -44,7 +44,7 @@ export async function loader(args: LoaderFunctionArgs) {
   const chatId =
     params.sessionId ?? new URL(request.url).searchParams.get('chatId');
   if (!chatId) {
-    throw redirect(`/chat?chatId=${encodeURIComponent(crypto.randomUUID())}`);
+    return redirect(`/chat?chatId=${encodeURIComponent(crypto.randomUUID())}`);
   }
   const runtime = await loadRuntime(request.signal);
   const conversation = runtime.history.find((entry) => entry.chatId === chatId);

@@ -1,6 +1,7 @@
+import { consumeStream, createUIMessageStream } from 'ai';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
-import { AgentRuntime, renderTurn } from '@deepagents/experimental/zukhruf';
+import { AgentRuntime } from '@deepagents/experimental/zukhruf';
 
 import declaration from './agent.ts';
 import {
@@ -55,7 +56,16 @@ const turn = await host.enqueue(conversation, {
   trigger: 'submit-message',
 });
 
-await renderTurn(turn.stream);
+await consumeStream({
+  stream: createUIMessageStream({
+    execute: ({ writer }) => writer.merge(turn.stream),
+    onEnd: ({ responseMessage }) => {
+      for (const part of responseMessage.parts) {
+        if (part.type === 'text') console.log(part.text);
+      }
+    },
+  }),
+});
 const status = await host.observe(conversation).status(turn.id);
 if (status?.status === 'failed') {
   throw new Error(status.error ?? 'Group chat turn failed');

@@ -83,6 +83,8 @@ export function replacementRange(
         case 'tool-approval-response':
           link(`approval:${part.approvalId}`, index, false);
           break;
+        default:
+          break;
       }
     }
   }
