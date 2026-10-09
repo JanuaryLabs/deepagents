@@ -11,6 +11,7 @@ import {
   isStaticToolUIPart,
   validateUIMessages,
 } from 'ai';
+import pMemoize from 'p-memoize';
 
 import { type ChainSummary, summarizeChain } from './chain-summary.ts';
 import {
@@ -415,6 +416,32 @@ export interface InspectResult {
   };
 }
 
+/** Before the first store call: the engine knows only the chat id. */
+const UNOPENED = {
+  chat: null,
+  branchName: 'main',
+  headMessageId: undefined,
+} as const;
+
+/** The chat row and its active branch, as this engine last read or wrote them. */
+class OpenChat {
+  chat: StoredChatData;
+  branch: BranchData;
+
+  constructor(chat: StoredChatData, branch: BranchData) {
+    this.chat = chat;
+    this.branch = branch;
+  }
+
+  get branchName(): string {
+    return this.branch.name;
+  }
+
+  get headMessageId(): string | undefined {
+    return this.branch.headMessageId ?? undefined;
+  }
+}
+
 /**
  * Context engine for managing AI conversation context with graph-based storage.
  *
@@ -432,24 +459,13 @@ export class ContextEngine {
   #store: ContextStore;
   #chatId: string;
   #userId: string;
-  #branchName: string;
-  #branch: BranchData | null = null;
-  #chatData: StoredChatData | null = null;
-  #initialized = false;
-  /** Initial metadata to merge on first initialization */
-  #initialMetadata: Record<string, unknown> | undefined;
+  /** What this engine knows of its chat: nothing until the first store call opens it. */
+  #session: OpenChat | typeof UNOPENED = UNOPENED;
+  /** Opens the chat once; concurrent first calls share it, and a failed open runs again. */
+  readonly #open: () => Promise<OpenChat>;
   #loaderResolver: FragmentLoaderResolver;
   /** Retained so forked children inherit the parent's resolver chain */
   #resolvers: ValueResolver[] | undefined;
-
-  get #activeBranch(): BranchData {
-    if (!this.#branch) {
-      throw new Error(
-        'Branch not initialized. Call #ensureInitialized() first.',
-      );
-    }
-    return this.#branch;
-  }
 
   get #renderableFragments(): ContextFragment[] {
     return this.#fragments.filter((f) => !isConditionalReminder(f));
@@ -465,8 +481,7 @@ export class ContextEngine {
     this.#store = options.store;
     this.#chatId = options.chatId;
     this.#userId = options.userId;
-    this.#branchName = 'main';
-    this.#initialMetadata = options.metadata;
+    this.#open = pMemoize(() => this.#openChat(options.metadata));
     this.#resolvers = options.resolvers;
     this.#loaderResolver = new FragmentLoaderResolver(
       options.resolvers ?? defaultResolvers(),
@@ -474,34 +489,27 @@ export class ContextEngine {
   }
 
   /**
-   * Initialize the chat and branch if they don't exist.
+   * Creates the chat if it is new, checks its owner, merges the initial
+   * metadata, and reads the active branch.
    */
-  async #ensureInitialized(): Promise<void> {
-    if (this.#initialized) {
-      return;
-    }
-
-    this.#chatData = await this.#store.upsertChat({
+  async #openChat(
+    metadata: Record<string, unknown> | undefined,
+  ): Promise<OpenChat> {
+    let chat = await this.#store.upsertChat({
       id: this.#chatId,
       userId: this.#userId,
     });
-    if (this.#chatData.userId !== this.#userId) {
+    if (chat.userId !== this.#userId) {
       throw new Error(
-        `chat "${this.#chatId}" belongs to user "${this.#chatData.userId}", not "${this.#userId}"`,
+        `chat "${this.#chatId}" belongs to user "${chat.userId}", not "${this.#userId}"`,
       );
     }
 
     // Merge initial metadata if provided (handles both new and existing chats)
-    if (this.#initialMetadata) {
-      const initialMetadata = this.#initialMetadata;
-      this.#chatData = await this.#store.updateChat(
-        this.#chatId,
-        ({ metadata }) => ({
-          metadata: { ...metadata, ...initialMetadata },
-        }),
-      );
-      // Clear after use to prevent memory leak
-      this.#initialMetadata = undefined;
+    if (metadata) {
+      chat = await this.#store.updateChat(this.#chatId, (stored) => ({
+        metadata: { ...stored.metadata, ...metadata },
+      }));
     }
 
     const branch = await this.#store.getActiveBranch(this.#chatId);
@@ -510,10 +518,9 @@ export class ContextEngine {
         `Active branch not found for chat "${this.#chatId}" after upsertChat`,
       );
     }
-    this.#branch = branch;
-    this.#branchName = branch.name;
-
-    this.#initialized = true;
+    const open = new OpenChat(chat, branch);
+    this.#session = open;
+    return open;
   }
 
   /**
@@ -521,17 +528,17 @@ export class ContextEngine {
    * Shared logic between rewind() and btw().
    */
   async #createBranchFrom(
+    open: OpenChat,
     messageId: string,
     switchTo: boolean,
   ): Promise<BranchInfo> {
     // Generate branch name based on same-prefix count (e.g., main-v2, main-v3)
     const branches = await this.#store.listBranches(this.#chatId);
+    const baseName = open.branch.name;
     const samePrefix = branches.filter(
-      (it) =>
-        it.name === this.#branchName ||
-        it.name.startsWith(`${this.#branchName}-v`),
+      (it) => it.name === baseName || it.name.startsWith(`${baseName}-v`),
     );
-    const newBranchName = `${this.#branchName}-v${samePrefix.length + 1}`;
+    const newBranchName = `${baseName}-v${samePrefix.length + 1}`;
 
     // Create new branch pointing to the target message
     const newBranch: BranchData = {
@@ -547,8 +554,7 @@ export class ContextEngine {
     if (switchTo) {
       // Switch to the new branch
       await this.#store.setActiveBranch(this.#chatId, newBranch.id);
-      this.#branch = { ...newBranch, isActive: true };
-      this.#branchName = newBranchName;
+      open.branch = { ...newBranch, isActive: true };
       // Clear pending messages (they were for the old branch)
       this.#pendingMessages = [];
     }
@@ -587,7 +593,7 @@ export class ContextEngine {
    * Get the current branch name.
    */
   public get branch(): string {
-    return this.#branchName;
+    return this.#session.branchName;
   }
 
   /**
@@ -595,7 +601,7 @@ export class ContextEngine {
    * Returns undefined if no messages have been saved yet.
    */
   public get headMessageId(): string | undefined {
-    return this.#branch?.headMessageId ?? undefined;
+    return this.#session.headMessageId;
   }
 
   /**
@@ -603,7 +609,7 @@ export class ContextEngine {
    * Returns null if the chat hasn't been initialized yet.
    */
   public get chat(): StoredChatData | null {
-    return this.#chatData;
+    return this.#session.chat;
   }
 
   /**
@@ -613,10 +619,10 @@ export class ContextEngine {
   async #getChainContext(
     pending: ContextFragment[] = this.#pendingMessages,
   ): Promise<ChainSummary> {
-    await this.#ensureInitialized();
+    const open = await this.#open();
 
-    const stored = this.#branch?.headMessageId
-      ? await this.#store.getMessageChain(this.#branch.headMessageId)
+    const stored = open.branch.headMessageId
+      ? await this.#store.getMessageChain(open.branch.headMessageId)
       : [];
     return summarizeChain(stored, pending);
   }
@@ -627,11 +633,11 @@ export class ContextEngine {
   }
 
   public async firstUserMessage(): Promise<UIMessage | undefined> {
-    await this.#ensureInitialized();
+    const open = await this.#open();
 
-    if (this.#branch?.headMessageId) {
+    if (open.branch.headMessageId) {
       const chain = await this.#store.getMessageChain(
-        this.#branch.headMessageId,
+        open.branch.headMessageId,
       );
       for (const msg of chain) {
         if (msg.name === 'user') {
@@ -665,7 +671,7 @@ export class ContextEngine {
   public async headMessage(): Promise<
     { id: string; name: string } | undefined
   > {
-    await this.#ensureInitialized();
+    const open = await this.#open();
 
     if (this.#pendingMessages.length > 0) {
       const tail = this.#pendingMessages[this.#pendingMessages.length - 1];
@@ -677,8 +683,8 @@ export class ContextEngine {
       return { id: tail.id, name: tail.name };
     }
 
-    if (this.#branch?.headMessageId) {
-      const msg = await this.#store.getMessage(this.#branch.headMessageId);
+    if (open.branch.headMessageId) {
+      const msg = await this.#store.getMessage(open.branch.headMessageId);
       if (msg) return { id: msg.id, name: msg.name };
     }
 
@@ -700,14 +706,14 @@ export class ContextEngine {
    * For id-lookup use `headMessage()` instead — that one keeps placeholders.
    */
   public async getMessages(): Promise<UIMessage[]> {
-    await this.#ensureInitialized();
+    const open = await this.#open();
 
     const messages: UIMessage[] = [];
     const indexById = new Map<string, number>();
 
-    if (this.#branch?.headMessageId) {
+    if (open.branch.headMessageId) {
       const chain = await this.#store.getMessageChain(
-        this.#branch.headMessageId,
+        open.branch.headMessageId,
       );
       for (const msg of chain) {
         const data = requireUIMessage(msg.data, `Stored message "${msg.id}"`);
@@ -827,7 +833,7 @@ export class ContextEngine {
    * ```
    */
   public async resolve(options: ResolveOptions): Promise<ResolveResult> {
-    await this.#ensureInitialized();
+    await this.#open();
     await this.#loaderResolver.resolve(this.#fragments, {
       sandbox: options.sandbox,
       context: this,
@@ -853,16 +859,16 @@ export class ContextEngine {
    * ```
    */
   public async save(options?: { branch?: boolean }): Promise<SaveResult> {
-    await this.#ensureInitialized();
+    const open = await this.#open();
 
     if (this.#pendingMessages.length === 0) {
-      return { headMessageId: this.#branch?.headMessageId ?? undefined };
+      return { headMessageId: open.branch.headMessageId ?? undefined };
     }
 
     const pending = this.#pendingMessages;
     this.#pendingMessages = [];
     const pipeline = new SavePipeline(
-      this.#asSavePipelineEngine(),
+      this.#asSavePipelineEngine(open),
       pending,
       options?.branch ?? true,
     );
@@ -1157,16 +1163,17 @@ export class ContextEngine {
   }
 
   #buildBaseWhenCtx(chain: ChainSummary): BaseWhenCtx {
-    const rawUsage = this.#chatData?.metadata?.usage;
+    const session = this.#session;
+    if (!(session instanceof OpenChat)) {
+      throw new Error('ContextEngine must be initialized before reminders run');
+    }
+    const chatData = session.chat;
+    const rawUsage = chatData.metadata?.usage;
     const usage = isLanguageModelUsage(rawUsage) ? rawUsage : undefined;
     const elapsed =
       chain.lastMessageAt !== undefined
         ? Date.now() - chain.lastMessageAt
         : undefined;
-    const chatData = this.#chatData;
-    if (!chatData) {
-      throw new Error('ContextEngine must be initialized before reminders run');
-    }
     return {
       turn: chain.turn,
       messageCount: chain.messageCount,
@@ -1174,7 +1181,7 @@ export class ContextEngine {
       lastMessage: chain.lastMessage,
       chat: chatData,
       usage,
-      branch: this.#branchName,
+      branch: session.branchName,
       elapsed,
     };
   }
@@ -1315,39 +1322,39 @@ export class ContextEngine {
     return { texts, onceIds: [...onceIds] };
   }
 
-  #asSavePipelineEngine() {
+  #asSavePipelineEngine(open: OpenChat) {
     return {
       store: this.#store,
       chatId: this.#chatId,
       getActiveBranch: () => ({
-        id: this.#activeBranch.id,
-        headMessageId: this.#activeBranch.headMessageId,
+        id: open.branch.id,
+        headMessageId: open.branch.headMessageId,
       }),
       commitHead: async (
         headMessageId: string,
         expectedHeadMessageId: string | null,
       ) => {
         const committed = await this.#store.updateBranchHead(
-          this.#activeBranch.id,
+          open.branch.id,
           headMessageId,
           expectedHeadMessageId,
         );
         if (committed) {
-          this.#activeBranch.headMessageId = headMessageId;
+          open.branch.headMessageId = headMessageId;
         }
         return committed;
       },
       refreshBranch: async () => {
         const fresh = await this.#store.getBranch(
           this.#chatId,
-          this.#activeBranch.name,
+          open.branch.name,
         );
         if (!fresh) {
           throw new Error(
-            `Branch "${this.#activeBranch.name}" not found for chat "${this.#chatId}"`,
+            `Branch "${open.branch.name}" not found for chat "${this.#chatId}"`,
           );
         }
-        this.#branch = fresh;
+        open.branch = fresh;
         return { id: fresh.id, headMessageId: fresh.headMessageId };
       },
       rewindForUpdate: (parentId: string) => this.#rewindForUpdate(parentId),
@@ -1374,7 +1381,7 @@ export class ContextEngine {
       signal?: AbortSignal;
     } = {},
   ): Promise<EstimateResult> {
-    await this.#ensureInitialized();
+    const open = await this.#open();
     await this.#loaderResolver.resolve(this.#fragments, {
       sandbox: options.sandbox,
       context: this,
@@ -1410,9 +1417,9 @@ export class ContextEngine {
     }
 
     // 2. Estimate persisted messages from store
-    if (this.#branch?.headMessageId) {
+    if (open.branch.headMessageId) {
       const chain = await this.#store.getMessageChain(
-        this.#branch.headMessageId,
+        open.branch.headMessageId,
       );
       for (const msg of chain) {
         const content = estimateMessageContent(msg.data);
@@ -1490,7 +1497,7 @@ export class ContextEngine {
    * ```
    */
   public async rewind(messageId: string): Promise<BranchInfo> {
-    await this.#ensureInitialized();
+    const open = await this.#open();
 
     // Verify the message exists
     const message = await this.#store.getMessage(messageId);
@@ -1501,7 +1508,7 @@ export class ContextEngine {
       throw new Error(`Message "${messageId}" belongs to a different chat`);
     }
 
-    return this.#createBranchFrom(messageId, true);
+    return this.#createBranchFrom(open, messageId, true);
   }
 
   /**
@@ -1524,9 +1531,9 @@ export class ContextEngine {
    * ```
    */
   public async checkpoint(name: string): Promise<CheckpointInfo> {
-    await this.#ensureInitialized();
+    const open = await this.#open();
 
-    if (!this.#branch?.headMessageId) {
+    if (!open.branch.headMessageId) {
       throw new Error('Cannot create checkpoint: no messages in conversation');
     }
 
@@ -1534,7 +1541,7 @@ export class ContextEngine {
       id: crypto.randomUUID(),
       chatId: this.#chatId,
       name,
-      messageId: this.#branch.headMessageId,
+      messageId: open.branch.headMessageId,
       createdAt: Date.now(),
     };
 
@@ -1565,7 +1572,7 @@ export class ContextEngine {
    * ```
    */
   public async restore(name: string): Promise<BranchInfo> {
-    await this.#ensureInitialized();
+    await this.#open();
 
     const checkpoint = await this.#store.getCheckpoint(this.#chatId, name);
     if (!checkpoint) {
@@ -1594,7 +1601,7 @@ export class ContextEngine {
    * ```
    */
   public async switchBranch(name: string): Promise<void> {
-    await this.#ensureInitialized();
+    const open = await this.#open();
 
     const branch = await this.#store.getBranch(this.#chatId, name);
     if (!branch) {
@@ -1602,8 +1609,7 @@ export class ContextEngine {
     }
 
     await this.#store.setActiveBranch(this.#chatId, branch.id);
-    this.#branch = { ...branch, isActive: true };
-    this.#branchName = name;
+    open.branch = { ...branch, isActive: true };
 
     // Clear pending messages (they were for the old branch)
     this.#pendingMessages = [];
@@ -1641,13 +1647,13 @@ export class ContextEngine {
    * ```
    */
   public async btw(): Promise<BranchInfo> {
-    await this.#ensureInitialized();
+    const open = await this.#open();
 
-    if (!this.#branch?.headMessageId) {
+    if (!open.branch.headMessageId) {
       throw new Error('Cannot create btw branch: no messages in conversation');
     }
 
-    return this.#createBranchFrom(this.#branch.headMessageId, false);
+    return this.#createBranchFrom(open, open.branch.headMessageId, false);
   }
 
   /**
@@ -1666,18 +1672,15 @@ export class ContextEngine {
   public async updateChat(
     updates: Partial<Pick<StoredChatData, 'title' | 'metadata'>>,
   ): Promise<void> {
-    await this.#ensureInitialized();
+    const open = await this.#open();
 
-    this.#chatData = await this.#store.updateChat(
-      this.#chatId,
-      ({ metadata }) => ({
-        title: updates.title,
-        metadata:
-          updates.metadata === undefined
-            ? undefined
-            : { ...metadata, ...updates.metadata },
-      }),
-    );
+    open.chat = await this.#store.updateChat(this.#chatId, ({ metadata }) => ({
+      title: updates.title,
+      metadata:
+        updates.metadata === undefined
+          ? undefined
+          : { ...metadata, ...updates.metadata },
+    }));
   }
 
   /**
@@ -1694,23 +1697,20 @@ export class ContextEngine {
    * ```
    */
   public async trackUsage(usage: LanguageModelUsage): Promise<void> {
-    await this.#ensureInitialized();
+    const open = await this.#open();
 
-    this.#chatData = await this.#store.updateChat(
-      this.#chatId,
-      ({ metadata }) => {
-        const storedUsage = metadata?.usage;
-        const currentUsage = isLanguageModelUsage(storedUsage)
-          ? storedUsage
-          : undefined;
-        return {
-          metadata: {
-            ...metadata,
-            usage: mergeLanguageModelUsage(currentUsage, usage),
-          },
-        };
-      },
-    );
+    open.chat = await this.#store.updateChat(this.#chatId, ({ metadata }) => {
+      const storedUsage = metadata?.usage;
+      const currentUsage = isLanguageModelUsage(storedUsage)
+        ? storedUsage
+        : undefined;
+      return {
+        metadata: {
+          ...metadata,
+          usage: mergeLanguageModelUsage(currentUsage, usage),
+        },
+      };
+    });
   }
 
   /**
@@ -1784,7 +1784,7 @@ export class ContextEngine {
    * ```
    */
   public async inspect(options: InspectOptions): Promise<InspectResult> {
-    await this.#ensureInitialized();
+    const open = await this.#open();
 
     const { renderer } = options;
 
@@ -1799,9 +1799,9 @@ export class ContextEngine {
 
     // Get persisted messages from store
     const persistedMessages: MessageData[] = [];
-    if (this.#branch?.headMessageId) {
+    if (open.branch.headMessageId) {
       const chain = await this.#store.getMessageChain(
-        this.#branch.headMessageId,
+        open.branch.headMessageId,
       );
       persistedMessages.push(...chain);
     }
@@ -1820,7 +1820,7 @@ export class ContextEngine {
       graph,
       meta: {
         chatId: this.#chatId,
-        branch: this.#branchName,
+        branch: open.branch.name,
         timestamp: Date.now(),
       },
     };
