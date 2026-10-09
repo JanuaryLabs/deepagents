@@ -118,7 +118,7 @@ export interface ContextEngineOptions {
   userId: string;
   /** Optional initial metadata for the chat (merged with existing if chat exists) */
   metadata?: Record<string, unknown>;
-  /** Custom resolver chain (defaults to async, generator, function, promise, iterable) */
+  /** Custom resolver chain (defaults to async, generator, function, iterable) */
   resolvers?: ValueResolver[];
 }
 

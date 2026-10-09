@@ -10,7 +10,6 @@ import {
   InMemoryContextStore,
   IterableResolver,
   type LoadContext,
-  PromiseResolver,
   createBashTool,
   createVirtualSandbox,
   fragment,
@@ -138,35 +137,6 @@ describe('GeneratorResolver', () => {
     }
     const loadCtx = await ctx();
     await assert.rejects(() => r.resolve(gen, loadCtx), /mid-iteration/);
-  });
-});
-
-describe('PromiseResolver', () => {
-  const r = new PromiseResolver();
-
-  it('claims Promise instances', () => {
-    assert.strictEqual(r.canResolve(Promise.resolve(1)), true);
-  });
-
-  it('rejects non-promises', () => {
-    assert.strictEqual(r.canResolve(1), false);
-    assert.strictEqual(
-      r.canResolve(() => 1),
-      false,
-    );
-  });
-
-  it('awaits the promise', async () => {
-    const result = await r.resolve(Promise.resolve('done'), await ctx());
-    assert.strictEqual(result, 'done');
-  });
-
-  it('propagates rejected promises', async () => {
-    const loadCtx = await ctx();
-    const rejected = Promise.reject(new Error('boom'));
-    // Suppress the unhandled-rejection warning before assert.rejects can catch it.
-    rejected.catch(() => {});
-    await assert.rejects(() => r.resolve(rejected, loadCtx), /boom/);
   });
 });
 

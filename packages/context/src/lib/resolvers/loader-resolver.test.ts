@@ -12,13 +12,13 @@ import {
   InMemoryContextStore,
   IterableResolver,
   type LoadContext,
-  PromiseResolver,
   XmlRenderer,
   createBashTool,
   createVirtualSandbox,
   defaultResolvers,
   fragment,
   isFragment,
+  isFragmentData,
 } from '@deepagents/context';
 
 async function createVirtualAgentSandbox() {
@@ -214,11 +214,8 @@ describe('FragmentLoaderResolver — sandbox optionality', () => {
     );
   });
 
-  it('allows promise values without a sandbox', async () => {
-    const f = fragment('promised', Promise.resolve('hi'));
-    const walker = newWalker();
-    await walker.resolve([f], emptyCtx());
-    assert.deepStrictEqual(f.data, ['hi']);
+  it('does not take a bare promise as fragment data', () => {
+    assert.strictEqual(isFragmentData(Promise.resolve('hi')), false);
   });
 
   it('allows iterable values without a sandbox', async () => {
@@ -321,21 +318,19 @@ describe('FragmentLoaderResolver — full default chain integration', () => {
     const f = fragment('mixed', [
       async () => 'from-async',
       () => 'from-sync',
-      Promise.resolve('from-promise'),
       new Set(['from-iterable']),
     ]);
     const walker = new FragmentLoaderResolver([
       new AsyncResolver(),
       new GeneratorResolver(),
       new FunctionResolver(),
-      new PromiseResolver(),
       new IterableResolver(),
     ]);
     await walker.resolve([f], await ctx());
     // f.data is `[children]` because fragment(name, ...children) wraps in array.
     // The Set materializes to its own array (['from-iterable']).
     assert.deepStrictEqual(f.data, [
-      ['from-async', 'from-sync', 'from-promise', ['from-iterable']],
+      ['from-async', 'from-sync', ['from-iterable']],
     ]);
   });
 });

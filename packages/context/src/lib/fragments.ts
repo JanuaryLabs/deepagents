@@ -44,8 +44,10 @@ export interface ContextFragment<T extends FragmentData = FragmentData> {
 
 /**
  * Fragment data can be a primitive, array, object, nested fragment, or a
- * lazy value (function, generator, promise, iterable) that is materialized
- * by the resolver chain at engine.resolve() time.
+ * lazy value (function, generator, iterable) that is materialized by the
+ * resolver chain at engine.resolve() time. Async data is a function that
+ * returns a promise: a bare promise would start before resolve() and could
+ * reject before anything awaits it.
  */
 export type FragmentData =
   | string
@@ -63,7 +65,6 @@ export type FragmentData =
       | Promise<FragmentData>
       | Iterable<FragmentData>
       | AsyncIterable<FragmentData>)
-  | Promise<FragmentData>
   | Iterable<FragmentData>
   | AsyncIterable<FragmentData>;
 
@@ -82,8 +83,8 @@ export function isFragment(data: unknown): data is ContextFragment {
 
 /**
  * Runtime check that a value fits {@link FragmentData}. Lazy values
- * (functions, promises, iterables) are accepted as they are, because only the
- * resolver chain can tell what they produce.
+ * (functions, iterables) are accepted as they are, because only the resolver
+ * chain can tell what they produce. A bare promise does not fit.
  */
 export function isFragmentData(value: unknown): value is FragmentData {
   return fitsFragmentData(value, new WeakSet());
@@ -98,7 +99,7 @@ function fitsFragmentData(value: unknown, visited: WeakSet<object>): boolean {
   if (Array.isArray(value)) {
     return value.every((item) => fitsFragmentData(item, visited));
   }
-  if (value instanceof Promise) return true;
+  if (value instanceof Promise) return false;
   if (Symbol.asyncIterator in value || Symbol.iterator in value) return true;
   if (isFragment(value)) return fitsFragmentData(value.data, visited);
   return Object.values(value).every((item) => fitsFragmentData(item, visited));
@@ -111,7 +112,7 @@ export type FragmentObject = Record<string, FragmentData>;
 
 /**
  * Type guard for plain objects in fragment data. The resolver chain dispatches
- * Promises/iterables to handlers first, so this guard would not normally see them.
+ * iterables to handlers first, so this guard would not normally see them.
  * Kept defensive so direct render paths that bypass the resolver still reject lazy values.
  */
 export function isFragmentObject(data: unknown): data is FragmentObject {
