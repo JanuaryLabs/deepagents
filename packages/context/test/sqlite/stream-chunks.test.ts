@@ -1,3 +1,4 @@
+import { settleWithin } from '@zukhruf/testing/async';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import { StreamHarness } from '@zukhruf/testing/streams';
 import { type UIMessageChunk, simulateReadableStream } from 'ai';
@@ -546,13 +547,10 @@ describe('Stream Chunks', () => {
       const persistPromise = streams.persist(source, streamId);
       try {
         await waitForStatus(store, streamId, 'running');
-        assert.equal(
-          await Promise.race([
-            chunksBuffered.promise.then(() => true),
-            sleep(2_000).then(() => false),
-          ]),
-          true,
+        await settleWithin(
+          chunksBuffered.promise,
           'source chunks reach the persistence buffer before cancellation',
+          2_000,
         );
         await streams.cancel(streamId);
 
@@ -2140,24 +2138,16 @@ describe('Stream Chunks', () => {
       });
       try {
         await waitForStatus(store, streamId, 'running');
-        assert.equal(
-          await Promise.race([
-            changeSource.firstFailure.promise.then(() => true),
-            sleep(2_000).then(() => false),
-          ]),
-          true,
+        await settleWithin(
+          changeSource.firstFailure.promise,
           'cancellation watcher subscribes',
+          2_000,
         );
         await controllingStreams.cancel(streamId);
-        const stoppedAfterRemoteCancel = await Promise.race([
-          persist.then(() => true),
-          sleep(300).then(() => false),
-        ]);
-
-        assert.equal(
-          stoppedAfterRemoteCancel,
-          true,
+        await settleWithin(
+          persist,
           'persist stops even when its first cancellation subscription fails',
+          300,
         );
         assert.ok(changeSource.attempts >= 1);
         assert.equal(cancellationDetections, 1);
@@ -2186,13 +2176,8 @@ describe('Stream Chunks', () => {
           } catch (error) {
             cancelError = error;
           }
-          const stoppedAfterCancel = await Promise.race([
-            persist.then(() => true),
-            sleep(300).then(() => false),
-          ]);
-
           assert.equal(cancelError, undefined);
-          assert.equal(stoppedAfterCancel, true);
+          await settleWithin(persist, 'persist stops after the cancel', 300);
           assert.equal(await store.getStreamStatus(streamId), 'cancelled');
         } finally {
           source[Symbol.dispose]();
@@ -2214,13 +2199,10 @@ describe('Stream Chunks', () => {
 
       const watcher = streams.monitorCancellation(streamId, () => {});
       try {
-        assert.equal(
-          await Promise.race([
-            changeSource.thirdAttempt.promise.then(() => true),
-            sleep(2_000).then(() => false),
-          ]),
-          true,
+        await settleWithin(
+          changeSource.thirdAttempt.promise,
           'watcher retries a repeatedly failing source',
+          2_000,
         );
         await sleep(120);
         assert.equal(
@@ -2246,13 +2228,10 @@ describe('Stream Chunks', () => {
 
       const watcher = streams.monitorCancellation(streamId, () => {});
       try {
-        assert.equal(
-          await Promise.race([
-            changeSource.thirdAttempt.promise.then(() => true),
-            sleep(2_000).then(() => false),
-          ]),
-          true,
+        await settleWithin(
+          changeSource.thirdAttempt.promise,
           'watcher reconnects after a source fails just after subscribing',
+          2_000,
         );
         await sleep(120);
         assert.equal(

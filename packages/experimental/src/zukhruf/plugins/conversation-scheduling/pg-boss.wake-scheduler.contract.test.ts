@@ -1,4 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
+import { settleWithin } from '@zukhruf/testing/async';
 import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert/strict';
@@ -65,12 +66,7 @@ test('PgBossWakeScheduler delivers opaque data at or after its due time', async 
       false,
       'future wake is not delivered early',
     );
-    const received = await Promise.race([
-      delivered.promise,
-      sleep(5_000).then(() => {
-        throw new Error('timed out waiting for wake');
-      }),
-    ]);
+    const received = await settleWithin(delivered.promise, 'wake');
     assert.deepEqual(received, wake);
     assert.deepEqual(otherTreeDeliveries, []);
     assert.ok(Date.now() >= runAt.getTime());

@@ -1,4 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
+import { settleWithin } from '@zukhruf/testing/async';
 import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert/strict';
@@ -177,14 +178,7 @@ for (const contract of turnQueueContracts) {
       }, noOrphans);
       void _consumer;
       try {
-        assert.equal(
-          await Promise.race([
-            started.promise.then(() => true),
-            sleep(5_000).then(() => false),
-          ]),
-          true,
-          'active handler starts',
-        );
+        await settleWithin(started.promise, 'active handler starts');
         assert.equal(await h.queue.getTurnActivity(conversation), 'running');
 
         release.resolve();
@@ -263,14 +257,7 @@ for (const contract of turnQueueContracts) {
       void _consumer;
 
       try {
-        assert.equal(
-          await Promise.race([
-            started.promise.then(() => true),
-            sleep(5_000).then(() => false),
-          ]),
-          true,
-          'active handler starts',
-        );
+        await settleWithin(started.promise, 'active handler starts');
         assert.deepStrictEqual(
           await h.queue.getCurrentTurn({
             chatId: first.chatId,
@@ -279,12 +266,8 @@ for (const contract of turnQueueContracts) {
           first,
         );
         await h.queue.cancel(first.streamId);
-        assert.equal(
-          await Promise.race([
-            aborted.promise.then(() => true),
-            sleep(5_000).then(() => false),
-          ]),
-          true,
+        await settleWithin(
+          aborted.promise,
           'active handler observes cancellation',
         );
         const overlapped = await Promise.race([
@@ -679,13 +662,10 @@ for (const contract of turnQueueContracts) {
         await h.queue.push(queued);
 
         disposing = Promise.resolve(consumer[Symbol.asyncDispose]());
-        assert.equal(
-          await Promise.race([
-            disposing.then(() => 'disposed'),
-            sleep(2_000).then(() => 'timed-out'),
-          ]),
-          'disposed',
+        await settleWithin(
+          disposing,
           'disposal does not wait for the active handler',
+          2_000,
         );
         consumer = undefined;
         await sleep(500);
@@ -1062,12 +1042,8 @@ test('does not delete or overlap a turn claimed after the cancellation snapshot'
   let cancelling: Promise<void> | undefined;
   try {
     cancelling = queue.cancel(first.streamId);
-    assert.equal(
-      await Promise.race([
-        snapshotTaken.promise.then(() => true),
-        sleep(5_000).then(() => false),
-      ]),
-      true,
+    await settleWithin(
+      snapshotTaken.promise,
       'cancellation captures the queued snapshot',
     );
     worker = await queue.consume(
@@ -1089,21 +1065,13 @@ test('does not delete or overlap a turn claimed after the cancellation snapshot'
       },
       { ...noOrphans, concurrency: 2 },
     );
-    assert.equal(
-      await Promise.race([
-        firstStarted.promise.then(() => true),
-        sleep(5_000).then(() => false),
-      ]),
-      true,
+    await settleWithin(
+      firstStarted.promise,
       'worker claims the snapshotted turn',
     );
     releaseSnapshot.resolve();
-    assert.equal(
-      await Promise.race([
-        cancelling.then(() => true),
-        sleep(5_000).then(() => false),
-      ]),
-      true,
+    await settleWithin(
+      cancelling,
       'state-conditional cancellation settles after the claim',
     );
 
@@ -1122,13 +1090,8 @@ test('does not delete or overlap a turn claimed after the cancellation snapshot'
       false,
       'a stale queued snapshot cannot delete the now-active FIFO owner',
     );
-    const successorRan = await Promise.race([
-      successorStarted.promise.then(() => true),
-      sleep(5_000).then(() => false),
-    ]);
-    assert.equal(
-      successorRan,
-      true,
+    await settleWithin(
+      successorStarted.promise,
       'the successor eventually becomes eligible',
     );
     await waitForAsync(
@@ -1205,12 +1168,8 @@ test('delivers cancellation to a local handler registered after cancel returns',
     );
     await queue.push(first);
     await queue.push(second);
-    assert.equal(
-      await Promise.race([
-        claimed.promise.then(() => true),
-        sleep(5_000).then(() => false),
-      ]),
-      true,
+    await settleWithin(
+      claimed.promise,
       'pg-boss claims the turn before adapter controller registration',
     );
     await queue.cancel(first.streamId);
@@ -1218,14 +1177,7 @@ test('delivers cancellation to a local handler registered after cancel returns',
     await otherWorker[Symbol.asyncDispose]();
     otherWorker = undefined;
     registerHandler.resolve();
-    assert.equal(
-      await Promise.race([
-        firstStarted.promise.then(() => true),
-        sleep(5_000).then(() => false),
-      ]),
-      true,
-      'delayed handler registers',
-    );
+    await settleWithin(firstStarted.promise, 'delayed handler registers');
     assert.equal(
       firstSignalAborted,
       true,
@@ -1237,12 +1189,8 @@ test('delivers cancellation to a local handler registered after cancel returns',
     ]);
     releaseFirst.resolve();
     assert.equal(overlapped, false);
-    assert.equal(
-      await Promise.race([
-        successorStarted.promise.then(() => true),
-        sleep(5_000).then(() => false),
-      ]),
-      true,
+    await settleWithin(
+      successorStarted.promise,
       'successor runs after the interrupted handler exits',
     );
     await waitForAsync(

@@ -1,3 +1,4 @@
+import { settleWithin } from '@zukhruf/testing/async';
 import {
   type Telemetry,
   embed,
@@ -335,15 +336,11 @@ describe('createFileTelemetry()', () => {
       onWriteError: (error) => reportError(error),
     });
 
-    const error = await Promise.race([
+    const error = await settleWithin(
       errorReported,
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error('initialization error was not reported')),
-          100,
-        ),
-      ),
-    ]);
+      'the initialization error is reported',
+      100,
+    );
     assert.ok(error instanceof Error);
   });
 });

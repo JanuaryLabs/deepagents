@@ -1,9 +1,9 @@
 import { openai } from '@ai-sdk/openai';
+import { settleWithin } from '@zukhruf/testing/async';
 import { HttpResponse, http } from 'msw';
 import { setupServer } from 'msw/node';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { z } from 'zod';
 
 import { WhatsAppGroup } from '@deepagents/demo-zukhruf-whatsapp';
@@ -132,14 +132,11 @@ test('every member sees a group message concurrently and only volunteers publish
     if (firstParticipants.size === participants.length) {
       firstNotificationStarted.resolve();
     }
-    await Promise.race([
+    await settleWithin(
       firstNotificationStarted.promise,
-      sleep(2_000).then(() => {
-        throw new Error(
-          'members did not receive the notification concurrently',
-        );
-      }),
-    ]);
+      'members receive the notification concurrently',
+      2_000,
+    );
     activeParticipationChecks--;
   };
 
