@@ -1,4 +1,5 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import { Latch } from '@zukhruf/async';
 import { type Telemetry, isStepCount, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { HttpResponse, http } from 'msw';
@@ -879,6 +880,161 @@ describe('OpenAI Traces Integration', () => {
         exported.map((batch) => batch.map((item) => item.id)),
         [['span_1', 'span_2'], ['trace_1']],
       );
+    });
+
+    it('drops spans and traces that end after shutdown', async () => {
+      const exported: string[][] = [];
+      const exporter: TracingExporter = {
+        async export(items) {
+          exported.push(items.map((item) => item.id));
+        },
+      };
+      const processor = new BatchTraceProcessor(exporter, {
+        scheduleDelayMs: 60_000,
+      });
+      processor.start();
+      await processor.shutdown();
+
+      processor.onSpanEnd({
+        object: 'trace.span',
+        id: 'span_late',
+        trace_id: 'trace_late',
+        started_at: new Date().toISOString(),
+        ended_at: new Date().toISOString(),
+        span_data: { type: 'agent', name: 'workflow' },
+      });
+      processor.onTraceEnd({
+        object: 'trace',
+        id: 'trace_late',
+        workflow_name: 'workflow',
+      });
+      await processor.forceFlush();
+
+      assert.deepStrictEqual(exported, []);
+    });
+
+    it('exports what was queued before shutdown', async () => {
+      const exported: string[][] = [];
+      const exporter: TracingExporter = {
+        async export(items) {
+          exported.push(items.map((item) => item.id));
+        },
+      };
+      const processor = new BatchTraceProcessor(exporter, {
+        scheduleDelayMs: 60_000,
+      });
+      processor.onSpanEnd({
+        object: 'trace.span',
+        id: 'span_1',
+        trace_id: 'trace_1',
+        started_at: new Date().toISOString(),
+        ended_at: new Date().toISOString(),
+        span_data: { type: 'agent', name: 'workflow' },
+      });
+
+      await processor.shutdown();
+
+      assert.deepStrictEqual(exported, [['span_1']]);
+    });
+
+    it('exports each queued item once when flushes overlap', async () => {
+      const release = new Latch();
+      const exported: string[][] = [];
+      const exporter: TracingExporter = {
+        async export(items) {
+          exported.push(items.map((item) => item.id));
+          await release.wait();
+        },
+      };
+      const processor = new BatchTraceProcessor(exporter, {
+        scheduleDelayMs: 60_000,
+      });
+      processor.onSpanEnd({
+        object: 'trace.span',
+        id: 'span_1',
+        trace_id: 'trace_1',
+        started_at: new Date().toISOString(),
+        ended_at: new Date().toISOString(),
+        span_data: { type: 'agent', name: 'workflow' },
+      });
+
+      const first = processor.forceFlush();
+      const second = processor.forceFlush();
+      release.open();
+      await Promise.all([first, second]);
+
+      assert.deepStrictEqual(exported, [['span_1']]);
+    });
+
+    it('a flush that joins one in flight exports what was queued before it', async () => {
+      const release = new Latch();
+      const exported: string[][] = [];
+      const exporter: TracingExporter = {
+        async export(items) {
+          exported.push(items.map((item) => item.id));
+          await release.wait();
+        },
+      };
+      const processor = new BatchTraceProcessor(exporter, {
+        scheduleDelayMs: 60_000,
+      });
+      processor.onSpanEnd({
+        object: 'trace.span',
+        id: 'span_1',
+        trace_id: 'trace_1',
+        started_at: new Date().toISOString(),
+        ended_at: new Date().toISOString(),
+        span_data: { type: 'agent', name: 'workflow' },
+      });
+      const first = processor.forceFlush();
+      processor.onSpanEnd({
+        object: 'trace.span',
+        id: 'span_2',
+        trace_id: 'trace_1',
+        started_at: new Date().toISOString(),
+        ended_at: new Date().toISOString(),
+        span_data: { type: 'generation' },
+      });
+
+      const joined = processor.forceFlush();
+      release.open();
+      await joined;
+
+      assert.deepStrictEqual(exported, [['span_1'], ['span_2']]);
+      await first;
+    });
+
+    it('exports queued items on the schedule after start()', async (t) => {
+      t.mock.timers.enable({ apis: ['setInterval'] });
+      const exported: string[][] = [];
+      const exporter: TracingExporter = {
+        async export(items) {
+          exported.push(items.map((item) => item.id));
+        },
+      };
+      const processor = new BatchTraceProcessor(exporter, {
+        scheduleDelayMs: 1_000,
+      });
+      try {
+        processor.start();
+        processor.onSpanEnd({
+          object: 'trace.span',
+          id: 'span_1',
+          trace_id: 'trace_1',
+          started_at: new Date().toISOString(),
+          ended_at: new Date().toISOString(),
+          span_data: { type: 'agent', name: 'workflow' },
+        });
+
+        t.mock.timers.tick(1_000);
+
+        await t.waitFor(() => assert.deepStrictEqual(exported, [['span_1']]), {
+          interval: 10,
+          timeout: 2_000,
+        });
+      } finally {
+        await processor.shutdown();
+      }
     });
   });
 
