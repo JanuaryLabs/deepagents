@@ -5,6 +5,8 @@ import { type ExtractedPair, PairProducer } from '../types.ts';
 const { Parser } = nodeSqlParser;
 const parser = new Parser();
 
+const unqualify = (name: string) => name.split('.').pop()!.toLowerCase();
+
 export interface FilteredProducerOptions {
   successOnly?: boolean;
   tables?: string[];
@@ -20,6 +22,7 @@ export interface FilteredProducerOptions {
 export class FilteredProducer extends PairProducer {
   readonly #producer: PairProducer;
   readonly #options: FilteredProducerOptions;
+  readonly #filterNames: Set<string>;
 
   /**
    * @param producer - Source producer to filter
@@ -29,6 +32,7 @@ export class FilteredProducer extends PairProducer {
     super();
     this.#producer = producer;
     this.#options = options;
+    this.#filterNames = new Set(options.tables?.map(unqualify));
   }
 
   /**
@@ -59,11 +63,7 @@ export class FilteredProducer extends PairProducer {
     }
   }
 
-  #filterNames: Set<string> | undefined;
-
   private matchesTables(sql: string, tables: string[]): boolean {
-    const unqualify = (name: string) => name.split('.').pop()!.toLowerCase();
-    this.#filterNames ??= new Set(tables.map(unqualify));
     const filterNames = this.#filterNames;
     try {
       const refs = parser.tableList(sql, {

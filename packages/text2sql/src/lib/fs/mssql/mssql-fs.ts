@@ -97,9 +97,8 @@ export class MssqlFs implements IFileSystem {
   #root: string;
   #schema: string;
   #ownsPool: boolean;
-  #isInitialized = false;
 
-  constructor(options: MssqlFsOptions) {
+  private constructor(options: MssqlFsOptions) {
     this.#chunkSize = options.chunkSize ?? 1024 * 1024;
     const schema = options.schema ?? 'dbo';
     if (!/^[a-zA-Z_]\w*$/.test(schema)) {
@@ -134,7 +133,19 @@ export class MssqlFs implements IFileSystem {
     return `[${this.#schema}].[${name}]`;
   }
 
-  async initialize(): Promise<void> {
+  /** Opens the file system: creates its tables and its root directories. */
+  static async create(options: MssqlFsOptions): Promise<MssqlFs> {
+    const fs = new MssqlFs(options);
+    try {
+      await fs.#initialize();
+    } catch (error) {
+      await fs.close();
+      throw error;
+    }
+    return fs;
+  }
+
+  async #initialize(): Promise<void> {
     if (this.#ownsPool) {
       await this.#pool.connect();
     }
@@ -159,12 +170,12 @@ export class MssqlFs implements IFileSystem {
 
     const rootSlashExists = rowsOf(
       existsRow,
-      await this.#rawQuery(
+      await this.#query(
         `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = '/') THEN 1 ELSE 0 END as [exists]`,
       ),
     );
     if (rootSlashExists[0].exists === 0) {
-      await this.#rawExec(
+      await this.#exec(
         `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime) VALUES ('/', 'directory', 493, 0, @p0)`,
         [Date.now()],
       );
@@ -175,27 +186,17 @@ export class MssqlFs implements IFileSystem {
 
       const rootExists = rowsOf(
         existsRow,
-        await this.#rawQuery(
+        await this.#query(
           `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
           [this.#root],
         ),
       );
       if (rootExists[0].exists === 0) {
-        await this.#rawExec(
+        await this.#exec(
           `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime) VALUES (@p0, 'directory', 493, 0, @p1)`,
           [this.#root, Date.now()],
         );
       }
-    }
-
-    this.#isInitialized = true;
-  }
-
-  #ensureInitialized(): void {
-    if (!this.#isInitialized) {
-      throw new Error(
-        'MssqlFs not initialized. Call await fs.initialize() after construction.',
-      );
     }
   }
 
@@ -207,14 +208,14 @@ export class MssqlFs implements IFileSystem {
       currentPath = path.posix.join(currentPath, segments[i]);
       const exists = rowsOf(
         existsRow,
-        await this.#rawQuery(
+        await this.#query(
           `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
           [currentPath],
         ),
       );
 
       if (exists[0].exists === 0) {
-        await this.#rawExec(
+        await this.#exec(
           `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime) VALUES (@p0, 'directory', 493, 0, @p1)`,
           [currentPath, Date.now()],
         );
@@ -222,7 +223,7 @@ export class MssqlFs implements IFileSystem {
     }
   }
 
-  #rawQuery(sql: string, params?: unknown[]): Promise<IResult<unknown>> {
+  #query(sql: string, params?: unknown[]): Promise<IResult<unknown>> {
     const request = this.#pool.request();
     params?.forEach((value, index) => {
       request.input(`p${index}`, value);
@@ -230,7 +231,7 @@ export class MssqlFs implements IFileSystem {
     return request.query(sql);
   }
 
-  async #rawExec(sql: string, params?: unknown[]): Promise<number> {
+  async #exec(sql: string, params?: unknown[]): Promise<number> {
     const request = this.#pool.request();
     params?.forEach((value, index) => {
       request.input(`p${index}`, value);
@@ -239,20 +240,9 @@ export class MssqlFs implements IFileSystem {
     return result.rowsAffected[0] ?? 0;
   }
 
-  async #query(sql: string, params?: unknown[]): Promise<IResult<unknown>> {
-    this.#ensureInitialized();
-    return this.#rawQuery(sql, params);
-  }
-
-  async #exec(sql: string, params?: unknown[]): Promise<number> {
-    this.#ensureInitialized();
-    return this.#rawExec(sql, params);
-  }
-
   async #useTransaction<T>(
     fn: (transaction: Transaction) => Promise<T>,
   ): Promise<T> {
-    this.#ensureInitialized();
     const mssql = MssqlFs.#requireMssql();
     const transaction = new mssql.Transaction(this.#pool);
     try {

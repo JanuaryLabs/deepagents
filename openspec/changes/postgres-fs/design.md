@@ -3,7 +3,7 @@
 The virtual filesystem layer in `packages/text2sql/src/lib/fs/` provides two database-backed `IFileSystem` implementations:
 
 - **`SqliteFs`** — synchronous, uses `node:sqlite` `DatabaseSync`, prepared statement caching
-- **`MssqlFs`** — async, uses `mssql` npm package, lazy-required via `createRequire`, explicit `initialize()`
+- **`MssqlFs`** — async, uses `mssql` npm package, lazy-required via `createRequire`, created with `await MssqlFs.create()`
 
 Both share the same two-table schema (`fs_entries` for metadata, `fs_chunks` for 1MB-chunked file content) and the same POSIX-like path semantics (root prefix, symlink resolution, parent auto-creation).
 
@@ -14,7 +14,7 @@ PostgreSQL is already used elsewhere in the project (`PostgresContextStore` in `
 **Goals:**
 
 - Implement `PostgresFs` class that fully implements `IFileSystem` from `just-bash`
-- Match `MssqlFs` API surface: async operations, explicit `initialize()`, pool injection, `close()` semantics, `getAllPathsAsync()`
+- Match `MssqlFs` API surface: async operations, a static async `create()` factory, pool injection, `close()` semantics, `getAllPathsAsync()`
 - Support PostgreSQL schema scoping (equivalent to MSSQL's `[schema].[table]` pattern)
 - Support root path isolation and composability with `ScopedFs`/`TrackedFs` decorators
 - Integration tests using a `Postgres` instance’s `database()` method from `@deepagents/test`
@@ -44,11 +44,11 @@ PostgreSQL is already used elsewhere in the project (`PostgresContextStore` in `
 
 **Detection:** Use `instanceof pg.Pool` check, same as `MssqlFs` uses `instanceof mssql.ConnectionPool`.
 
-### 3. Explicit `initialize()` (not constructor-based)
+### 3. A static async factory (not a constructor and `initialize()`)
 
-**Choice:** Require `await fs.initialize()` after construction.
+**Choice:** `await PostgresFs.create(options)` creates the file system. The constructor is private.
 
-**Why:** `pg.Pool` is async (unlike `node:sqlite` `DatabaseSync`). Constructor can't be async, and auto-initializing in the background (like `PostgresContextStore` does with `#initialized = this.#initialize()`) adds complexity for a filesystem where every operation depends on DDL being ready. Explicit init is simpler and matches `MssqlFs`.
+**Why:** `pg.Pool` is async (unlike `node:sqlite` `DatabaseSync`), and a constructor cannot be async. An earlier design used a public constructor and a separate `initialize()` call. That left an object that existed before its tables did, so each operation checked an "initialized" flag. The factory runs the DDL before it returns the object, so no operation can run first. If the DDL fails, the factory closes a pool that it created. Auto-initializing in the background (like `PostgresContextStore` does with `#initialized = this.#initialize()`) still adds complexity for a filesystem where every operation depends on the DDL. `MssqlFs` uses the same factory.
 
 ### 4. DDL as a TypeScript function (not .sql file)
 

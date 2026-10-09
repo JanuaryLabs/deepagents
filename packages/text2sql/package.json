@@ -119,7 +119,8 @@
     "sql-formatter": "^15.8.2",
     "uuid": "^14.0.1",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "p-memoize": "^8.0.0"
   },
   "devDependencies": {
     "@ai-sdk/openai": "^4.0.83",

@@ -6,6 +6,7 @@ import { z } from 'zod';
 
 import {
   ClickHouse,
+  ClickHouseSqlPolicyAnalyzer,
   constraints,
   indexes,
   info,
@@ -171,6 +172,61 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           { id: 1, name: 'Ada' },
           { id: 2, name: 'Grace' },
         ]);
+      } finally {
+        await container.cleanup();
+      }
+    });
+
+    it('runs the readonly probe again after a probe fails', async () => {
+      const container = await new TestClickHouse({
+        docker,
+        image: CLICKHOUSE_IMAGE,
+      }).start();
+      try {
+        await container.exec([
+          'clickhouse-client',
+          '--multiquery',
+          '--query',
+          SCHEMA_SQL,
+        ]);
+
+        const endpoint = new URL(`http://${container.host}:${container.port}/`);
+        endpoint.searchParams.set('user', USER);
+        endpoint.searchParams.set('password', PASSWORD);
+        endpoint.searchParams.set('database', DATABASE);
+        endpoint.searchParams.set('default_format', 'JSON');
+
+        const outages = [new Error('connection reset by peer')];
+        const analyzer = new ClickHouseSqlPolicyAnalyzer(
+          async (sql: string) => {
+            const outage = outages.shift();
+            if (outage) throw outage;
+            const response = await fetch(endpoint, {
+              method: 'POST',
+              body: sql,
+            });
+            if (!response.ok) {
+              throw new Error(await response.text());
+            }
+            const result = clickHouseJsonResult.parse(await response.json());
+            if (result.exception) throw new Error(result.exception);
+            return result;
+          },
+        );
+        const context = {
+          async resolveAllowedEntities() {
+            return [`${DATABASE}.users`];
+          },
+        };
+
+        const first = await analyzer.analyze('SELECT name FROM users', context);
+        const second = await analyzer.analyze(
+          'SELECT name FROM users',
+          context,
+        );
+
+        assert.equal(first?.kind, 'scope');
+        assert.equal(second, null);
       } finally {
         await container.cleanup();
       }
@@ -458,9 +514,14 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
         assert.match(validation, /readonly = 1/);
         assert.equal(validatorCalls, 0);
         assert.ok(!queries.includes(sql));
-        assert.deepEqual(queries, [
-          "SELECT getSetting('readonly') AS readonly, currentDatabase() AS database",
-        ]);
+        // Fail-closed: only the readonly probe reaches the connection. A
+        // failed probe runs again on the next call, so it may run twice.
+        assert.deepEqual(
+          new Set(queries),
+          new Set([
+            "SELECT getSetting('readonly') AS readonly, currentDatabase() AS database",
+          ]),
+        );
       } finally {
         await container.cleanup();
       }

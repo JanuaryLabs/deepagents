@@ -1,3 +1,4 @@
+import pMemoize from 'p-memoize';
 import { z } from 'zod';
 
 import {
@@ -24,7 +25,8 @@ export interface DuckDBAdapterOptions {
 
 export class DuckDB extends Adapter {
   readonly #options: DuckDBAdapterOptions;
-  #namespace?: Promise<{ catalog: string; schema: string }>;
+  /** Kept once it loads; a failed lookup is tried again on the next call. */
+  readonly #namespace: () => Promise<{ catalog: string; schema: string }>;
 
   override readonly grounding: GroundingFn[];
   override readonly defaultSchema = 'main';
@@ -39,6 +41,7 @@ export class DuckDB extends Adapter {
     validateScopeOption('schemas', options.schemas);
     super(new DuckDBSqlPolicyAnalyzer(options.execute));
     this.#options = options;
+    this.#namespace = pMemoize(() => this.#loadNamespace());
     this.grounding = options.grounding ?? [];
   }
 
@@ -98,7 +101,7 @@ export class DuckDB extends Adapter {
   }
 
   async currentNamespace(): Promise<{ catalog: string; schema: string }> {
-    return (this.#namespace ??= this.#loadNamespace());
+    return this.#namespace();
   }
 
   async resolveRelationName(

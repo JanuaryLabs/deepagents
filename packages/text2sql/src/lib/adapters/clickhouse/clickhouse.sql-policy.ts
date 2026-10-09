@@ -1,3 +1,5 @@
+import pMemoize from 'p-memoize';
+
 import type { SQLScopeErrorPayload } from '../../agents/exceptions.ts';
 import { buildScopeParseErrorPayload } from '../../sql-scope-error.ts';
 import type { ExecuteFunction } from '../adapter.ts';
@@ -16,11 +18,15 @@ type ExplainNode = {
 
 export class ClickHouseSqlPolicyAnalyzer implements SqlPolicyAnalyzer {
   readonly #query: ExecuteFunction;
-  #readonlyCheck?: Promise<void>;
-  #currentDatabase?: string;
+  /**
+   * The connection's current database, read by the probe that also checks
+   * readonly = 1. Kept once the probe passes; a failed probe runs again.
+   */
+  readonly #currentDatabase: () => Promise<string>;
 
   constructor(query: ExecuteFunction) {
     this.#query = query;
+    this.#currentDatabase = pMemoize(() => this.#verifyReadonly());
   }
 
   async analyze(
@@ -28,7 +34,7 @@ export class ClickHouseSqlPolicyAnalyzer implements SqlPolicyAnalyzer {
     context: SqlPolicyContext,
   ): Promise<SqlPolicyViolation | null> {
     try {
-      await (this.#readonlyCheck ??= this.#verifyReadonly());
+      const currentDatabase = await this.#currentDatabase();
 
       const ast = await this.#explain(`EXPLAIN AST ${sql}`);
       const astAnalysis = analyzeAst(ast);
@@ -51,13 +57,10 @@ export class ClickHouseSqlPolicyAnalyzer implements SqlPolicyAnalyzer {
         analyzedTree,
         'analyzed',
       );
-      if (!this.#currentDatabase) {
-        throw new Error('ClickHouse current database was not established.');
-      }
       const relations = [
         ...new Set(
           [...syntacticRelations, ...analyzedRelations].map((relation) =>
-            qualifyRelation(relation, this.#currentDatabase!),
+            qualifyRelation(relation, currentDatabase),
           ),
         ),
       ];
@@ -80,7 +83,7 @@ export class ClickHouseSqlPolicyAnalyzer implements SqlPolicyAnalyzer {
     }
   }
 
-  async #verifyReadonly(): Promise<void> {
+  async #verifyReadonly(): Promise<string> {
     const rows = readRows(
       await this.#query(
         "SELECT getSetting('readonly') AS readonly, currentDatabase() AS database",
@@ -104,7 +107,7 @@ export class ClickHouseSqlPolicyAnalyzer implements SqlPolicyAnalyzer {
         `ClickHouse connection must have effective readonly = 1; received ${String(value)}.`,
       );
     }
-    this.#currentDatabase = row.database;
+    return row.database;
   }
 
   async #explain(sql: string): Promise<string[]> {

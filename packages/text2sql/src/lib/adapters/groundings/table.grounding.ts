@@ -68,11 +68,13 @@ export abstract class TableGrounding extends AbstractGrounding {
   /** Find FKs FROM this table (outgoing relationships) */
   protected abstract findOutgoingRelations(
     tableName: string,
+    ctx: GroundingContext,
   ): Promise<Relationship[]>;
 
   /** Find FKs TO this table (incoming relationships) */
   protected abstract findIncomingRelations(
     tableName: string,
+    ctx: GroundingContext,
   ): Promise<Relationship[]>;
 
   override async contributeEntities(ctx: GroundingContext): Promise<void> {
@@ -150,7 +152,7 @@ export abstract class TableGrounding extends AbstractGrounding {
       }
 
       if (depth < forwardLimit) {
-        const rels = await this.findOutgoingRelations(name);
+        const rels = await this.findOutgoingRelations(name, ctx);
         for (const rel of rels) {
           if (!this.isRelationshipVisible(rel)) continue;
           this.addRelationship(rel, allRelationships, seenRelationships);
@@ -187,7 +189,7 @@ export abstract class TableGrounding extends AbstractGrounding {
       }
 
       if (depth < backwardLimit) {
-        const rels = await this.findIncomingRelations(name);
+        const rels = await this.findIncomingRelations(name, ctx);
         for (const rel of rels) {
           if (!this.isRelationshipVisible(rel)) continue;
           this.addRelationship(rel, allRelationships, seenRelationships);

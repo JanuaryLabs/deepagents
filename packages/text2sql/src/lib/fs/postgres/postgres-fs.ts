@@ -89,9 +89,8 @@ export class PostgresFs implements IFileSystem {
   #root: string;
   #schema: string;
   #ownsPool: boolean;
-  #isInitialized = false;
 
-  constructor(options: PostgresFsOptions) {
+  private constructor(options: PostgresFsOptions) {
     this.#chunkSize = options.chunkSize ?? 1024 * 1024;
     const schema = options.schema ?? 'public';
     if (!/^[a-zA-Z_]\w*$/.test(schema)) {
@@ -129,18 +128,30 @@ export class PostgresFs implements IFileSystem {
     return `"${this.#schema}"."${name}"`;
   }
 
-  async initialize(): Promise<void> {
+  /** Opens the file system: creates its tables and its root directories. */
+  static async create(options: PostgresFsOptions): Promise<PostgresFs> {
+    const fs = new PostgresFs(options);
+    try {
+      await fs.#initialize();
+    } catch (error) {
+      await fs.close();
+      throw error;
+    }
+    return fs;
+  }
+
+  async #initialize(): Promise<void> {
     const ddl = postgresFsDDL(this.#schema);
     await this.#pool.query(ddl);
 
     const rootSlashExists = rowsOf(
       existsRow,
-      await this.#rawQuery(
+      await this.#query(
         `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = '/') AS exists`,
       ),
     );
     if (!rootSlashExists[0].exists) {
-      await this.#rawExec(
+      await this.#exec(
         `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime) VALUES ('/', 'directory', 493, 0, $1)`,
         [Date.now()],
       );
@@ -151,27 +162,17 @@ export class PostgresFs implements IFileSystem {
 
       const rootExists = rowsOf(
         existsRow,
-        await this.#rawQuery(
+        await this.#query(
           `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = $1) AS exists`,
           [this.#root],
         ),
       );
       if (!rootExists[0].exists) {
-        await this.#rawExec(
+        await this.#exec(
           `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime) VALUES ($1, 'directory', 493, 0, $2)`,
           [this.#root, Date.now()],
         );
       }
-    }
-
-    this.#isInitialized = true;
-  }
-
-  #ensureInitialized(): void {
-    if (!this.#isInitialized) {
-      throw new Error(
-        'PostgresFs not initialized. Call await fs.initialize() after construction.',
-      );
     }
   }
 
@@ -183,14 +184,14 @@ export class PostgresFs implements IFileSystem {
       currentPath = path.posix.join(currentPath, segments[i]);
       const exists = rowsOf(
         existsRow,
-        await this.#rawQuery(
+        await this.#query(
           `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = $1) AS exists`,
           [currentPath],
         ),
       );
 
       if (!exists[0].exists) {
-        await this.#rawExec(
+        await this.#exec(
           `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime) VALUES ($1, 'directory', 493, 0, $2)`,
           [currentPath, Date.now()],
         );
@@ -198,27 +199,16 @@ export class PostgresFs implements IFileSystem {
     }
   }
 
-  #rawQuery(sql: string, params?: unknown[]): Promise<QueryResult> {
+  #query(sql: string, params?: unknown[]): Promise<QueryResult> {
     return this.#pool.query(sql, params);
   }
 
-  async #rawExec(sql: string, params?: unknown[]): Promise<number> {
+  async #exec(sql: string, params?: unknown[]): Promise<number> {
     const result = await this.#pool.query(sql, params);
     return result.rowCount ?? 0;
   }
 
-  async #query(sql: string, params?: unknown[]): Promise<QueryResult> {
-    this.#ensureInitialized();
-    return this.#rawQuery(sql, params);
-  }
-
-  async #exec(sql: string, params?: unknown[]): Promise<number> {
-    this.#ensureInitialized();
-    return this.#rawExec(sql, params);
-  }
-
   async #useTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-    this.#ensureInitialized();
     const client = await this.#pool.connect();
     try {
       await client.query('BEGIN');

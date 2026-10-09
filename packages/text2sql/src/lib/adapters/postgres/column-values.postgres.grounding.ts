@@ -1,3 +1,4 @@
+import pMemoize from 'p-memoize';
 import { z } from 'zod';
 
 import type { Adapter } from '../adapter.ts';
@@ -25,23 +26,21 @@ const textValueRow = z.object({ value: z.string().nullable() });
 
 export class PostgresColumnValuesGrounding extends ColumnValuesGrounding {
   #adapter: Adapter;
-  #enumCache: Map<string, string[]> = new Map();
-  #enumCacheLoaded = false;
+  /** Every ENUM type's values, loaded once on first use; a failed load runs again. */
+  readonly #enumValues: () => Promise<Map<string, string[]>>;
 
   constructor(adapter: Adapter, config: ColumnValuesGroundingConfig = {}) {
     super(config);
     this.#adapter = adapter;
+    this.#enumValues = pMemoize(() => this.#loadEnumValues());
   }
 
   /**
-   * Load all ENUM types and their values into cache.
-   * This is more efficient than querying per-column.
+   * Load all ENUM types and their values, keyed by schema-qualified and by
+   * bare type name. One query is more efficient than one per column.
    */
-  async #loadEnumCache(): Promise<void> {
-    if (this.#enumCacheLoaded) {
-      return;
-    }
-
+  async #loadEnumValues(): Promise<Map<string, string[]>> {
+    const enumValues = new Map<string, string[]>();
     const rows = await this.#adapter.runQuery(
       `
       SELECT
@@ -58,18 +57,18 @@ export class PostgresColumnValuesGrounding extends ColumnValuesGrounding {
 
     for (const row of rows) {
       const key = `${row.type_schema}.${row.type_name}`;
-      const existing = this.#enumCache.get(key) ?? [];
+      const existing = enumValues.get(key) ?? [];
       existing.push(row.enum_value);
-      this.#enumCache.set(key, existing);
+      enumValues.set(key, existing);
 
-      // Also cache without schema for convenience
+      // Also key it without schema for convenience
       const simpleKey = row.type_name;
-      const simpleExisting = this.#enumCache.get(simpleKey) ?? [];
+      const simpleExisting = enumValues.get(simpleKey) ?? [];
       simpleExisting.push(row.enum_value);
-      this.#enumCache.set(simpleKey, simpleExisting);
+      enumValues.set(simpleKey, simpleExisting);
     }
 
-    this.#enumCacheLoaded = true;
+    return enumValues;
   }
 
   protected override async collectEnumValues(
@@ -81,7 +80,7 @@ export class PostgresColumnValuesGrounding extends ColumnValuesGrounding {
       return undefined;
     }
 
-    await this.#loadEnumCache();
+    const enumValues = await this.#enumValues();
 
     // Get the actual type name for this column
     const { schema, table } = this.#adapter.parseTableName(tableName);
@@ -104,8 +103,7 @@ export class PostgresColumnValuesGrounding extends ColumnValuesGrounding {
 
     // Look up in cache
     const fullKey = `${udt_schema}.${udt_name}`;
-    const values =
-      this.#enumCache.get(fullKey) ?? this.#enumCache.get(udt_name);
+    const values = enumValues.get(fullKey) ?? enumValues.get(udt_name);
 
     return values?.length ? values : undefined;
   }

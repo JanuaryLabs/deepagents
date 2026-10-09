@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { Text2Sql, Text2SqlValidationError } from '@deepagents/text2sql';
 import {
   DuckDB,
+  DuckDBSqlPolicyAnalyzer,
   columnStats,
   columnValues,
   constraints,
@@ -39,6 +40,33 @@ function findEntity<F extends { name: string; data?: unknown }>(
       entityData.safeParse(fragment.data).data?.name === name,
   );
 }
+
+it('looks the DuckDB namespace up again after a lookup fails', async () => {
+  await using database = await duckdb.database();
+  const { connection } = database;
+  await connection.run(`
+    CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR NOT NULL);
+    INSERT INTO users VALUES (1, 'Ada');
+  `);
+  const outages = [new Error('connection reset by peer')];
+  const analyzer = new DuckDBSqlPolicyAnalyzer(async (sql: string) => {
+    const outage = outages.shift();
+    if (outage) throw outage;
+    const reader = await connection.runAndReadAll(sql);
+    return reader.getRowObjectsJson();
+  });
+  const context = {
+    async resolveAllowedEntities() {
+      return ['users'];
+    },
+  };
+
+  const first = await analyzer.analyze('SELECT name FROM users', context);
+  const second = await analyzer.analyze('SELECT name FROM users', context);
+
+  assert.equal(first?.kind, 'scope');
+  assert.equal(second, null);
+});
 
 it('executes grounded DuckDB friendly SQL through the public adapter', async () => {
   await using database = await duckdb.database();

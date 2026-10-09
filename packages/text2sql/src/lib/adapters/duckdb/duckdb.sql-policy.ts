@@ -1,3 +1,5 @@
+import pMemoize from 'p-memoize';
+
 import type { SQLScopeErrorPayload } from '../../agents/exceptions.ts';
 import { buildScopeParseErrorPayload } from '../../sql-scope-error.ts';
 import type { ExecuteFunction } from '../adapter.ts';
@@ -18,10 +20,12 @@ type Namespace = { catalog: string; schema: string };
 
 export class DuckDBSqlPolicyAnalyzer implements SqlPolicyAnalyzer {
   readonly #query: ExecuteFunction;
-  #namespace?: Promise<Namespace>;
+  /** Kept once it loads; a failed lookup is tried again on the next call. */
+  readonly #namespace: () => Promise<Namespace>;
 
   constructor(query: ExecuteFunction) {
     this.#query = query;
+    this.#namespace = pMemoize(() => this.#loadNamespace());
   }
 
   async analyze(
@@ -29,7 +33,7 @@ export class DuckDBSqlPolicyAnalyzer implements SqlPolicyAnalyzer {
     context: SqlPolicyContext,
   ): Promise<SqlPolicyViolation | null> {
     try {
-      const namespace = await (this.#namespace ??= this.#loadNamespace());
+      const namespace = await this.#namespace();
       const ast = await this.#serialize(sql);
       const analysis = analyzeAst(ast, namespace);
 

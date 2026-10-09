@@ -31,7 +31,6 @@ export interface BigQueryTableGroundingConfig extends TableGroundingConfig {}
 
 export class BigQueryTableGrounding extends TableGrounding {
   #adapter: BigQuery;
-  #cache?: Map<string, unknown>;
 
   constructor(adapter: BigQuery, config: BigQueryTableGroundingConfig = {}) {
     super(config);
@@ -39,7 +38,6 @@ export class BigQueryTableGrounding extends TableGrounding {
   }
 
   override async execute(ctx: GroundingContext): Promise<void> {
-    this.#cache = ctx.cache;
     await super.execute(ctx);
     ctx.tables = ctx.tables.filter((t) => t.columns.length > 0);
 
@@ -121,6 +119,7 @@ export class BigQueryTableGrounding extends TableGrounding {
 
   protected override async findOutgoingRelations(
     tableName: string,
+    ctx: GroundingContext,
   ): Promise<Relationship[]> {
     const { schema: dataset, table } = this.#adapter.parseTableName(tableName);
 
@@ -162,7 +161,7 @@ export class BigQueryTableGrounding extends TableGrounding {
         dataset,
         constraintName,
         columns,
-        this.#cache,
+        ctx.cache,
       );
       if (resolution) {
         rels.push({
@@ -179,6 +178,7 @@ export class BigQueryTableGrounding extends TableGrounding {
 
   protected override async findIncomingRelations(
     tableName: string,
+    ctx: GroundingContext,
   ): Promise<Relationship[]> {
     const { schema: referencedDataset, table: referencedTable } =
       this.#adapter.parseTableName(tableName);
@@ -203,6 +203,7 @@ export class BigQueryTableGrounding extends TableGrounding {
           row.constraint_name,
           referencedDataset,
           referencedTable,
+          ctx.cache,
         );
         if (rel) rels.push(rel);
       }
@@ -216,6 +217,7 @@ export class BigQueryTableGrounding extends TableGrounding {
     constraintName: string,
     expectedReferencedDataset: string,
     expectedReferencedTable: string,
+    cache: GroundingContext['cache'],
   ): Promise<Relationship | undefined> {
     const keyRows = await this.#adapter.runQuery(
       `
@@ -253,7 +255,7 @@ export class BigQueryTableGrounding extends TableGrounding {
       constraintDataset,
       constraintName,
       childColumns,
-      this.#cache,
+      cache,
     );
 
     if (

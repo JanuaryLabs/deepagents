@@ -24,23 +24,23 @@
 - **THEN** calling `close()` SHALL NOT close the external pool
 - **THEN** the external pool SHALL remain usable after `PostgresFs.close()`
 
-### Requirement: Explicit initialization
+### Requirement: Creation through a factory
 
-`PostgresFs` SHALL require an explicit `await fs.initialize()` call after construction before any operations can be performed.
+`PostgresFs` SHALL be created with `await PostgresFs.create(options)`. The constructor is private, so no `PostgresFs` exists before its tables do.
 
-#### Scenario: Operations before initialize throw
+#### Scenario: Create makes the schema and tables
 
-- **WHEN** any filesystem method is called before `initialize()`
-- **THEN** it SHALL throw an error indicating initialization is required
+- **WHEN** `PostgresFs.create()` is called
+- **THEN** it SHALL create the PostgreSQL schema (if not exists), `fs_entries` table, `fs_chunks` table, and root directory entry before it returns
 
-#### Scenario: Initialize creates schema and tables
+#### Scenario: A failed create closes the pool it made
 
-- **WHEN** `initialize()` is called
-- **THEN** it SHALL create the PostgreSQL schema (if not exists), `fs_entries` table, `fs_chunks` table, and root directory entry
+- **WHEN** the DDL fails during `PostgresFs.create()`
+- **THEN** it SHALL close a pool that it created, and SHALL throw the DDL error
 
-#### Scenario: Idempotent initialization
+#### Scenario: Idempotent creation
 
-- **WHEN** `initialize()` is called multiple times
+- **WHEN** `PostgresFs.create()` is called more than once for the same schema
 - **THEN** it SHALL succeed without error and not duplicate data
 
 ### Requirement: Schema scoping
@@ -69,7 +69,7 @@
 
 #### Scenario: Root directory auto-creation
 
-- **WHEN** `initialize()` is called with `root: '/a/b/c'`
+- **WHEN** `PostgresFs.create()` is called with `root: '/a/b/c'`
 - **THEN** directories `/a`, `/a/b`, and `/a/b/c` SHALL be created if they don't exist
 
 #### Scenario: Two instances with different roots are isolated

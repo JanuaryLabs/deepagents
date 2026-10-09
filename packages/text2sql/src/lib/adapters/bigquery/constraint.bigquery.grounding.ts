@@ -28,7 +28,6 @@ export interface BigQueryConstraintGroundingConfig extends ConstraintGroundingCo
 
 export class BigQueryConstraintGrounding extends ConstraintGrounding {
   #adapter: BigQuery;
-  #cache?: Map<string, unknown>;
 
   constructor(
     adapter: BigQuery,
@@ -39,7 +38,6 @@ export class BigQueryConstraintGrounding extends ConstraintGrounding {
   }
 
   override async execute(ctx: GroundingContext): Promise<void> {
-    this.#cache = ctx.cache;
     const byDataset = new Map<string, Table[]>();
     for (const table of ctx.tables) {
       const { schema: dataset } = this.#adapter.parseTableName(table.name);
@@ -63,7 +61,7 @@ export class BigQueryConstraintGrounding extends ConstraintGrounding {
         });
       }
       try {
-        await this.#batchConstraints(dataset, tables);
+        await this.#batchConstraints(dataset, tables, ctx.cache);
       } catch (error) {
         console.warn(
           'Error collecting constraints for dataset',
@@ -74,7 +72,11 @@ export class BigQueryConstraintGrounding extends ConstraintGrounding {
     }
   }
 
-  async #batchConstraints(dataset: string, tables: Table[]): Promise<void> {
+  async #batchConstraints(
+    dataset: string,
+    tables: Table[],
+    cache: GroundingContext['cache'],
+  ): Promise<void> {
     const tableNames = tables.map(
       (t) => this.#adapter.parseTableName(t.name).table,
     );
@@ -88,7 +90,7 @@ export class BigQueryConstraintGrounding extends ConstraintGrounding {
     }
 
     await this.#batchColumnMetadata(dataset, inList, constraintsByTable);
-    await this.#batchKeyConstraints(dataset, inList, constraintsByTable);
+    await this.#batchKeyConstraints(dataset, inList, constraintsByTable, cache);
 
     for (const table of tables) {
       const rawName = this.#adapter.parseTableName(table.name).table;
@@ -139,6 +141,7 @@ export class BigQueryConstraintGrounding extends ConstraintGrounding {
     dataset: string,
     inList: string,
     constraintsByTable: Map<string, TableConstraint[]>,
+    cache: GroundingContext['cache'],
   ): Promise<void> {
     const rows = await this.#adapter.runQuery(
       `
@@ -205,7 +208,7 @@ export class BigQueryConstraintGrounding extends ConstraintGrounding {
             dataset,
             constraintName,
             childColumns,
-            this.#cache,
+            cache,
           );
           if (resolution) {
             constraints.push({
