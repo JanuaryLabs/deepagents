@@ -9,6 +9,7 @@ import {
   createJSONRPCErrorResponse,
   isJSONRPCRequest,
 } from 'json-rpc-2.0';
+import pMemoize from 'p-memoize';
 
 import {
   FileIndexCache,
@@ -207,24 +208,17 @@ const httpServer = serve({ fetch: app.fetch, port: PORT }, ({ port }) => {
 });
 
 /** Closes the server and the pool, then exits; a later signal joins the first shutdown. */
-class Shutdown {
-  #closing: Promise<void> | undefined;
-
-  run(signal: NodeJS.Signals): Promise<void> {
-    this.#closing ??= this.#close(signal);
-    return this.#closing;
-  }
-
-  async #close(signal: NodeJS.Signals) {
+const shutdown = pMemoize(
+  async (signal: NodeJS.Signals) => {
     console.log(`[daemon] ${signal} received, shutting down`);
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));
     await pool.end().catch((err: Error) => {
       console.log(`[daemon] pool.end() failed: ${err.message}`);
     });
     process.exit(0);
-  }
-}
+  },
+  { cacheKey: () => 'shutdown' },
+);
 
-const shutdown = new Shutdown();
-process.once('SIGINT', () => void shutdown.run('SIGINT'));
-process.once('SIGTERM', () => void shutdown.run('SIGTERM'));
+process.once('SIGINT', () => void shutdown('SIGINT'));
+process.once('SIGTERM', () => void shutdown('SIGTERM'));

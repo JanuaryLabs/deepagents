@@ -2,6 +2,7 @@ import { validate } from '@sdk-it/hono/runtime';
 import type { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import mssql from 'mssql';
+import pMemoize from 'p-memoize';
 import { z } from 'zod';
 
 import type { ContextFragment } from '@deepagents/context';
@@ -82,20 +83,7 @@ async function createContext(): Promise<SqlAgentContext> {
 }
 
 /** One connection and introspection shared by every request; a failed one is retried. */
-class SqlAgentContextCache {
-  #context: Promise<SqlAgentContext> | undefined;
-
-  get(): Promise<SqlAgentContext> {
-    if (this.#context) return this.#context;
-    this.#context = createContext();
-    this.#context.catch(() => {
-      this.#context = undefined;
-    });
-    return this.#context;
-  }
-}
-
-const contexts = new SqlAgentContextCache();
+const sqlAgentContext = pMemoize(createContext);
 
 export default function (router: Hono<AppBindings>) {
   router.post(
@@ -117,7 +105,7 @@ export default function (router: Hono<AppBindings>) {
         model: modelString,
       });
 
-      const { adapter, fragments } = await contexts.get();
+      const { adapter, fragments } = await sqlAgentContext();
 
       const model = modelString
         ? resolveModel(modelString)

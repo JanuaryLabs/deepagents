@@ -21,6 +21,7 @@
     "@ai-sdk/groq": "^4.0.54",
     "@ai-sdk/openai": "^4.0.83",
     "@ai-sdk/openai-compatible": "^3.0.62",
-    "@ai-sdk/provider": "^4.0.21"
+    "@ai-sdk/provider": "^4.0.21",
+    "p-memoize": "^8.0.0"
   }
 }

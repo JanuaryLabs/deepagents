@@ -63,7 +63,6 @@ export class WhatsAppGroup implements AsyncDisposable {
   readonly #replies: ReplyInbox;
   readonly #onMessage?: WhatsAppGroupOptions['onMessage'];
   readonly #messages: WhatsAppMessage[] = [];
-  #closed = false;
 
   private constructor(
     options: WhatsAppGroupOptions,
@@ -143,7 +142,7 @@ export class WhatsAppGroup implements AsyncDisposable {
   }
 
   async send(content: string): Promise<readonly WhatsAppMessage[]> {
-    if (this.#closed) throw new Error('WhatsAppGroup is closed');
+    if (this.#resources.disposed) throw new Error('WhatsAppGroup is closed');
     const message = content.trim();
     if (!message) throw new Error('WhatsAppGroup message cannot be empty');
 
@@ -189,8 +188,7 @@ export class WhatsAppGroup implements AsyncDisposable {
   }
 
   async [Symbol.asyncDispose](): Promise<void> {
-    if (this.#closed) return;
-    this.#closed = true;
+    // A disposed stack ignores a second disposeAsync().
     await this.#resources.disposeAsync();
   }
 

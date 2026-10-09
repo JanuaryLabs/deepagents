@@ -29,19 +29,24 @@ interface ModelEntry {
 }
 
 const CACHE_TTL = 60 * 60 * 1000;
+const MODELS_URL = 'https://models.dev/api.json';
 
-/** The models.dev catalog, cached for an hour; a non-OK refresh serves the stale copy. */
+/** The models.dev catalog, cached by URL for an hour; a non-OK refresh serves the stale copy. */
 class ModelCatalog {
-  #cached: { data: ModelEntry[]; expiry: number } | undefined;
+  readonly #responses = new Map<
+    string,
+    { data: ModelEntry[]; expiry: number }
+  >();
 
   async list(): Promise<ModelEntry[]> {
-    if (this.#cached && Date.now() < this.#cached.expiry) {
-      return this.#cached.data;
+    const cached = this.#responses.get(MODELS_URL);
+    if (cached && Date.now() < cached.expiry) {
+      return cached.data;
     }
 
-    const res = await fetch('https://models.dev/api.json');
+    const res = await fetch(MODELS_URL);
     if (!res.ok) {
-      if (this.#cached) return this.#cached.data;
+      if (cached) return cached.data;
       throw new Error(`models.dev responded with ${res.status}`);
     }
 
@@ -60,7 +65,10 @@ class ModelCatalog {
       }
     }
 
-    this.#cached = { data: models, expiry: Date.now() + CACHE_TTL };
+    this.#responses.set(MODELS_URL, {
+      data: models,
+      expiry: Date.now() + CACHE_TTL,
+    });
     return models;
   }
 }
