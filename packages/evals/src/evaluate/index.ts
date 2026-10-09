@@ -106,46 +106,53 @@ interface EvalPlan<R extends RunSummary | RunSummary[]> {
   hasFailures(result: R): boolean;
 }
 
+/** Which cases a run takes, and whether a run with failures throws. */
+interface EvalRun {
+  readonly selection: Selection;
+  readonly shouldAssert: boolean;
+}
+
+const EVERY_CASE: EvalRun = { selection: { type: 'all' }, shouldAssert: false };
+
+/** Each method returns a new builder; awaiting a builder runs it. */
 export class EvalBuilder<
   R extends RunSummary | RunSummary[],
 > implements PromiseLike<R> {
   readonly #plan: EvalPlan<R>;
-  #selection: Selection = { type: 'all' };
-  #shouldAssert = false;
+  readonly #run: EvalRun;
 
-  constructor(plan: EvalPlan<R>) {
+  constructor(plan: EvalPlan<R>, run: EvalRun) {
     this.#plan = plan;
+    this.#run = run;
   }
 
-  #setSelection(selection: Selection): this {
-    if (this.#selection.type !== 'all') {
+  #select(selection: Selection): EvalBuilder<R> {
+    if (this.#run.selection.type !== 'all') {
       throw new Error(
-        `Cannot combine .${this.#selection.type}() with .${selection.type}()`,
+        `Cannot combine .${this.#run.selection.type}() with .${selection.type}()`,
       );
     }
-    this.#selection = selection;
-    return this;
+    return new EvalBuilder(this.#plan, { ...this.#run, selection });
   }
 
-  failed(): this {
-    return this.#setSelection({ type: 'failed' });
+  failed(): EvalBuilder<R> {
+    return this.#select({ type: 'failed' });
   }
 
-  cases(spec: string): this {
+  cases(spec: string): EvalBuilder<R> {
     const { indexes } = parseRecordSelection(spec);
-    return this.#setSelection({ type: 'cases', indexes });
+    return this.#select({ type: 'cases', indexes });
   }
 
-  sample(count: number): this {
+  sample(count: number): EvalBuilder<R> {
     if (count < 1) {
       throw new Error('Sample count must be >= 1');
     }
-    return this.#setSelection({ type: 'sample', count });
+    return this.#select({ type: 'sample', count });
   }
 
-  assert(): this {
-    this.#shouldAssert = true;
-    return this;
+  assert(): EvalBuilder<R> {
+    return new EvalBuilder(this.#plan, { ...this.#run, shouldAssert: true });
   }
 
   then<TResult1 = R, TResult2 = never>(
@@ -160,8 +167,8 @@ export class EvalBuilder<
   }
 
   async #execute(): Promise<R> {
-    const result = await this.#plan.run(this.#selection);
-    if (this.#shouldAssert && this.#plan.hasFailures(result)) {
+    const result = await this.#plan.run(this.#run.selection);
+    if (this.#run.shouldAssert && this.#plan.hasFailures(result)) {
       throw new EvalAssertionError(result);
     }
     return result;
@@ -254,9 +261,9 @@ export function evaluate<T, V extends { name: string }>(
   options: EvaluateOptions<T> | EvaluateEachOptions<T, V>,
 ): EvalBuilder<RunSummary> | EvalBuilder<RunSummary[]> {
   if ('models' in options) {
-    return new EvalBuilder(new EachModelEval(options));
+    return new EvalBuilder(new EachModelEval(options), EVERY_CASE);
   }
-  return new EvalBuilder(new SingleModelEval(options));
+  return new EvalBuilder(new SingleModelEval(options), EVERY_CASE);
 }
 
 function wireReporters(reporters: Reporter[]) {

@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import pMemoize from 'p-memoize';
 
 export interface ScorerArgs {
   input: unknown;
@@ -182,7 +183,8 @@ class LlmJudge {
   readonly #model: string;
   readonly #choices: Readonly<Record<string, number>>;
   readonly #criterion: string;
-  #client: JudgeClient | undefined;
+  /** The configured client, or one OpenAI client made on first use. */
+  readonly #client: () => Promise<JudgeClient>;
 
   private constructor(
     config: JudgeConfig,
@@ -190,7 +192,12 @@ class LlmJudge {
     criterion: string,
   ) {
     this.#model = config.model;
-    this.#client = config.client;
+    const configured = config.client;
+    this.#client = configured
+      ? async () => configured
+      : pMemoize(
+          async () => new OpenAI({ apiKey: process.env['OPENAI_API_KEY'] }),
+        );
     this.#choices = choices;
     this.#criterion = criterion;
   }
@@ -227,11 +234,8 @@ class LlmJudge {
   }
 
   async #score({ input, output, expected }: ScorerArgs): Promise<ScorerResult> {
-    this.#client ??= new OpenAI({
-      apiKey: process.env['OPENAI_API_KEY'],
-    });
-
-    const response = await this.#client.chat.completions.create({
+    const client = await this.#client();
+    const response = await client.chat.completions.create({
       model: this.#model,
       messages: [
         {

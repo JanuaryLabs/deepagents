@@ -77,7 +77,8 @@
   },
   "dependencies": {
     "chalk": "^5.6.2",
-    "openai": "^6.48.0"
+    "openai": "^6.48.0",
+    "p-memoize": "^8.0.0"
   },
   "devDependencies": {
     "tsx": "^4.23.1",
