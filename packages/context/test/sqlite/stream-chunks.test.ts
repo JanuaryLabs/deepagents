@@ -1,3 +1,4 @@
+import { Latch } from '@zukhruf/async';
 import { settleWithin } from '@zukhruf/testing/async';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import { StreamHarness } from '@zukhruf/testing/streams';
@@ -112,7 +113,7 @@ const FAST_WATCH_POLLING: WatchPollingConfig = {
 
 class FailFirstThenPollingChangeSource implements StreamChangeSource {
   attempts = 0;
-  readonly firstFailure = Promise.withResolvers<void>();
+  readonly firstFailure = new Latch();
   readonly #delegate: PollingChangeSource;
 
   constructor(store: StreamStore) {
@@ -128,7 +129,7 @@ class FailFirstThenPollingChangeSource implements StreamChangeSource {
   ): AsyncIterable<StreamChange> {
     this.attempts++;
     if (this.attempts === 1) {
-      this.firstFailure.resolve();
+      this.firstFailure.open();
       throw new Error('transient cancellation subscription failure');
     }
     yield* this.#delegate.subscribe(streamId, signal);
@@ -137,7 +138,7 @@ class FailFirstThenPollingChangeSource implements StreamChangeSource {
 
 class AlwaysFailingChangeSource implements StreamChangeSource {
   readonly attemptTimes: number[] = [];
-  readonly thirdAttempt = Promise.withResolvers<void>();
+  readonly thirdAttempt = new Latch();
 
   // Fails on the first next(), as a real source fails to connect.
   subscribe(): AsyncIterable<StreamChange> {
@@ -145,7 +146,7 @@ class AlwaysFailingChangeSource implements StreamChangeSource {
       [Symbol.asyncIterator]: () => ({
         next: async () => {
           this.attemptTimes.push(Date.now());
-          if (this.attemptTimes.length === 3) this.thirdAttempt.resolve();
+          if (this.attemptTimes.length === 3) this.thirdAttempt.open();
           throw new Error('persistent cancellation subscription failure');
         },
       }),
@@ -155,11 +156,11 @@ class AlwaysFailingChangeSource implements StreamChangeSource {
 
 class YieldThenFailChangeSource implements StreamChangeSource {
   readonly attemptTimes: number[] = [];
-  readonly thirdAttempt = Promise.withResolvers<void>();
+  readonly thirdAttempt = new Latch();
 
   async *subscribe(): AsyncIterable<StreamChange> {
     this.attemptTimes.push(Date.now());
-    if (this.attemptTimes.length === 3) this.thirdAttempt.resolve();
+    if (this.attemptTimes.length === 3) this.thirdAttempt.open();
     yield { kind: 'tick' };
     throw new Error('post-connect cancellation subscription failure');
   }
@@ -2026,7 +2027,7 @@ describe('Stream Chunks', () => {
       try {
         await waitForStatus(store, streamId, 'running');
         await settleWithin(
-          changeSource.firstFailure.promise,
+          changeSource.firstFailure.wait(),
           'cancellation watcher subscribes',
           2_000,
         );
@@ -2087,7 +2088,7 @@ describe('Stream Chunks', () => {
       const watcher = streams.monitorCancellation(streamId, () => {});
       try {
         await settleWithin(
-          changeSource.thirdAttempt.promise,
+          changeSource.thirdAttempt.wait(),
           'watcher retries a repeatedly failing source',
           2_000,
         );
@@ -2116,7 +2117,7 @@ describe('Stream Chunks', () => {
       const watcher = streams.monitorCancellation(streamId, () => {});
       try {
         await settleWithin(
-          changeSource.thirdAttempt.promise,
+          changeSource.thirdAttempt.wait(),
           'watcher reconnects after a source fails just after subscribing',
           2_000,
         );

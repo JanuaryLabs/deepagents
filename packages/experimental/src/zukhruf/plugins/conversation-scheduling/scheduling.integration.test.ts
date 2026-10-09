@@ -2,6 +2,7 @@ import type {
   LanguageModelV4FunctionTool,
   LanguageModelV4StreamPart,
 } from '@ai-sdk/provider';
+import { Latch } from '@zukhruf/async';
 import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { type UIMessage, isToolUIPart, simulateReadableStream } from 'ai';
@@ -128,21 +129,15 @@ class ControlledTurnQueue extends TurnQueue {
     handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
     options: ConsumeOptions;
   }>();
-  #nextActivityRead?: {
-    started: PromiseWithResolvers<void>;
-    release: PromiseWithResolvers<void>;
-  };
+  readonly #pausedActivityReads: { started: Latch; release: Latch }[] = [];
   readonly #running = new Map<string, TurnRef>();
 
   pauseNextActivityRead() {
-    const gate = {
-      started: Promise.withResolvers<void>(),
-      release: Promise.withResolvers<void>(),
-    };
-    this.#nextActivityRead = gate;
+    const gate = { started: new Latch(), release: new Latch() };
+    this.#pausedActivityReads.push(gate);
     return {
-      started: gate.started.promise,
-      release: () => gate.release.resolve(),
+      started: gate.started.wait(),
+      release: () => gate.release.open(),
     };
   }
 
@@ -155,11 +150,10 @@ class ControlledTurnQueue extends TurnQueue {
   override async getTurnActivity(
     conversation: Pick<TurnRef, 'chatId' | 'userId'>,
   ): Promise<'idle' | 'queued' | 'running'> {
-    const gate = this.#nextActivityRead;
+    const gate = this.#pausedActivityReads.shift();
     if (gate) {
-      this.#nextActivityRead = undefined;
-      gate.started.resolve();
-      await gate.release.promise;
+      gate.started.open();
+      await gate.release.wait();
     }
     const belongsToConversation = (turn: TurnRef) =>
       turn.chatId === conversation.chatId &&
@@ -223,10 +217,7 @@ class ControlledTurnQueue extends TurnQueue {
 class RecordingWakeScheduler extends WakeScheduler<SchedulingWake> {
   readonly wakes = new Map<string, Wake<SchedulingWake>>();
   readonly handlers = new Set<(wake: Wake<SchedulingWake>) => Promise<void>>();
-  #nextSchedule?: {
-    started: PromiseWithResolvers<void>;
-    release: PromiseWithResolvers<void>;
-  };
+  readonly #pausedSchedules: { started: Latch; release: Latch }[] = [];
   readonly scheduleFaults: Error[] = [];
 
   get handler(): ((wake: Wake<SchedulingWake>) => Promise<void>) | undefined {
@@ -234,25 +225,21 @@ class RecordingWakeScheduler extends WakeScheduler<SchedulingWake> {
   }
 
   pauseNextSchedule() {
-    const gate = {
-      started: Promise.withResolvers<void>(),
-      release: Promise.withResolvers<void>(),
-    };
-    this.#nextSchedule = gate;
+    const gate = { started: new Latch(), release: new Latch() };
+    this.#pausedSchedules.push(gate);
     return {
-      started: gate.started.promise,
-      release: () => gate.release.resolve(),
+      started: gate.started.wait(),
+      release: () => gate.release.open(),
     };
   }
 
   override async schedule(wake: Wake<SchedulingWake>): Promise<void> {
     const fault = this.scheduleFaults.shift();
     if (fault) throw fault;
-    const gate = this.#nextSchedule;
+    const gate = this.#pausedSchedules.shift();
     if (gate) {
-      this.#nextSchedule = undefined;
-      gate.started.resolve();
-      await gate.release.promise;
+      gate.started.open();
+      await gate.release.wait();
     }
     this.wakes.set(wake.id, wake);
   }

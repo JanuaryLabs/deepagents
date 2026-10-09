@@ -1,3 +1,4 @@
+import { Latch } from '@zukhruf/async';
 import { settleWithin } from '@zukhruf/testing/async';
 import { type UIMessage, isToolUIPart, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
@@ -344,8 +345,8 @@ class FailTwiceMailboxEnqueueStore extends SqliteMailboxStore {
 }
 
 class DelayedStaleLatestTurnStore extends InMemoryContextStore {
-  readonly staleWriteStarted = Promise.withResolvers<void>();
-  readonly #releaseStaleWrite = Promise.withResolvers<void>();
+  readonly staleWriteStarted = new Latch();
+  readonly #releaseStaleWrite = new Latch();
   readonly #armed: string[] = [];
 
   arm(staleTurnId: string): void {
@@ -353,7 +354,7 @@ class DelayedStaleLatestTurnStore extends InMemoryContextStore {
   }
 
   release(): void {
-    this.#releaseStaleWrite.resolve();
+    this.#releaseStaleWrite.open();
   }
 
   override async updateChat(
@@ -367,8 +368,8 @@ class DelayedStaleLatestTurnStore extends InMemoryContextStore {
   async #pauseIfStale() {
     const armed = this.#armed.shift();
     if (armed === undefined) return;
-    this.staleWriteStarted.resolve();
-    await this.#releaseStaleWrite.promise;
+    this.staleWriteStarted.open();
+    await this.#releaseStaleWrite.wait();
   }
 }
 
@@ -399,10 +400,10 @@ class CommitThenFailFirstMailboxStore extends SqliteMailboxStore {
 }
 
 class WaitObservedMailboxStore extends SqliteMailboxStore {
-  readonly pendingChecked = Promise.withResolvers<void>();
+  readonly pendingChecked = new Latch();
 
   override async hasPending(recipient: ConversationId): Promise<boolean> {
-    this.pendingChecked.resolve();
+    this.pendingChecked.open();
     return super.hasPending(recipient);
   }
 }
@@ -1451,7 +1452,7 @@ test('a stale orphan retry cannot clear or supersede a successor turn', async (t
     staleTurn,
     'retry the stale orphan callback',
   );
-  await store.staleWriteStarted.promise;
+  await store.staleWriteStarted.wait();
   const successorTurn = await runtime.enqueue(
     child,
     userTurn('successor-turn', 'Produce the successor result'),
@@ -2997,7 +2998,7 @@ test('cancelling the caller aborts an active wait_agent call', async (t) => {
   void _worker;
   const running = queue.runNext();
   await settleWithin(
-    mailboxStore.pendingChecked.promise,
+    mailboxStore.pendingChecked.wait(),
     'wait_agent reaches the pending-mail check',
   );
 
