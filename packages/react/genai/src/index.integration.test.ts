@@ -1,10 +1,17 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { it } from 'vitest';
 
-it('loads production JSX artifacts with the React production runtime', async () => {
+const run = promisify(execFile);
+
+// Importing both packages loads about 4,500 modules, which takes several
+// seconds cold and more on a busy CI runner, so the budget is the repo's 60 s.
+it('loads production JSX artifacts with the React production runtime', async ({
+  signal,
+}) => {
   for (const artifact of [
     resolve(import.meta.dirname, '../../shadcn/dist/index.js'),
     resolve(import.meta.dirname, '../dist/index.js'),
@@ -14,7 +21,7 @@ it('loads production JSX artifacts with the React production runtime', async () 
     assert.doesNotMatch(source, /react\/jsx-dev-runtime|\bjsxDEV\b/);
   }
 
-  execFileSync(
+  await run(
     process.execPath,
     [
       '--input-type=module',
@@ -24,6 +31,7 @@ it('loads production JSX artifacts with the React production runtime', async () 
     {
       cwd: import.meta.dirname,
       env: { ...process.env, NODE_ENV: 'production' },
+      signal,
     },
   );
-}, 10_000);
+}, 60_000);
