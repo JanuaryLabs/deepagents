@@ -2524,14 +2524,12 @@ test('a recurring cron does not fire when its first occurrence is beyond its sev
 test('duplicate wake delivery across runtimes advances PostgreSQL state once', async (t) => {
   await using container = await testPostgres.database();
 
-  const firstStore = new PostgresContextStore({
+  const firstStore = await PostgresContextStore.create({
     pool: container.connectionString,
   });
-  const secondStore = new PostgresContextStore({
+  const secondStore = await PostgresContextStore.create({
     pool: container.connectionString,
   });
-  await firstStore.initialize();
-  await secondStore.initialize();
   const scheduler = new RecordingWakeScheduler();
   const h = harness(t, scheduler, firstStore);
   const commands = new Map<string, { name: string; input: unknown }>([

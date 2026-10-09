@@ -178,9 +178,8 @@ export class SqlServerContextStore extends ContextStore {
   #pool: ConnectionPool;
   #schema: string;
   #ownsPool: boolean;
-  #isInitialized = false;
 
-  constructor(options: SqlServerStoreOptions) {
+  private constructor(options: SqlServerStoreOptions) {
     super();
     const schema = options.schema ?? 'dbo';
     if (!/^[a-zA-Z_]\w*$/.test(schema)) {
@@ -212,7 +211,21 @@ export class SqlServerContextStore extends ContextStore {
     return `[${this.#schema}].[${name}]`;
   }
 
-  async initialize(): Promise<void> {
+  /** Opens the store: connects a pool it owns and creates its schema objects before it returns. */
+  static async create(
+    options: SqlServerStoreOptions,
+  ): Promise<SqlServerContextStore> {
+    const store = new SqlServerContextStore(options);
+    try {
+      await store.#initialize();
+    } catch (error) {
+      await store.close();
+      throw error;
+    }
+    return store;
+  }
+
+  async #initialize(): Promise<void> {
     if (this.#ownsPool) {
       await this.#pool.connect();
     }
@@ -234,15 +247,6 @@ export class SqlServerContextStore extends ContextStore {
         await this.#pool.request().batch(batch);
       }
     }
-    this.#isInitialized = true;
-  }
-
-  #ensureInitialized(): void {
-    if (!this.#isInitialized) {
-      throw new Error(
-        'SqlServerContextStore not initialized. Call await store.initialize() after construction.',
-      );
-    }
   }
 
   /**
@@ -252,7 +256,6 @@ export class SqlServerContextStore extends ContextStore {
   async #useTransaction<T>(
     fn: (transaction: Transaction) => Promise<T>,
   ): Promise<T> {
-    this.#ensureInitialized();
     const mssql = SqlServerContextStore.#requireMssql();
     const transaction = new mssql.Transaction(this.#pool);
     try {
@@ -271,7 +274,6 @@ export class SqlServerContextStore extends ContextStore {
    * Converts positional params to SQL Server named params (@p0, @p1, ...).
    */
   async #query(sql: string, params?: unknown[]): Promise<unknown[]> {
-    this.#ensureInitialized();
     const request = this.#pool.request();
 
     // Add parameters: @p0, @p1, @p2...

@@ -208,9 +208,8 @@ export class PostgresContextStore extends ContextStore {
   #pool: Pool;
   #schema: string;
   #ownsPool: boolean;
-  #isInitialized = false;
 
-  constructor(options: PostgresStoreOptions) {
+  private constructor(options: PostgresStoreOptions) {
     super();
     const schema = options.schema ?? 'public';
     if (!/^[a-zA-Z_]\w*$/.test(schema)) {
@@ -245,18 +244,23 @@ export class PostgresContextStore extends ContextStore {
     return `"${this.#schema}"."${name}"`;
   }
 
-  async initialize(): Promise<void> {
-    const ddl = storeDDL(this.#schema);
-    await this.#pool.query(ddl);
-    this.#isInitialized = true;
+  /** Opens the store: creates its schema objects before it returns. */
+  static async create(
+    options: PostgresStoreOptions,
+  ): Promise<PostgresContextStore> {
+    const store = new PostgresContextStore(options);
+    try {
+      await store.#initialize();
+    } catch (error) {
+      await store.close();
+      throw error;
+    }
+    return store;
   }
 
-  #ensureInitialized(): void {
-    if (!this.#isInitialized) {
-      throw new Error(
-        'PostgresContextStore not initialized. Call await store.initialize() after construction.',
-      );
-    }
+  async #initialize(): Promise<void> {
+    const ddl = storeDDL(this.#schema);
+    await this.#pool.query(ddl);
   }
 
   /**
@@ -264,7 +268,6 @@ export class PostgresContextStore extends ContextStore {
    * Automatically commits on success or rolls back on error.
    */
   async #useTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-    this.#ensureInitialized();
     const client = await this.#pool.connect();
     try {
       await client.query('BEGIN');
@@ -283,7 +286,6 @@ export class PostgresContextStore extends ContextStore {
    * Execute a query using the pool (no transaction).
    */
   async #query(sql: string, params?: unknown[]): Promise<unknown[]> {
-    this.#ensureInitialized();
     const result = await this.#pool.query(sql, params);
     return result.rows;
   }

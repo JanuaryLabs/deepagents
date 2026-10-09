@@ -32,10 +32,9 @@ describe('Branching', () => {
     it('should create "main" branch by default', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -61,10 +60,9 @@ describe('Branching', () => {
     it('should expose branch name via getter (defaults to main)', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -83,10 +81,9 @@ describe('Branching', () => {
     it('should set parentId to null for first message', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -114,10 +111,9 @@ describe('Branching', () => {
     it('should link subsequent messages via parentId', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -157,10 +153,9 @@ describe('Branching', () => {
     it('should update branch headMessageId after save', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -188,10 +183,9 @@ describe('Branching', () => {
     it('should return messages in correct order (root to head)', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -224,10 +218,9 @@ describe('Branching', () => {
     it('should create new branch pointing to rewind message', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -265,10 +258,9 @@ describe('Branching', () => {
     it('should deactivate old branch after rewind', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -302,10 +294,9 @@ describe('Branching', () => {
     it('should preserve original messages after rewind', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -344,10 +335,9 @@ describe('Branching', () => {
     it('should link new messages to fork point after rewind', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -381,10 +371,9 @@ describe('Branching', () => {
     it('should update engine branch name after rewind', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -414,10 +403,9 @@ describe('Branching', () => {
     it('should clear pending messages after rewind', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -451,10 +439,9 @@ describe('Branching', () => {
     it('should throw when rewinding to non-existent message', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -478,10 +465,9 @@ describe('Branching', () => {
     it('should switch active branch', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -515,10 +501,9 @@ describe('Branching', () => {
     it('should return different message chains per branch', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -566,10 +551,9 @@ describe('Branching', () => {
     it('should throw when switching to non-existent branch', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -593,10 +577,9 @@ describe('Branching', () => {
     it('should clear pending messages when switching', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -634,10 +617,9 @@ describe('Branching', () => {
     it('should support multiple branches in one chat', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -676,10 +658,9 @@ describe('Branching', () => {
     it('should maintain independent headMessageId per branch', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -714,10 +695,9 @@ describe('Branching', () => {
     it('should have only one active branch at a time', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -752,10 +732,9 @@ describe('Branching', () => {
     it('should create new branch from current head without switching', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -785,10 +764,9 @@ describe('Branching', () => {
     it('should throw when no messages exist', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -813,10 +791,9 @@ describe('Branching', () => {
     it('should keep pending messages after btw', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -844,10 +821,9 @@ describe('Branching', () => {
     it('should create incrementing branch names', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',
@@ -873,10 +849,9 @@ describe('Branching', () => {
     it('should allow switching to btw branch and adding messages', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           userId: 'test-user',

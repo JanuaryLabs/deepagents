@@ -31,10 +31,9 @@ describe('Delete Chat', () => {
     it('should delete an existing chat and return true', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           store,
@@ -59,10 +58,9 @@ describe('Delete Chat', () => {
     it('should return false when deleting non-existent chat', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const result = await store.deleteChat('non-existent-chat-12345');
 
@@ -75,10 +73,9 @@ describe('Delete Chat', () => {
     it('should return false when deleting already-deleted chat', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           store,
@@ -103,10 +100,9 @@ describe('Delete Chat', () => {
     it('should not affect other chats when deleting one', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine1 = new ContextEngine({
           store,
@@ -139,10 +135,9 @@ describe('Delete Chat', () => {
     it('should delete all messages when chat is deleted', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           store,
@@ -175,10 +170,9 @@ describe('Delete Chat', () => {
     it('should delete all branches when chat is deleted', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           store,
@@ -211,10 +205,9 @@ describe('Delete Chat', () => {
     it('should delete all checkpoints when chat is deleted', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           store,
@@ -252,10 +245,9 @@ describe('Delete Chat', () => {
     it('should handle chat with multiple branches', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           store,
@@ -297,10 +289,9 @@ describe('Delete Chat', () => {
     it('should handle chat with deep message chains (50+ messages)', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           store,
@@ -329,10 +320,9 @@ describe('Delete Chat', () => {
     it('should delete chat when userId matches', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           store,
@@ -359,10 +349,9 @@ describe('Delete Chat', () => {
     it('should return false when userId does not match', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           store,
@@ -391,10 +380,9 @@ describe('Delete Chat', () => {
     it('should delete any chat when userId not provided (admin mode)', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           store,
@@ -419,10 +407,9 @@ describe('Delete Chat', () => {
     it('should not delete other users chats', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const aliceEngine = new ContextEngine({
           store,
@@ -458,10 +445,9 @@ describe('Delete Chat', () => {
     it('should handle case-sensitive userId comparison', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           store,
@@ -497,10 +483,9 @@ describe('Delete Chat', () => {
     it('should handle deleting chat with no messages', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           store,
@@ -525,10 +510,9 @@ describe('Delete Chat', () => {
     it('should handle chatId with special characters', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const specialIds = [
           'chat-with-dashes-pg',
@@ -558,10 +542,9 @@ describe('Delete Chat', () => {
     it('should handle very long chatId', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const longChatId = 'c'.repeat(200);
 
@@ -582,10 +565,9 @@ describe('Delete Chat', () => {
     it('should handle concurrent deletion of different chats', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         for (let i = 0; i < 10; i++) {
           await store.upsertChat({
@@ -609,10 +591,9 @@ describe('Delete Chat', () => {
     it('should handle concurrent deletion of same chat (one succeeds)', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.upsertChat({ id: 'race-chat', userId: 'alice' });
 
@@ -642,10 +623,9 @@ describe('Delete Chat', () => {
     it('should not affect concurrent reads of other chats', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         for (let i = 0; i < 5; i++) {
           const engine = new ContextEngine({

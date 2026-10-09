@@ -69,7 +69,7 @@ async function withNotifySource<T>(
   await using container = await testPostgres.database();
 
   const schema = testSchema();
-  const store = new PostgresStreamStore({
+  const store = await PostgresStreamStore.create({
     pool: container.connectionString,
     schema,
   });
@@ -77,7 +77,6 @@ async function withNotifySource<T>(
     pool: container.connectionString,
     schema,
   });
-  await store.initialize();
   await source.initialize();
   try {
     return await fn(store, source, container.connectionString);
@@ -174,7 +173,7 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       await store.createStream(other);
 
       const otherSchema = testSchema();
-      const otherStore = new PostgresStreamStore({
+      const otherStore = await PostgresStreamStore.create({
         pool: connectionString,
         schema: otherSchema,
       });
@@ -182,7 +181,6 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
         pool: connectionString,
         schema: otherSchema,
       });
-      await otherStore.initialize();
       await otherSource.initialize();
 
       const ac = new AbortController();
@@ -253,9 +251,8 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       connectionString: container.connectionString,
       max: 1,
     });
-    const store = new PostgresStreamStore({ pool, schema });
+    const store = await PostgresStreamStore.create({ pool, schema });
     const source = new PostgresNotifyChangeSource({ pool, schema });
-    await store.initialize();
     await source.initialize();
 
     const ac = new AbortController();
@@ -304,9 +301,8 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       connectionString: container.connectionString,
       max: 1,
     });
-    const store = new PostgresStreamStore({ pool, schema });
+    const store = await PostgresStreamStore.create({ pool, schema });
     const source = new PostgresNotifyChangeSource({ pool, schema });
-    await store.initialize();
     await source.initialize();
 
     const blocker = await pool.connect();

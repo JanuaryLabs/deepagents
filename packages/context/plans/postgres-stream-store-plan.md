@@ -18,7 +18,7 @@
 - `PostgresStreamStore` is persistence-only.
 - Users can combine `PostgresStreamStore` with either `PollingChangeSource` or `PostgresNotifyChangeSource`.
 - `PostgresNotifyChangeSource.initialize()` installs only notification trigger/function plumbing.
-- `PostgresStreamStore.initialize()` installs only base stream tables and indexes.
+- `PostgresStreamStore.create()` installs only base stream tables and indexes.
 - No `pg_notify` call lives inside `PostgresStreamStore.appendChunks()` or `PostgresStreamStore.updateStreamStatus()`.
 - Notification payloads are wakeups only. Chunks and final status are always read from tables.
 - Do not force `uuidv7()` in the core store. Current `StreamStore` accepts caller-owned string IDs.
@@ -43,11 +43,10 @@ Official references:
 ### Polling with PostgreSQL
 
 ```ts
-const store = new PostgresStreamStore({
+const store = await PostgresStreamStore.create({
   pool: process.env.DATABASE_URL!,
   schema: 'deepagents',
 });
-await store.initialize();
 
 const manager = new StreamManager({
   store,
@@ -60,11 +59,10 @@ const manager = new StreamManager({
 ### Native PostgreSQL notify
 
 ```ts
-const store = new PostgresStreamStore({
+const store = await PostgresStreamStore.create({
   pool: process.env.DATABASE_URL!,
   schema: 'deepagents',
 });
-await store.initialize();
 
 const changeSource = new PostgresNotifyChangeSource({
   pool: process.env.DATABASE_URL!,
@@ -146,7 +144,7 @@ Implementation requirements:
 - Validate schema names with the existing identifier rule.
 - Lazily `require('pg')` via `createRequire`, same as `PostgresContextStore`.
 - Track `#ownsPool` and close only owned pools.
-- Require `await store.initialize()` before queries.
+- Open with `await PostgresStreamStore.create(options)`; the constructor is private, so no query runs before the tables exist.
 - `createStream` inserts exactly the provided stream.
 - `upsertStream` uses `ON CONFLICT DO NOTHING RETURNING *`, then fetches existing.
 - `appendChunks([])` is a no-op.

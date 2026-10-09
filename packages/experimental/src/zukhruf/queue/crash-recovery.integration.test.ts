@@ -191,14 +191,12 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
   it('heartbeat lapse fails the job; the DLQ reconciler flips the stream and unblocks the chat', async () => {
     await using container = await testPostgres.database();
 
-    const streamStore = new PostgresStreamStore({
+    const streamStore = await PostgresStreamStore.create({
       pool: container.connectionString,
     });
-    await streamStore.initialize();
-    const store = new PostgresContextStore({
+    const store = await PostgresContextStore.create({
       pool: container.connectionString,
     });
-    await store.initialize();
 
     const boss = new PgBoss({
       connectionString: container.connectionString,

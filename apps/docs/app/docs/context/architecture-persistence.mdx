@@ -152,7 +152,7 @@ The `PostgresContextStore` uses the `pg` package for production-grade persistenc
 
 ### Pool-Based Connections
 
-The store accepts a connection string, `PoolConfig` object, or an existing `pg.Pool` instance. Initialization is explicit via `await store.initialize()`.
+The store accepts a connection string, `PoolConfig` object, or an existing `pg.Pool` instance. You open it with `await PostgresContextStore.create(options)`. The constructor is private, so each store that your code gets already has its schema objects.
 
 ```typescript
 import type { Pool, PoolConfig } from 'pg';
@@ -161,9 +161,8 @@ class PostgresContextStore extends ContextStore {
   #pool: Pool;
   #schema: string;
   #ownsPool: boolean;
-  #isInitialized = false;
 
-  constructor(options: PostgresStoreOptions) {
+  private constructor(options: PostgresStoreOptions) {
     super();
     const schema = options.schema ?? 'public';
     this.#schema = schema;
@@ -179,10 +178,22 @@ class PostgresContextStore extends ContextStore {
     }
   }
 
-  async initialize(): Promise<void> {
+  static async create(
+    options: PostgresStoreOptions,
+  ): Promise<PostgresContextStore> {
+    const store = new PostgresContextStore(options);
+    try {
+      await store.#initialize();
+    } catch (error) {
+      await store.close();
+      throw error;
+    }
+    return store;
+  }
+
+  async #initialize(): Promise<void> {
     const ddl = storeDDL(this.#schema);
     await this.#pool.query(ddl);
-    this.#isInitialized = true;
   }
 }
 ```
@@ -191,7 +202,7 @@ The `schema` option (defaults to `'public'`) scopes all tables under a PostgreSQ
 
 When an existing `Pool` is passed, `close()` does not end the pool (the caller retains ownership). When the store creates its own pool, `close()` ends it.
 
-**Source:** `packages/context/src/lib/store/postgres.store.ts:48-74`
+**Source:** `packages/context/src/lib/store/postgres.store.ts:207-264`
 
 ### JSONB for Metadata
 
@@ -236,11 +247,10 @@ LIMIT $3
 
 ### Async Transaction Handling
 
-PostgreSQL uses client-based transactions. The `#ensureInitialized()` guard is synchronous and throws if `initialize()` has not been called.
+PostgreSQL uses client-based transactions.
 
 ```typescript
 async #useTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-  this.#ensureInitialized();
   const client = await this.#pool.connect();
   try {
     await client.query('BEGIN');
@@ -256,7 +266,7 @@ async #useTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
 }
 ```
 
-**Source:** `packages/context/src/lib/store/postgres.store.ts:106-122`
+**Source:** `packages/context/src/lib/store/postgres.store.ts:270-283`
 
 ## SQL Server Adapter
 
@@ -419,7 +429,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
 | Timestamps | INTEGER | BIGINT | BIGINT |
 | Connection | Single file | Pool | Pool |
 | Schema support | N/A | `schema` option (default `public`) | `schema` option (default `dbo`) |
-| Initialization | Auto (constructor) | Explicit (`initialize()`) | Explicit (`initialize()`) |
+| Opening | Constructor | `await create()` | `await create()` |
 | Dependency | `node:sqlite` | `pg` | `mssql` |
 
 ## Next Steps

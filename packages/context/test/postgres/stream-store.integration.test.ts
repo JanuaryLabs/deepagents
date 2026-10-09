@@ -78,16 +78,13 @@ async function openStoreWithRetry(
 ): Promise<PostgresStreamStore> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 10; attempt++) {
-    const store = new PostgresStreamStore({
-      pool: connectionString,
-      schema,
-    });
     try {
-      await store.initialize();
-      return store;
+      return await PostgresStreamStore.create({
+        pool: connectionString,
+        schema,
+      });
     } catch (error) {
       lastError = error;
-      await store.close();
       if (!isTransientPostgresStartupError(error)) break;
       await sleep(100);
     }
@@ -122,23 +119,6 @@ async function waitForStatus(
 }
 
 describe('PostgreSQL StreamStore Integration', () => {
-  it('should require initialize before querying', async () => {
-    await using container = await testPostgres.database();
-
-    const store = new PostgresStreamStore({
-      pool: container.connectionString,
-      schema: testSchema(),
-    });
-    try {
-      await assert.rejects(
-        () => store.getStream('missing'),
-        /PostgresStreamStore not initialized/,
-      );
-    } finally {
-      await store.close();
-    }
-  });
-
   it('should create, upsert, retrieve, update, and list streams', async () =>
     await withStore(async (store) => {
       const stream = createStream({

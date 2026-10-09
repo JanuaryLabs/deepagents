@@ -77,10 +77,10 @@ const queue = new PgBossTurnQueue(boss, {
 });
 await queue.initialize();
 
-const streamStore = new PostgresStreamStore({ pool: connectionString });
-await streamStore.initialize();
-const store = new PostgresContextStore({ pool: connectionString });
-await store.initialize();
+const streamStore = await PostgresStreamStore.create({
+  pool: connectionString,
+});
+const store = await PostgresContextStore.create({ pool: connectionString });
 const streams = new StreamManager({
   store: streamStore,
   changeSource: new PollingChangeSource({ reads: streamStore }),

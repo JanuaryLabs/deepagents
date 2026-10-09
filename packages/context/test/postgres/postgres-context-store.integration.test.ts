@@ -24,10 +24,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should create a chat with auto timestamps', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         // Lower bound tolerant of host (Date.now) vs DB-container clock skew.
         const beforeCreate = Date.now() - 1000;
@@ -56,10 +55,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should upsert chat idempotently', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const result1 = await store.upsertChat({
           id: 'chat-upsert-1',
@@ -88,10 +86,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should return undefined for non-existent chat', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const chat = await store.getChat('non-existent-chat');
         assert.strictEqual(chat, undefined);
@@ -103,10 +100,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should update chat title and metadata', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({
           id: 'chat-update-1',
@@ -136,10 +132,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should list chats with pagination', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         // Create multiple chats
         for (let i = 0; i < 5; i++) {
@@ -177,10 +172,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should list chats filtered by userId', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-filter-alice', userId: 'alice' });
         await store.createChat({ id: 'chat-filter-bob', userId: 'bob' });
@@ -199,10 +193,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should delete chat and return true', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-delete-1', userId: 'user-1' });
 
@@ -219,10 +212,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should return false when deleting non-existent chat', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const result = await store.deleteChat('non-existent');
         assert.strictEqual(result, false);
@@ -234,10 +226,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should respect userId constraint on delete', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-delete-user', userId: 'owner' });
 
@@ -270,10 +261,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should add and retrieve a message', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-msg-1', userId: 'user-1' });
 
@@ -303,14 +293,12 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('serializes concurrent chat updaters from independent stores', async () => {
       await using container = await testPostgres.database();
 
-      const first = new PostgresContextStore({
+      const first = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      const second = new PostgresContextStore({
+      const second = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await first.initialize();
-      await second.initialize();
       try {
         await first.createChat({ id: 'chat-cas', userId: 'user-1' });
         await Promise.all([
@@ -334,10 +322,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should return undefined for non-existent message', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const message = await store.getMessage('non-existent-msg');
         assert.strictEqual(message, undefined);
@@ -349,10 +336,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should build message chain with parentId linking', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-chain-1', userId: 'user-1' });
 
@@ -398,10 +384,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should reject self-reference parentId', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-self-ref', userId: 'user-1' });
 
@@ -425,10 +410,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should check if message has children', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-children', userId: 'user-1' });
 
@@ -465,10 +449,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should get messages from active branch', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({
           id: 'chat-active-branch',
@@ -504,10 +487,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should throw error when getting messages for non-existent chat', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await assert.rejects(
           async () => store.getMessages('non-existent-chat'),
@@ -527,10 +509,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should create main branch automatically with chat', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-auto-branch', userId: 'user-1' });
 
@@ -548,10 +529,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should create and retrieve a branch', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({
           id: 'chat-branch-create',
@@ -583,10 +563,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should get active branch', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-active-get', userId: 'user-1' });
 
@@ -603,10 +582,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should set active branch and deactivate others', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({
           id: 'chat-switch-branch',
@@ -642,10 +620,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should update branch head', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-head-update', userId: 'user-1' });
 
@@ -677,10 +654,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should list branches with message counts', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({
           id: 'chat-list-branches',
@@ -747,10 +723,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should create and retrieve a checkpoint', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-checkpoint-1', userId: 'user-1' });
 
@@ -787,10 +762,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should return undefined for non-existent checkpoint', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({
           id: 'chat-no-checkpoint',
@@ -810,10 +784,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should upsert checkpoint on conflict', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({
           id: 'chat-checkpoint-upsert',
@@ -870,10 +843,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should list checkpoints ordered by createdAt descending', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({
           id: 'chat-list-checkpoints',
@@ -931,10 +903,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should delete a checkpoint', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({
           id: 'chat-delete-checkpoint',
@@ -982,10 +953,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should return complete graph data', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-graph', userId: 'user-1' });
 
@@ -1051,10 +1021,9 @@ describe('PostgreSQL ContextStore Integration', () => {
     it('should truncate long content in graph nodes', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-graph-long', userId: 'user-1' });
 
@@ -1089,10 +1058,9 @@ describe('PostgreSQL ContextStore Integration', () => {
       it('should store and retrieve complex nested metadata', async () => {
         await using container = await testPostgres.database();
 
-        const store = new PostgresContextStore({
+        const store = await PostgresContextStore.create({
           pool: container.connectionString,
         });
-        await store.initialize();
         try {
           const metadata = {
             nested: { deep: { value: 123 } },
@@ -1117,10 +1085,9 @@ describe('PostgreSQL ContextStore Integration', () => {
       it('should filter by string metadata value', async () => {
         await using container = await testPostgres.database();
 
-        const store = new PostgresContextStore({
+        const store = await PostgresContextStore.create({
           pool: container.connectionString,
         });
-        await store.initialize();
         try {
           await store.createChat({
             id: 'chat-meta-string',
@@ -1149,10 +1116,9 @@ describe('PostgreSQL ContextStore Integration', () => {
       it('should filter by boolean metadata value', async () => {
         await using container = await testPostgres.database();
 
-        const store = new PostgresContextStore({
+        const store = await PostgresContextStore.create({
           pool: container.connectionString,
         });
-        await store.initialize();
         try {
           await store.createChat({
             id: 'chat-meta-bool-true',
@@ -1189,10 +1155,9 @@ describe('PostgreSQL ContextStore Integration', () => {
       it('should filter by number metadata value', async () => {
         await using container = await testPostgres.database();
 
-        const store = new PostgresContextStore({
+        const store = await PostgresContextStore.create({
           pool: container.connectionString,
         });
-        await store.initialize();
         try {
           await store.createChat({
             id: 'chat-meta-num-1',
@@ -1223,10 +1188,9 @@ describe('PostgreSQL ContextStore Integration', () => {
       it('should return native boolean for isActive', async () => {
         await using container = await testPostgres.database();
 
-        const store = new PostgresContextStore({
+        const store = await PostgresContextStore.create({
           pool: container.connectionString,
         });
-        await store.initialize();
         try {
           await store.createChat({
             id: 'chat-bool-active',
@@ -1245,10 +1209,9 @@ describe('PostgreSQL ContextStore Integration', () => {
       it('should return native boolean for hasChildren', async () => {
         await using container = await testPostgres.database();
 
-        const store = new PostgresContextStore({
+        const store = await PostgresContextStore.create({
           pool: container.connectionString,
         });
-        await store.initialize();
         try {
           await store.createChat({
             id: 'chat-bool-children',
@@ -1278,10 +1241,9 @@ describe('PostgreSQL ContextStore Integration', () => {
       it('should handle concurrent operations', async () => {
         await using container = await testPostgres.database();
 
-        const store = new PostgresContextStore({
+        const store = await PostgresContextStore.create({
           pool: container.connectionString,
         });
-        await store.initialize();
         try {
           await store.createChat({ id: 'chat-concurrent', userId: 'user-1' });
 
@@ -1312,10 +1274,9 @@ describe('PostgreSQL ContextStore Integration', () => {
       it('should cascade delete messages when chat is deleted', async () => {
         await using container = await testPostgres.database();
 
-        const store = new PostgresContextStore({
+        const store = await PostgresContextStore.create({
           pool: container.connectionString,
         });
-        await store.initialize();
         try {
           await store.createChat({ id: 'chat-cascade', userId: 'user-1' });
 

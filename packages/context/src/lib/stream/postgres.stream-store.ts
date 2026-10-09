@@ -58,10 +58,8 @@ export class PostgresStreamStore extends StreamStore {
   #pool: Pool;
   #schema: string;
   #ownsPool: boolean;
-  #isInitialized = false;
-  #isClosed = false;
 
-  constructor(options: PostgresStreamStoreOptions) {
+  private constructor(options: PostgresStreamStoreOptions) {
     super();
     const schema = options.schema ?? 'public';
     assertIdentifier(schema, 'schema');
@@ -95,29 +93,31 @@ export class PostgresStreamStore extends StreamStore {
     return `"${this.#schema}"."${name}"`;
   }
 
-  async initialize(): Promise<void> {
+  /** Opens the store: creates its tables before it returns. */
+  static async create(
+    options: PostgresStreamStoreOptions,
+  ): Promise<PostgresStreamStore> {
+    const store = new PostgresStreamStore(options);
+    try {
+      await store.#initialize();
+    } catch (error) {
+      await store.close();
+      throw error;
+    }
+    return store;
+  }
+
+  async #initialize(): Promise<void> {
     await this.#pool.query(postgresStreamDDL(this.#schema));
-    this.#isInitialized = true;
   }
 
   async close(): Promise<void> {
-    if (this.#isClosed) return;
-    this.#isClosed = true;
-    if (this.#ownsPool) {
+    if (this.#ownsPool && !this.#pool.ending) {
       await this.#pool.end();
     }
   }
 
-  #ensureInitialized(): void {
-    if (!this.#isInitialized) {
-      throw new Error(
-        'PostgresStreamStore not initialized. Call await store.initialize() after construction.',
-      );
-    }
-  }
-
   async #query(sql: string, params?: unknown[]): Promise<unknown[]> {
-    this.#ensureInitialized();
     const result = await this.#pool.query(sql, params);
     return result.rows;
   }
@@ -131,7 +131,6 @@ export class PostgresStreamStore extends StreamStore {
   }
 
   async #useTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-    this.#ensureInitialized();
     const client = await this.#pool.connect();
     try {
       await client.query('BEGIN');

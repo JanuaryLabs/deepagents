@@ -27,10 +27,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should create a chat with auto timestamps', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         // Lower bound tolerant of host (Date.now) vs DB-container clock skew.
         const beforeCreate = Date.now() - 1000;
@@ -59,10 +58,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should upsert chat idempotently', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const result1 = await store.upsertChat({
           id: 'chat-upsert-1',
@@ -91,10 +89,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should return undefined for non-existent chat', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const chat = await store.getChat('non-existent-chat');
         assert.strictEqual(chat, undefined);
@@ -106,10 +103,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should update chat title and metadata', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({
           id: 'chat-update-1',
@@ -139,10 +135,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should list chats with pagination', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         // Create multiple chats
         for (let i = 0; i < 5; i++) {
@@ -180,10 +175,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should list chats filtered by userId', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-filter-alice', userId: 'alice' });
         await store.createChat({ id: 'chat-filter-bob', userId: 'bob' });
@@ -202,10 +196,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should delete chat and return true', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-delete-1', userId: 'user-1' });
 
@@ -222,10 +215,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should return false when deleting non-existent chat', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const result = await store.deleteChat('non-existent');
         assert.strictEqual(result, false);
@@ -237,10 +229,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should respect userId constraint on delete', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-delete-user', userId: 'owner' });
 
@@ -273,10 +264,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should add and retrieve a message', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-msg-1', userId: 'user-1' });
 
@@ -306,14 +296,12 @@ describe('SQL Server ContextStore Integration', () => {
     it('serializes concurrent chat updaters from independent stores', async () => {
       await using container = await testSqlServer.database();
 
-      const first = new SqlServerContextStore({
+      const first = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      const second = new SqlServerContextStore({
+      const second = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await first.initialize();
-      await second.initialize();
       try {
         await first.createChat({ id: 'chat-cas', userId: 'user-1' });
         await Promise.all([
@@ -337,10 +325,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should return undefined for non-existent message', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const message = await store.getMessage('non-existent-msg');
         assert.strictEqual(message, undefined);
@@ -352,10 +339,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should build message chain with parentId linking', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-chain-1', userId: 'user-1' });
 
@@ -401,10 +387,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should reject self-reference parentId', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-self-ref', userId: 'user-1' });
 
@@ -428,10 +413,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should check if message has children', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-children', userId: 'user-1' });
 
@@ -468,10 +452,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should get messages from active branch', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({
           id: 'chat-active-branch',
@@ -507,10 +490,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should throw error when getting messages for non-existent chat', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await assert.rejects(
           async () => store.getMessages('non-existent-chat'),
@@ -530,10 +512,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should create main branch automatically with chat', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-auto-branch', userId: 'user-1' });
 
@@ -551,10 +532,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should create and retrieve a branch', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({
           id: 'chat-branch-create',
@@ -586,10 +566,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should get active branch', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-active-get', userId: 'user-1' });
 
@@ -606,10 +585,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should set active branch and deactivate others', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({
           id: 'chat-switch-branch',
@@ -645,10 +623,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should update branch head', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-head-update', userId: 'user-1' });
 
@@ -680,10 +657,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should list branches with message counts', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({
           id: 'chat-list-branches',
@@ -750,10 +726,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should create and retrieve a checkpoint', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-checkpoint-1', userId: 'user-1' });
 
@@ -790,10 +765,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should return undefined for non-existent checkpoint', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({
           id: 'chat-no-checkpoint',
@@ -813,10 +787,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should upsert checkpoint on conflict', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({
           id: 'chat-checkpoint-upsert',
@@ -873,10 +846,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should list checkpoints ordered by createdAt descending', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({
           id: 'chat-list-checkpoints',
@@ -934,10 +906,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should delete a checkpoint', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({
           id: 'chat-delete-checkpoint',
@@ -985,10 +956,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should search messages by keyword', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-search', userId: 'user-1' });
 
@@ -1052,10 +1022,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should return ranked results', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-rank', userId: 'user-1' });
 
@@ -1094,10 +1063,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should return snippets', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-snippet', userId: 'user-1' });
 
@@ -1125,10 +1093,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should filter by roles', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-roles', userId: 'user-1' });
 
@@ -1175,10 +1142,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should respect limit option', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-limit', userId: 'user-1' });
 
@@ -1209,10 +1175,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should return empty array for no matches', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-nomatch', userId: 'user-1' });
 
@@ -1245,10 +1210,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should return complete graph data', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-graph', userId: 'user-1' });
 
@@ -1320,10 +1284,9 @@ describe('SQL Server ContextStore Integration', () => {
     it('should truncate long content in graph nodes', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-graph-long', userId: 'user-1' });
 
@@ -1358,10 +1321,9 @@ describe('SQL Server ContextStore Integration', () => {
       it('should store and retrieve complex nested metadata', async () => {
         await using container = await testSqlServer.database();
 
-        const store = new SqlServerContextStore({
+        const store = await SqlServerContextStore.create({
           pool: container.connectionString,
         });
-        await store.initialize();
         try {
           const metadata = {
             nested: { deep: { value: 123 } },
@@ -1388,10 +1350,9 @@ describe('SQL Server ContextStore Integration', () => {
       it('should return native boolean for isActive', async () => {
         await using container = await testSqlServer.database();
 
-        const store = new SqlServerContextStore({
+        const store = await SqlServerContextStore.create({
           pool: container.connectionString,
         });
-        await store.initialize();
         try {
           await store.createChat({ id: 'chat-bit-test', userId: 'user-1' });
 
@@ -1407,10 +1368,9 @@ describe('SQL Server ContextStore Integration', () => {
       it('should return native boolean for hasChildren', async () => {
         await using container = await testSqlServer.database();
 
-        const store = new SqlServerContextStore({
+        const store = await SqlServerContextStore.create({
           pool: container.connectionString,
         });
-        await store.initialize();
         try {
           await store.createChat({
             id: 'chat-bit-children',
@@ -1440,10 +1400,9 @@ describe('SQL Server ContextStore Integration', () => {
       it('should handle concurrent operations', async () => {
         await using container = await testSqlServer.database();
 
-        const store = new SqlServerContextStore({
+        const store = await SqlServerContextStore.create({
           pool: container.connectionString,
         });
-        await store.initialize();
         try {
           await store.createChat({ id: 'chat-concurrent', userId: 'user-1' });
 
@@ -1476,10 +1435,9 @@ describe('SQL Server ContextStore Integration', () => {
       it('should cascade delete messages when chat is deleted', async () => {
         await using container = await testSqlServer.database();
 
-        const store = new SqlServerContextStore({
+        const store = await SqlServerContextStore.create({
           pool: container.connectionString,
         });
-        await store.initialize();
         try {
           await store.createChat({ id: 'chat-cascade', userId: 'user-1' });
 
@@ -1520,8 +1478,7 @@ describe('SQL Server ContextStore Integration', () => {
       const pool = new sql.ConnectionPool(container.connectionString);
       await pool.connect();
       try {
-        const store = new SqlServerContextStore({ pool });
-        await store.initialize();
+        const store = await SqlServerContextStore.create({ pool });
         try {
           await store.createChat({
             id: 'chat-pool-inject',
@@ -1548,8 +1505,7 @@ describe('SQL Server ContextStore Integration', () => {
       const pool = new sql.ConnectionPool(container.connectionString);
       await pool.connect();
       try {
-        const store = new SqlServerContextStore({ pool });
-        await store.initialize();
+        const store = await SqlServerContextStore.create({ pool });
         await store.createChat({
           id: 'chat-no-close',
           userId: 'user-1',
@@ -1573,10 +1529,8 @@ describe('SQL Server ContextStore Integration', () => {
       const pool = new sql.ConnectionPool(container.connectionString);
       await pool.connect();
       try {
-        const store1 = new SqlServerContextStore({ pool });
-        await store1.initialize();
-        const store2 = new SqlServerContextStore({ pool });
-        await store2.initialize();
+        const store1 = await SqlServerContextStore.create({ pool });
+        const store2 = await SqlServerContextStore.create({ pool });
 
         await store1.createChat({
           id: 'chat-shared-1',
@@ -1605,11 +1559,10 @@ describe('SQL Server ContextStore Integration', () => {
     it('should create tables in a custom schema', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
         schema: 'custom_schema',
       });
-      await store.initialize();
       try {
         await store.createChat({
           id: 'chat-custom-schema',
@@ -1647,16 +1600,14 @@ describe('SQL Server ContextStore Integration', () => {
     it('should isolate two stores with different schemas', async () => {
       await using container = await testSqlServer.database();
 
-      const storeA = new SqlServerContextStore({
+      const storeA = await SqlServerContextStore.create({
         pool: container.connectionString,
         schema: 'schema_a',
       });
-      await storeA.initialize();
-      const storeB = new SqlServerContextStore({
+      const storeB = await SqlServerContextStore.create({
         pool: container.connectionString,
         schema: 'schema_b',
       });
-      await storeB.initialize();
 
       try {
         await storeA.createChat({
@@ -1687,11 +1638,10 @@ describe('SQL Server ContextStore Integration', () => {
     it('should create schema in sys.schemas', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
         schema: 'ddl_created_schema',
       });
-      await store.initialize();
       try {
         const pool = new sql.ConnectionPool(container.connectionString);
         await pool.connect();
@@ -1712,12 +1662,16 @@ describe('SQL Server ContextStore Integration', () => {
     it('should handle idempotent initialization', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const first = await SqlServerContextStore.create({
         pool: container.connectionString,
         schema: 'idempotent_schema',
       });
-      await store.initialize();
-      await store.initialize();
+      await first.close();
+      // A second open runs the schema DDL again over the existing objects.
+      const store = await SqlServerContextStore.create({
+        pool: container.connectionString,
+        schema: 'idempotent_schema',
+      });
       try {
         const chat = await store.createChat({ id: 'c1', userId: 'u1' });
         assert.ok(chat);

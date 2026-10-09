@@ -43,13 +43,12 @@ Production-ready persistence with PostgreSQL.
 import { ContextEngine, PostgresContextStore } from '@deepagents/context';
 
 // Connection string
-const store = new PostgresContextStore({
+const store = await PostgresContextStore.create({
   pool: 'postgresql://user:password@localhost:5432/mydb',
 });
-await store.initialize();
 
 // Or PoolConfig object
-const store = new PostgresContextStore({
+const store = await PostgresContextStore.create({
   pool: {
     host: 'localhost',
     port: 5432,
@@ -58,13 +57,11 @@ const store = new PostgresContextStore({
     database: 'mydb',
   },
 });
-await store.initialize();
 
 // Or pass an existing pg.Pool instance
 import pg from 'pg';
 const pool = new pg.Pool({ connectionString: 'postgresql://...' });
-const store = new PostgresContextStore({ pool });
-await store.initialize();
+const store = await PostgresContextStore.create({ pool });
 
 const context = new ContextEngine({
   store,
@@ -92,22 +89,20 @@ await store.close();
 Scope all tables under a specific PostgreSQL schema for multi-tenant isolation:
 
 ```typescript
-const store = new PostgresContextStore({
+const store = await PostgresContextStore.create({
   pool: 'postgresql://user:password@localhost:5432/mydb',
   schema: 'tenant_one',
 });
-await store.initialize();
 ```
 
 The store creates the schema if it does not exist and qualifies all table and index names with the schema prefix.
 
-### Initialization
+### Opening the Store
 
-Unlike SQLite, the PostgreSQL store requires explicit initialization after construction. Calling any store method before `initialize()` throws an error.
+Open the store with `PostgresContextStore.create()`. It creates the schema objects before it returns, so you can use the store at once. If it cannot create them, it closes the pool that it made and rejects.
 
 ```typescript
-const store = new PostgresContextStore({ pool: '...' });
-await store.initialize(); // required before any operations
+const store = await PostgresContextStore.create({ pool: '...' });
 ```
 
 ### Pool Ownership
@@ -123,12 +118,12 @@ Enterprise persistence with Microsoft SQL Server.
 import { ContextEngine, SqlServerContextStore } from '@deepagents/context';
 
 // Connection string
-const store = new SqlServerContextStore({
+const store = await SqlServerContextStore.create({
   pool: 'Server=localhost;Database=mydb;User Id=sa;Password=secret;TrustServerCertificate=true',
 });
 
 // Or config object
-const store = new SqlServerContextStore({
+const store = await SqlServerContextStore.create({
   pool: {
     server: 'localhost',
     database: 'mydb',
@@ -689,11 +684,10 @@ const graph = await store.getGraph('chat-001');
 One database, multiple users. You can isolate tenants with the `schema` option:
 
 ```typescript
-const store = new PostgresContextStore({
+const store = await PostgresContextStore.create({
   pool: process.env.DATABASE_URL,
   schema: `tenant_${tenantId}`,
 });
-await store.initialize();
 
 const context = new ContextEngine({
   store,
@@ -708,10 +702,9 @@ const chats = await store.listChats({ userId });
 Or use a single schema with user-scoped chat IDs:
 
 ```typescript
-const store = new PostgresContextStore({
+const store = await PostgresContextStore.create({
   pool: process.env.DATABASE_URL,
 });
-await store.initialize();
 
 const context = new ContextEngine({
   store,

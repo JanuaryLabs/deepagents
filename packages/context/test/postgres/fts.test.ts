@@ -19,10 +19,9 @@ describe('Full-Text Search', () => {
     it('should search messages by keyword', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-search', userId: 'user-1' });
 
@@ -83,10 +82,9 @@ describe('Full-Text Search', () => {
     it('should return ranked results with higher rank being more relevant', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-rank', userId: 'user-1' });
 
@@ -123,10 +121,9 @@ describe('Full-Text Search', () => {
     it('should return highlighted snippets', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-snippet', userId: 'user-1' });
 
@@ -155,10 +152,9 @@ describe('Full-Text Search', () => {
     it('should filter by roles', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-roles', userId: 'user-1' });
 
@@ -202,10 +198,9 @@ describe('Full-Text Search', () => {
     it('should respect limit option', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-limit', userId: 'user-1' });
 
@@ -233,10 +228,9 @@ describe('Full-Text Search', () => {
     it('should return empty array for no matches', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.createChat({ id: 'chat-nomatch', userId: 'user-1' });
 
@@ -265,10 +259,9 @@ describe('Full-Text Search', () => {
     it('should scope searchMessages to correct chat', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const aliceEngine = new ContextEngine({
           store,
@@ -307,10 +300,9 @@ describe('Full-Text Search', () => {
     it('should remove FTS entries when chat is deleted', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           store,
@@ -336,10 +328,9 @@ describe('Full-Text Search', () => {
     it('should not affect FTS entries of other chats', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine1 = new ContextEngine({
           store,
@@ -369,10 +360,9 @@ describe('Full-Text Search', () => {
     it('should handle search after deletion (no stale results)', async () => {
       await using container = await testPostgres.database();
 
-      const store = new PostgresContextStore({
+      const store = await PostgresContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           store,

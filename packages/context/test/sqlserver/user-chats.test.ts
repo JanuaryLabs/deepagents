@@ -33,10 +33,9 @@ describe('User Chat Management', () => {
     it('should create chat associated with specific user via ContextEngine', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           store,
@@ -60,10 +59,9 @@ describe('User Chat Management', () => {
     it('should expose userId via chat metadata getter', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           store,
@@ -90,10 +88,9 @@ describe('User Chat Management', () => {
     it('should list only chats belonging to specific user', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const aliceChat1 = new ContextEngine({
           store,
@@ -140,10 +137,9 @@ describe('User Chat Management', () => {
     it('should return empty array for user with no chats', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const noChats = await store.listChats({
           userId: 'nonexistent-user-xyz',
@@ -159,10 +155,9 @@ describe('User Chat Management', () => {
     it('should isolate conversation history per user', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const aliceEngine = new ContextEngine({
           store,
@@ -198,10 +193,9 @@ describe('User Chat Management', () => {
     it('should include userId in ChatInfo when listing', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await new ContextEngine({
           store,
@@ -221,10 +215,9 @@ describe('User Chat Management', () => {
     it('should not return cross-user chats when filtering by userId', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.upsertChat({ id: 'sec-alice-1', userId: 'sec-alice' });
         await store.upsertChat({ id: 'sec-alice-2', userId: 'sec-alice' });
@@ -252,10 +245,9 @@ describe('User Chat Management', () => {
     it('should preserve userId when getChat retrieves stored chat', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.upsertChat({
           id: 'preserve-test-chat',
@@ -274,10 +266,9 @@ describe('User Chat Management', () => {
     it('should handle userId with special characters', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const specialUserIds = [
           'user@example.com',
@@ -301,10 +292,9 @@ describe('User Chat Management', () => {
     it('should handle userId with unicode characters', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const unicodeUserIds = ['用户123', 'пользователь', 'المستخدم'];
 
@@ -331,10 +321,9 @@ describe('User Chat Management', () => {
     it('should treat userId filtering as case-insensitive (SQL Server default)', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         // Create chats with same "userId" but stored with different cases
         await store.upsertChat({
@@ -370,10 +359,9 @@ describe('User Chat Management', () => {
     it('should preserve userId through branching operations', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           store,
@@ -407,10 +395,9 @@ describe('User Chat Management', () => {
     it('should preserve userId through checkpoint restore', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine = new ContextEngine({
           store,
@@ -440,10 +427,9 @@ describe('User Chat Management', () => {
     it('should return correct messageCount per user chat', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const aliceEngine = new ContextEngine({
           store,
@@ -478,10 +464,9 @@ describe('User Chat Management', () => {
     it('should handle very long userId strings', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const longUserId = 'u'.repeat(200);
 
@@ -498,10 +483,9 @@ describe('User Chat Management', () => {
     it('should handle pagination correctly with userId filter', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         for (let i = 0; i < 10; i++) {
           await store.upsertChat({
@@ -550,10 +534,9 @@ describe('User Chat Management', () => {
     it('should return empty when offset exceeds total chats', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.upsertChat({
           id: 'only-offset-chat',
@@ -576,10 +559,9 @@ describe('User Chat Management', () => {
     it('should not change userId when upserting existing chat', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.upsertChat({
           id: 'immutable-ss-chat',
@@ -605,10 +587,9 @@ describe('User Chat Management', () => {
     it('should reject a ContextEngine reconnecting with a different userId', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const engine1 = new ContextEngine({
           store,
@@ -643,10 +624,9 @@ describe('User Chat Management', () => {
     it('should handle concurrent chat creation for same user', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const createPromises = Array.from({ length: 10 }, (_, i) =>
           store.upsertChat({
@@ -675,10 +655,9 @@ describe('User Chat Management', () => {
     it('should handle concurrent chat creation for different users', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         const users = [
           'conc-user-a',
@@ -716,10 +695,9 @@ describe('User Chat Management', () => {
     it('should handle concurrent reads and writes', async () => {
       await using container = await testSqlServer.database();
 
-      const store = new SqlServerContextStore({
+      const store = await SqlServerContextStore.create({
         pool: container.connectionString,
       });
-      await store.initialize();
       try {
         await store.upsertChat({ id: 'rw-ss-chat', userId: 'rw-ss-user' });
 
@@ -751,10 +729,9 @@ describe('Message Upsert', () => {
   it('should update existing message with same ID', async () => {
     await using container = await testSqlServer.database();
 
-    const store = new SqlServerContextStore({
+    const store = await SqlServerContextStore.create({
       pool: container.connectionString,
     });
-    await store.initialize();
     try {
       await store.upsertChat({ id: 'upsert-chat-1', userId: 'user-1' });
 
@@ -803,10 +780,9 @@ describe('Message Upsert', () => {
   it('should update FTS index on upsert', async () => {
     await using container = await testSqlServer.database();
 
-    const store = new SqlServerContextStore({
+    const store = await SqlServerContextStore.create({
       pool: container.connectionString,
     });
-    await store.initialize();
     try {
       await store.upsertChat({ id: 'upsert-fts-chat', userId: 'user-1' });
 
@@ -852,10 +828,9 @@ describe('Message Upsert', () => {
   it('should preserve original parentId on upsert', async () => {
     await using container = await testSqlServer.database();
 
-    const store = new SqlServerContextStore({
+    const store = await SqlServerContextStore.create({
       pool: container.connectionString,
     });
-    await store.initialize();
     try {
       await store.upsertChat({ id: 'upsert-parent-chat', userId: 'user-1' });
 
@@ -889,10 +864,9 @@ describe('Message Upsert', () => {
   it('should preserve original createdAt on upsert', async () => {
     await using container = await testSqlServer.database();
 
-    const store = new SqlServerContextStore({
+    const store = await SqlServerContextStore.create({
       pool: container.connectionString,
     });
-    await store.initialize();
     try {
       await store.upsertChat({ id: 'upsert-time-chat', userId: 'user-1' });
 

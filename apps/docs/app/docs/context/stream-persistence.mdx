@@ -148,8 +148,9 @@ import {
   StreamManager,
 } from '@deepagents/context';
 
-const store = new PostgresStreamStore({ pool: process.env.DATABASE_URL! });
-await store.initialize();
+const store = await PostgresStreamStore.create({
+  pool: process.env.DATABASE_URL!,
+});
 
 const changeSource = new PostgresNotifyChangeSource({
   pool: process.env.DATABASE_URL!,
