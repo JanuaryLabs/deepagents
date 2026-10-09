@@ -35,40 +35,32 @@ function mergeReply(segments: UIMessage[]): UIMessage {
   };
 }
 
-export class ChainSummaryBuilder {
-  #turn = 0;
-  #messageCount = 0;
-  #lastMessageAt?: number;
-  #lastMessage?: UIMessage;
-  #lastAssistantMessage?: UIMessage;
-  #lastAssistantMessages: UIMessage[] = [];
-  #replies: UIMessage[][] = [];
-  #replyClosed = true;
-  #firedOnceIds = new Set<string>();
+/** Summarize a branch's stored message chain and the messages not saved yet. */
+export function summarizeChain(
+  stored: readonly MessageData[],
+  pending: readonly ContextFragment[],
+): ChainSummary {
+  let turn = 0;
+  let lastMessageAt: number | undefined;
+  let lastMessage: UIMessage | undefined;
+  const assistantMessages: UIMessage[] = [];
+  // Segments produced after the same real user message belong to one reply.
+  let reply: UIMessage[] = [];
+  const replies = [reply];
+  const firedOnceIds = new Set<string>();
 
-  ingestStored(msg: MessageData): void {
-    this.#messageCount++;
-
+  for (const msg of stored) {
     if (msg.name === 'assistant') {
       const message = requireUIMessage(
         msg.data,
         `Stored assistant message "${msg.id}"`,
       );
-      this.#lastAssistantMessage = message;
-      this.#lastAssistantMessages.push(message);
-      // Segments produced after the same real user message belong to one reply.
-      const open = this.#replies.at(-1);
-      if (open && !this.#replyClosed) open.push(message);
-      else {
-        this.#replies.push([message]);
-        this.#replyClosed = false;
-      }
-      return;
+      assistantMessages.push(message);
+      reply.push(message);
+      continue;
     }
 
-    if (msg.name !== 'user') {
-      return;
-    }
+    if (msg.name !== 'user') continue;
 
     const message = requireUIMessage(
       msg.data,
@@ -80,41 +72,41 @@ export class ChainSummaryBuilder {
     // that lets once() suppress a fire-once reminder across runs.
     if (isSyntheticReminderMessage(message)) {
       for (const id of message.metadata.synthetic.onceIds ?? []) {
-        this.#firedOnceIds.add(id);
+        firedOnceIds.add(id);
       }
-      return;
+      continue;
     }
 
     // Real user turns carry the once-ids of any user-target reminder folded
     // into them, so a fresh engine re-collects them and once() stays latched.
-    for (const id of getReminderOnceIds(message)) this.#firedOnceIds.add(id);
+    for (const id of getReminderOnceIds(message)) firedOnceIds.add(id);
 
-    this.#turn++;
-    this.#lastMessageAt = msg.createdAt;
-    this.#lastMessage = message;
+    turn++;
+    lastMessageAt = msg.createdAt;
+    lastMessage = message;
     // The next assistant segment opens a NEW reply. Synthetic reminder users
-    // return above, so a mid-turn reminder never splits one reply into two.
-    this.#replyClosed = true;
+    // continue above, so a mid-turn reminder never splits one reply into two.
+    reply = [];
+    replies.push(reply);
   }
 
-  ingestPending(fragment: ContextFragment): void {
-    this.#messageCount++;
-    if (fragment.name !== 'user') return;
+  for (const fragment of pending) {
+    if (fragment.name !== 'user') continue;
     const encoded = fragment.codec?.encode();
-    if (isUIMessage(encoded) && isSyntheticReminderMessage(encoded)) return;
-    this.#turn++;
+    if (isUIMessage(encoded) && isSyntheticReminderMessage(encoded)) continue;
+    turn++;
   }
 
-  build(): ChainSummary {
-    return {
-      turn: this.#turn,
-      messageCount: this.#messageCount,
-      lastMessageAt: this.#lastMessageAt,
-      lastMessage: this.#lastMessage,
-      lastAssistantMessage: this.#lastAssistantMessage,
-      lastAssistantMessages: this.#lastAssistantMessages,
-      lastAssistantReplies: this.#replies.map(mergeReply),
-      firedOnceIds: this.#firedOnceIds,
-    };
-  }
+  return {
+    turn,
+    messageCount: stored.length + pending.length,
+    lastMessageAt,
+    lastMessage,
+    lastAssistantMessage: assistantMessages.at(-1),
+    lastAssistantMessages: assistantMessages,
+    lastAssistantReplies: replies
+      .filter((segments) => segments.length > 0)
+      .map(mergeReply),
+    firedOnceIds,
+  };
 }

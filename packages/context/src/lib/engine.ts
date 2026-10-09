@@ -12,7 +12,7 @@ import {
   validateUIMessages,
 } from 'ai';
 
-import { type ChainSummary, ChainSummaryBuilder } from './chain-summary.ts';
+import { type ChainSummary, summarizeChain } from './chain-summary.ts';
 import {
   type EstimateResult,
   type FragmentEstimate,
@@ -615,15 +615,10 @@ export class ContextEngine {
   ): Promise<ChainSummary> {
     await this.#ensureInitialized();
 
-    const builder = new ChainSummaryBuilder();
-    if (this.#branch?.headMessageId) {
-      const chain = await this.#store.getMessageChain(
-        this.#branch.headMessageId,
-      );
-      for (const msg of chain) builder.ingestStored(msg);
-    }
-    for (const fragment of pending) builder.ingestPending(fragment);
-    return builder.build();
+    const stored = this.#branch?.headMessageId
+      ? await this.#store.getMessageChain(this.#branch.headMessageId)
+      : [];
+    return summarizeChain(stored, pending);
   }
 
   public async getTurnCount(): Promise<number> {
