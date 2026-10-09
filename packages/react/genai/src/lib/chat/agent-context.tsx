@@ -16,7 +16,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from 'react';
 
 import type { ComponentRegistry } from '../tools/registry.ts';
@@ -51,6 +50,9 @@ const AgentMessagesContext = createContext<
   AgentMessagesContextValue | undefined
 >(undefined);
 const ChatManagerContext = createContext<ChatManager | null>(null);
+const AgentMetaContext = createContext<{ hasSubmitted: boolean } | undefined>(
+  undefined,
+);
 
 export function AgentProvider({
   chatId,
@@ -83,11 +85,12 @@ export function AgentProvider({
   onResetChat: (chatId: string) => void;
   queueEnabled?: boolean;
 }) {
-  const agent = useAgentChatSetup({
+  const { chat, helpers: agent } = useAgentChatSetup({
     chatId,
     transport,
     registry,
     initialMessages,
+    resume,
     onData,
     onFinish,
   });
@@ -108,14 +111,11 @@ export function AgentProvider({
     () =>
       new ChatManager({
         queueEnabled,
-        hasSubmitted: !!skipInitialView || (initialMessages?.length ?? 0) > 0,
-        initialMessages,
-        enableResume: resume,
         uploadFile: transport.uploadFile.bind(transport),
         onResetChat: forwardResetChat,
       }),
   );
-  manager.bind(agent);
+  manager.bind(chat);
 
   useEffect(() => {
     manager.initialize(chatId);
@@ -160,12 +160,17 @@ export function AgentProvider({
     [agent.messages, agent.status, agent.error],
   );
 
+  const hasSubmitted = !!skipInitialView || agent.messages.length > 0;
+  const metaValue = useMemo(() => ({ hasSubmitted }), [hasSubmitted]);
+
   return (
     <ChatManagerContext value={manager}>
       <AgentConfigContext.Provider value={configValue}>
         <AgentStatusContext.Provider value={agent.status}>
           <AgentMessagesContext.Provider value={messagesValue}>
-            {children}
+            <AgentMetaContext.Provider value={metaValue}>
+              {children}
+            </AgentMetaContext.Provider>
           </AgentMessagesContext.Provider>
         </AgentStatusContext.Provider>
       </AgentConfigContext.Provider>
@@ -187,16 +192,11 @@ export function useAgentStatus() {
 }
 
 export function useAgentMeta() {
-  const manager = useContext(ChatManagerContext);
-  if (!manager) {
+  const meta = useContext(AgentMetaContext);
+  if (meta === undefined) {
     throw new Error('useAgentMeta must be used within an AgentProvider');
   }
-  const hasSubmitted = useSyncExternalStore(
-    manager.subscribe,
-    () => manager.hasSubmitted,
-    () => manager.hasSubmitted,
-  );
-  return { hasSubmitted };
+  return meta;
 }
 
 export function useAgentMessages() {

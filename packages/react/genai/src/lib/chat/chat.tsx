@@ -1,4 +1,4 @@
-import { useChat } from '@ai-sdk/react';
+import { Chat, useChat } from '@ai-sdk/react';
 import {
   type ChatOnDataCallback,
   type ChatOnFinishCallback,
@@ -19,30 +19,73 @@ import type { ComponentRegistry } from '../tools/registry.ts';
 import { useAgentMeta } from './agent-context.tsx';
 import { completeRenderedClientTool } from './client-tool-output.ts';
 
-export function useAgentChatSetup(props: {
+type AgentUIMessage = UIMessage<unknown, UIDataTypes, UITools>;
+
+interface AgentChatSetupProps {
   chatId: string;
-  transport: ChatTransport<UIMessage<unknown, UIDataTypes, UITools>>;
-  initialMessages?: UIMessage<unknown, UIDataTypes, UITools>[];
+  transport: ChatTransport<AgentUIMessage>;
+  initialMessages?: AgentUIMessage[];
   registry?: ComponentRegistry;
-  onData?: ChatOnDataCallback<UIMessage<unknown, UIDataTypes, UITools>>;
-  onFinish?: ChatOnFinishCallback<UIMessage<unknown, UIDataTypes, UITools>>;
-}) {
-  const chat = useChat({
-    id: props.chatId,
-    experimental_throttle: 50,
-    messages: props.initialMessages,
-    transport: props.transport,
-    sendAutomaticallyWhen: (options) =>
-      lastAssistantMessageIsCompleteWithToolCalls(options) ||
-      lastAssistantMessageIsCompleteWithApprovalResponses(options),
-    async onToolCall({ toolCall }) {
-      await completeRenderedClientTool(chat, props.registry, toolCall);
-    },
-    onData: props.onData,
-    onFinish: props.onFinish,
+  /** Reconnect to the chat's active stream once, when its Chat is created. */
+  resume?: boolean;
+  onData?: ChatOnDataCallback<AgentUIMessage>;
+  onFinish?: ChatOnFinishCallback<AgentUIMessage>;
+}
+
+/**
+ * Creates one Chat per chatId and renders it with useChat. The Chat is owned
+ * here, not by useChat, so its live status and messages can be read between
+ * renders; its callbacks and transport read the latest props.
+ */
+export function useAgentChatSetup(props: AgentChatSetupProps) {
+  const latest = React.useRef(props);
+  React.useEffect(() => {
+    latest.current = props;
   });
 
-  return chat;
+  const chat = React.useMemo(
+    () =>
+      // eslint-disable-next-line react-hooks/refs -- the callbacks read `latest` only when the Chat calls them (a send, a stream part, a tool call), never while it is constructed during render. The analyzer cannot see past the opaque constructor; agent-context.tsx has the same case.
+      new Chat<AgentUIMessage>({
+        id: props.chatId,
+        messages: props.initialMessages,
+        transport: {
+          sendMessages: (options) =>
+            latest.current.transport.sendMessages(options),
+          reconnectToStream: (options) =>
+            latest.current.transport.reconnectToStream(options),
+        },
+        sendAutomaticallyWhen: (options) =>
+          lastAssistantMessageIsCompleteWithToolCalls(options) ||
+          lastAssistantMessageIsCompleteWithApprovalResponses(options),
+        async onToolCall({ toolCall }) {
+          await completeRenderedClientTool(
+            chat,
+            latest.current.registry,
+            toolCall,
+          );
+        },
+        onData: (part) => latest.current.onData?.(part),
+        onFinish: (event) => latest.current.onFinish?.(event),
+      }),
+    // A new Chat per conversation; initialMessages seed only that Chat.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [props.chatId],
+  );
+
+  React.useEffect(
+    () => () => {
+      void chat.stop();
+    },
+    [chat],
+  );
+
+  const helpers = useChat<AgentUIMessage>({
+    chat,
+    experimental_throttle: 50,
+    resume: props.resume,
+  });
+  return { chat, helpers };
 }
 
 export function ChatBot(

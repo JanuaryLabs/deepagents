@@ -1,5 +1,10 @@
-import type { UIMessage, UseChatHelpers } from '@ai-sdk/react';
-import type { ChatStatus, UIDataTypes, UITools } from 'ai';
+import type { Chat, UIMessage } from '@ai-sdk/react';
+import {
+  type ChatStatus,
+  SerialJobExecutor,
+  type UIDataTypes,
+  type UITools,
+} from 'ai';
 
 import type { ComposerDraftSource } from '@deepagents/react-input/browser';
 
@@ -31,13 +36,10 @@ type PreparedSubmission = Omit<QueuedMessage, 'id'>;
 
 type Listener = () => void;
 
-type ChatHelpers = UseChatHelpers<UIMessage<unknown, UIDataTypes, UITools>>;
+type BoundChat = Chat<UIMessage<unknown, UIDataTypes, UITools>>;
 
 export interface ChatManagerOptions {
   queueEnabled?: boolean;
-  hasSubmitted?: boolean;
-  initialMessages?: UIMessage[];
-  enableResume?: boolean;
   uploadFile: UploadFile;
   onResetChat: (chatId: string) => void;
 }
@@ -47,47 +49,32 @@ function isBusy(status: ChatStatus): boolean {
 }
 
 export class ChatManager {
-  private chat: ChatHelpers | null = null;
+  private chat: BoundChat | null = null;
   private prevStatus: ChatStatus = 'ready';
   private listeners = new Set<Listener>();
   private _queue: QueuedMessage[] = [];
   private _queueEnabled: boolean;
-  private _hasSubmitted: boolean;
-  private _initialMessages?: UIMessage[];
-  private _initialMessagesApplied = false;
-  private _enableResume: boolean;
-  private _resumed = false;
   private readonly uploadFile: UploadFile;
   /**
-   * Submissions still preparing their files, in order. Later submissions chain
-   * behind it so a text-only message never overtakes an image that is
-   * uploading; `null` once nothing is in flight.
+   * Runs submissions one at a time, in order, so a text-only message never
+   * overtakes an image that is uploading. An idle executor starts a job at
+   * once, so a submission without files still dispatches synchronously.
    */
-  private pendingSubmissions: Promise<void> | null = null;
-  /**
-   * `sendMessage` ran but the bound helpers still report the pre-send status
-   * (they are a render snapshot), so treat the chat as busy until the next
-   * status sync.
-   */
-  private sentAwaitingStatus = false;
+  private readonly submissions = new SerialJobExecutor();
 
   onResetChat: (chatId: string) => void;
 
   constructor(options: ChatManagerOptions) {
     this._queueEnabled = options.queueEnabled ?? true;
-    this._hasSubmitted = options.hasSubmitted ?? false;
-    this._initialMessages = options.initialMessages;
-    this._enableResume = options.enableResume ?? false;
     this.uploadFile = options.uploadFile;
     this.onResetChat = options.onResetChat;
   }
 
-  bind(chat: ChatHelpers): void {
+  bind(chat: BoundChat): void {
     this.chat = chat;
   }
 
   syncStatus(status: ChatStatus): void {
-    this.sentAwaitingStatus = false;
     const prev = this.prevStatus;
     this.prevStatus = status;
     if (isBusy(prev) && status === 'ready') {
@@ -97,25 +84,6 @@ export class ChatManager {
 
   initialize(chatId?: string): void {
     if (!this.chat) return;
-
-    if (!this._initialMessagesApplied) {
-      if (
-        this._initialMessages &&
-        this._initialMessages.length > 0 &&
-        this.chat.messages.length === 0
-      ) {
-        this.chat.setMessages(this._initialMessages);
-        this._hasSubmitted = true;
-        this.notify();
-      }
-      this._initialMessagesApplied = true;
-    }
-
-    if (this._enableResume && !this._resumed) {
-      void this.chat.resumeStream();
-      this._resumed = true;
-    }
-
     if (chatId) this.consumePrefill(chatId);
   }
 
@@ -127,30 +95,17 @@ export class ChatManager {
   submit(submission: ChatSubmission): Promise<void> {
     if (!this.chat) return Promise.resolve();
     const { files = [], ...message } = submission;
-    if (files.length === 0 && !this.pendingSubmissions) {
-      this.dispatch(message);
-      return Promise.resolve();
-    }
     const chatId = this.chat.id;
-    const current = (this.pendingSubmissions ?? Promise.resolve()).then(
-      async () => {
-        if (files.length === 0) {
-          this.assertCurrentChat(chatId);
-          this.dispatch(message);
-          return;
-        }
-        const uploads = await this.uploadFiles(chatId, files);
+    return this.submissions.run(async () => {
+      if (files.length === 0) {
         this.assertCurrentChat(chatId);
-        this.dispatch({ ...message, uploads });
-      },
-    );
-    const settled: Promise<void> = current
-      .catch(() => undefined)
-      .then(() => {
-        if (this.pendingSubmissions === settled) this.pendingSubmissions = null;
-      });
-    this.pendingSubmissions = settled;
-    return current;
+        this.dispatch(message);
+        return;
+      }
+      const uploads = await this.uploadFiles(chatId, files);
+      this.assertCurrentChat(chatId);
+      this.dispatch({ ...message, uploads });
+    });
   }
 
   private async uploadFiles(chatId: string, files: readonly File[]) {
@@ -173,17 +128,13 @@ export class ChatManager {
     this.directSubmit(message);
   }
 
+  /** Reads the live Chat, which reports `submitted` as soon as a send starts. */
   private isChatBusy(): boolean {
-    return (
-      this.sentAwaitingStatus ||
-      (this.chat !== null && isBusy(this.chat.status))
-    );
+    return this.chat !== null && isBusy(this.chat.status);
   }
 
   private directSubmit(message: PreparedSubmission): void {
     if (!this.chat) return;
-    this._hasSubmitted = true;
-    this.sentAwaitingStatus = true;
     void this.chat.sendMessage({
       role: 'user',
       parts: [{ type: 'text', text: message.prompt }],
@@ -225,16 +176,14 @@ export class ChatManager {
 
   clearChat(): void {
     if (!this.chat) return;
-    this.chat.setMessages([]);
-    this._hasSubmitted = false;
+    this.chat.messages = [];
     this.clearQueue();
     this.notify();
   }
 
   setChat(messages: UIMessage[]): void {
     if (!this.chat) return;
-    this.chat.setMessages(messages);
-    this._hasSubmitted = messages.length > 0;
+    this.chat.messages = messages;
     this.notify();
   }
 
@@ -292,14 +241,9 @@ export class ChatManager {
     return null;
   }
 
+  /** Whether the bound chat has messages: the conversation has started. */
   get hasSubmitted(): boolean {
-    return this._hasSubmitted;
-  }
-
-  set hasSubmitted(value: boolean) {
-    if (this._hasSubmitted === value) return;
-    this._hasSubmitted = value;
-    this.notify();
+    return (this.chat?.messages.length ?? 0) > 0;
   }
 
   subscribe = (listener: Listener): (() => void) => {

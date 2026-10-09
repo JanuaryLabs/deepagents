@@ -11,7 +11,7 @@ interface ToolCall {
 }
 
 export async function completeRenderedClientTool(
-  chat: ChatHelpers,
+  chat: Pick<ChatHelpers, 'addToolOutput'>,
   registry: ComponentRegistry | undefined,
   toolCall: ToolCall,
 ): Promise<void> {
