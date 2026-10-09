@@ -8,7 +8,6 @@ import { describe, it, mock } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
-  type ListStreamIdsOptions,
   PollingChangeSource,
   type PollingTelemetryEvent,
   SqliteStreamStore,
@@ -19,8 +18,6 @@ import {
   StreamManager,
   type StreamStatus,
   StreamStore,
-  type StreamUpdateResult,
-  type StreamUpdater,
   type StreamWatchTelemetryEvent,
   type WatchPollingConfig,
   createAdaptivePollingState,
@@ -63,124 +60,13 @@ function createChunk(
   };
 }
 
-class FlakyFlushStore extends StreamStore {
-  #stream: StreamData | undefined;
-  #chunks: StreamChunkData[] = [];
-  #failNextAppend = true;
+class FlakyFlushStore extends SqliteStreamStore {
+  readonly #appendFaults = [new Error('flush failed once')];
 
-  async createStream(stream: StreamData): Promise<void> {
-    this.#stream = { ...stream };
-  }
-
-  async upsertStream(
-    stream: StreamData,
-  ): Promise<{ stream: StreamData; created: boolean }> {
-    if (!this.#stream) {
-      this.#stream = { ...stream };
-      return { stream: { ...this.#stream }, created: true };
-    }
-    return { stream: { ...this.#stream }, created: false };
-  }
-
-  async getStream(streamId: string): Promise<StreamData | undefined> {
-    if (!this.#stream || this.#stream.id !== streamId) return undefined;
-    return { ...this.#stream };
-  }
-
-  async getStreamStatus(streamId: string): Promise<StreamStatus | undefined> {
-    if (!this.#stream || this.#stream.id !== streamId) return undefined;
-    return this.#stream.status;
-  }
-
-  async listStreamIds(options?: ListStreamIdsOptions): Promise<string[]> {
-    if (!this.#stream) return [];
-    if (options?.status && this.#stream.status !== options.status) {
-      return [];
-    }
-    return [this.#stream.id];
-  }
-
-  async updateStream(
-    streamId: string,
-    update: StreamUpdater,
-  ): Promise<StreamUpdateResult> {
-    if (!this.#stream || this.#stream.id !== streamId) {
-      throw new Error(`updateStream: stream "${streamId}" not found`);
-    }
-    const updates = update({ ...this.#stream });
-    if (updates === undefined) {
-      return { stream: { ...this.#stream }, updated: false };
-    }
-    this.#stream = { ...this.#stream, ...updates };
-    return { stream: { ...this.#stream }, updated: true };
-  }
-
-  async updateStreamStatus(
-    streamId: string,
-    status: StreamStatus,
-    options?: { error?: string },
-  ): Promise<void> {
-    if (!this.#stream || this.#stream.id !== streamId) return;
-    if (status === 'running' && this.#stream.status !== 'queued') {
-      return;
-    }
-    if (
-      (status === 'completed' ||
-        status === 'failed' ||
-        status === 'cancelled') &&
-      this.#stream.status !== 'queued' &&
-      this.#stream.status !== 'running'
-    ) {
-      return;
-    }
-    const now = Date.now();
-    this.#stream.status = status;
-    if (status === 'running') this.#stream.startedAt = now;
-    if (status === 'completed') this.#stream.finishedAt = now;
-    if (status === 'failed') {
-      this.#stream.finishedAt = now;
-      this.#stream.error = options?.error ?? null;
-    }
-    if (status === 'cancelled') {
-      this.#stream.cancelRequestedAt = now;
-      this.#stream.finishedAt = now;
-    }
-  }
-
-  async appendChunks(chunks: StreamChunkData[]): Promise<void> {
-    if (this.#failNextAppend) {
-      this.#failNextAppend = false;
-      throw new Error('flush failed once');
-    }
-    this.#chunks.push(...chunks);
-    for (const chunk of chunks) {
-      if (chunk.data.type === 'error') {
-        await this.updateStreamStatus(chunk.streamId, 'failed', {
-          error: chunk.data.errorText,
-        });
-        break;
-      }
-    }
-  }
-
-  async getChunks(
-    streamId: string,
-    fromSeq = 0,
-    limit?: number,
-  ): Promise<StreamChunkData[]> {
-    const filtered = this.#chunks
-      .filter((chunk) => chunk.streamId === streamId && chunk.seq >= fromSeq)
-      .sort((a, b) => a.seq - b.seq);
-    return limit == null ? filtered : filtered.slice(0, limit);
-  }
-
-  async deleteStream(streamId: string): Promise<void> {
-    if (this.#stream?.id === streamId) this.#stream = undefined;
-    this.#chunks = this.#chunks.filter((chunk) => chunk.streamId !== streamId);
-  }
-
-  async reopenStream(_streamId: string): Promise<StreamData> {
-    throw new Error('not implemented in test store');
+  override async appendChunks(chunks: StreamChunkData[]): Promise<void> {
+    const fault = this.#appendFaults.shift();
+    if (fault) throw fault;
+    return super.appendChunks(chunks);
   }
 }
 
@@ -280,17 +166,17 @@ class YieldThenFailChangeSource implements StreamChangeSource {
 }
 
 class FailNextStreamReadStore extends SqliteStreamStore {
-  #failNextStreamRead = false;
+  readonly #readFaults: Error[] = [];
 
   failNextStreamRead(): void {
-    this.#failNextStreamRead = true;
+    this.#readFaults.push(
+      new Error('transient cancellation telemetry read failure'),
+    );
   }
 
   override async getStream(streamId: string): Promise<StreamData | undefined> {
-    if (this.#failNextStreamRead) {
-      this.#failNextStreamRead = false;
-      throw new Error('transient cancellation telemetry read failure');
-    }
+    const fault = this.#readFaults.shift();
+    if (fault) throw fault;
     return super.getStream(streamId);
   }
 }
@@ -516,7 +402,7 @@ describe('Stream Chunks', () => {
     });
 
     it('should reject when aborted flush fails during persist', async () => {
-      const store = new FlakyFlushStore();
+      const store = new FlakyFlushStore(':memory:');
       const streams = makeManager(store);
       const streamId = crypto.randomUUID();
       await streams.register(streamId);
@@ -563,6 +449,7 @@ describe('Stream Chunks', () => {
         }
         await streams.cancel(streamId).catch(() => undefined);
         await persistPromise.catch(() => undefined);
+        store.close();
       }
     });
 
