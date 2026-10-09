@@ -1212,6 +1212,71 @@ test('delivers cancellation to a local handler registered after cancel returns',
   }
 });
 
+test('a consumer disposed while its claim is in flight hands the claimed turn to the next consumer', async (t) => {
+  const pglite = new PGlite();
+  const database = fromPglite(pglite);
+  const claimInFlight = Promise.withResolvers<void>();
+  const releaseClaim = Promise.withResolvers<void>();
+  const claimDone = Promise.withResolvers<void>();
+  let claimHeld = false;
+  const boss = new PgBoss({
+    db: {
+      // pg-boss claims from a key_strict_fifo queue with a strict_fifo_heads CTE.
+      // Holding the first claim lets a push commit before the claim reads.
+      executeSql: async (text, values) => {
+        if (claimHeld || !text.includes('strict_fifo_heads')) {
+          return database.executeSql(text, values);
+        }
+        claimHeld = true;
+        claimInFlight.resolve();
+        await releaseClaim.promise;
+        try {
+          return await database.executeSql(text, values);
+        } finally {
+          claimDone.resolve();
+        }
+      },
+    },
+    backend: 'pglite',
+  });
+  boss.on('error', () => {});
+  await boss.start();
+  const queue = new PgBossTurnQueue(boss, {
+    pollingIntervalSeconds: 0.5,
+    schema: 'pgboss',
+  });
+  await queue.initialize();
+  let disposedRuns = 0;
+  let nextRuns = 0;
+  let next: AsyncDisposable | undefined;
+  try {
+    const disposed = await queue.consume(async () => {
+      disposedRuns++;
+    }, noOrphans);
+    await claimInFlight.promise;
+    await disposed[Symbol.asyncDispose]();
+    await queue.push(ref('claim-after-dispose', 1));
+    releaseClaim.resolve();
+    await claimDone.promise;
+
+    next = await queue.consume(async () => {
+      nextRuns++;
+    }, noOrphans);
+    await waitFor(
+      t,
+      () => disposedRuns + nextRuns === 1,
+      'the pushed turn runs once',
+    );
+    assert.equal(disposedRuns, 0, 'a disposed consumer runs nothing');
+    assert.equal(nextRuns, 1);
+  } finally {
+    releaseClaim.resolve();
+    await next?.[Symbol.asyncDispose]();
+    await boss.stop({ graceful: false });
+    await pglite.close();
+  }
+});
+
 test('fails fast when a custom-adapter schema is omitted and accepts it explicitly', async (t) => {
   const pglite = new PGlite();
   const schema = 'custom_pgboss';

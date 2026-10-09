@@ -243,6 +243,9 @@ export class PgBossTurnQueue extends TurnQueue {
     handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
     options: ConsumeOptions,
   ): Promise<AsyncDisposable> {
+    // pg-boss's offWork lets a fetch already in flight finish, so a turn can
+    // be claimed after disposal. Such a turn goes back to the queue unrun.
+    const disposal = new AbortController();
     const turnWorkerId = await this.#boss.work<TurnRef>(
       this.#queue,
       {
@@ -250,6 +253,10 @@ export class PgBossTurnQueue extends TurnQueue {
         pollingIntervalSeconds: this.#pollingIntervalSeconds,
       },
       async ([job]) => {
+        if (disposal.signal.aborted) {
+          await this.#handBack(this.#queue, job.id);
+          return;
+        }
         let parked = false;
         const localAbort = new AbortController();
         const active = this.#active.get(job.data.streamId) ?? new Set();
@@ -301,6 +308,10 @@ export class PgBossTurnQueue extends TurnQueue {
         pollingIntervalSeconds: this.#pollingIntervalSeconds,
       },
       async ([job]: JobWithMetadata<TurnRef>[]) => {
+        if (disposal.signal.aborted) {
+          await this.#handBack(this.deadLetterQueue, job.id);
+          return;
+        }
         try {
           await options.onOrphaned(
             job.data,
@@ -320,6 +331,7 @@ export class PgBossTurnQueue extends TurnQueue {
 
     return {
       [Symbol.asyncDispose]: async () => {
+        disposal.abort();
         await this.#boss.offWork(this.#queue, {
           id: turnWorkerId,
           wait: options.waitForActive,
@@ -406,6 +418,18 @@ export class PgBossTurnQueue extends TurnQueue {
     );
     this.#cancelIntentExpiryTimer = timer;
     timer.unref();
+  }
+
+  /**
+   * Returns a claimed job to its queue unrun, in its original order: cancel
+   * releases its strict-FIFO key, as parking does, and resume makes it
+   * fetchable again with its id, created_on and retry count unchanged.
+   * pg-boss's later completion of the job finds it no longer active and
+   * changes nothing.
+   */
+  async #handBack(queue: string, id: string): Promise<void> {
+    await this.#boss.cancel(queue, id);
+    await this.#boss.resume(queue, id);
   }
 
   async #deleteIfStillQueued(ids: string[]): Promise<void> {
