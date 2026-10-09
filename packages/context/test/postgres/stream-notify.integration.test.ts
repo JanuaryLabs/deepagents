@@ -73,11 +73,10 @@ async function withNotifySource<T>(
     pool: container.connectionString,
     schema,
   });
-  const source = new PostgresNotifyChangeSource({
+  const source = await PostgresNotifyChangeSource.create({
     pool: container.connectionString,
     schema,
   });
-  await source.initialize();
   try {
     return await fn(store, source, container.connectionString);
   } finally {
@@ -101,22 +100,17 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
   it('should fail notify setup with PostgreSQL table-not-found when base stream tables are missing', async () => {
     await using container = await testPostgres.database();
 
-    const source = new PostgresNotifyChangeSource({
-      pool: container.connectionString,
-      schema: testSchema(),
-    });
-    try {
-      await assert.rejects(
-        () => source.initialize(),
-        (error: unknown) =>
-          typeof error === 'object' &&
-          error !== null &&
-          'code' in error &&
-          error.code === '42P01',
-      );
-    } finally {
-      await source.close();
-    }
+    await assert.rejects(
+      PostgresNotifyChangeSource.create({
+        pool: container.connectionString,
+        schema: testSchema(),
+      }),
+      (error: unknown) =>
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === '42P01',
+    );
   });
 
   it('should receive chunk and terminal status wakeups through LISTEN/NOTIFY', async () =>
@@ -177,11 +171,10 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
         pool: connectionString,
         schema: otherSchema,
       });
-      const otherSource = new PostgresNotifyChangeSource({
+      const otherSource = await PostgresNotifyChangeSource.create({
         pool: connectionString,
         schema: otherSchema,
       });
-      await otherSource.initialize();
 
       const ac = new AbortController();
       const iterator = source
@@ -252,8 +245,7 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       max: 1,
     });
     const store = await PostgresStreamStore.create({ pool, schema });
-    const source = new PostgresNotifyChangeSource({ pool, schema });
-    await source.initialize();
+    const source = await PostgresNotifyChangeSource.create({ pool, schema });
 
     const ac = new AbortController();
     const iterator = source
@@ -302,8 +294,7 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       max: 1,
     });
     const store = await PostgresStreamStore.create({ pool, schema });
-    const source = new PostgresNotifyChangeSource({ pool, schema });
-    await source.initialize();
+    const source = await PostgresNotifyChangeSource.create({ pool, schema });
 
     const blocker = await pool.connect();
     let blockerReleased = false;
@@ -341,4 +332,149 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       await pool.end();
     }
   });
+
+  it('concurrent first subscribers share one LISTEN connection', async () =>
+    await withNotifySource(async (_store, source, connectionString) => {
+      const admin = new Pool({ connectionString, max: 1 });
+      const ac = new AbortController();
+      const first = source
+        .subscribe('stream-a', ac.signal)
+        [Symbol.asyncIterator]();
+      const second = source
+        .subscribe('stream-b', ac.signal)
+        [Symbol.asyncIterator]();
+      try {
+        const ticks = await settleWithin(
+          Promise.all([first.next(), second.next()]),
+          'both ticks',
+        );
+        assert.deepStrictEqual(
+          ticks.map((tick) => tick.value),
+          [{ kind: 'tick' }, { kind: 'tick' }],
+        );
+
+        const { rows } = await admin.query<{ listening: number }>(
+          `SELECT count(*)::int AS listening FROM pg_stat_activity
+           WHERE datname = current_database() AND query LIKE 'LISTEN %'`,
+        );
+        assert.strictEqual(rows[0].listening, 1);
+      } finally {
+        ac.abort();
+        await first.return?.();
+        await second.return?.();
+        await admin.end();
+      }
+    }));
+
+  it('a subscribe whose LISTEN setup fails rejects, and the next one listens', async () => {
+    await using container = await testPostgres.database();
+    const schema = testSchema();
+    const pool = new Pool({
+      connectionString: container.connectionString,
+      max: 1,
+      connectionTimeoutMillis: 200,
+    });
+    const store = await PostgresStreamStore.create({ pool, schema });
+    const source = await PostgresNotifyChangeSource.create({ pool, schema });
+    // Holds the pool's only connection, so the LISTEN setup cannot connect.
+    const blocker = await pool.connect();
+    let blockerReleased = false;
+    const ac = new AbortController();
+    const failing = source
+      .subscribe('setup-failure', ac.signal)
+      [Symbol.asyncIterator]();
+    const retried = source
+      .subscribe('setup-failure', ac.signal)
+      [Symbol.asyncIterator]();
+    try {
+      await assert.rejects(settleWithin(failing.next(), 'failed setup'), {
+        message: /timeout exceeded when trying to connect/,
+      });
+
+      blocker.release();
+      blockerReleased = true;
+      assert.deepStrictEqual(
+        await settleWithin(retried.next(), 'tick after the failed setup'),
+        { value: { kind: 'tick' }, done: false },
+      );
+    } finally {
+      ac.abort();
+      if (!blockerReleased) {
+        blocker.release();
+      }
+      await failing.return?.();
+      await retried.return?.();
+      await source.close();
+      await store.close();
+      await pool.end();
+    }
+  });
+
+  it('fails subscribers when the LISTEN connection drops, then listens again', async () =>
+    await withNotifySource(async (store, source, connectionString) => {
+      const stream = createStream({
+        status: 'running',
+        startedAt: Date.now(),
+      });
+      await store.createStream(stream);
+      const admin = new Pool({ connectionString, max: 1 });
+      const ac = new AbortController();
+      const dropped = source
+        .subscribe(stream.id, ac.signal)
+        [Symbol.asyncIterator]();
+      const otherStream = source
+        .subscribe('other-stream', ac.signal)
+        [Symbol.asyncIterator]();
+      const again = source
+        .subscribe(stream.id, ac.signal)
+        [Symbol.asyncIterator]();
+      try {
+        assert.deepStrictEqual(
+          await settleWithin(dropped.next(), 'initial tick'),
+          { value: { kind: 'tick' }, done: false },
+        );
+        assert.deepStrictEqual(
+          await settleWithin(otherStream.next(), 'other stream tick'),
+          { value: { kind: 'tick' }, done: false },
+        );
+        // Handled from the start: the drop can fail them before the query returns.
+        const failures = Promise.all(
+          [dropped, otherStream].map((subscription) =>
+            assert.rejects(
+              settleWithin(subscription.next(), 'subscriber failure'),
+              {
+                message: /terminating connection due to administrator command/,
+              },
+            ),
+          ),
+        );
+
+        // What a database restart or an idle-connection kill does.
+        const terminated = await admin.query(
+          `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+           WHERE datname = current_database()
+             AND pid <> pg_backend_pid()
+             AND query LIKE 'LISTEN %'`,
+        );
+        assert.strictEqual(terminated.rowCount, 1, 'one LISTEN connection');
+        await failures;
+
+        assert.deepStrictEqual(
+          await settleWithin(again.next(), 'tick after the drop'),
+          { value: { kind: 'tick' }, done: false },
+        );
+        const nextChunk = again.next();
+        await store.appendChunks([createChunk(stream.id, 0)]);
+        assert.deepStrictEqual(
+          await settleWithin(nextChunk, 'chunk after the drop'),
+          { value: { kind: 'chunks' }, done: false },
+        );
+      } finally {
+        ac.abort();
+        await dropped.return?.();
+        await otherStream.return?.();
+        await again.return?.();
+        await admin.end();
+      }
+    }));
 });

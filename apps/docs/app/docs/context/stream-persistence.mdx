@@ -152,10 +152,9 @@ const store = await PostgresStreamStore.create({
   pool: process.env.DATABASE_URL!,
 });
 
-const changeSource = new PostgresNotifyChangeSource({
+const changeSource = await PostgresNotifyChangeSource.create({
   pool: process.env.DATABASE_URL!,
 });
-await changeSource.initialize();
 
 const manager = new StreamManager({ store, changeSource });
 ```

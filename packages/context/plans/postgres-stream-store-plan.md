@@ -17,7 +17,7 @@
 - PostgreSQL baseline is 18.
 - `PostgresStreamStore` is persistence-only.
 - Users can combine `PostgresStreamStore` with either `PollingChangeSource` or `PostgresNotifyChangeSource`.
-- `PostgresNotifyChangeSource.initialize()` installs only notification trigger/function plumbing.
+- `PostgresNotifyChangeSource.create()` installs only notification trigger/function plumbing.
 - `PostgresStreamStore.create()` installs only base stream tables and indexes.
 - No `pg_notify` call lives inside `PostgresStreamStore.appendChunks()` or `PostgresStreamStore.updateStreamStatus()`.
 - Notification payloads are wakeups only. Chunks and final status are always read from tables.
@@ -64,11 +64,10 @@ const store = await PostgresStreamStore.create({
   schema: 'deepagents',
 });
 
-const changeSource = new PostgresNotifyChangeSource({
+const changeSource = await PostgresNotifyChangeSource.create({
   pool: process.env.DATABASE_URL!,
   schema: 'deepagents',
 });
-await changeSource.initialize();
 
 const manager = new StreamManager({
   store,
@@ -156,7 +155,7 @@ Implementation requirements:
 
 ## Notify Source Schema
 
-`PostgresNotifyChangeSource.initialize()` installs only this layer. If base tables are missing, it should fail with PostgreSQL's table-not-found error, not silently create store tables.
+`PostgresNotifyChangeSource.create()` installs only this layer. If base tables are missing, it should fail with PostgreSQL's table-not-found error, not silently create store tables.
 
 Use one shared channel and filter by schema plus stream ID in TypeScript:
 
@@ -244,7 +243,7 @@ export interface PostgresNotifyChangeSourceOptions {
 Implementation requirements:
 
 - Own a dedicated `pg` client for `LISTEN`; do not use ordinary pooled queries for the listener connection.
-- `initialize()` installs only notify functions/triggers.
+- `create()` installs only notify functions/triggers.
 - `subscribe(streamId, signal)` registers the subscriber before ensuring `LISTEN` is active.
 - `subscribe()` must yield an initial `{ kind: 'tick' }` after `LISTEN` is active so `StreamManager` drains any chunks written before subscription readiness.
 - Parse notifications defensively. Ignore invalid JSON, wrong schema, wrong stream ID, and unknown kind.
@@ -288,7 +287,7 @@ Test cases:
 - Notify change source filters unrelated schemas.
 - Notify source initial tick drains chunks written before subscription.
 - Notify source cleans up listener connection on abort and close.
-- Notify trigger setup is optional; polling tests must pass without `PostgresNotifyChangeSource.initialize()`.
+- Notify trigger setup is optional; polling tests must pass without `PostgresNotifyChangeSource.create()`.
 
 ## Non-Goals
 

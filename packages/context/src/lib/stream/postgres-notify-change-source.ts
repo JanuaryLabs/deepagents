@@ -1,4 +1,6 @@
+import { EventEmitter, on } from 'node:events';
 import { createRequire } from 'node:module';
+import pMemoize from 'p-memoize';
 import type { Notification, Pool, PoolClient, PoolConfig } from 'pg';
 import { z } from 'zod';
 
@@ -15,37 +17,94 @@ export interface PostgresNotifyChangeSourceOptions {
   channel?: string;
 }
 
-type Subscriber = ChangeQueue<StreamChange>;
+interface ListenerHandlers {
+  readonly notification: (message: Notification) => void;
+  readonly error: (error: Error) => void;
+  readonly end: () => void;
+}
+
+/** No LISTEN connection: the next subscriber opens one. */
+const NOT_LISTENING = {
+  release: (): Promise<void> => Promise.resolve(),
+  fail: (): void => {},
+};
+
+/** The LISTEN connection, with the handlers this source put on it. */
+class Listening {
+  readonly #client: PoolClient;
+  readonly #handlers: ListenerHandlers;
+
+  constructor(client: PoolClient, handlers: ListenerHandlers) {
+    this.#client = client;
+    this.#handlers = handlers;
+    client.on('notification', handlers.notification);
+    client.on('error', handlers.error);
+    client.on('end', handlers.end);
+  }
+
+  /** Stops listening and returns the connection to the pool. */
+  async release(channel: string): Promise<void> {
+    this.#detach();
+    try {
+      await this.#client.query(`UNLISTEN ${quoteIdentifier(channel)}`);
+    } finally {
+      this.#client.release();
+    }
+  }
+
+  /** Gives a broken connection back for the pool to destroy. */
+  fail(error: Error | true): void {
+    this.#detach();
+    this.#client.release(error);
+  }
+
+  #detach(): void {
+    this.#client.off('notification', this.#handlers.notification);
+    this.#client.off('error', this.#handlers.error);
+    this.#client.off('end', this.#handlers.end);
+  }
+}
+
+/** A wakeup for one stream, wrapped so a subscription can tell it from other events. */
+class ChangeDelivery {
+  readonly change: StreamChange;
+
+  constructor(change: StreamChange) {
+    this.change = change;
+  }
+}
 
 export class PostgresNotifyChangeSource implements StreamChangeSource {
-  #pool: Pool;
-  #schema: string;
-  #channel: string;
-  #ownsPool: boolean;
-  #listener: PoolClient | undefined;
-  #listenPromise: Promise<void> | undefined;
-  #isInitialized = false;
-  #isClosing = false;
-  #isClosed = false;
-  #subscribers = new Map<string, Set<Subscriber>>();
+  readonly #pool: Pool;
+  readonly #schema: string;
+  readonly #channel: string;
+  readonly #ownsPool: boolean;
+  /** Aborts when close() starts: every subscription ends, and no LISTEN connection opens. */
+  readonly #closed = new AbortController();
+  /** Emits `stream:<id>` with a ChangeDelivery; `error` fails every subscription. */
+  readonly #changes = new EventEmitter().setMaxListeners(0);
+  #subscriptions = 0;
+  #listener: Listening | typeof NOT_LISTENING = NOT_LISTENING;
+  /** Concurrent subscribers share one LISTEN setup; a failed one runs again. */
+  readonly #listen = pMemoize(() => this.#openListener(), { cache: false });
 
-  #onNotification = (message: Notification): void => {
-    this.#handleNotification(message);
+  readonly #handlers: ListenerHandlers = {
+    notification: (message) => {
+      this.#handleNotification(message);
+    },
+    error: (error) => {
+      this.#failListener(error);
+    },
+    end: () => {
+      if (!this.#closed.signal.aborted) {
+        this.#failListener(
+          new Error('PostgreSQL stream notification listener ended'),
+        );
+      }
+    },
   };
 
-  #onListenerError = (error: Error): void => {
-    this.#failListener(error);
-  };
-
-  #onListenerEnd = (): void => {
-    if (!this.#isClosing) {
-      this.#failListener(
-        new Error('PostgreSQL stream notification listener ended'),
-      );
-    }
-  };
-
-  constructor(options: PostgresNotifyChangeSourceOptions) {
+  private constructor(options: PostgresNotifyChangeSourceOptions) {
     const schema = options.schema ?? 'public';
     const channel = options.channel ?? DEFAULT_POSTGRES_STREAM_CHANGES_CHANNEL;
     assertIdentifier(schema, 'schema');
@@ -77,63 +136,63 @@ export class PostgresNotifyChangeSource implements StreamChangeSource {
     }
   }
 
-  async initialize(): Promise<void> {
-    await this.#pool.query(
-      postgresStreamNotifyDDL(this.#schema, this.#channel),
-    );
-    this.#isInitialized = true;
+  /** Opens the source: installs the notify triggers before it returns. */
+  static async create(
+    options: PostgresNotifyChangeSourceOptions,
+  ): Promise<PostgresNotifyChangeSource> {
+    const source = new PostgresNotifyChangeSource(options);
+    try {
+      await source.#pool.query(
+        postgresStreamNotifyDDL(source.#schema, source.#channel),
+      );
+    } catch (error) {
+      await source.close();
+      throw error;
+    }
+    return source;
   }
 
   async *subscribe(
     streamId: string,
     signal: AbortSignal,
   ): AsyncIterable<StreamChange> {
-    this.#ensureInitialized();
-    this.#ensureOpen();
-    const queue = new ChangeQueue<StreamChange>();
-    this.#addSubscriber(streamId, queue);
-
-    const cleanup = () => {
-      queue.close();
-      this.#removeSubscriber(streamId, queue);
-    };
-    signal.addEventListener('abort', cleanup, { once: true });
-
+    if (this.#closed.signal.aborted) {
+      throw new Error('PostgresNotifyChangeSource is closed.');
+    }
+    if (signal.aborted) return;
+    // Listens before LISTEN is ready, so a change in that window is kept.
+    const changes = on(this.#changes, `stream:${streamId}`, {
+      signal: AbortSignal.any([signal, this.#closed.signal]),
+    });
+    this.#subscriptions += 1;
     try {
       await this.#ensureListening();
-      if (signal.aborted || this.#isClosed) return;
+      if (signal.aborted || this.#closed.signal.aborted) return;
       yield { kind: 'tick' };
 
-      while (!signal.aborted && !this.#isClosed) {
-        const change = await queue.next(signal);
-        if (!change) return;
-        yield change;
+      for await (const [delivery] of changes) {
+        if (delivery instanceof ChangeDelivery) yield delivery.change;
       }
+    } catch (error) {
+      // The caller's signal or close() ended the subscription.
+      if (error instanceof Error && error.name === 'AbortError') return;
+      throw error;
     } finally {
-      signal.removeEventListener('abort', cleanup);
-      cleanup();
+      this.#subscriptions -= 1;
+      await changes.return?.();
       await this.#releaseListenerIfIdle();
     }
   }
 
   async close(): Promise<void> {
-    if (this.#isClosed) return;
-    this.#isClosed = true;
-    this.#isClosing = true;
+    if (this.#closed.signal.aborted) return;
+    this.#closed.abort();
 
-    for (const subscribers of this.#subscribers.values()) {
-      for (const subscriber of subscribers) {
-        subscriber.close();
-      }
-    }
-    this.#subscribers.clear();
-
-    if (this.#listenPromise) {
-      try {
-        await this.#listenPromise;
-      } catch {
-        // Listener setup already released the failed client.
-      }
+    try {
+      // Joins a LISTEN setup in flight; it sees close() and destroys its client.
+      await this.#listen();
+    } catch {
+      // Listener setup already released the failed client.
     }
     await this.#releaseListener();
 
@@ -142,50 +201,26 @@ export class PostgresNotifyChangeSource implements StreamChangeSource {
     }
   }
 
-  #ensureInitialized(): void {
-    if (!this.#isInitialized) {
-      throw new Error(
-        'PostgresNotifyChangeSource not initialized. Call await source.initialize() after construction.',
-      );
-    }
-  }
-
-  #ensureOpen(): void {
-    if (this.#isClosed) {
-      throw new Error('PostgresNotifyChangeSource is closed.');
-    }
-  }
-
   async #ensureListening(): Promise<void> {
-    this.#ensureOpen();
-    if (this.#listener) return;
-    if (this.#listenPromise) return this.#listenPromise;
+    if (this.#listener instanceof Listening) return;
+    await this.#listen();
+  }
 
-    this.#listenPromise = (async () => {
-      const listener = await this.#pool.connect();
-      let success = false;
-      try {
-        listener.on('notification', this.#onNotification);
-        listener.on('error', this.#onListenerError);
-        listener.on('end', this.#onListenerEnd);
-        await listener.query(`LISTEN ${quoteIdentifier(this.#channel)}`);
-        if (this.#isClosed) {
-          return;
-        }
-        this.#listener = listener;
-        success = true;
-      } finally {
-        this.#listenPromise = undefined;
-        if (!success) {
-          listener.off('notification', this.#onNotification);
-          listener.off('error', this.#onListenerError);
-          listener.off('end', this.#onListenerEnd);
-          listener.release(true);
-        }
-      }
-    })();
-
-    return this.#listenPromise;
+  async #openListener(): Promise<void> {
+    if (this.#closed.signal.aborted) return;
+    const client = await this.#pool.connect();
+    const listening = new Listening(client, this.#handlers);
+    try {
+      await client.query(`LISTEN ${quoteIdentifier(this.#channel)}`);
+    } catch (error) {
+      listening.fail(true);
+      throw error;
+    }
+    if (this.#closed.signal.aborted) {
+      listening.fail(true);
+      return;
+    }
+    this.#listener = listening;
   }
 
   #handleNotification(message: Notification): void {
@@ -196,143 +231,32 @@ export class PostgresNotifyChangeSource implements StreamChangeSource {
     if (payload.schema !== this.#schema) return;
     if (payload.kind !== 'chunks' && payload.kind !== 'status') return;
 
-    const subscribers = this.#subscribers.get(payload.streamId);
-    if (!subscribers) return;
-
     const change: StreamChange =
       payload.kind === 'chunks' ? { kind: 'chunks' } : { kind: 'status' };
-    for (const subscriber of subscribers) {
-      subscriber.push(change);
-    }
+    this.#changes.emit(
+      `stream:${payload.streamId}`,
+      new ChangeDelivery(change),
+    );
   }
 
   #failListener(error: Error): void {
     const listener = this.#listener;
-    this.#listener = undefined;
-    this.#listenPromise = undefined;
-    if (listener) {
-      listener.off('notification', this.#onNotification);
-      listener.off('error', this.#onListenerError);
-      listener.off('end', this.#onListenerEnd);
-      listener.release(error);
+    this.#listener = NOT_LISTENING;
+    listener.fail(error);
+    if (this.#changes.listenerCount('error') > 0) {
+      this.#changes.emit('error', error);
     }
-
-    for (const subscribers of this.#subscribers.values()) {
-      for (const subscriber of subscribers) {
-        subscriber.fail(error);
-      }
-    }
-    this.#subscribers.clear();
   }
 
   async #releaseListenerIfIdle(): Promise<void> {
-    if (this.#subscribers.size > 0) return;
+    if (this.#subscriptions > 0) return;
     await this.#releaseListener();
   }
 
   async #releaseListener(): Promise<void> {
     const listener = this.#listener;
-    if (!listener) return;
-
-    this.#listener = undefined;
-    listener.off('notification', this.#onNotification);
-    listener.off('error', this.#onListenerError);
-    listener.off('end', this.#onListenerEnd);
-    try {
-      await listener.query(`UNLISTEN ${quoteIdentifier(this.#channel)}`);
-    } finally {
-      listener.release();
-    }
-  }
-
-  #addSubscriber(streamId: string, subscriber: Subscriber): void {
-    let subscribers = this.#subscribers.get(streamId);
-    if (!subscribers) {
-      subscribers = new Set();
-      this.#subscribers.set(streamId, subscribers);
-    }
-    subscribers.add(subscriber);
-  }
-
-  #removeSubscriber(streamId: string, subscriber: Subscriber): void {
-    const subscribers = this.#subscribers.get(streamId);
-    if (!subscribers) return;
-    subscribers.delete(subscriber);
-    if (subscribers.size === 0) {
-      this.#subscribers.delete(streamId);
-    }
-  }
-}
-
-class ChangeQueue<T> {
-  #values: T[] = [];
-  #waiters = new Set<{
-    resolve: (value: T | undefined) => void;
-    reject: (error: unknown) => void;
-  }>();
-  #closed = false;
-  #error: unknown;
-
-  push(value: T): void {
-    if (this.#closed) return;
-    const waiter = this.#waiters.values().next().value;
-    if (waiter) {
-      this.#waiters.delete(waiter);
-      waiter.resolve(value);
-      return;
-    }
-    this.#values.push(value);
-  }
-
-  fail(error: unknown): void {
-    if (this.#closed) return;
-    this.#closed = true;
-    this.#error = error;
-    this.#values = [];
-    for (const waiter of this.#waiters) {
-      waiter.reject(error);
-    }
-    this.#waiters.clear();
-  }
-
-  close(): void {
-    if (this.#closed) return;
-    this.#closed = true;
-    this.#values = [];
-    for (const waiter of this.#waiters) {
-      waiter.resolve(undefined);
-    }
-    this.#waiters.clear();
-  }
-
-  async next(signal: AbortSignal): Promise<T | undefined> {
-    if (this.#error) throw this.#error;
-    if (this.#closed || signal.aborted) return undefined;
-    if (this.#values.length > 0) {
-      return this.#values.shift();
-    }
-
-    return new Promise<T | undefined>((resolve, reject) => {
-      const waiter = { resolve, reject };
-      const cleanup = () => {
-        this.#waiters.delete(waiter);
-        signal.removeEventListener('abort', onAbort);
-      };
-      const onAbort = () => {
-        cleanup();
-        resolve(undefined);
-      };
-      waiter.resolve = (value) => {
-        cleanup();
-        resolve(value);
-      };
-      waiter.reject = (error) => {
-        cleanup();
-        reject(error);
-      };
-      this.#waiters.add(waiter);
-      signal.addEventListener('abort', onAbort, { once: true });
-    });
+    this.#listener = NOT_LISTENING;
+    await listener.release(this.#channel);
   }
 }
 
