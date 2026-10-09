@@ -116,7 +116,7 @@
     "@napi-rs/keyring": "^2.1.0",
     "@opencoredev/loginwithchatgpt-core": "^0.2.0",
     "@sdk-it/hono": "^0.46.7",
-    "@zukhruf/mutex": "^0.3.9",
+    "@zukhruf/mutex": "^0.3.14",
     "ai": "^7.0.127",
     "atomically": "^2.1.1",
     "cron-parser": "5.6.2",
