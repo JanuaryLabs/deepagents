@@ -1,10 +1,12 @@
 import { MemoryStore } from '@opencoredev/loginwithchatgpt-core';
+import { settleWithin } from '@zukhruf/testing/async';
 import { generateText } from 'ai';
 import { http } from 'msw';
 import { setupServer } from 'msw/node';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
   ClaudeAuthError,
@@ -399,6 +401,132 @@ test('a rejected access token is refreshed once and the request retried', async 
       .map((request) => request.authorization),
     ['Bearer access-1', 'Bearer access-2'],
   );
+  assert.equal((await accounts.state('owner-a')).status, 'connected');
+});
+
+test('a request aborted while another request refreshes the token stops waiting for that refresh', async () => {
+  const accounts = createClaudeAccounts({ store: new MemoryStore() });
+  const refreshing = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let refreshes = 0;
+  using requests = interceptWire(async (request) => {
+    if (
+      request.url === TOKEN_URL &&
+      request.body?.grant_type === 'authorization_code'
+    ) {
+      return tokens('access-1', 'refresh-1', { expires_in: 30 });
+    }
+    if (request.url === TOKEN_URL) {
+      refreshes++;
+      refreshing.resolve();
+      await release.promise;
+      return tokens('access-2', 'refresh-2');
+    }
+    if (request.url === MESSAGES_URL) return message('hi');
+    return unexpected();
+  });
+
+  await signIn(accounts, 'owner-a');
+  const refreshingRequest = ask(accounts, 'owner-a');
+  try {
+    await refreshing.promise;
+    const controller = new AbortController();
+    const waitingRequest = generateText({
+      model: accounts.provider('owner-a')('claude-sonnet-4-6'),
+      prompt: 'hello',
+      maxRetries: 0,
+      abortSignal: controller.signal,
+    });
+    // Nothing outside the provider shows that a request waits for the
+    // refresh, so the request gets time to reach the wait before the abort.
+    await sleep(100);
+    controller.abort();
+    await settleWithin(
+      assert.rejects(waitingRequest, { name: 'AbortError' }),
+      'the aborted request stops waiting',
+      1_000,
+    );
+  } finally {
+    release.resolve();
+    await Promise.allSettled([refreshingRequest]);
+  }
+
+  assert.equal((await refreshingRequest).text, 'hi');
+  assert.equal(refreshes, 1);
+  assert.deepStrictEqual(
+    requests
+      .filter((request) => request.url === MESSAGES_URL)
+      .map((request) => request.authorization),
+    ['Bearer access-2'],
+  );
+  assert.equal((await accounts.state('owner-a')).status, 'connected');
+});
+
+test('a retry aborted while another retry refreshes a rejected token stops waiting for that refresh', async () => {
+  const accounts = createClaudeAccounts({ store: new MemoryStore() });
+  const waitingAtApi = Promise.withResolvers<void>();
+  const rejectWaiting = Promise.withResolvers<void>();
+  const refreshing = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let refreshes = 0;
+  using _wire = interceptWire(async (request) => {
+    if (
+      request.url === TOKEN_URL &&
+      request.body?.grant_type === 'authorization_code'
+    ) {
+      return tokens('access-1', 'refresh-1');
+    }
+    if (request.url === TOKEN_URL) {
+      refreshes++;
+      refreshing.resolve();
+      await release.promise;
+      return tokens('access-2', 'refresh-2');
+    }
+    if (request.url === MESSAGES_URL) {
+      if (request.authorization !== 'Bearer access-1') {
+        return message('after refresh');
+      }
+      // The waiting request reaches the API before the other one, so its
+      // retry starts while the other retry already refreshes.
+      if (JSON.stringify(request.body).includes('waiting')) {
+        waitingAtApi.resolve();
+        await rejectWaiting.promise;
+      }
+      return Response.json({ type: 'error' }, { status: 401 });
+    }
+    return unexpected();
+  });
+
+  await signIn(accounts, 'owner-a');
+  const controller = new AbortController();
+  const waitingRequest = generateText({
+    model: accounts.provider('owner-a')('claude-sonnet-4-6'),
+    prompt: 'waiting',
+    maxRetries: 0,
+    abortSignal: controller.signal,
+  });
+  await waitingAtApi.promise;
+  const refreshingRequest = ask(accounts, 'owner-a');
+  try {
+    await refreshing.promise;
+    rejectWaiting.resolve();
+    // Nothing outside the provider shows that the retry waits for the
+    // refresh, so the retry gets time to reach the wait before the abort.
+    await sleep(100);
+    controller.abort();
+    await settleWithin(
+      assert.rejects(waitingRequest, { name: 'AbortError' }),
+      'the aborted retry stops waiting',
+      1_000,
+    );
+  } finally {
+    rejectWaiting.resolve();
+    release.resolve();
+    await Promise.allSettled([refreshingRequest]);
+  }
+
+  assert.equal((await refreshingRequest).text, 'after refresh');
+  assert.equal(refreshes, 1);
   assert.equal((await accounts.state('owner-a')).status, 'connected');
 });
 

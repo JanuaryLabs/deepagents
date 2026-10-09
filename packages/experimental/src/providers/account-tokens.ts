@@ -97,10 +97,14 @@ export function createTokenResolver<
 
   return {
     fresh: (owner: string, signal?: AbortSignal) =>
-      exclusive.acquire(owner, () => resolve(owner, undefined, signal)),
+      exclusive.acquire(owner, () => resolve(owner, undefined, signal), {
+        signal,
+      }),
     /** Replaces an access token the server rejected, refreshing at most once. */
     replace: (owner: string, rejected: string, signal?: AbortSignal) =>
-      exclusive.acquire(owner, () => resolve(owner, rejected, signal)),
+      exclusive.acquire(owner, () => resolve(owner, rejected, signal), {
+        signal,
+      }),
   };
 }
 

@@ -29,7 +29,7 @@ const signInMessage =
 
 /** Reads Claude Code's native store without running the Claude agent. */
 export async function getLocalClaudeAuth(
-  signal?: AbortSignal | null,
+  signal?: AbortSignal,
 ): Promise<string> {
   signal?.throwIfAborted();
   const directory = (
@@ -46,61 +46,65 @@ export async function getLocalClaudeAuth(
     return initial.value.claudeAiOauth.accessToken;
 
   const mutex = new Mutex(new SqliteStore(join(home, '.deepagents-locks')));
-  return mutex.acquire('claude', async () => {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      signal?.throwIfAborted();
-      const current = await snapshot(home, directory);
-      const tokens = current.value.claudeAiOauth;
-      if (tokens.expiresAt > Date.now() + 60_000) return tokens.accessToken;
-      let fresh;
-      try {
-        const response = await globalThis.fetch(CLAUDE_TOKEN_URL, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            grant_type: 'refresh_token',
-            refresh_token: tokens.refreshToken,
-            client_id: CLAUDE_CLIENT_ID,
-            scope: tokens.scopes.join(' '),
-          }),
-          signal: AbortSignal.any([
-            AbortSignal.timeout(30_000),
-            ...(signal ? [signal] : []),
-          ]),
-        });
-        if (!response.ok) {
-          await response.body?.cancel();
-          throw new Error('Token refresh rejected');
-        }
-        fresh = tokenResponse.parse(await response.json());
-      } catch {
+  return mutex.acquire(
+    'claude',
+    async () => {
+      for (let attempt = 0; attempt < 3; attempt++) {
         signal?.throwIfAborted();
+        const current = await snapshot(home, directory);
+        const tokens = current.value.claudeAiOauth;
+        if (tokens.expiresAt > Date.now() + 60_000) return tokens.accessToken;
+        let fresh;
+        try {
+          const response = await globalThis.fetch(CLAUDE_TOKEN_URL, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              grant_type: 'refresh_token',
+              refresh_token: tokens.refreshToken,
+              client_id: CLAUDE_CLIENT_ID,
+              scope: tokens.scopes.join(' '),
+            }),
+            signal: AbortSignal.any([
+              AbortSignal.timeout(30_000),
+              ...(signal ? [signal] : []),
+            ]),
+          });
+          if (!response.ok) {
+            await response.body?.cancel();
+            throw new Error('Token refresh rejected');
+          }
+          fresh = tokenResponse.parse(await response.json());
+        } catch {
+          signal?.throwIfAborted();
+          if ((await current.store.read()) !== current.raw) continue;
+          throw new Error(
+            'Could not refresh the local Claude login. Run `claude auth login` again.',
+          );
+        }
+        signal?.throwIfAborted();
+        // ponytail: the Claude CLI does not share this lock. Detect completed
+        // login changes; a single credential owner is needed to eliminate CLI refresh races.
         if ((await current.store.read()) !== current.raw) continue;
-        throw new Error(
-          'Could not refresh the local Claude login. Run `claude auth login` again.',
-        );
+        const value = nativeLogin.parse({
+          ...current.value,
+          claudeAiOauth: {
+            ...tokens,
+            accessToken: fresh.access_token,
+            refreshToken: fresh.refresh_token ?? tokens.refreshToken,
+            expiresAt: Date.now() + fresh.expires_in * 1000,
+            scopes: fresh.scope?.split(' ') ?? tokens.scopes,
+          },
+        });
+        await current.store.write(JSON.stringify(value, null, 2) + '\n');
+        return value.claudeAiOauth.accessToken;
       }
-      signal?.throwIfAborted();
-      // ponytail: the Claude CLI does not share this lock. Detect completed
-      // login changes; a single credential owner is needed to eliminate CLI refresh races.
-      if ((await current.store.read()) !== current.raw) continue;
-      const value = nativeLogin.parse({
-        ...current.value,
-        claudeAiOauth: {
-          ...tokens,
-          accessToken: fresh.access_token,
-          refreshToken: fresh.refresh_token ?? tokens.refreshToken,
-          expiresAt: Date.now() + fresh.expires_in * 1000,
-          scopes: fresh.scope?.split(' ') ?? tokens.scopes,
-        },
-      });
-      await current.store.write(JSON.stringify(value, null, 2) + '\n');
-      return value.claudeAiOauth.accessToken;
-    }
-    throw new Error(
-      'The local Claude login changed repeatedly during refresh. Retry the request.',
-    );
-  });
+      throw new Error(
+        'The local Claude login changed repeatedly during refresh. Retry the request.',
+      );
+    },
+    { signal },
+  );
 }
 
 async function snapshot(home: string, directory: string) {

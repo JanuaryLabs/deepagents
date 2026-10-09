@@ -1,4 +1,5 @@
 import { NoSuchModelError } from '@ai-sdk/provider';
+import { settleWithin } from '@zukhruf/testing/async';
 import {
   createProviderRegistry,
   generateText,
@@ -12,6 +13,7 @@ import { mkdtempDisposable, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type TestContext, test } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { z } from 'zod';
 
 import {
@@ -437,3 +439,65 @@ for (const refresh of [true, false]) {
     );
   });
 }
+
+test('a request aborted while another request refreshes the login stops waiting for that refresh', async (t) => {
+  await using home = await mkdtempDisposable(
+    join(tmpdir(), 'claude-provider-'),
+  );
+  t.mock.property(process, 'platform', 'linux');
+  t.mock.property(process, 'env', {
+    ...process.env,
+    CLAUDE_CONFIG_DIR: home.path,
+    ANTHROPIC_API_KEY: 'must-not-be-used',
+    ANTHROPIC_AUTH_TOKEN: 'must-not-be-used',
+    ANTHROPIC_BASE_URL: 'https://must-not-receive-credentials.invalid',
+  });
+  const path = join(home.path, '.credentials.json');
+  await writeFile(path, JSON.stringify(login('old', Date.now() - 1000)));
+  const refreshing = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let refreshes = 0;
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    if (String(input).endsWith('/oauth/token')) {
+      refreshes++;
+      refreshing.resolve();
+      await release.promise;
+      return Response.json({ access_token: 'fresh', expires_in: 3600 });
+    }
+    return response('ok');
+  });
+
+  const refreshingRequest = generateText({
+    model: claude('claude-sonnet-4-6'),
+    prompt: 'hello',
+    maxRetries: 0,
+  });
+  try {
+    await refreshing.promise;
+    const controller = new AbortController();
+    const waitingRequest = generateText({
+      model: claude('claude-sonnet-4-6'),
+      prompt: 'hello',
+      maxRetries: 0,
+      abortSignal: controller.signal,
+    });
+    // Nothing outside the provider shows that a request waits for the
+    // refresh, so the request gets time to reach the wait before the abort.
+    await sleep(100);
+    controller.abort();
+    await settleWithin(
+      assert.rejects(waitingRequest, { name: 'AbortError' }),
+      'the aborted request stops waiting',
+      1_000,
+    );
+  } finally {
+    release.resolve();
+    // The refresh writes into the home; let it finish before the home goes.
+    await Promise.allSettled([refreshingRequest]);
+  }
+
+  assert.equal((await refreshingRequest).text, 'ok');
+  assert.equal(refreshes, 1);
+  const saved = JSON.parse(await readFile(path, 'utf8'));
+  assert.equal(saved.claudeAiOauth.accessToken, 'fresh');
+});

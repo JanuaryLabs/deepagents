@@ -1,5 +1,6 @@
 import { NoSuchModelError } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
+import { settleWithin } from '@zukhruf/testing/async';
 import {
   createProviderRegistry,
   defaultSettingsMiddleware,
@@ -23,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { type TestContext, test } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
 
@@ -424,6 +426,69 @@ for (const rotate of [true, false]) {
     assert.equal((await stat(join(home, 'auth.json'))).mode & 0o777, 0o600);
   });
 }
+
+test('a request aborted while another request refreshes the login stops waiting for that refresh', async (t) => {
+  await using home = await mkdtempDisposable(
+    join(tmpdir(), 'chatgpt-provider-'),
+  );
+  t.mock.property(process, 'env', {
+    ...process.env,
+    CODEX_HOME: home.path,
+    OPENAI_API_KEY: 'must-not-be-used',
+  });
+  const path = join(home.path, 'auth.json');
+  await writeFile(path, JSON.stringify(login('account-a', 0)));
+  const refreshing = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let refreshes = 0;
+  const freshAccessToken = accessToken(Date.now() + 7_200_000);
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    if (new URL(input.toString()).hostname === 'auth.openai.com') {
+      refreshes++;
+      refreshing.resolve();
+      await release.promise;
+      return Response.json({
+        access_token: freshAccessToken,
+        expires_in: 7200,
+      });
+    }
+    return response('ok');
+  });
+
+  const refreshingRequest = generateText({
+    model: codex('gpt-5.5'),
+    prompt: 'hello',
+    maxRetries: 0,
+  });
+  try {
+    await refreshing.promise;
+    const controller = new AbortController();
+    const waitingRequest = generateText({
+      model: codex('gpt-5.5'),
+      prompt: 'hello',
+      maxRetries: 0,
+      abortSignal: controller.signal,
+    });
+    // Nothing outside the provider shows that a request waits for the
+    // refresh, so the request gets time to reach the wait before the abort.
+    await sleep(100);
+    controller.abort();
+    await settleWithin(
+      assert.rejects(waitingRequest, { name: 'AbortError' }),
+      'the aborted request stops waiting',
+      1_000,
+    );
+  } finally {
+    release.resolve();
+    // The refresh writes into the home; let it finish before the home goes.
+    await Promise.allSettled([refreshingRequest]);
+  }
+
+  assert.equal((await refreshingRequest).text, 'ok');
+  assert.equal(refreshes, 1);
+  const saved = JSON.parse(await readFile(path, 'utf8'));
+  assert.equal(saved.tokens.access_token, freshAccessToken);
+});
 
 test('a refresh cannot replace a newer native login', async (t) => {
   const home = await localHome(t);

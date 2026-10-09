@@ -35,7 +35,7 @@ type CredentialStore = {
 
 /** Reads Codex's native store without running the Codex agent. */
 export async function getLocalCodexAuth(
-  signal?: AbortSignal | null,
+  signal?: AbortSignal,
 ): Promise<CodexAuth> {
   signal?.throwIfAborted();
   const home = await realpath(
@@ -49,62 +49,66 @@ export async function getLocalCodexAuth(
 
   // Coordinate refreshes across provider instances and worker processes.
   const mutex = new Mutex(new SqliteStore(join(home, '.deepagents-locks')));
-  return mutex.acquire('chatgpt', async () => {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      signal?.throwIfAborted();
-      const current = await snapshot(home);
-      if (!isAccessTokenExpired(current.tokens)) return auth(current.tokens);
-      const config = resolveConfig({
-        fetch: (input, init) =>
-          globalThis.fetch(input, {
-            ...init,
-            signal: AbortSignal.any([
-              AbortSignal.timeout(30_000),
-              ...(signal ? [signal] : []),
-            ]),
-          }),
-      });
-      let fresh;
-      try {
-        fresh = await ensureFreshTokens(config, current.tokens);
-      } catch {
+  return mutex.acquire(
+    'chatgpt',
+    async () => {
+      for (let attempt = 0; attempt < 3; attempt++) {
         signal?.throwIfAborted();
+        const current = await snapshot(home);
+        if (!isAccessTokenExpired(current.tokens)) return auth(current.tokens);
+        const config = resolveConfig({
+          fetch: (input, init) =>
+            globalThis.fetch(input, {
+              ...init,
+              signal: AbortSignal.any([
+                AbortSignal.timeout(30_000),
+                ...(signal ? [signal] : []),
+              ]),
+            }),
+        });
+        let fresh;
+        try {
+          fresh = await ensureFreshTokens(config, current.tokens);
+        } catch {
+          signal?.throwIfAborted();
+          if ((await current.store.read()) !== current.raw) continue;
+          // Do not leak token endpoint response bodies through errors or logs.
+          throw new Error(
+            'Could not refresh the local ChatGPT login. Run `codex login` again.',
+          );
+        }
+        signal?.throwIfAborted();
+        // ponytail: the Codex CLI does not share this lock. Detect completed
+        // login changes; a single credential owner is needed to eliminate CLI refresh races.
         if ((await current.store.read()) !== current.raw) continue;
-        // Do not leak token endpoint response bodies through errors or logs.
-        throw new Error(
-          'Could not refresh the local ChatGPT login. Run `codex login` again.',
-        );
-      }
-      signal?.throwIfAborted();
-      // ponytail: the Codex CLI does not share this lock. Detect completed
-      // login changes; a single credential owner is needed to eliminate CLI refresh races.
-      if ((await current.store.read()) !== current.raw) continue;
-      await current.store.write(
-        JSON.stringify(
-          {
-            ...current.value,
-            last_refresh: new Date().toISOString(),
-            tokens: {
-              ...current.value.tokens,
-              access_token: fresh.accessToken,
-              refresh_token: fresh.refreshToken,
-              id_token: fresh.idToken ?? current.value.tokens.id_token,
-              account_id: fresh.accountId ?? current.tokens.accountId,
+        await current.store.write(
+          JSON.stringify(
+            {
+              ...current.value,
+              last_refresh: new Date().toISOString(),
+              tokens: {
+                ...current.value.tokens,
+                access_token: fresh.accessToken,
+                refresh_token: fresh.refreshToken,
+                id_token: fresh.idToken ?? current.value.tokens.id_token,
+                account_id: fresh.accountId ?? current.tokens.accountId,
+              },
             },
-          },
-          null,
-          2,
-        ) + '\n',
+            null,
+            2,
+          ) + '\n',
+        );
+        return auth({
+          ...fresh,
+          accountId: fresh.accountId ?? current.tokens.accountId,
+        });
+      }
+      throw new Error(
+        'The local Codex login changed repeatedly during refresh. Retry the request.',
       );
-      return auth({
-        ...fresh,
-        accountId: fresh.accountId ?? current.tokens.accountId,
-      });
-    }
-    throw new Error(
-      'The local Codex login changed repeatedly during refresh. Retry the request.',
-    );
-  });
+    },
+    { signal },
+  );
 }
 
 function auth(tokens: { accessToken: string; accountId: string }): CodexAuth {
