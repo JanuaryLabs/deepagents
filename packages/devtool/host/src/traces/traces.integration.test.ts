@@ -13,6 +13,7 @@ import { mkdtempDisposable, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
@@ -249,28 +250,10 @@ function createSlowTraceModel() {
   return new MockLanguageModelV4({
     provider: 'test-provider',
     modelId: 'slow-trace-model',
-    doStream: async () => ({
-      stream: simulateReadableStream({
-        initialDelayInMs: 1_000,
-        chunkDelayInMs: 1_000,
-        chunks: [
-          { type: 'text-start', id: 'text-1' },
-          { type: 'text-delta', id: 'text-1', delta: 'Too late.' },
-          { type: 'text-end', id: 'text-1' },
-          {
-            type: 'finish',
-            finishReason: { unified: 'stop', raw: 'stop' },
-            usage: {
-              inputTokens: {
-                total: 1,
-                noCache: 1,
-                cacheRead: 0,
-                cacheWrite: 0,
-              },
-              outputTokens: { total: 1, text: 1, reasoning: 0 },
-            },
-          },
-        ],
+    // Like a real provider, the response body fails when the request aborts.
+    doStream: async ({ abortSignal }) => ({
+      stream: new ReadableStream<LanguageModelV4StreamPart>({
+        pull: () => sleep(60_000, undefined, { signal: abortSignal }),
       }),
     }),
   });
