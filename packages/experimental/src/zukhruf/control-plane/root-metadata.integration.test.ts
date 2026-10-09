@@ -53,7 +53,9 @@ function streamsFor(store: StreamStore): StreamManager {
 
 class RecordingTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];
-  #handler?: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
+  readonly #consumers = new Set<{
+    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
+  }>();
 
   override async push(turn: TurnRef) {
     this.turns.push(turn);
@@ -91,10 +93,11 @@ class RecordingTurnQueue extends TurnQueue {
     _options: ConsumeOptions,
   ): Promise<AsyncDisposable> {
     void _options;
-    this.#handler = handler;
+    const consumer = { handler };
+    this.#consumers.add(consumer);
     return {
       [Symbol.asyncDispose]: async () => {
-        this.#handler = undefined;
+        this.#consumers.delete(consumer);
       },
     };
   }
@@ -104,8 +107,9 @@ class RecordingTurnQueue extends TurnQueue {
   async runNext(): Promise<void> {
     const turn = this.turns.shift();
     assert.ok(turn, 'expected a queued turn');
-    assert.ok(this.#handler, 'expected a running worker');
-    await this.#handler(turn, {
+    const [consumer] = this.#consumers;
+    assert.ok(consumer, 'expected a running worker');
+    await consumer.handler(turn, {
       signal: new AbortController().signal,
       park: async () => {
         throw new Error('turn unexpectedly parked');
@@ -115,40 +119,38 @@ class RecordingTurnQueue extends TurnQueue {
 }
 
 class CancelAfterStatusReadStreamStore extends SqliteStreamStore {
-  #armed = false;
+  readonly #armed: StreamUpdater[] = [];
 
   arm(): void {
-    this.#armed = true;
+    this.#armed.push(({ status }) => {
+      if (status !== 'queued' && status !== 'running') return undefined;
+      const now = Date.now();
+      return {
+        status: 'cancelled',
+        cancelRequestedAt: now,
+        finishedAt: now,
+      };
+    });
   }
 
   override async updateStream(streamId: string, update: StreamUpdater) {
-    if (this.#armed) {
-      this.#armed = false;
-      await super.updateStream(streamId, ({ status }) => {
-        if (status !== 'queued' && status !== 'running') return undefined;
-        const now = Date.now();
-        return {
-          status: 'cancelled',
-          cancelRequestedAt: now,
-          finishedAt: now,
-        };
-      });
-    }
+    const armed = this.#armed.shift();
+    if (armed) await super.updateStream(streamId, armed);
     return super.updateStream(streamId, update);
   }
 }
 
 class ConcurrentRootMetadataStore extends InMemoryContextStore {
-  #injectHostWrite = true;
+  readonly #hostWrites = [{ concurrentHostValue: 'preserved' }];
 
   override async updateChat(
     chatId: string,
     update: Parameters<InMemoryContextStore['updateChat']>[1],
   ) {
-    if (this.#injectHostWrite) {
-      this.#injectHostWrite = false;
+    const hostWrite = this.#hostWrites.shift();
+    if (hostWrite) {
       await super.updateChat(chatId, ({ metadata }) => ({
-        metadata: { ...metadata, concurrentHostValue: 'preserved' },
+        metadata: { ...metadata, ...hostWrite },
       }));
     }
     return super.updateChat(chatId, update);

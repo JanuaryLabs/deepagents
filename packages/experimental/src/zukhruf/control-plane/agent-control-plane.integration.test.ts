@@ -115,8 +115,10 @@ function streamsFor(store: StreamStore): StreamManager {
 class ControlledTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];
   resumeCalls = 0;
-  #handler?: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
-  #options?: ConsumeOptions;
+  readonly #consumers = new Set<{
+    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
+    options: ConsumeOptions;
+  }>();
 
   override async push(turn: TurnRef) {
     this.turns.push(turn);
@@ -124,14 +126,13 @@ class ControlledTurnQueue extends TurnQueue {
 
   override async consume(
     handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
-    _options: ConsumeOptions,
+    options: ConsumeOptions,
   ): Promise<AsyncDisposable> {
-    this.#handler = handler;
-    this.#options = _options;
+    const consumer = { handler, options };
+    this.#consumers.add(consumer);
     return {
       [Symbol.asyncDispose]: async () => {
-        this.#handler = undefined;
-        this.#options = undefined;
+        this.#consumers.delete(consumer);
       },
     };
   }
@@ -182,22 +183,23 @@ class ControlledTurnQueue extends TurnQueue {
   }
 
   async retryOrphan(turn: TurnRef, error: string): Promise<void> {
-    assert.ok(this.#options, 'expected consumer options');
-    await this.#options.onOrphaned(turn, error);
+    const [consumer] = this.#consumers;
+    assert.ok(consumer, 'expected consumer options');
+    await consumer.options.onOrphaned(turn, error);
   }
 
   async #run(turn: TurnRef): Promise<void> {
-    assert.ok(this.#handler, 'expected a running worker');
+    const [consumer] = this.#consumers;
+    assert.ok(consumer, 'expected a running worker');
     try {
-      await this.#handler(turn, {
+      await consumer.handler(turn, {
         signal: new AbortController().signal,
         park: async () => {
           throw new Error('turn unexpectedly parked');
         },
       });
     } catch (error) {
-      assert.ok(this.#options, 'expected consumer options');
-      await this.#options.onOrphaned(
+      await consumer.options.onOrphaned(
         turn,
         error instanceof Error ? error.message : String(error),
       );
@@ -216,8 +218,10 @@ class SharedTurnQueueState {
 class SharedControlledTurnQueue extends TurnQueue {
   readonly #state: SharedTurnQueueState;
   readonly #owner = Symbol('shared-turn-queue-owner');
-  #handler?: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
-  #options?: ConsumeOptions;
+  readonly #consumers = new Set<{
+    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
+    options: ConsumeOptions;
+  }>();
 
   constructor(state: SharedTurnQueueState) {
     super();
@@ -232,12 +236,11 @@ class SharedControlledTurnQueue extends TurnQueue {
     handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
     options: ConsumeOptions,
   ): Promise<AsyncDisposable> {
-    this.#handler = handler;
-    this.#options = options;
+    const consumer = { handler, options };
+    this.#consumers.add(consumer);
     return {
       [Symbol.asyncDispose]: async () => {
-        this.#handler = undefined;
-        this.#options = undefined;
+        this.#consumers.delete(consumer);
       },
     };
   }
@@ -285,21 +288,21 @@ class SharedControlledTurnQueue extends TurnQueue {
     assert.notEqual(index, -1, `expected a queued turn for ${chatId}`);
     const [turn] = this.#state.turns.splice(index, 1);
     assert.ok(turn);
-    assert.ok(this.#handler, 'expected a running worker');
-    assert.ok(this.#options, 'expected consumer options');
+    const [consumer] = this.#consumers;
+    assert.ok(consumer, 'expected a running worker');
 
     const key = SharedControlledTurnQueue.#key(turn);
     const abort = new AbortController();
     this.#state.running.set(key, { turn, abort, owner: this.#owner });
     try {
-      await this.#handler(turn, {
+      await consumer.handler(turn, {
         signal: abort.signal,
         park: async () => {
           throw new Error('turn unexpectedly parked');
         },
       });
     } catch (error) {
-      await this.#options.onOrphaned(
+      await consumer.options.onOrphaned(
         turn,
         error instanceof Error ? error.message : String(error),
       );
@@ -314,29 +317,28 @@ class SharedControlledTurnQueue extends TurnQueue {
 }
 
 class FailFirstMailboxEnqueueStore extends SqliteMailboxStore {
-  #fail = true;
+  readonly #faults = [new Error('simulated completion mailbox failure')];
 
   override async enqueue(
     communication: InterAgentCommunication,
   ): Promise<MailboxEnqueueResult> {
-    if (this.#fail) {
-      this.#fail = false;
-      throw new Error('simulated completion mailbox failure');
-    }
+    const fault = this.#faults.shift();
+    if (fault) throw fault;
     return super.enqueue(communication);
   }
 }
 
 class FailTwiceMailboxEnqueueStore extends SqliteMailboxStore {
-  #failuresRemaining = 2;
+  readonly #faults = [
+    new Error('simulated repeated completion mailbox failure'),
+    new Error('simulated repeated completion mailbox failure'),
+  ];
 
   override async enqueue(
     communication: InterAgentCommunication,
   ): Promise<MailboxEnqueueResult> {
-    if (this.#failuresRemaining > 0) {
-      this.#failuresRemaining--;
-      throw new Error('simulated repeated completion mailbox failure');
-    }
+    const fault = this.#faults.shift();
+    if (fault) throw fault;
     return super.enqueue(communication);
   }
 }
@@ -344,10 +346,10 @@ class FailTwiceMailboxEnqueueStore extends SqliteMailboxStore {
 class DelayedStaleLatestTurnStore extends InMemoryContextStore {
   readonly staleWriteStarted = Promise.withResolvers<void>();
   readonly #releaseStaleWrite = Promise.withResolvers<void>();
-  #staleTurnId?: string;
+  readonly #armed: string[] = [];
 
   arm(staleTurnId: string): void {
-    this.#staleTurnId = staleTurnId;
+    this.#armed.push(staleTurnId);
   }
 
   release(): void {
@@ -363,39 +365,35 @@ class DelayedStaleLatestTurnStore extends InMemoryContextStore {
   }
 
   async #pauseIfStale() {
-    if (this.#staleTurnId === undefined) return;
-    this.#staleTurnId = undefined;
+    const armed = this.#armed.shift();
+    if (armed === undefined) return;
     this.staleWriteStarted.resolve();
     await this.#releaseStaleWrite.promise;
   }
 }
 
 class FailFirstMailboxBeginStore extends SqliteMailboxStore {
-  #fail = true;
+  readonly #faults = [new Error('simulated mailbox setup failure')];
 
   override async beginTurn(
     recipient: ConversationId,
     turnId: string,
   ): Promise<void> {
-    if (this.#fail) {
-      this.#fail = false;
-      throw new Error('simulated mailbox setup failure');
-    }
+    const fault = this.#faults.shift();
+    if (fault) throw fault;
     return super.beginTurn(recipient, turnId);
   }
 }
 
 class CommitThenFailFirstMailboxStore extends SqliteMailboxStore {
-  #fail = true;
+  readonly #faults = [new Error('simulated crash after mailbox commit')];
 
   override async enqueue(
     communication: InterAgentCommunication,
   ): Promise<MailboxEnqueueResult> {
     const result = await super.enqueue(communication);
-    if (this.#fail) {
-      this.#fail = false;
-      throw new Error('simulated crash after mailbox commit');
-    }
+    const fault = this.#faults.shift();
+    if (fault) throw fault;
     return result;
   }
 }

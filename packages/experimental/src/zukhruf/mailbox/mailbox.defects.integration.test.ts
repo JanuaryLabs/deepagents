@@ -142,18 +142,16 @@ function declaration(
 class ManualTurnQueue extends TurnQueue {
   readonly attempted: TurnRef[] = [];
   readonly pending: TurnRef[] = [];
-  failPushes = 0;
-  #consumer?: {
+  readonly pushFaults: Error[] = [];
+  readonly #consumers = new Set<{
     handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
     options: ConsumeOptions;
-  };
+  }>();
 
   override async push(turn: TurnRef) {
     this.attempted.push(turn);
-    if (this.failPushes > 0) {
-      this.failPushes--;
-      throw new Error('simulated queue push failure');
-    }
+    const fault = this.pushFaults.shift();
+    if (fault) throw fault;
     this.pending.push(turn);
   }
 
@@ -188,10 +186,11 @@ class ManualTurnQueue extends TurnQueue {
     handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
     options: ConsumeOptions,
   ): Promise<AsyncDisposable> {
-    this.#consumer = { handler, options };
+    const consumer = { handler, options };
+    this.#consumers.add(consumer);
     return {
       [Symbol.asyncDispose]: async () => {
-        this.#consumer = undefined;
+        this.#consumers.delete(consumer);
       },
     };
   }
@@ -199,17 +198,18 @@ class ManualTurnQueue extends TurnQueue {
   override async resumeParked(): Promise<void> {}
 
   async runNext(): Promise<void> {
-    assert.ok(this.#consumer, 'start runtime.work() before running a turn');
+    const [consumer] = this.#consumers;
+    assert.ok(consumer, 'start runtime.work() before running a turn');
     const turn = this.pending.shift();
     assert.ok(turn, 'expected one queued turn');
     const abort = new AbortController();
     try {
-      await this.#consumer.handler(turn, {
+      await consumer.handler(turn, {
         signal: abort.signal,
         park: async () => {},
       });
     } catch (error) {
-      await this.#consumer.options.onOrphaned(
+      await consumer.options.onOrphaned(
         turn,
         error instanceof Error ? error.message : String(error),
       );
@@ -218,13 +218,11 @@ class ManualTurnQueue extends TurnQueue {
 }
 
 class FailFirstHistoryWriteStore extends InMemoryContextStore {
-  #fail = true;
+  readonly #faults = [new Error('simulated durable history write failure')];
 
   override async addMessages(messages: MessageData[]): Promise<void> {
-    if (this.#fail) {
-      this.#fail = false;
-      throw new Error('simulated durable history write failure');
-    }
+    const fault = this.#faults.shift();
+    if (fault) throw fault;
     await super.addMessages(messages);
   }
 }
@@ -663,7 +661,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
 
   it('does not leave a permanently queued stream receipt when wake scheduling fails', async () => {
     const queue = new ManualTurnQueue();
-    queue.failPushes = 1;
+    queue.pushFaults.push(new Error('simulated queue push failure'));
     const h = await runtimeHarness({ queue });
     try {
       await assert.rejects(

@@ -52,7 +52,7 @@ const usage = {
 
 class RecordingWakeScheduler extends WakeScheduler<SchedulingWake> {
   readonly scheduled: Wake<SchedulingWake>[] = [];
-  #handler?: (wake: Wake<SchedulingWake>) => Promise<void>;
+  readonly #handlers = new Set<(wake: Wake<SchedulingWake>) => Promise<void>>();
 
   override async schedule(wake: Wake<SchedulingWake>): Promise<void> {
     this.scheduled.push(wake);
@@ -63,24 +63,27 @@ class RecordingWakeScheduler extends WakeScheduler<SchedulingWake> {
   override async consume(
     handler: (wake: Wake<SchedulingWake>) => Promise<void>,
   ): Promise<AsyncDisposable> {
-    this.#handler = handler;
+    this.#handlers.add(handler);
     return {
       [Symbol.asyncDispose]: async () => {
-        this.#handler = undefined;
+        this.#handlers.delete(handler);
       },
     };
   }
 
   async deliver(wake: Wake<SchedulingWake>): Promise<void> {
-    assert.ok(this.#handler, 'expected a running wake consumer');
-    await this.#handler(wake);
+    const [handler] = this.#handlers;
+    assert.ok(handler, 'expected a running wake consumer');
+    await handler(wake);
   }
 }
 
 class RecordingTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];
-  #handler?: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
-  #options?: ConsumeOptions;
+  readonly #consumers = new Set<{
+    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
+    options: ConsumeOptions;
+  }>();
 
   override async push(turn: TurnRef) {
     this.turns.push(turn);
@@ -117,12 +120,11 @@ class RecordingTurnQueue extends TurnQueue {
     handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
     options: ConsumeOptions,
   ): Promise<AsyncDisposable> {
-    this.#handler = handler;
-    this.#options = options;
+    const consumer = { handler, options };
+    this.#consumers.add(consumer);
     return {
       [Symbol.asyncDispose]: async () => {
-        this.#handler = undefined;
-        this.#options = undefined;
+        this.#consumers.delete(consumer);
       },
     };
   }
@@ -132,12 +134,13 @@ class RecordingTurnQueue extends TurnQueue {
   async runNext(): Promise<void> {
     const turn = this.turns.shift();
     assert.ok(turn, 'expected a queued turn');
-    assert.ok(this.#handler, 'expected a running turn consumer');
-    await this.#handler(turn, {
+    const [consumer] = this.#consumers;
+    assert.ok(consumer, 'expected a running turn consumer');
+    await consumer.handler(turn, {
       signal: new AbortController().signal,
       park: async () => assert.fail('turn unexpectedly parked'),
     });
-    await this.#options?.onSettled?.(turn);
+    await consumer.options.onSettled?.(turn);
   }
 }
 

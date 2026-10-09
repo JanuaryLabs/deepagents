@@ -123,14 +123,16 @@ const usage = {
 
 class ControlledTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];
-  pushFailuresRemaining = 0;
-  #handler?: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
+  readonly pushFaults: Error[] = [];
+  readonly #consumers = new Set<{
+    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
+    options: ConsumeOptions;
+  }>();
   #nextActivityRead?: {
     started: PromiseWithResolvers<void>;
     release: PromiseWithResolvers<void>;
   };
-  #running?: TurnRef;
-  #options?: ConsumeOptions;
+  readonly #running = new Map<string, TurnRef>();
 
   pauseNextActivityRead() {
     const gate = {
@@ -145,10 +147,8 @@ class ControlledTurnQueue extends TurnQueue {
   }
 
   override async push(turn: TurnRef) {
-    if (this.pushFailuresRemaining > 0) {
-      this.pushFailuresRemaining--;
-      throw new Error('simulated turn enqueue outage');
-    }
+    const fault = this.pushFaults.shift();
+    if (fault) throw fault;
     this.turns.push(turn);
   }
 
@@ -164,7 +164,9 @@ class ControlledTurnQueue extends TurnQueue {
     const belongsToConversation = (turn: TurnRef) =>
       turn.chatId === conversation.chatId &&
       turn.userId === conversation.userId;
-    if (this.#running && belongsToConversation(this.#running)) return 'running';
+    if ([...this.#running.values()].some(belongsToConversation)) {
+      return 'running';
+    }
     return this.turns.some(belongsToConversation) ? 'queued' : 'idle';
   }
 
@@ -174,9 +176,10 @@ class ControlledTurnQueue extends TurnQueue {
     const belongsToConversation = (turn: TurnRef) =>
       turn.chatId === conversation.chatId &&
       turn.userId === conversation.userId;
-    return this.#running && belongsToConversation(this.#running)
-      ? this.#running
-      : this.turns.find(belongsToConversation);
+    return (
+      [...this.#running.values()].find(belongsToConversation) ??
+      this.turns.find(belongsToConversation)
+    );
   }
 
   override async cancel(streamId: string): Promise<void> {
@@ -188,12 +191,11 @@ class ControlledTurnQueue extends TurnQueue {
     handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
     options: ConsumeOptions,
   ): Promise<AsyncDisposable> {
-    this.#handler = handler;
-    this.#options = options;
+    const consumer = { handler, options };
+    this.#consumers.add(consumer);
     return {
       [Symbol.asyncDispose]: async () => {
-        this.#handler = undefined;
-        this.#options = undefined;
+        this.#consumers.delete(consumer);
       },
     };
   }
@@ -203,17 +205,18 @@ class ControlledTurnQueue extends TurnQueue {
   async runNext(): Promise<void> {
     const turn = this.turns.shift();
     assert.ok(turn);
-    assert.ok(this.#handler);
-    this.#running = turn;
+    const [consumer] = this.#consumers;
+    assert.ok(consumer);
+    this.#running.set(turn.streamId, turn);
     try {
-      await this.#handler(turn, {
+      await consumer.handler(turn, {
         signal: new AbortController().signal,
         park: async () => assert.fail('turn unexpectedly parked'),
       });
     } finally {
-      this.#running = undefined;
+      this.#running.delete(turn.streamId);
     }
-    await this.#options?.onSettled?.(turn);
+    await consumer.options.onSettled?.(turn);
   }
 }
 
@@ -224,7 +227,7 @@ class RecordingWakeScheduler extends WakeScheduler<SchedulingWake> {
     started: PromiseWithResolvers<void>;
     release: PromiseWithResolvers<void>;
   };
-  scheduleFailuresRemaining = 0;
+  readonly scheduleFaults: Error[] = [];
 
   get handler(): ((wake: Wake<SchedulingWake>) => Promise<void>) | undefined {
     return this.handlers.values().next().value;
@@ -243,10 +246,8 @@ class RecordingWakeScheduler extends WakeScheduler<SchedulingWake> {
   }
 
   override async schedule(wake: Wake<SchedulingWake>): Promise<void> {
-    if (this.scheduleFailuresRemaining > 0) {
-      this.scheduleFailuresRemaining--;
-      throw new Error('simulated wake insertion outage');
-    }
+    const fault = this.scheduleFaults.shift();
+    if (fault) throw fault;
     const gate = this.#nextSchedule;
     if (gate) {
       this.#nextSchedule = undefined;
@@ -290,7 +291,7 @@ class RecordingWakeScheduler extends WakeScheduler<SchedulingWake> {
 }
 
 class FailOnceDispatchClearStore extends InMemoryContextStore {
-  failNextDispatchClear = false;
+  readonly dispatchClearFaults: Error[] = [];
 
   override updateChat(
     chatId: string,
@@ -299,12 +300,11 @@ class FailOnceDispatchClearStore extends InMemoryContextStore {
     return super.updateChat(chatId, (chat) => {
       const result = update(chat);
       if (
-        this.failNextDispatchClear &&
         dispatchingState(chat.metadata) !== undefined &&
         dispatchingState(result?.metadata) === undefined
       ) {
-        this.failNextDispatchClear = false;
-        throw new Error('simulated dispatch cleanup outage');
+        const fault = this.dispatchClearFaults.shift();
+        if (fault) throw fault;
       }
       return result;
     });
@@ -1247,7 +1247,7 @@ test('failed wake insertion does not commit a cron definition', async (t) => {
   const conversation = { chatId: 'create-gap', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
-  scheduler.scheduleFailuresRemaining = 1;
+  scheduler.scheduleFaults.push(new Error('simulated wake insertion outage'));
   await runTurn(runtime, h.queue, conversation, 'create during outage');
   assert.equal(scheduler.wakes.size, 0);
   const chat = await h.store.getChat(conversation.chatId);
@@ -1350,7 +1350,9 @@ test('retry after enqueue-before-dispatch-clear executes one scheduled turn', as
   await runTurn(runtime, h.queue, conversation, 'schedule crash window');
   const wake = [...scheduler.wakes.values()][0];
 
-  store.failNextDispatchClear = true;
+  store.dispatchClearFaults.push(
+    new Error('simulated dispatch cleanup outage'),
+  );
   await assert.rejects(scheduler.fire(wake.id), /dispatch cleanup outage/);
   assert.equal(h.queue.turns.length, 1);
   await scheduler.fire(wake.id);
@@ -1427,7 +1429,7 @@ test('retry after claim-before-enqueue executes one scheduled turn', async (t) =
   await runTurn(runtime, h.queue, conversation, 'schedule claim crash window');
   const wake = [...scheduler.wakes.values()][0];
 
-  h.queue.pushFailuresRemaining = 1;
+  h.queue.pushFaults.push(new Error('simulated turn enqueue outage'));
   await assert.rejects(scheduler.fire(wake.id), /turn enqueue outage/);
   assert.equal(h.queue.turns.length, 0);
 
@@ -1595,7 +1597,7 @@ test('failed successor insertion leaves the current cron retryable', async (t) =
   );
   const first = [...scheduler.wakes.values()][0];
 
-  scheduler.scheduleFailuresRemaining = 1;
+  scheduler.scheduleFaults.push(new Error('simulated wake insertion outage'));
   await assert.rejects(scheduler.fire(first.id), /wake insertion outage/);
   assert.equal(h.queue.turns.length, 0);
 
@@ -1651,7 +1653,10 @@ test('pg-boss can retry successor insertion through a prolonged outage', async (
   await runTurn(runtime, h.queue, conversation, 'create prolonged outage cron');
   const first = [...scheduler.wakes.values()][0];
 
-  scheduler.scheduleFailuresRemaining = 2;
+  scheduler.scheduleFaults.push(
+    new Error('simulated wake insertion outage'),
+    new Error('simulated wake insertion outage'),
+  );
   await assert.rejects(scheduler.fire(first.id), /wake insertion outage/);
   await assert.rejects(scheduler.fire(first.id), /wake insertion outage/);
   await scheduler.fire(first.id);

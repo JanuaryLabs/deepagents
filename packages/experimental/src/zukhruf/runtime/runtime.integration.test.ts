@@ -512,13 +512,11 @@ function declaration(
 }
 
 class FailOnceResumeParkedQueue extends PgBossTurnQueue {
-  #shouldFail = true;
+  readonly #faults = [new Error('simulated parked-turn revival outage')];
 
   override async resumeParked(chatId: string): Promise<void> {
-    if (this.#shouldFail) {
-      this.#shouldFail = false;
-      throw new Error('simulated parked-turn revival outage');
-    }
+    const fault = this.#faults.shift();
+    if (fault) throw fault;
     await super.resumeParked(chatId);
   }
 }

@@ -50,7 +50,9 @@ function streamsFor(store: StreamStore): StreamManager {
 
 class ControlledTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];
-  #handler?: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
+  readonly #consumers = new Set<{
+    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
+  }>();
 
   override async push(turn: TurnRef) {
     this.turns.push(turn);
@@ -88,10 +90,11 @@ class ControlledTurnQueue extends TurnQueue {
     _options: ConsumeOptions,
   ): Promise<AsyncDisposable> {
     void _options;
-    this.#handler = handler;
+    const consumer = { handler };
+    this.#consumers.add(consumer);
     return {
       [Symbol.asyncDispose]: async () => {
-        this.#handler = undefined;
+        this.#consumers.delete(consumer);
       },
     };
   }
@@ -101,8 +104,9 @@ class ControlledTurnQueue extends TurnQueue {
   async runNext(): Promise<void> {
     const turn = this.turns.shift();
     assert.ok(turn, 'expected a queued turn');
-    assert.ok(this.#handler, 'expected a running worker');
-    await this.#handler(turn, {
+    const [consumer] = this.#consumers;
+    assert.ok(consumer, 'expected a running worker');
+    await consumer.handler(turn, {
       signal: new AbortController().signal,
       park: async () => {
         throw new Error('turn unexpectedly parked');

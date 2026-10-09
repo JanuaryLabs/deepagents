@@ -91,8 +91,10 @@ const PUBLIC_URL = `http://localhost${MOUNT}`;
 
 class ControlledTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];
-  #handler?: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
-  #options?: ConsumeOptions;
+  readonly #consumers = new Set<{
+    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
+    options: ConsumeOptions;
+  }>();
 
   push(turn: TurnRef): Promise<void> {
     this.turns.push(turn);
@@ -117,12 +119,11 @@ class ControlledTurnQueue extends TurnQueue {
     handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
     options: ConsumeOptions,
   ): Promise<AsyncDisposable> {
-    this.#handler = handler;
-    this.#options = options;
+    const consumer = { handler, options };
+    this.#consumers.add(consumer);
     return Promise.resolve({
       [Symbol.asyncDispose]: () => {
-        this.#handler = undefined;
-        this.#options = undefined;
+        this.#consumers.delete(consumer);
         return Promise.resolve();
       },
     });
@@ -135,15 +136,16 @@ class ControlledTurnQueue extends TurnQueue {
   async runNext(): Promise<void> {
     const turn = this.turns.shift();
     assert(turn, 'expected a queued turn');
-    assert(this.#handler, 'expected a running queue consumer');
+    const [consumer] = this.#consumers;
+    assert(consumer, 'expected a running queue consumer');
     try {
-      await this.#handler(turn, {
+      await consumer.handler(turn, {
         signal: new AbortController().signal,
         park: () => Promise.resolve(),
       });
-      await this.#options?.onSettled?.(turn);
+      await consumer.options.onSettled?.(turn);
     } catch (error) {
-      await this.#options?.onOrphaned(
+      await consumer.options.onOrphaned(
         turn,
         error instanceof Error ? error.message : String(error),
       );
