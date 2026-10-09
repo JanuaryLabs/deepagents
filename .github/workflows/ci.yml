@@ -22,13 +22,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: lts/*
-
-      - name: Install dependencies
-        run: npm ci
+      - name: Set up the workspace
+        uses: JanuaryLabs/zukhruf/.github/actions/setup-workspace@main
 
       - name: Set SHAs for affected commands
         uses: nrwl/nx-set-shas@v5
