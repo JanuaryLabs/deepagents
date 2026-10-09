@@ -8,7 +8,7 @@ class FakeEventSource extends EventTarget {
   static instances: FakeEventSource[] = [];
   readonly url: string;
   onerror: (() => void) | null = null;
-  closed = false;
+  readonly #closed = new AbortController();
 
   constructor(url: string) {
     super();
@@ -16,8 +16,12 @@ class FakeEventSource extends EventTarget {
     FakeEventSource.instances.push(this);
   }
 
+  get closed() {
+    return this.#closed.signal.aborted;
+  }
+
   close() {
-    this.closed = true;
+    this.#closed.abort();
   }
 
   send(event: string, data: unknown) {

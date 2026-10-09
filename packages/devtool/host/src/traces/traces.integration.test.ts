@@ -78,9 +78,14 @@ function unusedSandbox(): Promise<AgentSandbox> {
 
 class ControlledTurnQueue extends TurnQueue {
   readonly #turns: TurnRef[] = [];
-  #active?: { turn: TurnRef; abort: AbortController };
-  #handler?: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
-  #options?: ConsumeOptions;
+  readonly #running = new Map<
+    string,
+    { turn: TurnRef; abort: AbortController }
+  >();
+  readonly #consumers = new Set<{
+    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
+    options: ConsumeOptions;
+  }>();
 
   push(turn: TurnRef): Promise<void> {
     this.#turns.push(turn);
@@ -89,16 +94,22 @@ class ControlledTurnQueue extends TurnQueue {
 
   getTurnActivity(): Promise<TurnActivity> {
     return Promise.resolve(
-      this.#active ? 'running' : this.#turns.length === 0 ? 'idle' : 'queued',
+      this.#running.size > 0
+        ? 'running'
+        : this.#turns.length === 0
+          ? 'idle'
+          : 'queued',
     );
   }
 
   getCurrentTurn(): Promise<TurnRef | undefined> {
-    return Promise.resolve(this.#active?.turn ?? this.#turns[0]);
+    return Promise.resolve(
+      this.#running.values().next().value?.turn ?? this.#turns[0],
+    );
   }
 
   cancel(streamId: string): Promise<void> {
-    if (this.#active?.turn.streamId === streamId) this.#active.abort.abort();
+    this.#running.get(streamId)?.abort.abort();
     const index = this.#turns.findIndex((turn) => turn.streamId === streamId);
     if (index >= 0) this.#turns.splice(index, 1);
     return Promise.resolve();
@@ -108,12 +119,11 @@ class ControlledTurnQueue extends TurnQueue {
     handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
     options: ConsumeOptions,
   ): Promise<AsyncDisposable> {
-    this.#handler = handler;
-    this.#options = options;
+    const consumer = { handler, options };
+    this.#consumers.add(consumer);
     return Promise.resolve({
       [Symbol.asyncDispose]: () => {
-        this.#handler = undefined;
-        this.#options = undefined;
+        this.#consumers.delete(consumer);
         return Promise.resolve();
       },
     });
@@ -126,22 +136,23 @@ class ControlledTurnQueue extends TurnQueue {
   async runNext(): Promise<void> {
     const turn = this.#turns.shift();
     assert(turn, 'expected a queued turn');
-    assert(this.#handler, 'expected a running queue consumer');
+    const [consumer] = this.#consumers;
+    assert(consumer, 'expected a running queue consumer');
     const abort = new AbortController();
-    this.#active = { turn, abort };
+    this.#running.set(turn.streamId, { turn, abort });
     try {
-      await this.#handler(turn, {
+      await consumer.handler(turn, {
         signal: abort.signal,
         park: () => Promise.resolve(),
       });
-      await this.#options?.onSettled?.(turn);
+      await consumer.options.onSettled?.(turn);
     } catch (error) {
-      await this.#options?.onOrphaned(
+      await consumer.options.onOrphaned(
         turn,
         error instanceof Error ? error.message : String(error),
       );
     } finally {
-      this.#active = undefined;
+      this.#running.delete(turn.streamId);
     }
   }
 }

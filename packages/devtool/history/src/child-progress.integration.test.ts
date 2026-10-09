@@ -17,15 +17,18 @@ test('DevTool projects owner events into bounded child rows for the selected pro
   const previous = Object.getOwnPropertyDescriptors(globalThis);
   class OwnerEventSource extends EventTarget {
     static current: OwnerEventSource;
-    closed = false;
+    readonly #closed = new AbortController();
     readonly url: string;
     constructor(url: string) {
       super();
       this.url = url;
       OwnerEventSource.current = this;
     }
+    get closed() {
+      return this.#closed.signal.aborted;
+    }
     close() {
-      this.closed = true;
+      this.#closed.abort();
     }
     emit(event: unknown) {
       this.dispatchEvent(
