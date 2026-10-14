@@ -63,6 +63,11 @@ IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_${schema}_branches_ch
 IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_${schema}_branches_chatId_isActive' AND object_id = OBJECT_ID('[${schema}].[branches]'))
   CREATE INDEX [idx_${schema}_branches_chatId_isActive] ON [${schema}].[branches](chatId, isActive);
 
+-- Deleting a message checks this foreign key. Without the index the check
+-- scans every chat's branches and waits on rows another chat delete holds.
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_${schema}_branches_headMessageId' AND object_id = OBJECT_ID('[${schema}].[branches]'))
+  CREATE INDEX [idx_${schema}_branches_headMessageId] ON [${schema}].[branches](headMessageId);
+
 IF OBJECT_ID('[${schema}].[checkpoints]', 'U') IS NULL
 BEGIN
   CREATE TABLE [${schema}].[checkpoints] (

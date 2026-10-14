@@ -24,7 +24,7 @@ chat flows, local retrieval, and Text2SQL assistants.
 | `@deepagents/react-genai`      | Render AI SDK chat flows, trajectories, tools, citations, dynamic UI, and interactive responses.                               |
 | `@deepagents/react-shadcn`     | Publish the shared Base UI-backed Shadcn primitive set and `cn()` helper.                                                      |
 
-## Current Runtime Model
+## Current runtime model
 
 Text2SQL chat flows use a real sandbox-installed `sql` command. Install
 `@deepagents/text2sql` inside the sandbox, point `TEXT2SQL_ADAPTERS` at an
@@ -42,24 +42,26 @@ bash calls need SQL quote repair, proxy blocking, and formatted-SQL metadata.
 Use Nx targets for package work:
 
 ```bash
-nx run context:typecheck
-nx run text2sql:typecheck
-nx run text2sql:test
-nx run text2sql:build
+nx run @deepagents/context:typecheck
+nx run @deepagents/text2sql:typecheck
+nx run @deepagents/text2sql:test
+nx run @deepagents/text2sql:build
 ```
 
-Tests use the Node.js test runner under the Nx target. Import package modules
+The Text2SQL test target uses the Node.js test runner. Import package modules
 in tests, not relative source paths, so private class identities stay aligned
 with built package output.
 
 ## Use a package's source from another repo
 
-Each export of a package has a `@deepagents/source` condition first. This
-condition points at the source in `src/`. The other conditions point at the
-build in `dist/`. A repo that sets no condition gets `dist/`.
+Each source-runnable package export has a `@deepagents/source` condition first.
+This condition points at the source in `src/`. The other conditions point at
+the build in `dist/`. `./package.json`, wildcard `./*` exports, and asset
+exports such as `./styles.css` stay dist-only or asset-only. A repo that sets
+no condition gets `dist/`.
 
-To change a package and a repo that uses it together, link the package. Then
-run the other repo with the condition and with the text loader of this repo:
+To develop a package alongside a repo that consumes it, link the package.
+Run the consuming repo with the condition and this repo's text loader:
 
 ```bash
 npm link                                  # in packages/<package>

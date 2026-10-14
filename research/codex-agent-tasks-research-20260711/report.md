@@ -2,7 +2,9 @@
 
 **Research date:** 2026-07-11
 **Codex source examined:** `openai/codex` pinned at `bca577d69a2f2be4550da5cd31f7bef6608c751e` (2026-07-10)
-**DeepAgents source examined:** local working tree at `/Users/ezzabuzaid/Desktop/January/deepagents`; proposal baseline commit `598cedf50c0df3f136826fcc666923608d08c803`
+**DeepAgents source examined:** local working tree at `/Users/ezzabuzaid/Desktop/January/deepagents`
+
+**Maintenance note (2026-10-14):** The analysis below records the July 11 research snapshot. DeepAgents now exports `plan.instructions()` and `plan.review({ when })` from `@deepagents/context`; see the [implemented plan-review contract](../../recitation.md) and [public implementation](../../packages/context/src/lib/fragments/plan.ts). The `TaskStore`, `PlanSnapshot`, and separate review-store designs below are research recommendations, not the current package contract.
 
 ## Executive summary
 
@@ -14,11 +16,11 @@ Codex does not have one unified “agent task” system. It has three deliberate
 
 The exact answer to “does Codex recite its task plan?” is therefore: **not automatically**. Calling `update_plan` voluntarily recites the full checklist near the context tail, and compaction requests a prose summary of progress and next steps, but Codex has no plan-aware scheduler that asks whether the current plan is still valid. The checklist can become stale, disappear from active context after compaction, and fail to replay visually after resume. By contrast, active goals are deterministically re-read from SQLite and injected on automatic continuation. [3][10][12][20][22]
 
-For DeepAgents, the best design is not to copy Codex’s checklist or goal system wholesale. Keep the proposed durable `TaskStore`, add a small versioned **plan snapshot**, and make **plan review** a first-class decision:
+For DeepAgents, the best design is not to copy Codex’s checklist or goal system wholesale. Use a durable `TaskStore`, add a small versioned **plan snapshot**, and make **plan review** a first-class decision:
 
 > Is the current plan still valid given the latest evidence?
 
-That review should return a structured decision (`continue`, `revise`, `replace`, `complete`, or `blocked`) and evidence/rationale. Trigger it at meaningful boundaries - new contradictory evidence, repeated failure, compaction/resume, scope change, and pre-completion - not on every model step. DeepAgents already has the right injection mechanism in `target: 'steer'`; what is missing is plan/task-aware context and a durable review record. [30][31][32][33]
+That review should return a structured decision (`continue`, `revise`, `replace`, `complete`, or `blocked`) and evidence/rationale. Trigger it at meaningful boundaries - new contradictory evidence, repeated failure, compaction/resume, scope change, and pre-completion - not on every model step. DeepAgents already has the right injection mechanism in `target: 'steer'`; what is missing is plan/task-aware context and a durable review record. [30][31]
 
 ## Introduction
 
@@ -33,7 +35,7 @@ The word “plan” is overloaded in Codex. The source itself warns that `Update
 
 These distinctions matter. If they are collapsed into one abstraction, the product either over-engineers simple progress reporting or under-engineers durable autonomous work.
 
-## Main Analysis
+## Main analysis
 
 ### 2. Architecture at a glance
 
@@ -268,19 +270,7 @@ A goal has one objective and lifecycle/accounting state, not a task DAG or plan.
 
 ## 9. Implications for DeepAgents
 
-The existing `add-task-system` proposal is already stronger than Codex’s checklist on durable task semantics. It proposes:
-
-- a SQLite-backed `TaskStore`;
-- stable task IDs and `listId` scoping;
-- `pending`, `in_progress`, `completed`, and `deleted` lifecycle;
-- owners and metadata;
-- `blockedBy`/`blocks` dependency relations;
-- compact list vs detailed get APIs;
-- tool factories and context fragments. [30][31]
-
-But the proposal explicitly makes ContextEngine integration a non-goal. That leaves the key Manus/Codex lesson unresolved: durable state does not improve attention unless the engine knows **when and how to bring it back**.
-
-DeepAgents already has a strong mechanism for that. `target: 'steer'` can inject a synthetic reminder at a step boundary, persist the exact model-visible chain, and keep prompt/store parity. [32][33] The missing pieces are task-aware review inputs and durable plan-review outputs.
+At research time, DeepAgents supported synthetic `target: 'steer'` reminders at step boundaries and persisted the model-visible chain. [30][31] Task-aware review inputs and durable plan-review outputs were the proposed additions; see the maintenance note above for the implemented contract.
 
 ## Recommendations
 
@@ -349,7 +339,7 @@ This is better than Codex’s fully voluntary checklist updates and better than 
 
 ### 10.4 Extend reminder context
 
-Current `WhenContext` exposes turn/message/usage/tool-output context but not plan revision, current task, step number, or evidence since last review. [32] Add a plan-aware slice such as:
+Current `WhenContext` exposes turn/message/usage/tool-output context but not plan revision, current task, step number, or evidence since last review. [30] Add a plan-aware slice such as:
 
 ```ts
 interface PlanWhenContext {
@@ -362,7 +352,7 @@ interface PlanWhenContext {
 }
 ```
 
-Then a `target: 'steer'` reminder can inject the review question at the right boundary. [33]
+Then a `target: 'steer'` reminder can inject the review question at the right boundary. [31]
 
 ### 10.5 Deterministic rehydration
 
@@ -396,7 +386,7 @@ Keep model prompting for judgment; use runtime validation for consistency.
 
 ## 11. Recommended delivery sequence
 
-1. **Finish the durable TaskStore foundation** already described in OpenSpec.
+1. **Build the durable TaskStore foundation.**
 2. **Add `PlanSnapshot` as a compact, versioned view** linked to task IDs where useful.
 3. **Add `reviewPlan()`** returning `PlanReview`; store reviews append-only.
 4. **Expose current plan/task state to reminder predicates.**
@@ -418,20 +408,20 @@ For DeepAgents, make the loved sentence a real primitive:
 
 The reminder/steer layer decides when to ask. The task/plan store supplies authoritative state. The review operation records the answer. That combination is the missing bridge between durable tasks and attention manipulation.
 
-## Claims-Evidence Table
+## Claims-evidence table
 
-| Claim                                                                         | Primary evidence                                               | Confidence                                           |
-| ----------------------------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------- |
-| `update_plan` is a full-snapshot checklist, not a task store                  | Protocol schema and handler [1][3]                             | High                                                 |
-| The live plan notification is a client projection                             | App-server mapping and TUI runtime [6][7]                      | High                                                 |
-| Checklist refresh is voluntary, not scheduled                                 | Handler, prompt policy, and absence of reinjection path [3][4] | High                                                 |
-| Compaction is not checklist-aware                                             | Local/remote compaction and prompt [10][11][12]                | High                                                 |
-| Plan mode is semantically separate                                            | Runtime guard and Plan-mode PR [3][17]                         | High                                                 |
-| Goals have durable external state                                             | Goal schema and persistence PR [23][24][25]                    | High                                                 |
-| Goals perform host-driven objective recitation                                | Goal runtime, steering, and continuation prompt [20][21][22]   | High                                                 |
-| DeepAgents has the steering mechanism but lacks task-aware review integration | Task design and reminder runtime [30][31][32][33]              | High for current design; recommendation is normative |
+| Claim                                                                         | Primary evidence                                               | Confidence                                          |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------- | --------------------------------------------------- |
+| `update_plan` is a full-snapshot checklist, not a task store                  | Protocol schema and handler [1][3]                             | High                                                |
+| The live plan notification is a client projection                             | App-server mapping and TUI runtime [6][7]                      | High                                                |
+| Checklist refresh is voluntary, not scheduled                                 | Handler, prompt policy, and absence of reinjection path [3][4] | High                                                |
+| Compaction is not checklist-aware                                             | Local/remote compaction and prompt [10][11][12]                | High                                                |
+| Plan mode is semantically separate                                            | Runtime guard and Plan-mode PR [3][17]                         | High                                                |
+| Goals have durable external state                                             | Goal schema and persistence PR [23][24][25]                    | High                                                |
+| Goals perform host-driven objective recitation                                | Goal runtime, steering, and continuation prompt [20][21][22]   | High                                                |
+| DeepAgents has the steering mechanism but lacks task-aware review integration | Reminder runtime [30][31]                                      | High for cited runtime; recommendation is normative |
 
-## Counterevidence Register
+## Counterevidence register
 
 - **“The plan is durable because the function call is persisted.”** True in the limited sense that historical snapshots survive uncompacted rollout resume. It is not a canonical latest-plan record, cannot be queried directly, and does not deterministically restore client checklist state.
 - **“Compaction already performs recitation.”** True for generic progress and remaining-work prose. It does not preserve exact step identity, status, revision, or review evidence. [10][12]
@@ -460,7 +450,7 @@ Research used the official `openai/codex` Git repository cloned to `/tmp/openai-
 - Plan-mode artifacts;
 - the goal store, tools, runtime, steering prompts, accounting, and idle continuation;
 - tests and git/PR history;
-- the current DeepAgents task proposal and reminder/steer runtime.
+- the current DeepAgents reminder/steer runtime.
 
 Primary evidence is source code, integration tests, database migrations, and official OpenAI pull-request descriptions. Because most sources belong to one repository, confidence comes from triangulating independent code paths - schema, handler, persistence policy, client adapter, tests, and history - rather than from publisher diversity.
 
@@ -495,7 +485,5 @@ Primary evidence is source code, integration tests, database migrations, and off
 [27] (2026). [PR #25060: Goal idle continuation](https://github.com/openai/codex/pull/25060)
 [28] (2026). [PR #26547: Align goal extension behavior](https://github.com/openai/codex/pull/26547)
 [29] (2026). [PR #26681: Replace completed goals](https://github.com/openai/codex/pull/26681)
-[30] (2026). [DeepAgents proposed task-system scope](https://github.com/JanuaryLabs/deepagents/blob/598cedf50c0df3f136826fcc666923608d08c803/openspec/changes/add-task-system/proposal.md)
-[31] (2026). [DeepAgents proposed task-system design](https://github.com/JanuaryLabs/deepagents/blob/598cedf50c0df3f136826fcc666923608d08c803/openspec/changes/add-task-system/design.md)
-[32] (2026). [DeepAgents current reminder and steer types](/Users/ezzabuzaid/Desktop/January/deepagents/packages/context/src/lib/fragments/reminders/src/types.ts)
-[33] (2026). [DeepAgents current steer runtime](/Users/ezzabuzaid/Desktop/January/deepagents/packages/context/src/lib/engine.ts)
+[30] (2026). [DeepAgents current reminder and steer types](/Users/ezzabuzaid/Desktop/January/deepagents/packages/context/src/lib/fragments/reminders/src/types.ts)
+[31] (2026). [DeepAgents current steer runtime](/Users/ezzabuzaid/Desktop/January/deepagents/packages/context/src/lib/engine.ts)

@@ -328,6 +328,18 @@
         padding-left: 8px;
       }
 
+      pre {
+        margin: 16px 0;
+        padding: 12px;
+        break-inside: avoid;
+        border: 1px solid #d1d5db;
+        background: #f8f9fa;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font-size: 11px;
+        line-height: 1.5;
+      }
+
       .bibliography {
         background: #f8f9fa;
         padding: 30px;
@@ -427,7 +439,7 @@
         <div class="header-meta">
           <span>2026-07-11</span>
           <span>•</span>
-          <span>33 Sources</span>
+          <span>31 Sources</span>
         </div>
       </div>
 
@@ -437,7 +449,7 @@
           ><span class="metric-label">Distinct Codex primitives</span>
         </div>
         <div class="metric">
-          <span class="metric-number">33</span
+          <span class="metric-number">31</span
           ><span class="metric-label">Primary sources traced</span>
         </div>
         <div class="metric">
@@ -451,6 +463,22 @@
       </div>
 
       <div class="content">
+        <div class="info-box">
+          <p>
+            <strong>Maintenance note (2026-10-14):</strong> The analysis below
+            records the July 11 research snapshot. DeepAgents now exports
+            <code>plan.instructions()</code> and
+            <code>plan.review({ when })</code> from
+            <code>@deepagents/context</code>; see the
+            <a href="../../recitation.md">implemented plan-review contract</a>
+            and
+            <a href="../../packages/context/src/lib/fragments/plan.ts"
+              >public implementation</a
+            >. The <code>TaskStore</code>, <code>PlanSnapshot</code>, and
+            separate review-store designs below are research recommendations,
+            not the current package contract.
+          </p>
+        </div>
         <div class="section">
           <h2 class="section-title">Executive summary</h2>
 
@@ -498,7 +526,7 @@
 
           <p>
             For DeepAgents, the best design is not to copy Codex’s checklist or
-            goal system wholesale. Keep the proposed durable
+            goal system wholesale. Use a durable
             <code>TaskStore</code>, add a small versioned
             <strong>plan snapshot</strong>, and make
             <strong>plan review</strong> a first-class decision:
@@ -515,7 +543,7 @@
             change, and pre-completion - not on every model step. DeepAgents
             already has the right injection mechanism in
             <code>target: 'steer'</code>; what is missing is plan/task-aware
-            context and a durable review record. [30][31][32][33]
+            context and a durable review record. [30][31]
           </p>
         </div>
         <div class="section">
@@ -556,7 +584,7 @@
           </p>
         </div>
         <div class="section">
-          <h2 class="section-title">Main Analysis</h2>
+          <h2 class="section-title">Main analysis</h2>
 
           <h3 class="subsection-title">2. Architecture at a glance</h3>
 
@@ -727,11 +755,8 @@
             history, so the model naturally sees:
           </p>
 
-          <p>
-            <code>`</code>text FunctionCall(update_plan, full current plan)
-            FunctionCallOutput("Plan updated")
-          </p>
-          <code>`</code>
+          <pre><code class="language-text">FunctionCall(update_plan, full current plan)
+FunctionCallOutput(&quot;Plan updated&quot;)</code></pre>
 
           <p>
             Both function calls and function outputs pass rollout persistence
@@ -1173,39 +1198,11 @@
           <h2 class="section-title">9. Implications for DeepAgents</h2>
 
           <p>
-            The existing <code>add-task-system</code> proposal is already
-            stronger than Codex’s checklist on durable task semantics. It
-            proposes:
-          </p>
-
-          <ul>
-            <li>a SQLite-backed <code>TaskStore</code>;</li>
-            <li>stable task IDs and <code>listId</code> scoping;</li>
-            <li>
-              <code>pending</code>, <code>in_progress</code>,
-              <code>completed</code>, and <code>deleted</code> lifecycle;
-            </li>
-            <li>owners and metadata;</li>
-            <li>
-              <code>blockedBy</code>/<code>blocks</code> dependency relations;
-            </li>
-            <li>compact list vs detailed get APIs;</li>
-            <li>tool factories and context fragments. [30][31]</li>
-          </ul>
-
-          <p>
-            But the proposal explicitly makes ContextEngine integration a
-            non-goal. That leaves the key Manus/Codex lesson unresolved: durable
-            state does not improve attention unless the engine knows
-            <strong>when and how to bring it back</strong>.
-          </p>
-
-          <p>
-            DeepAgents already has a strong mechanism for that.
-            <code>target: 'steer'</code> can inject a synthetic reminder at a
-            step boundary, persist the exact model-visible chain, and keep
-            prompt/store parity. [32][33] The missing pieces are task-aware
-            review inputs and durable plan-review outputs.
+            At research time, DeepAgents supported synthetic
+            <code>target: 'steer'</code> reminders at step boundaries and
+            persisted the model-visible chain. [30][31] Task-aware review inputs
+            and durable plan-review outputs were the proposed additions; see the
+            maintenance note above for the implemented contract.
           </p>
         </div>
         <div class="section">
@@ -1220,15 +1217,20 @@
             dependencies. Add a compact plan layer for attention and sequencing:
           </p>
 
-          <p>
-            <code>`</code>ts interface PlanSnapshot { id: string; listId:
-            string; objective: string; successCriteria: string[]; revision:
-            number; status: 'active' | 'completed' | 'blocked' | 'superseded';
-            steps: Array<{ taskId?: string; text: string; status: 'pending' |
-            'in_progress' | 'completed' | 'blocked' | 'deferred'; }>;
-            lastReviewedAt?: number; }
-          </p>
-          <code>`</code>
+          <pre><code class="language-ts">interface PlanSnapshot {
+  id: string;
+  listId: string;
+  objective: string;
+  successCriteria: string[];
+  revision: number;
+  status: &#x27;active&#x27; | &#x27;completed&#x27; | &#x27;blocked&#x27; | &#x27;superseded&#x27;;
+  steps: Array&lt;{
+    taskId?: string;
+    text: string;
+    status: &#x27;pending&#x27; | &#x27;in_progress&#x27; | &#x27;completed&#x27; | &#x27;blocked&#x27; | &#x27;deferred&#x27;;
+  }&gt;;
+  lastReviewedAt?: number;
+}</code></pre>
 
           <p>
             This preserves Codex’s small full-snapshot attention surface while
@@ -1239,29 +1241,22 @@
             10.2 Make review an event and a decision
           </h3>
 
-          <p>
-            <code>`</code>ts interface PlanReview { planId: string;
-            reviewedRevision: number; trigger:
-          </p>
-          <table>
-            <thead>
-              <tr></tr>
-            </thead>
-            <tbody>
-              <tr></tr>
-              <tr></tr>
-              <tr></tr>
-              <tr></tr>
-              <tr></tr>
-              <tr></tr>
-            </tbody>
-          </table>
-          <p>
-            evidence: EvidenceRef[]; decision: 'continue' | 'revise' | 'replace'
-            | 'complete' | 'blocked'; rationale: string; revisedPlan?:
-            PlanSnapshot; }
-          </p>
-          <code>`</code>
+          <pre><code class="language-ts">interface PlanReview {
+  planId: string;
+  reviewedRevision: number;
+  trigger:
+    | &#x27;new_evidence&#x27;
+    | &#x27;tool_failure&#x27;
+    | &#x27;scope_change&#x27;
+    | &#x27;resume&#x27;
+    | &#x27;post_compaction&#x27;
+    | &#x27;pre_completion&#x27;
+    | &#x27;manual&#x27;;
+  evidence: EvidenceRef[];
+  decision: &#x27;continue&#x27; | &#x27;revise&#x27; | &#x27;replace&#x27; | &#x27;complete&#x27; | &#x27;blocked&#x27;;
+  rationale: string;
+  revisedPlan?: PlanSnapshot;
+}</code></pre>
 
           <p>
             The key point is that “Is the current plan still valid?” should not
@@ -1302,21 +1297,22 @@
           <p>
             Current <code>WhenContext</code> exposes
             turn/message/usage/tool-output context but not plan revision,
-            current task, step number, or evidence since last review. [32] Add a
+            current task, step number, or evidence since last review. [30] Add a
             plan-aware slice such as:
           </p>
 
-          <p>
-            <code>`</code>ts interface PlanWhenContext { plan?: PlanSnapshot;
-            activeTask?: TaskSummary; stepNumber: number;
-            substantiveToolCallsSinceReview: number; failuresSinceReview:
-            ToolFailureSummary[]; evidenceSinceReview: EvidenceRef[]; }
-          </p>
-          <code>`</code>
+          <pre><code class="language-ts">interface PlanWhenContext {
+  plan?: PlanSnapshot;
+  activeTask?: TaskSummary;
+  stepNumber: number;
+  substantiveToolCallsSinceReview: number;
+  failuresSinceReview: ToolFailureSummary[];
+  evidenceSinceReview: EvidenceRef[];
+}</code></pre>
 
           <p>
             Then a <code>target: 'steer'</code> reminder can inject the review
-            question at the right boundary. [33]
+            question at the right boundary. [31]
           </p>
 
           <h3 class="subsection-title">10.5 Deterministic rehydration</h3>
@@ -1327,13 +1323,13 @@
             representation:
           </p>
 
-          <p>
-            <code>`</code>text Objective: … Success criteria: … Current step: …
-            Remaining steps: … Last review: revision 4, continue New evidence
-            since review: … Question: Is this plan still valid? If not, revise
-            it before continuing.
-          </p>
-          <code>`</code>
+          <pre><code class="language-text">Objective: …
+Success criteria: …
+Current step: …
+Remaining steps: …
+Last review: revision 4, continue
+New evidence since review: …
+Question: Is this plan still valid? If not, revise it before continuing.</code></pre>
 
           <p>
             This should be derived from the store, not reconstructed from
@@ -1366,8 +1362,7 @@
 
           <ol>
             <li>
-              <strong>Finish the durable TaskStore foundation</strong> already
-              described in OpenSpec.
+              <strong>Build the durable TaskStore foundation.</strong>
             </li>
             <li>
               <strong
@@ -1444,7 +1439,7 @@
           </p>
         </div>
         <div class="section">
-          <h2 class="section-title">Claims-Evidence Table</h2>
+          <h2 class="section-title">Claims-evidence table</h2>
 
           <table>
             <thead>
@@ -1502,14 +1497,14 @@
                   DeepAgents has the steering mechanism but lacks task-aware
                   review integration
                 </td>
-                <td>Task design and reminder runtime [30][31][32][33]</td>
-                <td>High for current design; recommendation is normative</td>
+                <td>Reminder runtime [30][31]</td>
+                <td>High for cited runtime; recommendation is normative</td>
               </tr>
             </tbody>
           </table>
         </div>
         <div class="section">
-          <h2 class="section-title">Counterevidence Register</h2>
+          <h2 class="section-title">Counterevidence register</h2>
 
           <ul>
             <li>
@@ -1607,9 +1602,7 @@
               idle continuation;
             </li>
             <li>tests and git/PR history;</li>
-            <li>
-              the current DeepAgents task proposal and reminder/steer runtime.
-            </li>
+            <li>the current DeepAgents reminder/steer runtime.</li>
           </ul>
 
           <p>
@@ -1819,26 +1812,12 @@
             <div class="bib-entry">
               <span class="bib-number">[30]</span> (2026).
               <a
-                href="https://github.com/JanuaryLabs/deepagents/blob/598cedf50c0df3f136826fcc666923608d08c803/openspec/changes/add-task-system/proposal.md"
-                >DeepAgents proposed task-system scope</a
-              >
-            </div>
-            <div class="bib-entry">
-              <span class="bib-number">[31]</span> (2026).
-              <a
-                href="https://github.com/JanuaryLabs/deepagents/blob/598cedf50c0df3f136826fcc666923608d08c803/openspec/changes/add-task-system/design.md"
-                >DeepAgents proposed task-system design</a
-              >
-            </div>
-            <div class="bib-entry">
-              <span class="bib-number">[32]</span> (2026).
-              <a
                 href="file:///Users/ezzabuzaid/Desktop/January/deepagents/packages/context/src/lib/fragments/reminders/src/types.ts"
                 >DeepAgents current reminder and steer types</a
               >
             </div>
             <div class="bib-entry">
-              <span class="bib-number">[33]</span> (2026).
+              <span class="bib-number">[31]</span> (2026).
               <a
                 href="file:///Users/ezzabuzaid/Desktop/January/deepagents/packages/context/src/lib/engine.ts"
                 >DeepAgents current steer reminder runtime</a

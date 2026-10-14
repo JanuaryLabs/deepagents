@@ -476,8 +476,6 @@ The public agent-flow integration test now proves that an agent:
 
 > Codex cli source code is open source. Clone it in tmp folder and do deepresearch on it to understand every bit of their "agent tasks/todo" whether they do recitation and where they store the tasks and all other aspects that we need to know about. stuff they do better, what not with thear reasining if documented
 
-> do not use openspec. let us talk inline here
-
 # Appendix B: Verbatim response annotations
 
 ## Annotation 1

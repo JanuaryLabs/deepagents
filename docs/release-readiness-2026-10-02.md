@@ -2,13 +2,25 @@
 
 Validation continued on October 3 after a network interruption.
 
-The packaging audit covers all **16 public packages**. Reproduced packaging and
-release-command defects are repaired. A reproduced runtime subscription cleanup
-race is fixed; the complete 25-file local runtime batch now passes with 284
-passing tests and one pre-existing TODO. Local npm identity and package write
-permissions are verified. Docker is responsive again, and all **732 selected
-Docker-enabled tests pass**, including the repaired managed-volume cleanup race.
-The remaining publication blocker is renewal of the GitHub Actions npm credential.
+Update on October 8: this file remains the historical readiness audit for the
+7.0.0 publication path. As of October 8, public package manifests say **7.1.1**
+after the October 7 `7.1.0` and `7.1.1` release commits; do not read the
+original 6.2.0/7.0.0 package-state bullets below as the current registry plan.
+
+Update on October 9: the repaired `development` export-condition failures below
+remain historical. As of October 9, manifests use a separate `@deepagents/source`
+condition for linked-checkout development; package JSON exports, wildcard
+exports, and asset exports still avoid excluded `src` paths in the published
+package.
+
+At the close of the audit on October 3, all **16 public packages** had been
+checked. Reproduced packaging and release-command defects were repaired, along
+with a runtime subscription cleanup race. The complete 25-file local runtime
+batch passed with 284 passing tests and one pre-existing TODO. Local npm identity
+and package write permissions were verified. Docker was responsive, and all
+**732 selected Docker-enabled tests passed**, including coverage of the repaired
+managed-volume cleanup race. The remaining publication blocker at that time was
+renewal of the GitHub Actions npm credential.
 Nothing was published, versioned, staged, committed, tagged, or pushed during this
 audit. Consumer repositories were read without changing their checkouts or links.
 
@@ -16,10 +28,10 @@ audit. Consumer repositories were read without changing their checkouts or links
 
 - Started from clean `main` at `9a641eeb`, three commits ahead of recorded
   `origin/main`. Local tools: Node 26.8.1, npm 11.19.0, Nx 23.1.0.
-- All public manifests currently say **6.2.0**. Local tag `release/6.2.0` is at
+- At audit start, all public manifests said **6.2.0**. Local tag `release/6.2.0` was at
   `2f85ee24` (August 20), 86 commits behind the starting checkout.
-- Live npm metadata: eight established packages are still **6.1.2**, published
-  August 4. The other eight packages have never been published. No published
+- npm metadata checked during the audit: eight established packages were **6.1.2**,
+  published August 4. The other eight packages had never been published. No published
   6.2.0 was found.
 - `nx release --dry-run --skip-publish` succeeds and proposes **7.0.0**, updating
   all 16 versions and their internal dependencies together. The major bump
@@ -266,6 +278,9 @@ to trusted publishing after the new package names exist, before
 These were kept separate from the required daemon recovery and release validation.
 
 ## Release procedure
+
+This procedure records the audited 7.0.0 publication path. Before a new release,
+refresh the version, credential, and test evidence.
 
 Do not run `nx release` to repair authentication. Local login and account/package
 write permissions are verified; renew and verify the CI credential separately.

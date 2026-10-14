@@ -176,7 +176,7 @@ leaves changes unstaged unless the user explicitly authorizes staging.
 
 ```sh
 nx run @deepagents/experimental:typecheck
-node --test --no-warnings packages/experimental/src/zukhruf/plugins/http/http.integration.test.ts packages/experimental/src/zukhruf/runtime/plugin/agent-runtime-plugin.integration.test.ts
+nx run @deepagents/experimental:test --args="--test-timeout=60000 src/zukhruf/plugins/http/http.integration.test.ts src/zukhruf/runtime/plugin/agent-runtime-plugin.integration.test.ts"
 nx run @deepagents/devtool:typecheck
 nx run @deepagents/devtool:test
 nx run @deepagents/demo-zukhruf-simple:lint
@@ -206,8 +206,8 @@ unless its diagnostic changes because of this work.
   `src/zukhruf/plugins/http/`; no forwarding source entry remains.
 - `@deepagents/experimental/zukhruf/http` maps directly to the relocated build output.
 - The root barrel test proves HTTP runtime values remain absent from transport-neutral Zukhruf.
-- The validator uses Hono's public string-valued header map directly; the redundant header-copy
-  fallback was removed.
+- HTTP routes now use `validate` from `@sdk-it/hono/runtime`; the redundant
+  local validation and header-copy helpers were removed.
 - The existing packed-consumer probe imports and composes the public HTTP and trace-HTTP entry
   points.
 - Experimental and DevTool typechecks passed. Focused HTTP/runtime-plugin tests

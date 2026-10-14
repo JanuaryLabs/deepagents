@@ -1,4 +1,4 @@
-### General Rules
+### General rules
 
 - The "developer" is working hand in hand with you to build a high quality and maintainable codebase and always ready to answer your questions to give you more context so never hesitate to ask and you are encouraged to ask questions.
 
@@ -32,7 +32,7 @@ throw new HTTPException(400, {
 
 - Use `PATCH` for update
 
-### Date & Time
+### Date and time
 
 - Use date-fns when possible.
 - Use Intl API when date-fns doesn't support the required functionality.
@@ -48,11 +48,14 @@ The frontend `build` and `typecheck` targets run `generate-sdk` for you. To run 
 
 Do not edit the generated client. Change the backend route, then generate the client again.
 
-### API Input Validation
+### API input validation
 
-The validator middleware is used both for validating request bodies, path and query parameters at runtime and act as directive for generating OpenAPI schema at build time hence make sure the `against` is staticaly analyzable.
+Use `validate` from `@sdk-it/hono/runtime` for request bodies, path
+parameters, and query parameters. It validates requests at runtime and provides
+the schema metadata used by the OpenAPI generator, so keep each `against`
+expression statically analyzable.
 
-Special schemas are supported only through
+Special schemas are supported only through:
 
 - `import * as inputs from '../core/inputs.ts'`
 
@@ -60,10 +63,13 @@ Special schemas are supported only through
 
 - Use the `toPagination` function to make the response of a paginated list.
 
-### Unit Test
+### Running Node.js integration tests
+
+For Node.js integration tests, prefer the package's Nx `test` target so the
+package builds first. When running a Node.js test directly, include a timeout:
 
 ```sh
-node --test <target-filename>.test.ts
+node --test --test-timeout=60000 <target-filename>.test.ts
 ```
 
 ### Using the API
@@ -74,16 +80,16 @@ const { data: suites } = useData('GET /suites', {});
 
 `useData` returns the same result as `useQuery` from TanStack Query.
 
-### Client Data Hooks
+### Client data hooks
 
 - Use `useData` and `useAction` from `frontend/src/app/hooks/use-client.ts` for all API calls in React components. Do not call `fetch` directly.
 - Prefer server-managed state over duplicating data in component or local storage; reserve `localStorage` only for ephemeral UI preferences (e.g. theme).
 - Use the `invalidate` option in `useAction` to refresh dependent queries after mutations rather than manual refetch logic.
 - Do not create parallel caches; rely solely on React Query plus generated client typing for consistency and correctness.
 
-### Running Typescript files
+### Running TypeScript files
 
-We use node version that support running typescript files directly without precompilation. To run a typescript file, use the following command:
+The workspace's Node.js version runs TypeScript files directly. Run a file with:
 
 ```sh
 node path/to/file.ts
@@ -103,13 +109,15 @@ For example, to build the `frontend` package/app, run:
 nx run frontend:build
 ```
 
-### Folder and File Structure
+### Folder and file structure
 
-In frontend apps, each route should have its own folder under `app/routes/`. why folder is because all componenst related to this route should be colocated in this folder. You might also notice we have `components` folder under `app/` this folder is for components that are shared across multiple routes.
+Give each frontend route its own folder under `app/routes/` and colocate its
+components there. Use `app/components/` for components shared across routes.
 
-### Small Components
+### Small components
 
-Always break down components into smaller components and colocate them in the same folder as the route. Those broken down components should be autonomous on their own logic, state management and accepts props.
+Split large components into smaller components in the route's folder. Each
+component should own its logic and state and accept the props it needs.
 
 - **Extract sub-components** - When a component has distinct UI sections (cards, forms, selectors), extract each into its own function in the same file.
 
@@ -119,26 +127,26 @@ Always break down components into smaller components and colocate them in the sa
 
 - **Colocate in same file** - Keep sub-components in the same file as the parent. Only move to separate files if reused across multiple routes.
 
-### React Component Architecture
+### React component architecture
 
 - **Keep components in the same file** - When breaking down large components, create smaller React function components in the same file. Do NOT create new files unless the component is reused across multiple files.
 - **Components should own their state** - Avoid passing callbacks as props. Move logic into the component that uses it to avoid prop drilling.
-- **Proactively breakdown large components** - If a component is getting large, split it into smaller components in the same file separated by regions.
+- **Break down large components** - If a component is getting large, split it into smaller components in the same file separated by regions.
 
 ## Testing
 
 - **Do NOT write tests during feature implementation** unless explicitly asked. Complete the feature first, test later.
 - Focus on **integration tests** that test entire flows, not unit tests for individual functions.
 
-### Loading Buttons
+### Loading buttons
 
 Use `Button` and `Spinner` from `@deepagents/react-shadcn` for buttons that trigger async operations and need to show loading state.
 
-### Local Database
+### Local database
 
 The backend keeps its data in one SQLite file. `EVALS_DB_PATH` sets the path of that file. When `EVALS_DB_PATH` is not set, the path is `.evals/store.db` in the working directory of the backend. To debug, open this file and examine the data.
 
-## UI Skills
+## UI skills
 
 Opinionated constraints for building better interfaces with agents.
 
