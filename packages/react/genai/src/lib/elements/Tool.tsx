@@ -1,4 +1,11 @@
+import {
+  Badge,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@zukhruf/shadcn';
 import type { DynamicToolUIPart, ToolUIPart } from 'ai';
+import { cn } from 'cn';
 import {
   CheckCircleIcon,
   ChevronDownIcon,
@@ -9,14 +16,6 @@ import {
 } from 'lucide-react';
 import type { ComponentProps, ReactNode } from 'react';
 import { isValidElement } from 'react';
-
-import {
-  Badge,
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-  cn,
-} from '@deepagents/react-shadcn';
 
 import { CodeBlock } from './CodeBlock.tsx';
 

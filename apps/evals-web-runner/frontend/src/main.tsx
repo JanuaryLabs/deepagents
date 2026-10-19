@@ -1,8 +1,8 @@
 import { QueryClientProvider } from '@tanstack/react-query';
+import { Toaster } from '@zukhruf/shadcn';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider, createBrowserRouter, redirect } from 'react-router';
-import { Toaster } from 'sonner';
 
 import { queryClient } from './app/hooks/query-client.ts';
 import Layout from './app/routes/Layout.tsx';
@@ -94,21 +94,7 @@ const root = createRoot(container);
 root.render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <Toaster
-        theme="system"
-        className="toaster group"
-        toastOptions={{
-          classNames: {
-            toast:
-              'group toast group-[.toaster]:bg-background group-[.toaster]:text-foreground group-[.toaster]:border-border group-[.toaster]:shadow-lg',
-            description: 'group-[.toast]:text-muted-foreground',
-            actionButton:
-              'group-[.toast]:bg-primary group-[.toast]:text-primary-foreground',
-            cancelButton:
-              'group-[.toast]:bg-muted group-[.toast]:text-muted-foreground',
-          },
-        }}
-      />
+      <Toaster />
       <RouterProvider router={router} />
     </QueryClientProvider>
   </StrictMode>,

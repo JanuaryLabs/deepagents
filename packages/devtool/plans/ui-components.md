@@ -1,12 +1,12 @@
 # UI Component Topology
 
-Status: current-source inventory after consolidating Shadcn primitives into
-`@deepagents/react-shadcn`.
+Status: current-source inventory after moving the Shadcn primitives to
+`@zukhruf/shadcn`.
 
 ## Conclusion
 
-The repo has one cross-product Shadcn package:
-`@deepagents/react-shadcn`. Applications own their themes and feature
+The repo uses one Shadcn package from npm:
+`@zukhruf/shadcn`. Applications own their themes and feature
 compositions; they do not vendor primitive copies.
 
 ```text
@@ -17,7 +17,6 @@ deepagents
 ├── apps/evals-web-runner/frontend
 │   ├── app/components              6 cross-route compositions
 │   └── app/routes                 product screens and route-local UI
-├── packages/react/shadcn           Base UI-backed shared primitives
 └── packages/devtool
     ├── history                     History composition, status, and formatting
     ├── traces                      trace server core and trace React view
@@ -46,8 +45,8 @@ Ownership:
 - [`../traces/src/index.ts`](../traces/src/index.ts) owns trace discovery,
   telemetry decoration, and HTTP routes;
   [`../traces/src/ui.tsx`](../traces/src/ui.tsx) owns the waterfall and inspector.
-- [`../../react/shadcn/src/index.ts`](../../react/shadcn/src/index.ts) exports
-  `cn()` and the shared Base UI-backed primitive set.
+- `@zukhruf/shadcn` exports the Base UI-backed primitive set; `cn()` comes
+  from the `cn` package.
 - [`../history/src/index.tsx`](../history/src/index.tsx) owns status presentation
   and timestamp formatting.
 - [`../host/ui/src/styles.css`](../host/ui/src/styles.css) owns the devtool
@@ -61,14 +60,13 @@ inset restore trigger, rail, Ctrl/Cmd+B, cookie persistence, and a responsive
 sheet.
 
 Implication: scheduled-task composition remains DevTool-owned, while only
-proven cross-product primitives should enter `@deepagents/react-shadcn`.
+shadcn/ui primitives come only from `@zukhruf/shadcn`.
 
 ### `apps/evals-web-runner/frontend`
 
 Ownership:
 
-- [`../../react/shadcn/src/index.ts`](../../react/shadcn/src/index.ts) supplies
-  the eval runner's shared primitives.
+- `@zukhruf/shadcn` supplies the eval runner's primitives.
 - [`../../../apps/evals-web-runner/frontend/src/app/components`](../../../apps/evals-web-runner/frontend/src/app/components)
   contains six compositions shared by more than one route or too substantial
   to leave inline.
@@ -125,14 +123,14 @@ Implication: the docs UI is not a source for devtool management primitives.
 ## Documentation drift
 
 [`../../../apps/evals-web-runner/AGENTS.md`](../../../apps/evals-web-runner/AGENTS.md)
-now points UI work to `@deepagents/react-shadcn`. Generated data hooks remain
+now points UI work to `@zukhruf/shadcn`. Generated data hooks remain
 app-local.
 
 ## Shared package seam
 
 The package boundary uses these constraints:
 
-1. import primitives and `cn` from `@deepagents/react-shadcn`;
+1. import primitives from `@zukhruf/shadcn` and `cn` from `cn`;
 2. keep feature compositions in their owning application or feature package;
 3. add primitives to the shared package only after a demonstrated consumer;
 4. keep theme tokens app-owned unless both consumers demonstrably share the

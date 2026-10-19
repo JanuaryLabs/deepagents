@@ -1,6 +1,3 @@
-import { useState } from 'react';
-import { useSearchParams } from 'react-router';
-
 import {
   Button,
   Select,
@@ -9,7 +6,9 @@ import {
   SelectTrigger,
   SelectValue,
   Skeleton,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import { useState } from 'react';
+import { useSearchParams } from 'react-router';
 
 import { ComparisonTable } from '../../components/ComparisonTable.tsx';
 import { useData } from '../../hooks/use-client.ts';

@@ -1,3 +1,4 @@
+import { cn } from 'cn';
 import {
   CircleAlertIcon,
   CircleDotIcon,
@@ -21,7 +22,6 @@ import type {
   ConversationStatus,
 } from '@deepagents/experimental/zukhruf';
 import type { OwnerEvent } from '@deepagents/experimental/zukhruf/http';
-import { cn } from '@deepagents/react-shadcn';
 
 export type { ConversationStatus } from '@deepagents/experimental/zukhruf';
 

@@ -1,7 +1,6 @@
+import { cn } from 'cn';
 import * as React from 'react';
 import { memo } from 'react';
-
-import { cn } from '@deepagents/react-shadcn';
 
 import {
   TablePanelStreamdown,

@@ -1,7 +1,3 @@
-import { type ToolUIPart, getToolName } from 'ai';
-import { AlertCircle, RefreshCw } from 'lucide-react';
-import type { ZodError } from 'zod';
-
 import {
   Alert,
   AlertDescription,
@@ -12,7 +8,10 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import { type ToolUIPart, getToolName } from 'ai';
+import { AlertCircle, RefreshCw } from 'lucide-react';
+import type { ZodError } from 'zod';
 
 import { useAgentMessages } from '../chat/agent-context.tsx';
 

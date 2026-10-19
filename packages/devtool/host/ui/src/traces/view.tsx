@@ -1,3 +1,4 @@
+import { cn } from 'cn';
 import {
   AlertCircleIcon,
   BotIcon,
@@ -15,7 +16,6 @@ import {
   conversationStatusLabel,
   formatTimestamp,
 } from '@deepagents/devtool-history';
-import { cn } from '@deepagents/react-shadcn';
 
 const recordingStateSchema = z.enum(['recorded', 'not-recorded']);
 const spanStatusSchema = z.enum([

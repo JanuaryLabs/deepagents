@@ -84,7 +84,7 @@ changes.
 - `packages/devtool` is a folder-only container; the published
   `@deepagents/devtool` package lives at `packages/devtool/host` with
   publishable `history` and `traces` child packages. Shared display primitives
-  come from `@deepagents/react-shadcn`.
+  come from `@zukhruf/shadcn`.
 - The Traces slice (conversation-scoped reads, persistent History navigation,
   newest-first trace selection, waterfall, span inspector) and the routed
   off-canvas shell with `/history`, `/chat/:sessionId?`,
@@ -379,7 +379,7 @@ implementing, but the behavior is fixed:
 - [x] Extract the existing History composition as the first real child package.
 - [x] Extract the trace read model and trace UI as a child package without
       duplicating their contracts.
-- [x] Consolidate shared display primitives in `@deepagents/react-shadcn`
+- [x] Consolidate shared display primitives in one shadcn package (now `@zukhruf/shadcn`)
       without adding speculative devtool components.
 - [x] Keep devtool status formatting in History and theme values in the host.
 - [x] Add the Scheduled Tasks management and run-inbox UI after approving the

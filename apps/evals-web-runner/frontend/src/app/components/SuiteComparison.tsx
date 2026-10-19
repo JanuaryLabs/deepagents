@@ -1,19 +1,3 @@
-import { toPng } from 'html-to-image';
-import { useCallback, useMemo, useRef, useState } from 'react';
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  PolarAngleAxis,
-  PolarGrid,
-  PolarRadiusAxis,
-  Radar,
-  RadarChart,
-  XAxis,
-  YAxis,
-} from 'recharts';
-import { toast } from 'sonner';
-
 import {
   Button,
   Card,
@@ -32,8 +16,23 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@deepagents/react-shadcn';
-import type { ChartConfig } from '@deepagents/react-shadcn';
+  toast,
+} from '@zukhruf/shadcn';
+import type { ChartConfig } from '@zukhruf/shadcn';
+import { toPng } from 'html-to-image';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  PolarAngleAxis,
+  PolarGrid,
+  PolarRadiusAxis,
+  Radar,
+  RadarChart,
+  XAxis,
+  YAxis,
+} from 'recharts';
 
 import { useData } from '../hooks/use-client.ts';
 import { formatDuration, formatTokens } from '../lib/format.ts';
@@ -85,7 +84,11 @@ export function SuiteComparison({
   const captureRef = useRef<HTMLDivElement>(null);
   const [capturing, setCapturing] = useState(false);
 
-  const { data: comparison, isLoading, error } = useData(
+  const {
+    data: comparison,
+    isLoading,
+    error,
+  } = useData(
     'GET /suites/{id}/compare',
     { id: suiteId, runIds: runIds.join(',') },
     { enabled: runIds.length >= 2 },
@@ -103,7 +106,7 @@ export function SuiteComparison({
         await navigator.clipboard.write([
           new ClipboardItem({ 'image/png': blob }),
         ]);
-        toast.success('Copied comparison as image');
+        toast.add({ type: 'success', title: 'Copied comparison as image' });
       } else {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -111,10 +114,10 @@ export function SuiteComparison({
         a.download = 'comparison.png';
         a.click();
         URL.revokeObjectURL(url);
-        toast.success('Downloaded comparison as image');
+        toast.add({ type: 'success', title: 'Downloaded comparison as image' });
       }
     } catch {
-      toast.error('Failed to capture comparison');
+      toast.add({ type: 'error', title: 'Failed to capture comparison' });
     } finally {
       setCapturing(false);
     }

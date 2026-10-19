@@ -31,7 +31,7 @@
   },
   "dependencies": {
     "@deepagents/experimental": "7.1.1",
-    "@deepagents/react-shadcn": "7.1.1",
+    "cn": "^0.4.0",
     "lucide-react": "^1.33.0"
   },
   "peerDependencies": {

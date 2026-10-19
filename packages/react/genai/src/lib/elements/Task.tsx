@@ -1,12 +1,11 @@
-import { ChevronDownIcon, SearchIcon } from 'lucide-react';
-import type { ComponentProps } from 'react';
-
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-  cn,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import { cn } from 'cn';
+import { ChevronDownIcon, SearchIcon } from 'lucide-react';
+import type { ComponentProps } from 'react';
 
 export type TaskItemFileProps = ComponentProps<'div'>;
 

@@ -1,6 +1,6 @@
+import { Attachment } from '@zukhruf/shadcn';
 import type { ToolUIPart } from 'ai';
-
-import { Attachment, cn } from '@deepagents/react-shadcn';
+import { cn } from 'cn';
 
 import {
   type GenAIInteractiveElement,

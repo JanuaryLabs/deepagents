@@ -1,8 +1,7 @@
+import { cn } from 'cn';
 import type { HTMLMotionProps } from 'motion/react';
 import { motion } from 'motion/react';
 import * as React from 'react';
-
-import { cn } from '@deepagents/react-shadcn';
 
 interface AgentActionButtonProps extends Omit<
   HTMLMotionProps<'button'>,

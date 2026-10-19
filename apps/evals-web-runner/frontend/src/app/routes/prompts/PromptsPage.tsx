@@ -1,5 +1,3 @@
-import { useState } from 'react';
-
 import {
   Badge,
   Button,
@@ -16,7 +14,8 @@ import {
   TableHeader,
   TableRow,
   Textarea,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import { useState } from 'react';
 
 import { useAction, useData } from '../../hooks/use-client.ts';
 

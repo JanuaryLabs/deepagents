@@ -1,8 +1,7 @@
 import type { ToolUIPart } from 'ai';
 import { isStaticToolUIPart } from 'ai';
+import { cn } from 'cn';
 import { Activity, type PropsWithChildren, useMemo } from 'react';
-
-import { cn } from '@deepagents/react-shadcn';
 
 import { useAgent, useAgentMessages } from '../chat/agent-context.tsx';
 import type { ComponentTool } from '../tools/registry.ts';

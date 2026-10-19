@@ -1,12 +1,3 @@
-import type { UIMessage } from 'ai';
-import {
-  CheckIcon,
-  ChevronRightIcon,
-  CircleAlertIcon,
-  MinusIcon,
-} from 'lucide-react';
-import { z } from 'zod';
-
 import {
   Alert,
   AlertDescription,
@@ -20,7 +11,15 @@ import {
   ItemTitle,
   Separator,
   Spinner,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import type { UIMessage } from 'ai';
+import {
+  CheckIcon,
+  ChevronRightIcon,
+  CircleAlertIcon,
+  MinusIcon,
+} from 'lucide-react';
+import { z } from 'zod';
 
 /**
  * The `data-compaction` payloads Zukhruf streams (`CompactionEvent`), as far as

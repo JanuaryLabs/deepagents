@@ -46,9 +46,6 @@
       "path": "./packages/experimental"
     },
     {
-      "path": "./packages/react/shadcn"
-    },
-    {
       "path": "./packages/react/formatters"
     },
     {

@@ -1,6 +1,0 @@
-{
-  "name": "@deepagents/react-shadcn",
-  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "packages/react/shadcn/src",
-  "projectType": "library"
-}

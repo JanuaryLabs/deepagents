@@ -9,11 +9,10 @@ import {
   lastAssistantMessageIsCompleteWithApprovalResponses,
   lastAssistantMessageIsCompleteWithToolCalls,
 } from 'ai';
+import { cn } from 'cn';
 import { AnimatePresence, motion } from 'motion/react';
 import * as React from 'react';
 import { useStickToBottom } from 'use-stick-to-bottom';
-
-import { cn } from '@deepagents/react-shadcn';
 
 import type { ComponentRegistry } from '../tools/registry.ts';
 import { useAgentMeta } from './agent-context.tsx';

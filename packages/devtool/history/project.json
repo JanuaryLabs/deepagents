@@ -15,7 +15,7 @@
       "outputs": ["{options.outputPath}"],
       "options": {
         "main": "packages/devtool/history/src/index.tsx",
-        "external": ["@deepagents/react-shadcn", "lucide-react", "react"]
+        "external": ["lucide-react", "react"]
       }
     }
   }

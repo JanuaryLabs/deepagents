@@ -1,4 +1,5 @@
 import { type ToolUIPart, getToolName } from 'ai';
+import { cn } from 'cn';
 import { CircleHelp } from 'lucide-react';
 import { useId, useState } from 'react';
 
@@ -7,7 +8,6 @@ import {
   ToolError,
   useAgentMessages,
 } from '@deepagents/react-genai';
-import { cn } from '@deepagents/react-shadcn';
 
 import { SubmittedOutputView } from './clarification/primitives.tsx';
 import { inputSchema, outputSchema } from './clarification/schemas.ts';

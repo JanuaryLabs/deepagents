@@ -1,5 +1,3 @@
-import { Link } from 'react-router';
-
 import {
   Badge,
   Skeleton,
@@ -10,8 +8,9 @@ import {
   TableHeader,
   TableRow,
   buttonVariants,
-  cn,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import { cn } from 'cn';
+import { Link } from 'react-router';
 
 import { useData } from '../../hooks/use-client.ts';
 

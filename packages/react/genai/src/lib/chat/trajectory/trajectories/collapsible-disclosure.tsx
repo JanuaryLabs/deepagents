@@ -1,12 +1,11 @@
-import { ChevronDown } from 'lucide-react';
-import type { ReactNode } from 'react';
-
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-  cn,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import { cn } from 'cn';
+import { ChevronDown } from 'lucide-react';
+import type { ReactNode } from 'react';
 
 export function CollapsibleDisclosure({
   label,

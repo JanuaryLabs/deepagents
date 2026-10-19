@@ -6,8 +6,6 @@ import {
   getExpandedRowModel,
   useReactTable,
 } from '@tanstack/react-table';
-import { Fragment, useMemo, useState } from 'react';
-
 import {
   Table,
   TableBody,
@@ -15,7 +13,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import { Fragment, useMemo, useState } from 'react';
 
 import { formatInputValue, truncate } from '../lib/format.ts';
 

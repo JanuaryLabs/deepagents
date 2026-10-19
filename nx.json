@@ -106,7 +106,6 @@
           "@deepagents/context",
           "@deepagents/elements",
           "@deepagents/devtool-history",
-          "@deepagents/react-shadcn",
           "@deepagents/evals",
           "@deepagents/experimental",
           "@ai-sdk/otel",

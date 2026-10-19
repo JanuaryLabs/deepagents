@@ -1,4 +1,19 @@
 import {
+  Button,
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarRail,
+  SidebarTrigger,
+} from '@zukhruf/shadcn';
+import { cn } from 'cn';
+import {
   CalendarClockIcon,
   GitBranchIcon,
   HistoryIcon,
@@ -18,21 +33,6 @@ import {
   History,
   type HistoryRecord,
 } from '@deepagents/devtool-history';
-import {
-  Button,
-  Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarRail,
-  SidebarTrigger,
-  cn,
-} from '@deepagents/react-shadcn';
 
 import type { loader } from './layout.tsx';
 

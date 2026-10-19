@@ -1,3 +1,5 @@
+import { buttonVariants } from '@zukhruf/shadcn';
+import { cn } from 'cn';
 import type { Root, Table } from 'mdast';
 import type { LeafDirective } from 'mdast-util-directive';
 import { toString } from 'mdast-util-to-string';
@@ -20,8 +22,6 @@ import {
 } from 'streamdown';
 import { unified } from 'unified';
 import { SKIP, visit } from 'unist-util-visit';
-
-import { buttonVariants, cn } from '@deepagents/react-shadcn';
 
 import { TablePanel } from '../ui/TablePanel.tsx';
 import { normalizeStreamdownChildren } from './normalize-streamdown-children.ts';

@@ -1,8 +1,7 @@
 import { Button } from '@base-ui/react/button';
+import { cn } from 'cn';
 import { X } from 'lucide-react';
 import { type ComponentPropsWithoutRef, useEffect, useState } from 'react';
-
-import { cn } from '@deepagents/react-shadcn';
 
 import { useComposerContext } from './ComposerContext.ts';
 import type { ComposerState } from './ComposerTypes.ts';

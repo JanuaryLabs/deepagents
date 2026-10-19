@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 
+import { cn } from 'cn';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -17,8 +18,7 @@ import {
   TableCell,
   TableRow,
   buttonVariants,
-  cn,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
 
 import {
   CaseTable,

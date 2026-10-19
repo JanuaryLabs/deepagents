@@ -1,6 +1,6 @@
+import * as ShadcnComponents from '@zukhruf/shadcn';
+import { cn } from 'cn';
 import * as React from 'react';
-
-import * as ShadcnComponents from '@deepagents/react-shadcn';
 
 // Only expose safe React hooks - no useRef (DOM access), no useContext (escape scope)
 const safeReactHooks = {
@@ -30,6 +30,7 @@ export function createSafeScope(): Record<string, unknown> {
 
     // All shadcn components
     ...ShadcnComponents,
+    cn,
 
     // Block dangerous globals by setting them to undefined
     window: undefined,

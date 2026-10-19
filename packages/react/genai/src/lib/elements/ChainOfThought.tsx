@@ -1,15 +1,14 @@
 import { useControllableState } from '@radix-ui/react-use-controllable-state';
-import { BrainIcon, ZapIcon } from 'lucide-react';
-import type { ComponentProps, ReactNode } from 'react';
-import { createContext, memo, useContext } from 'react';
-
 import {
   Badge,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-  cn,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import { cn } from 'cn';
+import { BrainIcon, ZapIcon } from 'lucide-react';
+import type { ComponentProps, ReactNode } from 'react';
+import { createContext, memo, useContext } from 'react';
 
 type ChainOfThoughtContextValue = {
   isOpen: boolean;

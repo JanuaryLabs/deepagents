@@ -1,4 +1,10 @@
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@zukhruf/shadcn';
 import type { UIMessage } from 'ai';
+import { cn } from 'cn';
 import {
   Fragment,
   type ReactNode,
@@ -8,13 +14,6 @@ import {
   useState,
 } from 'react';
 import { useStickToBottom } from 'use-stick-to-bottom';
-
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-  cn,
-} from '@deepagents/react-shadcn';
 
 import { TextShimmer } from '../../components/text-shimmer.tsx';
 import {

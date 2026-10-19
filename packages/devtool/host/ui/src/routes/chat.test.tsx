@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { SidebarProvider } from '@zukhruf/shadcn';
 import {
   MemoryRouter,
   Outlet,
@@ -10,7 +11,6 @@ import {
 import { expect, it, vi } from 'vitest';
 
 import { RuntimeEventsProvider } from '@deepagents/devtool-history';
-import { SidebarProvider } from '@deepagents/react-shadcn';
 
 import { DevtoolSidebar, NewChatButton } from '../app/sidebar.tsx';
 import { Component, loader } from './chat.tsx';

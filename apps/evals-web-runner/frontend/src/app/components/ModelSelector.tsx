@@ -1,5 +1,3 @@
-import type { ComponentProps, ReactNode } from 'react';
-
 import {
   Command,
   CommandDialog,
@@ -14,8 +12,9 @@ import {
   DialogContent,
   DialogTitle,
   DialogTrigger,
-  cn,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import { cn } from 'cn';
+import type { ComponentProps, ReactNode } from 'react';
 
 export type ModelSelectorProps = ComponentProps<typeof Dialog>;
 

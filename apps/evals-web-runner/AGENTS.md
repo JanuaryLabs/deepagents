@@ -140,7 +140,7 @@ component should own its logic and state and accept the props it needs.
 
 ### Loading buttons
 
-Use `Button` and `Spinner` from `@deepagents/react-shadcn` for buttons that trigger async operations and need to show loading state.
+Use `Button` and `Spinner` from `@zukhruf/shadcn` for buttons that trigger async operations and need to show loading state.
 
 ### Local database
 
@@ -152,7 +152,7 @@ Opinionated constraints for building better interfaces with agents.
 
 ### Shadcn UI
 
-All components are exported from `packages/react/shadcn/src/index.ts` and imported from `@deepagents/react-shadcn`. The package uses Base UI as its primitive foundation.
+Import all components from `@zukhruf/shadcn`, and `cn` from the `cn` package. The components use Base UI. Show the errors of background tasks and mutations with the `toast` and `Toaster` of `@zukhruf/shadcn`.
 
 Always make sure to make extensive use of existing components before creating new ones.
 

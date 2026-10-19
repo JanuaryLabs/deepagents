@@ -1,3 +1,4 @@
+import { cn } from 'cn';
 import {
   AnimatePresence,
   type HTMLMotionProps,
@@ -5,8 +6,6 @@ import {
   useReducedMotion,
 } from 'motion/react';
 import type { ReactNode } from 'react';
-
-import { cn } from '@deepagents/react-shadcn';
 
 import { ArrowUpIcon } from '../ui/ArrowUpIcon.tsx';
 

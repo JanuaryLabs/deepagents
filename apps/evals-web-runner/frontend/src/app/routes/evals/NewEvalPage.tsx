@@ -1,6 +1,3 @@
-import { useCallback, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
-
 import {
   Accordion,
   AccordionContent,
@@ -22,7 +19,9 @@ import {
   TabsList,
   TabsTrigger,
   Textarea,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import { useCallback, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router';
 
 import {
   ModelSelector,

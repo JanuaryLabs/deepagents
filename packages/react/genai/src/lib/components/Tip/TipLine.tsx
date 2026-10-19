@@ -1,7 +1,6 @@
+import { cn } from 'cn';
 import { Lightbulb } from 'lucide-react';
 import { useEffect, useState } from 'react';
-
-import { cn } from '@deepagents/react-shadcn';
 
 import { TextShimmer } from '../text-shimmer.tsx';
 import { useTipValue } from './TipProvider.tsx';

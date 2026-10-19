@@ -1,6 +1,3 @@
-import { useState } from 'react';
-import { Link } from 'react-router';
-
 import {
   Button,
   Input,
@@ -12,7 +9,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import { useState } from 'react';
+import { Link } from 'react-router';
 
 import { useAction, useData } from '../../hooks/use-client.ts';
 import { formatSize } from '../../lib/format.ts';

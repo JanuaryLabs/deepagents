@@ -1,4 +1,6 @@
+import { AttachmentGroup, AttachmentMedia } from '@zukhruf/shadcn';
 import type { UIMessage } from 'ai';
+import { cn } from 'cn';
 import { memo, useMemo, useState } from 'react';
 
 import {
@@ -7,7 +9,6 @@ import {
   stripReminders,
 } from '@deepagents/context/browser';
 import { PersistedPromptText } from '@deepagents/react-input/browser';
-import { AttachmentGroup, AttachmentMedia, cn } from '@deepagents/react-shadcn';
 
 import { formatUsageBreakdown, parseMetadataUsage } from '../../usage.ts';
 import { uploadReceiptSchema } from '../../zukhruf-chat-transport.ts';

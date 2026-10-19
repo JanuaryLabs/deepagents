@@ -1,4 +1,5 @@
 import { type UIMessage, validateUIMessages } from 'ai';
+import { cn } from 'cn';
 import { useState, useSyncExternalStore } from 'react';
 import {
   type LoaderFunctionArgs,
@@ -29,7 +30,6 @@ import {
   useChatManager,
 } from '@deepagents/react-genai';
 import { Composer, useComposer } from '@deepagents/react-input/browser';
-import { cn } from '@deepagents/react-shadcn';
 
 import { INTERACTIVE_ELEMENTS } from '../app/elements.tsx';
 import { loadRuntime } from '../app/runtime-data.ts';

@@ -1,4 +1,31 @@
+import {
+  Button,
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupTextarea,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@zukhruf/shadcn';
 import type { ChatStatus, FileUIPart } from 'ai';
+import { cn } from 'cn';
 import {
   CornerDownLeftIcon,
   ImageIcon,
@@ -33,34 +60,6 @@ import {
   useRef,
   useState,
 } from 'react';
-
-import {
-  Button,
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupTextarea,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  cn,
-} from '@deepagents/react-shadcn';
 
 // ============================================================================
 // Provider Context & Types
@@ -414,10 +413,7 @@ export const PromptInputActionAddAttachments = ({
   const attachments = usePromptInputAttachments();
 
   return (
-    <DropdownMenuItem
-      {...props}
-      onClick={() => attachments.openFileDialog()}
-    >
+    <DropdownMenuItem {...props} onClick={() => attachments.openFileDialog()}>
       <ImageIcon className="mr-2 size-4" /> {label}
     </DropdownMenuItem>
   );

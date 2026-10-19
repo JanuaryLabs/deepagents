@@ -1,13 +1,8 @@
+import { Avatar, AvatarFallback, AvatarImage } from '@zukhruf/shadcn';
 import type { UIMessage } from 'ai';
 import { type VariantProps, cva } from 'class-variance-authority';
+import { cn } from 'cn';
 import type { ComponentProps, HTMLAttributes } from 'react';
-
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
-  cn,
-} from '@deepagents/react-shadcn';
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage['role'];

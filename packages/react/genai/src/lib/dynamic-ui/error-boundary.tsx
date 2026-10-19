@@ -1,6 +1,3 @@
-import { AlertCircle, RefreshCw } from 'lucide-react';
-import * as React from 'react';
-
 import {
   Alert,
   AlertDescription,
@@ -11,7 +8,9 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import { AlertCircle, RefreshCw } from 'lucide-react';
+import * as React from 'react';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;

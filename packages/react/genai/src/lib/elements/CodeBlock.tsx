@@ -1,3 +1,5 @@
+import { Button } from '@zukhruf/shadcn';
+import { cn } from 'cn';
 import { CheckIcon, CopyIcon } from 'lucide-react';
 import type { ComponentProps, HTMLAttributes, ReactNode } from 'react';
 import { createContext, useContext } from 'react';
@@ -6,8 +8,6 @@ import {
   oneDark,
   oneLight,
 } from 'react-syntax-highlighter/dist/esm/styles/prism/index.js';
-
-import { Button, cn } from '@deepagents/react-shadcn';
 
 import { useCopyFeedback } from '../ui/use-copy-feedback.ts';
 

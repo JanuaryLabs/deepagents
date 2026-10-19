@@ -1,6 +1,5 @@
+import { cn } from 'cn';
 import { ChevronRight } from 'lucide-react';
-
-import { cn } from '@deepagents/react-shadcn';
 
 export function CompactDisclosureChevron({
   className,

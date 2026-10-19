@@ -1,7 +1,6 @@
 import type { ToolUIPart } from 'ai';
+import { cn } from 'cn';
 import type { ReactNode } from 'react';
-
-import { cn } from '@deepagents/react-shadcn';
 
 import { useIsAssistantSnapshotRender } from '../../copy/assistant-snapshot.tsx';
 import type { ToolLabel } from '../../tools/registry.ts';

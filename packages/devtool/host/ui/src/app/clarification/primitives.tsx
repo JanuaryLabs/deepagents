@@ -1,6 +1,3 @@
-import { Check, ChevronRight } from 'lucide-react';
-import { useRef } from 'react';
-
 import {
   Button,
   Checkbox,
@@ -10,8 +7,10 @@ import {
   Separator,
   Spinner,
   Textarea,
-  cn,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import { cn } from 'cn';
+import { Check, ChevronRight } from 'lucide-react';
+import { useRef } from 'react';
 
 import type {
   BaseOutputAnswer,
@@ -303,9 +302,7 @@ export function ChoiceField({
         checked={value.isOther}
         disabled={disabled}
         customText={value.customText}
-        onCustomTextChange={(customText) =>
-          onChange({ ...value, customText })
-        }
+        onCustomTextChange={(customText) => onChange({ ...value, customText })}
       />
     </RadioGroup>
   );

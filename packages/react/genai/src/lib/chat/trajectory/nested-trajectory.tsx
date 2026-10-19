@@ -1,8 +1,7 @@
 import type { UIMessage } from 'ai';
 import { isToolUIPart } from 'ai';
+import { cn } from 'cn';
 import { memo, useMemo } from 'react';
-
-import { cn } from '@deepagents/react-shadcn';
 
 import { Segment } from './segments/index.tsx';
 import {

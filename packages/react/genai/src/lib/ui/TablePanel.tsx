@@ -1,5 +1,3 @@
-import * as React from 'react';
-
 import {
   Card,
   CardAction,
@@ -7,8 +5,9 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-  cn,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import { cn } from 'cn';
+import * as React from 'react';
 
 const TablePanelRoot = React.forwardRef<
   HTMLDivElement,

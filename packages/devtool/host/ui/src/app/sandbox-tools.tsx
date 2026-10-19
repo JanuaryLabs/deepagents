@@ -1,4 +1,5 @@
 import type { ToolUIPart } from 'ai';
+import { cn } from 'cn';
 import type { ReactNode } from 'react';
 
 import {
@@ -7,7 +8,6 @@ import {
   type StaticTool,
   type ToolLabel,
 } from '@deepagents/react-genai';
-import { cn } from '@deepagents/react-shadcn';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

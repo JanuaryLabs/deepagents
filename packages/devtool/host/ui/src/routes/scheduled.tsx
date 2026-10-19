@@ -1,3 +1,35 @@
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+  Badge,
+  Button,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+  Field,
+  FieldDescription,
+  FieldLabel,
+  Input,
+  NativeSelect,
+  NativeSelectOption,
+  Skeleton,
+  Textarea,
+  buttonVariants,
+} from '@zukhruf/shadcn';
+import { cn } from 'cn';
 import cronstrue from 'cronstrue';
 import {
   ArchiveIcon,
@@ -24,39 +56,6 @@ import {
   useNavigate,
   useParams,
 } from 'react-router';
-
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-  Badge,
-  Button,
-  buttonVariants,
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-  Field,
-  FieldDescription,
-  FieldLabel,
-  Input,
-  NativeSelect,
-  NativeSelectOption,
-  Skeleton,
-  Textarea,
-  cn,
-} from '@deepagents/react-shadcn';
 
 import { loadRuntime } from '../app/runtime-data.ts';
 import {
@@ -110,10 +109,7 @@ function ScheduledWorkspace({ href }: { href: string }) {
     <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <section className="flex min-h-0 flex-col border-r">
         <div className="flex flex-wrap items-center gap-1 px-4 pt-3 pb-2">
-          <FilterTab
-            active={reviewing}
-            to="/scheduled/review"
-          >
+          <FilterTab active={reviewing} to="/scheduled/review">
             Needs review
             {pending.length > 0 ? (
               <Badge className="ml-1.5" variant="secondary">

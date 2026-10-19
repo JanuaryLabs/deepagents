@@ -1,6 +1,5 @@
+import { cn } from 'cn';
 import type { Ref, TextareaHTMLAttributes } from 'react';
-
-import { cn } from '@deepagents/react-shadcn';
 
 type ChatTextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement> & {
   ref?: Ref<HTMLTextAreaElement>;

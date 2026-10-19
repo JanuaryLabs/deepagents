@@ -1,4 +1,5 @@
 import { type UIMessage, isTextUIPart } from 'ai';
+import { cn } from 'cn';
 import { Check, Copy } from 'lucide-react';
 import {
   type ReactNode,
@@ -8,8 +9,6 @@ import {
   useRef,
   useState,
 } from 'react';
-
-import { cn } from '@deepagents/react-shadcn';
 
 import { TheButton } from '../ui/TheButton.tsx';
 import { COPY_EXCLUSION_MODES } from './copy-image.ts';

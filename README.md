@@ -22,7 +22,15 @@ chat flows, local retrieval, and Text2SQL assistants.
 | `@deepagents/react-input`      | Provide the reusable structured prompt composer used by browser chat surfaces.                                                 |
 | `@deepagents/react-formatters` | Format dates, durations, bytes, numbers, booleans, and generic display values for React UIs.                                   |
 | `@deepagents/react-genai`      | Render AI SDK chat flows, trajectories, tools, citations, dynamic UI, and interactive responses.                               |
-| `@deepagents/react-shadcn`     | Publish the shared Base UI-backed Shadcn primitive set and `cn()` helper.                                                      |
+
+`@deepagents/react-genai` uses the components of `@zukhruf/shadcn`. Import the
+stylesheet of `@zukhruf/shadcn` in the Tailwind CSS v4 file of your app, after
+Tailwind. Use a plain `@import`, without `layer()`:
+
+```css
+@import 'tailwindcss';
+@import '@zukhruf/shadcn/styles.css';
+```
 
 ## Current runtime model
 
@@ -78,7 +86,6 @@ sets the condition, for example Vite with `resolve.conditions`:
 
 - `@deepagents/retrieval` and `@deepagents/toolbox`: relative imports end in
   `.js`.
-- `@deepagents/react-shadcn`: relative imports have no extension.
 - `@deepagents/react-genai`, `@deepagents/react-input/browser` and
   `@deepagents/devtool-history`: the source is `.tsx`.
 

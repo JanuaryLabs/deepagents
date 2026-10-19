@@ -26,5 +26,5 @@
     "eslint.config.mjs"
   ],
   "include": ["src/**/*.js", "src/**/*.jsx", "src/**/*.ts", "src/**/*.tsx"],
-  "references": [{ "path": "../shadcn/tsconfig.lib.json" }]
+  "references": []
 }

@@ -39,9 +39,5 @@
     "vitest.config.mts"
   ],
   "include": ["src/**/*.js", "src/**/*.jsx", "src/**/*.ts", "src/**/*.tsx"],
-  "references": [
-    {
-      "path": "../../../packages/react/shadcn/tsconfig.lib.json"
-    }
-  ]
+  "references": []
 }

@@ -1,6 +1,5 @@
+import { cn } from 'cn';
 import type { ElementType, ReactNode } from 'react';
-
-import { cn } from '@deepagents/react-shadcn';
 
 export type TextShimmerProps = {
   children: ReactNode;

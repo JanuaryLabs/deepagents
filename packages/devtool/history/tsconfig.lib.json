@@ -11,9 +11,6 @@
   "exclude": ["src/**/*.test.ts"],
   "references": [
     {
-      "path": "../../react/shadcn/tsconfig.lib.json"
-    },
-    {
       "path": "../../experimental/tsconfig.lib.json"
     }
   ]

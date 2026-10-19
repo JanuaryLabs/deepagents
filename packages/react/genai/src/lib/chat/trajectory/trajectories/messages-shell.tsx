@@ -1,7 +1,6 @@
 import type { ChatStatus, UIMessage } from 'ai';
+import { cn } from 'cn';
 import { useMemo } from 'react';
-
-import { cn } from '@deepagents/react-shadcn';
 
 import type { GenAIInteractiveElement } from '../../../components/InteractiveResponse.tsx';
 import {

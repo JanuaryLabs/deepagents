@@ -1,4 +1,4 @@
-import { Button } from '@deepagents/react-shadcn';
+import { Button } from '@zukhruf/shadcn';
 
 import { Response } from '../../../elements/Response.tsx';
 

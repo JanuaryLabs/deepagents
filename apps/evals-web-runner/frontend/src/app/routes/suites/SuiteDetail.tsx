@@ -1,6 +1,3 @@
-import { useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
-
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -24,8 +21,10 @@ import {
   TableHeader,
   TableRow,
   buttonVariants,
-  cn,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import { cn } from 'cn';
+import { useMemo, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
 
 import { RunStatusBadge } from '../../components/RunStatusBadge.tsx';
 import { SuiteComparison } from '../../components/SuiteComparison.tsx';

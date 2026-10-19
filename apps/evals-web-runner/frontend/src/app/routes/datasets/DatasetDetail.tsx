@@ -1,6 +1,3 @@
-import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
-
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -21,7 +18,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import { useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
 
 import { useData } from '../../hooks/use-client.ts';
 

@@ -1,13 +1,12 @@
-import type { ToolUIPart, UIMessage } from 'ai';
-import { isStaticToolUIPart } from 'ai';
-import { type ReactNode, createContext, use, useMemo } from 'react';
-import { Fragment } from 'react/jsx-runtime';
-
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import type { ToolUIPart, UIMessage } from 'ai';
+import { isStaticToolUIPart } from 'ai';
+import { type ReactNode, createContext, use, useMemo } from 'react';
+import { Fragment } from 'react/jsx-runtime';
 
 import { CitationPill } from '../../../components/CitationPill.tsx';
 import { DynamicToolDebug } from '../../../components/tool-debug.tsx';

@@ -5,6 +5,7 @@ import { RunStatusBadge } from '../../components/RunStatusBadge.tsx';
 import { useData } from '../../hooks/use-client.ts';
 import { useSuiteEvents } from '../../hooks/use-suite-events.ts';
 import { formatDuration, formatTokens } from '../../lib/format.ts';
+import { cn } from 'cn';
 import {
   Progress,
   Skeleton,
@@ -15,8 +16,7 @@ import {
   TableHeader,
   TableRow,
   buttonVariants,
-  cn,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
 
 export default function RunListPage() {
   // TODO: use "usePolling"

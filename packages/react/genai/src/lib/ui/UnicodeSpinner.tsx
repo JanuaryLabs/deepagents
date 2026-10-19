@@ -1,6 +1,5 @@
+import { cn } from 'cn';
 import { useEffect, useState } from 'react';
-
-import { cn } from '@deepagents/react-shadcn';
 
 const spinners = {
   braille: {

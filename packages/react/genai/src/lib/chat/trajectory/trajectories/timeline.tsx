@@ -1,13 +1,12 @@
-import type { ToolUIPart } from 'ai';
-import { BanIcon } from 'lucide-react';
-import { type ReactNode, use } from 'react';
-
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-  cn,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import type { ToolUIPart } from 'ai';
+import { cn } from 'cn';
+import { BanIcon } from 'lucide-react';
+import { type ReactNode, use } from 'react';
 
 import type { ToolLabel } from '../../../tools/registry.ts';
 import { UnicodeSpinner } from '../../../ui/UnicodeSpinner.tsx';

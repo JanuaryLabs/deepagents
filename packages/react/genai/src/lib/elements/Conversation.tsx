@@ -1,8 +1,8 @@
+import { Button } from '@zukhruf/shadcn';
+import { cn } from 'cn';
 import { ArrowDownIcon } from 'lucide-react';
 import { type ComponentProps, useCallback } from 'react';
 import { StickToBottom, useStickToBottomContext } from 'use-stick-to-bottom';
-
-import { Button, cn } from '@deepagents/react-shadcn';
 
 export type ConversationProps = ComponentProps<typeof StickToBottom>;
 

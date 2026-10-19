@@ -1,13 +1,12 @@
-import { Loader2, type LucideIcon } from 'lucide-react';
-import { useEffect, useState } from 'react';
-
 import {
   Button,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-  cn,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import { cn } from 'cn';
+import { Loader2, type LucideIcon } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 interface TheButtonProps extends React.ComponentProps<typeof Button> {
   /**

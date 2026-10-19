@@ -1,12 +1,8 @@
+import { Button } from '@zukhruf/shadcn';
 import { type ToolUIPart } from 'ai';
 import { Loader } from 'lucide-react';
 
-import { Button } from '@deepagents/react-shadcn';
-
-import {
-  useAgent,
-  useAgentMessages,
-} from '../chat/agent-context.tsx';
+import { useAgent, useAgentMessages } from '../chat/agent-context.tsx';
 import { ToolOutput } from '../elements/Tool.tsx';
 
 function ToolApproval({ part }: { part: ToolUIPart }) {

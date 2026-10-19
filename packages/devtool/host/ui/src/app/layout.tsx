@@ -1,3 +1,9 @@
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+  useSidebar,
+} from '@zukhruf/shadcn';
 import { useCallback, useState } from 'react';
 import {
   type LoaderFunctionArgs,
@@ -11,16 +17,11 @@ import {
   RuntimeEventsProvider,
   isConversationEvent,
 } from '@deepagents/devtool-history';
-import {
-  SIDEBAR_COOKIE_NAME,
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-  useSidebar,
-} from '@deepagents/react-shadcn';
 
 import { loadRuntime, queryClient } from './runtime-data.ts';
 import { DevtoolSidebar, NewChatButton } from './sidebar.tsx';
+
+const SIDEBAR_COOKIE_NAME = 'sidebar_state';
 
 export function loader({ request }: LoaderFunctionArgs) {
   return loadRuntime(request.signal);

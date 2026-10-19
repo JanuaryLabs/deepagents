@@ -1,9 +1,8 @@
 import type { ReasoningUIPart, ToolUIPart, UIMessage } from 'ai';
 import { isStaticToolUIPart } from 'ai';
+import { cn } from 'cn';
 import { AlertCircle } from 'lucide-react';
 import { type ReactNode, memo, useState } from 'react';
-
-import { cn } from '@deepagents/react-shadcn';
 
 import { TextShimmer } from '../../../components/text-shimmer.tsx';
 import { DynamicToolDebug } from '../../../components/tool-debug.tsx';

@@ -1,7 +1,6 @@
+import { cn } from 'cn';
 import { Braces, Check, Copy, RefreshCw } from 'lucide-react';
 import { Children, type ReactNode } from 'react';
-
-import { cn } from '@deepagents/react-shadcn';
 
 import { ChatActionButton } from '../../../components/ChatAction.tsx';
 import { extractAssistantRawText } from '../../../copy/assistant-snapshot.tsx';

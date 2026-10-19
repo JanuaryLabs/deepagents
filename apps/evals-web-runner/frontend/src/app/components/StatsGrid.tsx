@@ -1,9 +1,4 @@
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@deepagents/react-shadcn';
+import { Card, CardContent, CardHeader, CardTitle } from '@zukhruf/shadcn';
 
 import { formatDuration, formatTokens } from '../lib/format.ts';
 

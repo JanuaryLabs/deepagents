@@ -1,14 +1,4 @@
 import {
-  Database,
-  FileText,
-  FlaskConical,
-  GitCompare,
-  Play,
-  Plus,
-} from 'lucide-react';
-import { Link, Outlet, useLocation } from 'react-router';
-
-import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
@@ -18,7 +8,16 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import {
+  Database,
+  FileText,
+  FlaskConical,
+  GitCompare,
+  Play,
+  Plus,
+} from 'lucide-react';
+import { Link, Outlet, useLocation } from 'react-router';
 
 interface NavItem {
   href: string;

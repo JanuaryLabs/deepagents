@@ -1,6 +1,7 @@
 import { Button } from '@base-ui/react/button';
 import type { JSONContent } from '@tiptap/core';
 import { type Editor, EditorContent, useEditor } from '@tiptap/react';
+import { cn } from 'cn';
 import {
   type ComponentPropsWithoutRef,
   type MouseEvent,
@@ -11,8 +12,6 @@ import {
   useRef,
   useState,
 } from 'react';
-
-import { cn } from '@deepagents/react-shadcn';
 
 import { ComposerAttachments } from './ComposerAttachments.tsx';
 import {

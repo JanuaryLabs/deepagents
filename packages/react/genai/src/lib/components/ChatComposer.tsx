@@ -1,3 +1,4 @@
+import { cn } from 'cn';
 import { Paperclip, Plus } from 'lucide-react';
 import type { ComponentProps } from 'react';
 
@@ -11,7 +12,6 @@ import {
   type ComposerToolbarProps,
   useComposer,
 } from '@deepagents/react-input/browser';
-import { cn } from '@deepagents/react-shadcn';
 
 import { useAgentMeta } from '../chat/agent-context.tsx';
 import { ChatActionButton } from './ChatAction.tsx';

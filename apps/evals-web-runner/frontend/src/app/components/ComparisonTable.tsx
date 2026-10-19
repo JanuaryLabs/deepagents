@@ -1,5 +1,3 @@
-import { Fragment } from 'react';
-
 import {
   Card,
   CardContent,
@@ -11,7 +9,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@deepagents/react-shadcn';
+} from '@zukhruf/shadcn';
+import { Fragment } from 'react';
 
 import type { Endpoints } from '../hooks/use-client.ts';
 import { formatDelta } from '../lib/format.ts';
