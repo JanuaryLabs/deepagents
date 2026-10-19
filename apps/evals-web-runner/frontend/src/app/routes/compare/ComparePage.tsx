@@ -39,6 +39,11 @@ export default function ComparePage() {
     { enabled: !!baselineParam && !!candidateParam },
   );
 
+  const runItems = (completedRuns ?? []).map((r) => ({
+    value: r.id,
+    label: `${r.name} — ${r.model} (${new Date(r.started_at).toLocaleDateString()})`,
+  }));
+
   function handleCompare() {
     if (selectedBaseline && selectedCandidate) {
       setSearchParams({
@@ -71,15 +76,15 @@ export default function ComparePage() {
             onValueChange={(value) =>
               value !== null && setSelectedBaseline(value)
             }
+            items={runItems}
           >
             <SelectTrigger className="mt-1">
               <SelectValue placeholder="Select a run..." />
             </SelectTrigger>
             <SelectContent>
-              {completedRuns?.map((r) => (
-                <SelectItem key={r.id} value={r.id}>
-                  {r.name} — {r.model} (
-                  {new Date(r.started_at).toLocaleDateString()})
+              {runItems.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -93,15 +98,15 @@ export default function ComparePage() {
             onValueChange={(value) =>
               value !== null && setSelectedCandidate(value)
             }
+            items={runItems}
           >
             <SelectTrigger className="mt-1">
               <SelectValue placeholder="Select a run..." />
             </SelectTrigger>
             <SelectContent>
-              {completedRuns?.map((r) => (
-                <SelectItem key={r.id} value={r.id}>
-                  {r.name} — {r.model} (
-                  {new Date(r.started_at).toLocaleDateString()})
+              {runItems.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
                 </SelectItem>
               ))}
             </SelectContent>

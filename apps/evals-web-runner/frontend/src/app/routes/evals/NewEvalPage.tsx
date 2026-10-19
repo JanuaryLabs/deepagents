@@ -365,6 +365,10 @@ export default function NewEvalPage() {
                       onValueChange={(value) =>
                         value !== null && setSelectedPromptId(value)
                       }
+                      items={sortedPrompts.map((p) => ({
+                        value: p.id,
+                        label: `${p.name} (v${p.version})`,
+                      }))}
                     >
                       <SelectTrigger className="mt-1">
                         <SelectValue placeholder="Select a prompt..." />
