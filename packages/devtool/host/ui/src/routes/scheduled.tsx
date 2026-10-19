@@ -15,7 +15,7 @@ import {
   Trash2Icon,
   XIcon,
 } from 'lucide-react';
-import { type ReactElement, type ReactNode, useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import {
   type LoaderFunctionArgs,
   NavLink,
@@ -31,6 +31,7 @@ import {
   AlertTitle,
   Badge,
   Button,
+  buttonVariants,
   Dialog,
   DialogContent,
   DialogFooter,
@@ -111,7 +112,7 @@ function ScheduledWorkspace({ href }: { href: string }) {
         <div className="flex flex-wrap items-center gap-1 px-4 pt-3 pb-2">
           <FilterTab
             active={reviewing}
-            render={<NavLink to="/scheduled/review" />}
+            to="/scheduled/review"
           >
             Needs review
             {pending.length > 0 ? (
@@ -125,7 +126,7 @@ function ScheduledWorkspace({ href }: { href: string }) {
             <FilterTab
               key={key}
               active={!reviewing && filter === key}
-              render={<NavLink to="/scheduled/tasks" />}
+              to="/scheduled/tasks"
               onClick={() => setFilter(key)}
             >
               {titleCase(key)}
@@ -895,28 +896,27 @@ function ListRow({
 
 function FilterTab({
   active,
-  render,
+  to,
   onClick,
   children,
 }: {
   active: boolean;
-  render: ReactElement;
+  to: string;
   onClick?: () => void;
   children: ReactNode;
 }) {
   return (
-    <Button
-      render={render}
-      size="sm"
-      variant="ghost"
+    <NavLink
+      to={to}
       onClick={onClick}
       className={cn(
+        buttonVariants({ size: 'sm', variant: 'ghost' }),
         'text-muted-foreground hover:text-foreground shrink-0 rounded-full px-2.5 font-normal',
         active && 'text-foreground font-medium',
       )}
     >
       {children}
-    </Button>
+    </NavLink>
   );
 }
 
