@@ -24,6 +24,7 @@ import {
   TableHeader,
   TableRow,
   buttonVariants,
+  cn,
 } from '@deepagents/react-shadcn';
 
 import { RunStatusBadge } from '../../components/RunStatusBadge.tsx';
@@ -181,7 +182,7 @@ export default function SuiteDetailPage() {
           <div className="flex items-center gap-2">
             <Link
               to={`/evals/new?suiteId=${suite.id}${runs[0] ? `&from=${runs[0].id}` : ''}`}
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}
             >
               Add Run
             </Link>

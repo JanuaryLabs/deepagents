@@ -15,6 +15,7 @@ import {
   TableHeader,
   TableRow,
   buttonVariants,
+  cn,
 } from '@deepagents/react-shadcn';
 
 export default function RunListPage() {
@@ -90,7 +91,7 @@ export default function RunListPage() {
         </div>
         <Link
           to="/evals/new"
-          className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}
         >
           New Eval
         </Link>

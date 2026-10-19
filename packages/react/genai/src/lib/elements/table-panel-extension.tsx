@@ -39,10 +39,12 @@ type StreamdownBlockComponent = NonNullable<
 
 const tablePanelTag = 'response-table-panel';
 const tablePanelAttributes = ['title', 'description'];
-const tableActionClassName = buttonVariants({
-  variant: 'ghost',
-  size: 'icon-sm',
-});
+const tableActionClassName = cn(
+  buttonVariants({
+    variant: 'ghost',
+    size: 'icon-sm',
+  }),
+);
 
 interface TablePanelNode {
   type: 'tablePanel';

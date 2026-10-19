@@ -10,6 +10,7 @@ import {
   TableHeader,
   TableRow,
   buttonVariants,
+  cn,
 } from '@deepagents/react-shadcn';
 
 import { useData } from '../../hooks/use-client.ts';
@@ -45,7 +46,7 @@ export default function SuiteList() {
             </p>
             <Link
               to="/evals/new"
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}
             >
               New Eval
             </Link>

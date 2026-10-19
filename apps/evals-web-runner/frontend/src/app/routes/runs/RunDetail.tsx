@@ -17,6 +17,7 @@ import {
   TableCell,
   TableRow,
   buttonVariants,
+  cn,
 } from '@deepagents/react-shadcn';
 
 import {
@@ -209,7 +210,7 @@ export default function RunDetailPage() {
             </Button>
             <Link
               to={`/evals/new?from=${run.id}`}
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}
             >
               Add Run
             </Link>
