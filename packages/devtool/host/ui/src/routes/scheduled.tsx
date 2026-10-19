@@ -696,7 +696,7 @@ function CreateTaskDialog({
         onClose();
       }}
     >
-      <DialogContent className="max-w-xl">
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>New scheduled task</DialogTitle>
         </DialogHeader>
