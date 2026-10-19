@@ -65,7 +65,7 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
     "@vitejs/plugin-react": "6.0.3",
-    "@zukhruf/shadcn": "^0.3.24",
+    "@zukhruf/shadcn": "^0.3.26",
     "ai": "7.0.127",
     "cn": "^0.4.0",
     "cronstrue": "^3.24.0",

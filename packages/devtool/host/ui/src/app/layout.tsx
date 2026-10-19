@@ -1,4 +1,5 @@
 import {
+  SIDEBAR_COOKIE_NAME,
   SidebarInset,
   SidebarProvider,
   SidebarTrigger,
@@ -20,8 +21,6 @@ import {
 
 import { loadRuntime, queryClient } from './runtime-data.ts';
 import { DevtoolSidebar, NewChatButton } from './sidebar.tsx';
-
-const SIDEBAR_COOKIE_NAME = 'sidebar_state';
 
 export function loader({ request }: LoaderFunctionArgs) {
   return loadRuntime(request.signal);

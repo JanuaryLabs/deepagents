@@ -36,7 +36,7 @@
     "@deepagents/react-input": "7.1.1",
     "@radix-ui/react-use-controllable-state": "^1.2.2",
     "@types/mdast": "^4.0.4",
-    "@zukhruf/shadcn": "^0.3.24",
+    "@zukhruf/shadcn": "^0.3.26",
     "ai": "7.0.127",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.4.0",
