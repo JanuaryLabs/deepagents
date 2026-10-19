@@ -372,7 +372,9 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
     const pool = new Pool({
       connectionString: container.connectionString,
       max: 1,
-      connectionTimeoutMillis: 200,
+      // Above one connect through an SSH forward to a remote engine, and below
+      // settleWithin's 5 s default: the failing subscribe waits the full limit.
+      connectionTimeoutMillis: 2_000,
     });
     const store = await PostgresStreamStore.create({ pool, schema });
     const source = await PostgresNotifyChangeSource.create({ pool, schema });
