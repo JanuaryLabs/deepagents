@@ -227,7 +227,11 @@ function normalizeMicrosandboxError(
 ): Error {
   const err = toError(error);
   if (err instanceof MicrosandboxSandboxError) return err;
-  if (err instanceof sdk.LibkrunfwNotFoundError) {
+  if (
+    err instanceof sdk.LibkrunfwNotFoundError ||
+    err instanceof sdk.RuntimeNotInstalledError ||
+    err instanceof sdk.RuntimeIncompleteError
+  ) {
     return new MicrosandboxNotAvailableError(err);
   }
   if (err instanceof sdk.MicrosandboxError) {

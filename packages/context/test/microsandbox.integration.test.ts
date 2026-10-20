@@ -1,7 +1,9 @@
 import assert from 'node:assert';
+import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { text as streamText } from 'node:stream/consumers';
 import { describe, it } from 'node:test';
+import { promisify } from 'node:util';
 
 import {
   MICROSANDBOX_DEFAULT_DESTINATION,
@@ -11,6 +13,8 @@ import {
 } from '@deepagents/context';
 
 type MicrosandboxSdk = typeof import('microsandbox');
+
+const execFileAsync = promisify(execFile);
 
 async function importMicrosandboxSdk(): Promise<MicrosandboxSdk | undefined> {
   try {
@@ -80,6 +84,47 @@ describe('Microsandbox Sandbox', async () => {
         createMicrosandboxSandbox({ replace: true }),
         MicrosandboxSandboxError,
       );
+    });
+  });
+
+  const sdkInstalled = (await importMicrosandboxSdk()) !== undefined;
+  describe('runtime availability', { skip: !sdkInstalled }, () => {
+    // The SDK keeps the runtime it resolved for its first VM, and the
+    // usability probe above has already booted one in this process, so the
+    // broken runtime is configured on a fresh process from its start.
+    it('rejects with MicrosandboxNotAvailableError when the runtime is incomplete', async () => {
+      const program = `
+        const { createMicrosandboxSandbox, MicrosandboxNotAvailableError } = await import('@deepagents/context');
+        const { MicrosandboxError } = await import('microsandbox');
+        try {
+          await using sandbox = await createMicrosandboxSandbox();
+          console.log(JSON.stringify({ created: true }));
+        } catch (error) {
+          console.log(JSON.stringify({
+            name: error.name,
+            notAvailable: error instanceof MicrosandboxNotAvailableError,
+            sdkCause: error.cause instanceof MicrosandboxError,
+          }));
+        }
+      `;
+
+      const { stdout } = await execFileAsync(
+        process.execPath,
+        ['--no-warnings', '--input-type=module', '--eval', program],
+        {
+          cwd: import.meta.dirname,
+          env: {
+            ...process.env,
+            MSB_PATH: `/deepagents-missing-runtime/${randomUUID()}/msb`,
+          },
+        },
+      );
+
+      assert.deepStrictEqual(JSON.parse(stdout), {
+        name: 'MicrosandboxNotAvailableError',
+        notAvailable: true,
+        sdkCause: true,
+      });
     });
   });
 
