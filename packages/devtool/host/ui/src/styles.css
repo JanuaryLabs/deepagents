@@ -15,6 +15,7 @@
 @source "../../../history";
 /* nx-tailwind-sources:end */
 @import "@zukhruf/shadcn/styles.css";
+@import "@zukhruf/ui/styles.css";
 @plugin "@tailwindcss/typography";
 
 @source "../../../../../node_modules/streamdown/dist/*.js";

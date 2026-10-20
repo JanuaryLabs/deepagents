@@ -1,3 +1,4 @@
+import { TheButton } from '@zukhruf/ui';
 import { type UIMessage, isTextUIPart } from 'ai';
 import { cn } from 'cn';
 import { Check, Copy } from 'lucide-react';
@@ -10,7 +11,6 @@ import {
   useState,
 } from 'react';
 
-import { TheButton } from '../ui/TheButton.tsx';
 import { COPY_EXCLUSION_MODES } from './copy-image.ts';
 import { SnapshotRenderContext } from './snapshot-context.ts';
 import { SnapshotRenderPortal, waitForNextPaint } from './snapshot-render.tsx';
