@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/react-genai",
-  "version": "7.1.1",
+  "version": "7.1.2",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -30,10 +30,10 @@
   },
   "dependencies": {
     "@ai-sdk/react": "4.0.130",
-    "@deepagents/context": "7.1.1",
-    "@deepagents/elements": "7.1.1",
-    "@deepagents/react-formatters": "7.1.1",
-    "@deepagents/react-input": "7.1.1",
+    "@deepagents/context": "7.1.2",
+    "@deepagents/elements": "7.1.2",
+    "@deepagents/react-formatters": "7.1.2",
+    "@deepagents/react-input": "7.1.2",
     "@radix-ui/react-use-controllable-state": "^1.2.2",
     "@types/mdast": "^4.0.4",
     "@zukhruf/shadcn": "^0.3.31",
