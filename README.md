@@ -23,9 +23,9 @@ chat flows, local retrieval, and Text2SQL assistants.
 | `@deepagents/react-formatters` | Format dates, durations, bytes, numbers, booleans, and generic display values for React UIs.                                   |
 | `@deepagents/react-genai`      | Render AI SDK chat flows, trajectories, tools, citations, dynamic UI, and interactive responses.                               |
 
-`@deepagents/react-genai` uses the components of `@zukhruf/shadcn`. Import the
-stylesheet of `@zukhruf/shadcn` in the Tailwind CSS v4 file of your app, after
-Tailwind. Use a plain `@import`, without `layer()`:
+`@deepagents/react-genai` uses `@zukhruf/shadcn` components. In your app's
+Tailwind CSS v4 stylesheet, import the component styles after Tailwind with a
+plain `@import`, without `layer()`:
 
 ```css
 @import 'tailwindcss';

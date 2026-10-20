@@ -316,20 +316,21 @@ nx run-many -t test --projects=@deepagents/context,@deepagents/text2sql,@deepage
 ```
 
 Projects tagged `test:docker` run `node --test` with
-`--test-global-setup=tools/src/docker-global-setup.ts`. That file re-exports
-the global setup and the global teardown of `@zukhruf/testing`. The global setup
-resolves the selected Docker context to a Unix or SSH endpoint one time. It
-pins that endpoint for the test processes. It also does recovery of dead runs
-on that endpoint. These targets set `parallelism: false` and turn off the Nx
-cache. Thus Nx runs them one at a time within each invocation, locally and in
-CI. Other targets keep their parallelism when no Docker test target runs. On an
-SSH endpoint, the Nx command adds `--test-concurrency=1`, so Node runs one test
-file at a time. To run two files at a time in the active project, add
-`--args="--test-concurrency=2"`. The later flag wins. Cases within a file run in
-sequence, which is the Node default, unless the test sets concurrency. This
-limits test scheduling. It does not limit how many containers one case starts.
-Separate Nx invocations can still overlap.
-Other Node projects keep the standard Node test command.
+`--test-global-setup="$NX_WORKSPACE_ROOT/tools/src/docker-global-setup.ts"`.
+The file re-exports `globalSetup` and `globalTeardown` from
+`@zukhruf/testing/docker-global-setup`. Setup resolves the selected Docker
+context once, pins its Unix or SSH endpoint for the test processes, and
+recovers resources left by exited runs on that endpoint.
+
+These targets set `parallelism: false` and disable Nx test caching, so Nx runs
+them exclusively within each invocation, locally and in CI. Other targets keep
+their parallelism when no Docker test target runs. For SSH endpoints, the Nx
+command adds `--test-concurrency=1` to run one test file at a time. Add
+`--args="--test-concurrency=2"` to run two files at a time within the active
+project; the later flag wins. Cases within a file run sequentially unless a
+test enables concurrency. These settings limit test scheduling; a single case
+can still start multiple containers, and separate Nx invocations can overlap.
+Other Node.js projects keep the standard Node.js test command.
 
 `Docker`, `Postgres`, `Mysql`, and `SqlServer` support local Unix sockets and SSH
 endpoints. Published test ports bind to the engine host's loopback interface.
@@ -352,31 +353,33 @@ and architecture-specific tests use `docker.info().architecture`.
 Container helpers default to one CPU and 1 GiB RAM, SQL Server to 3 GiB, and
 ClickHouse tests to 2 GiB. Database containers use private IPC. When testing
 another container API, pass `docker.defaults` directly to that API. It
-provides `resources` and the current run's ownership `labels`, so build the
-`docker` with `TestRun.fromEnvironment(process.env)`: without it, the labels are
-empty and the global teardown cannot remove what a killed run left. Spread these
-defaults before explicit options; merge nested `resources` or `labels` when
-overriding individual settings. Sandbox tests import their public APIs directly.
+provides `resources` and the current run's ownership `labels`, so construct
+`Docker` with `TestRun.fromEnvironment(process.env)`: without it, the labels are
+empty and global teardown cannot identify resources left by a killed run.
+Spread these defaults before explicit options; merge nested `resources` or
+`labels` when overriding individual settings. Sandbox tests import their public
+APIs directly.
 
 Normal disposal closes SSH connections and removes owned containers with their
-anonymous volumes. A killed test process does not dispose its handles. The
-global teardown is synchronous. It removes labeled disposable containers with
-their anonymous volumes, labeled volumes, and recorded paths (including local
-SSH sockets). Managed Docker sandbox volumes inherit the sandbox labels. Shared
-database servers continue to run under the existing explicit-cleanup contract.
-Images and build caches also stay.
+anonymous volumes. A killed test process does not dispose its handles. Global
+teardown synchronously removes labeled disposable containers and their
+anonymous volumes, labeled volumes, and recorded paths, including local SSH
+sockets. Managed Docker sandbox volumes inherit the sandbox labels. Shared
+database servers remain running until explicitly cleaned up. Images and build
+caches also remain.
 
-Each test process has a process record. Each Docker or SSH command that a test
-process starts also has a process record while it runs. A run keeps its records
-until every recorded process has ended. If cleanup fails, for example because
-the host is unreachable, the global teardown keeps the records under
+Each test process and each Docker or SSH command it starts has a process record.
+A run keeps its records until every recorded process has exited. If cleanup
+fails, for example because the host is unreachable, global teardown reports
+the error, sets exit code 1, and retains the records under
 `$XDG_STATE_HOME/zukhruf-testing/docker-runs/` (`~/.local/state` when unset).
-The next run on that endpoint, from any project, does recovery of what is left.
-Never delete those records to hide a cleanup failure.
+The next run on that endpoint, from any project run by the same user, retries
+cleanup once the previous runner and all recorded processes have exited.
+Never delete these records to hide a cleanup failure.
 
-An SSH forward ends when the process that opened it ends, also when that
-process is killed. The forward runs `cat` in a remote shell, so the SSH user
-needs a shell on the host.
+An SSH forward closes when the process that opened it exits or is killed. The
+forward runs `cat` in a remote shell, so the SSH user needs shell access on the
+host.
 
 GitHub CI explicitly uses the runner's Unix socket. It requires no personal
 server or Hetzner secrets.

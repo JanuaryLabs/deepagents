@@ -1,13 +1,12 @@
-# UI Component Topology
+# UI component topology
 
-Status: current-source inventory after moving the Shadcn primitives to
+Status: current source inventory after moving the shadcn/ui primitives to
 `@zukhruf/shadcn`.
 
 ## Conclusion
 
-The repo uses one Shadcn package from npm:
-`@zukhruf/shadcn`. Applications own their themes and feature
-compositions; they do not vendor primitive copies.
+The repository uses `@zukhruf/shadcn` from npm for shared shadcn/ui primitives.
+Applications own their themes and feature compositions.
 
 ```text
 deepagents
@@ -19,11 +18,12 @@ deepagents
 │   └── app/routes                 product screens and route-local UI
 └── packages/devtool
     ├── history                     History composition, status, and formatting
-    ├── traces                      trace server core and trace React view
-    └── host/ui                     application shell, navigation, and theme
+    └── host
+        ├── src/traces              trace reader, telemetry, and HTTP projection
+        └── ui                      application shell, navigation, theme, and trace view
 ```
 
-Both the eval runner and devtool import primitives from the shared package.
+Both the eval runner and DevTool import primitives from the shared package.
 Neither imports through the other application's paths.
 
 ## UI modules
@@ -42,14 +42,16 @@ Ownership:
 - [`../history/src/index.tsx`](../history/src/index.tsx) owns `History.Root`,
   `History.Item`, `History.ItemTrigger`, `History.Empty`, `ChatStatusIcon`,
   `RuntimeEventsProvider`, and the `HistoryRecord` model.
-- [`../traces/src/index.ts`](../traces/src/index.ts) owns trace discovery,
-  telemetry decoration, and HTTP routes;
-  [`../traces/src/ui.tsx`](../traces/src/ui.tsx) owns the waterfall and inspector.
+- [`../host/src/traces/index.ts`](../host/src/traces/index.ts) exports trace
+  integration through `@deepagents/devtool/traces`, including telemetry
+  recording, the trace reader, and HTTP routes.
+  [`../host/ui/src/traces/view.tsx`](../host/ui/src/traces/view.tsx) owns the
+  waterfall and inspector.
 - `@zukhruf/shadcn` exports the Base UI-backed primitive set; `cn()` comes
   from the `cn` package.
 - [`../history/src/index.tsx`](../history/src/index.tsx) owns status presentation
   and timestamp formatting.
-- [`../host/ui/src/styles.css`](../host/ui/src/styles.css) owns the devtool
+- [`../host/ui/src/styles.css`](../host/ui/src/styles.css) owns the DevTool
   Tailwind theme.
 - [`../host/ui/vite.config.ts`](../host/ui/vite.config.ts) builds the UI into static
   assets copied into the published `@deepagents/devtool` package.
@@ -59,8 +61,9 @@ The shared sidebar preserves provider state, desktop off-canvas behavior,
 inset restore trigger, rail, Ctrl/Cmd+B, cookie persistence, and a responsive
 sheet.
 
-Implication: scheduled-task composition remains DevTool-owned, while only
-shadcn/ui primitives come only from `@zukhruf/shadcn`.
+Scheduled-task composition remains in the DevTool host. Shared shadcn/ui
+primitives come from `@zukhruf/shadcn`. The shell imports `SIDEBAR_COOKIE_NAME`
+from that package to restore the sidebar state saved by `SidebarProvider`.
 
 ### `apps/evals-web-runner/frontend`
 
@@ -106,9 +109,9 @@ Cross-route compositions and callers:
 | `StatsGrid`       | Run detail                         |
 | `SuiteComparison` | Suite detail                       |
 
-The eval runner and devtool share 72 CSS custom-property names, but many values
-differ. Their token schemas are compatible; their themes are not identical.
-Shared behavior and app-owned theme values are therefore separable.
+The eval runner and DevTool inherit shared theme defaults from
+`@zukhruf/shadcn/styles.css` and define their own font and color overrides.
+Their token names are compatible; each application owns its theme values.
 
 ### `apps/docs`
 
@@ -118,7 +121,8 @@ documentation-specific (`PackageCard`, `FeatureBlock`, and navigation), and
 [`../../../apps/docs/styles.css`](../../../apps/docs/styles.css) owns a separate
 editorial theme.
 
-Implication: the docs UI is not a source for devtool management primitives.
+The docs UI owns documentation components; DevTool management compositions
+remain in the DevTool packages.
 
 ## Documentation drift
 
@@ -126,18 +130,22 @@ Implication: the docs UI is not a source for devtool management primitives.
 now points UI work to `@zukhruf/shadcn`. Generated data hooks remain
 app-local.
 
-## Shared package seam
+## Shared package boundary
 
 The package boundary uses these constraints:
 
-1. import primitives from `@zukhruf/shadcn` and `cn` from `cn`;
-2. keep feature compositions in their owning application or feature package;
-3. add primitives to the shared package only after a demonstrated consumer;
-4. keep theme tokens app-owned unless both consumers demonstrably share the
-   same product theme;
-5. add no parallel primitive system and do not import from one application
+1. Import primitives from `@zukhruf/shadcn` and `cn` from `cn`.
+2. Keep feature compositions in their owning application or feature package;
+   the shared package contains shadcn/ui primitives.
+3. Import `@zukhruf/shadcn/styles.css` after Tailwind with a plain `@import`,
+   without `layer()`. Each application's stylesheet owns its theme overrides.
+4. Keep navigation as `Link` or `NavLink`, styled with
+   `cn(buttonVariants(...))`. Use `Button` for actions.
+5. Keep theme tokens app-owned unless both consumers demonstrably share the
+   same product theme. Use the shared primitives without vendoring copies or
+   introducing a parallel primitive system. Do not import from one application
    into another.
 
-The devtool host continues to own navigation and records, and the eval runner
+The DevTool host continues to own navigation and records, and the eval runner
 continues to own its product screens. Their themes remain intentionally
 different.

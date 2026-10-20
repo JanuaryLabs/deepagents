@@ -41,9 +41,11 @@ implemented first useful core.
   removes both the capability and Scheduled navigation.
 - Generated run titles and summaries remain out of scope. The workspace uses
   task names, run state, timestamps, errors, and exact conversation references.
-- The devtool has publishable `history` and `traces` child packages and
-  consumes Base UI-backed primitives from `@zukhruf/shadcn`.
-  History owns status presentation; the host owns its theme and shell.
+- The DevTool host exposes trace integration through
+  `@deepagents/devtool/traces`; `@deepagents/devtool-history` remains a
+  publishable child package. Both UI surfaces consume Base UI-backed
+  primitives from `@zukhruf/shadcn`. History owns status presentation; the host
+  owns its theme and shell.
 
 ## Source contracts
 

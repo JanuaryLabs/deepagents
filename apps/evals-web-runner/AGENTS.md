@@ -140,7 +140,8 @@ component should own its logic and state and accept the props it needs.
 
 ### Loading buttons
 
-Use `Button` and `Spinner` from `@zukhruf/shadcn` for buttons that trigger async operations and need to show loading state.
+Use `Button` and `Spinner` from `@zukhruf/shadcn` for asynchronous actions that
+display a loading state.
 
 ### Local database
 
@@ -150,18 +151,30 @@ The backend keeps its data in one SQLite file. `EVALS_DB_PATH` sets the path of 
 
 Opinionated constraints for building better interfaces with agents.
 
-### Shadcn UI
+### shadcn/ui
 
-Import all components from `@zukhruf/shadcn`, and `cn` from the `cn` package. The components use Base UI. Show the errors of background tasks and mutations with the `toast` and `Toaster` of `@zukhruf/shadcn`.
+Import shared UI primitives from `@zukhruf/shadcn` and `cn` from `cn`. The
+primitives use Base UI. Show background-task and mutation errors with the
+package's `toast` and `Toaster`.
 
-Always make sure to make extensive use of existing components before creating new ones.
+Use existing primitives before creating new components. Keep app-specific
+compositions in the frontend.
+
+- Import `@zukhruf/shadcn/styles.css` after Tailwind in `src/styles.css`, using
+  a plain `@import` without `layer()`.
+- Use React Router `Link` or `NavLink` for navigation, styled with
+  `cn(buttonVariants(...))`. Use `Button` for actions.
+- For ID-based `Select` values, pass `items` with `{ value, label }` entries
+  so `SelectValue` displays names. See the run selectors in
+  `frontend/src/app/routes/compare/ComparePage.tsx` and the prompt selector in
+  `frontend/src/app/routes/evals/NewEvalPage.tsx`.
 
 ### Stack
 
 - MUST use Tailwind CSS defaults (spacing, radius, shadows) before custom values
 - MUST use `motion/react` (formerly `framer-motion`) when JavaScript animation is required
 - SHOULD use `tw-animate-css` for entrance and micro-animations in Tailwind CSS
-- MUST use `cn` utility (`clsx` + `tailwind-merge`) for class logic
+- MUST use `cn` from the `cn` package for class-name merging
 
 ### Components
 
