@@ -1,5 +1,9 @@
 import { transaction } from '@zukhruf/sqlite-transaction';
-import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import {
+  DatabaseSync,
+  type SQLInputValue,
+  type SQLTagStore,
+} from 'node:sqlite';
 import { z } from 'zod';
 
 import { parseJson } from '../store/columns.ts';
@@ -40,20 +44,10 @@ const chunkRow = z.object({
 
 export class SqliteStreamStore extends StreamStore {
   #db: DatabaseSync;
-  #statements = new Map<string, ReturnType<DatabaseSync['prepare']>>();
-
-  #stmt(sql: string): ReturnType<DatabaseSync['prepare']> {
-    let stmt = this.#statements.get(sql);
-    if (!stmt) {
-      stmt = this.#db.prepare(sql);
-      this.#statements.set(sql, stmt);
-    }
-    return stmt;
-  }
+  #sql: SQLTagStore;
 
   close(): void {
     if (!this.#db.isOpen) return;
-    this.#statements.clear();
     this.#db.close();
   }
 
@@ -62,41 +56,24 @@ export class SqliteStreamStore extends StreamStore {
     this.#db =
       typeof pathOrDb === 'string' ? new DatabaseSync(pathOrDb) : pathOrDb;
     this.#db.exec(STREAM_DDL);
+    this.#sql = this.#db.createTagStore();
   }
 
   async createStream(stream: StreamData): Promise<void> {
-    this.#stmt(
-      `INSERT INTO streams (id, status, createdAt, startedAt, finishedAt, cancelRequestedAt, error)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      stream.id,
-      stream.status,
-      stream.createdAt,
-      stream.startedAt,
-      stream.finishedAt,
-      stream.cancelRequestedAt,
-      stream.error,
-    );
+    this.#sql
+      .run`INSERT INTO streams (id, status, createdAt, startedAt, finishedAt, cancelRequestedAt, error)
+       VALUES (${stream.id}, ${stream.status}, ${stream.createdAt}, ${stream.startedAt}, ${stream.finishedAt}, ${stream.cancelRequestedAt}, ${stream.error})`;
   }
 
   async upsertStream(
     stream: StreamData,
   ): Promise<{ stream: StreamData; created: boolean }> {
     const created = streamRow.optional().parse(
-      this.#stmt(
-        `INSERT INTO streams (id, status, createdAt, startedAt, finishedAt, cancelRequestedAt, error)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      this.#sql
+        .get`INSERT INTO streams (id, status, createdAt, startedAt, finishedAt, cancelRequestedAt, error)
+       VALUES (${stream.id}, ${stream.status}, ${stream.createdAt}, ${stream.startedAt}, ${stream.finishedAt}, ${stream.cancelRequestedAt}, ${stream.error})
        ON CONFLICT(id) DO NOTHING
        RETURNING *`,
-      ).get(
-        stream.id,
-        stream.status,
-        stream.createdAt,
-        stream.startedAt,
-        stream.finishedAt,
-        stream.cancelRequestedAt,
-        stream.error,
-      ),
     );
 
     if (created) {
@@ -115,30 +92,26 @@ export class SqliteStreamStore extends StreamStore {
   async getStream(streamId: string): Promise<StreamData | undefined> {
     return streamRow
       .optional()
-      .parse(this.#stmt('SELECT * FROM streams WHERE id = ?').get(streamId));
+      .parse(this.#sql.get`SELECT * FROM streams WHERE id = ${streamId}`);
   }
 
   async getStreamStatus(streamId: string): Promise<StreamStatus | undefined> {
     const row = statusRow
       .optional()
-      .parse(
-        this.#stmt('SELECT status FROM streams WHERE id = ?').get(streamId),
-      );
+      .parse(this.#sql.get`SELECT status FROM streams WHERE id = ${streamId}`);
     return row?.status;
   }
 
   async listStreamIds(options?: ListStreamIdsOptions): Promise<string[]> {
-    let sql = 'SELECT id FROM streams';
-    const params: SQLInputValue[] = [];
-
-    if (options?.status) {
-      sql += ' WHERE status = ?';
-      params.push(options.status);
-    }
-
-    sql += ' ORDER BY createdAt ASC, id ASC';
-
-    const rows = z.array(idRow).parse(this.#stmt(sql).all(...params));
+    const rows = z
+      .array(idRow)
+      .parse(
+        options?.status
+          ? this.#sql
+              .all`SELECT id FROM streams WHERE status = ${options.status} ORDER BY createdAt ASC, id ASC`
+          : this.#sql
+              .all`SELECT id FROM streams ORDER BY createdAt ASC, id ASC`,
+      );
     return rows.map((row) => row.id);
   }
 
@@ -151,9 +124,7 @@ export class SqliteStreamStore extends StreamStore {
       () => {
         const stream = streamRow
           .optional()
-          .parse(
-            this.#stmt('SELECT * FROM streams WHERE id = ?').get(streamId),
-          );
+          .parse(this.#sql.get`SELECT * FROM streams WHERE id = ${streamId}`);
         if (!stream) {
           throw new Error(`updateStream: stream "${streamId}" not found`);
         }
@@ -182,9 +153,11 @@ export class SqliteStreamStore extends StreamStore {
 
         params.push(streamId);
         const next = streamRow.parse(
-          this.#stmt(
-            `UPDATE streams SET ${setClauses.join(', ')} WHERE id = ? RETURNING *`,
-          ).get(...params),
+          this.#db
+            .prepare(
+              `UPDATE streams SET ${setClauses.join(', ')} WHERE id = ? RETURNING *`,
+            )
+            .get(...params),
         );
         return { stream: next, updated: true };
       },
@@ -200,34 +173,26 @@ export class SqliteStreamStore extends StreamStore {
     const now = Date.now();
     switch (status) {
       case 'running':
-        this.#stmt(
-          `UPDATE streams SET status = ?, startedAt = ?
-            WHERE id = ? AND status = 'queued'`,
-        ).run(status, now, streamId);
+        this.#sql.run`UPDATE streams SET status = ${status}, startedAt = ${now}
+            WHERE id = ${streamId} AND status = 'queued'`;
         break;
       case 'completed':
-        this.#stmt(
-          `UPDATE streams SET status = ?, finishedAt = ?
-            WHERE id = ? AND status IN ('queued', 'running')`,
-        ).run(status, now, streamId);
+        this.#sql.run`UPDATE streams SET status = ${status}, finishedAt = ${now}
+            WHERE id = ${streamId} AND status IN ('queued', 'running')`;
         break;
       case 'failed':
-        this.#stmt(
-          `UPDATE streams SET status = ?, finishedAt = ?, error = ?
-            WHERE id = ? AND status IN ('queued', 'running')`,
-        ).run(status, now, options?.error ?? null, streamId);
+        this.#sql
+          .run`UPDATE streams SET status = ${status}, finishedAt = ${now}, error = ${options?.error ?? null}
+            WHERE id = ${streamId} AND status IN ('queued', 'running')`;
         break;
       case 'cancelled':
-        this.#stmt(
-          `UPDATE streams SET status = ?, cancelRequestedAt = ?, finishedAt = ?
-            WHERE id = ? AND status IN ('queued', 'running')`,
-        ).run(status, now, now, streamId);
+        this.#sql
+          .run`UPDATE streams SET status = ${status}, cancelRequestedAt = ${now}, finishedAt = ${now}
+            WHERE id = ${streamId} AND status IN ('queued', 'running')`;
         break;
       default:
-        this.#stmt(
-          `UPDATE streams SET status = ?
-            WHERE id = ? AND status = 'queued'`,
-        ).run(status, streamId);
+        this.#sql.run`UPDATE streams SET status = ${status}
+            WHERE id = ${streamId} AND status = 'queued'`;
     }
   }
 
@@ -238,26 +203,18 @@ export class SqliteStreamStore extends StreamStore {
       this.#db,
       () => {
         for (const chunk of chunks) {
-          this.#stmt(
-            `INSERT INTO stream_chunks (streamId, seq, data, createdAt)
-           VALUES (?, ?, ?, ?)`,
-          ).run(
-            chunk.streamId,
-            chunk.seq,
-            JSON.stringify(chunk.data),
-            chunk.createdAt,
-          );
+          this.#sql
+            .run`INSERT INTO stream_chunks (streamId, seq, data, createdAt)
+           VALUES (${chunk.streamId}, ${chunk.seq}, ${JSON.stringify(chunk.data)}, ${chunk.createdAt})`;
         }
         const failedAt = Date.now();
         for (const failure of failures) {
-          const result = this.#stmt(
-            `UPDATE streams SET status = ?, finishedAt = ?, error = ?
-            WHERE id = ? AND status IN ('queued', 'running')`,
-          ).run('failed', failedAt, failure.error, failure.streamId);
+          const result = this.#sql
+            .run`UPDATE streams SET status = 'failed', finishedAt = ${failedAt}, error = ${failure.error}
+            WHERE id = ${failure.streamId} AND status IN ('queued', 'running')`;
           if (result.changes !== 1) {
-            const existing = this.#stmt(
-              'SELECT id FROM streams WHERE id = ?',
-            ).get(failure.streamId);
+            const existing = this.#sql
+              .get`SELECT id FROM streams WHERE id = ${failure.streamId}`;
             if (!existing) {
               throw new Error(`Stream "${failure.streamId}" not found`);
             }
@@ -273,22 +230,9 @@ export class SqliteStreamStore extends StreamStore {
     fromSeq?: number,
     limit?: number,
   ): Promise<StreamChunkData[]> {
-    let sql = 'SELECT * FROM stream_chunks WHERE streamId = ?';
-    const params: SQLInputValue[] = [streamId];
-
-    if (fromSeq !== undefined) {
-      sql += ' AND seq >= ?';
-      params.push(fromSeq);
-    }
-
-    sql += ' ORDER BY seq ASC';
-
-    if (limit !== undefined) {
-      sql += ' LIMIT ?';
-      params.push(limit);
-    }
-
-    const rows = z.array(chunkRow).parse(this.#stmt(sql).all(...params));
+    const rows = z
+      .array(chunkRow)
+      .parse(this.#chunkRows(streamId, fromSeq, limit));
 
     return Promise.all(
       rows.map(async (row): Promise<StreamChunkData> => ({
@@ -300,8 +244,25 @@ export class SqliteStreamStore extends StreamStore {
     );
   }
 
+  #chunkRows(streamId: string, fromSeq?: number, limit?: number) {
+    if (fromSeq !== undefined && limit !== undefined) {
+      return this.#sql
+        .all`SELECT * FROM stream_chunks WHERE streamId = ${streamId} AND seq >= ${fromSeq} ORDER BY seq ASC LIMIT ${limit}`;
+    }
+    if (fromSeq !== undefined) {
+      return this.#sql
+        .all`SELECT * FROM stream_chunks WHERE streamId = ${streamId} AND seq >= ${fromSeq} ORDER BY seq ASC`;
+    }
+    if (limit !== undefined) {
+      return this.#sql
+        .all`SELECT * FROM stream_chunks WHERE streamId = ${streamId} ORDER BY seq ASC LIMIT ${limit}`;
+    }
+    return this.#sql
+      .all`SELECT * FROM stream_chunks WHERE streamId = ${streamId} ORDER BY seq ASC`;
+  }
+
   async deleteStream(streamId: string): Promise<void> {
-    this.#stmt('DELETE FROM streams WHERE id = ?').run(streamId);
+    this.#sql.run`DELETE FROM streams WHERE id = ${streamId}`;
   }
 
   async reopenStream(streamId: string): Promise<StreamData> {
@@ -310,9 +271,7 @@ export class SqliteStreamStore extends StreamStore {
       () => {
         const row = statusRow
           .optional()
-          .parse(
-            this.#stmt('SELECT * FROM streams WHERE id = ?').get(streamId),
-          );
+          .parse(this.#sql.get`SELECT * FROM streams WHERE id = ${streamId}`);
 
         if (!row) {
           throw new Error(`Stream "${streamId}" not found`);
@@ -327,12 +286,11 @@ export class SqliteStreamStore extends StreamStore {
           );
         }
 
-        this.#stmt('DELETE FROM streams WHERE id = ?').run(streamId);
+        this.#sql.run`DELETE FROM streams WHERE id = ${streamId}`;
         const now = Date.now();
-        this.#stmt(
-          `INSERT INTO streams (id, status, createdAt, startedAt, finishedAt, cancelRequestedAt, error)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        ).run(streamId, 'queued', now, null, null, null, null);
+        this.#sql
+          .run`INSERT INTO streams (id, status, createdAt, startedAt, finishedAt, cancelRequestedAt, error)
+         VALUES (${streamId}, 'queued', ${now}, NULL, NULL, NULL, NULL)`;
 
         return {
           id: streamId,

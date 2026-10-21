@@ -70,6 +70,12 @@ export default defineConfig(
         'warn',
         { ignoreUsingDeclarations: true },
       ],
+      // node:sqlite's tag store runs a statement as a tagged template, and a
+      // write such as sql.run`DELETE ...` often has no result to use.
+      '@typescript-eslint/no-unused-expressions': [
+        'error',
+        { allowTaggedTemplates: true },
+      ],
       '@typescript-eslint/ban-ts-comment': 'off',
       '@typescript-eslint/no-empty-object-type': 'off',
       // @zukhruf/eslint's base turns these off; they were warnings here

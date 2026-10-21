@@ -9,7 +9,7 @@ import type {
   RmOptions,
 } from 'just-bash';
 import * as path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type SQLTagStore } from 'node:sqlite';
 import z from 'zod';
 
 import { entryType } from '../columns.ts';
@@ -100,7 +100,7 @@ const dataRow = chunkRow.pick({ data: true });
  */
 export class SqliteFs implements IFileSystem {
   #db: DatabaseSync;
-  #statements = new Map<string, ReturnType<DatabaseSync['prepare']>>();
+  #sql: SQLTagStore;
   #chunkSize: number;
   #root: string;
 
@@ -111,29 +111,24 @@ export class SqliteFs implements IFileSystem {
     this.#root = normalizedRoot === '/' ? '' : normalizedRoot;
     this.#db = new DatabaseSync(options.dbPath);
     this.#db.exec(SQLITE_FS_DDL);
+    this.#sql = this.#db.createTagStore();
 
     // Always ensure '/' exists first (for all instances sharing the DB)
-    const rootSlashExists = this.#stmt(
-      'SELECT 1 FROM fs_entries WHERE path = ?',
-    ).get('/');
+    const rootSlashExists = this.#sql
+      .get`SELECT 1 FROM fs_entries WHERE path = '/'`;
     if (!rootSlashExists) {
-      this.#stmt(
-        `INSERT INTO fs_entries (path, type, mode, size, mtime)
-         VALUES ('/', 'directory', 493, 0, ?)`,
-      ).run(Date.now());
+      this.#sql.run`INSERT INTO fs_entries (path, type, mode, size, mtime)
+         VALUES ('/', 'directory', 493, 0, ${Date.now()})`;
     }
 
     if (this.#root) {
       this.#createParentDirs(this.#root);
 
-      const rootExists = this.#stmt(
-        'SELECT 1 FROM fs_entries WHERE path = ?',
-      ).get(this.#root);
+      const rootExists = this.#sql
+        .get`SELECT 1 FROM fs_entries WHERE path = ${this.#root}`;
       if (!rootExists) {
-        this.#stmt(
-          `INSERT INTO fs_entries (path, type, mode, size, mtime)
-           VALUES (?, 'directory', 493, 0, ?)`,
-        ).run(this.#root, Date.now());
+        this.#sql.run`INSERT INTO fs_entries (path, type, mode, size, mtime)
+           VALUES (${this.#root}, 'directory', 493, 0, ${Date.now()})`;
       }
     }
   }
@@ -148,26 +143,14 @@ export class SqliteFs implements IFileSystem {
 
     for (let i = 0; i < segments.length - 1; i++) {
       currentPath = path.posix.join(currentPath, segments[i]);
-      const exists = this.#stmt('SELECT 1 FROM fs_entries WHERE path = ?').get(
-        currentPath,
-      );
+      const exists = this.#sql
+        .get`SELECT 1 FROM fs_entries WHERE path = ${currentPath}`;
 
       if (!exists) {
-        this.#stmt(
-          `INSERT INTO fs_entries (path, type, mode, size, mtime)
-           VALUES (?, 'directory', 493, 0, ?)`,
-        ).run(currentPath, Date.now());
+        this.#sql.run`INSERT INTO fs_entries (path, type, mode, size, mtime)
+           VALUES (${currentPath}, 'directory', 493, 0, ${Date.now()})`;
       }
     }
-  }
-
-  #stmt(sql: string): ReturnType<DatabaseSync['prepare']> {
-    let stmt = this.#statements.get(sql);
-    if (!stmt) {
-      stmt = this.#db.prepare(sql);
-      this.#statements.set(sql, stmt);
-    }
-    return stmt;
   }
 
   #normalizeRoot(root: string): string {
@@ -216,32 +199,27 @@ export class SqliteFs implements IFileSystem {
 
     const entry = typeRow
       .optional()
-      .parse(
-        this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(parent),
-      );
+      .parse(this.#sql.get`SELECT type FROM fs_entries WHERE path = ${parent}`);
 
     if (!entry) {
       this.#ensureParentExists(parent);
-      this.#stmt(
-        `INSERT INTO fs_entries (path, type, mode, size, mtime)
-         VALUES (?, 'directory', 493, 0, ?)`,
-      ).run(parent, Date.now());
+      this.#sql.run`INSERT INTO fs_entries (path, type, mode, size, mtime)
+         VALUES (${parent}, 'directory', 493, 0, ${Date.now()})`;
     } else if (entry.type !== 'directory') {
       throw new Error(`mkdir: parent is not a directory: ${parent}`);
     }
   }
 
   #writeChunks(filePath: string, content: Uint8Array): void {
-    this.#stmt('DELETE FROM fs_chunks WHERE path = ?').run(filePath);
+    this.#sql.run`DELETE FROM fs_chunks WHERE path = ${filePath}`;
 
     for (let i = 0; i < content.length; i += this.#chunkSize) {
       const chunk = content.slice(
         i,
         Math.min(i + this.#chunkSize, content.length),
       );
-      this.#stmt(
-        'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (?, ?, ?)',
-      ).run(filePath, Math.floor(i / this.#chunkSize), chunk);
+      this.#sql
+        .run`INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (${filePath}, ${Math.floor(i / this.#chunkSize)}, ${chunk})`;
     }
   }
 
@@ -249,9 +227,8 @@ export class SqliteFs implements IFileSystem {
     return z
       .array(chunkRow)
       .parse(
-        this.#stmt('SELECT chunkIndex, data FROM fs_chunks WHERE path = ?').all(
-          filePath,
-        ),
+        this.#sql
+          .all`SELECT chunkIndex, data FROM fs_chunks WHERE path = ${filePath}`,
       );
   }
 
@@ -259,9 +236,8 @@ export class SqliteFs implements IFileSystem {
     const rows = z
       .array(dataRow)
       .parse(
-        this.#stmt(
-          'SELECT data FROM fs_chunks WHERE path = ? ORDER BY chunkIndex',
-        ).all(filePath),
+        this.#sql
+          .all`SELECT data FROM fs_chunks WHERE path = ${filePath} ORDER BY chunkIndex`,
       );
 
     if (rows.length === 0) {
@@ -288,9 +264,8 @@ export class SqliteFs implements IFileSystem {
     const entry = linkRow
       .optional()
       .parse(
-        this.#stmt(
-          'SELECT type, symlinkTarget FROM fs_entries WHERE path = ?',
-        ).get(p),
+        this.#sql
+          .get`SELECT type, symlinkTarget FROM fs_entries WHERE path = ${p}`,
       );
 
     if (!entry) {
@@ -330,7 +305,7 @@ export class SqliteFs implements IFileSystem {
     const entry = typeRow
       .optional()
       .parse(
-        this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(resolved),
+        this.#sql.get`SELECT type FROM fs_entries WHERE path = ${resolved}`,
       );
 
     if (!entry) {
@@ -354,7 +329,7 @@ export class SqliteFs implements IFileSystem {
     const entry = typeRow
       .optional()
       .parse(
-        this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(resolved),
+        this.#sql.get`SELECT type FROM fs_entries WHERE path = ${resolved}`,
       );
 
     if (!entry) {
@@ -382,14 +357,12 @@ export class SqliteFs implements IFileSystem {
       () => {
         this.#ensureParentExists(prefixed);
 
-        this.#stmt(
-          `INSERT INTO fs_entries (path, type, mode, size, mtime)
-         VALUES (?, 'file', 420, ?, ?)
+        this.#sql.run`INSERT INTO fs_entries (path, type, mode, size, mtime)
+         VALUES (${prefixed}, 'file', 420, ${data.length}, ${Date.now()})
          ON CONFLICT(path) DO UPDATE SET
            type = 'file',
            size = excluded.size,
-           mtime = excluded.mtime`,
-        ).run(prefixed, data.length, Date.now());
+           mtime = excluded.mtime`;
 
         this.#writeChunks(prefixed, data);
       },
@@ -415,9 +388,7 @@ export class SqliteFs implements IFileSystem {
         const entry = typeRow
           .optional()
           .parse(
-            this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(
-              prefixed,
-            ),
+            this.#sql.get`SELECT type FROM fs_entries WHERE path = ${prefixed}`,
           );
 
         if (entry && entry.type !== 'file') {
@@ -429,13 +400,11 @@ export class SqliteFs implements IFileSystem {
         combined.set(existing, 0);
         combined.set(newData, existing.length);
 
-        this.#stmt(
-          `INSERT INTO fs_entries (path, type, mode, size, mtime)
-         VALUES (?, 'file', 420, ?, ?)
+        this.#sql.run`INSERT INTO fs_entries (path, type, mode, size, mtime)
+         VALUES (${prefixed}, 'file', 420, ${combined.length}, ${Date.now()})
          ON CONFLICT(path) DO UPDATE SET
            size = excluded.size,
-           mtime = excluded.mtime`,
-        ).run(prefixed, combined.length, Date.now());
+           mtime = excluded.mtime`;
 
         this.#writeChunks(prefixed, combined);
       },
@@ -446,9 +415,8 @@ export class SqliteFs implements IFileSystem {
   async exists(filePath: string): Promise<boolean> {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
-    const row = this.#stmt('SELECT 1 FROM fs_entries WHERE path = ?').get(
-      prefixed,
-    );
+    const row = this.#sql
+      .get`SELECT 1 FROM fs_entries WHERE path = ${prefixed}`;
     return row !== undefined;
   }
 
@@ -459,9 +427,7 @@ export class SqliteFs implements IFileSystem {
 
     const entry = entryRow
       .optional()
-      .parse(
-        this.#stmt('SELECT * FROM fs_entries WHERE path = ?').get(resolved),
-      );
+      .parse(this.#sql.get`SELECT * FROM fs_entries WHERE path = ${resolved}`);
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
@@ -483,9 +449,7 @@ export class SqliteFs implements IFileSystem {
 
     const entry = entryRow
       .optional()
-      .parse(
-        this.#stmt('SELECT * FROM fs_entries WHERE path = ?').get(prefixed),
-      );
+      .parse(this.#sql.get`SELECT * FROM fs_entries WHERE path = ${prefixed}`);
 
     if (!entry) {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
@@ -508,7 +472,7 @@ export class SqliteFs implements IFileSystem {
     const existing = typeRow
       .optional()
       .parse(
-        this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(prefixed),
+        this.#sql.get`SELECT type FROM fs_entries WHERE path = ${prefixed}`,
       );
 
     if (existing) {
@@ -532,16 +496,14 @@ export class SqliteFs implements IFileSystem {
             const exists = typeRow
               .optional()
               .parse(
-                this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(
-                  currentPath,
-                ),
+                this.#sql
+                  .get`SELECT type FROM fs_entries WHERE path = ${currentPath}`,
               );
 
             if (!exists) {
-              this.#stmt(
-                `INSERT INTO fs_entries (path, type, mode, size, mtime)
-               VALUES (?, 'directory', 493, 0, ?)`,
-              ).run(currentPath, Date.now());
+              this.#sql
+                .run`INSERT INTO fs_entries (path, type, mode, size, mtime)
+               VALUES (${currentPath}, 'directory', 493, 0, ${Date.now()})`;
             } else if (exists.type !== 'directory') {
               throw new Error(`mkdir: not a directory: ${currentPath}`);
             }
@@ -552,9 +514,7 @@ export class SqliteFs implements IFileSystem {
           const parentEntry = typeRow
             .optional()
             .parse(
-              this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(
-                parent,
-              ),
+              this.#sql.get`SELECT type FROM fs_entries WHERE path = ${parent}`,
             );
 
           if (!parentEntry) {
@@ -564,10 +524,8 @@ export class SqliteFs implements IFileSystem {
             throw new Error(`mkdir: parent is not a directory: ${parent}`);
           }
 
-          this.#stmt(
-            `INSERT INTO fs_entries (path, type, mode, size, mtime)
-           VALUES (?, 'directory', 493, 0, ?)`,
-          ).run(prefixed, Date.now());
+          this.#sql.run`INSERT INTO fs_entries (path, type, mode, size, mtime)
+           VALUES (${prefixed}, 'directory', 493, 0, ${Date.now()})`;
         }
       },
       { mode: 'deferred' },
@@ -582,7 +540,7 @@ export class SqliteFs implements IFileSystem {
     const entry = typeRow
       .optional()
       .parse(
-        this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(resolved),
+        this.#sql.get`SELECT type FROM fs_entries WHERE path = ${resolved}`,
       );
 
     if (!entry) {
@@ -595,12 +553,10 @@ export class SqliteFs implements IFileSystem {
     // Get direct children (path starts with dir/ but doesn't have another / after)
     const prefix = resolved === '/' ? '/' : resolved + '/';
     const rows = z.array(pathRow).parse(
-      this.#stmt(
-        `SELECT path FROM fs_entries
-       WHERE path LIKE ? || '%'
-         AND path != ?
-         AND path NOT LIKE ? || '%/%'`,
-      ).all(prefix, resolved, prefix),
+      this.#sql.all`SELECT path FROM fs_entries
+       WHERE path LIKE ${prefix} || '%'
+         AND path != ${resolved}
+         AND path NOT LIKE ${prefix} || '%/%'`,
     );
 
     return rows.map((row) => path.posix.basename(row.path));
@@ -614,7 +570,7 @@ export class SqliteFs implements IFileSystem {
     const entry = typeRow
       .optional()
       .parse(
-        this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(resolved),
+        this.#sql.get`SELECT type FROM fs_entries WHERE path = ${resolved}`,
       );
 
     if (!entry) {
@@ -626,12 +582,10 @@ export class SqliteFs implements IFileSystem {
 
     const prefix = resolved === '/' ? '/' : resolved + '/';
     const rows = z.array(pathTypeRow).parse(
-      this.#stmt(
-        `SELECT path, type FROM fs_entries
-       WHERE path LIKE ? || '%'
-         AND path != ?
-         AND path NOT LIKE ? || '%/%'`,
-      ).all(prefix, resolved, prefix),
+      this.#sql.all`SELECT path, type FROM fs_entries
+       WHERE path LIKE ${prefix} || '%'
+         AND path != ${resolved}
+         AND path NOT LIKE ${prefix} || '%/%'`,
     );
 
     return rows.map((row) => ({
@@ -649,7 +603,7 @@ export class SqliteFs implements IFileSystem {
     const entry = typeRow
       .optional()
       .parse(
-        this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(prefixed),
+        this.#sql.get`SELECT type FROM fs_entries WHERE path = ${prefixed}`,
       );
 
     if (!entry) {
@@ -663,20 +617,18 @@ export class SqliteFs implements IFileSystem {
       this.#db,
       () => {
         if (entry.type === 'directory') {
-          const children = this.#stmt(
-            `SELECT 1 FROM fs_entries WHERE path LIKE ? || '/%' LIMIT 1`,
-          ).get(prefixed);
+          const children = this.#sql
+            .get`SELECT 1 FROM fs_entries WHERE path LIKE ${prefixed} || '/%' LIMIT 1`;
 
           if (children && !options?.recursive) {
             throw new Error(`ENOTEMPTY: directory not empty: ${filePath}`);
           }
 
           // Chunks cascade via FK
-          this.#stmt(
-            `DELETE FROM fs_entries WHERE path = ? OR path LIKE ? || '/%'`,
-          ).run(prefixed, prefixed);
+          this.#sql
+            .run`DELETE FROM fs_entries WHERE path = ${prefixed} OR path LIKE ${prefixed} || '/%'`;
         } else {
-          this.#stmt('DELETE FROM fs_entries WHERE path = ?').run(prefixed);
+          this.#sql.run`DELETE FROM fs_entries WHERE path = ${prefixed}`;
         }
       },
       { mode: 'deferred' },
@@ -692,7 +644,7 @@ export class SqliteFs implements IFileSystem {
     const srcEntry = entryRow
       .optional()
       .parse(
-        this.#stmt('SELECT * FROM fs_entries WHERE path = ?').get(srcPrefixed),
+        this.#sql.get`SELECT * FROM fs_entries WHERE path = ${srcPrefixed}`,
       );
 
     if (!srcEntry) {
@@ -712,61 +664,40 @@ export class SqliteFs implements IFileSystem {
           const allEntries = z
             .array(entryRow)
             .parse(
-              this.#stmt(
-                `SELECT * FROM fs_entries WHERE path = ? OR path LIKE ? || '/%'`,
-              ).all(srcPrefixed, srcPrefixed),
+              this.#sql
+                .all`SELECT * FROM fs_entries WHERE path = ${srcPrefixed} OR path LIKE ${srcPrefixed} || '/%'`,
             );
 
           for (const entry of allEntries) {
             const relativePath = path.posix.relative(srcPrefixed, entry.path);
             const newPath = path.posix.join(destPrefixed, relativePath);
 
-            this.#stmt(
-              `INSERT OR REPLACE INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            ).run(
-              newPath,
-              entry.type,
-              entry.mode,
-              entry.size,
-              Date.now(),
-              entry.symlinkTarget,
-            );
+            this.#sql
+              .run`INSERT OR REPLACE INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
+             VALUES (${newPath}, ${entry.type}, ${entry.mode}, ${entry.size}, ${Date.now()}, ${entry.symlinkTarget})`;
 
             if (entry.type === 'file') {
               const chunks = this.#chunks(entry.path);
 
               for (const chunk of chunks) {
-                this.#stmt(
-                  'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (?, ?, ?)',
-                ).run(newPath, chunk.chunkIndex, chunk.data);
+                this.#sql
+                  .run`INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (${newPath}, ${chunk.chunkIndex}, ${chunk.data})`;
               }
             }
           }
         } else {
-          this.#stmt(
-            `INSERT OR REPLACE INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          ).run(
-            destPrefixed,
-            srcEntry.type,
-            srcEntry.mode,
-            srcEntry.size,
-            Date.now(),
-            srcEntry.symlinkTarget,
-          );
+          this.#sql
+            .run`INSERT OR REPLACE INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
+           VALUES (${destPrefixed}, ${srcEntry.type}, ${srcEntry.mode}, ${srcEntry.size}, ${Date.now()}, ${srcEntry.symlinkTarget})`;
 
           if (srcEntry.type === 'file') {
             const chunks = this.#chunks(srcPrefixed);
 
-            this.#stmt('DELETE FROM fs_chunks WHERE path = ?').run(
-              destPrefixed,
-            );
+            this.#sql.run`DELETE FROM fs_chunks WHERE path = ${destPrefixed}`;
 
             for (const chunk of chunks) {
-              this.#stmt(
-                'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (?, ?, ?)',
-              ).run(destPrefixed, chunk.chunkIndex, chunk.data);
+              this.#sql
+                .run`INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (${destPrefixed}, ${chunk.chunkIndex}, ${chunk.data})`;
             }
           }
         }
@@ -784,7 +715,7 @@ export class SqliteFs implements IFileSystem {
     const srcEntry = entryRow
       .optional()
       .parse(
-        this.#stmt('SELECT * FROM fs_entries WHERE path = ?').get(srcPrefixed),
+        this.#sql.get`SELECT * FROM fs_entries WHERE path = ${srcPrefixed}`,
       );
 
     if (!srcEntry) {
@@ -801,66 +732,46 @@ export class SqliteFs implements IFileSystem {
           const allEntries = z
             .array(entryRow)
             .parse(
-              this.#stmt(
-                `SELECT * FROM fs_entries WHERE path = ? OR path LIKE ? || '/%' ORDER BY path DESC`,
-              ).all(srcPrefixed, srcPrefixed),
+              this.#sql
+                .all`SELECT * FROM fs_entries WHERE path = ${srcPrefixed} OR path LIKE ${srcPrefixed} || '/%' ORDER BY path DESC`,
             );
 
           for (const entry of [...allEntries].reverse()) {
             const relativePath = path.posix.relative(srcPrefixed, entry.path);
             const newPath = path.posix.join(destPrefixed, relativePath);
 
-            this.#stmt(
-              `INSERT INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            ).run(
-              newPath,
-              entry.type,
-              entry.mode,
-              entry.size,
-              Date.now(),
-              entry.symlinkTarget,
-            );
+            this.#sql
+              .run`INSERT INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
+             VALUES (${newPath}, ${entry.type}, ${entry.mode}, ${entry.size}, ${Date.now()}, ${entry.symlinkTarget})`;
 
             if (entry.type === 'file') {
               const chunks = this.#chunks(entry.path);
 
               for (const chunk of chunks) {
-                this.#stmt(
-                  'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (?, ?, ?)',
-                ).run(newPath, chunk.chunkIndex, chunk.data);
+                this.#sql
+                  .run`INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (${newPath}, ${chunk.chunkIndex}, ${chunk.data})`;
               }
             }
           }
 
           // Chunks cascade via FK
-          this.#stmt(
-            `DELETE FROM fs_entries WHERE path = ? OR path LIKE ? || '/%'`,
-          ).run(srcPrefixed, srcPrefixed);
+          this.#sql
+            .run`DELETE FROM fs_entries WHERE path = ${srcPrefixed} OR path LIKE ${srcPrefixed} || '/%'`;
         } else {
-          this.#stmt(
-            `INSERT INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          ).run(
-            destPrefixed,
-            srcEntry.type,
-            srcEntry.mode,
-            srcEntry.size,
-            Date.now(),
-            srcEntry.symlinkTarget,
-          );
+          this.#sql
+            .run`INSERT INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
+           VALUES (${destPrefixed}, ${srcEntry.type}, ${srcEntry.mode}, ${srcEntry.size}, ${Date.now()}, ${srcEntry.symlinkTarget})`;
 
           if (srcEntry.type === 'file') {
             const chunks = this.#chunks(srcPrefixed);
 
             for (const chunk of chunks) {
-              this.#stmt(
-                'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (?, ?, ?)',
-              ).run(destPrefixed, chunk.chunkIndex, chunk.data);
+              this.#sql
+                .run`INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (${destPrefixed}, ${chunk.chunkIndex}, ${chunk.data})`;
             }
           }
 
-          this.#stmt('DELETE FROM fs_entries WHERE path = ?').run(srcPrefixed);
+          this.#sql.run`DELETE FROM fs_entries WHERE path = ${srcPrefixed}`;
         }
       },
       { mode: 'deferred' },
@@ -874,7 +785,7 @@ export class SqliteFs implements IFileSystem {
   getAllPaths(): string[] {
     const rows = z
       .array(pathRow)
-      .parse(this.#stmt('SELECT path FROM fs_entries ORDER BY path').all());
+      .parse(this.#sql.all`SELECT path FROM fs_entries ORDER BY path`);
     return rows.map((row) => row.path);
   }
 
@@ -883,9 +794,8 @@ export class SqliteFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
     const resolved = this.#resolveSymlink(prefixed);
 
-    const exists = this.#stmt('SELECT 1 FROM fs_entries WHERE path = ?').get(
-      resolved,
-    );
+    const exists = this.#sql
+      .get`SELECT 1 FROM fs_entries WHERE path = ${resolved}`;
     if (!exists) {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
     }
@@ -898,9 +808,8 @@ export class SqliteFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
     const resolved = this.#resolveSymlink(prefixed);
 
-    const result = this.#stmt(
-      'UPDATE fs_entries SET mtime = ? WHERE path = ?',
-    ).run(mtime.getTime(), resolved);
+    const result = this.#sql
+      .run`UPDATE fs_entries SET mtime = ${mtime.getTime()} WHERE path = ${resolved}`;
 
     if (result.changes === 0) {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
@@ -911,9 +820,8 @@ export class SqliteFs implements IFileSystem {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
 
-    const result = this.#stmt(
-      'UPDATE fs_entries SET mode = ? WHERE path = ?',
-    ).run(mode, prefixed);
+    const result = this.#sql
+      .run`UPDATE fs_entries SET mode = ${mode} WHERE path = ${prefixed}`;
 
     if (result.changes === 0) {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
@@ -924,9 +832,8 @@ export class SqliteFs implements IFileSystem {
     const normalized = this.#normalizePath(linkPath);
     const prefixed = this.#prefixPath(normalized);
 
-    const existing = this.#stmt('SELECT 1 FROM fs_entries WHERE path = ?').get(
-      prefixed,
-    );
+    const existing = this.#sql
+      .get`SELECT 1 FROM fs_entries WHERE path = ${prefixed}`;
     if (existing) {
       throw new Error(`EEXIST: file already exists: ${linkPath}`);
     }
@@ -936,10 +843,9 @@ export class SqliteFs implements IFileSystem {
       () => {
         this.#ensureParentExists(prefixed);
 
-        this.#stmt(
-          `INSERT INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
-         VALUES (?, 'symlink', 511, 0, ?, ?)`,
-        ).run(prefixed, Date.now(), target);
+        this.#sql
+          .run`INSERT INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
+         VALUES (${prefixed}, 'symlink', 511, 0, ${Date.now()}, ${target})`;
       },
       { mode: 'deferred' },
     );
@@ -954,7 +860,7 @@ export class SqliteFs implements IFileSystem {
     const srcEntry = entryRow
       .optional()
       .parse(
-        this.#stmt('SELECT * FROM fs_entries WHERE path = ?').get(srcPrefixed),
+        this.#sql.get`SELECT * FROM fs_entries WHERE path = ${srcPrefixed}`,
       );
 
     if (!srcEntry) {
@@ -965,9 +871,8 @@ export class SqliteFs implements IFileSystem {
       throw new Error(`link: not supported for directories: ${existingPath}`);
     }
 
-    const existing = this.#stmt('SELECT 1 FROM fs_entries WHERE path = ?').get(
-      destPrefixed,
-    );
+    const existing = this.#sql
+      .get`SELECT 1 FROM fs_entries WHERE path = ${destPrefixed}`;
     if (existing) {
       throw new Error(`EEXIST: file already exists: ${newPath}`);
     }
@@ -978,17 +883,14 @@ export class SqliteFs implements IFileSystem {
       () => {
         this.#ensureParentExists(destPrefixed);
 
-        this.#stmt(
-          `INSERT INTO fs_entries (path, type, mode, size, mtime)
-         VALUES (?, 'file', ?, ?, ?)`,
-        ).run(destPrefixed, srcEntry.mode, srcEntry.size, Date.now());
+        this.#sql.run`INSERT INTO fs_entries (path, type, mode, size, mtime)
+         VALUES (${destPrefixed}, 'file', ${srcEntry.mode}, ${srcEntry.size}, ${Date.now()})`;
 
         const chunks = this.#chunks(srcPrefixed);
 
         for (const chunk of chunks) {
-          this.#stmt(
-            'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (?, ?, ?)',
-          ).run(destPrefixed, chunk.chunkIndex, chunk.data);
+          this.#sql
+            .run`INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (${destPrefixed}, ${chunk.chunkIndex}, ${chunk.data})`;
         }
       },
       { mode: 'deferred' },
@@ -1002,9 +904,8 @@ export class SqliteFs implements IFileSystem {
     const entry = linkRow
       .optional()
       .parse(
-        this.#stmt(
-          'SELECT type, symlinkTarget FROM fs_entries WHERE path = ?',
-        ).get(prefixed),
+        this.#sql
+          .get`SELECT type, symlinkTarget FROM fs_entries WHERE path = ${prefixed}`,
       );
 
     if (!entry) {

@@ -1,5 +1,9 @@
 import { transaction } from '@zukhruf/sqlite-transaction';
-import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import {
+  DatabaseSync,
+  type SQLInputValue,
+  type SQLTagStore,
+} from 'node:sqlite';
 import { z } from 'zod';
 
 import { parseJson, parseJsonObject } from './columns.ts';
@@ -178,27 +182,14 @@ function toMessage(row: z.output<typeof messageColumns>): MessageData {
  */
 export class SqliteContextStore extends ContextStore {
   #db: DatabaseSync;
-  #statements = new Map<string, ReturnType<DatabaseSync['prepare']>>();
-
-  /**
-   * Get or create a prepared statement.
-   * Statements are cached for the lifetime of the store to avoid
-   * repeated SQL parsing and compilation overhead.
-   */
-  #stmt(sql: string): ReturnType<DatabaseSync['prepare']> {
-    let stmt = this.#statements.get(sql);
-    if (!stmt) {
-      stmt = this.#db.prepare(sql);
-      this.#statements.set(sql, stmt);
-    }
-    return stmt;
-  }
+  #sql: SQLTagStore;
 
   constructor(pathOrDb: string | DatabaseSync) {
     super();
     this.#db =
       typeof pathOrDb === 'string' ? new DatabaseSync(pathOrDb) : pathOrDb;
     this.#db.exec(STORE_DDL);
+    this.#sql = this.#db.createTagStore();
   }
 
   // ==========================================================================
@@ -440,22 +431,13 @@ export class SqliteContextStore extends ContextStore {
     }
 
     // Upsert message (using cached statement)
-    this.#stmt(
-      `INSERT INTO messages (id, chatId, parentId, name, type, data, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+    this.#sql
+      .run`INSERT INTO messages (id, chatId, parentId, name, type, data, createdAt)
+       VALUES (${message.id}, ${message.chatId}, ${message.parentId}, ${message.name}, ${message.type ?? null}, ${JSON.stringify(message.data)}, ${message.createdAt})
        ON CONFLICT(id) DO UPDATE SET
          name = excluded.name,
          type = excluded.type,
-         data = excluded.data`,
-    ).run(
-      message.id,
-      message.chatId,
-      message.parentId,
-      message.name,
-      message.type ?? null,
-      JSON.stringify(message.data),
-      message.createdAt,
-    );
+         data = excluded.data`;
 
     // Index in FTS for search
     const content =
@@ -464,11 +446,9 @@ export class SqliteContextStore extends ContextStore {
         : JSON.stringify(message.data);
 
     // Delete existing FTS entry if any (for upsert), then insert new one
-    this.#stmt(`DELETE FROM messages_fts WHERE messageId = ?`).run(message.id);
-    this.#stmt(
-      `INSERT INTO messages_fts(messageId, chatId, name, content)
-       VALUES (?, ?, ?, ?)`,
-    ).run(message.id, message.chatId, message.name, content);
+    this.#sql.run`DELETE FROM messages_fts WHERE messageId = ${message.id}`;
+    this.#sql.run`INSERT INTO messages_fts(messageId, chatId, name, content)
+       VALUES (${message.id}, ${message.chatId}, ${message.name}, ${content})`;
   }
 
   async addMessage(message: MessageData): Promise<void> {
@@ -496,9 +476,8 @@ export class SqliteContextStore extends ContextStore {
     if (parentId === messageId) {
       throw new Error(`Message ${messageId} cannot be its own parent`);
     }
-    const result = this.#stmt(
-      'UPDATE messages SET parentId = ? WHERE id = ?',
-    ).run(parentId, messageId);
+    const result = this.#sql
+      .run`UPDATE messages SET parentId = ${parentId} WHERE id = ${messageId}`;
     if (result.changes === 0) {
       throw new Error(`Message ${messageId} not found`);
     }
@@ -507,7 +486,7 @@ export class SqliteContextStore extends ContextStore {
   async getMessage(messageId: string): Promise<MessageData | undefined> {
     return storedMessage
       .optional()
-      .parse(this.#stmt('SELECT * FROM messages WHERE id = ?').get(messageId));
+      .parse(this.#sql.get`SELECT * FROM messages WHERE id = ${messageId}`);
   }
 
   async getMessageChain(headId: string): Promise<MessageData[]> {
@@ -516,9 +495,8 @@ export class SqliteContextStore extends ContextStore {
     // and order by depth DESC to get chronological order (root first)
     // Depth limit of 100000 prevents infinite loops from circular references
     return z.array(storedMessage).parse(
-      this.#stmt(
-        `WITH RECURSIVE chain AS (
-        SELECT *, 0 as depth FROM messages WHERE id = ?
+      this.#sql.all`WITH RECURSIVE chain AS (
+        SELECT *, 0 as depth FROM messages WHERE id = ${headId}
         UNION ALL
         SELECT m.*, c.depth + 1 FROM messages m
         INNER JOIN chain c ON m.id = c.parentId
@@ -526,15 +504,13 @@ export class SqliteContextStore extends ContextStore {
       )
       SELECT * FROM chain
       ORDER BY depth DESC`,
-      ).all(headId),
     );
   }
 
   async hasChildren(messageId: string): Promise<boolean> {
     const row = hasChildrenRow.parse(
-      this.#stmt(
-        'SELECT EXISTS(SELECT 1 FROM messages WHERE parentId = ?) as hasChildren',
-      ).get(messageId),
+      this.#sql
+        .get`SELECT EXISTS(SELECT 1 FROM messages WHERE parentId = ${messageId}) as hasChildren`,
     );
 
     return row.hasChildren === 1;
@@ -591,9 +567,8 @@ export class SqliteContextStore extends ContextStore {
     return storedBranch
       .optional()
       .parse(
-        this.#stmt(
-          'SELECT * FROM branches WHERE chatId = ? AND isActive = 1',
-        ).get(chatId),
+        this.#sql
+          .get`SELECT * FROM branches WHERE chatId = ${chatId} AND isActive = 1`,
       );
   }
 
@@ -614,9 +589,8 @@ export class SqliteContextStore extends ContextStore {
     messageId: string | null,
     expectedHeadMessageId: string | null,
   ): Promise<boolean> {
-    const result = this.#stmt(
-      'UPDATE branches SET headMessageId = ? WHERE id = ? AND headMessageId IS ?',
-    ).run(messageId, branchId, expectedHeadMessageId);
+    const result = this.#sql
+      .run`UPDATE branches SET headMessageId = ${messageId} WHERE id = ${branchId} AND headMessageId IS ${expectedHeadMessageId}`;
     return result.changes > 0;
   }
 
