@@ -360,7 +360,7 @@ describe('RunStore', () => {
     assert.strictEqual(v2.version, 2);
   });
 
-  it('migrates runs to require suite_id and drops orphaned runs', () => {
+  it('migrates runs to require suite_id, drops orphaned runs and keeps the cases and scores of kept runs', () => {
     using db = new DatabaseSync(':memory:');
     db.exec(`
       PRAGMA foreign_keys = ON;
@@ -383,6 +383,27 @@ describe('RunStore', () => {
       );
       CREATE INDEX idx_runs_suite_id ON runs(suite_id);
       CREATE INDEX idx_runs_started_at ON runs(started_at);
+      CREATE TABLE cases (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        idx INTEGER NOT NULL,
+        input TEXT NOT NULL,
+        output TEXT,
+        expected TEXT,
+        latency_ms INTEGER,
+        tokens_in INTEGER,
+        tokens_out INTEGER,
+        error TEXT,
+        FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+      );
+      CREATE TABLE scores (
+        id TEXT PRIMARY KEY,
+        case_id TEXT NOT NULL,
+        scorer_name TEXT NOT NULL,
+        score REAL NOT NULL,
+        reason TEXT,
+        FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE CASCADE
+      );
     `);
 
     const suiteId = crypto.randomUUID();
@@ -395,9 +416,25 @@ describe('RunStore', () => {
       'INSERT INTO runs (id, suite_id, name, model, started_at, status) VALUES (?, ?, ?, ?, ?, ?)',
     ).run(validRunId, suiteId, 'valid-run', 'gpt-4', Date.now(), 'running');
 
+    const orphanRunId = crypto.randomUUID();
     db.prepare(
       'INSERT INTO runs (id, suite_id, name, model, started_at, status) VALUES (?, NULL, ?, ?, ?, ?)',
-    ).run(crypto.randomUUID(), 'orphan-run', 'gpt-4', Date.now(), 'running');
+    ).run(orphanRunId, 'orphan-run', 'gpt-4', Date.now(), 'running');
+
+    const insertCase = db.prepare(
+      'INSERT INTO cases (id, run_id, idx, input) VALUES (?, ?, ?, ?)',
+    );
+    const insertScore = db.prepare(
+      'INSERT INTO scores (id, case_id, scorer_name, score) VALUES (?, ?, ?, ?)',
+    );
+    const keptCaseIds = [crypto.randomUUID(), crypto.randomUUID()];
+    keptCaseIds.forEach((caseId, idx) => {
+      insertCase.run(caseId, validRunId, idx, '{"question":"q"}');
+      insertScore.run(crypto.randomUUID(), caseId, 'accuracy', 0.25);
+    });
+    const orphanCaseId = crypto.randomUUID();
+    insertCase.run(orphanCaseId, orphanRunId, 0, '{"question":"q"}');
+    insertScore.run(crypto.randomUUID(), orphanCaseId, 'accuracy', 0.25);
 
     const migratedStore = new RunStore(db);
     const suiteColumn = db
@@ -416,6 +453,18 @@ describe('RunStore', () => {
     assert.strictEqual(runs.length, 1);
     assert.strictEqual(runs[0].id, validRunId);
     assert.strictEqual(runs[0].suite_id, suiteId);
+
+    assert.deepStrictEqual(
+      migratedStore.getCases(validRunId).map((row) => row.id),
+      keptCaseIds,
+    );
+    assert.deepStrictEqual(
+      migratedStore
+        .getFailingCases(validRunId, 0.5)
+        .map((row) => row.scores.map((score) => score.score)),
+      [[0.25], [0.25]],
+    );
+    assert.deepStrictEqual(migratedStore.getCases(orphanRunId), []);
 
     assert.throws(
       () =>

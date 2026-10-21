@@ -1,7 +1,3 @@
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
-PRAGMA foreign_keys = ON;
-
 CREATE TABLE IF NOT EXISTS suites (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -53,9 +49,12 @@ CREATE INDEX IF NOT EXISTS idx_scores_case_id ON scores(case_id);
 
 CREATE TABLE IF NOT EXISTS prompts (
   id TEXT PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
   content TEXT NOT NULL,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+  UNIQUE(name, version)
 );
 
 CREATE INDEX IF NOT EXISTS idx_prompts_created_at ON prompts(created_at);
+CREATE INDEX IF NOT EXISTS idx_prompts_name_version ON prompts(name, version DESC);

@@ -1,3 +1,4 @@
+import { Declaration } from '@zukhruf/sqlite-drift';
 import { transaction } from '@zukhruf/sqlite-transaction';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -7,7 +8,9 @@ import {
   type SQLOutputValue,
 } from 'node:sqlite';
 
-import DDL from './ddl.sqlite.sql';
+import SCHEMA from './ddl.sqlite.sql';
+
+const schema = new Declaration([SCHEMA], { rows: 'keep' });
 
 export interface SuiteRow {
   id: string;
@@ -331,114 +334,23 @@ export class RunStore {
       mkdirSync(dirname(dbPath), { recursive: true });
       this.#db = new DatabaseSync(dbPath);
     }
-    this.#db.exec(DDL);
-    this.#migrateRunsTableToSuiteRequired();
-    this.#migratePromptsTableIfNeeded();
-    this.#db.exec(
-      'CREATE INDEX IF NOT EXISTS idx_prompts_name_version ON prompts(name, version DESC)',
+    this.#db.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA synchronous = NORMAL;
+      PRAGMA foreign_keys = ON;
+    `);
+    const runsTable = this.#get(
+      { name: 'text' },
+      "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'runs'",
     );
-  }
-
-  #migratePromptsTableIfNeeded(): void {
-    const columns = this.#all({ name: 'text' }, 'PRAGMA table_info(prompts)');
-
-    if (columns.length === 0) return;
-    if (columns.some((column) => column.name === 'version')) return;
-
-    transaction(
-      this.#db,
-      () => {
-        this.#db.exec('ALTER TABLE prompts RENAME TO prompts_legacy');
-        this.#db.exec(`
-        CREATE TABLE prompts (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          version INTEGER NOT NULL,
-          content TEXT NOT NULL,
-          created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-          UNIQUE(name, version)
-        )
-      `);
-        this.#db.exec(`
-        INSERT INTO prompts (id, name, version, content, created_at)
-        SELECT id, name, 1, content, created_at
-        FROM prompts_legacy
-      `);
-        this.#db.exec('DROP TABLE prompts_legacy');
-        this.#db.exec(
-          'CREATE INDEX IF NOT EXISTS idx_prompts_created_at ON prompts(created_at)',
-        );
-        this.#db.exec(
-          'CREATE INDEX IF NOT EXISTS idx_prompts_name_version ON prompts(name, version DESC)',
-        );
-      },
-      { mode: 'deferred' },
-    );
-  }
-
-  #migrateRunsTableToSuiteRequired(): void {
-    const columns = this.#all(
-      { name: 'text', notnull: 'number' },
-      'PRAGMA table_info(runs)',
-    );
-
-    if (columns.length === 0) return;
-
-    const suiteColumn = columns.find((column) => column.name === 'suite_id');
-    const hasNonNullSuite = suiteColumn?.notnull === 1;
-
-    const runForeignKeys = this.#all(
-      { from: 'text', on_delete: 'text', table: 'text' },
-      'PRAGMA foreign_key_list(runs)',
-    );
-    const suiteForeignKey = runForeignKeys.find(
-      (fk) => fk.from === 'suite_id' && fk.table === 'suites',
-    );
-    const hasCascadeDelete = suiteForeignKey?.on_delete === 'CASCADE';
-
-    if (hasNonNullSuite && hasCascadeDelete) return;
-
-    this.#statements.clear();
-    transaction(
-      this.#db,
-      () => {
-        this.#db.exec(`
-        CREATE TABLE runs_next (
-          id TEXT PRIMARY KEY,
-          suite_id TEXT NOT NULL,
-          name TEXT NOT NULL,
-          model TEXT NOT NULL,
-          config TEXT,
-          started_at INTEGER NOT NULL,
-          finished_at INTEGER,
-          status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running', 'completed', 'failed')),
-          summary TEXT,
-          FOREIGN KEY (suite_id) REFERENCES suites(id) ON DELETE CASCADE
-        )
-      `);
-
-        // Drop legacy orphaned runs that do not belong to a suite.
-        this.#db.exec('DELETE FROM runs WHERE suite_id IS NULL');
-
-        this.#db.exec(`
-        INSERT INTO runs_next (id, suite_id, name, model, config, started_at, finished_at, status, summary)
-        SELECT r.id, r.suite_id, r.name, r.model, r.config, r.started_at, r.finished_at, r.status, r.summary
-        FROM runs r
-        JOIN suites s ON s.id = r.suite_id
-      `);
-
-        this.#db.exec('DROP TABLE runs');
-        this.#db.exec('ALTER TABLE runs_next RENAME TO runs');
-        this.#db.exec(
-          'CREATE INDEX IF NOT EXISTS idx_runs_suite_id ON runs(suite_id)',
-        );
-        this.#db.exec(
-          'CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at)',
-        );
-      },
-      { mode: 'deferred' },
-    );
-    this.#statements.clear();
+    if (runsTable !== undefined) {
+      // Runs from layouts before suite_id was required have no suite. With
+      // foreign keys on, deleting them also deletes their cases and scores.
+      this.#db.exec(
+        'DELETE FROM runs WHERE suite_id IS NULL OR NOT EXISTS (SELECT 1 FROM suites WHERE suites.id = runs.suite_id)',
+      );
+    }
+    schema.apply(this.#db);
   }
 
   createSuite(name: string): SuiteRow {
