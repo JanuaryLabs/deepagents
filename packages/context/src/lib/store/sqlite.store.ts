@@ -195,7 +195,7 @@ function isFts5QueryError(error: unknown): boolean {
     error instanceof Error &&
     'errcode' in error &&
     error.errcode === 1 &&
-    /^(fts5: syntax error near |no such column: |unterminated string$)/.test(
+    /^(fts5: syntax error near |no such column: |unterminated string$|unknown special query: |expected integer, got )/.test(
       error.message,
     )
   );

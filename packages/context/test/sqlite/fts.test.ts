@@ -43,6 +43,58 @@ describe('Full-Text Search', () => {
       }
     });
 
+    it("throws SearchQuerySyntaxError with SQLite's error as the cause for an unknown special query and a NEAR distance that is not an integer", async () => {
+      await using database = await sqlite.database();
+      const store = new SqliteContextStore(database.connection);
+      const engine = new ContextEngine({
+        store,
+        chatId: 'syntax-chat',
+        userId: 'alice',
+      });
+      engine.set(user('hello world'));
+      await engine.save();
+
+      for (const [query, cause] of [
+        ['*', 'unknown special query: '],
+        ['NEAR(hello world, x)', 'expected integer, got "x"'],
+      ]) {
+        const error = await store.searchMessages('syntax-chat', query).then(
+          () => assert.fail(`expected ${query} to be rejected`),
+          (rejection: unknown) => rejection,
+        );
+        assert.ok(error instanceof SearchQuerySyntaxError);
+        assert.ok(error.cause instanceof Error);
+        assert.strictEqual(error.cause.message, cause);
+        assert.ok('errcode' in error.cause);
+        assert.strictEqual(error.cause.errcode, 1);
+      }
+    });
+
+    it("keeps SQLite's own error when a search fails for a reason other than the query", async () => {
+      await using database = await sqlite.database();
+      const store = new SqliteContextStore(database.connection);
+      const engine = new ContextEngine({
+        store,
+        chatId: 'syntax-chat',
+        userId: 'alice',
+      });
+      engine.set(user('hello world'));
+      await engine.save();
+
+      const error = await store
+        .searchMessages('syntax-chat', 'hello', { limit: 1.5 })
+        .then(
+          () => assert.fail('expected a limit of 1.5 to be rejected'),
+          (rejection: unknown) => rejection,
+        );
+
+      assert.ok(!(error instanceof SearchQuerySyntaxError));
+      assert.ok(error instanceof Error);
+      assert.strictEqual(error.message, 'datatype mismatch');
+      assert.ok('errcode' in error);
+      assert.strictEqual(error.errcode, 20);
+    });
+
     it('finds messages with a quoted phrase and with an AND query', async () => {
       await using database = await sqlite.database();
       const store = new SqliteContextStore(database.connection);
