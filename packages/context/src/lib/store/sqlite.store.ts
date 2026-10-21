@@ -175,6 +175,33 @@ function toMessage(row: z.output<typeof messageColumns>): MessageData {
 }
 
 /**
+ * The search query of searchMessages is not valid FTS5 query syntax. The
+ * cause is SQLite's error.
+ */
+export class SearchQuerySyntaxError extends Error {
+  constructor(query: string, options: { cause: unknown }) {
+    super(
+      `The search query ${JSON.stringify(query)} is not valid FTS5 syntax. Put a term that has characters such as - or : in double quotes: "well-known" finds the term well-known.`,
+      options,
+    );
+    this.name = 'SearchQuerySyntaxError';
+  }
+}
+
+// FTS5 reads the MATCH text when the statement runs, and rejects a query it
+// cannot parse with SQLITE_ERROR (errcode 1) and one of these messages.
+function isFts5QueryError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    'errcode' in error &&
+    error.errcode === 1 &&
+    /^(fts5: syntax error near |no such column: |unterminated string$)/.test(
+      error.message,
+    )
+  );
+}
+
+/**
  * SQLite-based context store using graph model.
  *
  * Uses node:sqlite's synchronous DatabaseSync for persistence.
@@ -721,7 +748,15 @@ export class SqliteContextStore extends ContextStore {
     sql += ' ORDER BY fts.rank LIMIT ?';
     params.push(limit);
 
-    return z.array(searchResult).parse(this.#db.prepare(sql).all(...params));
+    const statement = this.#db.prepare(sql);
+    try {
+      return z.array(searchResult).parse(statement.all(...params));
+    } catch (error) {
+      if (isFts5QueryError(error)) {
+        throw new SearchQuerySyntaxError(query, { cause: error });
+      }
+      throw error;
+    }
   }
 
   // ==========================================================================

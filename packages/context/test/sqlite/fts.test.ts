@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 
 import {
   ContextEngine,
+  SearchQuerySyntaxError,
   SqliteContextStore,
   assistantText,
   reminder,
@@ -13,6 +14,57 @@ import {
 const sqlite = new Sqlite();
 
 describe('Full-Text Search', () => {
+  describe('Search Query Syntax', () => {
+    it("throws SearchQuerySyntaxError with SQLite's error as the cause when a query is not valid FTS5 syntax", async () => {
+      await using database = await sqlite.database();
+      const store = new SqliteContextStore(database.connection);
+      const engine = new ContextEngine({
+        store,
+        chatId: 'syntax-chat',
+        userId: 'alice',
+      });
+      engine.set(user('A well-known fix: now'));
+      await engine.save();
+
+      for (const [query, cause] of [
+        ['well-known', 'no such column: known'],
+        ['fix: now', 'no such column: fix'],
+      ]) {
+        const error = await store.searchMessages('syntax-chat', query).then(
+          () => assert.fail(`expected ${query} to be rejected`),
+          (rejection: unknown) => rejection,
+        );
+        assert.ok(error instanceof SearchQuerySyntaxError);
+        assert.match(error.message, /not valid FTS5 syntax.*"well-known"/);
+        assert.ok(error.cause instanceof Error);
+        assert.strictEqual(error.cause.message, cause);
+        assert.ok('errcode' in error.cause);
+        assert.strictEqual(error.cause.errcode, 1);
+      }
+    });
+
+    it('finds messages with a quoted phrase and with an AND query', async () => {
+      await using database = await sqlite.database();
+      const store = new SqliteContextStore(database.connection);
+      const engine = new ContextEngine({
+        store,
+        chatId: 'syntax-chat',
+        userId: 'alice',
+      });
+      engine.set(user('A well-known way to learn programming'));
+      await engine.save();
+
+      const phrase = await store.searchMessages('syntax-chat', '"well-known"');
+      const and = await store.searchMessages(
+        'syntax-chat',
+        'learn AND programming',
+      );
+
+      assert.strictEqual(phrase.length, 1);
+      assert.strictEqual(and.length, 1);
+    });
+  });
+
   describe('FTS Cleanup', () => {
     it('should remove FTS entries when chat is deleted', async () => {
       await using database = await sqlite.database();
