@@ -1,3 +1,4 @@
+import { transaction } from '@zukhruf/sqlite-transaction';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { z } from 'zod';
 
@@ -145,43 +146,50 @@ export class SqliteStreamStore extends StreamStore {
     streamId: string,
     update: StreamUpdater,
   ): Promise<StreamUpdateResult> {
-    return this.#transaction(() => {
-      const stream = streamRow
-        .optional()
-        .parse(this.#stmt('SELECT * FROM streams WHERE id = ?').get(streamId));
-      if (!stream) {
-        throw new Error(`updateStream: stream "${streamId}" not found`);
-      }
+    return transaction(
+      this.#db,
+      () => {
+        const stream = streamRow
+          .optional()
+          .parse(
+            this.#stmt('SELECT * FROM streams WHERE id = ?').get(streamId),
+          );
+        if (!stream) {
+          throw new Error(`updateStream: stream "${streamId}" not found`);
+        }
 
-      const updates = update(stream);
-      if (updates === undefined) return { stream, updated: false };
+        const updates = update(stream);
+        if (updates === undefined) return { stream, updated: false };
 
-      const setClauses: string[] = [];
-      const params: SQLInputValue[] = [];
-      const set = (column: string, value: SQLInputValue) => {
-        setClauses.push(`${column} = ?`);
-        params.push(value);
-      };
+        const setClauses: string[] = [];
+        const params: SQLInputValue[] = [];
+        const set = (column: string, value: SQLInputValue) => {
+          setClauses.push(`${column} = ?`);
+          params.push(value);
+        };
 
-      if (updates.status !== undefined) set('status', updates.status);
-      if (updates.startedAt !== undefined) set('startedAt', updates.startedAt);
-      if (updates.finishedAt !== undefined) {
-        set('finishedAt', updates.finishedAt);
-      }
-      if (updates.cancelRequestedAt !== undefined) {
-        set('cancelRequestedAt', updates.cancelRequestedAt);
-      }
-      if (updates.error !== undefined) set('error', updates.error);
-      if (setClauses.length === 0) return { stream, updated: false };
+        if (updates.status !== undefined) set('status', updates.status);
+        if (updates.startedAt !== undefined)
+          set('startedAt', updates.startedAt);
+        if (updates.finishedAt !== undefined) {
+          set('finishedAt', updates.finishedAt);
+        }
+        if (updates.cancelRequestedAt !== undefined) {
+          set('cancelRequestedAt', updates.cancelRequestedAt);
+        }
+        if (updates.error !== undefined) set('error', updates.error);
+        if (setClauses.length === 0) return { stream, updated: false };
 
-      params.push(streamId);
-      const next = streamRow.parse(
-        this.#stmt(
-          `UPDATE streams SET ${setClauses.join(', ')} WHERE id = ? RETURNING *`,
-        ).get(...params),
-      );
-      return { stream: next, updated: true };
-    });
+        params.push(streamId);
+        const next = streamRow.parse(
+          this.#stmt(
+            `UPDATE streams SET ${setClauses.join(', ')} WHERE id = ? RETURNING *`,
+          ).get(...params),
+        );
+        return { stream: next, updated: true };
+      },
+      { mode: 'immediate' },
+    );
   }
 
   async updateStreamStatus(
@@ -226,34 +234,38 @@ export class SqliteStreamStore extends StreamStore {
   async appendChunks(chunks: StreamChunkData[]): Promise<void> {
     if (chunks.length === 0) return;
     const failures = collectStreamFailures(chunks);
-    this.#transaction(() => {
-      for (const chunk of chunks) {
-        this.#stmt(
-          `INSERT INTO stream_chunks (streamId, seq, data, createdAt)
+    transaction(
+      this.#db,
+      () => {
+        for (const chunk of chunks) {
+          this.#stmt(
+            `INSERT INTO stream_chunks (streamId, seq, data, createdAt)
            VALUES (?, ?, ?, ?)`,
-        ).run(
-          chunk.streamId,
-          chunk.seq,
-          JSON.stringify(chunk.data),
-          chunk.createdAt,
-        );
-      }
-      const failedAt = Date.now();
-      for (const failure of failures) {
-        const result = this.#stmt(
-          `UPDATE streams SET status = ?, finishedAt = ?, error = ?
+          ).run(
+            chunk.streamId,
+            chunk.seq,
+            JSON.stringify(chunk.data),
+            chunk.createdAt,
+          );
+        }
+        const failedAt = Date.now();
+        for (const failure of failures) {
+          const result = this.#stmt(
+            `UPDATE streams SET status = ?, finishedAt = ?, error = ?
             WHERE id = ? AND status IN ('queued', 'running')`,
-        ).run('failed', failedAt, failure.error, failure.streamId);
-        if (result.changes !== 1) {
-          const existing = this.#stmt(
-            'SELECT id FROM streams WHERE id = ?',
-          ).get(failure.streamId);
-          if (!existing) {
-            throw new Error(`Stream "${failure.streamId}" not found`);
+          ).run('failed', failedAt, failure.error, failure.streamId);
+          if (result.changes !== 1) {
+            const existing = this.#stmt(
+              'SELECT id FROM streams WHERE id = ?',
+            ).get(failure.streamId);
+            if (!existing) {
+              throw new Error(`Stream "${failure.streamId}" not found`);
+            }
           }
         }
-      }
-    });
+      },
+      { mode: 'immediate' },
+    );
   }
 
   async getChunks(
@@ -293,56 +305,46 @@ export class SqliteStreamStore extends StreamStore {
   }
 
   async reopenStream(streamId: string): Promise<StreamData> {
-    return this.#transaction(() => {
-      const row = statusRow
-        .optional()
-        .parse(this.#stmt('SELECT * FROM streams WHERE id = ?').get(streamId));
+    return transaction(
+      this.#db,
+      () => {
+        const row = statusRow
+          .optional()
+          .parse(
+            this.#stmt('SELECT * FROM streams WHERE id = ?').get(streamId),
+          );
 
-      if (!row) {
-        throw new Error(`Stream "${streamId}" not found`);
-      }
-      if (
-        row.status !== 'completed' &&
-        row.status !== 'failed' &&
-        row.status !== 'cancelled'
-      ) {
-        throw new Error(
-          `Cannot reopen stream "${streamId}" with status "${row.status}". Only terminal streams can be reopened.`,
-        );
-      }
+        if (!row) {
+          throw new Error(`Stream "${streamId}" not found`);
+        }
+        if (
+          row.status !== 'completed' &&
+          row.status !== 'failed' &&
+          row.status !== 'cancelled'
+        ) {
+          throw new Error(
+            `Cannot reopen stream "${streamId}" with status "${row.status}". Only terminal streams can be reopened.`,
+          );
+        }
 
-      this.#stmt('DELETE FROM streams WHERE id = ?').run(streamId);
-      const now = Date.now();
-      this.#stmt(
-        `INSERT INTO streams (id, status, createdAt, startedAt, finishedAt, cancelRequestedAt, error)
+        this.#stmt('DELETE FROM streams WHERE id = ?').run(streamId);
+        const now = Date.now();
+        this.#stmt(
+          `INSERT INTO streams (id, status, createdAt, startedAt, finishedAt, cancelRequestedAt, error)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(streamId, 'queued', now, null, null, null, null);
+        ).run(streamId, 'queued', now, null, null, null, null);
 
-      return {
-        id: streamId,
-        status: 'queued',
-        createdAt: now,
-        startedAt: null,
-        finishedAt: null,
-        cancelRequestedAt: null,
-        error: null,
-      };
-    });
-  }
-
-  #transaction<T>(callback: () => T): T {
-    this.#db.exec('BEGIN IMMEDIATE');
-    try {
-      const result = callback();
-      this.#db.exec('COMMIT');
-      return result;
-    } catch (error) {
-      try {
-        this.#db.exec('ROLLBACK');
-      } catch {
-        // Preserve the operation error when SQLite already ended the transaction.
-      }
-      throw error;
-    }
+        return {
+          id: streamId,
+          status: 'queued',
+          createdAt: now,
+          startedAt: null,
+          finishedAt: null,
+          cancelRequestedAt: null,
+          error: null,
+        };
+      },
+      { mode: 'immediate' },
+    );
   }
 }

@@ -1,3 +1,4 @@
+import { transaction } from '@zukhruf/sqlite-transaction';
 import { DatabaseSync } from 'node:sqlite';
 
 import type { GroundingFn } from '../adapter.ts';
@@ -123,26 +124,20 @@ function loadData(db: DatabaseSync, sheet: ParsedSheet): void {
   const insertSQL = `INSERT INTO "${escapeIdentifier(sheet.name)}" (${columns}) VALUES (${placeholders})`;
   const stmt = db.prepare(insertSQL);
 
-  db.exec('BEGIN TRANSACTION');
-
-  try {
-    for (const row of sheet.rows) {
-      const values: SQLiteValue[] = sheet.columns.map((col) => {
-        // Use originalKey to access row data (preserves original case)
-        const rawValue = row[col.originalKey];
-        return convertValue(rawValue, col.type);
-      });
-      stmt.run(...values);
-    }
-    db.exec('COMMIT');
-  } catch (error) {
-    try {
-      db.exec('ROLLBACK');
-    } catch {
-      // Preserve the operation error when SQLite already ended the transaction.
-    }
-    throw error;
-  }
+  transaction(
+    db,
+    () => {
+      for (const row of sheet.rows) {
+        const values: SQLiteValue[] = sheet.columns.map((col) => {
+          // Use originalKey to access row data (preserves original case)
+          const rawValue = row[col.originalKey];
+          return convertValue(rawValue, col.type);
+        });
+        stmt.run(...values);
+      }
+    },
+    { mode: 'deferred' },
+  );
 }
 
 /**

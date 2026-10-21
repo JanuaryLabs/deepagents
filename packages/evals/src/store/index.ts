@@ -1,3 +1,4 @@
+import { transaction } from '@zukhruf/sqlite-transaction';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
@@ -322,22 +323,6 @@ export class RunStore {
       .map((row) => readRow(row, columns, sql));
   }
 
-  #transaction<T>(fn: () => T): T {
-    this.#db.exec('BEGIN TRANSACTION');
-    try {
-      const result = fn();
-      this.#db.exec('COMMIT');
-      return result;
-    } catch (error) {
-      try {
-        this.#db.exec('ROLLBACK');
-      } catch {
-        // Preserve the operation error when SQLite already ended the transaction.
-      }
-      throw error;
-    }
-  }
-
   constructor(pathOrDb?: string | DatabaseSync) {
     if (pathOrDb instanceof DatabaseSync) {
       this.#db = pathOrDb;
@@ -360,9 +345,11 @@ export class RunStore {
     if (columns.length === 0) return;
     if (columns.some((column) => column.name === 'version')) return;
 
-    this.#transaction(() => {
-      this.#db.exec('ALTER TABLE prompts RENAME TO prompts_legacy');
-      this.#db.exec(`
+    transaction(
+      this.#db,
+      () => {
+        this.#db.exec('ALTER TABLE prompts RENAME TO prompts_legacy');
+        this.#db.exec(`
         CREATE TABLE prompts (
           id TEXT PRIMARY KEY,
           name TEXT NOT NULL,
@@ -372,19 +359,21 @@ export class RunStore {
           UNIQUE(name, version)
         )
       `);
-      this.#db.exec(`
+        this.#db.exec(`
         INSERT INTO prompts (id, name, version, content, created_at)
         SELECT id, name, 1, content, created_at
         FROM prompts_legacy
       `);
-      this.#db.exec('DROP TABLE prompts_legacy');
-      this.#db.exec(
-        'CREATE INDEX IF NOT EXISTS idx_prompts_created_at ON prompts(created_at)',
-      );
-      this.#db.exec(
-        'CREATE INDEX IF NOT EXISTS idx_prompts_name_version ON prompts(name, version DESC)',
-      );
-    });
+        this.#db.exec('DROP TABLE prompts_legacy');
+        this.#db.exec(
+          'CREATE INDEX IF NOT EXISTS idx_prompts_created_at ON prompts(created_at)',
+        );
+        this.#db.exec(
+          'CREATE INDEX IF NOT EXISTS idx_prompts_name_version ON prompts(name, version DESC)',
+        );
+      },
+      { mode: 'deferred' },
+    );
   }
 
   #migrateRunsTableToSuiteRequired(): void {
@@ -410,8 +399,10 @@ export class RunStore {
     if (hasNonNullSuite && hasCascadeDelete) return;
 
     this.#statements.clear();
-    this.#transaction(() => {
-      this.#db.exec(`
+    transaction(
+      this.#db,
+      () => {
+        this.#db.exec(`
         CREATE TABLE runs_next (
           id TEXT PRIMARY KEY,
           suite_id TEXT NOT NULL,
@@ -426,25 +417,27 @@ export class RunStore {
         )
       `);
 
-      // Drop legacy orphaned runs that do not belong to a suite.
-      this.#db.exec('DELETE FROM runs WHERE suite_id IS NULL');
+        // Drop legacy orphaned runs that do not belong to a suite.
+        this.#db.exec('DELETE FROM runs WHERE suite_id IS NULL');
 
-      this.#db.exec(`
+        this.#db.exec(`
         INSERT INTO runs_next (id, suite_id, name, model, config, started_at, finished_at, status, summary)
         SELECT r.id, r.suite_id, r.name, r.model, r.config, r.started_at, r.finished_at, r.status, r.summary
         FROM runs r
         JOIN suites s ON s.id = r.suite_id
       `);
 
-      this.#db.exec('DROP TABLE runs');
-      this.#db.exec('ALTER TABLE runs_next RENAME TO runs');
-      this.#db.exec(
-        'CREATE INDEX IF NOT EXISTS idx_runs_suite_id ON runs(suite_id)',
-      );
-      this.#db.exec(
-        'CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at)',
-      );
-    });
+        this.#db.exec('DROP TABLE runs');
+        this.#db.exec('ALTER TABLE runs_next RENAME TO runs');
+        this.#db.exec(
+          'CREATE INDEX IF NOT EXISTS idx_runs_suite_id ON runs(suite_id)',
+        );
+        this.#db.exec(
+          'CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at)',
+        );
+      },
+      { mode: 'deferred' },
+    );
     this.#statements.clear();
   }
 
@@ -506,36 +499,44 @@ export class RunStore {
   }
 
   saveCases(cases: CaseData[]): void {
-    this.#transaction(() => {
-      const stmt = this.#stmt(
-        'INSERT INTO cases (id, run_id, idx, input, output, expected, latency_ms, tokens_in, tokens_out, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      );
-      for (const c of cases) {
-        stmt.run(
-          c.id,
-          c.run_id,
-          c.idx,
-          JSON.stringify(c.input),
-          c.output,
-          c.expected != null ? JSON.stringify(c.expected) : null,
-          c.latency_ms,
-          c.tokens_in,
-          c.tokens_out,
-          c.error ?? null,
+    transaction(
+      this.#db,
+      () => {
+        const stmt = this.#stmt(
+          'INSERT INTO cases (id, run_id, idx, input, output, expected, latency_ms, tokens_in, tokens_out, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         );
-      }
-    });
+        for (const c of cases) {
+          stmt.run(
+            c.id,
+            c.run_id,
+            c.idx,
+            JSON.stringify(c.input),
+            c.output,
+            c.expected != null ? JSON.stringify(c.expected) : null,
+            c.latency_ms,
+            c.tokens_in,
+            c.tokens_out,
+            c.error ?? null,
+          );
+        }
+      },
+      { mode: 'deferred' },
+    );
   }
 
   saveScores(scores: ScoreData[]): void {
-    this.#transaction(() => {
-      const stmt = this.#stmt(
-        'INSERT INTO scores (id, case_id, scorer_name, score, reason) VALUES (?, ?, ?, ?, ?)',
-      );
-      for (const s of scores) {
-        stmt.run(s.id, s.case_id, s.scorer_name, s.score, s.reason ?? null);
-      }
-    });
+    transaction(
+      this.#db,
+      () => {
+        const stmt = this.#stmt(
+          'INSERT INTO scores (id, case_id, scorer_name, score, reason) VALUES (?, ?, ?, ?, ?)',
+        );
+        for (const s of scores) {
+          stmt.run(s.id, s.case_id, s.scorer_name, s.score, s.reason ?? null);
+        }
+      },
+      { mode: 'deferred' },
+    );
   }
 
   getRun(runId: string): RunRow | undefined {
@@ -728,12 +729,16 @@ export class RunStore {
   }
 
   resetRun(id: string): void {
-    this.#transaction(() => {
-      this.#stmt('DELETE FROM cases WHERE run_id = ?').run(id);
-      this.#stmt(
-        'UPDATE runs SET status = ?, started_at = ?, finished_at = NULL, summary = NULL WHERE id = ?',
-      ).run('running', Date.now(), id);
-    });
+    transaction(
+      this.#db,
+      () => {
+        this.#stmt('DELETE FROM cases WHERE run_id = ?').run(id);
+        this.#stmt(
+          'UPDATE runs SET status = ?, started_at = ?, finished_at = NULL, summary = NULL WHERE id = ?',
+        ).run('running', Date.now(), id);
+      },
+      { mode: 'deferred' },
+    );
   }
 
   deleteRun(id: string): void {

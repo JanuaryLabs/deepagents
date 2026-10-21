@@ -1,3 +1,4 @@
+import { transaction } from '@zukhruf/sqlite-transaction';
 import dedent from 'dedent';
 import { template } from 'lodash-es';
 
@@ -20,6 +21,7 @@ interface DB {
     get: (...args: any[]) => any;
   };
   exec: (sql: string) => void;
+  isTransaction: boolean;
 }
 
 export class SQLiteStore implements Store {
@@ -28,21 +30,6 @@ export class SQLiteStore implements Store {
     this.#db = db;
     const compiled = template(sql);
     this.#db.exec(compiled({ DIMENSION: dimension }));
-  }
-
-  #transaction(callback: () => void) {
-    this.#db.exec('BEGIN IMMEDIATE');
-    try {
-      callback();
-      this.#db.exec('COMMIT');
-    } catch (error) {
-      try {
-        this.#db.exec('ROLLBACK');
-      } catch {
-        // Preserve the operation error when SQLite already ended the transaction.
-      }
-      throw error;
-    }
   }
 
   #searchByDocument(inputs: {
@@ -217,19 +204,27 @@ export class SQLiteStore implements Store {
 
     const insert = this.insertDoc({ sourceId, documentId: corpus.id });
     // Delete previous rows once before inserting
-    this.#transaction(() => {
-      this.delete({ sourceId, documentId: corpus.id });
-    });
+    transaction(
+      this.#db,
+      () => {
+        this.delete({ sourceId, documentId: corpus.id });
+      },
+      { mode: 'immediate' },
+    );
 
     const batchSize = 32;
     let batch: Chunk[] = [];
     const flush = () => {
       if (!batch.length) return;
-      this.#transaction(() => {
-        for (let i = 0; i < batch.length; i++) {
-          insert(batch[i]);
-        }
-      });
+      transaction(
+        this.#db,
+        () => {
+          for (let i = 0; i < batch.length; i++) {
+            insert(batch[i]);
+          }
+        },
+        { mode: 'immediate' },
+      );
       batch = [];
     };
 

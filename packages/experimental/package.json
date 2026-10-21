@@ -118,6 +118,7 @@
     "@sdk-it/hono": "^0.46.7",
     "@zukhruf/async": "^0.3.15",
     "@zukhruf/mutex": "^0.3.14",
+    "@zukhruf/sqlite-transaction": "^0.3.33",
     "ai": "^7.0.147",
     "atomically": "^2.1.1",
     "cron-parser": "5.6.2",

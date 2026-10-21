@@ -1,3 +1,4 @@
+import { transaction } from '@zukhruf/sqlite-transaction';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 
@@ -90,67 +91,79 @@ export class SqliteMailboxStore extends MailboxStore implements Disposable {
     recipient: ConversationId,
     turnId: string,
   ): Promise<void> {
-    this.#transaction(() => {
-      this.#database
-        .prepare(
-          `INSERT INTO zukhruf_mailbox_activity (
+    transaction(
+      this.#database,
+      () => {
+        this.#database
+          .prepare(
+            `INSERT INTO zukhruf_mailbox_activity (
              recipient_chat_id,
              recipient_user_id,
              turn_id
            ) VALUES (?, ?, ?)
            ON CONFLICT (recipient_chat_id, recipient_user_id)
            DO UPDATE SET turn_id = excluded.turn_id`,
-        )
-        .run(recipient.chatId, recipient.userId, turnId);
-    });
+          )
+          .run(recipient.chatId, recipient.userId, turnId);
+      },
+      { mode: 'immediate' },
+    );
   }
 
   override async enqueue(
     communication: InterAgentCommunication,
   ): Promise<MailboxEnqueueResult> {
-    return this.#transaction(() => {
-      const consumedTerminal =
-        communication.type === InterAgentCommunicationTypes.FinalAnswer &&
-        this.#hasConsumedTerminal(communication.id);
-      if (!consumedTerminal) {
-        this.#database
-          .prepare(
-            `INSERT OR IGNORE INTO zukhruf_mailbox_items (
+    return transaction(
+      this.#database,
+      () => {
+        const consumedTerminal =
+          communication.type === InterAgentCommunicationTypes.FinalAnswer &&
+          this.#hasConsumedTerminal(communication.id);
+        if (!consumedTerminal) {
+          this.#database
+            .prepare(
+              `INSERT OR IGNORE INTO zukhruf_mailbox_items (
                recipient_chat_id,
                recipient_user_id,
                communication
              ) VALUES (?, ?, ?)`,
-          )
-          .run(
-            communication.recipient.chatId,
-            communication.recipient.userId,
-            JSON.stringify(communication),
-          );
-      }
-      return {
-        recipientActive: this.#isTurnActive(communication.recipient),
-      };
-    });
+            )
+            .run(
+              communication.recipient.chatId,
+              communication.recipient.userId,
+              JSON.stringify(communication),
+            );
+        }
+        return {
+          recipientActive: this.#isTurnActive(communication.recipient),
+        };
+      },
+      { mode: 'immediate' },
+    );
   }
 
   override async endTurn(
     recipient: ConversationId,
     turnId: string,
   ): Promise<MailboxEndTurnResult> {
-    return this.#transaction(() => {
-      const result = this.#database
-        .prepare(
-          `DELETE FROM zukhruf_mailbox_activity
+    return transaction(
+      this.#database,
+      () => {
+        const result = this.#database
+          .prepare(
+            `DELETE FROM zukhruf_mailbox_activity
             WHERE recipient_chat_id = ?
               AND recipient_user_id = ?
               AND turn_id = ?`,
-        )
-        .run(recipient.chatId, recipient.userId, turnId);
-      return {
-        hasPending: this.#hasPending(recipient),
-        turnEnded: result.changes > 0,
-      };
-    });
+          )
+          .run(recipient.chatId, recipient.userId, turnId);
+        return {
+          hasPending: this.#hasPending(recipient),
+          turnEnded: result.changes > 0,
+        };
+      },
+      { mode: 'immediate' },
+    );
   }
 
   override async hasPending(recipient: ConversationId): Promise<boolean> {
@@ -211,64 +224,54 @@ export class SqliteMailboxStore extends MailboxStore implements Disposable {
     recipient: ConversationId,
     leadingQueueOnly: boolean,
   ): InterAgentCommunication[] {
-    return this.#transaction(() => {
-      const items = mailboxItemRowsSchema.parse(
-        this.#database
-          .prepare(
-            `SELECT sequence, communication
+    return transaction(
+      this.#database,
+      () => {
+        const items = mailboxItemRowsSchema.parse(
+          this.#database
+            .prepare(
+              `SELECT sequence, communication
                FROM zukhruf_mailbox_items
               WHERE recipient_chat_id = ?
                 AND recipient_user_id = ?
               ORDER BY sequence`,
-          )
-          .all(recipient.chatId, recipient.userId),
-      );
-      const firstTrigger = leadingQueueOnly
-        ? items.findIndex(({ communication }) => communication.triggerTurn)
-        : -1;
-      const consumed =
-        firstTrigger === -1 ? items : items.slice(0, firstTrigger);
-      const lastConsumed = consumed.at(-1);
-      if (lastConsumed) {
-        // Only terminal IDs get durable tombstones. Ordinary random-ID mail
-        // does not need permanent dedup state after FIFO consumption.
-        const tombstone = this.#database.prepare(
-          `INSERT OR IGNORE
+            )
+            .all(recipient.chatId, recipient.userId),
+        );
+        const firstTrigger = leadingQueueOnly
+          ? items.findIndex(({ communication }) => communication.triggerTurn)
+          : -1;
+        const consumed =
+          firstTrigger === -1 ? items : items.slice(0, firstTrigger);
+        const lastConsumed = consumed.at(-1);
+        if (lastConsumed) {
+          // Only terminal IDs get durable tombstones. Ordinary random-ID mail
+          // does not need permanent dedup state after FIFO consumption.
+          const tombstone = this.#database.prepare(
+            `INSERT OR IGNORE
              INTO zukhruf_mailbox_consumed_terminal_ids (communication_id)
            VALUES (?)`,
-        );
-        for (const { communication } of consumed) {
-          if (communication.type === InterAgentCommunicationTypes.FinalAnswer) {
-            tombstone.run(communication.id);
+          );
+          for (const { communication } of consumed) {
+            if (
+              communication.type === InterAgentCommunicationTypes.FinalAnswer
+            ) {
+              tombstone.run(communication.id);
+            }
           }
-        }
-        this.#database
-          .prepare(
-            `DELETE FROM zukhruf_mailbox_items
+          this.#database
+            .prepare(
+              `DELETE FROM zukhruf_mailbox_items
             WHERE recipient_chat_id = ?
               AND recipient_user_id = ?
               AND sequence <= ?`,
-          )
-          .run(recipient.chatId, recipient.userId, lastConsumed.sequence);
-      }
-      return consumed.map(({ communication }) => communication);
-    });
-  }
-
-  #transaction<T>(operation: () => T): T {
-    this.#database.exec('BEGIN IMMEDIATE');
-    try {
-      const result = operation();
-      this.#database.exec('COMMIT');
-      return result;
-    } catch (error) {
-      try {
-        this.#database.exec('ROLLBACK');
-      } catch {
-        // Preserve the operation error when SQLite already ended the transaction.
-      }
-      throw error;
-    }
+            )
+            .run(recipient.chatId, recipient.userId, lastConsumed.sequence);
+        }
+        return consumed.map(({ communication }) => communication);
+      },
+      { mode: 'immediate' },
+    );
   }
 
   close(): void {

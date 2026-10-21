@@ -1,3 +1,4 @@
+import { transaction } from '@zukhruf/sqlite-transaction';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { z } from 'zod';
 
@@ -200,97 +201,77 @@ export class SqliteContextStore extends ContextStore {
     this.#db.exec(STORE_DDL);
   }
 
-  /**
-   * Execute a function within a transaction.
-   * Automatically commits on success or rolls back on error.
-   */
-  #useTransaction<T>(
-    fn: () => T,
-    mode: 'deferred' | 'immediate' = 'deferred',
-  ): T {
-    this.#db.exec(
-      mode === 'immediate' ? 'BEGIN IMMEDIATE' : 'BEGIN TRANSACTION',
-    );
-    try {
-      const result = fn();
-      this.#db.exec('COMMIT');
-      return result;
-    } catch (error) {
-      // SQLite can end a transaction itself after fatal I/O errors such as
-      // SQLITE_FULL. A follow-up ROLLBACK then fails with "no transaction is
-      // active"; never let that cleanup failure mask the original error.
-      try {
-        this.#db.exec('ROLLBACK');
-      } catch {
-        // Best effort: preserve the operation error that triggered cleanup.
-      }
-      throw error;
-    }
-  }
-
   // ==========================================================================
   // Chat Operations
   // ==========================================================================
 
   async createChat(chat: ChatData): Promise<StoredChatData> {
-    return this.#useTransaction(() => {
-      // Create chat (createdAt and updatedAt are auto-set by SQLite DEFAULT)
-      const created = storedChat.parse(
-        this.#db
-          .prepare(
-            `INSERT INTO chats (id, userId, title, metadata)
+    return transaction(
+      this.#db,
+      () => {
+        // Create chat (createdAt and updatedAt are auto-set by SQLite DEFAULT)
+        const created = storedChat.parse(
+          this.#db
+            .prepare(
+              `INSERT INTO chats (id, userId, title, metadata)
            VALUES (?, ?, ?, ?)
            RETURNING *`,
-          )
-          .get(
-            chat.id,
-            chat.userId,
-            chat.title ?? null,
-            chat.metadata ? JSON.stringify(chat.metadata) : null,
-          ),
-      );
+            )
+            .get(
+              chat.id,
+              chat.userId,
+              chat.title ?? null,
+              chat.metadata ? JSON.stringify(chat.metadata) : null,
+            ),
+        );
 
-      // Create "main" branch
-      this.#db
-        .prepare(
-          `INSERT INTO branches (id, chatId, name, headMessageId, isActive, createdAt)
+        // Create "main" branch
+        this.#db
+          .prepare(
+            `INSERT INTO branches (id, chatId, name, headMessageId, isActive, createdAt)
            VALUES (?, ?, 'main', NULL, 1, ?)`,
-        )
-        .run(crypto.randomUUID(), chat.id, Date.now());
+          )
+          .run(crypto.randomUUID(), chat.id, Date.now());
 
-      return created;
-    });
+        return created;
+      },
+      { mode: 'deferred' },
+    );
   }
 
   async upsertChat(chat: ChatData): Promise<StoredChatData> {
-    return this.#useTransaction(() => {
-      // Insert if not exists, no-op update if exists (to trigger RETURNING)
-      const upserted = storedChat.parse(
-        this.#db
-          .prepare(
-            `INSERT INTO chats (id, userId, title, metadata)
+    return transaction(
+      this.#db,
+      () => {
+        // Insert if not exists, no-op update if exists (to trigger RETURNING)
+        const upserted = storedChat.parse(
+          this.#db
+            .prepare(
+              `INSERT INTO chats (id, userId, title, metadata)
            VALUES (?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET id = excluded.id
            RETURNING *`,
-          )
-          .get(
-            chat.id,
-            chat.userId,
-            chat.title ?? null,
-            chat.metadata ? JSON.stringify(chat.metadata) : null,
-          ),
-      );
+            )
+            .get(
+              chat.id,
+              chat.userId,
+              chat.title ?? null,
+              chat.metadata ? JSON.stringify(chat.metadata) : null,
+            ),
+        );
 
-      // Ensure "main" branch exists (INSERT OR IGNORE uses UNIQUE(chatId, name) constraint)
-      this.#db
-        .prepare(
-          `INSERT OR IGNORE INTO branches (id, chatId, name, headMessageId, isActive, createdAt)
+        // Ensure "main" branch exists (INSERT OR IGNORE uses UNIQUE(chatId, name) constraint)
+        this.#db
+          .prepare(
+            `INSERT OR IGNORE INTO branches (id, chatId, name, headMessageId, isActive, createdAt)
            VALUES (?, ?, 'main', NULL, 1, ?)`,
-        )
-        .run(crypto.randomUUID(), chat.id, Date.now());
+          )
+          .run(crypto.randomUUID(), chat.id, Date.now());
 
-      return upserted;
-    });
+        return upserted;
+      },
+      { mode: 'deferred' },
+    );
   }
 
   #getChat(chatId: string): StoredChatData | undefined {
@@ -307,36 +288,42 @@ export class SqliteContextStore extends ContextStore {
     chatId: string,
     update: ChatUpdater,
   ): Promise<StoredChatData> {
-    return this.#useTransaction(() => {
-      const current = this.#getChat(chatId);
-      if (!current) {
-        throw new Error(`updateChat: chat "${chatId}" not found`);
-      }
+    return transaction(
+      this.#db,
+      () => {
+        const current = this.#getChat(chatId);
+        if (!current) {
+          throw new Error(`updateChat: chat "${chatId}" not found`);
+        }
 
-      const updates = update(current);
-      if (updates === undefined) return current;
+        const updates = update(current);
+        if (updates === undefined) return current;
 
-      const setClauses: string[] = ["updatedAt = strftime('%s', 'now') * 1000"];
-      const params: SQLInputValue[] = [];
+        const setClauses: string[] = [
+          "updatedAt = strftime('%s', 'now') * 1000",
+        ];
+        const params: SQLInputValue[] = [];
 
-      if (updates.title !== undefined) {
-        setClauses.push('title = ?');
-        params.push(updates.title);
-      }
-      if (updates.metadata !== undefined) {
-        setClauses.push('metadata = ?');
-        params.push(JSON.stringify(updates.metadata));
-      }
+        if (updates.title !== undefined) {
+          setClauses.push('title = ?');
+          params.push(updates.title);
+        }
+        if (updates.metadata !== undefined) {
+          setClauses.push('metadata = ?');
+          params.push(JSON.stringify(updates.metadata));
+        }
 
-      params.push(chatId);
-      return storedChat.parse(
-        this.#db
-          .prepare(
-            `UPDATE chats SET ${setClauses.join(', ')} WHERE id = ? RETURNING *`,
-          )
-          .get(...params),
-      );
-    }, 'immediate');
+        params.push(chatId);
+        return storedChat.parse(
+          this.#db
+            .prepare(
+              `UPDATE chats SET ${setClauses.join(', ')} WHERE id = ? RETURNING *`,
+            )
+            .get(...params),
+        );
+      },
+      { mode: 'immediate' },
+    );
   }
 
   async listChats(options?: ListChatsOptions): Promise<ChatInfo[]> {
@@ -403,39 +390,43 @@ export class SqliteContextStore extends ContextStore {
     chatId: string,
     options?: DeleteChatOptions,
   ): Promise<boolean> {
-    return this.#useTransaction(() => {
-      // Get message IDs before deletion for FTS cleanup
-      const messageIds = z
-        .array(idRow)
-        .parse(
+    return transaction(
+      this.#db,
+      () => {
+        // Get message IDs before deletion for FTS cleanup
+        const messageIds = z
+          .array(idRow)
+          .parse(
+            this.#db
+              .prepare('SELECT id FROM messages WHERE chatId = ?')
+              .all(chatId),
+          );
+
+        // Build the delete query with optional userId check
+        let sql = 'DELETE FROM chats WHERE id = ?';
+        const params: SQLInputValue[] = [chatId];
+
+        if (options?.userId !== undefined) {
+          sql += ' AND userId = ?';
+          params.push(options.userId);
+        }
+
+        const result = this.#db.prepare(sql).run(...params);
+
+        // Clean up FTS entries (CASCADE handles messages, branches, checkpoints)
+        if (result.changes > 0 && messageIds.length > 0) {
+          const placeholders = messageIds.map(() => '?').join(', ');
           this.#db
-            .prepare('SELECT id FROM messages WHERE chatId = ?')
-            .all(chatId),
-        );
+            .prepare(
+              `DELETE FROM messages_fts WHERE messageId IN (${placeholders})`,
+            )
+            .run(...messageIds.map((m) => m.id));
+        }
 
-      // Build the delete query with optional userId check
-      let sql = 'DELETE FROM chats WHERE id = ?';
-      const params: SQLInputValue[] = [chatId];
-
-      if (options?.userId !== undefined) {
-        sql += ' AND userId = ?';
-        params.push(options.userId);
-      }
-
-      const result = this.#db.prepare(sql).run(...params);
-
-      // Clean up FTS entries (CASCADE handles messages, branches, checkpoints)
-      if (result.changes > 0 && messageIds.length > 0) {
-        const placeholders = messageIds.map(() => '?').join(', ');
-        this.#db
-          .prepare(
-            `DELETE FROM messages_fts WHERE messageId IN (${placeholders})`,
-          )
-          .run(...messageIds.map((m) => m.id));
-      }
-
-      return result.changes > 0;
-    });
+        return result.changes > 0;
+      },
+      { mode: 'deferred' },
+    );
   }
 
   // ==========================================================================
@@ -487,11 +478,15 @@ export class SqliteContextStore extends ContextStore {
   override async addMessages(messages: MessageData[]): Promise<void> {
     if (messages.length === 0) return;
 
-    this.#useTransaction(() => {
-      for (const message of messages) {
-        this.#insertMessage(message);
-      }
-    });
+    transaction(
+      this.#db,
+      () => {
+        for (const message of messages) {
+          this.#insertMessage(message);
+        }
+      },
+      { mode: 'deferred' },
+    );
   }
 
   async setMessageParent(

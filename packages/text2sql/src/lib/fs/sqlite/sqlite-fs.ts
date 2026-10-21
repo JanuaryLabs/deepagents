@@ -1,3 +1,4 @@
+import { transaction } from '@zukhruf/sqlite-transaction';
 import type {
   BufferEncoding,
   CpOptions,
@@ -199,22 +200,6 @@ export class SqliteFs implements IFileSystem {
     return p;
   }
 
-  #useTransaction<T>(fn: () => T): T {
-    this.#db.exec('BEGIN TRANSACTION');
-    try {
-      const result = fn();
-      this.#db.exec('COMMIT');
-      return result;
-    } catch (error) {
-      try {
-        this.#db.exec('ROLLBACK');
-      } catch {
-        // Preserve the operation error when SQLite already ended the transaction.
-      }
-      throw error;
-    }
-  }
-
   #normalizePath(p: string): string {
     return path.posix.resolve('/', p);
   }
@@ -392,20 +377,24 @@ export class SqliteFs implements IFileSystem {
     const encoding = typeof options === 'string' ? options : options?.encoding;
     const data = this.#toUint8Array(content, encoding);
 
-    this.#useTransaction(() => {
-      this.#ensureParentExists(prefixed);
+    transaction(
+      this.#db,
+      () => {
+        this.#ensureParentExists(prefixed);
 
-      this.#stmt(
-        `INSERT INTO fs_entries (path, type, mode, size, mtime)
+        this.#stmt(
+          `INSERT INTO fs_entries (path, type, mode, size, mtime)
          VALUES (?, 'file', 420, ?, ?)
          ON CONFLICT(path) DO UPDATE SET
            type = 'file',
            size = excluded.size,
            mtime = excluded.mtime`,
-      ).run(prefixed, data.length, Date.now());
+        ).run(prefixed, data.length, Date.now());
 
-      this.#writeChunks(prefixed, data);
-    });
+        this.#writeChunks(prefixed, data);
+      },
+      { mode: 'deferred' },
+    );
   }
 
   async appendFile(
@@ -418,36 +407,40 @@ export class SqliteFs implements IFileSystem {
     const encoding = typeof options === 'string' ? options : options?.encoding;
     const newData = this.#toUint8Array(content, encoding);
 
-    this.#useTransaction(() => {
-      this.#ensureParentExists(prefixed);
+    transaction(
+      this.#db,
+      () => {
+        this.#ensureParentExists(prefixed);
 
-      const entry = typeRow
-        .optional()
-        .parse(
-          this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(
-            prefixed,
-          ),
-        );
+        const entry = typeRow
+          .optional()
+          .parse(
+            this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(
+              prefixed,
+            ),
+          );
 
-      if (entry && entry.type !== 'file') {
-        throw new Error(`appendFile: not a file: ${filePath}`);
-      }
+        if (entry && entry.type !== 'file') {
+          throw new Error(`appendFile: not a file: ${filePath}`);
+        }
 
-      const existing = entry ? this.#readChunks(prefixed) : new Uint8Array(0);
-      const combined = new Uint8Array(existing.length + newData.length);
-      combined.set(existing, 0);
-      combined.set(newData, existing.length);
+        const existing = entry ? this.#readChunks(prefixed) : new Uint8Array(0);
+        const combined = new Uint8Array(existing.length + newData.length);
+        combined.set(existing, 0);
+        combined.set(newData, existing.length);
 
-      this.#stmt(
-        `INSERT INTO fs_entries (path, type, mode, size, mtime)
+        this.#stmt(
+          `INSERT INTO fs_entries (path, type, mode, size, mtime)
          VALUES (?, 'file', 420, ?, ?)
          ON CONFLICT(path) DO UPDATE SET
            size = excluded.size,
            mtime = excluded.mtime`,
-      ).run(prefixed, combined.length, Date.now());
+        ).run(prefixed, combined.length, Date.now());
 
-      this.#writeChunks(prefixed, combined);
-    });
+        this.#writeChunks(prefixed, combined);
+      },
+      { mode: 'deferred' },
+    );
   }
 
   async exists(filePath: string): Promise<boolean> {
@@ -525,56 +518,60 @@ export class SqliteFs implements IFileSystem {
       throw new Error(`EEXIST: file already exists: ${dirPath}`);
     }
 
-    this.#useTransaction(() => {
-      if (options?.recursive) {
-        const rootPath = this.#root || '/';
-        const relativePath = path.posix.relative(rootPath, prefixed);
-        const segments = relativePath.split('/').filter(Boolean);
-        let currentPath = rootPath;
+    transaction(
+      this.#db,
+      () => {
+        if (options?.recursive) {
+          const rootPath = this.#root || '/';
+          const relativePath = path.posix.relative(rootPath, prefixed);
+          const segments = relativePath.split('/').filter(Boolean);
+          let currentPath = rootPath;
 
-        for (const segment of segments) {
-          currentPath = path.posix.join(currentPath, segment);
-          const exists = typeRow
+          for (const segment of segments) {
+            currentPath = path.posix.join(currentPath, segment);
+            const exists = typeRow
+              .optional()
+              .parse(
+                this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(
+                  currentPath,
+                ),
+              );
+
+            if (!exists) {
+              this.#stmt(
+                `INSERT INTO fs_entries (path, type, mode, size, mtime)
+               VALUES (?, 'directory', 493, 0, ?)`,
+              ).run(currentPath, Date.now());
+            } else if (exists.type !== 'directory') {
+              throw new Error(`mkdir: not a directory: ${currentPath}`);
+            }
+          }
+        } else {
+          // Non-recursive: parent must exist
+          const parent = this.#dirname(prefixed);
+          const parentEntry = typeRow
             .optional()
             .parse(
               this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(
-                currentPath,
+                parent,
               ),
             );
 
-          if (!exists) {
-            this.#stmt(
-              `INSERT INTO fs_entries (path, type, mode, size, mtime)
-               VALUES (?, 'directory', 493, 0, ?)`,
-            ).run(currentPath, Date.now());
-          } else if (exists.type !== 'directory') {
-            throw new Error(`mkdir: not a directory: ${currentPath}`);
+          if (!parentEntry) {
+            throw new Error(`mkdir: parent does not exist: ${parent}`);
           }
-        }
-      } else {
-        // Non-recursive: parent must exist
-        const parent = this.#dirname(prefixed);
-        const parentEntry = typeRow
-          .optional()
-          .parse(
-            this.#stmt('SELECT type FROM fs_entries WHERE path = ?').get(
-              parent,
-            ),
-          );
+          if (parentEntry.type !== 'directory') {
+            throw new Error(`mkdir: parent is not a directory: ${parent}`);
+          }
 
-        if (!parentEntry) {
-          throw new Error(`mkdir: parent does not exist: ${parent}`);
-        }
-        if (parentEntry.type !== 'directory') {
-          throw new Error(`mkdir: parent is not a directory: ${parent}`);
-        }
-
-        this.#stmt(
-          `INSERT INTO fs_entries (path, type, mode, size, mtime)
+          this.#stmt(
+            `INSERT INTO fs_entries (path, type, mode, size, mtime)
            VALUES (?, 'directory', 493, 0, ?)`,
-        ).run(prefixed, Date.now());
-      }
-    });
+          ).run(prefixed, Date.now());
+        }
+      },
+      { mode: 'deferred' },
+    );
   }
 
   async readdir(dirPath: string): Promise<string[]> {
@@ -662,24 +659,28 @@ export class SqliteFs implements IFileSystem {
       throw new Error(`ENOENT: no such file or directory: ${filePath}`);
     }
 
-    this.#useTransaction(() => {
-      if (entry.type === 'directory') {
-        const children = this.#stmt(
-          `SELECT 1 FROM fs_entries WHERE path LIKE ? || '/%' LIMIT 1`,
-        ).get(prefixed);
+    transaction(
+      this.#db,
+      () => {
+        if (entry.type === 'directory') {
+          const children = this.#stmt(
+            `SELECT 1 FROM fs_entries WHERE path LIKE ? || '/%' LIMIT 1`,
+          ).get(prefixed);
 
-        if (children && !options?.recursive) {
-          throw new Error(`ENOTEMPTY: directory not empty: ${filePath}`);
+          if (children && !options?.recursive) {
+            throw new Error(`ENOTEMPTY: directory not empty: ${filePath}`);
+          }
+
+          // Chunks cascade via FK
+          this.#stmt(
+            `DELETE FROM fs_entries WHERE path = ? OR path LIKE ? || '/%'`,
+          ).run(prefixed, prefixed);
+        } else {
+          this.#stmt('DELETE FROM fs_entries WHERE path = ?').run(prefixed);
         }
-
-        // Chunks cascade via FK
-        this.#stmt(
-          `DELETE FROM fs_entries WHERE path = ? OR path LIKE ? || '/%'`,
-        ).run(prefixed, prefixed);
-      } else {
-        this.#stmt('DELETE FROM fs_entries WHERE path = ?').run(prefixed);
-      }
-    });
+      },
+      { mode: 'deferred' },
+    );
   }
 
   async cp(src: string, dest: string, options?: CpOptions): Promise<void> {
@@ -702,70 +703,76 @@ export class SqliteFs implements IFileSystem {
       throw new Error(`cp: -r not specified; omitting directory: ${src}`);
     }
 
-    this.#useTransaction(() => {
-      this.#ensureParentExists(destPrefixed);
+    transaction(
+      this.#db,
+      () => {
+        this.#ensureParentExists(destPrefixed);
 
-      if (srcEntry.type === 'directory') {
-        const allEntries = z
-          .array(entryRow)
-          .parse(
+        if (srcEntry.type === 'directory') {
+          const allEntries = z
+            .array(entryRow)
+            .parse(
+              this.#stmt(
+                `SELECT * FROM fs_entries WHERE path = ? OR path LIKE ? || '/%'`,
+              ).all(srcPrefixed, srcPrefixed),
+            );
+
+          for (const entry of allEntries) {
+            const relativePath = path.posix.relative(srcPrefixed, entry.path);
+            const newPath = path.posix.join(destPrefixed, relativePath);
+
             this.#stmt(
-              `SELECT * FROM fs_entries WHERE path = ? OR path LIKE ? || '/%'`,
-            ).all(srcPrefixed, srcPrefixed),
-          );
+              `INSERT OR REPLACE INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            ).run(
+              newPath,
+              entry.type,
+              entry.mode,
+              entry.size,
+              Date.now(),
+              entry.symlinkTarget,
+            );
 
-        for (const entry of allEntries) {
-          const relativePath = path.posix.relative(srcPrefixed, entry.path);
-          const newPath = path.posix.join(destPrefixed, relativePath);
+            if (entry.type === 'file') {
+              const chunks = this.#chunks(entry.path);
 
+              for (const chunk of chunks) {
+                this.#stmt(
+                  'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (?, ?, ?)',
+                ).run(newPath, chunk.chunkIndex, chunk.data);
+              }
+            }
+          }
+        } else {
           this.#stmt(
             `INSERT OR REPLACE INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
-             VALUES (?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?)`,
           ).run(
-            newPath,
-            entry.type,
-            entry.mode,
-            entry.size,
+            destPrefixed,
+            srcEntry.type,
+            srcEntry.mode,
+            srcEntry.size,
             Date.now(),
-            entry.symlinkTarget,
+            srcEntry.symlinkTarget,
           );
 
-          if (entry.type === 'file') {
-            const chunks = this.#chunks(entry.path);
+          if (srcEntry.type === 'file') {
+            const chunks = this.#chunks(srcPrefixed);
+
+            this.#stmt('DELETE FROM fs_chunks WHERE path = ?').run(
+              destPrefixed,
+            );
 
             for (const chunk of chunks) {
               this.#stmt(
                 'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (?, ?, ?)',
-              ).run(newPath, chunk.chunkIndex, chunk.data);
+              ).run(destPrefixed, chunk.chunkIndex, chunk.data);
             }
           }
         }
-      } else {
-        this.#stmt(
-          `INSERT OR REPLACE INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-        ).run(
-          destPrefixed,
-          srcEntry.type,
-          srcEntry.mode,
-          srcEntry.size,
-          Date.now(),
-          srcEntry.symlinkTarget,
-        );
-
-        if (srcEntry.type === 'file') {
-          const chunks = this.#chunks(srcPrefixed);
-
-          this.#stmt('DELETE FROM fs_chunks WHERE path = ?').run(destPrefixed);
-
-          for (const chunk of chunks) {
-            this.#stmt(
-              'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (?, ?, ?)',
-            ).run(destPrefixed, chunk.chunkIndex, chunk.data);
-          }
-        }
-      }
-    });
+      },
+      { mode: 'deferred' },
+    );
   }
 
   async mv(src: string, dest: string): Promise<void> {
@@ -784,76 +791,80 @@ export class SqliteFs implements IFileSystem {
       throw new Error(`ENOENT: no such file or directory: ${src}`);
     }
 
-    this.#useTransaction(() => {
-      this.#ensureParentExists(destPrefixed);
+    transaction(
+      this.#db,
+      () => {
+        this.#ensureParentExists(destPrefixed);
 
-      if (srcEntry.type === 'directory') {
-        // Reverse order: children before parents for delete
-        const allEntries = z
-          .array(entryRow)
-          .parse(
+        if (srcEntry.type === 'directory') {
+          // Reverse order: children before parents for delete
+          const allEntries = z
+            .array(entryRow)
+            .parse(
+              this.#stmt(
+                `SELECT * FROM fs_entries WHERE path = ? OR path LIKE ? || '/%' ORDER BY path DESC`,
+              ).all(srcPrefixed, srcPrefixed),
+            );
+
+          for (const entry of [...allEntries].reverse()) {
+            const relativePath = path.posix.relative(srcPrefixed, entry.path);
+            const newPath = path.posix.join(destPrefixed, relativePath);
+
             this.#stmt(
-              `SELECT * FROM fs_entries WHERE path = ? OR path LIKE ? || '/%' ORDER BY path DESC`,
-            ).all(srcPrefixed, srcPrefixed),
-          );
+              `INSERT INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            ).run(
+              newPath,
+              entry.type,
+              entry.mode,
+              entry.size,
+              Date.now(),
+              entry.symlinkTarget,
+            );
 
-        for (const entry of [...allEntries].reverse()) {
-          const relativePath = path.posix.relative(srcPrefixed, entry.path);
-          const newPath = path.posix.join(destPrefixed, relativePath);
+            if (entry.type === 'file') {
+              const chunks = this.#chunks(entry.path);
 
+              for (const chunk of chunks) {
+                this.#stmt(
+                  'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (?, ?, ?)',
+                ).run(newPath, chunk.chunkIndex, chunk.data);
+              }
+            }
+          }
+
+          // Chunks cascade via FK
+          this.#stmt(
+            `DELETE FROM fs_entries WHERE path = ? OR path LIKE ? || '/%'`,
+          ).run(srcPrefixed, srcPrefixed);
+        } else {
           this.#stmt(
             `INSERT INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
-             VALUES (?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?)`,
           ).run(
-            newPath,
-            entry.type,
-            entry.mode,
-            entry.size,
+            destPrefixed,
+            srcEntry.type,
+            srcEntry.mode,
+            srcEntry.size,
             Date.now(),
-            entry.symlinkTarget,
+            srcEntry.symlinkTarget,
           );
 
-          if (entry.type === 'file') {
-            const chunks = this.#chunks(entry.path);
+          if (srcEntry.type === 'file') {
+            const chunks = this.#chunks(srcPrefixed);
 
             for (const chunk of chunks) {
               this.#stmt(
                 'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (?, ?, ?)',
-              ).run(newPath, chunk.chunkIndex, chunk.data);
+              ).run(destPrefixed, chunk.chunkIndex, chunk.data);
             }
           }
+
+          this.#stmt('DELETE FROM fs_entries WHERE path = ?').run(srcPrefixed);
         }
-
-        // Chunks cascade via FK
-        this.#stmt(
-          `DELETE FROM fs_entries WHERE path = ? OR path LIKE ? || '/%'`,
-        ).run(srcPrefixed, srcPrefixed);
-      } else {
-        this.#stmt(
-          `INSERT INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-        ).run(
-          destPrefixed,
-          srcEntry.type,
-          srcEntry.mode,
-          srcEntry.size,
-          Date.now(),
-          srcEntry.symlinkTarget,
-        );
-
-        if (srcEntry.type === 'file') {
-          const chunks = this.#chunks(srcPrefixed);
-
-          for (const chunk of chunks) {
-            this.#stmt(
-              'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (?, ?, ?)',
-            ).run(destPrefixed, chunk.chunkIndex, chunk.data);
-          }
-        }
-
-        this.#stmt('DELETE FROM fs_entries WHERE path = ?').run(srcPrefixed);
-      }
-    });
+      },
+      { mode: 'deferred' },
+    );
   }
 
   resolvePath(base: string, relativePath: string): string {
@@ -920,14 +931,18 @@ export class SqliteFs implements IFileSystem {
       throw new Error(`EEXIST: file already exists: ${linkPath}`);
     }
 
-    this.#useTransaction(() => {
-      this.#ensureParentExists(prefixed);
+    transaction(
+      this.#db,
+      () => {
+        this.#ensureParentExists(prefixed);
 
-      this.#stmt(
-        `INSERT INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
+        this.#stmt(
+          `INSERT INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
          VALUES (?, 'symlink', 511, 0, ?, ?)`,
-      ).run(prefixed, Date.now(), target);
-    });
+        ).run(prefixed, Date.now(), target);
+      },
+      { mode: 'deferred' },
+    );
   }
 
   async link(existingPath: string, newPath: string): Promise<void> {
@@ -958,22 +973,26 @@ export class SqliteFs implements IFileSystem {
     }
 
     // Hard link: duplicate the entry and chunks
-    this.#useTransaction(() => {
-      this.#ensureParentExists(destPrefixed);
+    transaction(
+      this.#db,
+      () => {
+        this.#ensureParentExists(destPrefixed);
 
-      this.#stmt(
-        `INSERT INTO fs_entries (path, type, mode, size, mtime)
-         VALUES (?, 'file', ?, ?, ?)`,
-      ).run(destPrefixed, srcEntry.mode, srcEntry.size, Date.now());
-
-      const chunks = this.#chunks(srcPrefixed);
-
-      for (const chunk of chunks) {
         this.#stmt(
-          'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (?, ?, ?)',
-        ).run(destPrefixed, chunk.chunkIndex, chunk.data);
-      }
-    });
+          `INSERT INTO fs_entries (path, type, mode, size, mtime)
+         VALUES (?, 'file', ?, ?, ?)`,
+        ).run(destPrefixed, srcEntry.mode, srcEntry.size, Date.now());
+
+        const chunks = this.#chunks(srcPrefixed);
+
+        for (const chunk of chunks) {
+          this.#stmt(
+            'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (?, ?, ?)',
+          ).run(destPrefixed, chunk.chunkIndex, chunk.data);
+        }
+      },
+      { mode: 'deferred' },
+    );
   }
 
   async readlink(linkPath: string): Promise<string> {

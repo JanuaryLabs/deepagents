@@ -108,6 +108,7 @@
     "@deepagents/agent": "7.1.2",
     "@deepagents/context": "7.1.2",
     "@google-cloud/bigquery": "8.3.1",
+    "@zukhruf/sqlite-transaction": "^0.3.33",
     "ai": "^7.0.147",
     "cac": "7.0.0",
     "dedent": "1.7.2",

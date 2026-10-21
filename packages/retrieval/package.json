@@ -41,6 +41,7 @@
   },
   "dependencies": {
     "@langchain/textsplitters": "^1.0.1",
+    "@zukhruf/sqlite-transaction": "^0.3.33",
     "execa": "^10.0.0",
     "@linear/sdk": "^88.2.0",
     "fast-glob": "^3.3.3",
