@@ -103,12 +103,12 @@
     "access": "public"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^4.0.71",
-    "@ai-sdk/code-mode": "^1.0.84",
-    "@ai-sdk/mcp": "^2.0.66",
-    "@ai-sdk/openai": "^4.0.83",
-    "@ai-sdk/provider": "^4.0.21",
-    "@ai-sdk/provider-utils": "^5.0.53",
+    "@ai-sdk/anthropic": "^4.0.84",
+    "@ai-sdk/code-mode": "^1.0.104",
+    "@ai-sdk/mcp": "^2.0.80",
+    "@ai-sdk/openai": "^4.0.98",
+    "@ai-sdk/provider": "^4.0.31",
+    "@ai-sdk/provider-utils": "^5.0.64",
     "@deepagents/compaction": "7.1.2",
     "@deepagents/context": "7.1.2",
     "@deepagents/elements": "7.1.2",
@@ -118,7 +118,7 @@
     "@sdk-it/hono": "^0.46.7",
     "@zukhruf/async": "^0.3.15",
     "@zukhruf/mutex": "^0.3.14",
-    "ai": "^7.0.127",
+    "ai": "^7.0.147",
     "atomically": "^2.1.1",
     "cron-parser": "5.6.2",
     "cronstrue": "^3.24.0",
@@ -134,7 +134,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@ai-sdk/provider": "^4.0.21",
+    "@ai-sdk/provider": "^4.0.31",
     "@electric-sql/pglite": "^0.5.4",
     "just-bash": "^3.2.0",
     "msw": "^3.0.2"

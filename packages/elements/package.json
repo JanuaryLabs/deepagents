@@ -40,7 +40,7 @@
     "access": "public"
   },
   "dependencies": {
-    "ai": "^7.0.127",
+    "ai": "^7.0.147",
     "dedent": "^1.7.2",
     "htmlparser2": "^10.0.0",
     "zod": "^4.4.3"

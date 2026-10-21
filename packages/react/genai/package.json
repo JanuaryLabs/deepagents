@@ -29,7 +29,7 @@
     }
   },
   "dependencies": {
-    "@ai-sdk/react": "4.0.130",
+    "@ai-sdk/react": "4.0.151",
     "@deepagents/context": "7.1.2",
     "@deepagents/elements": "7.1.2",
     "@deepagents/react-formatters": "7.1.2",
@@ -38,7 +38,7 @@
     "@types/mdast": "^4.0.4",
     "@zukhruf/shadcn": "^0.3.31",
     "@zukhruf/ui": "^0.3.31",
-    "ai": "7.0.127",
+    "ai": "7.0.147",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.4.0",
     "html-to-image": "1.11.13",

@@ -31,9 +31,9 @@
     "access": "public"
   },
   "peerDependencies": {
-    "ai": "^7.0.127"
+    "ai": "^7.0.147"
   },
   "devDependencies": {
-    "ai": "^7.0.127"
+    "ai": "^7.0.147"
   }
 }
