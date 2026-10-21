@@ -1,4 +1,8 @@
+import { Sqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert';
+import { mkdtempDisposable } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import { setTimeout } from 'node:timers/promises';
@@ -48,6 +52,21 @@ function createRunInSuite(
 }
 
 describe('RunStore', () => {
+  it("waits for another process's write transaction and then saves the suite", async () => {
+    await using directory = await mkdtempDisposable(
+      join(tmpdir(), 'evals-store-lock-'),
+    );
+    const path = join(directory.path, 'store.db');
+    using db = new DatabaseSync(path);
+    const store = new RunStore(db);
+    // Another process, such as a CLI eval next to the web runner, writes for 200 ms.
+    await using lock = await new Sqlite().writeLock(path, 200);
+
+    const suite = store.createSuite('while-locked');
+
+    assert.strictEqual(store.getSuite(suite.id)?.name, 'while-locked');
+  });
+
   it('creates a suite and returns id and name', () => {
     using db = new DatabaseSync(':memory:');
     const store = new RunStore(db);
