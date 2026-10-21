@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import { bigintColumn, parseJson, parseJsonObject } from './columns.ts';
 import { storeDDL } from './ddl.sqlserver.ts';
+import { withSqlServerSchemaLock } from './sqlserver-schema-lock.ts';
 import type {
   BranchData,
   BranchInfo,
@@ -230,23 +231,30 @@ export class SqlServerContextStore extends ContextStore {
       await this.#pool.connect();
     }
 
-    const schemaReq = this.#pool.request();
-    schemaReq.input('schema', this.#schema);
-    await schemaReq.query(`
-      IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = @schema)
-      BEGIN
-        DECLARE @sql NVARCHAR(MAX) = N'CREATE SCHEMA ' + QUOTENAME(@schema);
-        EXEC sp_executesql @sql;
-      END
-    `);
+    await withSqlServerSchemaLock(
+      SqlServerContextStore.#requireMssql(),
+      this.#pool,
+      this.#schema,
+      async () => {
+        const schemaReq = this.#pool.request();
+        schemaReq.input('schema', this.#schema);
+        await schemaReq.query(`
+          IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = @schema)
+          BEGIN
+            DECLARE @sql NVARCHAR(MAX) = N'CREATE SCHEMA ' + QUOTENAME(@schema);
+            EXEC sp_executesql @sql;
+          END
+        `);
 
-    const ddl = storeDDL(this.#schema);
-    const batches = ddl.split(/\bGO\b/i).filter((b) => b.trim());
-    for (const batch of batches) {
-      if (batch.trim()) {
-        await this.#pool.request().batch(batch);
-      }
-    }
+        const ddl = storeDDL(this.#schema);
+        const batches = ddl.split(/\bGO\b/i).filter((b) => b.trim());
+        for (const batch of batches) {
+          if (batch.trim()) {
+            await this.#pool.request().batch(batch);
+          }
+        }
+      },
+    );
   }
 
   /**

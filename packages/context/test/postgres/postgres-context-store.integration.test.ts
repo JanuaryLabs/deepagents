@@ -1,6 +1,7 @@
 import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert';
+import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
 
 import { PostgresContextStore } from '@deepagents/context';
@@ -16,6 +17,79 @@ const testPostgres = new Postgres({ docker });
  * Tests fail explicitly if Docker is not available.
  */
 describe('PostgreSQL ContextStore Integration', () => {
+  describe('Opening', () => {
+    it('opens an existing schema while other stores open it at the same time', async () => {
+      await using container = await testPostgres.database();
+      const schema = `open_${randomUUID().replaceAll('-', '_')}`;
+      const initial = await PostgresContextStore.create({
+        pool: container.connectionString,
+        schema,
+      });
+      await initial.close();
+
+      // Reopening an existing schema deadlocks only when the openers' DDL
+      // overlaps, so six openers make the overlap dependable.
+      const results = await Promise.allSettled(
+        Array.from({ length: 6 }, () =>
+          PostgresContextStore.create({
+            pool: container.connectionString,
+            schema,
+          }),
+        ),
+      );
+      const stores = results.flatMap((result) =>
+        result.status === 'fulfilled' ? [result.value] : [],
+      );
+      try {
+        assert.deepStrictEqual(
+          results.map((result) =>
+            result.status === 'fulfilled' ? 'opened' : result.reason.code,
+          ),
+          Array.from({ length: 6 }, () => 'opened'),
+        );
+        await stores[0].createChat({ id: 'chat-open', userId: 'user-1' });
+        assert.strictEqual(
+          (await stores[5].getChat('chat-open'))?.id,
+          'chat-open',
+        );
+      } finally {
+        await Promise.all(stores.map((store) => store.close()));
+      }
+    });
+
+    it('creates a new schema while other stores create it at the same time', async () => {
+      await using container = await testPostgres.database();
+      const schema = `open_${randomUUID().replaceAll('-', '_')}`;
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 3 }, () =>
+          PostgresContextStore.create({
+            pool: container.connectionString,
+            schema,
+          }),
+        ),
+      );
+      const stores = results.flatMap((result) =>
+        result.status === 'fulfilled' ? [result.value] : [],
+      );
+      try {
+        assert.deepStrictEqual(
+          results.map((result) =>
+            result.status === 'fulfilled' ? 'opened' : result.reason.code,
+          ),
+          ['opened', 'opened', 'opened'],
+        );
+        await stores[0].createChat({ id: 'chat-new', userId: 'user-1' });
+        assert.strictEqual(
+          (await stores[2].getChat('chat-new'))?.id,
+          'chat-new',
+        );
+      } finally {
+        await Promise.all(stores.map((store) => store.close()));
+      }
+    });
+  });
+
   // ==========================================================================
   // Chat Operations
   // ==========================================================================

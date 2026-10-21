@@ -1,3 +1,4 @@
+import { settleWithin } from '@zukhruf/testing/async';
 import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { SqlServer } from '@zukhruf/testing/sqlserver';
 import sql from 'mssql';
@@ -11,6 +12,113 @@ const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
 const testSqlServer = new SqlServer({ docker });
 
 describe('MssqlFs', () => {
+  describe('opening', () => {
+    it('creates a new schema and root while other file systems open it at the same time', async () => {
+      await using container = await testSqlServer.database();
+      const schema = `fs_${crypto.randomUUID().replaceAll('-', '_')}`;
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 3 }, () =>
+          MssqlFs.create({
+            pool: container.connectionString,
+            schema,
+            root: '/workspace/project',
+          }),
+        ),
+      );
+      const systems = results.flatMap((result) =>
+        result.status === 'fulfilled' ? [result.value] : [],
+      );
+      try {
+        assert.deepStrictEqual(
+          results.map((result) =>
+            result.status === 'fulfilled' ? 'opened' : result.reason.message,
+          ),
+          ['opened', 'opened', 'opened'],
+        );
+        await systems[0].writeFile('/notes.txt', 'shared');
+        assert.strictEqual(await systems[2].readFile('/notes.txt'), 'shared');
+      } finally {
+        await Promise.all(systems.map((system) => system.close()));
+      }
+    });
+
+    it('adds a root while other file systems add it at the same time', async () => {
+      await using container = await testSqlServer.database();
+      const schema = `fs_${crypto.randomUUID().replaceAll('-', '_')}`;
+      const initial = await MssqlFs.create({
+        pool: container.connectionString,
+        schema,
+        root: '/',
+      });
+      await initial.close();
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 3 }, () =>
+          MssqlFs.create({
+            pool: container.connectionString,
+            schema,
+            root: '/workspace/project',
+          }),
+        ),
+      );
+      const systems = results.flatMap((result) =>
+        result.status === 'fulfilled' ? [result.value] : [],
+      );
+      try {
+        assert.deepStrictEqual(
+          results.map((result) =>
+            result.status === 'fulfilled' ? 'opened' : result.reason.message,
+          ),
+          ['opened', 'opened', 'opened'],
+        );
+        await systems[0].writeFile('/notes.txt', 'shared');
+        assert.strictEqual(await systems[2].readFile('/notes.txt'), 'shared');
+      } finally {
+        await Promise.all(systems.map((system) => system.close()));
+      }
+    });
+
+    it('lets the next file system open after an open fails on a caller-owned pool', async () => {
+      await using container = await testSqlServer.database();
+      const schema = `fs_${crypto.randomUUID().replaceAll('-', '_')}`;
+      const pool = await new sql.ConnectionPool(
+        container.connectionString,
+      ).connect();
+      try {
+        // Platform setup: a view where the DDL creates a table makes the open
+        // fail partway; no file-system operation can produce that state.
+        await pool.request().batch(`CREATE SCHEMA [${schema}]`);
+        await pool
+          .request()
+          .batch(`CREATE VIEW [${schema}].[fs_entries] AS SELECT 1 AS path`);
+        await assert.rejects(
+          MssqlFs.create({ pool, schema, root: '/' }),
+          /already an object named 'fs_entries'/,
+        );
+        await pool.request().batch(`DROP VIEW [${schema}].[fs_entries]`);
+
+        const fs = await settleWithin(
+          MssqlFs.create({
+            pool: container.connectionString,
+            schema,
+            root: '/',
+          }),
+          'open after the failed open',
+          30_000,
+        );
+        try {
+          await fs.writeFile('/after.txt', 'opened');
+          assert.strictEqual(await fs.readFile('/after.txt'), 'opened');
+        } finally {
+          await fs.close();
+        }
+      } finally {
+        await pool.close();
+      }
+    });
+  });
+
   describe('file operations', () => {
     it('should write and read a file', async () => {
       await using container = await testSqlServer.database();

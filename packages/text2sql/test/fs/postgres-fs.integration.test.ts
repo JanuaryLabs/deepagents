@@ -11,6 +11,74 @@ const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
 const testPostgres = new Postgres({ docker });
 
 describe('PostgresFs', () => {
+  describe('opening', () => {
+    it('creates a new schema and root while other file systems open it at the same time', async () => {
+      await using container = await testPostgres.database();
+      const schema = `fs_${crypto.randomUUID().replaceAll('-', '_')}`;
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 3 }, () =>
+          PostgresFs.create({
+            pool: container.connectionString,
+            schema,
+            root: '/workspace/project',
+          }),
+        ),
+      );
+      const systems = results.flatMap((result) =>
+        result.status === 'fulfilled' ? [result.value] : [],
+      );
+      try {
+        assert.deepStrictEqual(
+          results.map((result) =>
+            result.status === 'fulfilled' ? 'opened' : result.reason.code,
+          ),
+          ['opened', 'opened', 'opened'],
+        );
+        await systems[0].writeFile('/notes.txt', 'shared');
+        assert.strictEqual(await systems[2].readFile('/notes.txt'), 'shared');
+      } finally {
+        await Promise.all(systems.map((system) => system.close()));
+      }
+    });
+
+    it('adds a root while other file systems add it at the same time', async () => {
+      await using container = await testPostgres.database();
+      const schema = `fs_${crypto.randomUUID().replaceAll('-', '_')}`;
+      const initial = await PostgresFs.create({
+        pool: container.connectionString,
+        schema,
+        root: '/',
+      });
+      await initial.close();
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 3 }, () =>
+          PostgresFs.create({
+            pool: container.connectionString,
+            schema,
+            root: '/workspace/project',
+          }),
+        ),
+      );
+      const systems = results.flatMap((result) =>
+        result.status === 'fulfilled' ? [result.value] : [],
+      );
+      try {
+        assert.deepStrictEqual(
+          results.map((result) =>
+            result.status === 'fulfilled' ? 'opened' : result.reason.code,
+          ),
+          ['opened', 'opened', 'opened'],
+        );
+        await systems[0].writeFile('/notes.txt', 'shared');
+        assert.strictEqual(await systems[2].readFile('/notes.txt'), 'shared');
+      } finally {
+        await Promise.all(systems.map((system) => system.close()));
+      }
+    });
+  });
+
   describe('file operations', () => {
     it('should write and read a file', async () => {
       await using container = await testPostgres.database();

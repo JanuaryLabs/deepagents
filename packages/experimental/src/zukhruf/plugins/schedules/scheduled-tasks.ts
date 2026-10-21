@@ -11,6 +11,8 @@ import type {
 import rrulePackage from 'rrule';
 import { z } from 'zod';
 
+import { lockSchemaDDL } from '@deepagents/context';
+
 import { pgBossNotifications } from '../../queue/pg-boss-notifications.ts';
 
 const { rrulestr } = rrulePackage;
@@ -419,7 +421,7 @@ export class ScheduledTasks<ExecutionConfig extends object> {
   }
 
   async initialize(): Promise<void> {
-    await this.#database.executeSql(DDL);
+    await this.#database.executeSql(lockSchemaDDL(DDL));
     if (this.#queueOptions) {
       await this.#boss.createQueue(this.#queue, this.#queueOptions);
     } else {

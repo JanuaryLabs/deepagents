@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import { bigintColumn, jsonObject } from './columns.ts';
 import { storeDDL } from './ddl.postgres.ts';
+import { lockSchemaDDL } from './postgres-schema-lock.ts';
 import type {
   BranchData,
   BranchInfo,
@@ -259,8 +260,7 @@ export class PostgresContextStore extends ContextStore {
   }
 
   async #initialize(): Promise<void> {
-    const ddl = storeDDL(this.#schema);
-    await this.#pool.query(ddl);
+    await this.#pool.query(lockSchemaDDL(storeDDL(this.#schema), this.#schema));
   }
 
   /**

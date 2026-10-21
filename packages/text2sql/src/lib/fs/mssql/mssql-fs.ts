@@ -14,6 +14,7 @@ import z from 'zod';
 
 import { bigintColumn, entryType } from '../columns.ts';
 import { mssqlFsDDL } from './ddl.mssql-fs.ts';
+import { withSqlServerSchemaLock } from './sqlserver-schema-lock.ts';
 
 interface ReadFileOptions {
   encoding?: BufferEncoding | null;
@@ -150,54 +151,37 @@ export class MssqlFs implements IFileSystem {
       await this.#pool.connect();
     }
 
-    const schemaReq = this.#pool.request();
-    schemaReq.input('schema', this.#schema);
-    await schemaReq.query(`
-      IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = @schema)
-      BEGIN
-        DECLARE @sql NVARCHAR(MAX) = N'CREATE SCHEMA ' + QUOTENAME(@schema);
-        EXEC sp_executesql @sql;
-      END
-    `);
+    await withSqlServerSchemaLock(
+      MssqlFs.#requireMssql(),
+      this.#pool,
+      this.#schema,
+      async () => {
+        const schemaReq = this.#pool.request();
+        schemaReq.input('schema', this.#schema);
+        await schemaReq.query(`
+          IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = @schema)
+          BEGIN
+            DECLARE @sql NVARCHAR(MAX) = N'CREATE SCHEMA ' + QUOTENAME(@schema);
+            EXEC sp_executesql @sql;
+          END
+        `);
 
-    const ddl = mssqlFsDDL(this.#schema);
-    const batches = ddl.split(/\bGO\b/i).filter((b) => b.trim());
-    for (const batch of batches) {
-      if (batch.trim()) {
-        await this.#pool.request().batch(batch);
-      }
-    }
+        const ddl = mssqlFsDDL(this.#schema);
+        const batches = ddl.split(/\bGO\b/i).filter((b) => b.trim());
+        for (const batch of batches) {
+          await this.#pool.request().batch(batch);
+        }
 
-    const rootSlashExists = rowsOf(
-      existsRow,
-      await this.#query(
-        `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = '/') THEN 1 ELSE 0 END as [exists]`,
-      ),
+        // Inside the schema lock, so concurrent openers also create the root
+        // directories one at a time.
+        await this.#ensureDirectory('/');
+
+        if (this.#root) {
+          await this.#createParentDirs(this.#root);
+          await this.#ensureDirectory(this.#root);
+        }
+      },
     );
-    if (rootSlashExists[0].exists === 0) {
-      await this.#exec(
-        `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime) VALUES ('/', 'directory', 493, 0, @p0)`,
-        [Date.now()],
-      );
-    }
-
-    if (this.#root) {
-      await this.#createParentDirs(this.#root);
-
-      const rootExists = rowsOf(
-        existsRow,
-        await this.#query(
-          `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
-          [this.#root],
-        ),
-      );
-      if (rootExists[0].exists === 0) {
-        await this.#exec(
-          `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime) VALUES (@p0, 'directory', 493, 0, @p1)`,
-          [this.#root, Date.now()],
-        );
-      }
-    }
   }
 
   async #createParentDirs(p: string): Promise<void> {
@@ -206,21 +190,17 @@ export class MssqlFs implements IFileSystem {
 
     for (let i = 0; i < segments.length - 1; i++) {
       currentPath = path.posix.join(currentPath, segments[i]);
-      const exists = rowsOf(
-        existsRow,
-        await this.#query(
-          `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
-          [currentPath],
-        ),
-      );
-
-      if (exists[0].exists === 0) {
-        await this.#exec(
-          `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime) VALUES (@p0, 'directory', 493, 0, @p1)`,
-          [currentPath, Date.now()],
-        );
-      }
+      await this.#ensureDirectory(currentPath);
     }
+  }
+
+  async #ensureDirectory(p: string): Promise<void> {
+    await this.#exec(
+      `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime)
+       SELECT @p0, 'directory', 493, 0, @p1
+       WHERE NOT EXISTS (SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0)`,
+      [p, Date.now()],
+    );
   }
 
   #query(sql: string, params?: unknown[]): Promise<IResult<unknown>> {

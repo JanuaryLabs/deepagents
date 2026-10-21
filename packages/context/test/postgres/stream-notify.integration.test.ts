@@ -97,6 +97,121 @@ async function expectNoChange(
 }
 
 describe('PostgreSQL Notify StreamChangeSource Integration', () => {
+  it('installs its triggers while other sources install them at the same time', async () => {
+    await using container = await testPostgres.database();
+    const schema = testSchema();
+    const store = await PostgresStreamStore.create({
+      pool: container.connectionString,
+      schema,
+    });
+
+    const results = await Promise.allSettled(
+      Array.from({ length: 3 }, () =>
+        PostgresNotifyChangeSource.create({
+          pool: container.connectionString,
+          schema,
+        }),
+      ),
+    );
+    const sources = results.flatMap((result) =>
+      result.status === 'fulfilled' ? [result.value] : [],
+    );
+    const ac = new AbortController();
+    try {
+      assert.deepStrictEqual(
+        results.map((result) =>
+          result.status === 'fulfilled' ? 'opened' : result.reason.code,
+        ),
+        ['opened', 'opened', 'opened'],
+      );
+      const stream = createStream({ status: 'running', startedAt: Date.now() });
+      await store.createStream(stream);
+      const iterators = sources.map((source) =>
+        source.subscribe(stream.id, ac.signal)[Symbol.asyncIterator](),
+      );
+      await Promise.all(
+        iterators.map((iterator) =>
+          settleWithin(iterator.next(), 'initial tick'),
+        ),
+      );
+      const nextChunks = iterators.map((iterator) => iterator.next());
+      await store.appendChunks([createChunk(stream.id, 0)]);
+      assert.deepStrictEqual(
+        await Promise.all(
+          nextChunks.map((next) => settleWithin(next, 'chunk notification')),
+        ),
+        Array.from({ length: 3 }, () => ({
+          value: { kind: 'chunks' },
+          done: false,
+        })),
+      );
+    } finally {
+      ac.abort();
+      await Promise.all(sources.map((source) => source.close()));
+      await store.close();
+    }
+  });
+
+  it('opens on installed triggers while other sources open at the same time', async () => {
+    await using container = await testPostgres.database();
+    const schema = testSchema();
+    const store = await PostgresStreamStore.create({
+      pool: container.connectionString,
+      schema,
+    });
+    const initial = await PostgresNotifyChangeSource.create({
+      pool: container.connectionString,
+      schema,
+    });
+    await initial.close();
+
+    const results = await Promise.allSettled(
+      Array.from({ length: 3 }, () =>
+        PostgresNotifyChangeSource.create({
+          pool: container.connectionString,
+          schema,
+        }),
+      ),
+    );
+    const sources = results.flatMap((result) =>
+      result.status === 'fulfilled' ? [result.value] : [],
+    );
+    const ac = new AbortController();
+    try {
+      assert.deepStrictEqual(
+        results.map((result) =>
+          result.status === 'fulfilled' ? 'opened' : result.reason.code,
+        ),
+        ['opened', 'opened', 'opened'],
+      );
+      const stream = createStream({ status: 'running', startedAt: Date.now() });
+      await store.createStream(stream);
+      const iterators = sources.map((source) =>
+        source.subscribe(stream.id, ac.signal)[Symbol.asyncIterator](),
+      );
+      await Promise.all(
+        iterators.map((iterator) =>
+          settleWithin(iterator.next(), 'initial tick'),
+        ),
+      );
+      const nextChunks = iterators.map((iterator) => iterator.next());
+      await store.appendChunks([createChunk(stream.id, 0)]);
+      assert.deepStrictEqual(
+        await Promise.all(
+          nextChunks.map((next) => settleWithin(next, 'chunk notification')),
+        ),
+        Array.from({ length: 3 }, () => ({
+          value: { kind: 'chunks' },
+          done: false,
+        })),
+      );
+    } finally {
+      ac.abort();
+      await Promise.all(sources.map((source) => source.close()));
+      await store.close();
+    }
+  });
+
   it('should fail notify setup with PostgreSQL table-not-found when base stream tables are missing', async () => {
     await using container = await testPostgres.database();
 

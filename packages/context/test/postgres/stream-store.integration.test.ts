@@ -119,6 +119,36 @@ async function waitForStatus(
 }
 
 describe('PostgreSQL StreamStore Integration', () => {
+  it('creates a new schema while other stores create it at the same time', async () => {
+    await using container = await testPostgres.database();
+    const schema = testSchema();
+
+    const results = await Promise.allSettled(
+      Array.from({ length: 3 }, () =>
+        PostgresStreamStore.create({
+          pool: container.connectionString,
+          schema,
+        }),
+      ),
+    );
+    const stores = results.flatMap((result) =>
+      result.status === 'fulfilled' ? [result.value] : [],
+    );
+    try {
+      assert.deepStrictEqual(
+        results.map((result) =>
+          result.status === 'fulfilled' ? 'opened' : result.reason.code,
+        ),
+        ['opened', 'opened', 'opened'],
+      );
+      const stream = createStream();
+      await stores[0].createStream(stream);
+      assert.deepStrictEqual(await stores[2].getStream(stream.id), stream);
+    } finally {
+      await Promise.all(stores.map((store) => store.close()));
+    }
+  });
+
   it('should create, upsert, retrieve, update, and list streams', async () =>
     await withStore(async (store) => {
       const stream = createStream({

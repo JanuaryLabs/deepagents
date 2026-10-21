@@ -1,3 +1,4 @@
+import { settleWithin } from '@zukhruf/testing/async';
 import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { SqlServer } from '@zukhruf/testing/sqlserver';
 import sql from 'mssql';
@@ -1677,6 +1678,79 @@ describe('SQL Server ContextStore Integration', () => {
         assert.ok(chat);
       } finally {
         await store.close();
+      }
+    });
+
+    it('creates a new schema while other stores create it at the same time', async () => {
+      await using container = await testSqlServer.database();
+      const schema = `open_${crypto.randomUUID().replaceAll('-', '_')}`;
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 3 }, () =>
+          SqlServerContextStore.create({
+            pool: container.connectionString,
+            schema,
+          }),
+        ),
+      );
+      const stores = results.flatMap((result) =>
+        result.status === 'fulfilled' ? [result.value] : [],
+      );
+      try {
+        assert.deepStrictEqual(
+          results.map((result) =>
+            result.status === 'fulfilled' ? 'opened' : result.reason.message,
+          ),
+          ['opened', 'opened', 'opened'],
+        );
+        await stores[0].createChat({ id: 'chat-new', userId: 'user-1' });
+        assert.strictEqual(
+          (await stores[2].getChat('chat-new'))?.id,
+          'chat-new',
+        );
+      } finally {
+        await Promise.all(stores.map((store) => store.close()));
+      }
+    });
+
+    it('lets the next store open after an open fails on a caller-owned pool', async () => {
+      await using container = await testSqlServer.database();
+      const schema = `open_${crypto.randomUUID().replaceAll('-', '_')}`;
+      const pool = await new sql.ConnectionPool(
+        container.connectionString,
+      ).connect();
+      try {
+        // Platform setup: a view where the DDL creates a table makes the open
+        // fail partway; no store operation can produce that state.
+        await pool.request().batch(`CREATE SCHEMA [${schema}]`);
+        await pool
+          .request()
+          .batch(`CREATE VIEW [${schema}].[chats] AS SELECT 1 AS id`);
+        await assert.rejects(
+          SqlServerContextStore.create({ pool, schema }),
+          /already an object named 'chats'/,
+        );
+        await pool.request().batch(`DROP VIEW [${schema}].[chats]`);
+
+        const store = await settleWithin(
+          SqlServerContextStore.create({
+            pool: container.connectionString,
+            schema,
+          }),
+          'open after the failed open',
+          30_000,
+        );
+        try {
+          await store.createChat({ id: 'chat-after', userId: 'user-1' });
+          assert.strictEqual(
+            (await store.getChat('chat-after'))?.id,
+            'chat-after',
+          );
+        } finally {
+          await store.close();
+        }
+      } finally {
+        await pool.close();
       }
     });
   });

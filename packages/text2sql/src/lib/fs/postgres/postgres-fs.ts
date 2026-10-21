@@ -12,6 +12,8 @@ import * as path from 'node:path';
 import type { Pool, PoolClient, PoolConfig, QueryResult } from 'pg';
 import z from 'zod';
 
+import { lockSchemaDDL } from '@deepagents/context';
+
 import { bigintColumn, entryType } from '../columns.ts';
 import { postgresFsDDL } from './ddl.postgres-fs.ts';
 
@@ -140,63 +142,38 @@ export class PostgresFs implements IFileSystem {
     return fs;
   }
 
+  // The schema lock is held until this transaction commits, so concurrent
+  // openers also create the root directories one at a time.
   async #initialize(): Promise<void> {
-    const ddl = postgresFsDDL(this.#schema);
-    await this.#pool.query(ddl);
-
-    const rootSlashExists = rowsOf(
-      existsRow,
-      await this.#query(
-        `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = '/') AS exists`,
-      ),
-    );
-    if (!rootSlashExists[0].exists) {
-      await this.#exec(
-        `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime) VALUES ('/', 'directory', 493, 0, $1)`,
-        [Date.now()],
+    await this.#useTransaction(async (client) => {
+      await client.query(
+        lockSchemaDDL(postgresFsDDL(this.#schema), this.#schema),
       );
-    }
 
-    if (this.#root) {
-      await this.#createParentDirs(this.#root);
+      await this.#ensureDirectory(client, '/');
 
-      const rootExists = rowsOf(
-        existsRow,
-        await this.#query(
-          `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = $1) AS exists`,
-          [this.#root],
-        ),
-      );
-      if (!rootExists[0].exists) {
-        await this.#exec(
-          `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime) VALUES ($1, 'directory', 493, 0, $2)`,
-          [this.#root, Date.now()],
-        );
+      if (this.#root) {
+        await this.#createParentDirs(client, this.#root);
+        await this.#ensureDirectory(client, this.#root);
       }
-    }
+    });
   }
 
-  async #createParentDirs(p: string): Promise<void> {
+  async #createParentDirs(client: PoolClient, p: string): Promise<void> {
     const segments = p.split('/').filter(Boolean);
     let currentPath = '/';
 
     for (let i = 0; i < segments.length - 1; i++) {
       currentPath = path.posix.join(currentPath, segments[i]);
-      const exists = rowsOf(
-        existsRow,
-        await this.#query(
-          `SELECT EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = $1) AS exists`,
-          [currentPath],
-        ),
-      );
-
-      if (!exists[0].exists) {
-        await this.#exec(
-          `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime) VALUES ($1, 'directory', 493, 0, $2)`,
-          [currentPath, Date.now()],
-        );
-      }
+      await this.#ensureDirectory(client, currentPath);
     }
+  }
+
+  async #ensureDirectory(client: PoolClient, p: string): Promise<void> {
+    await client.query(
+      `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime) VALUES ($1, 'directory', 493, 0, $2) ON CONFLICT (path) DO NOTHING`,
+      [p, Date.now()],
+    );
   }
 
   #query(sql: string, params?: unknown[]): Promise<QueryResult> {

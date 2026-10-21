@@ -3,6 +3,7 @@ import type { Pool, PoolClient, PoolConfig } from 'pg';
 import { z } from 'zod';
 
 import { bigintColumn } from '../store/columns.ts';
+import { lockSchemaDDL } from '../store/postgres-schema-lock.ts';
 import { postgresStreamDDL } from './ddl.stream.postgres.ts';
 import { streamStatus, toStreamPart } from './rows.ts';
 import type {
@@ -108,7 +109,9 @@ export class PostgresStreamStore extends StreamStore {
   }
 
   async #initialize(): Promise<void> {
-    await this.#pool.query(postgresStreamDDL(this.#schema));
+    await this.#pool.query(
+      lockSchemaDDL(postgresStreamDDL(this.#schema), this.#schema),
+    );
   }
 
   async close(): Promise<void> {

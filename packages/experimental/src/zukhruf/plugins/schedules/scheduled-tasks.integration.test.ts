@@ -594,6 +594,75 @@ test('a queued run survives coordinator and pg-boss restart', async (t) => {
   }
 });
 
+test('real PostgreSQL initializes while other instances initialize at the same time', async () => {
+  await using testDatabase = await testPostgres.database();
+  const { connectionString } = testDatabase;
+
+  const pool = new Pool({ connectionString });
+  const bosses = Array.from(
+    { length: 3 },
+    () => new PgBoss({ connectionString, schedule: false }),
+  );
+  for (const boss of bosses) boss.on('error', () => {});
+  const transaction: ScheduledTaskTransaction = async (operation) => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const database: Db = {
+        executeSql: (text, values) => client.query(text, values),
+      };
+      const result = await operation(database);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  };
+  const queue = `scheduled-initialize-${randomUUID()}`;
+  const instances = bosses.map(
+    (boss) =>
+      new ScheduledTasks({
+        executionConfigSchema: testExecutionConfigSchema,
+        boss,
+        queue,
+        reconciliationIntervalMs: 50,
+        transaction,
+        executor: new TestExecutor(),
+      }),
+  );
+  try {
+    await Promise.all(bosses.map((boss) => boss.start()));
+    const results = await Promise.allSettled(
+      instances.map((instance) => instance.initialize()),
+    );
+
+    assert.deepEqual(
+      results.map((result) =>
+        result.status === 'fulfilled' ? 'initialized' : result.reason.code,
+      ),
+      ['initialized', 'initialized', 'initialized'],
+    );
+    const task = await instances[0].create('owner-1', {
+      idempotencyKey: 'concurrent-initialize',
+      name: 'Concurrent initialize',
+      prompt: 'Visible to every instance',
+      recurrence: futureRecurrence(60_000, 'FREQ=DAILY;COUNT=1'),
+      timezone: 'UTC',
+      executionConfig: { destination: 'postgres' },
+    });
+    assert.deepEqual(
+      (await instances[2].list('owner-1')).map(({ id }) => id),
+      [task.id],
+    );
+  } finally {
+    await Promise.all(bosses.map((boss) => boss.stop({ graceful: false })));
+    await pool.end();
+  }
+});
+
 test('real PostgreSQL competing workers launch one execution for one run', async (t) => {
   await using testDatabase = await testPostgres.database();
   const { connectionString } = testDatabase;

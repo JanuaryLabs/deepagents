@@ -5,6 +5,7 @@ import type { Notification, Pool, PoolClient, PoolConfig } from 'pg';
 import { z } from 'zod';
 
 import { parseJson } from '../store/columns.ts';
+import { lockSchemaDDL } from '../store/postgres-schema-lock.ts';
 import type { StreamChange, StreamChangeSource } from './change-source.ts';
 import {
   DEFAULT_POSTGRES_STREAM_CHANGES_CHANNEL,
@@ -143,7 +144,10 @@ export class PostgresNotifyChangeSource implements StreamChangeSource {
     const source = new PostgresNotifyChangeSource(options);
     try {
       await source.#pool.query(
-        postgresStreamNotifyDDL(source.#schema, source.#channel),
+        lockSchemaDDL(
+          postgresStreamNotifyDDL(source.#schema, source.#channel),
+          source.#schema,
+        ),
       );
     } catch (error) {
       await source.close();
