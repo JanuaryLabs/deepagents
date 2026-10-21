@@ -401,7 +401,7 @@ for (const ownership of ['owned', 'borrowed']) {
         );
         await assert.rejects(
           options.streams.store.getStream(turn.id),
-          /finalized/,
+          /not open/,
         );
         await assert.rejects(
           options.mailboxStore.hasPending(conversation),
