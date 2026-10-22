@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/experimental",
-  "version": "7.1.3",
+  "version": "7.1.4",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -109,9 +109,9 @@
     "@ai-sdk/openai": "^4.0.98",
     "@ai-sdk/provider": "^4.0.31",
     "@ai-sdk/provider-utils": "^5.0.64",
-    "@deepagents/compaction": "7.1.3",
-    "@deepagents/context": "7.1.3",
-    "@deepagents/elements": "7.1.3",
+    "@deepagents/compaction": "7.1.4",
+    "@deepagents/context": "7.1.4",
+    "@deepagents/elements": "7.1.4",
     "@iarna/toml": "^2.2.5",
     "@napi-rs/keyring": "^2.1.0",
     "@opencoredev/loginwithchatgpt-core": "^0.2.0",
