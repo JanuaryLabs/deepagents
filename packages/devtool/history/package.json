@@ -35,7 +35,7 @@
     "lucide-react": "^1.33.0"
   },
   "peerDependencies": {
-    "react": "19.2.8"
+    "react": "^19.2.8"
   },
   "devDependencies": {
     "@types/react": "19.2.18",
