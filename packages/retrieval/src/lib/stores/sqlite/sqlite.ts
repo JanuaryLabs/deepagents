@@ -118,7 +118,7 @@ export class SQLiteStore implements Store {
     const stmt = this.#db.prepare(dedent`
 				INSERT INTO sources (source_id, expires_at) VALUES (?, ?)
 				ON CONFLICT(source_id) DO UPDATE SET
-					updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now',
+					updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
 					expires_at=excluded.expires_at
 			`);
     return stmt.run(inputs.sourceId, inputs.expiresAt);
