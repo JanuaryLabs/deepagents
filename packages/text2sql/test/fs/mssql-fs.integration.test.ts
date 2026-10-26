@@ -1,5 +1,4 @@
 import { settleWithin } from '@zukhruf/testing/async';
-import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { SqlServer } from '@zukhruf/testing/sqlserver';
 import sql from 'mssql';
 import * as assert from 'node:assert';
@@ -7,9 +6,7 @@ import { describe, it } from 'node:test';
 
 import { MssqlFs } from '@deepagents/text2sql';
 
-const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
-
-const testSqlServer = new SqlServer({ docker });
+const testSqlServer = new SqlServer({ environment: process.env });
 
 describe('MssqlFs', () => {
   describe('opening', () => {

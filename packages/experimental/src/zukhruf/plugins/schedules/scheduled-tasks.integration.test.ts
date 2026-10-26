@@ -1,5 +1,4 @@
 import { PGlite } from '@electric-sql/pglite';
-import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -20,9 +19,7 @@ import {
   ScheduledTasks,
 } from '@deepagents/experimental/zukhruf/schedules';
 
-const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
-
-const testPostgres = new Postgres({ docker });
+const testPostgres = new Postgres({ environment: process.env });
 
 const FAST_POLLING = {
   batchSize: 3,

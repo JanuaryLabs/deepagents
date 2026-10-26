@@ -1,6 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
 import { settleWithin } from '@zukhruf/testing/async';
-import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
@@ -24,9 +23,7 @@ import type {
 } from '@deepagents/experimental/zukhruf';
 import { PgBossTurnQueue } from '@deepagents/experimental/zukhruf';
 
-const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
-
-const testPostgres = new Postgres({ docker });
+const testPostgres = new Postgres({ environment: process.env });
 
 /** The addressing every queued `TurnRef` payload carries. */
 const queuedTurnSchema = z.looseObject({

@@ -3,7 +3,6 @@ import type {
   LanguageModelV4StreamPart,
 } from '@ai-sdk/provider';
 import { Latch } from '@zukhruf/async';
-import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { type UIMessage, isToolUIPart, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
@@ -51,15 +50,13 @@ import {
   conversationSchedulingCapabilities,
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
 
-const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
-
 async function virtualSandbox(): Promise<AgentSandbox> {
   return createBashTool({
     sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
   });
 }
 
-const testPostgres = new Postgres({ docker });
+const testPostgres = new Postgres({ environment: process.env });
 
 const userTurn = (id: string, text: string) => ({
   message: {

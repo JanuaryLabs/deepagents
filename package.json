@@ -55,7 +55,7 @@
     "@zukhruf/async": "^0.3.15",
     "@zukhruf/eslint": "^0.3.15",
     "@zukhruf/git-hooks": "^0.3.44",
-    "@zukhruf/testing": "^0.3.24",
+    "@zukhruf/testing": "^0.3.46",
     "autoprefixer": "10.5.4",
     "chalk": "^5.6.2",
     "css-tree": "^3.2.1",

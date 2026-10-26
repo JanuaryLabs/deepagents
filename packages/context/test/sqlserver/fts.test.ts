@@ -1,4 +1,3 @@
-import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { SQL_SERVER_FULL_IMAGE, SqlServer } from '@zukhruf/testing/sqlserver';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -12,9 +11,10 @@ import {
 
 import { waitForFtsReady } from './wait-for-fts-ready.ts';
 
-const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
-
-const testSqlServer = new SqlServer({ docker, image: SQL_SERVER_FULL_IMAGE });
+const testSqlServer = new SqlServer({
+  environment: process.env,
+  image: SQL_SERVER_FULL_IMAGE,
+});
 
 /**
  * SQL Server Full-Text Search tests.

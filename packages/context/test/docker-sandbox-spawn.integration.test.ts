@@ -1,4 +1,4 @@
-import { Docker, TestRun } from '@zukhruf/testing/docker';
+import { DockerTestbed } from '@zukhruf/testing/docker';
 import assert from 'node:assert';
 import { text as streamText } from 'node:stream/consumers';
 import { describe, it } from 'node:test';
@@ -6,7 +6,10 @@ import { setTimeout as sleep } from 'node:timers/promises';
 
 import { createBashTool, createDockerSandbox } from '@deepagents/context';
 
-const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
+import { dockerSandboxDefaults } from './helpers/docker-sandbox-defaults.ts';
+
+const testbed = new DockerTestbed({ environment: process.env });
+const defaults = dockerSandboxDefaults(testbed.defaults);
 
 async function readFirstChunk(
   stream: ReadableStream<Uint8Array>,
@@ -24,7 +27,7 @@ async function readFirstChunk(
 describe('Docker Sandbox — spawn', () => {
   describe('failure modes', () => {
     it('exit resolves with signal info when aborted mid-stream', async () => {
-      await using sandbox = await createDockerSandbox(docker.defaults);
+      await using sandbox = await createDockerSandbox(defaults);
       assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
       const controller = new AbortController();
       const child = sandbox.spawn('printf hi; while :; do sleep 1; done', {
@@ -45,7 +48,7 @@ describe('Docker Sandbox — spawn', () => {
     });
 
     it('exit resolves with non-zero code on command failure', async () => {
-      await using sandbox = await createDockerSandbox(docker.defaults);
+      await using sandbox = await createDockerSandbox(defaults);
       assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
       const child = sandbox.spawn('exit 42');
       await streamText(child.stdout);
@@ -58,7 +61,7 @@ describe('Docker Sandbox — spawn', () => {
     });
 
     it('stdout and stderr both close after the child exits', async () => {
-      await using sandbox = await createDockerSandbox(docker.defaults);
+      await using sandbox = await createDockerSandbox(defaults);
       assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
       const child = sandbox.spawn('echo hi; echo err >&2');
       const [out, err, info] = await Promise.all([
@@ -74,7 +77,7 @@ describe('Docker Sandbox — spawn', () => {
 
   describe('live streaming', () => {
     it('delivers stdout bytes before the child exits', async () => {
-      await using sandbox = await createDockerSandbox(docker.defaults);
+      await using sandbox = await createDockerSandbox(defaults);
       assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
       const child = sandbox.spawn('printf hi; sleep 1; printf bye');
 
@@ -95,7 +98,7 @@ describe('Docker Sandbox — spawn', () => {
     });
 
     it('streams stderr independently of stdout', async () => {
-      await using sandbox = await createDockerSandbox(docker.defaults);
+      await using sandbox = await createDockerSandbox(defaults);
       assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
       const child = sandbox.spawn(
         'echo "to stdout"; echo "to stderr" >&2; echo "also stdout"',
@@ -115,7 +118,7 @@ describe('Docker Sandbox — spawn', () => {
 
   describe('SpawnOptions', () => {
     it('forwards env into the child via docker exec -e', async () => {
-      await using sandbox = await createDockerSandbox(docker.defaults);
+      await using sandbox = await createDockerSandbox(defaults);
       assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
       const child = sandbox.spawn('printf "%s" "$MY_VAR"', {
         env: { MY_VAR: 'hello-from-host' },
@@ -127,7 +130,7 @@ describe('Docker Sandbox — spawn', () => {
     });
 
     it('forwards cwd into the child via docker exec -w', async () => {
-      await using sandbox = await createDockerSandbox(docker.defaults);
+      await using sandbox = await createDockerSandbox(defaults);
       assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
       const child = sandbox.spawn('pwd', { cwd: '/tmp' });
       const text = await streamText(child.stdout);
@@ -139,7 +142,7 @@ describe('Docker Sandbox — spawn', () => {
 
   describe('executeCommand signal retrofit', () => {
     it('honors options.signal (no longer silently dropped)', async () => {
-      await using sandbox = await createDockerSandbox(docker.defaults);
+      await using sandbox = await createDockerSandbox(defaults);
       const controller = new AbortController();
       const exec = sandbox.executeCommand('sleep 10', {
         signal: controller.signal,
@@ -157,7 +160,7 @@ describe('Docker Sandbox — spawn', () => {
   describe('guest process termination', () => {
     it('enforces commandTimeout for executeCommand and spawn without delayed writes', async () => {
       await using timedSandbox = await createDockerSandbox({
-        ...docker.defaults,
+        ...defaults,
         commandTimeout: 100,
       });
 
@@ -193,7 +196,7 @@ describe('Docker Sandbox — spawn', () => {
 
     it('keeps caller abort distinct from the configured deadline', async () => {
       await using abortableSandbox = await createDockerSandbox({
-        ...docker.defaults,
+        ...defaults,
         commandTimeout: 60_000,
       });
       assert.ok(abortableSandbox.spawn);
@@ -220,7 +223,7 @@ describe('Docker Sandbox — spawn', () => {
 
   describe('through createBashTool', () => {
     it('exposes spawn on the wrapped sandbox', async () => {
-      await using sandbox = await createDockerSandbox(docker.defaults);
+      await using sandbox = await createDockerSandbox(defaults);
       const agent = await createBashTool({
         sandbox,
         destination: '/workspace',
@@ -233,7 +236,7 @@ describe('Docker Sandbox — spawn', () => {
     });
 
     it('streams live stdout through the wrapper', async () => {
-      await using sandbox = await createDockerSandbox(docker.defaults);
+      await using sandbox = await createDockerSandbox(defaults);
       const agent = await createBashTool({
         sandbox,
         destination: '/workspace',

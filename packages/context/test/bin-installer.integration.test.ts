@@ -1,4 +1,4 @@
-import { Docker, TestRun } from '@zukhruf/testing/docker';
+import { type DockerDirectory, DockerTestbed } from '@zukhruf/testing/docker';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -11,9 +11,10 @@ import {
   useSandbox,
 } from '@deepagents/context';
 
-const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
+import { dockerSandboxDefaults } from './helpers/docker-sandbox-defaults.ts';
 
-type DockerDirectory = Awaited<ReturnType<Docker['directory']>>;
+const testbed = new DockerTestbed({ environment: process.env });
+const defaults = dockerSandboxDefaults(testbed.defaults);
 
 /** Seeds an executable `bin/hello.js` that prints `linked`. */
 async function seedHelloBinary(fixture: DockerDirectory): Promise<void> {
@@ -36,11 +37,11 @@ describe('bin installer', () => {
   };
 
   it('symlinks a bind-mounted binary onto PATH using the basename', async () => {
-    await using fixture = await docker.directory();
+    await using fixture = await testbed.directory();
     await seedHelloBinary(fixture);
     await useSandbox(
       {
-        ...docker.defaults,
+        ...defaults,
         image: 'node:lts-alpine',
         installers: [pkg(['bash']), bin(HELLO_BINARY)],
         volumes: [{ ...tempMount, hostPath: fixture.path }],
@@ -54,12 +55,12 @@ describe('bin installer', () => {
   });
 
   it('follows a symlink whose target is a regular file', async () => {
-    await using fixture = await docker.directory();
+    await using fixture = await testbed.directory();
     await seedHelloBinary(fixture);
     await fixture.symlink('hello.js', 'bin/hello-shim.js');
     await useSandbox(
       {
-        ...docker.defaults,
+        ...defaults,
         image: 'node:lts-alpine',
         installers: [pkg(['bash']), bin('/mnt/bin/hello-shim.js')],
         volumes: [{ ...tempMount, hostPath: fixture.path }],
@@ -73,11 +74,11 @@ describe('bin installer', () => {
   });
 
   it('honors custom name and target', async () => {
-    await using fixture = await docker.directory();
+    await using fixture = await testbed.directory();
     await seedHelloBinary(fixture);
     await useSandbox(
       {
-        ...docker.defaults,
+        ...defaults,
         image: 'node:lts-alpine',
         installers: [
           pkg(['bash']),
@@ -94,7 +95,7 @@ describe('bin installer', () => {
   });
 
   it('reports actionable error when binary is non-executable on read-only mount', async () => {
-    await using nonExec = await docker.directory();
+    await using nonExec = await testbed.directory();
     const nonExecDir = nonExec.path;
     await nonExec.mkdir('bin');
     await nonExec.writeFile(
@@ -105,7 +106,7 @@ describe('bin installer', () => {
 
     await assert.rejects(
       createDockerSandbox({
-        ...docker.defaults,
+        ...defaults,
         image: 'node:lts-alpine',
         installers: [pkg(['bash']), bin('/mnt/bin/noexec.js')],
         volumes: [{ ...tempMount, hostPath: nonExecDir }],
@@ -126,7 +127,7 @@ describe('bin installer', () => {
   it('throws InstallError when the binary is missing', async () => {
     await assert.rejects(
       createDockerSandbox({
-        ...docker.defaults,
+        ...defaults,
         image: 'node:lts-alpine',
         installers: [pkg(['bash']), bin('/var/empty/does-not-exist.js')],
       }),

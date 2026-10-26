@@ -1,4 +1,3 @@
-import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { Postgres as TestPostgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -12,9 +11,7 @@ import {
   tables,
 } from '@deepagents/text2sql/postgres';
 
-const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
-
-const testPostgres = new TestPostgres({ docker });
+const testPostgres = new TestPostgres({ environment: process.env });
 
 const columnData = z.object({
   name: z.string(),

@@ -1,6 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
 import { settleWithin } from '@zukhruf/testing/async';
-import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert/strict';
 import { suite, test } from 'node:test';
@@ -13,9 +12,7 @@ import {
   PgBossConversationStatusChangeSource,
 } from '@deepagents/experimental/zukhruf';
 
-const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
-
-const testPostgres = new Postgres({ docker });
+const testPostgres = new Postgres({ environment: process.env });
 
 interface ChangeSourceHarness extends AsyncDisposable {
   /** Two pg-boss instances over one database: the subscriber and the notifier. */

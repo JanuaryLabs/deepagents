@@ -1,4 +1,3 @@
-import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { SqlServer } from '@zukhruf/testing/sqlserver';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
@@ -14,9 +13,7 @@ import {
   user,
 } from '@deepagents/context';
 
-const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
-
-const testSqlServer = new SqlServer({ docker });
+const testSqlServer = new SqlServer({ environment: process.env });
 
 async function createVirtualAgentSandbox() {
   return createBashTool({

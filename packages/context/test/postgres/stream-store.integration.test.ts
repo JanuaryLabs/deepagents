@@ -1,5 +1,4 @@
 import { settleWithin } from '@zukhruf/testing/async';
-import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { type UIMessageChunk, simulateReadableStream } from 'ai';
 import assert from 'node:assert';
@@ -15,11 +14,9 @@ import {
   type StreamStatus,
 } from '@deepagents/context';
 
-const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
-
 const POSTGRES_18 = { image: 'postgres:18-alpine' };
 
-const testPostgres = new Postgres({ ...POSTGRES_18, docker });
+const testPostgres = new Postgres({ ...POSTGRES_18, environment: process.env });
 
 function testSchema(): string {
   return `stream_test_${crypto.randomUUID().replaceAll('-', '_')}`;

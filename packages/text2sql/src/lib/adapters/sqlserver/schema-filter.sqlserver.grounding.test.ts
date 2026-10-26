@@ -1,4 +1,3 @@
-import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { SqlServer as TestSqlServer } from '@zukhruf/testing/sqlserver';
 import sql from 'mssql';
 import assert from 'node:assert';
@@ -12,9 +11,7 @@ import {
   views,
 } from '@deepagents/text2sql/sqlserver';
 
-const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
-
-const testSqlServer = new TestSqlServer({ docker });
+const testSqlServer = new TestSqlServer({ environment: process.env });
 
 const named = z.object({ name: z.string() });
 

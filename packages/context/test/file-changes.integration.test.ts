@@ -1,5 +1,5 @@
 import type { LanguageModelV4Prompt } from '@ai-sdk/provider';
-import { Docker, TestRun } from '@zukhruf/testing/docker';
+import { DockerTestbed } from '@zukhruf/testing/docker';
 import { generateText, isStepCount } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { build } from 'esbuild';
@@ -19,7 +19,10 @@ import {
   withStraceFileChanges,
 } from '@deepagents/context';
 
-const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
+import { dockerSandboxDefaults } from './helpers/docker-sandbox-defaults.ts';
+
+const testbed = new DockerTestbed({ environment: process.env });
+const defaults = dockerSandboxDefaults(testbed.defaults);
 
 // Native-arch image with strace + python3 baked in. ContainerfileStrategy
 // content-hash-caches the build, so the apt install runs once per machine.
@@ -191,7 +194,7 @@ describe('strace file-change tracking (docker backend)', () => {
       calls,
     };
     const backend = await createDockerSandbox({
-      ...docker.defaults,
+      ...defaults,
       dockerfile: STRACE_IMAGE,
     });
     const tracked = await withStraceFileChanges(backend, {
@@ -471,7 +474,7 @@ describe('strace file-change tracking (docker backend)', () => {
   it('drops changes matching an exclude glob (e.g. uploaded skills) but keeps siblings', async () => {
     const seen: FileChange[] = [];
     const backend = await createDockerSandbox({
-      ...docker.defaults,
+      ...defaults,
       dockerfile: STRACE_IMAGE,
     });
     const tracked = await withStraceFileChanges(backend, {
@@ -526,7 +529,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
   it('renders a thrown BashException via the caller’s own format(), and still runs the command', async () => {
     const errors: unknown[] = [];
     const backend = await createDockerSandbox({
-      ...docker.defaults,
+      ...defaults,
       dockerfile: STRACE_IMAGE,
     });
     const tracked = await withStraceFileChanges(backend, {
@@ -565,7 +568,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
   it('fails the tool call when onFileChanges throws a plain Error (and does not reach onError)', async () => {
     const errors: unknown[] = [];
     const backend = await createDockerSandbox({
-      ...docker.defaults,
+      ...defaults,
       dockerfile: STRACE_IMAGE,
     });
     const tracked = await withStraceFileChanges(backend, {
@@ -593,7 +596,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
 
   it('propagates a throwing onFileChanges out of sandbox.writeFiles (post-hoc gate)', async () => {
     const backend = await createDockerSandbox({
-      ...docker.defaults,
+      ...defaults,
       dockerfile: STRACE_IMAGE,
     });
     const tracked = await withStraceFileChanges(backend, {
@@ -621,7 +624,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
 
   it('renders a thrown BashException as the writeFile tool RESULT (not a rejected call)', async () => {
     const backend = await createDockerSandbox({
-      ...docker.defaults,
+      ...defaults,
       dockerfile: STRACE_IMAGE,
     });
     const tracked = await withStraceFileChanges(backend, {
@@ -661,7 +664,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
 
   it('surfaces the caller’s BashException format() to the model on its tool result', async () => {
     const backend = await createDockerSandbox({
-      ...docker.defaults,
+      ...defaults,
       dockerfile: STRACE_IMAGE,
     });
     const tracked = await withStraceFileChanges(backend, {
@@ -717,7 +720,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
 
   it('still removes the per-command trace file when onFileChanges throws', async () => {
     const backend = await createDockerSandbox({
-      ...docker.defaults,
+      ...defaults,
       dockerfile: STRACE_IMAGE,
     });
     const tracked = await withStraceFileChanges(backend, {
@@ -754,7 +757,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
   it('isolates a throwing onFileChanges on the spawn path (exit still resolves)', async () => {
     const errors: unknown[] = [];
     const backend = await createDockerSandbox({
-      ...docker.defaults,
+      ...defaults,
       dockerfile: STRACE_IMAGE,
     });
     const tracked = await withStraceFileChanges(backend, {
@@ -782,7 +785,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
 
   it('keeps the spawn exit resolving even when onError itself throws', async () => {
     const backend = await createDockerSandbox({
-      ...docker.defaults,
+      ...defaults,
       dockerfile: STRACE_IMAGE,
     });
     const tracked = await withStraceFileChanges(backend, {
@@ -817,7 +820,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
 describe('selfTestStrace (in-container)', () => {
   it('reports OK on a real strace-capable container', async () => {
     const backend = await createDockerSandbox({
-      ...docker.defaults,
+      ...defaults,
       dockerfile: NODE_STRACE_IMAGE,
     });
     try {
@@ -830,7 +833,7 @@ describe('selfTestStrace (in-container)', () => {
 
   it('reports strace-missing when strace is absent', async () => {
     const backend = await createDockerSandbox({
-      ...docker.defaults,
+      ...defaults,
       image: NODE_BASE,
     });
     try {
@@ -862,7 +865,7 @@ describe('selfTestStrace (in-container)', () => {
       }),
     );
     const backend = await createDockerSandbox({
-      ...docker.defaults,
+      ...defaults,
       dockerfile: NODE_STRACE_IMAGE,
       security: { securityOpt: [`seccomp=${seccomp}`] },
     });
@@ -879,14 +882,14 @@ describe('selfTestStrace (in-container)', () => {
   });
 
   it('reports trace-unparseable under an emulated arch', async (t) => {
-    const { architecture } = await docker.info();
-    if (!['arm64', 'aarch64'].includes(architecture))
+    const { Architecture } = await (await testbed.client()).info();
+    if (Architecture !== 'arm64' && Architecture !== 'aarch64')
       return t.skip('The Docker engine runs amd64 natively');
     // amd64 under emulation on an arm64 host: strace runs but the trace is
     // garbled (qemu renders syscalls as raw `syscall_0x…`), which the parser
     // rejects.
     const backend = await createDockerSandbox({
-      ...docker.defaults,
+      ...defaults,
       dockerfile: NODE_STRACE_IMAGE,
       platform: 'linux/amd64',
     });

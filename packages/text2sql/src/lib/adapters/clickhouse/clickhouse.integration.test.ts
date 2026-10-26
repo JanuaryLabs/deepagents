@@ -1,5 +1,5 @@
 import { ClickHouse as TestClickHouse } from '@zukhruf/testing/clickhouse';
-import { Docker, TestRun } from '@zukhruf/testing/docker';
+import type { ServiceContainer } from '@zukhruf/testing/docker';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { z } from 'zod';
@@ -14,8 +14,6 @@ import {
   tables,
   views,
 } from '@deepagents/text2sql/clickhouse';
-
-const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
 
 const CLICKHOUSE_IMAGES = process.env.CLICKHOUSE_TEST_IMAGE
   ? [process.env.CLICKHOUSE_TEST_IMAGE]
@@ -126,20 +124,23 @@ IDENTIFIED WITH sha256_password BY '${NOT_READONLY_PASSWORD}';
 GRANT SELECT ON ${DATABASE}.* TO ${NOT_READONLY_USER};
 `;
 
+/** Creates the schema with clickhouse-client in the server's container. */
+async function createSchema(service: ServiceContainer): Promise<void> {
+  const { exitCode, output } = await service.container.exec({
+    Cmd: ['clickhouse-client', '--multiquery', '--query', SCHEMA_SQL],
+  });
+  assert.strictEqual(exitCode, 0, output);
+}
+
 for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
   describe(`ClickHouse adapter (${CLICKHOUSE_IMAGE})`, () => {
     it('executes a grounded SELECT through the public adapter', async () => {
       const container = await new TestClickHouse({
-        docker,
+        environment: process.env,
         image: CLICKHOUSE_IMAGE,
       }).start();
       try {
-        await container.exec([
-          'clickhouse-client',
-          '--multiquery',
-          '--query',
-          SCHEMA_SQL,
-        ]);
+        await createSchema(container);
 
         const endpoint = new URL(`http://${container.host}:${container.port}/`);
         endpoint.searchParams.set('user', USER);
@@ -179,16 +180,11 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
 
     it('runs the readonly probe again after a probe fails', async () => {
       const container = await new TestClickHouse({
-        docker,
+        environment: process.env,
         image: CLICKHOUSE_IMAGE,
       }).start();
       try {
-        await container.exec([
-          'clickhouse-client',
-          '--multiquery',
-          '--query',
-          SCHEMA_SQL,
-        ]);
+        await createSchema(container);
 
         const endpoint = new URL(`http://${container.host}:${container.port}/`);
         endpoint.searchParams.set('user', USER);
@@ -234,16 +230,11 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
 
     it('introspects ClickHouse metadata through the public grounding surface', async () => {
       const container = await new TestClickHouse({
-        docker,
+        environment: process.env,
         image: CLICKHOUSE_IMAGE,
       }).start();
       try {
-        await container.exec([
-          'clickhouse-client',
-          '--multiquery',
-          '--query',
-          SCHEMA_SQL,
-        ]);
+        await createSchema(container);
 
         const endpoint = new URL(`http://${container.host}:${container.port}/`);
         endpoint.searchParams.set('user', USER);
@@ -343,16 +334,11 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
 
     it('rejects an out-of-scope relation in an unused CTE before validation', async () => {
       const container = await new TestClickHouse({
-        docker,
+        environment: process.env,
         image: CLICKHOUSE_IMAGE,
       }).start();
       try {
-        await container.exec([
-          'clickhouse-client',
-          '--multiquery',
-          '--query',
-          SCHEMA_SQL,
-        ]);
+        await createSchema(container);
 
         const databaseQueries: string[] = [];
         const endpoint = new URL(`http://${container.host}:${container.port}/`);
@@ -413,16 +399,11 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
 
     it('rejects mutation SQL before it reaches the consumer executor', async () => {
       const container = await new TestClickHouse({
-        docker,
+        environment: process.env,
         image: CLICKHOUSE_IMAGE,
       }).start();
       try {
-        await container.exec([
-          'clickhouse-client',
-          '--multiquery',
-          '--query',
-          SCHEMA_SQL,
-        ]);
+        await createSchema(container);
 
         const databaseQueries: string[] = [];
         const endpoint = new URL(`http://${container.host}:${container.port}/`);
@@ -463,16 +444,11 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
 
     it('rejects a connection whose effective readonly setting is not 1', async () => {
       const container = await new TestClickHouse({
-        docker,
+        environment: process.env,
         image: CLICKHOUSE_IMAGE,
       }).start();
       try {
-        await container.exec([
-          'clickhouse-client',
-          '--multiquery',
-          '--query',
-          SCHEMA_SQL,
-        ]);
+        await createSchema(container);
 
         const queries: string[] = [];
         const endpoint = new URL(`http://${container.host}:${container.port}/`);
@@ -529,16 +505,11 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
 
     it('rejects table functions before they reach the consumer validator', async () => {
       const container = await new TestClickHouse({
-        docker,
+        environment: process.env,
         image: CLICKHOUSE_IMAGE,
       }).start();
       try {
-        await container.exec([
-          'clickhouse-client',
-          '--multiquery',
-          '--query',
-          SCHEMA_SQL,
-        ]);
+        await createSchema(container);
 
         const databaseQueries: string[] = [];
         const endpoint = new URL(`http://${container.host}:${container.port}/`);
@@ -596,16 +567,11 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
 
     it('rejects outfile, mutations, multiple statements, and malformed SQL', async () => {
       const container = await new TestClickHouse({
-        docker,
+        environment: process.env,
         image: CLICKHOUSE_IMAGE,
       }).start();
       try {
-        await container.exec([
-          'clickhouse-client',
-          '--multiquery',
-          '--query',
-          SCHEMA_SQL,
-        ]);
+        await createSchema(container);
 
         const databaseQueries: string[] = [];
         const endpoint = new URL(`http://${container.host}:${container.port}/`);
@@ -658,16 +624,11 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
 
     it('fails closed on unapproved real AST and query-tree nodes', async () => {
       const container = await new TestClickHouse({
-        docker,
+        environment: process.env,
         image: CLICKHOUSE_IMAGE,
       }).start();
       try {
-        await container.exec([
-          'clickhouse-client',
-          '--multiquery',
-          '--query',
-          SCHEMA_SQL,
-        ]);
+        await createSchema(container);
 
         const databaseQueries: string[] = [];
         const endpoint = new URL(`http://${container.host}:${container.port}/`);
@@ -722,16 +683,11 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
 
     it('rejects non-system functions before they reach the consumer validator', async () => {
       const container = await new TestClickHouse({
-        docker,
+        environment: process.env,
         image: CLICKHOUSE_IMAGE,
       }).start();
       try {
-        await container.exec([
-          'clickhouse-client',
-          '--multiquery',
-          '--query',
-          SCHEMA_SQL,
-        ]);
+        await createSchema(container);
 
         const databaseQueries: string[] = [];
         const endpoint = new URL(`http://${container.host}:${container.port}/`);
@@ -779,16 +735,11 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
 
     it('rejects scalar functions whose data sources bypass relation scope', async () => {
       const container = await new TestClickHouse({
-        docker,
+        environment: process.env,
         image: CLICKHOUSE_IMAGE,
       }).start();
       try {
-        await container.exec([
-          'clickhouse-client',
-          '--multiquery',
-          '--query',
-          SCHEMA_SQL,
-        ]);
+        await createSchema(container);
 
         const databaseQueries: string[] = [];
         const endpoint = new URL(`http://${container.host}:${container.port}/`);
@@ -840,16 +791,11 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
 
     it('validates a join when both resolved physical tables are grounded', async () => {
       const container = await new TestClickHouse({
-        docker,
+        environment: process.env,
         image: CLICKHOUSE_IMAGE,
       }).start();
       try {
-        await container.exec([
-          'clickhouse-client',
-          '--multiquery',
-          '--query',
-          SCHEMA_SQL,
-        ]);
+        await createSchema(container);
 
         const endpoint = new URL(`http://${container.host}:${container.port}/`);
         endpoint.searchParams.set('user', USER);
@@ -893,16 +839,11 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
 
     it('validates ClickHouse-specific read clauses with known tree shapes', async () => {
       const container = await new TestClickHouse({
-        docker,
+        environment: process.env,
         image: CLICKHOUSE_IMAGE,
       }).start();
       try {
-        await container.exec([
-          'clickhouse-client',
-          '--multiquery',
-          '--query',
-          SCHEMA_SQL,
-        ]);
+        await createSchema(container);
 
         const endpoint = new URL(`http://${container.host}:${container.port}/`);
         endpoint.searchParams.set('user', USER);
@@ -951,16 +892,11 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
 
     it('validates window functions and QUALIFY with known tree shapes', async () => {
       const container = await new TestClickHouse({
-        docker,
+        environment: process.env,
         image: CLICKHOUSE_IMAGE,
       }).start();
       try {
-        await container.exec([
-          'clickhouse-client',
-          '--multiquery',
-          '--query',
-          SCHEMA_SQL,
-        ]);
+        await createSchema(container);
 
         const endpoint = new URL(`http://${container.host}:${container.port}/`);
         endpoint.searchParams.set('user', USER);
@@ -1004,16 +940,11 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
 
     it('rejects an out-of-scope relation inside a union', async () => {
       const container = await new TestClickHouse({
-        docker,
+        environment: process.env,
         image: CLICKHOUSE_IMAGE,
       }).start();
       try {
-        await container.exec([
-          'clickhouse-client',
-          '--multiquery',
-          '--query',
-          SCHEMA_SQL,
-        ]);
+        await createSchema(container);
 
         const endpoint = new URL(`http://${container.host}:${container.port}/`);
         endpoint.searchParams.set('user', USER);
@@ -1055,16 +986,11 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
 
     it('compares physical relation names with ClickHouse case sensitivity', async () => {
       const container = await new TestClickHouse({
-        docker,
+        environment: process.env,
         image: CLICKHOUSE_IMAGE,
       }).start();
       try {
-        await container.exec([
-          'clickhouse-client',
-          '--multiquery',
-          '--query',
-          SCHEMA_SQL,
-        ]);
+        await createSchema(container);
 
         const endpoint = new URL(`http://${container.host}:${container.port}/`);
         endpoint.searchParams.set('user', USER);
@@ -1105,16 +1031,11 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
 
     it('qualifies unused syntactic relations with the effective database', async () => {
       const container = await new TestClickHouse({
-        docker,
+        environment: process.env,
         image: CLICKHOUSE_IMAGE,
       }).start();
       try {
-        await container.exec([
-          'clickhouse-client',
-          '--multiquery',
-          '--query',
-          SCHEMA_SQL,
-        ]);
+        await createSchema(container);
 
         const endpoint = new URL(`http://${container.host}:${container.port}/`);
         endpoint.searchParams.set('user', USER);
@@ -1159,16 +1080,11 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
 
     it('rejects an out-of-scope relation inside a subquery', async () => {
       const container = await new TestClickHouse({
-        docker,
+        environment: process.env,
         image: CLICKHOUSE_IMAGE,
       }).start();
       try {
-        await container.exec([
-          'clickhouse-client',
-          '--multiquery',
-          '--query',
-          SCHEMA_SQL,
-        ]);
+        await createSchema(container);
 
         const endpoint = new URL(`http://${container.host}:${container.port}/`);
         endpoint.searchParams.set('user', USER);
@@ -1210,16 +1126,11 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
 
     it('validates a grounded view resolved in the default database', async () => {
       const container = await new TestClickHouse({
-        docker,
+        environment: process.env,
         image: CLICKHOUSE_IMAGE,
       }).start();
       try {
-        await container.exec([
-          'clickhouse-client',
-          '--multiquery',
-          '--query',
-          SCHEMA_SQL,
-        ]);
+        await createSchema(container);
 
         const endpoint = new URL(`http://${container.host}:${container.port}/`);
         endpoint.searchParams.set('user', USER);

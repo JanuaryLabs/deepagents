@@ -1,7 +1,6 @@
 /** Live adapter contract tests for SQL policy enforcement. */
 import type { Dataset } from '@google-cloud/bigquery';
 import { BigQuery as TestBigQuery } from '@zukhruf/testing/bigquery';
-import { Docker, TestRun } from '@zukhruf/testing/docker';
 import { type MysqlDatabase, Mysql as TestMysql } from '@zukhruf/testing/mysql';
 import { Postgres as TestPostgres } from '@zukhruf/testing/postgres';
 import { Sqlite as TestSqlite } from '@zukhruf/testing/sqlite';
@@ -48,8 +47,6 @@ import {
   tables as sqlServerTables,
   views as sqlServerViews,
 } from '@deepagents/text2sql/sqlserver';
-
-const docker = new Docker({ testRun: TestRun.fromEnvironment(process.env) });
 
 const scopeErrorPayload = z.object({
   error: z.string(),
@@ -539,9 +536,9 @@ function createBigQueryScope(
   };
 }
 
-const testPostgres = new TestPostgres({ docker });
-const testMysql = new TestMysql({ docker });
-const testSqlServer = new TestSqlServer({ docker });
+const testPostgres = new TestPostgres({ environment: process.env });
+const testMysql = new TestMysql({ environment: process.env });
+const testSqlServer = new TestSqlServer({ environment: process.env });
 
 const adapterCases: AdapterCase[] = [
   {
