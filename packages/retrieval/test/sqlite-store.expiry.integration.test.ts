@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import * as sqliteVec from 'sqlite-vec';
 
-import { SQLiteStore } from '@deepagents/retrieval';
+import { SQLiteStore, similaritySearch } from '@deepagents/retrieval';
 
 const sqlite = new Sqlite();
 
@@ -54,5 +54,35 @@ describe('SQLiteStore source expiry', () => {
       results.map(({ content, document_id }) => ({ content, document_id })),
       [{ content: 'hello world', document_id: 'readme' }],
     );
+  });
+
+  it("ingests a source again in the 'expired' mode only after its expiry has passed", async () => {
+    await using database = await sqlite.database();
+    database.connection.close();
+    using connection = openWithVec(database.path);
+    const store = new SQLiteStore(connection, 3);
+    let listed = 0;
+    const config = {
+      store,
+      embedder: embedder({ greeting: [1, 0, 0], 'hello world': [1, 0, 0] }),
+      connector: {
+        sourceId: 'docs',
+        ingestWhen: 'expired' as const,
+        sources: async function* () {
+          listed++;
+          yield { id: 'readme', content: async () => 'hello world' };
+        },
+      },
+    };
+
+    await similaritySearch('greeting', config);
+    store.setSourceExpiry('docs', new Date('2100-01-01T00:00:00.000Z'));
+    await similaritySearch('greeting', config);
+    const listedBeforeExpiry = listed;
+    store.setSourceExpiry('docs', new Date('2000-01-01T00:00:00.000Z'));
+    await similaritySearch('greeting', config);
+
+    assert.equal(listedBeforeExpiry, 1);
+    assert.equal(listed, 2);
   });
 });

@@ -180,7 +180,7 @@ export class SQLiteStore implements Store {
 					AND expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ','now')
 				LIMIT 1
 			`);
-    const row = stmt.run(sourceId);
+    const row = stmt.get(sourceId);
     return Boolean(row);
   }
   setSourceExpiry(sourceId: string, expiryDate: Date) {
