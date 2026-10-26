@@ -250,6 +250,22 @@ describe('SqliteFs', () => {
       assert.strictEqual(await sqliteFs.exists('/tomove.txt'), false);
       assert.strictEqual(await sqliteFs.readFile('/moved.txt'), 'moving');
     });
+
+    it('reads a file moved onto the path of a removed file as the moved file', async () => {
+      await using database = await sqlite.database();
+      const sqliteFs = new SqliteFs({
+        dbPath: database.path,
+        root: '/',
+        chunkSize: 4,
+      });
+      await sqliteFs.writeFile('/report.txt', 'old-old-old-');
+      await sqliteFs.rm('/report.txt');
+      await sqliteFs.writeFile('/draft.txt', 'new');
+
+      await sqliteFs.mv('/draft.txt', '/report.txt');
+
+      assert.strictEqual(await sqliteFs.readFile('/report.txt'), 'new');
+    });
   });
 
   describe('stat operations', () => {
