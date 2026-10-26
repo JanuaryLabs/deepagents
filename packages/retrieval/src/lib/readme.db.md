@@ -42,6 +42,7 @@ The embed system uses a three-layer architecture:
 The system uses a three-table design for optimal performance and data integrity:
 
 #### Sources Table
+
 ```sql
 CREATE TABLE sources (
   source_id TEXT PRIMARY KEY,           -- e.g., 'github', 'rss', 'local'
@@ -49,7 +50,8 @@ CREATE TABLE sources (
 );
 ```
 
-#### Documents Table  
+#### Documents Table
+
 ```sql
 CREATE TABLE documents (
   id TEXT PRIMARY KEY,                  -- Document identifier (e.g., file path)
@@ -61,6 +63,7 @@ CREATE TABLE documents (
 ```
 
 #### Vector Chunks Table
+
 ```sql
 CREATE VIRTUAL TABLE vec_chunks USING vec0(
   source_id TEXT,                       -- Partition key for performance
@@ -83,7 +86,7 @@ sqliteVec.load(db);
 
 // Performance optimizations applied automatically:
 // PRAGMA journal_mode = WAL;     -- Write-Ahead Logging
-// PRAGMA synchronous = NORMAL;   -- Balanced safety/performance  
+// PRAGMA synchronous = NORMAL;   -- Balanced safety/performance
 // PRAGMA temp_store = MEMORY;    -- Memory temp storage
 ```
 
@@ -93,24 +96,25 @@ sqliteVec.load(db);
 
 ```typescript
 export async function ingest(
-  sourceId: string,      // Data source identifier
-  documentId: string,    // Document identifier  
-  cid: string,          // Content hash (SHA-256)
-  getDocument: () => Content | Promise<Content>
+  sourceId: string, // Data source identifier
+  documentId: string, // Document identifier
+  cid: string, // Content hash (SHA-256)
+  getDocument: () => Content | Promise<Content>,
 ) {
   return store.upsertIfChanged(sourceId, documentId, cid, async () => {
     const document = await getDocument();
-    const chunks = await split(document.content);      // Text chunking
-    const { embeddings } = await embed(chunks);       // Vector generation
+    const chunks = await split(document.content); // Text chunking
+    const { embeddings } = await embed(chunks); // Vector generation
     return chunks.map((content, idx) => ({
       content,
-      embedding: embeddings[idx]
+      embedding: embeddings[idx],
     }));
   });
 }
 ```
 
 **Key Features:**
+
 - **Change Detection**: Only processes content when SHA-256 hash changes
 - **Transactional**: All operations wrapped in database transactions
 - **Batch Processing**: Multiple chunks embedded in single API call
@@ -126,7 +130,7 @@ async function split(content: string): Promise<string[]> {
 
 Uses LangChain's MarkdownTextSplitter for intelligent content segmentation that respects document structure.
 
-### 3. Embedding Generation  
+### 3. Embedding Generation
 
 ```typescript
 async function embed(documents: string[]) {
@@ -134,13 +138,14 @@ async function embed(documents: string[]) {
   const { embeddings } = await embedMany({
     model: lmstudio.textEmbeddingModel('text-embedding-qwen3-embedding-0.6b'),
     values: documents,
-    providerOptions: { lmstudio: { dimensions } }
+    providerOptions: { lmstudio: { dimensions } },
   });
   return { embeddings, dimensions };
 }
 ```
 
 **Model Details:**
+
 - **Model**: `text-embedding-qwen3-embedding-0.6b`
 - **Provider**: LM Studio (local inference)
 - **Dimensions**: 1024
@@ -153,7 +158,7 @@ async function embed(documents: string[]) {
 ```typescript
 export async function similaritySearch(
   query: string,
-  { sourceId, documentId, topN = 10 }: SearchOptions
+  { sourceId, documentId, topN = 10 }: SearchOptions,
 ) {
   const { embeddings } = await embed([query]);
   const qVec = JSON.stringify(embeddings[0]);
@@ -186,6 +191,7 @@ export async function similaritySearch(
 ```
 
 **Search Features:**
+
 - **Partitioned Search**: Search by source for performance
 - **Document-Specific**: Optionally limit to specific documents
 - **Top-K Results**: Configurable result count (default: 10)
@@ -199,19 +205,19 @@ export async function similaritySearch(
 export async function vectorStore(dimension: number) {
   // Initialize database schema with template
   const compiled = template(
-    readFileSync(new URL('./embed.sql', import.meta.url), 'utf8')
+    readFileSync(new URL('./embed.sql', import.meta.url), 'utf8'),
   );
   db.exec(compiled({ DIMENSION: dimension }));
-  
+
   return {
     upsertIfChanged: async (
       sourceId: string,
-      documentId: string, 
+      documentId: string,
       cid: string,
-      getChunks: Embedder
+      getChunks: Embedder,
     ) => {
       // Implementation handles change detection and upsert logic
-    }
+    },
   };
 }
 ```
@@ -261,9 +267,9 @@ function transaction(callback: () => void) {
 
 // Usage in upsert operations
 transaction(() => {
-  deleteStmt.run(sourceId, documentId);  // Remove old chunks
+  deleteStmt.run(sourceId, documentId); // Remove old chunks
   for (const chunk of chunks) {
-    insert(chunk);                       // Insert new chunks
+    insert(chunk); // Insert new chunks
   }
 });
 ```
@@ -273,7 +279,7 @@ transaction(() => {
 ### Database Level
 
 1. **WAL Mode**: Enables concurrent reads during writes
-2. **Memory Temp Storage**: Faster temporary operations  
+2. **Memory Temp Storage**: Faster temporary operations
 3. **Vector Normalization**: Pre-normalized vectors for faster similarity
 4. **Partitioned Tables**: Source-based partitioning for query performance
 
@@ -302,17 +308,17 @@ Use this to manually check content hashes and debug change detection.
 -- Check source status
 SELECT source_id, updated_at FROM sources;
 
--- View document versions  
+-- View document versions
 SELECT id, source_id, cid, updated_at FROM documents;
 
 -- Count chunks per document
-SELECT document_id, COUNT(*) as chunk_count 
-FROM vec_chunks 
+SELECT document_id, COUNT(*) as chunk_count
+FROM vec_chunks
 GROUP BY document_id;
 
 -- Test vector search manually
-SELECT content, distance 
-FROM vec_chunks 
+SELECT content, distance
+FROM vec_chunks
 WHERE source_id = 'your_source'
   AND embedding MATCH vec_normalize(vec_f32('[...]'))
   AND k = 5;
@@ -324,11 +330,11 @@ WHERE source_id = 'your_source'
 apps/api/src/swarm/embed/
 ├── store.ts              # Vector store implementation
 │   ├── vectorStore()     # Main store factory
-│   ├── cid()            # Content hashing utility  
+│   ├── cid()            # Content hashing utility
 │   └── transaction()    # Transaction wrapper
 ├── pipeline.ts          # Processing pipeline
 │   ├── ingest()         # Content ingestion
-│   ├── split()          # Text chunking  
+│   ├── split()          # Text chunking
 │   ├── embed()          # Vector generation
 │   └── similaritySearch() # Semantic search
 ├── embed.sql           # Database schema template
@@ -345,10 +351,9 @@ apps/api/src/swarm/embed/
 ```json
 {
   "node:sqlite": "Built-in SQLite database",
-  "sqlite-vec": "Vector extension for SQLite", 
+  "sqlite-vec": "Vector extension for SQLite",
   "ai": "AI SDK for embeddings",
-  "langchain": "Text splitting utilities",
-  "lodash-es": "Template compilation"
+  "langchain": "Text splitting utilities"
 }
 ```
 

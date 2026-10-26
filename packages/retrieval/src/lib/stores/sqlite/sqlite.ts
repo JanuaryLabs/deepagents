@@ -1,6 +1,7 @@
+import { Declaration } from '@zukhruf/sqlite-drift';
 import { transaction } from '@zukhruf/sqlite-transaction';
 import dedent from 'dedent';
-import { template } from 'lodash-es';
+import type { DatabaseSync } from 'node:sqlite';
 
 import type {
   Chunk,
@@ -10,26 +11,36 @@ import type {
   SearchResult,
   Store,
 } from '../store.js';
-import sql from './sqlite.sql.js';
+import { SETUP, statements, vectors } from './ddl.sqlite.js';
+import { open } from './open.js';
 
 const DEFAULT_TOP_N = 10;
 
-interface DB {
-  prepare: (sql: string) => {
-    run: (...args: any[]) => any;
-    all: (...args: any[]) => any[];
-    get: (...args: any[]) => any;
-  };
-  exec: (sql: string) => void;
-  isTransaction: boolean;
-}
+const tables = new Declaration(statements, { rows: 'keep' });
 
 export class SQLiteStore implements Store {
-  readonly #db: DB;
-  constructor(db: DB, dimension: number) {
+  readonly #db: DatabaseSync;
+  constructor(db: DatabaseSync, dimension: number) {
     this.#db = db;
-    const compiled = template(sql);
-    this.#db.exec(compiled({ DIMENSION: dimension }));
+    this.#db.exec(SETUP);
+    const chunks = new Declaration([vectors(dimension)], {
+      rows: 'replace',
+      devDatabase: () => open(':memory:'),
+    });
+    transaction(
+      this.#db,
+      () => {
+        const stale = chunks.drift(this.#db) === 'stale';
+        chunks.apply(this.#db);
+        // A replaced vec_chunks is empty, yet upsertDoc skips a document whose
+        // cid is unchanged and similaritySearch skips a source that exists.
+        // Deleting the sources cascades to their documents, so the next
+        // ingest embeds every document again.
+        if (stale) this.#db.exec('DELETE FROM sources');
+      },
+      { mode: 'immediate' },
+    );
+    tables.apply(this.#db);
   }
 
   #searchByDocument(inputs: {
@@ -178,7 +189,7 @@ export class SQLiteStore implements Store {
 				SET expires_at = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 				WHERE source_id = ?
 			`);
-    return stmt.run(expiryDate.toISOString(), sourceId);
+    stmt.run(expiryDate.toISOString(), sourceId);
   }
   async index(sourceId: string, corpus: Corpus, expiryDate?: Date) {
     if (expiryDate) {
