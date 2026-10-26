@@ -1,3 +1,4 @@
+import { Declaration } from '@zukhruf/sqlite-drift';
 import { transaction } from '@zukhruf/sqlite-transaction';
 import {
   DatabaseSync,
@@ -7,7 +8,7 @@ import {
 import { z } from 'zod';
 
 import { parseJson } from '../store/columns.ts';
-import STREAM_DDL from './ddl.stream.sqlite.sql';
+import { SETUP, statements } from './ddl.stream.sqlite.ts';
 import { streamStatus, toStreamPart } from './rows.ts';
 import type {
   ListStreamIdsOptions,
@@ -19,7 +20,9 @@ import type {
 } from './stream-store.ts';
 import { StreamStore, collectStreamFailures } from './stream-store.ts';
 
-// Row shapes as node:sqlite returns them for ddl.stream.sqlite.sql.
+const tables = new Declaration(statements, { rows: 'keep' });
+
+// Row shapes as node:sqlite returns them for ddl.stream.sqlite.ts.
 
 const streamRow = z.object({
   id: z.string(),
@@ -55,7 +58,8 @@ export class SqliteStreamStore extends StreamStore {
     super();
     this.#db =
       typeof pathOrDb === 'string' ? new DatabaseSync(pathOrDb) : pathOrDb;
-    this.#db.exec(STREAM_DDL);
+    this.#db.exec(SETUP);
+    tables.apply(this.#db);
     this.#sql = this.#db.createTagStore();
   }
 

@@ -1,3 +1,4 @@
+import { Declaration } from '@zukhruf/sqlite-drift';
 import { transaction } from '@zukhruf/sqlite-transaction';
 import {
   DatabaseSync,
@@ -7,7 +8,7 @@ import {
 import { z } from 'zod';
 
 import { parseJson, parseJsonObject } from './columns.ts';
-import STORE_DDL from './ddl.sqlite.sql';
+import { SETUP, searchStatements, statements } from './ddl.sqlite.ts';
 import type {
   BranchData,
   BranchInfo,
@@ -29,7 +30,10 @@ import type {
 } from './store.ts';
 import { ContextStore } from './store.ts';
 
-// Row shapes as node:sqlite returns them for ddl.sqlite.sql: INTEGER columns
+const tables = new Declaration(statements, { rows: 'keep' });
+const search = new Declaration(searchStatements, { rows: 'replace' });
+
+// Row shapes as node:sqlite returns them for ddl.sqlite.ts: INTEGER columns
 // are numbers, TEXT columns strings, and JSON is stored as TEXT.
 
 const chatColumns = z.object({
@@ -215,7 +219,9 @@ export class SqliteContextStore extends ContextStore {
     super();
     this.#db =
       typeof pathOrDb === 'string' ? new DatabaseSync(pathOrDb) : pathOrDb;
-    this.#db.exec(STORE_DDL);
+    this.#db.exec(SETUP);
+    tables.apply(this.#db);
+    search.apply(this.#db);
     this.#sql = this.#db.createTagStore();
   }
 
