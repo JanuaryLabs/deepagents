@@ -16,6 +16,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 
 import type { ComponentRegistry } from '../tools/registry.ts';
@@ -76,16 +77,16 @@ export function AgentProvider({
   initialMessages?: UIMessage[];
   transport: ChatTransport<UIMessage<unknown, UIDataTypes, UITools>> &
     Pick<ZukhrufChatTransport, 'uploadFile'>;
-  /** Reconnect to the chat's active stream once, on mount. */
+  /** Enable the AI SDK's automatic stream resumption. */
   resume?: boolean;
   /** Observes every streamed data part, transient ones included. */
   onData?: ChatOnDataCallback<UIMessage<unknown, UIDataTypes, UITools>>;
-  /** Observes completion of each assistant response. */
+  /** Observes response termination; inspect isAbort, isDisconnect, and isError. */
   onFinish?: ChatOnFinishCallback<UIMessage<unknown, UIDataTypes, UITools>>;
   onResetChat: (chatId: string) => void;
   queueEnabled?: boolean;
 }) {
-  const { chat, helpers: agent } = useAgentChatSetup({
+  const agent = useAgentChatSetup({
     chatId,
     transport,
     registry,
@@ -115,15 +116,20 @@ export function AgentProvider({
         onResetChat: forwardResetChat,
       }),
   );
-  manager.bind(chat);
+  manager.bind(agent);
+  const queue = useSyncExternalStore(
+    manager.subscribe,
+    () => manager.queue,
+    () => manager.queue,
+  );
 
   useEffect(() => {
     manager.initialize(chatId);
   }, [manager, chatId]);
 
   useEffect(() => {
-    manager.syncStatus(agent.status);
-  }, [manager, agent.status]);
+    manager.processQueue(queue);
+  }, [manager, agent.status, queue]);
 
   const managerMethods = useMemo(
     () => ({
@@ -150,14 +156,11 @@ export function AgentProvider({
     [chatId, registry, debugMode, toggleDebugMode, managerMethods],
   );
 
-  // useChat() returns a new object every render, but its fields (messages, status, error)
-  // are from useSyncExternalStore — referentially stable when unchanged. Methods (sendMessage,
-  // setMessages, etc.) are stable chatRef.current accessors. So memoizing on the three
-  // changing fields is safe: cached object's methods still point to the same Chat instance.
+  // SDK methods change with the chat ID; snapshots stay stable until updated.
   const messagesValue = useMemo(
     () => agent,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [agent.messages, agent.status, agent.error],
+    [agent.id, agent.messages, agent.status, agent.error],
   );
 
   const hasSubmitted = !!skipInitialView || agent.messages.length > 0;

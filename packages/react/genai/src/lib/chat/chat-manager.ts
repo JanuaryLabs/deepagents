@@ -1,10 +1,5 @@
-import type { Chat, UIMessage } from '@ai-sdk/react';
-import {
-  type ChatStatus,
-  SerialJobExecutor,
-  type UIDataTypes,
-  type UITools,
-} from 'ai';
+import type { UIMessage, UseChatHelpers } from '@ai-sdk/react';
+import { SerialJobExecutor, type UIDataTypes, type UITools } from 'ai';
 
 import type { ComposerDraftSource } from '@deepagents/react-input/browser';
 
@@ -36,7 +31,7 @@ type PreparedSubmission = Omit<QueuedMessage, 'id'>;
 
 type Listener = () => void;
 
-type BoundChat = Chat<UIMessage<unknown, UIDataTypes, UITools>>;
+type BoundChat = UseChatHelpers<UIMessage<unknown, UIDataTypes, UITools>>;
 
 export interface ChatManagerOptions {
   queueEnabled?: boolean;
@@ -44,21 +39,15 @@ export interface ChatManagerOptions {
   onResetChat: (chatId: string) => void;
 }
 
-function isBusy(status: ChatStatus): boolean {
-  return status === 'streaming' || status === 'submitted';
-}
-
 export class ChatManager {
   private chat: BoundChat | null = null;
-  private prevStatus: ChatStatus = 'ready';
   private listeners = new Set<Listener>();
   private _queue: QueuedMessage[] = [];
   private _queueEnabled: boolean;
   private readonly uploadFile: UploadFile;
   /**
    * Runs submissions one at a time, in order, so a text-only message never
-   * overtakes an image that is uploading. An idle executor starts a job at
-   * once, so a submission without files still dispatches synchronously.
+   * overtakes an image that is uploading.
    */
   private readonly submissions = new SerialJobExecutor();
 
@@ -74,26 +63,18 @@ export class ChatManager {
     this.chat = chat;
   }
 
-  syncStatus(status: ChatStatus): void {
-    const prev = this.prevStatus;
-    this.prevStatus = status;
-    if (isBusy(prev) && status === 'ready') {
-      this.processQueue();
-    }
-  }
-
   initialize(chatId?: string): void {
     if (!this.chat) return;
     if (chatId) this.consumePrefill(chatId);
   }
 
   /**
-   * Resolves once the message is queued or handed to the chat. Submissions
-   * without files keep the synchronous path; rejects, sending nothing, when a
-   * file cannot be prepared or uploaded.
+   * Resolves once the message is queued or handed to the chat; rejects,
+   * sending nothing, when a file cannot be prepared or uploaded.
    */
   submit(submission: ChatSubmission): Promise<void> {
     if (!this.chat) return Promise.resolve();
+    this.chat.clearError();
     const { files = [], ...message } = submission;
     const chatId = this.chat.id;
     return this.submissions.run(async () => {
@@ -120,17 +101,12 @@ export class ChatManager {
 
   private dispatch(message: PreparedSubmission): void {
     if (!this.chat) return;
-    if (this._queueEnabled && this.isChatBusy()) {
+    if (this._queueEnabled) {
       this._queue = [...this._queue, { id: crypto.randomUUID(), ...message }];
       this.notify();
       return;
     }
     this.directSubmit(message);
-  }
-
-  /** Reads the live Chat, which reports `submitted` as soon as a send starts. */
-  private isChatBusy(): boolean {
-    return this.chat !== null && isBusy(this.chat.status);
   }
 
   private directSubmit(message: PreparedSubmission): void {
@@ -145,12 +121,13 @@ export class ChatManager {
     this.notify();
   }
 
-  private processQueue(): void {
-    if (!this._queueEnabled || this._queue.length === 0) return;
-    const [next, ...rest] = this._queue;
+  /** Dispatch only from a committed queue and SDK status snapshot. */
+  processQueue(queue: readonly QueuedMessage[]): void {
+    if (queue !== this._queue || this.chat?.status !== 'ready') return;
+    if (!this._queueEnabled || queue.length === 0) return;
+    const [next, ...rest] = queue;
     this._queue = rest;
-    this.notify();
-    queueMicrotask(() => this.directSubmit(next));
+    this.directSubmit(next);
   }
 
   removeFromQueue(id: string): void {
@@ -176,14 +153,14 @@ export class ChatManager {
 
   clearChat(): void {
     if (!this.chat) return;
-    this.chat.messages = [];
+    this.chat.setMessages([]);
     this.clearQueue();
     this.notify();
   }
 
   setChat(messages: UIMessage[]): void {
     if (!this.chat) return;
-    this.chat.messages = messages;
+    this.chat.setMessages(messages);
     this.notify();
   }
 

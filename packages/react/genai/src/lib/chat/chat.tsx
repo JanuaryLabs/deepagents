@@ -1,4 +1,4 @@
-import { Chat, useChat } from '@ai-sdk/react';
+import { useChat } from '@ai-sdk/react';
 import {
   type ChatOnDataCallback,
   type ChatOnFinishCallback,
@@ -25,66 +25,30 @@ interface AgentChatSetupProps {
   transport: ChatTransport<AgentUIMessage>;
   initialMessages?: AgentUIMessage[];
   registry?: ComponentRegistry;
-  /** Reconnect to the chat's active stream once, when its Chat is created. */
+  /** Enable the AI SDK's automatic stream resumption. */
   resume?: boolean;
   onData?: ChatOnDataCallback<AgentUIMessage>;
   onFinish?: ChatOnFinishCallback<AgentUIMessage>;
 }
 
-/**
- * Creates one Chat per chatId and renders it with useChat. The Chat is owned
- * here, not by useChat, so its live status and messages can be read between
- * renders; its callbacks and transport read the latest props.
- */
 export function useAgentChatSetup(props: AgentChatSetupProps) {
-  const latest = React.useRef(props);
-  React.useEffect(() => {
-    latest.current = props;
-  });
-
-  const chat = React.useMemo(
-    () =>
-      // eslint-disable-next-line react-hooks/refs -- the callbacks read `latest` only when the Chat calls them (a send, a stream part, a tool call), never while it is constructed during render. The analyzer cannot see past the opaque constructor; agent-context.tsx has the same case.
-      new Chat<AgentUIMessage>({
-        id: props.chatId,
-        messages: props.initialMessages,
-        transport: {
-          sendMessages: (options) =>
-            latest.current.transport.sendMessages(options),
-          reconnectToStream: (options) =>
-            latest.current.transport.reconnectToStream(options),
-        },
-        sendAutomaticallyWhen: (options) =>
-          lastAssistantMessageIsCompleteWithToolCalls(options) ||
-          lastAssistantMessageIsCompleteWithApprovalResponses(options),
-        async onToolCall({ toolCall }) {
-          await completeRenderedClientTool(
-            chat,
-            latest.current.registry,
-            toolCall,
-          );
-        },
-        onData: (part) => latest.current.onData?.(part),
-        onFinish: (event) => latest.current.onFinish?.(event),
-      }),
-    // A new Chat per conversation; initialMessages seed only that Chat.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [props.chatId],
-  );
-
-  React.useEffect(
-    () => () => {
-      void chat.stop();
-    },
-    [chat],
-  );
-
   const helpers = useChat<AgentUIMessage>({
-    chat,
-    experimental_throttle: 50,
+    id: props.chatId,
+    messages: props.initialMessages,
+    transport: props.transport,
+    throttle: 50,
     resume: props.resume,
+    onData: props.onData,
+    onFinish: props.onFinish,
+    sendAutomaticallyWhen: (options) =>
+      lastAssistantMessageIsCompleteWithToolCalls(options) ||
+      lastAssistantMessageIsCompleteWithApprovalResponses(options),
+    onToolCall({ toolCall }) {
+      // The SDK queues tool output behind this callback; awaiting it deadlocks.
+      void completeRenderedClientTool(helpers, props.registry, toolCall);
+    },
   });
-  return { chat, helpers };
+  return helpers;
 }
 
 export function ChatBot(

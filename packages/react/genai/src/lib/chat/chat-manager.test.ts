@@ -1,4 +1,4 @@
-import { Chat, type UseChatHelpers, useChat } from '@ai-sdk/react';
+import { type UseChatHelpers, useChat } from '@ai-sdk/react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { StreamHarness, type StreamSource } from '@zukhruf/testing/streams';
 import type {
@@ -9,7 +9,7 @@ import type {
   UIMessageChunk,
   UITools,
 } from 'ai';
-import { useEffect } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -135,10 +135,7 @@ function imageFile(name = 'shot.png'): File {
 }
 
 /**
- * Replicates the production wiring from `AgentProvider`: bind the live
- * `useChat()` helpers to the manager on every render and forward real status
- * transitions into `manager.syncStatus`, so queue draining happens through the
- * actual status machine rather than by hand-poking the manager.
+ * Replicates AgentProvider's committed SDK status and queue subscription.
  */
 function renderChatManager(
   manager: ChatManager,
@@ -148,20 +145,24 @@ function renderChatManager(
     initialMessages?: TestUIMessage[];
   },
 ) {
-  const chat = new Chat<TestUIMessage>({
-    ...(options.chatId ? { id: options.chatId } : {}),
-    ...(options.initialMessages ? { messages: options.initialMessages } : {}),
-    transport: options.transport,
-  });
   const rendered = renderHook(() => {
-    const helpers = useChat<TestUIMessage>({ chat });
-    manager.bind(chat);
+    const helpers = useChat<TestUIMessage>({
+      id: options.chatId,
+      messages: options.initialMessages,
+      transport: options.transport,
+    });
+    manager.bind(helpers);
+    const queue = useSyncExternalStore(
+      manager.subscribe,
+      () => manager.queue,
+      () => manager.queue,
+    );
     useEffect(() => {
-      manager.syncStatus(helpers.status);
-    }, [helpers.status]);
+      manager.processQueue(queue);
+    }, [helpers.status, queue]);
     return helpers;
   });
-  return Object.assign(rendered, { chat });
+  return rendered;
 }
 
 function isBusy(status: ChatStatus): boolean {
@@ -301,7 +302,7 @@ describe('ChatManager', () => {
       const { unmount } = renderChatManager(manager, { transport });
       try {
         await act(async () => {
-          // No render runs between the two: only the live Chat knows a send started.
+          // Neither submission can observe an SDK status update before React commits.
           void manager.submit(plainSubmission('first'));
           void manager.submit(plainSubmission('second'));
         });
@@ -669,7 +670,7 @@ describe('ChatManager', () => {
       try {
         let pending!: Promise<void>;
         await act(async () => {
-          manager.bind(first.chat);
+          manager.bind(first.result.current);
           pending = manager.submit({
             ...plainSubmission('describe [Image #1]'),
             files: [imageFile()],
@@ -679,7 +680,7 @@ describe('ChatManager', () => {
           expect(uploading.uploads).toHaveLength(1);
         });
 
-        manager.bind(second.chat);
+        manager.bind(second.result.current);
         const rejection = expect(pending).rejects.toThrow(
           'The chat changed before the submission was sent.',
         );

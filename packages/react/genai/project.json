@@ -3,5 +3,14 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/react/genai/src",
   "projectType": "library",
-  "tags": ["layer:app-agnostic"]
+  "tags": ["layer:app-agnostic"],
+  "targets": {
+    "test": {
+      "configurations": {
+        "integration": {
+          "command": "node --test --no-warnings --test-timeout=60000 test/*.test.ts"
+        }
+      }
+    }
+  }
 }
