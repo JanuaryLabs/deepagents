@@ -2,6 +2,7 @@ import type { TelemetryOptions } from 'ai';
 
 import type { CompactOptions, CompactionTrigger } from '@deepagents/compaction';
 import type {
+  AgentControls,
   AgentModel,
   AgentSandbox,
   ContextFragment,
@@ -34,7 +35,7 @@ export type AgentCompaction = Omit<
   triggers: readonly CompactionTrigger[];
 };
 
-export interface AgentDeclaration {
+export interface AgentDeclaration extends AgentControls<ZukhrufToolSet> {
   /**
    * Stable declaration identity persisted in conversation metadata.
    * It must be unique in one declaration graph and must not be renamed while

@@ -197,6 +197,12 @@ export class AgentTurnExecutor {
     const agentOptions = {
       name: declaration.name,
       model: declaration.model,
+      reasoning: declaration.reasoning,
+      maxOutputTokens: declaration.maxOutputTokens,
+      timeout: declaration.timeout,
+      toolCallConcurrency: declaration.toolCallConcurrency,
+      experimental_toolApprovalSecret:
+        declaration.experimental_toolApprovalSecret,
       sandbox,
       context: engine,
       telemetry: this.#plugins.configureTelemetry(
@@ -273,10 +279,17 @@ export class AgentTurnExecutor {
             }),
           )
         : undefined;
+      const { toolApproval } = declaration;
       const stream = await chat(
         agent({
           ...agentOptions,
           tools: modelTools,
+          // The declaration's dynamic policy also sees injected runtime tools;
+          // the call re-types it for this turn's tool set.
+          toolApproval:
+            typeof toolApproval === 'function'
+              ? (options) => toolApproval(options)
+              : toolApproval,
           prepareStep: compaction?.prepareStep,
         }),
         {

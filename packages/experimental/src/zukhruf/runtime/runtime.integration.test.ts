@@ -2340,6 +2340,183 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal(await h.streamStore.getStreamStatus(ask.id), 'completed');
   });
 
+  it('native tool concurrency and timeout apply through queued runtime turns', async () => {
+    let active = 0;
+    let maxActive = 0;
+    let slowAborted = false;
+    const completed: number[] = [];
+    const model: MockLanguageModelV4 = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: ReadableStream.from<LanguageModelV4StreamPart>([
+          ...(model.doStreamCalls.length === 1
+            ? [
+                {
+                  type: 'tool-call' as const,
+                  toolCallId: 'first',
+                  toolName: 'record',
+                  input: '{"id":1}',
+                },
+                {
+                  type: 'tool-call' as const,
+                  toolCallId: 'slow',
+                  toolName: 'slow',
+                  input: '{}',
+                },
+                {
+                  type: 'tool-call' as const,
+                  toolCallId: 'second',
+                  toolName: 'record',
+                  input: '{"id":2}',
+                },
+              ]
+            : [
+                { type: 'text-start' as const, id: 'answer' },
+                {
+                  type: 'text-delta' as const,
+                  id: 'answer',
+                  delta: 'Recovered.',
+                },
+                { type: 'text-end' as const, id: 'answer' },
+              ]),
+          {
+            type: 'finish',
+            finishReason: {
+              unified: model.doStreamCalls.length === 1 ? 'tool-calls' : 'stop',
+              raw: undefined,
+            },
+            usage,
+          },
+        ]),
+      }),
+    });
+    const root = defineAgent({
+      ...declaration(model),
+      toolCallConcurrency: 1,
+      timeout: { tools: { slowMs: 20 } },
+      tools: {
+        record: defineTool({
+          inputSchema: z.object({ id: z.number() }),
+          execute: async ({ id }) => {
+            maxActive = Math.max(maxActive, ++active);
+            await setImmediate();
+            active--;
+            completed.push(id);
+            return id;
+          },
+        }),
+        slow: defineTool({
+          inputSchema: z.object({}),
+          execute: async (_, { abortSignal }) => {
+            maxActive = Math.max(maxActive, ++active);
+            try {
+              await sleep(10_000, undefined, { signal: abortSignal });
+            } finally {
+              active--;
+              slowAborted = abortSignal?.aborted ?? false;
+            }
+            return 'unexpected';
+          },
+        }),
+      },
+    });
+    await using h = await harness(model, root.tools, { declaration: root });
+    await h.runtime.work();
+
+    const result = await h.runtime.enqueue(
+      { chatId: 'native-controls', userId: 'user' },
+      turn('Run the tools.'),
+    );
+    const text = await collectText(result.stream);
+
+    assert.equal(text, 'Recovered.');
+    assert.deepEqual(completed, [1, 2]);
+    assert.equal(maxActive, 1);
+    assert.equal(slowAborted, true);
+    assert.equal(model.doStreamCalls.length, 2);
+    assert.equal(await h.streamStore.getStreamStatus(result.id), 'completed');
+    assert.ok(
+      (await h.streamStore.getChunks(result.id)).some(
+        ({ data }) =>
+          data.type === 'tool-output-error' && data.toolCallId === 'slow',
+      ),
+    );
+  });
+
+  for (const tamper of [false, true]) {
+    it(`native approval policy ${tamper ? 'rejects a forged signature' : 'resumes signed approval after a host restart'}`, async () => {
+      const { track, tools, model } = approvalSetup();
+      tools.sendEmail = defineTool({
+        inputSchema: z.object({ to: z.string() }),
+        execute: async ({ to }) => {
+          track.toolRuns++;
+          return `sent:${to}`;
+        },
+      });
+      const root = defineAgent({
+        ...declaration(model, tools),
+        reasoning: 'low',
+        maxOutputTokens: 128,
+        timeout: { totalMs: 5_000 },
+        toolCallConcurrency: 1,
+        toolApproval: { sendEmail: 'user-approval' },
+        experimental_toolApprovalSecret: 'integration-test-persistent-secret',
+      });
+      await using h = await harness(model, tools, { declaration: root });
+      await h.runtime.work();
+      const conversation = { chatId: `signed-${tamper}`, userId: 'u1' };
+      const ask = await h.runtime.enqueue(conversation, turn('send it'));
+      await collectText(ask.stream);
+      const { head, part } = await pausedToolCall(h.runtime, conversation);
+      assert.equal(part.state, 'approval-requested');
+      assert.ok(part.approval?.signature);
+      assert.equal(track.toolRuns, 0);
+      await h.runtime[Symbol.asyncDispose]();
+      await using resumed = await new AgentRuntime(root).initialize(
+        defineStack(async () => ({
+          store: h.store,
+          streams: h.streams,
+          queue: h.queue,
+          mailboxStore: h.mailboxStore,
+        })),
+      );
+      await resumed.work();
+      const message: UIMessage & { role: 'assistant' } = {
+        ...head,
+        role: 'assistant',
+        parts: head.parts.map((candidate) =>
+          isToolUIPart(candidate) && candidate.state === 'approval-requested'
+            ? {
+                ...candidate,
+                state: 'approval-responded',
+                approval: {
+                  ...candidate.approval,
+                  approved: true,
+                  ...(tamper ? { signature: 'forged' } : {}),
+                },
+              }
+            : candidate,
+        ),
+      };
+
+      const continuation = await resumed.enqueue(conversation, {
+        message,
+        trigger: 'submit-message',
+      });
+      await Array.fromAsync(continuation.stream);
+
+      assert.equal(
+        (await resumed.observe(conversation).status(ask.id))?.status,
+        tamper ? 'failed' : 'completed',
+      );
+      assert.equal(track.toolRuns, tamper ? 0 : 1);
+      assert.equal(model.doStreamCalls.length, tamper ? 1 : 2);
+      for (const request of model.doStreamCalls) {
+        assert.equal(request.reasoning, 'low');
+        assert.equal(request.maxOutputTokens, 128);
+      }
+    });
+  }
+
   it('continues once after AI SDK submits every sibling approval response', async () => {
     const { track, tools, model } = siblingApprovalSetup();
     await using h = await harness(model, tools);

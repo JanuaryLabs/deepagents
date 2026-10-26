@@ -480,7 +480,12 @@ export function createCompaction<TOOLS extends ToolSet>(
     };
   };
   const onStepEnd: GenerateTextOnStepEndCallback<TOOLS> = async (step) => {
-    if (signal.aborted || step.finishReason === 'error') return;
+    if (
+      signal.aborted ||
+      step.finishReason === 'error' ||
+      step.finishReason === 'interrupted'
+    )
+      return;
     const iterations = step.usage.raw?.iterations;
     // Native compaction/iteration totals can describe billing, not the sent prompt.
     const ambiguous =

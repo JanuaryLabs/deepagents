@@ -248,6 +248,90 @@ async function send(
   };
 }
 
+test('interrupted turns retain partial text without replacing successful usage and cache observations', async () => {
+  await using resources = new AsyncDisposableStack();
+  const { store, stack } = await infrastructure(resources);
+  const model: MockLanguageModelV4 = new MockLanguageModelV4({
+    doStream: async () => ({
+      request: { body: { cache_control: { type: 'ephemeral' } } },
+      stream: ReadableStream.from<LanguageModelV4StreamPart>([
+        { type: 'text-start', id: 'answer' },
+        { type: 'text-delta', id: 'answer', delta: 'Retained answer.' },
+        { type: 'text-end', id: 'answer' },
+        {
+          type: 'finish',
+          finishReason: {
+            unified: model.doStreamCalls.length === 2 ? 'interrupted' : 'stop',
+            raw: undefined,
+          },
+          usage: {
+            inputTokens: {
+              total: model.doStreamCalls.length * 100,
+              noCache: 0,
+              cacheRead: 100,
+              cacheWrite: 0,
+            },
+            outputTokens: { total: 1, text: 1, reasoning: 0 },
+          },
+        },
+      ]),
+    }),
+  });
+  const host = resources.use(
+    await new AgentRuntime(
+      declaration(model, {
+        model: summarizer(),
+        triggers: [() => false],
+        targetTokens: 4_000,
+      }),
+    ).initialize(stack),
+  );
+  await host.work();
+  assert.equal(
+    (await send(host, 'Establish observations.')).status?.status,
+    'completed',
+  );
+  const observations = z.object({
+    zukhruf: z.object({ inputUsage: z.unknown(), promptCache: z.unknown() }),
+  });
+  const before = observations.parse(
+    (await store.getChat(conversation.chatId))?.metadata,
+  );
+
+  const interrupted = await send(host, 'Interrupted answer.');
+
+  assert.equal(interrupted.status?.status, 'failed');
+  assert.equal(
+    interrupted.chunks
+      .flatMap((chunk) => (chunk.type === 'text-delta' ? [chunk.delta] : []))
+      .join(''),
+    'Retained answer.',
+  );
+  assert.ok(interrupted.chunks.some((chunk) => chunk.type === 'error'));
+  assert.equal(
+    model.doStreamCalls.length,
+    2,
+    'interruption does not automatically resample',
+  );
+  assert.deepEqual(
+    observations.parse((await store.getChat(conversation.chatId))?.metadata),
+    before,
+  );
+  const messages = await host.observe(conversation).engine.getMessages();
+  assert.ok(
+    messages
+      .at(-1)
+      ?.parts.some(
+        (part) => part.type === 'text' && part.text === 'Retained answer.',
+      ),
+  );
+  assert.equal(
+    (await send(host, 'Continue explicitly.')).status?.status,
+    'completed',
+  );
+  assert.equal(model.doStreamCalls.length, 3);
+});
+
 test(
   'measured input survives restart and checkpoint restore without double counting',
   { timeout: 30_000 },

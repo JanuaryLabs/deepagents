@@ -50,6 +50,21 @@ The public experimental surface contains the pure declaration layer
 ports and adapters. The optional Hono transport plugin is a separate
 `@deepagents/experimental/zukhruf/http` entry point.
 Declarations have a types-only dependency on `@deepagents/context`.
+
+`defineAgent()` accepts native AI SDK `reasoning`, `maxOutputTokens`,
+`timeout`, `toolCallConcurrency`, `toolApproval`, and
+`experimental_toolApprovalSecret` settings. The runtime forwards them to each
+turn without adding defaults. If you configure a signing secret, reuse it
+across workers and restarts that resume the same approval. A `toolApproval`
+map overrides `needsApproval` for the listed tools; unlisted tools keep their
+own rules. A callback controls every tool call, including tools added by the
+runtime. The runtime stores approvals and resumes turns after a decision.
+
+If the provider interrupts a response, the runtime retains partial output
+and marks the turn `failed` without automatically retrying it. Compaction
+keeps the input token and prompt cache measurements from the last successful
+step.
+
 The `AgentHost` returned by `AgentRuntime.initialize()` exposes enqueue, host
 mailbox delivery, observation, approval, denial, worker lifecycle, and
 model-facing collaboration for declared subagents. Its control plane, executor,
