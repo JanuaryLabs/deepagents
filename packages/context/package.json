@@ -68,7 +68,7 @@
     "@ai-sdk/provider": "^4.0.34",
     "@ai-sdk/provider-utils": "^5.0.68",
     "@deepagents/agent": "7.1.4",
-    "@zukhruf/sqlite-transaction": "^0.3.33",
+    "@zukhruf/sqlite-transaction": "^0.3.45",
     "ai": "^7.0.153",
     "chalk": "^5.6.2",
     "dedent": "^1.7.2",

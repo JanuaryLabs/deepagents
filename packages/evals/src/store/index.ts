@@ -8,9 +8,9 @@ import {
   type SQLOutputValue,
 } from 'node:sqlite';
 
-import SCHEMA from './ddl.sqlite.sql';
+import { statements } from './ddl.sqlite.ts';
 
-const schema = new Declaration([SCHEMA], { rows: 'keep' });
+const schema = new Declaration(statements, { rows: 'keep' });
 
 export interface SuiteRow {
   id: string;
@@ -337,7 +337,6 @@ export class RunStore {
     this.#db.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA synchronous = NORMAL;
-      PRAGMA foreign_keys = ON;
       PRAGMA busy_timeout = 5000;
     `);
     const runsTable = this.#get(
