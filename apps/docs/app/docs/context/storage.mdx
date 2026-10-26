@@ -32,7 +32,7 @@ const context = new ContextEngine({
 
 **Features:**
 
-- Auto-creates database and schema on first use
+- Creates the database file and its tables on first use. On each open, it brings an existing file to the declared tables and keeps the rows of each table
 - FTS5 full-text search
 - Single file, easy to backup
 
@@ -222,13 +222,11 @@ PRAGMA synchronous = NORMAL;
 PRAGMA cache_size = -64000;
 PRAGMA temp_store = MEMORY;
 PRAGMA mmap_size = 268435456;
-
--- Integrity
-PRAGMA foreign_keys = ON;
+PRAGMA busy_timeout = 5000;
 
 -- Chats table
 -- createdAt/updatedAt: DEFAULT for insert, inline SET for updates
-CREATE TABLE IF NOT EXISTS chats (
+CREATE TABLE chats (
   id TEXT PRIMARY KEY,
   userId TEXT NOT NULL,
   title TEXT,
@@ -237,31 +235,31 @@ CREATE TABLE IF NOT EXISTS chats (
   updatedAt INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
 );
 
-CREATE INDEX IF NOT EXISTS idx_chats_updatedAt ON chats(updatedAt);
-CREATE INDEX IF NOT EXISTS idx_chats_userId ON chats(userId);
+CREATE INDEX idx_chats_updatedAt ON chats(updatedAt);
+CREATE INDEX idx_chats_userId ON chats(userId);
 -- Composite index for listChats(): WHERE userId = ? ORDER BY updatedAt DESC
-CREATE INDEX IF NOT EXISTS idx_chats_userId_updatedAt ON chats(userId, updatedAt DESC);
+CREATE INDEX idx_chats_userId_updatedAt ON chats(userId, updatedAt DESC);
 
 -- Messages table (nodes in the DAG)
-CREATE TABLE IF NOT EXISTS messages (
+CREATE TABLE messages (
   id TEXT PRIMARY KEY,
   chatId TEXT NOT NULL,
   parentId TEXT,
   name TEXT NOT NULL,
   type TEXT,
-  payload TEXT NOT NULL,
+  data TEXT NOT NULL,
   createdAt INTEGER NOT NULL,
   FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
   FOREIGN KEY (parentId) REFERENCES messages(id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_messages_chatId ON messages(chatId);
-CREATE INDEX IF NOT EXISTS idx_messages_parentId ON messages(parentId);
+CREATE INDEX idx_messages_chatId ON messages(chatId);
+CREATE INDEX idx_messages_parentId ON messages(parentId);
 -- Composite index for recursive CTE parent traversal in getMessageChain()
-CREATE INDEX IF NOT EXISTS idx_messages_chatId_parentId ON messages(chatId, parentId);
+CREATE INDEX idx_messages_chatId_parentId ON messages(chatId, parentId);
 
 -- Branches table (pointers to head messages)
-CREATE TABLE IF NOT EXISTS branches (
+CREATE TABLE branches (
   id TEXT PRIMARY KEY,
   chatId TEXT NOT NULL,
   name TEXT NOT NULL,
@@ -273,12 +271,12 @@ CREATE TABLE IF NOT EXISTS branches (
   UNIQUE(chatId, name)
 );
 
-CREATE INDEX IF NOT EXISTS idx_branches_chatId ON branches(chatId);
+CREATE INDEX idx_branches_chatId ON branches(chatId);
 -- Composite index for getActiveBranch(): WHERE chatId = ? AND isActive = 1
-CREATE INDEX IF NOT EXISTS idx_branches_chatId_isActive ON branches(chatId, isActive);
+CREATE INDEX idx_branches_chatId_isActive ON branches(chatId, isActive);
 
 -- Checkpoints table (pointers to message nodes)
-CREATE TABLE IF NOT EXISTS checkpoints (
+CREATE TABLE checkpoints (
   id TEXT PRIMARY KEY,
   chatId TEXT NOT NULL,
   name TEXT NOT NULL,
@@ -289,12 +287,12 @@ CREATE TABLE IF NOT EXISTS checkpoints (
   UNIQUE(chatId, name)
 );
 
-CREATE INDEX IF NOT EXISTS idx_checkpoints_chatId ON checkpoints(chatId);
+CREATE INDEX idx_checkpoints_chatId ON checkpoints(chatId);
 
 -- FTS5 virtual table for full-text search
 -- messageId/chatId/name are UNINDEXED (stored but not searchable, used for filtering/joining)
 -- Only 'content' is indexed for full-text search
-CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+CREATE VIRTUAL TABLE messages_fts USING fts5(
   messageId UNINDEXED,
   chatId UNINDEXED,
   name UNINDEXED,

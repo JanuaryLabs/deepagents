@@ -17,13 +17,13 @@ The SQLite store uses [sqlite-vec](https://github.com/asg017/sqlite-vec) for vec
 ### Import
 
 ```typescript
-import { nodeSQLite, SQLiteStore } from '@deepagents/retrieval';
+import { SQLiteStore, nodeSQLite } from '@deepagents/retrieval';
 ```
 
 ### Basic Usage
 
 ```typescript
-import { nodeSQLite, similaritySearch, fastembed } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { local } from '@deepagents/retrieval/connectors';
 
 // Create store with dimension matching your embedding model
@@ -42,14 +42,16 @@ const results = await similaritySearch('authentication', {
 nodeSQLite(dbName: string, dimension: number)
 ```
 
-| Parameter | Description |
-|-----------|-------------|
-| `dbName` | Path to SQLite database file (created if doesn't exist) |
-| `dimension` | Vector dimension (must match embedding model) |
+| Parameter   | Description                                             |
+| ----------- | ------------------------------------------------------- |
+| `dbName`    | Path to SQLite database file (created if doesn't exist) |
+| `dimension` | Vector dimension (must match embedding model)           |
 
 ## Schema
 
-The store creates these tables:
+The store declares these tables with `@zukhruf/sqlite-drift`. When it opens a file, it brings the file to the declared tables and keeps the rows of `sources` and `documents`. `vec_chunks` has its own declaration for each vector dimension. When a file was made with another dimension, the store makes an empty `vec_chunks` and deletes the sources. The next ingest then embeds the documents again.
+
+**Source:** `packages/retrieval/src/lib/stores/sqlite/ddl.sqlite.ts`
 
 ### sources
 
@@ -58,10 +60,9 @@ Tracks data sources and their expiry:
 ```sql
 CREATE TABLE sources (
   source_id TEXT PRIMARY KEY,
-  expires_at TEXT,
-  updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-);
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  expires_at TEXT
+) STRICT;
 ```
 
 ### documents
@@ -73,11 +74,10 @@ CREATE TABLE documents (
   id TEXT PRIMARY KEY,
   source_id TEXT NOT NULL,
   cid TEXT NOT NULL,
-  metadata TEXT,
-  updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  metadata TEXT, -- JSON blob with arbitrary document metadata
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   FOREIGN KEY (source_id) REFERENCES sources(source_id) ON DELETE CASCADE
-);
+) STRICT;
 ```
 
 ### vec_chunks
@@ -86,10 +86,10 @@ Virtual table for vector storage and search:
 
 ```sql
 CREATE VIRTUAL TABLE vec_chunks USING vec0(
-  source_id TEXT,
+  source_id TEXT PARTITION KEY,
   document_id TEXT,
-  content TEXT,
-  embedding FLOAT[{DIMENSION}] distance_metric=cosine
+  embedding FLOAT[{DIMENSION}] DISTANCE_METRIC=cosine,
+  +content TEXT -- auxiliary payload (not filterable) for reconstruction
 );
 ```
 
@@ -109,11 +109,7 @@ interface Store {
   sourceExpired: (sourceId: string) => Promise<boolean> | boolean;
   setSourceExpiry: (sourceId: string, expiryDate: Date) => Promise<void> | void;
 
-  index: (
-    sourceId: string,
-    corpus: Corpus,
-    expiryDate?: Date,
-  ) => Promise<void>;
+  index: (sourceId: string, corpus: Corpus, expiryDate?: Date) => Promise<void>;
 }
 ```
 
@@ -121,9 +117,9 @@ interface Store {
 
 ```typescript
 interface SearchOptions {
-  sourceId: string;      // Required: filter by source
-  documentId?: string;   // Optional: filter by specific document
-  topN?: number;         // Number of results (default: 10)
+  sourceId: string; // Required: filter by source
+  documentId?: string; // Optional: filter by specific document
+  topN?: number; // Number of results (default: 10)
 }
 ```
 
@@ -131,20 +127,20 @@ interface SearchOptions {
 
 Results include:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `content` | string | The matched text chunk |
-| `distance` | number | Cosine distance (lower = more similar) |
-| `similarity` | number | 1 - distance (higher = more relevant) |
-| `document_id` | string | Source document identifier |
-| `metadata` | object | Custom metadata from the document |
+| Field         | Type   | Description                            |
+| ------------- | ------ | -------------------------------------- |
+| `content`     | string | The matched text chunk                 |
+| `distance`    | number | Cosine distance (lower = more similar) |
+| `similarity`  | number | 1 - distance (higher = more relevant)  |
+| `document_id` | string | Source document identifier             |
+| `metadata`    | object | Custom metadata from the document      |
 
 ## Real-World Examples
 
 ### Basic Search
 
 ```typescript
-import { nodeSQLite, similaritySearch, fastembed } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { local } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./docs.db', 384);
@@ -167,7 +163,7 @@ for (const result of results) {
 For more control, use the SQLiteStore directly:
 
 ```typescript
-import { nodeSQLite, fastembed, ingest } from '@deepagents/retrieval';
+import { fastembed, ingest, nodeSQLite } from '@deepagents/retrieval';
 import { local } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./direct.db', 384);
@@ -185,7 +181,7 @@ await ingest({
 const results = await store.search(
   'authentication middleware',
   { sourceId: connector.sourceId, topN: 20 },
-  embedder
+  embedder,
 );
 ```
 
@@ -212,7 +208,7 @@ console.log(`Source expired: ${expired}`);
 Use separate stores for different content types:
 
 ```typescript
-import { nodeSQLite, similaritySearch, fastembed } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { local, pdf, rss } from '@deepagents/retrieval/connectors';
 
 const embedder = fastembed();
@@ -249,7 +245,12 @@ const newsResults = await similaritySearch('AI regulation', {
 Or use a single store for unified search:
 
 ```typescript
-import { nodeSQLite, ingest, similaritySearch, fastembed } from '@deepagents/retrieval';
+import {
+  fastembed,
+  ingest,
+  nodeSQLite,
+  similaritySearch,
+} from '@deepagents/retrieval';
 import { local, pdf } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./unified.db', 384);

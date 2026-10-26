@@ -22,6 +22,7 @@ msg-1 ← msg-2 ← msg-3 (main)
 ```
 
 **Why immutable nodes?**
+
 - **History preservation:** Every conversation path is retained
 - **Auditability:** Complete trace of what was said
 - **Branching:** Natural support for "what if" explorations
@@ -34,10 +35,10 @@ Each message points to its parent via `parentId`. This forms the edges of the DA
 interface MessageData {
   id: string;
   chatId: string;
-  parentId: string | null;  // null for root messages
-  name: string;             // 'user', 'assistant', etc.
-  type?: string;            // 'message', 'fragment'
-  data: unknown;            // JSON-serializable content
+  parentId: string | null; // null for root messages
+  name: string; // 'user', 'assistant', etc.
+  type?: string; // 'message', 'fragment'
+  data: unknown; // JSON-serializable content
   createdAt: number;
 }
 ```
@@ -47,6 +48,7 @@ interface MessageData {
 ### No Deletion
 
 The system never deletes message nodes. Instead:
+
 - **Rewind** creates a new branch from an earlier point
 - **Delete chat** removes the entire conversation (CASCADE deletes all related data)
 - **Individual messages** remain forever as part of the graph
@@ -112,8 +114,8 @@ A branch is simply a named pointer to a head message:
 interface BranchData {
   id: string;
   chatId: string;
-  name: string;              // 'main', 'main-v2', etc.
-  headMessageId: string | null;  // null if empty branch
+  name: string; // 'main', 'main-v2', etc.
+  headMessageId: string | null; // null if empty branch
   isActive: boolean;
   createdAt: number;
 }
@@ -129,13 +131,13 @@ When creating a new branch via `rewind()` or `btw()`, the engine generates names
 const branches = await this.#store.listBranches(this.#chatId);
 const samePrefix = branches.filter(
   (it) =>
-    it.name === this.#branchName ||
-    it.name.startsWith(`${this.#branchName}-v`),
+    it.name === this.#branchName || it.name.startsWith(`${this.#branchName}-v`),
 );
 const newBranchName = `${this.#branchName}-v${samePrefix.length + 1}`;
 ```
 
 **Naming progression:**
+
 - `main` (original)
 - `main-v2` (first rewind)
 - `main-v3` (second rewind)
@@ -220,16 +222,16 @@ ON CONFLICT(chatId, name) DO UPDATE SET
   createdAt = excluded.createdAt
 ```
 
-**Source:** `packages/context/src/lib/store/ddl.sqlite.sql:74` and `packages/context/src/lib/store/sqlite.store.ts:622-631`
+**Source:** `packages/context/src/lib/store/ddl.sqlite.ts:70` and `packages/context/src/lib/store/sqlite.store.ts:669-673`
 
 ### Checkpoint vs Branch
 
-| Aspect | Checkpoint | Branch |
-|--------|------------|--------|
-| Purpose | Named bookmark to return to | Active conversation path |
-| Modifiable | Points to fixed message | Head moves with new messages |
-| Per-chat limit | Unique names only | Unique names only |
-| Activation | Restoring creates new branch | Only one active at a time |
+| Aspect         | Checkpoint                   | Branch                       |
+| -------------- | ---------------------------- | ---------------------------- |
+| Purpose        | Named bookmark to return to  | Active conversation path     |
+| Modifiable     | Points to fixed message      | Head moves with new messages |
+| Per-chat limit | Unique names only            | Unique names only            |
+| Activation     | Restoring creates new branch | Only one active at a time    |
 
 ### Restore Creates Branch
 

@@ -351,6 +351,8 @@ DELETE FROM chats WHERE id = ?
 
 ### Complete SQLite Schema
 
+The store keeps these statements in a TypeScript module, one CREATE statement for each object. When it opens a file, the store runs the PRAGMAs first. Then it declares the tables with `@zukhruf/sqlite-drift` and applies the declaration. A new file gets every table. In an existing file, a stale table gets the declared text and keeps its rows. `messages_fts` has its own declaration with `rows: 'replace'`: when it is stale, the store makes it again with no rows. node:sqlite enables foreign keys by default, so the store sets no PRAGMA for them.
+
 ```sql
 -- Performance PRAGMAs
 PRAGMA journal_mode = WAL;
@@ -358,10 +360,10 @@ PRAGMA synchronous = NORMAL;
 PRAGMA cache_size = -64000;
 PRAGMA temp_store = MEMORY;
 PRAGMA mmap_size = 268435456;
-PRAGMA foreign_keys = ON;
+PRAGMA busy_timeout = 5000;
 
 -- Chats table
-CREATE TABLE IF NOT EXISTS chats (
+CREATE TABLE chats (
   id TEXT PRIMARY KEY,
   userId TEXT NOT NULL,
   title TEXT,
@@ -370,10 +372,10 @@ CREATE TABLE IF NOT EXISTS chats (
   updatedAt INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
 );
 
-CREATE INDEX IF NOT EXISTS idx_chats_userId_updatedAt ON chats(userId, updatedAt DESC);
+CREATE INDEX idx_chats_userId_updatedAt ON chats(userId, updatedAt DESC);
 
 -- Messages table (DAG nodes)
-CREATE TABLE IF NOT EXISTS messages (
+CREATE TABLE messages (
   id TEXT PRIMARY KEY,
   chatId TEXT NOT NULL,
   parentId TEXT,
@@ -385,10 +387,10 @@ CREATE TABLE IF NOT EXISTS messages (
   FOREIGN KEY (parentId) REFERENCES messages(id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_messages_chatId_parentId ON messages(chatId, parentId);
+CREATE INDEX idx_messages_chatId_parentId ON messages(chatId, parentId);
 
 -- Branches table (pointers)
-CREATE TABLE IF NOT EXISTS branches (
+CREATE TABLE branches (
   id TEXT PRIMARY KEY,
   chatId TEXT NOT NULL,
   name TEXT NOT NULL,
@@ -401,7 +403,7 @@ CREATE TABLE IF NOT EXISTS branches (
 );
 
 -- Checkpoints table (bookmarks)
-CREATE TABLE IF NOT EXISTS checkpoints (
+CREATE TABLE checkpoints (
   id TEXT PRIMARY KEY,
   chatId TEXT NOT NULL,
   name TEXT NOT NULL,
@@ -413,7 +415,7 @@ CREATE TABLE IF NOT EXISTS checkpoints (
 );
 
 -- FTS5 for full-text search
-CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+CREATE VIRTUAL TABLE messages_fts USING fts5(
   messageId UNINDEXED,
   chatId UNINDEXED,
   name UNINDEXED,
@@ -422,7 +424,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
 );
 ```
 
-**Source:** `packages/context/src/lib/store/ddl.sqlite.sql`
+**Source:** `packages/context/src/lib/store/ddl.sqlite.ts` and `packages/context/src/lib/store/sqlite.store.ts:218-226`
 
 ### Index Strategy
 
