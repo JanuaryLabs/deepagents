@@ -274,6 +274,9 @@ CREATE TABLE branches (
 CREATE INDEX idx_branches_chatId ON branches(chatId);
 -- Composite index for getActiveBranch(): WHERE chatId = ? AND isActive = 1
 CREATE INDEX idx_branches_chatId_isActive ON branches(chatId, isActive);
+-- Deleting a message checks this foreign key; without the index the check
+-- scans every chat's branches
+CREATE INDEX idx_branches_headMessageId ON branches(headMessageId);
 
 -- Checkpoints table (pointers to message nodes)
 CREATE TABLE checkpoints (
@@ -288,6 +291,9 @@ CREATE TABLE checkpoints (
 );
 
 CREATE INDEX idx_checkpoints_chatId ON checkpoints(chatId);
+-- Deleting a message checks this foreign key; without the index the check
+-- scans every chat's checkpoints
+CREATE INDEX idx_checkpoints_messageId ON checkpoints(messageId);
 
 -- FTS5 virtual table for full-text search
 -- messageId/chatId/name are UNINDEXED (stored but not searchable, used for filtering/joining)
@@ -350,6 +356,7 @@ CREATE TABLE IF NOT EXISTS "public"."branches" (
 );
 
 CREATE INDEX IF NOT EXISTS "idx_public_branches_chatId" ON "public"."branches"(chatId);
+CREATE INDEX IF NOT EXISTS "idx_public_branches_headMessageId" ON "public"."branches"(headMessageId);
 
 CREATE TABLE IF NOT EXISTS "public"."checkpoints" (
   id TEXT PRIMARY KEY,
@@ -363,6 +370,7 @@ CREATE TABLE IF NOT EXISTS "public"."checkpoints" (
 );
 
 CREATE INDEX IF NOT EXISTS "idx_public_checkpoints_chatId" ON "public"."checkpoints"(chatId);
+CREATE INDEX IF NOT EXISTS "idx_public_checkpoints_messageId" ON "public"."checkpoints"(messageId);
 
 CREATE TABLE IF NOT EXISTS "public"."messages_fts" (
   messageId TEXT PRIMARY KEY REFERENCES "public"."messages"(id) ON DELETE CASCADE,

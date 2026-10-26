@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS "${schema}"."branches" (
 );
 
 CREATE INDEX IF NOT EXISTS "idx_${schema}_branches_chatId" ON "${schema}"."branches"(chatId);
+CREATE INDEX IF NOT EXISTS "idx_${schema}_branches_headMessageId" ON "${schema}"."branches"(headMessageId);
 
 CREATE TABLE IF NOT EXISTS "${schema}"."checkpoints" (
   id TEXT PRIMARY KEY,
@@ -56,6 +57,7 @@ CREATE TABLE IF NOT EXISTS "${schema}"."checkpoints" (
 );
 
 CREATE INDEX IF NOT EXISTS "idx_${schema}_checkpoints_chatId" ON "${schema}"."checkpoints"(chatId);
+CREATE INDEX IF NOT EXISTS "idx_${schema}_checkpoints_messageId" ON "${schema}"."checkpoints"(messageId);
 
 CREATE TABLE IF NOT EXISTS "${schema}"."messages_fts" (
   messageId TEXT PRIMARY KEY REFERENCES "${schema}"."messages"(id) ON DELETE CASCADE,

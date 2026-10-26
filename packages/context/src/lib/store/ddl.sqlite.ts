@@ -58,6 +58,9 @@ export const statements = [
   `CREATE INDEX idx_branches_chatId ON branches(chatId)`,
   // Composite index for getActiveBranch(): WHERE chatId = ? AND isActive = 1
   `CREATE INDEX idx_branches_chatId_isActive ON branches(chatId, isActive)`,
+  // Deleting a message checks this foreign key; without the index the check
+  // scans every chat's branches
+  `CREATE INDEX idx_branches_headMessageId ON branches(headMessageId)`,
   // Checkpoints point to message nodes
   `CREATE TABLE checkpoints (
   id TEXT PRIMARY KEY,
@@ -70,6 +73,9 @@ export const statements = [
   UNIQUE(chatId, name)
 )`,
   `CREATE INDEX idx_checkpoints_chatId ON checkpoints(chatId)`,
+  // Deleting a message checks this foreign key; without the index the check
+  // scans every chat's checkpoints
+  `CREATE INDEX idx_checkpoints_messageId ON checkpoints(messageId)`,
 ];
 
 // FTS5 table for full-text search over message content. The store fills it
