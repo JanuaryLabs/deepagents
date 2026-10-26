@@ -1,7 +1,9 @@
+import { Declaration } from '@zukhruf/sqlite-drift';
 import { transaction } from '@zukhruf/sqlite-transaction';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 
+import { SETUP, statements } from './ddl.sqlite.ts';
 import {
   type MailboxEndTurnResult,
   type MailboxEnqueueResult,
@@ -13,40 +15,7 @@ import {
   InterAgentCommunicationTypes,
 } from './types.ts';
 
-const DDL = `
-  PRAGMA journal_mode = WAL;
-  PRAGMA synchronous = NORMAL;
-
-  CREATE TABLE IF NOT EXISTS zukhruf_mailbox_items (
-    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-    recipient_chat_id TEXT NOT NULL,
-    recipient_user_id TEXT NOT NULL,
-    communication TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS zukhruf_mailbox_activity (
-    recipient_chat_id TEXT NOT NULL,
-    recipient_user_id TEXT NOT NULL,
-    turn_id TEXT NOT NULL,
-    PRIMARY KEY (recipient_chat_id, recipient_user_id)
-  );
-
-  CREATE TABLE IF NOT EXISTS zukhruf_mailbox_consumed_terminal_ids (
-    communication_id TEXT PRIMARY KEY
-  );
-
-  CREATE INDEX IF NOT EXISTS zukhruf_mailbox_recipient_sequence
-    ON zukhruf_mailbox_items (
-      recipient_chat_id,
-      recipient_user_id,
-      sequence
-    );
-
-  CREATE UNIQUE INDEX IF NOT EXISTS zukhruf_mailbox_communication_id
-    ON zukhruf_mailbox_items (
-      json_extract(communication, '$.id')
-    );
-`;
+const tables = new Declaration(statements, { rows: 'keep' });
 
 const BUSY_TIMEOUT_MS = 5_000;
 
@@ -84,7 +53,8 @@ export class SqliteMailboxStore extends MailboxStore implements Disposable {
   constructor(path: string) {
     super();
     this.#database = new DatabaseSync(path, { timeout: BUSY_TIMEOUT_MS });
-    this.#database.exec(DDL);
+    this.#database.exec(SETUP);
+    tables.apply(this.#database);
   }
 
   override async beginTurn(
