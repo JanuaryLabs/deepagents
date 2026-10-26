@@ -182,6 +182,7 @@ describe('SQLiteStore on an existing file', () => {
 
     using connection = openWithVec(database.path);
     const store = new SQLiteStore(connection, 3);
+    const sourceKept = store.sourceExists('docs');
     store.setSourceExpiry('docs', new Date('2030-01-01T00:00:00.000Z'));
     const results = await store.search(
       'greeting',
@@ -189,6 +190,7 @@ describe('SQLiteStore on an existing file', () => {
       embedder({ greeting: [1, 0, 0] }),
     );
 
+    assert.equal(sourceKept, true);
     assert.deepEqual(
       results.map(({ content, document_id }) => ({ content, document_id })),
       [{ content: CONTENT, document_id: 'readme' }],
