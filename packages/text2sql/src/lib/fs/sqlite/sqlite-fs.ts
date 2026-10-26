@@ -1,3 +1,4 @@
+import { Declaration } from '@zukhruf/sqlite-drift';
 import { transaction } from '@zukhruf/sqlite-transaction';
 import type {
   BufferEncoding,
@@ -13,7 +14,9 @@ import { DatabaseSync, type SQLTagStore } from 'node:sqlite';
 import z from 'zod';
 
 import { entryType } from '../columns.ts';
-import SQLITE_FS_DDL from './ddl.sqlite-fs.sql';
+import { SETUP, statements } from './ddl.sqlite-fs.ts';
+
+const tables = new Declaration(statements, { rows: 'keep' });
 
 // Types not exported from just-bash main index but defined in IFileSystem
 interface ReadFileOptions {
@@ -54,7 +57,7 @@ export interface SqliteFsOptions {
   chunkSize?: number;
 }
 
-// Row shapes as node:sqlite returns them for ddl.sqlite-fs.sql: INTEGER as a
+// Row shapes as node:sqlite returns them for ddl.sqlite-fs.ts: INTEGER as a
 // number, TEXT as a string, BLOB as a Uint8Array.
 
 const entryRow = z.object({
@@ -110,7 +113,8 @@ export class SqliteFs implements IFileSystem {
     const normalizedRoot = this.#normalizeRoot(options.root);
     this.#root = normalizedRoot === '/' ? '' : normalizedRoot;
     this.#db = new DatabaseSync(options.dbPath);
-    this.#db.exec(SQLITE_FS_DDL);
+    this.#db.exec(SETUP);
+    tables.apply(this.#db);
     this.#sql = this.#db.createTagStore();
 
     // Always ensure '/' exists first (for all instances sharing the DB)
