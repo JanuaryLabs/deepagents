@@ -438,7 +438,8 @@ To let only one caller introspect, acquire a key around `index()`. This example
 uses [`@zukhruf/mutex`](https://www.npmjs.com/package/@zukhruf/mutex):
 
 ```typescript
-import { Mutex, SqliteStore } from '@zukhruf/mutex';
+import { Mutex } from '@zukhruf/mutex';
+import { SqliteStore } from '@zukhruf/mutex/sqlite';
 
 const mutex = new Mutex(new SqliteStore('/var/lib/my-app/locks'));
 

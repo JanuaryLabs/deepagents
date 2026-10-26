@@ -1,5 +1,6 @@
 import type { KeyValueStore } from '@opencoredev/loginwithchatgpt-core';
-import { MemoryStore, Mutex } from '@zukhruf/mutex';
+import { Mutex } from '@zukhruf/mutex';
+import { MemoryStore } from '@zukhruf/mutex/memory';
 
 export interface TokenSnapshot<T> {
   tokens: T | undefined;

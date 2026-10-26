@@ -7,7 +7,8 @@ import {
   isAccessTokenExpired,
   resolveConfig,
 } from '@opencoredev/loginwithchatgpt-core';
-import { Mutex, SqliteStore } from '@zukhruf/mutex';
+import { Mutex } from '@zukhruf/mutex';
+import { SqliteStore } from '@zukhruf/mutex/sqlite';
 import { writeFile as atomicWriteFile } from 'atomically';
 import { createHash } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';

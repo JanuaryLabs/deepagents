@@ -1,5 +1,6 @@
 import { Latch } from '@zukhruf/async';
-import { MemoryStore, Mutex } from '@zukhruf/mutex';
+import { Mutex } from '@zukhruf/mutex';
+import { MemoryStore } from '@zukhruf/mutex/memory';
 import type { UIMessage } from 'ai';
 import { EventEmitter, on } from 'node:events';
 import { isDeepStrictEqual } from 'node:util';
