@@ -119,7 +119,7 @@ npm link @deepagents/<package>            # in the other repo
 NODE_OPTIONS="--conditions=@deepagents/source --import <deepagents>/tools/src/text-loader.ts" node …
 ```
 
-The source imports `.sql`, `.md` and `.txt` files as text. The build does
+The source imports `.md` and `.txt` files as text. The build does
 this with esbuild. Without the loader, Node.js stops with
 `ERR_UNKNOWN_FILE_EXTENSION`.
 

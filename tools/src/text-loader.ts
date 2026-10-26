@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { extname } from 'node:path';
 
-const TEXT_EXTENSIONS = new Set(['.sql', '.md', '.txt', '.html', '.graphql', '.gql']);
+const TEXT_EXTENSIONS = new Set(['.md', '.txt', '.html', '.graphql', '.gql']);
 
 export async function load(url, context, nextLoad) {
   const ext = extname(new URL(url).pathname);

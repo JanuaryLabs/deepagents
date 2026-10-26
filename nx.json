@@ -93,7 +93,6 @@
         "esbuildOptions": {
           "loader": {
             ".txt": "text",
-            ".sql": "text",
             ".md": "text"
           }
         },
