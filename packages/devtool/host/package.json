@@ -41,7 +41,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@ai-sdk/otel": "^1.0.147",
+    "@ai-sdk/otel": "^1.0.153",
     "@hono/node-server": "^2.0.10",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/core": "2.11.0",
@@ -54,7 +54,7 @@
     "@deepagents/experimental": "7.1.4"
   },
   "devDependencies": {
-    "@ai-sdk/provider": "4.0.31",
+    "@ai-sdk/provider": "4.0.34",
     "@deepagents/react-input": "7.1.4",
     "@deepagents/context": "7.1.4",
     "@deepagents/devtool-history": "7.1.4",
@@ -67,7 +67,7 @@
     "@vitejs/plugin-react": "6.0.3",
     "@zukhruf/shadcn": "^0.3.31",
     "@zukhruf/ui": "^0.3.31",
-    "ai": "7.0.147",
+    "ai": "7.0.153",
     "cn": "^0.4.0",
     "cronstrue": "^3.24.0",
     "lucide-react": "^1.33.0",

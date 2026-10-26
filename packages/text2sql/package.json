@@ -104,12 +104,12 @@
     "access": "public"
   },
   "dependencies": {
-    "@ai-sdk/groq": "^4.0.66",
+    "@ai-sdk/groq": "^4.0.70",
     "@deepagents/agent": "7.1.4",
     "@deepagents/context": "7.1.4",
     "@google-cloud/bigquery": "8.3.1",
     "@zukhruf/sqlite-transaction": "^0.3.33",
-    "ai": "^7.0.147",
+    "ai": "^7.0.153",
     "cac": "7.0.0",
     "dedent": "1.7.2",
     "just-bash": "^3.2.0",
@@ -124,8 +124,8 @@
     "p-memoize": "^8.0.0"
   },
   "devDependencies": {
-    "@ai-sdk/openai": "^4.0.98",
-    "@ai-sdk/react": "^4.0.151",
+    "@ai-sdk/openai": "^4.0.102",
+    "@ai-sdk/react": "^4.0.157",
     "@deepagents/evals": "7.1.4",
     "@duckdb/node-api": "^1.5.5-r.3",
     "@google-cloud/bigquery": "^8.3.1",

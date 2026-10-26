@@ -100,7 +100,7 @@ const detailedNews = await rag(
   'What are the key points about AI developments?',
   connectors.rss('https://feeds.feedburner.com/oreilly/radar', {
     maxItems: 10,
-    fetchFullArticles: true, // Uses Mozilla Readability
+    fetchFullArticles: true, // Uses the AI SDK web fetch tool
   }),
 );
 ```
@@ -108,7 +108,8 @@ const detailedNews = await rag(
 **RSS Features:**
 
 - Industry-standard parsing (RSS 2.0, RSS 1.0, Atom)
-- Mozilla Readability for full article extraction
+- AI SDK web fetch tool for article extraction as Markdown
+- Feed content retained when article extraction fails or yields less content
 - Metadata preservation (author, categories, dates)
 - Configurable item limits
 

@@ -16,12 +16,12 @@
     "@sdk-it/core": "^0.46.7",
     "@sdk-it/generic": "^0.46.7",
     "@deepagents/context": "*",
-    "@ai-sdk/anthropic": "^4.0.84",
-    "@ai-sdk/google": "^4.0.101",
-    "@ai-sdk/groq": "^4.0.66",
-    "@ai-sdk/openai": "^4.0.98",
-    "@ai-sdk/openai-compatible": "^3.0.74",
-    "@ai-sdk/provider": "^4.0.31",
+    "@ai-sdk/anthropic": "^4.0.88",
+    "@ai-sdk/google": "^4.0.105",
+    "@ai-sdk/groq": "^4.0.70",
+    "@ai-sdk/openai": "^4.0.102",
+    "@ai-sdk/openai-compatible": "^3.0.78",
+    "@ai-sdk/provider": "^4.0.34",
     "p-memoize": "^8.0.0"
   }
 }

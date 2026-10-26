@@ -8,13 +8,13 @@
     "start": "node run.ts"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^4.0.98",
+    "@ai-sdk/openai": "^4.0.102",
     "@deepagents/context": "*",
     "@deepagents/devtool": "*",
     "@deepagents/experimental": "*",
     "@electric-sql/pglite": "^0.5.4",
     "microsandbox": "^0.7.8",
     "pg-boss": "^12.29.0",
-    "ai": "^7.0.147"
+    "ai": "^7.0.153"
   }
 }

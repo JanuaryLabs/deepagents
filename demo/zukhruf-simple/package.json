@@ -21,8 +21,8 @@
     }
   },
   "dependencies": {
-    "@ai-sdk/mcp": "2.0.80",
-    "@ai-sdk/openai": "^4.0.98",
+    "@ai-sdk/mcp": "2.0.84",
+    "@ai-sdk/openai": "^4.0.102",
     "@deepagents/compaction": "*",
     "@deepagents/context": "*",
     "@deepagents/devtool": "*",
@@ -35,7 +35,7 @@
     "hono": "^4.12.33"
   },
   "devDependencies": {
-    "ai": "^7.0.147",
+    "ai": "^7.0.153",
     "just-bash": "^3.2.0"
   }
 }

@@ -1,5 +1,11 @@
-import { Readability } from '@mozilla/readability';
+import { experimental_createWebFetchTool } from '@ai-sdk/tool-web-fetch';
+import assert from 'node:assert/strict';
 import Parser from 'rss-parser';
+
+const webFetch = experimental_createWebFetchTool({
+  // Ingestion stores the complete article in one result.
+  maxLength: Number.MAX_SAFE_INTEGER,
+});
 
 type FeedFields = {
   copyright?: string;
@@ -63,38 +69,19 @@ async function fetchArticleContent(url: string): Promise<string> {
   try {
     console.log(`Fetching full article content from: ${url}`);
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; RSS-RAG-Bot/1.0)',
-        Accept:
-          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate',
-        Connection: 'keep-alive',
-      },
-      signal: AbortSignal.timeout(10000), // 10 second timeout
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const html = await response.text();
-
-    const { JSDOM } = await import('jsdom');
-    const dom = new JSDOM(html, { url });
-    const document = dom.window.document;
-
-    // Use Mozilla's Readability to extract the main content
-    const reader = new Readability(document);
-    const article = reader.parse();
-
-    if (!article) {
-      throw new Error('Readability failed to extract article content');
+    const article = await webFetch.execute(
+      { url },
+      { toolCallId: url, messages: [], context: {} },
+    );
+    assert.ok('type' in article, 'Web fetch must return a complete result');
+    if (article.type === 'error') {
+      throw new Error(article.message);
     }
 
     // Combine title and content for comprehensive text
-    const fullContent = `${article.title ? article.title + '\n\n' : ''}${article.textContent || article.content}`;
+    const fullContent = article.title
+      ? `${article.title}\n\n${article.content}`
+      : article.content;
 
     // Ensure we have meaningful content (at least 200 characters for full articles)
     if (fullContent.length < 200) {
@@ -104,7 +91,7 @@ async function fetchArticleContent(url: string): Promise<string> {
     }
 
     console.log(
-      `✓ Successfully extracted article: "${article.title}" (${fullContent.length} chars, ~${Math.round(fullContent.split(' ').length)} words)`,
+      `✓ Successfully extracted article: "${article.title ?? ''}" (${fullContent.length} chars, ~${Math.round(fullContent.split(' ').length)} words)`,
     );
 
     return fullContent;
