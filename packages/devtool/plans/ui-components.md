@@ -1,12 +1,13 @@
 # UI component topology
 
 Status: current source inventory after moving the shadcn/ui primitives to
-`@zukhruf/shadcn`.
+`@zukhruf/shadcn` and `TheButton` to `@zukhruf/ui`.
 
 ## Conclusion
 
 The repository uses `@zukhruf/shadcn` from npm for shared shadcn/ui primitives.
-Applications own their themes and feature compositions.
+`@zukhruf/ui` supplies `TheButton`, built on those primitives. Applications
+own their themes and feature compositions.
 
 ```text
 deepagents
@@ -23,8 +24,11 @@ deepagents
         └── ui                      application shell, navigation, theme, and trace view
 ```
 
-Both the eval runner and DevTool import primitives from the shared package.
-Neither imports through the other application's paths.
+Both the eval runner and DevTool import primitives from `@zukhruf/shadcn`.
+The chat snapshot action in
+[`../../../packages/react/genai/src/lib/copy/assistant-snapshot.tsx`](../../../packages/react/genai/src/lib/copy/assistant-snapshot.tsx)
+imports `TheButton` from `@zukhruf/ui`. Neither application imports through
+the other's paths.
 
 ## UI modules
 
@@ -138,7 +142,9 @@ The package boundary uses these constraints:
 2. Keep feature compositions in their owning application or feature package;
    the shared package contains shadcn/ui primitives.
 3. Import `@zukhruf/shadcn/styles.css` after Tailwind with a plain `@import`,
-   without `layer()`. Each application's stylesheet owns its theme overrides.
+   without `layer()`. Apps rendering `@deepagents/react-genai` also import
+   `@zukhruf/ui/styles.css`, as the DevTool host does. Each application's
+   stylesheet owns its theme overrides.
 4. Keep navigation as `Link` or `NavLink`, styled with
    `cn(buttonVariants(...))`. Use `Button` for actions.
 5. Keep theme tokens app-owned unless both consumers demonstrably share the

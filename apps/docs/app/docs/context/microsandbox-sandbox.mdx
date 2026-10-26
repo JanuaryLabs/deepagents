@@ -1,5 +1,5 @@
 ---
-title: Microsandbox Sandbox
+title: Microsandbox sandbox
 description: Execute OCI images in local hardware-isolated microVMs without Docker daemon coupling
 ---
 
@@ -15,20 +15,20 @@ image, creates the working directory, and returns a sandbox that can plug
 directly into `createBashTool`.
 
 <Callout type="warn">
-  Microsandbox is an optional peer dependency. It requires Node 22+ and hardware
-  virtualization: Apple silicon, Linux with KVM, or Windows with WHP.
+  Microsandbox is an optional peer dependency. It requires Node.js 22+ and
+  hardware virtualization: Apple silicon, Linux with KVM, or Windows with WHP.
 </Callout>
 
 ## Installation
 
 ```npm
-npm install microsandbox
+npm install microsandbox@^0.7.8
 ```
 
 If the package or runtime is unavailable, `createMicrosandboxSandbox()` throws
-`MicrosandboxNotAvailableError`.
+`MicrosandboxNotAvailableError`. This includes an incomplete runtime installation.
 
-## Basic Usage
+## Basic usage
 
 ```typescript
 import { createMicrosandboxSandbox } from '@deepagents/context';
@@ -43,7 +43,7 @@ The default image is `bash:5.3-alpine3.24`. The default working directory is
 `/workspace`, and the factory creates it during boot because common images do
 not ship that directory.
 
-## AI Agent Integration
+## AI agent integration
 
 ```typescript
 import {
@@ -66,7 +66,7 @@ const sandbox = await createBashTool({
 Pass the `sandbox.tools` object to an agent the same way you would with Docker,
 Apple Container, Daytona, or a virtual sandbox.
 
-## Named Sandboxes
+## Named sandboxes
 
 Pass `name` when a chat or workflow should resume the same microVM:
 
@@ -111,7 +111,7 @@ Bash shell after `configure`. A named sandbox therefore stays persistent even
 if `configure` calls `ephemeral(true)`, and the factory's `workdir` wins over
 one set in `configure`.
 
-## Command Execution APIs
+## Command execution APIs
 
 `executeCommand` is buffered and accepts an optional `AbortSignal`:
 
@@ -140,7 +140,7 @@ const exit = await proc.exit;
 `executeCommand` lowers onto the same streaming path as `spawn`, so cancellation
 kills the guest process instead of abandoning it.
 
-## Readiness Hooks
+## Readiness hooks
 
 Use `readiness` when the image needs a daemon or service started before the
 agent gets the sandbox:
@@ -158,7 +158,7 @@ const sandbox = await createMicrosandboxSandbox({
 
 If `readiness` throws, the factory disposes the sandbox and rethrows the error.
 
-## Image Cache Demo
+## Image cache demo
 
 The Text2SQL demo shows the local image-cache flow:
 
@@ -173,20 +173,22 @@ loads it directly into the local Microsandbox cache with the SDK's
 `createMicrosandboxSandbox({ configure })` with `image(...)` and `pullPolicy('never')` so a
 missing local image fails clearly instead of trying a registry pull.
 
-## Error Handling
+## Error handling
 
 All package-owned errors extend `MicrosandboxSandboxError`:
 
-| Error                           | When                                                |
-| ------------------------------- | --------------------------------------------------- |
-| `MicrosandboxNotAvailableError` | The optional dependency or runtime is unavailable   |
-| `MicrosandboxCreationError`     | Sandbox creation fails outside a known SDK error    |
-| `MicrosandboxCommandError`      | File reads or writes through the VM filesystem fail |
+| Error                           | When                                                                            |
+| ------------------------------- | ------------------------------------------------------------------------------- |
+| `MicrosandboxNotAvailableError` | The optional dependency is unavailable, or the runtime is missing or incomplete |
+| `MicrosandboxCreationError`     | Sandbox creation fails outside a known SDK error                                |
+| `MicrosandboxCommandError`      | File reads or writes through the VM filesystem fail                             |
 
-SDK-owned errors from `microsandbox` are preserved when possible, so callers can
-also handle specific SDK failure classes.
+The adapter wraps the SDK's `LibkrunfwNotFoundError`, `RuntimeNotInstalledError`,
+and `RuntimeIncompleteError` in `MicrosandboxNotAvailableError`, retaining the
+SDK error in `cause`. Other `MicrosandboxError` subclasses pass through unchanged,
+so callers can handle those SDK failure classes directly.
 
-## Next Steps
+## Next steps
 
 - [Sandbox Overview](/docs/context/sandbox) - choosing the right approach
 - [Docker Sandbox](/docs/context/docker-sandbox) - full container isolation through Docker

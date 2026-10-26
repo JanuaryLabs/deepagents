@@ -172,9 +172,9 @@ const balanced = weighted({
 });
 ```
 
-## Run Store
+## Run store
 
-SQLite-backed persistence for runs, cases, and scores:
+`RunStore` persists evaluation runs, cases, and scores in SQLite:
 
 ```typescript
 import { RunStore } from '@deepagents/evals/store';
@@ -189,6 +189,14 @@ const runs = store.listRuns(suite.id);
 const failing = store.getFailingCases(runId, 0.5);
 const summary = store.getRunSummary(runId);
 ```
+
+The store waits up to five seconds for a locked database before a write fails
+with `SQLITE_BUSY`.
+
+Opening an older database applies schema updates automatically. Runs associated
+with an existing suite retain their cases and scores during the upgrade. Runs
+without an existing suite, along with their cases and scores, are removed;
+`suite_id` is now required for every run.
 
 ## Engine
 

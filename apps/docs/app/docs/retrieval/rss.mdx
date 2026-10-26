@@ -1,9 +1,9 @@
 ---
-title: RSS Connector
+title: RSS connector
 description: Index RSS feeds with automatic article extraction
 ---
 
-The `rss` connector indexes content from RSS feeds, optionally fetching and parsing full article content using Mozilla's Readability library.
+The `rss` connector indexes RSS feed content. Enable `fetchFullArticles` to fetch article pages with the AI SDK web fetch tool.
 
 ## Import
 
@@ -14,7 +14,7 @@ import { rss } from '@deepagents/retrieval/connectors';
 ## Basic Usage
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { rss } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./news.db', 384);
@@ -35,23 +35,24 @@ rss(feedUrl: string, options?: {
 })
 ```
 
-### Fetch Full Articles
+### Fetch full articles
 
-By default, the connector uses RSS summary content. Enable `fetchFullArticles` to extract the complete article text:
+By default, the connector uses content included in the feed. Enable `fetchFullArticles` to extract content from each article's URL:
 
 ```typescript
 const connector = rss('https://blog.example.com/feed.xml', {
-  fetchFullArticles: true, // Uses Readability to extract article content
+  fetchFullArticles: true, // Extracts article content as Markdown
   maxItems: 20,
 });
 ```
 
 When enabled, the connector:
 
-1. Fetches each article URL from the feed
-2. Parses the HTML using JSDOM
-3. Extracts main content using Mozilla Readability
-4. Falls back to RSS content if extraction fails
+1. Fetches each public article URL with the AI SDK web fetch tool.
+2. Converts HTML articles to Markdown and preserves supported text formats, such as plain text, JSON, and XML.
+3. Keeps the feed content if extraction fails, yields fewer than 200 characters including the title, or does not produce more content than the feed already provides.
+
+Article requests use the SDK's private-network protections, 10 MiB response limit, and 30-second timeout. The connector keeps the full extracted text within those limits, including articles longer than the tool's default 50,000-character result. Blocked or oversized responses fall back to feed content. The feed URL itself is fetched separately by `rss-parser`.
 
 ## Content Format
 
@@ -87,7 +88,12 @@ Total Items: {count}
 Build a searchable tech news knowledge base:
 
 ```typescript
-import { ingest, similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import {
+  fastembed,
+  ingest,
+  nodeSQLite,
+  similaritySearch,
+} from '@deepagents/retrieval';
 import { rss } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./tech-news.db', 384);
@@ -134,7 +140,7 @@ const results = await searchNews('artificial intelligence regulation');
 Index a company blog for internal search:
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { rss } from '@deepagents/retrieval/connectors';
 
 async function searchBlog(query: string) {
@@ -143,13 +149,13 @@ async function searchBlog(query: string) {
   const results = await similaritySearch(query, {
     connector: rss('https://blog.company.com/feed.xml', {
       fetchFullArticles: true, // Get complete article text
-      maxItems: 100,           // Index last 100 posts
+      maxItems: 100, // Index last 100 posts
     }),
     store,
     embedder: fastembed(),
   });
 
-  return results.map(r => ({
+  return results.map((r) => ({
     title: r.content.match(/Title: (.+)/)?.[1],
     link: r.content.match(/Link: (.+)/)?.[1],
     similarity: r.similarity,
@@ -164,16 +170,16 @@ const results = await searchBlog('product launch announcement');
 Track academic preprints and papers:
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { rss } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./research.db', 384);
 
 // arXiv RSS feeds for specific categories
 const arxivFeeds = [
-  'https://rss.arxiv.org/rss/cs.AI',  // AI
-  'https://rss.arxiv.org/rss/cs.LG',  // Machine Learning
-  'https://rss.arxiv.org/rss/cs.CL',  // NLP
+  'https://rss.arxiv.org/rss/cs.AI', // AI
+  'https://rss.arxiv.org/rss/cs.LG', // Machine Learning
+  'https://rss.arxiv.org/rss/cs.CL', // NLP
 ];
 
 async function searchPapers(query: string) {
@@ -194,7 +200,7 @@ const results = await searchPapers('transformer architecture improvements');
 Index newsletter content for reference:
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { rss } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./newsletters.db', 384);
@@ -242,7 +248,7 @@ This can be passed to an LLM to provide context about the knowledge source.
 The connector generates a source ID based on the feed URL:
 
 ```typescript
-rss('https://example.com/feed.xml')
+rss('https://example.com/feed.xml');
 // sourceId: "rss:https://example.com/feed.xml"
 ```
 

@@ -3,16 +3,16 @@ title: Storage
 description: Persist conversations with SQLite, PostgreSQL, or SQL Server
 ---
 
-import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 
 The storage system persists conversation history using a graph-based model. Messages are stored as nodes in a DAG (directed acyclic graph), with branches and checkpoints as pointers.
 
-## Built-in Stores
+## Built-in stores
 
 <Tabs groupId="context-store" items={['SQLite', 'PostgreSQL', 'SQL Server', 'In-Memory']}>
 <Tab value="SQLite">
 
-File-based persistence using the native SQLite module in Node.js LTS.
+File-based persistence using the built-in `node:sqlite` module in Node.js 24.9.0 or later.
 
 ```typescript
 import { ContextEngine, SqliteContextStore } from '@deepagents/context';
@@ -26,10 +26,12 @@ const context = new ContextEngine({
 ```
 
 **Requirements:**
-- Node.js LTS (uses `node:sqlite` module)
+
+- Node.js 24.9.0 or later (uses `node:sqlite` and its prepared statement cache)
 - No additional packages needed
 
 **Features:**
+
 - Auto-creates database and schema on first use
 - FTS5 full-text search
 - Single file, easy to backup
@@ -74,17 +76,19 @@ await store.close();
 ```
 
 **Requirements:**
+
 - `npm install pg`
 - PostgreSQL 12+
 
 **Features:**
+
 - Connection pooling via `pg.Pool`
 - Full-text search with `tsvector`
 - JSONB metadata support
 - Schema isolation with `schema` option (defaults to `'public'`)
 - Production-grade performance
 
-### Schema Option
+### Schema option
 
 Scope all tables under a specific PostgreSQL schema for multi-tenant isolation:
 
@@ -97,15 +101,19 @@ const store = await PostgresContextStore.create({
 
 The store creates the schema if it does not exist and qualifies all table and index names with the schema prefix.
 
-### Opening the Store
+### Opening the store
 
-Open the store with `PostgresContextStore.create()`. It creates the schema objects before it returns, so you can use the store at once. If it cannot create them, it closes the pool that it made and rejects.
+Open the store with `PostgresContextStore.create()`. It creates the schema
+objects before it returns, so the store is ready to use. A transaction-scoped
+advisory lock serializes initialization for callers opening the same schema.
+If initialization fails, the factory closes any pool it created and rejects
+with the error.
 
 ```typescript
 const store = await PostgresContextStore.create({ pool: '...' });
 ```
 
-### Pool Ownership
+### Pool ownership
 
 When you pass an existing `pg.Pool` instance, the store does not close the pool on `store.close()`. When the store creates its own pool (from a connection string or config object), it closes the pool on `store.close()`.
 
@@ -146,14 +154,22 @@ await store.close();
 ```
 
 **Requirements:**
+
 - `npm install mssql`
 - SQL Server 2016+
+- A connection pool with at least two connections available during initialization
 
 **Features:**
+
 - Connection pooling via `mssql.ConnectionPool`
 - Full-text search (when FTS is installed)
 - Falls back to LIKE search if FTS unavailable
 - Enterprise integration
+
+`SqlServerContextStore.create()` holds a schema-specific application lock while
+creating the schema objects. The lock uses one pooled connection, and the DDL
+runs through other connections because full-text DDL cannot run inside a user
+transaction. The lock is released when initialization succeeds or fails.
 
 </Tab>
 <Tab value="In-Memory">
@@ -172,11 +188,13 @@ const context = new ContextEngine({
 ```
 
 **Behavior:**
+
 - Uses SQLite's in-memory mode (`:memory:`)
 - Data lost when process exits
 - No file created
 
 **Use cases:**
+
 - Unit tests
 - Development/prototyping
 - Stateless serverless functions
@@ -378,7 +396,8 @@ CREATE TRIGGER "public_messages_fts_vector_update"
 
 All table and index names are qualified with the configured schema (defaults to `dbo`). The example below uses `dbo` as the schema:
 
-<pre><code className="language-sql">{`IF OBJECT_ID('[dbo].[chats]', 'U') IS NULL
+<pre>
+  <code className="language-sql">{`IF OBJECT_ID('[dbo].[chats]', 'U') IS NULL
 BEGIN
   CREATE TABLE [dbo].[chats]${''}(
     id NVARCHAR(255) PRIMARY KEY,
@@ -487,7 +506,8 @@ BEGIN
       ON [dbo_context_store_catalog]
       WITH STOPLIST = SYSTEM;
   END;
-END;`}</code></pre>
+END;`}</code>
+</pre>
 
 </Tab>
 </Tabs>
@@ -497,7 +517,8 @@ END;`}</code></pre>
 
 Prisma schema is portable across providers. Change `datasource.provider` to match your database:
 
-<pre><code className="language-prisma">{`datasource db {
+<pre>
+  <code className="language-prisma">{`datasource db {
   provider = "postgresql" // or "sqlite" or "sqlserver"
   url      = env("DATABASE_URL")
 }
@@ -562,16 +583,17 @@ model MessageFts {
   content   String
 
   message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
-}`}</code></pre>
+}`}</code>
+</pre>
 
 **Type mappings by provider:**
 
-| Prisma Type | SQLite | PostgreSQL | SQL Server |
-|-------------|--------|------------|------------|
-| `String` | TEXT | TEXT | NVARCHAR(255) |
-| `Boolean` | INTEGER (0/1) | BOOLEAN | BIT |
-| `Json` | TEXT | JSONB | NVARCHAR(MAX) |
-| `BigInt` | INTEGER | BIGINT | BIGINT |
+| Prisma Type | SQLite        | PostgreSQL | SQL Server    |
+| ----------- | ------------- | ---------- | ------------- |
+| `String`    | TEXT          | TEXT       | NVARCHAR(255) |
+| `Boolean`   | INTEGER (0/1) | BOOLEAN    | BIT           |
+| `Json`      | TEXT          | JSONB      | NVARCHAR(MAX) |
+| `BigInt`    | INTEGER       | BIGINT     | BIGINT        |
 
 </Tab>
 </Tabs>
@@ -582,7 +604,11 @@ model MessageFts {
 
 ```typescript
 // 1. Create context
-const context = new ContextEngine({ store, chatId: 'chat-001', userId: 'user-001' });
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'user-001',
+});
 
 // 2. Add messages (queued in memory)
 context.set(user('Hello!'));
@@ -593,7 +619,11 @@ const { headMessageId } = await context.save();
 // headMessageId points to the last saved message
 
 // 4. New session loads from store
-const context2 = new ContextEngine({ store, chatId: 'chat-001', userId: 'user-001' });
+const context2 = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'user-001',
+});
 const { messages } = await context2.resolve({ renderer: new XmlRenderer() });
 // messages loaded from database
 ```
@@ -604,12 +634,12 @@ Only message fragments (with `type: 'message'`) are saved:
 
 ```typescript
 // Auto-persisted (message fragments set type: 'message')
-context.set(user('Hello'));        // ✅ Saved
+context.set(user('Hello')); // ✅ Saved
 context.set(assistantText('Hi!')); // ✅ Saved
 
 // Not persisted (context fragments stay in memory)
-context.set(role('Be helpful'));   // ❌ Memory only
-context.set(hint('Be concise'));   // ❌ Memory only
+context.set(role('Be helpful')); // ❌ Memory only
+context.set(hint('Be concise')); // ❌ Memory only
 ```
 
 ## Store API
@@ -653,16 +683,36 @@ const branches = await store.listBranches('chat-001');
 const active = await store.getActiveBranch('chat-001');
 ```
 
-### Search Operations
+### Search operations
 
 ```typescript
 // Full-text search messages
 const results = await store.searchMessages('chat-001', 'python tutorial', {
   limit: 10,
-  roles: ['user', 'assistant'],  // Filter by message type
+  roles: ['user', 'assistant'], // Filter by message type
 });
 
 // results: [{ message: {...}, rank: 0.8, snippet: '...python...' }]
+```
+
+SQLite search queries use FTS5 syntax. Wrap terms containing punctuation such as
+`-` or `:` in double quotes, for example `'"well-known"'`. When FTS5 cannot parse
+the query, `searchMessages` rejects with `SearchQuerySyntaxError`, exported from
+`@deepagents/context`. Its `cause` retains the original SQLite error. Other
+database errors pass through unchanged.
+
+```typescript
+import { SearchQuerySyntaxError } from '@deepagents/context';
+
+try {
+  const results = await store.searchMessages('chat-001', '"well-known"');
+} catch (error) {
+  if (error instanceof SearchQuerySyntaxError) {
+    // Ask the caller to correct the query or quote terms with punctuation.
+  } else {
+    throw error;
+  }
+}
 ```
 
 ### Graph Operations
@@ -763,6 +813,7 @@ class RedisContextStore extends ContextStore {
 ```
 
 See the built-in implementations for reference:
+
 - `packages/context/src/lib/store/sqlite.store.ts`
 - `packages/context/src/lib/store/postgres.store.ts`
 - `packages/context/src/lib/store/sqlserver.store.ts`

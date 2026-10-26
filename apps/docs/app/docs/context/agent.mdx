@@ -203,6 +203,54 @@ const assistant = agent({
 | `maxGuardrailRetries` | `number`          | `3`                | Max retry attempts when a guardrail fails                                                                                                                                                                           |
 | `logging`             | `boolean`         | `undefined`        | Enable debug logging                                                                                                                                                                                                |
 
+### Native execution controls
+
+`agent()` and `structuredOutput()` accept the AI SDK's `reasoning`,
+`maxOutputTokens`, `timeout`, `toolCallConcurrency`, `toolApproval`, and
+`experimental_toolApprovalSecret` settings. Their types come directly from
+`ToolLoopAgentSettings`, and omitted settings retain the SDK's behavior.
+
+```ts
+const assistant = agent({
+  name: 'assistant',
+  model,
+  context,
+  sandbox,
+  tools,
+  reasoning: 'low',
+  maxOutputTokens: 4_096,
+  timeout: { totalMs: 120_000, stepMs: 30_000, toolMs: 10_000 },
+  toolCallConcurrency: 1,
+  toolApproval: { publish: 'user-approval' },
+  experimental_toolApprovalSecret: approvalSecret,
+});
+```
+
+`toolCallConcurrency: 1` runs local tools sequentially within a step.
+A `toolApproval` map overrides `needsApproval` for the listed tools; unlisted
+tools keep their own rules. A callback controls every tool call, and returning
+`undefined` means no approval is required.
+
+If you configure `experimental_toolApprovalSecret`, reuse the same secret
+when resuming saved approvals across hosts or restarts. These controls are
+preserved by `clone()` and `asTool()`;
+`asAdvisor()` forwards reasoning and timeout and retains its own output limit.
+
+When a provider reports `finishReason: 'interrupted'`, stream persistence
+retains partial output and sets the stream status to `failed`. It does not
+automatically retry the partial response. User cancellation sets the stream
+status to `cancelled`.
+
+### Tool call repair
+
+The wrapper repairs invalid tool arguments with the agent's model. For direct
+AI SDK calls, `@deepagents/context` also exports
+`createRepairToolCall(model, abortSignal?)` from `@deepagents/agent`; pass its
+result as the SDK's `repairToolCall` option. The helper awaits the tool's input
+schema and skips unknown tools. It uses the SDK's repair abort signal when
+provided, falling back to the signal passed to the helper, so cancellation
+and execution timeouts also stop the repair request.
+
 ## Instance Properties
 
 The agent exposes these readonly properties after creation:
@@ -316,10 +364,10 @@ const writer = agent({
 
 ### asTool() Options
 
-| Option            | Type                                    | Description                                                  |
-| ----------------- | --------------------------------------- | ------------------------------------------------------------ |
-| `toolDescription` | `string`                                | Override the generated tool description                      |
-| `outputExtractor` | `(result) => T \| Promise<T>`            | Transform the sub-agent result before the parent receives it |
+| Option            | Type                          | Description                                                  |
+| ----------------- | ----------------------------- | ------------------------------------------------------------ |
+| `toolDescription` | `string`                      | Override the generated tool description                      |
+| `outputExtractor` | `(result) => T \| Promise<T>` | Transform the sub-agent result before the parent receives it |
 
 ## asAdvisor()
 
@@ -437,7 +485,7 @@ const person = await extractor.generate();
 | `schema`          | `z.ZodType`       | required    | Zod schema for the output type                                                   |
 | `providerOptions` | `object`          | `undefined` | Provider-specific options                                                        |
 | `telemetry`       | `object`          | `undefined` | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText` |
-| `tools`           | `ToolSet`         | `{}`        | Tools available during generation.                                                |
+| `tools`           | `ToolSet`         | `{}`        | Tools available during generation.                                               |
 
 ### structuredOutput Methods
 

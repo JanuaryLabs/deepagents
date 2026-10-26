@@ -23,14 +23,56 @@ chat flows, local retrieval, and Text2SQL assistants.
 | `@deepagents/react-formatters` | Format dates, durations, bytes, numbers, booleans, and generic display values for React UIs.                                   |
 | `@deepagents/react-genai`      | Render AI SDK chat flows, trajectories, tools, citations, dynamic UI, and interactive responses.                               |
 
-`@deepagents/react-genai` uses `@zukhruf/shadcn` components. In your app's
-Tailwind CSS v4 stylesheet, import the component styles after Tailwind with a
-plain `@import`, without `layer()`:
+`@deepagents/react-genai` uses `@zukhruf/shadcn` primitives and `TheButton`
+from `@zukhruf/ui`. In your app's Tailwind CSS v4 stylesheet, import both
+packages' styles after Tailwind with plain `@import` statements, without
+`layer()`:
 
 ```css
 @import 'tailwindcss';
 @import '@zukhruf/shadcn/styles.css';
+@import '@zukhruf/ui/styles.css';
 ```
+
+Import `TheButton` directly from `@zukhruf/ui`; `@deepagents/react-genai`
+no longer re-exports it.
+
+## React and AI SDK compatibility
+
+`@deepagents/react-genai`, `@deepagents/react-input`, and
+`@deepagents/devtool-history` declare React `^19.2.8` as a peer dependency:
+19.2.8 or later within React 19. `@deepagents/react-genai` also requires
+`react-dom` in the same range.
+
+`@deepagents/react-genai` declares `ai@^7.0.153` and
+`@ai-sdk/react@^4.0.157` as dependencies. DevTool declares
+`@ai-sdk/otel@^1.0.153`. These ranges allow dependency updates within each
+package's major version.
+
+## React chat lifecycle
+
+`AgentProvider` from `@deepagents/react-genai` uses the AI SDK's `useChat`
+for chat state and stream reconnection. `initialMessages` seeds each new
+`chatId`; use `useAgent().setChat(messages)` to replace loaded history.
+Changing `chatId` or unmounting the provider stops its active stream.
+
+Submissions queue by default and send in order when the chat is ready.
+`useAgent().submit()` resolves when the message is queued or handed to the
+chat, before the assistant finishes responding. A failed file upload rejects
+that submission without sending it. Errors pause queued sends. A successful
+`useAgentMessages().resumeStream()` lets the queue continue; an explicit
+submission clears the current error and joins the end of the queue.
+
+Set `resume` to enable automatic stream resumption when opening an existing
+conversation and when a page becomes visible after a network disconnect.
+Use `useAgentMessages().resumeStream()` to reconnect manually.
+`ZukhrufChatTransport` replays the response from the beginning; the AI SDK
+replaces partial assistant output so replayed text is not duplicated.
+
+`onData` receives streamed data parts, including transient parts that are
+not stored in message history. `onFinish` can also run after an abort,
+disconnect, or error; inspect its `isAbort`, `isDisconnect`, and `isError`
+flags before treating the response as successful.
 
 ## Current runtime model
 
