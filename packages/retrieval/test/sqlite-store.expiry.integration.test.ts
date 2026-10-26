@@ -86,7 +86,7 @@ describe('SQLiteStore source expiry', () => {
     assert.equal(listed, 2);
   });
 
-  it("ingests a source again in the 'expired' mode once its expiresAfter has passed", async (t) => {
+  it("ingests a source again in the 'expired' mode once its expiresAfter has passed, and not again until the new expiry", async (t) => {
     await using database = await sqlite.database();
     database.connection.close();
     using connection = openWithVec(database.path);
@@ -117,7 +117,10 @@ describe('SQLiteStore source expiry', () => {
       t.mock.timers.reset();
     }
     await similaritySearch('greeting', config);
+    const listedAfterExpiry = listed;
+    await similaritySearch('greeting', config);
 
+    assert.equal(listedAfterExpiry, 2);
     assert.equal(listed, 2);
   });
 
