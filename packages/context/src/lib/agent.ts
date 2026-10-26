@@ -28,7 +28,11 @@ import {
 import chalk from 'chalk';
 import z from 'zod';
 
-import { withHostOnlyToolMetadata } from '@deepagents/agent';
+import {
+  type AgentControls,
+  createRepairToolCall,
+  withHostOnlyToolMetadata,
+} from '@deepagents/agent';
 
 import {
   type ContextEngine,
@@ -52,8 +56,9 @@ import {
   type GuardrailContext,
   runGuardrailChain,
 } from './guardrail.ts';
-import { createRepairToolCall } from './repair.ts';
 import type { AgentSandbox } from './sandbox/types.ts';
+
+export type { AgentControls } from '@deepagents/agent';
 
 /** Input schema shape accepted by the tool `asTool()` produces. */
 export interface SubagentToolInput {
@@ -116,7 +121,9 @@ export type StreamOptions<TOOLS extends ToolSet = ToolSet> = Pick<
   maxRetries?: number;
 };
 
-export interface CreateAgent<TOOLS extends ToolSet = {}> {
+export interface CreateAgent<TOOLS extends ToolSet = {}> extends AgentControls<
+  AgentModelTools<TOOLS>
+> {
   name: string;
   sandbox: AgentSandbox;
   context?: ContextEngine;
@@ -205,7 +212,14 @@ class Agent<TOOLS extends ToolSet> {
       renderer: new XmlRenderer(),
       sandbox: this.#options.sandbox,
     });
-    return generateText({
+    return generateText<AgentModelTools<TOOLS>>({
+      reasoning: this.#options.reasoning,
+      maxOutputTokens: this.#options.maxOutputTokens,
+      timeout: this.#options.timeout,
+      toolCallConcurrency: this.#options.toolCallConcurrency,
+      toolApproval: this.#options.toolApproval,
+      experimental_toolApprovalSecret:
+        this.#options.experimental_toolApprovalSecret,
       abortSignal: options?.abortSignal,
       providerOptions: this.#options.providerOptions,
       telemetry: this.#options.telemetry,
@@ -324,6 +338,13 @@ class Agent<TOOLS extends ToolSet> {
     });
 
     return streamText<AgentModelTools<TOOLS>>({
+      reasoning: this.#options.reasoning,
+      maxOutputTokens: this.#options.maxOutputTokens,
+      timeout: this.#options.timeout,
+      toolCallConcurrency: this.#options.toolCallConcurrency,
+      toolApproval: this.#options.toolApproval,
+      experimental_toolApprovalSecret:
+        this.#options.experimental_toolApprovalSecret,
       abortSignal: config?.abortSignal,
       onStart: config?.onStart,
       onStepStart: config?.onStepStart,
@@ -628,6 +649,8 @@ class Agent<TOOLS extends ToolSet> {
 
         try {
           const result = await generateText({
+            reasoning: this.#options.reasoning,
+            timeout: this.#options.timeout,
             model: this.model,
             instructions: advisorSystemPrompt,
             messages: executionOptions.messages,
@@ -677,7 +700,7 @@ export function agent<const TOOLS extends ToolSet = {}>(
 export interface StructuredOutputOptions<
   TSchema extends FlexibleSchema,
   TOOLS extends ToolSet = {},
-> {
+> extends AgentControls<PreparedTools<TOOLS>> {
   context?: ContextEngine;
   model?: AgentModel;
   schema: TSchema;
@@ -764,7 +787,18 @@ export function structuredOutput<
         sandbox: options.sandbox,
       });
 
-      const result = await generateText({
+      const result = await generateText<
+        PreparedTools<TOOLS>,
+        Record<string, unknown>,
+        ReturnType<typeof Output.object<InferSchema<TSchema>>>
+      >({
+        reasoning: options.reasoning,
+        maxOutputTokens: options.maxOutputTokens,
+        timeout: options.timeout,
+        toolCallConcurrency: options.toolCallConcurrency,
+        toolApproval: options.toolApproval,
+        experimental_toolApprovalSecret:
+          options.experimental_toolApprovalSecret,
         abortSignal: callOptions?.abortSignal,
         providerOptions: options.providerOptions,
         telemetry: options.telemetry,
@@ -805,7 +839,18 @@ export function structuredOutput<
         sandbox: options.sandbox,
       });
 
-      return streamText({
+      return streamText<
+        PreparedTools<TOOLS>,
+        Record<string, unknown>,
+        ReturnType<typeof Output.object<InferSchema<TSchema>>>
+      >({
+        reasoning: options.reasoning,
+        maxOutputTokens: options.maxOutputTokens,
+        timeout: options.timeout,
+        toolCallConcurrency: options.toolCallConcurrency,
+        toolApproval: options.toolApproval,
+        experimental_toolApprovalSecret:
+          options.experimental_toolApprovalSecret,
         abortSignal: callOptions?.abortSignal,
         providerOptions: options.providerOptions,
         telemetry: options.telemetry,

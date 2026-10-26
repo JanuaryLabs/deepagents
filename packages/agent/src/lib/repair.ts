@@ -12,7 +12,13 @@ export function createRepairToolCall(
   model: LanguageModelV4,
   abortSignal?: AbortSignal,
 ): ToolCallRepairFunction<ToolSet> {
-  return async ({ toolCall, tools, inputSchema, error }) => {
+  return async ({
+    toolCall,
+    tools,
+    inputSchema,
+    error,
+    abortSignal: repairSignal = abortSignal,
+  }) => {
     if (NoSuchToolError.isInstance(error)) {
       return null;
     }
@@ -24,7 +30,7 @@ export function createRepairToolCall(
     const tool = tools[toolCall.toolName];
 
     const { output } = await generateText({
-      abortSignal,
+      abortSignal: repairSignal,
       model,
       output: Output.object({ schema: tool.inputSchema }),
       prompt: [
@@ -32,7 +38,7 @@ export function createRepairToolCall(
           ` with the following inputs:`,
         JSON.stringify(toolCall.input),
         `The tool accepts the following schema:`,
-        JSON.stringify(inputSchema(toolCall)),
+        JSON.stringify(await inputSchema(toolCall)),
         'Please fix the inputs.',
       ].join('\n'),
     });

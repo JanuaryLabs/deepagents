@@ -23,7 +23,12 @@ import {
 } from 'ai';
 import chalk from 'chalk';
 
-import { type Agent, type AgentModel, type AgentOutput } from './agent.ts';
+import {
+  type Agent,
+  type AgentModel,
+  type AgentOutput,
+  type ContextVariables,
+} from './agent.ts';
 import {
   last,
   messageToUiMessage,
@@ -62,7 +67,13 @@ export async function generate<O, CIn, COut = CIn>(
   },
 ): Promise<GenerateTextResult<ToolSet, any, AgentOutput<O>>> {
   const tools: SwarmToolSet = agent.toToolset();
-  return generateText({
+  return generateText<SwarmToolSet, ContextVariables, AgentOutput<O>>({
+    reasoning: agent.reasoning,
+    maxOutputTokens: agent.maxOutputTokens,
+    timeout: agent.timeout,
+    toolCallConcurrency: agent.toolCallConcurrency,
+    toolApproval: agent.toolApproval,
+    experimental_toolApprovalSecret: agent.experimental_toolApprovalSecret,
     abortSignal: config?.abortSignal,
     providerOptions: agent.providerOptions ?? config?.providerOptions,
     model: agent.model,
@@ -103,7 +114,13 @@ export async function execute<O, CIn, COut = CIn>(
 ): Promise<StreamTextResult<ToolSet, any, AgentOutput<O>>> {
   const runId = generateId();
   const tools: SwarmToolSet = agent.toToolset();
-  const stream = streamText({
+  const stream = streamText<SwarmToolSet, ContextVariables, AgentOutput<O>>({
+    reasoning: agent.reasoning,
+    maxOutputTokens: agent.maxOutputTokens,
+    timeout: agent.timeout,
+    toolCallConcurrency: agent.toolCallConcurrency,
+    toolApproval: agent.toolApproval,
+    experimental_toolApprovalSecret: agent.experimental_toolApprovalSecret,
     abortSignal: config?.abortSignal,
     providerOptions: config?.providerOptions,
     model: agent.model,
@@ -216,6 +233,10 @@ export function swarm<CIn>(
       await stream.consumeStream({ onError: console.error });
       await last(stream.stream);
 
+      if ((await stream.finishReason) === 'interrupted') {
+        writer.write({ type: 'finish', finishReason: 'interrupted' });
+        return;
+      }
       if (!agent.prepareEnd) return;
 
       while (true) {
@@ -255,6 +276,10 @@ export function swarm<CIn>(
         );
         await stream.consumeStream({ onError: console.error });
         await last(stream.stream);
+        if ((await stream.finishReason) === 'interrupted') {
+          writer.write({ type: 'finish', finishReason: 'interrupted' });
+          return;
+        }
       }
 
       writer.write({ type: 'finish' });
@@ -278,6 +303,8 @@ export async function prepareAgent<CIn>(
     instructions: agent.instructions(contextVariables),
     activeTools: agent.toolsNames,
     model: stepModel,
+    reasoning: agent.reasoning,
+    maxOutputTokens: agent.maxOutputTokens,
     messages,
     toolChoice: agent.toolChoice,
   } as const;

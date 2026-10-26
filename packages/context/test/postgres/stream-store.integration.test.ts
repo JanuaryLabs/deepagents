@@ -535,6 +535,34 @@ describe('PostgreSQL StreamStore Integration', () => {
       );
     }));
 
+  it('should retain partial output and fail a PostgreSQL interrupted stream', async () =>
+    withStore(async (store) => {
+      const manager = new StreamManager({
+        store,
+        changeSource: new PollingChangeSource({ reads: store }),
+      });
+      const streamId = crypto.randomUUID();
+      await manager.register(streamId);
+      const parts: UIMessageChunk[] = [
+        { type: 'start' },
+        { type: 'text-start', id: 'partial' },
+        { type: 'text-delta', id: 'partial', delta: 'Partial answer' },
+        { type: 'text-end', id: 'partial' },
+        { type: 'finish', finishReason: 'interrupted' },
+      ];
+
+      await manager.persist(ReadableStream.from(parts), streamId);
+      await store.updateStreamStatus(streamId, 'completed');
+
+      assert.equal((await store.getStream(streamId))?.status, 'failed');
+      assert.deepEqual(
+        (await store.getChunks(streamId)).map(({ data }) => data),
+        parts,
+      );
+      const replay = await Array.fromAsync(manager.watch(streamId));
+      assert.ok(replay.some((part) => part.type === 'error'));
+    }));
+
   it('should complete a PostgreSQL persisted stream for tool error chunks', async () =>
     await withStore(async (store) => {
       const streamId = crypto.randomUUID();

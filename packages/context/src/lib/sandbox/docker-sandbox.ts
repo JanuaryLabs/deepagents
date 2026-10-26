@@ -309,14 +309,24 @@ export const dockerEngine: ContainerEngine<DockerCommonOptions> = {
   cli: 'docker',
   bindMountsOnClient: false,
   isMissingBindSource(message, source) {
-    const marker = `bind source path does not exist: ${source}`;
-    const index = message.indexOf(marker);
-    if (index < 0) return false;
-    const remainder = message.slice(index + marker.length);
-    return (
-      remainder === '' ||
-      remainder.startsWith('\n') ||
-      remainder.startsWith('\r\n')
+    // Docker Desktop reports VM paths and resolves macOS's root symlinks.
+    const canonicalSource = source.replace(
+      /^\/(tmp|var|etc)(?=\/|$)/,
+      '/private/$1',
+    );
+    return [source, `/host_mnt${source}`, `/host_mnt${canonicalSource}`].some(
+      (candidate) => {
+        const marker = `bind source path does not exist: ${candidate}`;
+        const index = message.indexOf(marker);
+        if (index < 0) return false;
+        // A parent mount must not match its missing child.
+        const remainder = message.slice(index + marker.length);
+        return (
+          remainder === '' ||
+          remainder.startsWith('\n') ||
+          remainder.startsWith('\r\n')
+        );
+      },
     );
   },
 

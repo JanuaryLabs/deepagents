@@ -3,11 +3,7 @@ import type { StreamPart } from './types.ts';
 export type { StreamPart } from './types.ts';
 
 export type StreamStatus =
-  | 'queued'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+  'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface ListStreamIdsOptions {
   status?: StreamStatus;
@@ -51,8 +47,17 @@ export function collectStreamFailures(
 ): StreamFailure[] {
   const failures = new Map<string, string>();
   for (const chunk of chunks) {
-    if (chunk.data.type === 'error' && !failures.has(chunk.streamId)) {
+    if (failures.has(chunk.streamId)) continue;
+    if (chunk.data.type === 'error') {
       failures.set(chunk.streamId, chunk.data.errorText);
+    } else if (
+      chunk.data.type === 'finish' &&
+      chunk.data.finishReason === 'interrupted'
+    ) {
+      failures.set(
+        chunk.streamId,
+        'Model stream interrupted before completion.',
+      );
     }
   }
 

@@ -1,9 +1,11 @@
 import type { UIMessageStreamWriter } from 'ai';
 
-import type { StreamChunkData, StreamStore } from './stream/stream-store.ts';
+import {
+  type StreamChunkData,
+  type StreamStore,
+  collectStreamFailures,
+} from './stream/stream-store.ts';
 import type { StreamPart } from './stream/types.ts';
-
-type StreamErrorPart = Extract<StreamPart, { type: 'error' }>;
 
 export interface PersistedWriterOptions {
   writer: UIMessageStreamWriter;
@@ -50,7 +52,7 @@ export async function persistedWriter(
 
   let seq = 0;
   let buffer: StreamChunkData[] = [];
-  let failedByErrorChunk = false;
+  let failedByChunk = false;
   let abortedByChunk = false;
 
   async function flush() {
@@ -69,20 +71,9 @@ export async function persistedWriter(
     };
   }
 
-  function isStreamErrorPart(part: StreamPart): part is StreamErrorPart {
-    return part.type === 'error';
-  }
-
   async function appendBatch(batch: StreamChunkData[]) {
-    const hasErrorPart =
-      !failedByErrorChunk &&
-      batch.map((chunk) => chunk.data).some(isStreamErrorPart);
-
     await store.appendChunks(batch);
-
-    if (hasErrorPart) {
-      failedByErrorChunk = true;
-    }
+    failedByChunk ||= collectStreamFailures(batch).length > 0;
   }
 
   async function persistChunk(chunk: StreamChunkData) {
@@ -123,7 +114,7 @@ export async function persistedWriter(
     flush,
     async complete() {
       await flush();
-      if (failedByErrorChunk) return;
+      if (failedByChunk) return;
       await store.updateStreamStatus(
         streamId,
         abortedByChunk ? 'cancelled' : 'completed',
@@ -131,7 +122,7 @@ export async function persistedWriter(
     },
     async fail(error?: string) {
       await flush();
-      if (failedByErrorChunk) return;
+      if (failedByChunk) return;
       await store.updateStreamStatus(streamId, 'failed', { error });
     },
     async cleanup() {

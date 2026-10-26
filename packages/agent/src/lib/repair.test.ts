@@ -118,6 +118,69 @@ function createRepairStreamingModel() {
 }
 
 describe('repair tool calls', () => {
+  it('sends the resolved tool schema to the repair model before executing repaired input', async () => {
+    const model = createRepairSequenceModel();
+    const executedInputs: string[] = [];
+    const assistant = agent({
+      name: 'repair-schema',
+      prompt: 'Look up orders.',
+      model,
+      tools: {
+        lookup_order: tool({
+          inputSchema: z.object({
+            orderId: z.string().describe('The order identifier'),
+          }),
+          execute: ({ orderId }) => {
+            executedInputs.push(orderId);
+            return `order:${orderId}`;
+          },
+        }),
+      },
+    });
+    const abortController = new AbortController();
+
+    try {
+      const result = await generate(
+        assistant,
+        'Find order 42',
+        {},
+        {
+          abortSignal: abortController.signal,
+        },
+      );
+
+      assert.strictEqual(result.text, 'done');
+      assert.deepStrictEqual(executedInputs, ['42']);
+      assert.strictEqual(model.doGenerateCalls.length, 3);
+      const [request, repairRequest] = model.doGenerateCalls;
+      assert.ok(request);
+      assert.ok(repairRequest);
+      const advertisedTool = request.tools?.find(
+        (tool) => tool.name === 'lookup_order',
+      );
+      assert.ok(advertisedTool?.type === 'function');
+      assert.deepStrictEqual(advertisedTool.inputSchema.properties, {
+        orderId: { type: 'string', description: 'The order identifier' },
+      });
+      assert.deepStrictEqual(advertisedTool.inputSchema.required, ['orderId']);
+      const repairPrompt = repairRequest.prompt
+        .flatMap((message) =>
+          message.role === 'user'
+            ? message.content
+                .filter((part) => part.type === 'text')
+                .map((part) => part.text)
+            : [],
+        )
+        .join('\n');
+      assert.ok(
+        repairPrompt.includes(JSON.stringify(advertisedTool.inputSchema)),
+        `repair model must receive the resolved schema; received:\n${repairPrompt}`,
+      );
+    } finally {
+      abortController.abort();
+    }
+  });
+
   it('passes the request abort signal to the repair call', async () => {
     const model = createRepairSequenceModel();
     const abortController = new AbortController();

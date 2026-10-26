@@ -8,6 +8,7 @@ import {
   type ToolCallRepairFunction,
   type ToolChoice,
   type ToolExecutionOptions,
+  type ToolLoopAgentSettings,
   type ToolSet,
   type UIDataTypes,
   type UIMessage,
@@ -81,7 +82,21 @@ export type PrepareEndFn<C, _O = unknown> = (config: {
   | undefined
   | void;
 
-export interface CreateAgent<Output, CIn, COut = CIn> {
+export type AgentControls<TOOLS extends ToolSet = ToolSet> = Pick<
+  ToolLoopAgentSettings<never, TOOLS>,
+  | 'reasoning'
+  | 'maxOutputTokens'
+  | 'timeout'
+  | 'toolCallConcurrency'
+  | 'toolApproval'
+  | 'experimental_toolApprovalSecret'
+>;
+
+export interface CreateAgent<
+  Output,
+  CIn,
+  COut = CIn,
+> extends AgentControls<SwarmToolSet> {
   name: string;
   prompt: Instruction<CIn>;
   // Description of what this agent does, to be included in handoff tool description
@@ -111,8 +126,16 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
   readonly output?: z.Schema<Output>;
   readonly providerOptions?: CreateAgent<Output, CIn, COut>['providerOptions'];
   readonly logging?: boolean;
+  readonly reasoning?: AgentControls['reasoning'];
+  readonly maxOutputTokens?: AgentControls['maxOutputTokens'];
+  readonly timeout?: AgentControls['timeout'];
+  readonly toolCallConcurrency?: AgentControls['toolCallConcurrency'];
+  readonly toolApproval?: AgentControls<SwarmToolSet>['toolApproval'];
+  readonly experimental_toolApprovalSecret?: AgentControls['experimental_toolApprovalSecret'];
+  readonly #config: CreateAgent<Output, CIn, COut>;
 
   constructor(config: CreateAgent<Output, CIn, COut>) {
+    this.#config = config;
     this.model = config.model;
     this.toolChoice = config.toolChoice || 'auto';
     this.handoffs = config.handoffs ?? [];
@@ -122,6 +145,13 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
     this.internalName = snakecase(config.name);
     this.providerOptions = config.providerOptions;
     this.logging = config.logging;
+    this.reasoning = config.reasoning;
+    this.maxOutputTokens = config.maxOutputTokens;
+    this.timeout = config.timeout;
+    this.toolCallConcurrency = config.toolCallConcurrency;
+    this.toolApproval = config.toolApproval;
+    this.experimental_toolApprovalSecret =
+      config.experimental_toolApprovalSecret;
     this.handoff = {
       name: this.internalName,
       instructions: config.prompt,
@@ -240,7 +270,18 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
       ) => {
         try {
           const tools: SwarmToolSet = this.handoff.tools;
-          const result = await generateText({
+          const result = await generateText<
+            SwarmToolSet,
+            ContextVariables,
+            AgentOutput<Output>
+          >({
+            reasoning: this.reasoning,
+            maxOutputTokens: this.maxOutputTokens,
+            timeout: this.timeout,
+            toolCallConcurrency: this.toolCallConcurrency,
+            toolApproval: this.toolApproval,
+            experimental_toolApprovalSecret:
+              this.experimental_toolApprovalSecret,
             model: this.model,
             instructions: this.#prepareInstructions(),
             prompt: `
@@ -342,20 +383,12 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
   }
 
   clone(
-    agent?: Omit<Partial<CreateAgent<Output, CIn, COut>>, 'handoffs'>,
+    overrides?: Omit<Partial<CreateAgent<Output, CIn, COut>>, 'handoffs'>,
   ): Agent<Output, CIn, COut> {
     return new Agent<Output, CIn, COut>({
-      prepareHandoff: (messages) => this.prepareHandoff?.(messages),
-      model: agent?.model ?? this.model,
-      toolChoice: agent?.toolChoice ?? this.toolChoice,
-      prompt: agent?.prompt ?? this.handoff.instructions,
-      tools: agent?.tools ?? this.handoff.tools,
-      name: agent?.name ?? this.handoff.name,
-      handoffDescription:
-        agent?.handoffDescription ?? this.handoff.handoffDescription,
+      ...this.#config,
+      ...overrides,
       handoffs: [...this.handoffs],
-      output: agent?.output ?? this.output,
-      providerOptions: agent?.providerOptions ?? this.providerOptions,
     });
   }
 }
