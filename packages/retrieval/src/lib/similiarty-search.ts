@@ -32,10 +32,6 @@ export async function similaritySearch(
     }
   }
 
-  // Calculate expiry date if connector specifies expiresAfter
-  const expiryDate = config.connector.expiresAfter
-    ? new Date(Date.now() + config.connector.expiresAfter)
-    : undefined;
   if (shouldIngest) {
     await ingest(config);
   }

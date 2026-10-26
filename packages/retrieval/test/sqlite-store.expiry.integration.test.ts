@@ -85,4 +85,65 @@ describe('SQLiteStore source expiry', () => {
     assert.equal(listedBeforeExpiry, 1);
     assert.equal(listed, 2);
   });
+
+  it("ingests a source again in the 'expired' mode once its expiresAfter has passed", async (t) => {
+    await using database = await sqlite.database();
+    database.connection.close();
+    using connection = openWithVec(database.path);
+    const store = new SQLiteStore(connection, 3);
+    let listed = 0;
+    const config = {
+      store,
+      embedder: embedder({ greeting: [1, 0, 0], 'hello world': [1, 0, 0] }),
+      connector: {
+        sourceId: 'docs',
+        ingestWhen: 'expired' as const,
+        expiresAfter: 60 * 60 * 1000,
+        sources: async function* () {
+          listed++;
+          yield { id: 'readme', content: async () => 'hello world' };
+        },
+      },
+    };
+
+    // The first ingest runs a day ago, so its hour-long expiry has passed.
+    t.mock.timers.enable({
+      apis: ['Date'],
+      now: Date.now() - 24 * 60 * 60 * 1000,
+    });
+    try {
+      await similaritySearch('greeting', config);
+    } finally {
+      t.mock.timers.reset();
+    }
+    await similaritySearch('greeting', config);
+
+    assert.equal(listed, 2);
+  });
+
+  it("does not ingest a source again in the 'expired' mode before its expiresAfter has passed", async () => {
+    await using database = await sqlite.database();
+    database.connection.close();
+    using connection = openWithVec(database.path);
+    const store = new SQLiteStore(connection, 3);
+    let listed = 0;
+    const config = {
+      store,
+      embedder: embedder({ greeting: [1, 0, 0], 'hello world': [1, 0, 0] }),
+      connector: {
+        sourceId: 'docs',
+        ingestWhen: 'expired' as const,
+        expiresAfter: 60 * 60 * 1000,
+        sources: async function* () {
+          listed++;
+          yield { id: 'readme', content: async () => 'hello world' };
+        },
+      },
+    };
+
+    await similaritySearch('greeting', config);
+    await similaritySearch('greeting', config);
+
+    assert.equal(listed, 1);
+  });
 });

@@ -22,6 +22,11 @@ export async function ingest(
   const splitter = config.splitter ?? split;
   const embedder = config.embedder;
   const corpuses = config.connector.sources();
+  const { expiresAfter } = config.connector;
+  const expiryDate =
+    expiresAfter === undefined
+      ? undefined
+      : new Date(Date.now() + expiresAfter);
 
   for await (const it of corpuses) {
     callback?.(it.id);
@@ -30,26 +35,30 @@ export async function ingest(
       // skip empty files
       continue;
     }
-    await config.store.index(config.connector.sourceId, {
-      id: it.id,
-      cid: cid(content),
-      metadata: it.metadata,
-      chunker: async function* () {
-        // Embed in small batches to control memory usage
-        const values = await splitter(it.id, content);
-        const batchSize = 40;
-        for (let i = 0; i < values.length; i += batchSize) {
-          const batch = values.slice(i, i + batchSize);
-          const { embeddings } = await embedder(batch);
-          for (let j = 0; j < embeddings.length; j++) {
-            yield {
-              content: batch[j],
-              embedding: embeddings[j],
-            };
+    await config.store.index(
+      config.connector.sourceId,
+      {
+        id: it.id,
+        cid: cid(content),
+        metadata: it.metadata,
+        chunker: async function* () {
+          // Embed in small batches to control memory usage
+          const values = await splitter(it.id, content);
+          const batchSize = 40;
+          for (let i = 0; i < values.length; i += batchSize) {
+            const batch = values.slice(i, i + batchSize);
+            const { embeddings } = await embedder(batch);
+            for (let j = 0; j < embeddings.length; j++) {
+              yield {
+                content: batch[j],
+                embedding: embeddings[j],
+              };
+            }
           }
-        }
+        },
       },
-    });
+      expiryDate,
+    );
   }
 }
 
