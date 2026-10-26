@@ -4,7 +4,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "prepare": "husky"
+    "prepare": "git config core.hooksPath .husky || exit 0"
   },
   "repository": "https://github.com/JanuaryLabs/deepagents",
   "private": true,
@@ -53,6 +53,7 @@
     "@vitejs/plugin-react": "6.0.3",
     "@vitest/ui": "4.1.10",
     "@zukhruf/eslint": "^0.3.15",
+    "@zukhruf/git-hooks": "^0.3.42",
     "@zukhruf/testing": "^0.3.24",
     "autoprefixer": "10.5.4",
     "chalk": "^5.6.2",
@@ -67,7 +68,6 @@
     "eslint-plugin-jsx-a11y": "6.10.2",
     "eslint-plugin-react": "7.37.5",
     "eslint-plugin-react-hooks": "7.1.1",
-    "husky": "^9.1.7",
     "jiti": "2.7.0",
     "jsdom": "~29.1.1",
     "json-rpc-2.0": "^1.7.1",
@@ -154,7 +154,6 @@
     "isbot": "^5.2.1",
     "just-bash": "^3.2.0",
     "langchain": "^1.5.3",
-    "lint-staged": "^17.0.8",
     "lodash-es": "^4.18.1",
     "motion": "^12.42.2",
     "nano-spawn": "^2.1.0",
@@ -180,10 +179,5 @@
   },
   "overrides": {
     "tar": "7.5.20"
-  },
-  "lint-staged": {
-    "*.{css,ts,js,json,scss,md,mjs,cjs,yml,yaml,html}": [
-      "prettier --write"
-    ]
   }
 }
