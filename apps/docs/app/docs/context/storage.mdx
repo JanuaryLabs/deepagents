@@ -466,6 +466,9 @@ IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_dbo_branches_chatId' 
 IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_dbo_branches_chatId_isActive' AND object_id = OBJECT_ID('[dbo].[branches]'))
   CREATE INDEX [idx_dbo_branches_chatId_isActive] ON [dbo].[branches]${''}(chatId, isActive);
 
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_dbo_branches_headMessageId' AND object_id = OBJECT_ID('[dbo].[branches]'))
+  CREATE INDEX [idx_dbo_branches_headMessageId] ON [dbo].[branches]${''}(headMessageId);
+
 IF OBJECT_ID('[dbo].[checkpoints]', 'U') IS NULL
 BEGIN
   CREATE TABLE [dbo].[checkpoints]${''}(
@@ -482,6 +485,9 @@ END;
 
 IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_dbo_checkpoints_chatId' AND object_id = OBJECT_ID('[dbo].[checkpoints]'))
   CREATE INDEX [idx_dbo_checkpoints_chatId] ON [dbo].[checkpoints]${''}(chatId);
+
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_dbo_checkpoints_messageId' AND object_id = OBJECT_ID('[dbo].[checkpoints]'))
+  CREATE INDEX [idx_dbo_checkpoints_messageId] ON [dbo].[checkpoints]${''}(messageId);
 
 IF OBJECT_ID('[dbo].[messages_fts]', 'U') IS NULL
 BEGIN

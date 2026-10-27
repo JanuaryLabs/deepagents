@@ -85,6 +85,10 @@ END;
 IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_${schema}_checkpoints_chatId' AND object_id = OBJECT_ID('[${schema}].[checkpoints]'))
   CREATE INDEX [idx_${schema}_checkpoints_chatId] ON [${schema}].[checkpoints](chatId);
 
+-- Deleting a message checks this foreign key too, so it needs the same index.
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_${schema}_checkpoints_messageId' AND object_id = OBJECT_ID('[${schema}].[checkpoints]'))
+  CREATE INDEX [idx_${schema}_checkpoints_messageId] ON [${schema}].[checkpoints](messageId);
+
 IF OBJECT_ID('[${schema}].[messages_fts]', 'U') IS NULL
 BEGIN
   CREATE TABLE [${schema}].[messages_fts] (
