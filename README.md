@@ -147,7 +147,7 @@ TypeScript then checks the source of the package with the options of the
 other repo. The source imports its own files with the `.ts` extension, so the
 other repo needs `allowImportingTsExtensions`. If the other repo emits
 JavaScript, use `rewriteRelativeImportExtensions` instead. `global.d.ts`
-declares the `.sql`, `.md` and `.txt` modules and `tiny-tfidf`, which the
+declares the `.md` and `.txt` modules and `tiny-tfidf`, which the
 source imports.
 
 This repo does not set the condition in `customConditions`. The esbuild build

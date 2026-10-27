@@ -1,367 +1,170 @@
-# Embed System Database & Architecture
+# Retrieval database and architecture
 
-Technical implementation guide for the vector database and embedding pipeline powering the RAG system.
+Implementation guide for `@deepagents/retrieval` ingestion and SQLite vector storage.
 
-## Architecture Overview
+## Architecture overview
 
-The embed system uses a three-layer architecture:
+Connectors supply document IDs, content, and metadata. `ingest()` splits and embeds changed documents. `similaritySearch()` decides whether to ingest, then queries the configured store. Applications pass the results to their own answer-generation flow.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        RAG Layer (rag.ts)                      │
-│  • Entry point for developers                                  │
-│  • Orchestrates ingest → search → generate workflow            │
-└─────────────────────────────────────────────────────────────────┘
-                                   │
-┌─────────────────────────────────────────────────────────────────┐
-│                   Pipeline Layer (pipeline.ts)                 │
-│  • Content ingestion with change detection                     │
-│  • Text chunking and embedding generation                      │
-│  • Semantic search with similarity scoring                     │
-└─────────────────────────────────────────────────────────────────┘
-                                   │
-┌─────────────────────────────────────────────────────────────────┐
-│                  Storage Layer (store.ts + SQLite)             │
-│  • Vector database with SQLite-vec                             │
-│  • Content hashing for change detection                        │
-│  • Transaction management and data integrity                   │
-└─────────────────────────────────────────────────────────────────┘
-```
+The public entry point is [`src/index.ts`](../index.ts). The [store guide](../../../../apps/docs/app/docs/retrieval/stores.mdx) covers the public API and schema.
 
-## Database Implementation
+## Database implementation
 
-### Core Technology Stack
+### Core technology stack
 
-- **Database**: SQLite with `sqlite-vec` extension
-- **Vector Dimensions**: 1024 (Qwen embeddings)
-- **Distance Metric**: Cosine similarity
-- **Performance**: WAL mode with memory temp storage
+- **Database:** the built-in `node:sqlite` module with the `sqlite-vec` extension.
+- **Vector dimensions:** configured per store to match its embedder.
+- **Distance metric:** cosine distance; lower values mean closer matches.
+- **Schema management:** `@zukhruf/sqlite-drift` applies declarations on each open.
 
-### Database Schema
+### Database schema
 
-The system uses a three-table design for optimal performance and data integrity:
+[`stores/sqlite/ddl.sqlite.ts`](./stores/sqlite/ddl.sqlite.ts) defines the tables, indexes, delete trigger, and connection PRAGMAs.
 
-#### Sources Table
+#### Sources table
 
-```sql
-CREATE TABLE sources (
-  source_id TEXT PRIMARY KEY,           -- e.g., 'github', 'rss', 'local'
-  updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-);
-```
+`sources` records `source_id`, `updated_at`, and optional `expires_at`. Ingestion refreshes the expiry from the connector's `expiresAfter` duration in milliseconds when it indexes a nonempty document.
 
-#### Documents Table
+#### Documents table
 
-```sql
-CREATE TABLE documents (
-  id TEXT PRIMARY KEY,                  -- Document identifier (e.g., file path)
-  source_id TEXT,                       -- References sources.source_id
-  cid TEXT,                            -- SHA-256 content hash for change detection
-  updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  FOREIGN KEY(source_id) REFERENCES sources(source_id)
-);
-```
+`documents` records the document ID, source ID, SHA-256 content hash (`cid`), JSON metadata, and update time. Deleting a source cascades to its documents; a trigger removes their vector chunks.
 
-#### Vector Chunks Table
+#### Vector chunks table
 
-```sql
-CREATE VIRTUAL TABLE vec_chunks USING vec0(
-  source_id TEXT,                       -- Partition key for performance
-  document_id TEXT,                     -- Document this chunk belongs to
-  embedding FLOAT[1024] DISTANCE_METRIC=cosine,  -- 1024-dimensional vector
-  content TEXT                          -- The actual text content
-);
-```
+`vec_chunks` is a `vec0` virtual table partitioned by source. It stores document IDs, vectors of the configured dimension, and chunk content as an auxiliary field.
 
-### Database Configuration
+A new dimension makes the store replace this table with an empty table. In the same transaction, the store deletes all sources and their documents. The next ingest reads the connector content and embeds the documents again. To keep the indexes of two dimensions, use one file for each dimension.
 
-Performance-optimized SQLite settings:
+### Database configuration
 
 ```typescript
-import { DatabaseSync } from 'node:sqlite';
-import * as sqliteVec from 'sqlite-vec';
+import { nodeSQLite } from '@deepagents/retrieval';
 
-const db = new DatabaseSync('embed.sqlite', { allowExtension: true });
-sqliteVec.load(db);
-
-// Performance optimizations applied automatically:
-// PRAGMA journal_mode = WAL;     -- Write-Ahead Logging
-// PRAGMA synchronous = NORMAL;   -- Balanced safety/performance
-// PRAGMA temp_store = MEMORY;    -- Memory temp storage
+const store = nodeSQLite('./knowledge.db', 384);
 ```
 
-## Content Processing Pipeline
+`nodeSQLite()` opens a `DatabaseSync` connection, loads `sqlite-vec`, and constructs `SQLiteStore`. The constructor applies the connection PRAGMAs and schema. A stale table keeps its rows. A replaced `vec_chunks` has no rows, as described above.
 
-### 1. Ingestion Pipeline
+## Content processing pipeline
+
+### 1. Ingestion pipeline
 
 ```typescript
-export async function ingest(
-  sourceId: string, // Data source identifier
-  documentId: string, // Document identifier
-  cid: string, // Content hash (SHA-256)
-  getDocument: () => Content | Promise<Content>,
-) {
-  return store.upsertIfChanged(sourceId, documentId, cid, async () => {
-    const document = await getDocument();
-    const chunks = await split(document.content); // Text chunking
-    const { embeddings } = await embed(chunks); // Vector generation
-    return chunks.map((content, idx) => ({
-      content,
-      embedding: embeddings[idx],
-    }));
-  });
-}
+import { fastembed, ingest, nodeSQLite } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./knowledge.db', 384);
+const embedder = fastembed();
+const connector = local('docs/**/*.md');
+
+await ingest({ connector, store, embedder });
 ```
 
-**Key Features:**
+[`ingest.ts`](./ingest.ts) reads each document, skips empty content, computes its hash, and passes a chunk generator and optional expiry date to `store.index()`. A direct call to `ingest()` always reads every document of the connector. `similaritySearch()` applies the `ingestWhen` policy first.
 
-- **Change Detection**: Only processes content when SHA-256 hash changes
-- **Transactional**: All operations wrapped in database transactions
-- **Batch Processing**: Multiple chunks embedded in single API call
+### 2. Text chunking
 
-### 2. Text Chunking
+The default splitter uses LangChain's `MarkdownTextSplitter`. Pass `splitter(id, content)` to `ingest()` to supply a custom splitter. The ingestion pipeline sends chunks to the embedder in batches of up to 40.
 
-```typescript
-async function split(content: string): Promise<string[]> {
-  const splitter = new MarkdownTextSplitter();
-  return splitter.splitText(content);
-}
-```
+### 3. Embedding generation
 
-Uses LangChain's MarkdownTextSplitter for intelligent content segmentation that respects document structure.
+An `Embedder` accepts an array of strings and returns `{ embeddings, dimensions }`. `fastembed()` uses Transformers.js for local feature extraction. Callers can supply any implementation of the same interface. The store normalizes vectors with `vec_normalize()` for indexing and search.
 
-### 3. Embedding Generation
+## Search implementation
+
+### Similarity search
 
 ```typescript
-async function embed(documents: string[]) {
-  const dimensions = 1024;
-  const { embeddings } = await embedMany({
-    model: lmstudio.textEmbeddingModel('text-embedding-qwen3-embedding-0.6b'),
-    values: documents,
-    providerOptions: { lmstudio: { dimensions } },
-  });
-  return { embeddings, dimensions };
-}
-```
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
 
-**Model Details:**
-
-- **Model**: `text-embedding-qwen3-embedding-0.6b`
-- **Provider**: LM Studio (local inference)
-- **Dimensions**: 1024
-- **Normalization**: Automatic vector normalization for cosine similarity
-
-## Search Implementation
-
-### Similarity Search
-
-```typescript
-export async function similaritySearch(
-  query: string,
-  { sourceId, documentId, topN = 10 }: SearchOptions,
-) {
-  const { embeddings } = await embed([query]);
-  const qVec = JSON.stringify(embeddings[0]);
-
-  // Search within specific document
-  if (documentId) {
-    const stmt = db.prepare(`
-      SELECT v.content, v.distance
-      FROM vec_chunks v
-      WHERE v.source_id = ?
-        AND v.document_id = ?
-        AND v.embedding MATCH vec_normalize(vec_f32(?))
-        AND v.k = ?
-      ORDER BY v.distance ASC
-    `);
-    return stmt.all(sourceId, documentId, qVec, topN);
-  }
-
-  // Search across all documents in source
-  const stmt = db.prepare(`
-    SELECT v.content, v.distance, v.document_id
-    FROM vec_chunks v
-    WHERE v.source_id = ?
-      AND v.embedding MATCH vec_normalize(vec_f32(?))
-      AND v.k = ?
-    ORDER BY v.distance ASC
-  `);
-  return stmt.all(sourceId, qVec, topN);
-}
-```
-
-**Search Features:**
-
-- **Partitioned Search**: Search by source for performance
-- **Document-Specific**: Optionally limit to specific documents
-- **Top-K Results**: Configurable result count (default: 10)
-- **Similarity Scoring**: Cosine distance returned for each result
-
-## Vector Store Management
-
-### Core Store Interface
-
-```typescript
-export async function vectorStore(dimension: number) {
-  // Initialize database schema with template
-  const compiled = template(
-    readFileSync(new URL('./embed.sql', import.meta.url), 'utf8'),
-  );
-  db.exec(compiled({ DIMENSION: dimension }));
-
-  return {
-    upsertIfChanged: async (
-      sourceId: string,
-      documentId: string,
-      cid: string,
-      getChunks: Embedder,
-    ) => {
-      // Implementation handles change detection and upsert logic
-    },
-  };
-}
-```
-
-### Change Detection Algorithm
-
-The system uses content hashing to avoid unnecessary reprocessing:
-
-```typescript
-// 1. Calculate content hash
-const contentHash = createHash('sha256').update(content).digest('hex');
-
-// 2. Check if content changed
-const upsertDoc = db.prepare(`
-  INSERT INTO documents (id, source_id, cid)
-  VALUES (?, ?, ?)
-  ON CONFLICT(id) DO UPDATE SET
-    cid=excluded.cid,
-    updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
-  WHERE documents.cid != excluded.cid;
-`);
-const info = upsertDoc.run(documentId, sourceId, contentHash);
-const changed = info.changes > 0;
-
-// 3. Only process if changed
-if (!changed) {
-  console.log(`No changes detected for document ${documentId}`);
-  return;
-}
-```
-
-### Transaction Management
-
-All multi-step operations are wrapped in database transactions:
-
-```typescript
-function transaction(callback: () => void) {
-  try {
-    db.exec('BEGIN');
-    callback();
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-}
-
-// Usage in upsert operations
-transaction(() => {
-  deleteStmt.run(sourceId, documentId); // Remove old chunks
-  for (const chunk of chunks) {
-    insert(chunk); // Insert new chunks
-  }
+const results = await similaritySearch('authentication', {
+  connector: local('docs/**/*.md'),
+  store: nodeSQLite('./knowledge.db', 384),
+  embedder: fastembed(),
 });
 ```
 
-## Performance Optimizations
+[`similiarty-search.ts`](./similiarty-search.ts) applies the connector's ingestion policy, searches its `sourceId`, and requests up to 50 results. It adds `similarity: 1 - distance` to each result.
 
-### Database Level
+For direct searches, `store.search(query, options, embedder)` accepts `sourceId`, optional `documentId`, and optional `topN` (default 10). It returns content, distance, document ID, and metadata. Metadata is `null` when absent.
 
-1. **WAL Mode**: Enables concurrent reads during writes
-2. **Memory Temp Storage**: Faster temporary operations
-3. **Vector Normalization**: Pre-normalized vectors for faster similarity
-4. **Partitioned Tables**: Source-based partitioning for query performance
+## Vector store management
 
-### Application Level
+### Core store interface
 
-1. **Batch Embeddings**: Multiple texts embedded in single API call
-2. **Smart Caching**: SHA-256 hashing prevents redundant work
-3. **Prepared Statements**: Reused SQL statements for better performance
-4. **Connection Reuse**: Single database connection across operations
+[`stores/store.ts`](./stores/store.ts) defines `Store`, `SearchOptions`, `SearchResult`, `Corpus`, and `Embedder`. The public store methods are `search()`, `index()`, `sourceExists()`, `sourceExpired()`, and `setSourceExpiry()`.
 
-## Monitoring and Debugging
+`SQLiteStore` takes a `node:sqlite` `DatabaseSync` connection and a vector dimension. If you construct it directly, load `sqlite-vec` on that connection first. `nodeSQLite()` handles this setup.
 
-### Content Hash Utility
+### Change detection algorithm
+
+`index()` upserts the source and its expiry before comparing the document's hash. An unchanged hash skips chunk generation and embedding. It still refreshes a supplied expiry. A changed hash updates document metadata, removes the old chunks, and inserts new chunks.
+
+With `ingestWhen: 'expired'`, `similaritySearch()` ingests missing or expired sources and skips existing sources whose expiry has not passed. A source without an expiry time is not expired.
+
+### Transaction management
+
+[`stores/sqlite/sqlite.ts`](./stores/sqlite/sqlite.ts) uses `@zukhruf/sqlite-transaction` with `mode: 'immediate'`. One transaction deletes the old chunks. Each batch of up to 32 new chunks has its own transaction. Source and document upserts happen before those transactions.
+
+A full ingestion is not atomic. If embedding or a later batch fails, earlier metadata changes and committed chunk batches remain. Do not treat a failed ingestion as a rollback of the whole document or source.
+
+## Performance optimizations
+
+### Database level
+
+The connection setup enables WAL mode, in-memory temporary storage, and a five-second busy timeout. Source partitions limit vector searches, and indexes support document lookup and source expiry checks. See `SETUP` and `statements` in the schema module for the exact settings.
+
+### Application level
+
+Content hashes skip unchanged document embeddings. Embedding requests and SQLite insertions use separate batch sizes: up to 40 texts per embedder call and 32 chunks per insertion transaction. A store reuses its database connection across operations.
+
+## Monitoring and debugging
+
+### Content hash utility
 
 ```typescript
-export function cid(content: string): string {
-  return createHash('sha256').update(content).digest('hex');
-}
+import { cid } from '@deepagents/retrieval';
+
+console.log(cid('Hello, world!')); // SHA-256 hash
 ```
 
-Use this to manually check content hashes and debug change detection.
-
-### Database Inspection
+### Database inspection
 
 ```sql
--- Check source status
-SELECT source_id, updated_at FROM sources;
+-- Check source expiry
+SELECT source_id, updated_at, expires_at FROM sources;
 
--- View document versions
-SELECT id, source_id, cid, updated_at FROM documents;
+-- View document versions and metadata
+SELECT id, source_id, cid, metadata, updated_at FROM documents;
 
 -- Count chunks per document
-SELECT document_id, COUNT(*) as chunk_count
+SELECT document_id, COUNT(*) AS chunk_count
 FROM vec_chunks
 GROUP BY document_id;
-
--- Test vector search manually
-SELECT content, distance
-FROM vec_chunks
-WHERE source_id = 'your_source'
-  AND embedding MATCH vec_normalize(vec_f32('[...]'))
-  AND k = 5;
 ```
 
-## File Structure
+Vector queries require a connection with `sqlite-vec` loaded. Use `store.search()` to normalize the query vector and apply source and document filters.
 
-```
-apps/api/src/swarm/embed/
-├── store.ts              # Vector store implementation
-│   ├── vectorStore()     # Main store factory
-│   ├── cid()            # Content hashing utility
-│   └── transaction()    # Transaction wrapper
-├── pipeline.ts          # Processing pipeline
-│   ├── ingest()         # Content ingestion
-│   ├── split()          # Text chunking
-│   ├── embed()          # Vector generation
-│   └── similaritySearch() # Semantic search
-├── embed.sql           # Database schema template
-└── connectors/         # Data source connectors
-    ├── connector.ts    # Interface definition
-    ├── github.ts      # GitHub API connector
-    ├── rss.ts         # RSS feed connector
-    ├── local.ts       # Local file connector
-    └── linear.ts      # Linear API connector
-```
+## File structure
+
+- [`ingest.ts`](./ingest.ts): document loading, splitting, and embedding.
+- [`similiarty-search.ts`](./similiarty-search.ts): ingestion policy and result scoring.
+- [`connectors/connector.ts`](./connectors/connector.ts): source and expiry contract.
+- [`embedders/fastembed.ts`](./embedders/fastembed.ts): local embedder.
+- [`stores/store.ts`](./stores/store.ts): store and embedding interfaces.
+- [`stores/sqlite/node-sqlite.ts`](./stores/sqlite/node-sqlite.ts): public store factory.
+- [`stores/sqlite/open.ts`](./stores/sqlite/open.ts): connection and extension loading.
+- [`stores/sqlite/ddl.sqlite.ts`](./stores/sqlite/ddl.sqlite.ts): schema declarations.
+- [`stores/sqlite/sqlite.ts`](./stores/sqlite/sqlite.ts): indexing and search.
 
 ## Dependencies
 
-```json
-{
-  "node:sqlite": "Built-in SQLite database",
-  "sqlite-vec": "Vector extension for SQLite",
-  "ai": "AI SDK for embeddings",
-  "langchain": "Text splitting utilities"
-}
-```
+The store uses `node:sqlite`, `sqlite-vec`, `@zukhruf/sqlite-drift`, and `@zukhruf/sqlite-transaction`. The default splitter uses `@langchain/textsplitters`. The local embedder uses `@huggingface/transformers`. See the [package manifest](../../package.json) for dependency ranges.
 
-## Development Setup
+## Development setup
 
-1. **Install sqlite-vec**: Ensure the extension is available
-2. **Configure LM Studio**: Load the Qwen embedding model
-3. **Database Location**: `embed.sqlite` created in project root
-4. **Schema Management**: Auto-created on first vectorStore() call
-
-The database layer is designed for reliability, performance, and easy debugging. All operations are transactional and include comprehensive change detection to minimize unnecessary work.
+1. Choose an embedder and match the store's dimension to its output.
+2. Open a database file with `nodeSQLite()`; a relative path resolves from the process's working directory.
+3. Supply a connector, then call `ingest()` or `similaritySearch()`.
+4. To keep the existing index, use a separate file for another vector dimension.

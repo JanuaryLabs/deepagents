@@ -349,9 +349,9 @@ DELETE FROM chats WHERE id = ?
   → FTS entries cleaned separately
 ```
 
-### Complete SQLite Schema
+### Complete SQLite schema
 
-The store keeps these statements in a TypeScript module, one CREATE statement for each object. When it opens a file, the store runs the PRAGMAs first. Then it declares the tables with `@zukhruf/sqlite-drift` and applies the declaration. A new file gets every table. In an existing file, a stale table gets the declared text and keeps its rows. `messages_fts` has its own declaration with `rows: 'replace'`: when it is stale, the store makes it again with no rows. node:sqlite enables foreign keys by default, so the store sets no PRAGMA for them.
+The store keeps these statements in a TypeScript module, one CREATE statement for each object. When it opens a file, the store runs the PRAGMAs first. Then it declares the tables with `@zukhruf/sqlite-drift` and applies the declaration. A new file gets every table. In an existing file, a stale table gets the declared text and keeps its rows. `messages_fts` has its own declaration with `rows: 'replace'`: when it is stale, the store makes it again with no rows. The store does not add the stored messages to the new `messages_fts`. node:sqlite enables foreign keys by default, so the store sets no PRAGMA for them.
 
 ```sql
 -- Performance PRAGMAs
@@ -372,6 +372,8 @@ CREATE TABLE chats (
   updatedAt INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
 );
 
+CREATE INDEX idx_chats_updatedAt ON chats(updatedAt);
+CREATE INDEX idx_chats_userId ON chats(userId);
 CREATE INDEX idx_chats_userId_updatedAt ON chats(userId, updatedAt DESC);
 
 -- Messages table (DAG nodes)
@@ -387,6 +389,8 @@ CREATE TABLE messages (
   FOREIGN KEY (parentId) REFERENCES messages(id)
 );
 
+CREATE INDEX idx_messages_chatId ON messages(chatId);
+CREATE INDEX idx_messages_parentId ON messages(parentId);
 CREATE INDEX idx_messages_chatId_parentId ON messages(chatId, parentId);
 
 -- Branches table (pointers)
@@ -402,6 +406,10 @@ CREATE TABLE branches (
   UNIQUE(chatId, name)
 );
 
+CREATE INDEX idx_branches_chatId ON branches(chatId);
+CREATE INDEX idx_branches_chatId_isActive ON branches(chatId, isActive);
+CREATE INDEX idx_branches_headMessageId ON branches(headMessageId);
+
 -- Checkpoints table (bookmarks)
 CREATE TABLE checkpoints (
   id TEXT PRIMARY KEY,
@@ -413,6 +421,9 @@ CREATE TABLE checkpoints (
   FOREIGN KEY (messageId) REFERENCES messages(id),
   UNIQUE(chatId, name)
 );
+
+CREATE INDEX idx_checkpoints_chatId ON checkpoints(chatId);
+CREATE INDEX idx_checkpoints_messageId ON checkpoints(messageId);
 
 -- FTS5 for full-text search
 CREATE VIRTUAL TABLE messages_fts USING fts5(
@@ -426,14 +437,16 @@ CREATE VIRTUAL TABLE messages_fts USING fts5(
 
 **Source:** `packages/context/src/lib/store/ddl.sqlite.ts` and `packages/context/src/lib/store/sqlite.store.ts:218-226`
 
-### Index Strategy
+### Index strategy
 
-| Index                          | Purpose                               |
-| ------------------------------ | ------------------------------------- |
-| `idx_chats_userId_updatedAt`   | Fast `listChats()` with userId filter |
-| `idx_messages_chatId_parentId` | Fast recursive CTE traversal          |
-| `idx_branches_chatId_isActive` | Fast `getActiveBranch()`              |
-| `idx_checkpoints_chatId`       | Fast checkpoint listing               |
+| Index                          | Purpose                                   |
+| ------------------------------ | ----------------------------------------- |
+| `idx_chats_userId_updatedAt`   | Fast `listChats()` with userId filter     |
+| `idx_messages_chatId_parentId` | Fast recursive CTE traversal              |
+| `idx_branches_chatId_isActive` | Fast `getActiveBranch()`                  |
+| `idx_branches_headMessageId`   | Foreign-key checks when deleting messages |
+| `idx_checkpoints_chatId`       | Fast checkpoint listing                   |
+| `idx_checkpoints_messageId`    | Foreign-key checks when deleting messages |
 
 ## Adapter Comparison
 

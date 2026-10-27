@@ -5,7 +5,7 @@ description: Configure SQLite vector storage for embeddings
 
 Stores persist embeddings and enable similarity search. The retrieval package includes a SQLite-based store that uses the vec0 extension for efficient vector operations.
 
-## SQLite Store
+## SQLite store
 
 The SQLite store uses [sqlite-vec](https://github.com/asg017/sqlite-vec) for vector operations, providing:
 
@@ -20,7 +20,7 @@ The SQLite store uses [sqlite-vec](https://github.com/asg017/sqlite-vec) for vec
 import { SQLiteStore, nodeSQLite } from '@deepagents/retrieval';
 ```
 
-### Basic Usage
+### Basic usage
 
 ```typescript
 import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
@@ -49,7 +49,9 @@ nodeSQLite(dbName: string, dimension: number)
 
 ## Schema
 
-The store declares these tables with `@zukhruf/sqlite-drift`. When it opens a file, it brings the file to the declared tables and keeps the rows of `sources` and `documents`. `vec_chunks` has its own declaration for each vector dimension. When a file was made with another dimension, the store makes an empty `vec_chunks` and deletes the sources. The next ingest then embeds the documents again.
+On each open, the store applies its schema with `@zukhruf/sqlite-drift`. The store updates stale tables, indexes and the trigger. It keeps the rows in `sources` and `documents`.
+
+A new vector dimension makes the store replace `vec_chunks` with an empty table. In the same transaction, the store deletes all sources and their documents. The next ingest reads the connector content and embeds the documents again. To keep the indexes of two dimensions, use one database file for each dimension.
 
 **Source:** `packages/retrieval/src/lib/stores/sqlite/ddl.sqlite.ts`
 
@@ -93,7 +95,7 @@ CREATE VIRTUAL TABLE vec_chunks USING vec0(
 );
 ```
 
-## Store Interface
+## Store interface
 
 All stores implement this interface:
 
@@ -103,7 +105,7 @@ interface Store {
     query: string,
     options: SearchOptions,
     embedder: Embedder,
-  ) => Promise<any[]>;
+  ) => Promise<SearchResult[]>;
 
   sourceExists: (sourceId: string) => Promise<boolean> | boolean;
   sourceExpired: (sourceId: string) => Promise<boolean> | boolean;
@@ -113,7 +115,7 @@ interface Store {
 }
 ```
 
-## Search Options
+## Search options
 
 ```typescript
 interface SearchOptions {
@@ -123,21 +125,21 @@ interface SearchOptions {
 }
 ```
 
-## Search Results
+## Search results
 
-Results include:
+`store.search()` returns `content`, `distance`, `document_id`, and `metadata` (`null` when absent). `similaritySearch()` adds `similarity` to each result:
 
-| Field         | Type   | Description                            |
-| ------------- | ------ | -------------------------------------- |
-| `content`     | string | The matched text chunk                 |
-| `distance`    | number | Cosine distance (lower = more similar) |
-| `similarity`  | number | 1 - distance (higher = more relevant)  |
-| `document_id` | string | Source document identifier             |
-| `metadata`    | object | Custom metadata from the document      |
+| Field         | Type           | Description                                   |
+| ------------- | -------------- | --------------------------------------------- |
+| `content`     | string         | The matched text chunk                        |
+| `distance`    | number         | Cosine distance (lower = more similar)        |
+| `similarity`  | number         | 1 - distance (higher = more relevant)         |
+| `document_id` | string         | Source document identifier                    |
+| `metadata`    | object or null | Custom metadata from the document, if present |
 
-## Real-World Examples
+## Real-world examples
 
-### Basic Search
+### Basic search
 
 ```typescript
 import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
@@ -158,9 +160,9 @@ for (const result of results) {
 }
 ```
 
-### Direct Store Access
+### Direct store access
 
-For more control, use the SQLiteStore directly:
+For more control, call the store directly:
 
 ```typescript
 import { fastembed, ingest, nodeSQLite } from '@deepagents/retrieval';
@@ -185,7 +187,11 @@ const results = await store.search(
 );
 ```
 
-### Check Source Status
+### Check source status
+
+`sourceExpired()` returns `true` only when the source has an expiry time that has passed. A source without an expiry time returns `false`. With `ingestWhen: 'expired'`, `similaritySearch()` ingests a missing or expired source and skips an existing source whose expiry has not passed.
+
+Set the connector's `expiresAfter` duration in milliseconds to control when the source expires. Each ingestion that indexes a nonempty document refreshes the source expiry, even when the document's content hash is unchanged. In the `'expired'` mode, the next search after expiry ingests the source. No background timer refreshes the source. The default `'contentChanged'` mode ingests on every search.
 
 ```typescript
 import { nodeSQLite } from '@deepagents/retrieval';
@@ -203,7 +209,7 @@ const expired = store.sourceExpired(connector.sourceId);
 console.log(`Source expired: ${expired}`);
 ```
 
-### Multiple Stores
+### Multiple stores
 
 Use separate stores for different content types:
 
@@ -240,9 +246,9 @@ const newsResults = await similaritySearch('AI regulation', {
 });
 ```
 
-### Shared Store
+### Shared store
 
-Or use a single store for unified search:
+Or keep multiple sources in one store. Each search still filters by the connector's `sourceId`:
 
 ```typescript
 import {
@@ -269,35 +275,34 @@ await ingest({
   embedder,
 });
 
-// Search across all content
+// Search the local documentation source
 const results = await similaritySearch('machine learning', {
-  connector: local('docs/**/*.md'), // Any connector works
+  connector: local('docs/**/*.md'),
   store,
   embedder,
 });
 ```
 
-## Transaction Safety
+## Transaction safety
 
-The store uses transactions for write operations:
+The store uses separate `BEGIN IMMEDIATE` transactions to delete a document's old chunks and insert each batch of up to 32 new chunks. Source and document metadata are written before those transactions. A complete ingestion is not atomic: a failed embedding or later batch can leave partial indexed content.
 
 ```typescript
-// Internally, index operations use BEGIN IMMEDIATE / COMMIT
-// This ensures consistency even during concurrent access
+// Chunk deletion and each insertion batch commit separately
 await store.index(sourceId, corpus);
 ```
 
-For multiple index operations, each is atomic:
+You can ingest multiple sources into the same store. Each ingestion uses the same transactions as above:
 
 ```typescript
-// Safe for concurrent use
+// Ingest two sources into one store
 await Promise.all([
   ingest({ connector: conn1, store, embedder }),
   ingest({ connector: conn2, store, embedder }),
 ]);
 ```
 
-## Content Change Detection
+## Content change detection
 
 The store uses content hashes (CID) to detect changes:
 
@@ -311,15 +316,15 @@ console.log(hash); // SHA-256 hash
 
 When a document's CID changes, its chunks are re-indexed. Unchanged documents are skipped.
 
-## Performance Tips
+## Performance tips
 
 1. **Match dimensions**: Ensure store dimension matches embedding model
-2. **Use appropriate topN**: Default is 10, increase for broader results
+2. **Choose a result count**: `store.search()` defaults to 10 results and accepts `topN`; `similaritySearch()` requests 50 results
 3. **Separate stores**: Use different stores for unrelated content
 4. **Batch operations**: Index multiple sources before searching
 5. **Use SSD**: SQLite performance benefits from fast storage
 
-## Next Steps
+## Next steps
 
 - [Ingestion Modes](/docs/retrieval/ingestion-modes) - Control re-indexing
 - [Embedders](/docs/retrieval/embedders) - Choose embedding models
