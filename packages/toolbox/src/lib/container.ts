@@ -1,10 +1,12 @@
+import { ContainerNotRunningError, Docker } from '@zukhruf/docker';
 import { tool } from 'ai';
-import spawn from 'nano-spawn';
 import { z } from 'zod';
+
+const CONTAINER = 'toolos';
 
 export const execute_os_command = tool({
   description:
-    'Tool to execute Linux commands in an isolated Docker container with Node.js runtime. Use when you need OS operations like file management, package installation, network requests, or system commands.',
+    'Tool to execute Linux commands in an isolated Docker container with Node.js runtime. Use when you need OS operations like file management, package installation, network requests, or system commands. Returns the exitCode, stdout and stderr of the command; a non-zero exitCode means that the command failed.',
   inputSchema: z.object({
     command: z
       .array(z.string().min(1, 'Command parts cannot be empty'))
@@ -30,31 +32,44 @@ export const execute_os_command = tool({
         'Environment variables as key-value pairs. Examples: {"NODE_ENV": "development", "API_KEY": "secret123"}',
       ),
   }),
-  execute: ({ command, working_directory, environment_vars }) => {
-    return exec(command, working_directory, environment_vars);
+  execute: async (
+    { command, working_directory, environment_vars },
+    { abortSignal },
+  ) => {
+    await using docker = await Docker.connect({
+      environment: process.env,
+      signal: abortSignal,
+    });
+    const container = await docker.containers.find(CONTAINER, {
+      signal: abortSignal,
+    });
+    if (!container) {
+      throw new Error(
+        `The container '${CONTAINER}' does not exist. Start it before you run a command.`,
+      );
+    }
+    try {
+      const { exitCode, stdout, stderr } = await container.exec(
+        {
+          Cmd: command,
+          WorkingDir: working_directory,
+          Env:
+            environment_vars &&
+            Object.entries(environment_vars).map(
+              ([key, value]) => `${key}=${value}`,
+            ),
+        },
+        { signal: abortSignal },
+      );
+      return { exitCode, stdout, stderr };
+    } catch (error) {
+      if (error instanceof ContainerNotRunningError) {
+        throw new Error(
+          `The container '${CONTAINER}' is not running (${error.state}). Start it before you run a command.`,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
   },
 });
-
-function exec(
-  command: string[],
-  working_directory?: string,
-  environment_vars?: Record<string, string>,
-) {
-  const args = ['exec', '-i'];
-
-  if (working_directory) {
-    args.push('-w', working_directory);
-  }
-
-  if (environment_vars) {
-    Object.entries(environment_vars).forEach(([key, value]) => {
-      args.push('-e', `${key}=${value}`);
-    });
-  }
-
-  args.push('toolos', ...command);
-
-  return spawn('docker', args, {
-    stdio: 'pipe',
-  });
-}

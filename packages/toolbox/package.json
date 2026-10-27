@@ -39,6 +39,7 @@
     "access": "public"
   },
   "dependencies": {
+    "@zukhruf/docker": "^0.3.46",
     "ai": "^7.0.153",
     "duck-duck-scrape": "^2.2.7",
     "nano-spawn": "^2.1.0",
