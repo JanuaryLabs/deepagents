@@ -691,8 +691,13 @@ describe('Docker Sandbox', () => {
           ).containers.find(`sandbox-${name}`);
           assert.ok(found, `sandbox-${name} must exist`);
           const container = await found.inspect();
-          assert.strictEqual(container.HostConfig?.Memory, 256 * 1024 ** 2);
-          assert.strictEqual(container.HostConfig?.NanoCpus, 500_000_000);
+          assert.deepStrictEqual(
+            {
+              Memory: container.HostConfig?.Memory,
+              NanoCpus: container.HostConfig?.NanoCpus,
+            },
+            { Memory: 256 * 1024 ** 2, NanoCpus: 500_000_000 },
+          );
         } finally {
           await sandbox.dispose();
         }
@@ -1068,24 +1073,28 @@ describe('Docker Sandbox', () => {
     });
 
     describe('cleanup', () => {
-      it('dispose stops and removes container', async () => {
-        const sandbox = await createDockerSandbox(defaults);
+      it('dispose stops and removes container', async (t) => {
+        const name = `dispose-${crypto.randomUUID()}`;
+        const sandbox = await createDockerSandbox({ ...defaults, name });
 
-        // Verify container is running
-        const beforeResult = await sandbox.executeCommand('echo alive');
-        assert.strictEqual(beforeResult.exitCode, 0);
-
-        // Dispose
-        await sandbox.dispose();
-
-        // Commands should now fail (container gone)
-        // Note: This may throw or return error depending on timing
         try {
-          await sandbox.executeCommand('echo should-fail');
-          // If we get here without error, that's unexpected but not a failure
-          // The container might still be stopping
-        } catch {
-          // Expected - container is gone
+          const beforeResult = await sandbox.executeCommand('echo alive');
+          assert.strictEqual(beforeResult.exitCode, 0);
+
+          await sandbox.dispose();
+
+          const client = await testbed.client();
+          await t.waitFor(
+            async () => {
+              assert.strictEqual(
+                await client.containers.find(`sandbox-${name}`),
+                undefined,
+              );
+            },
+            { timeout: 30_000 },
+          );
+        } finally {
+          await removeSandboxContainer(name);
         }
       });
 
@@ -1221,11 +1230,19 @@ describe('Docker Sandbox', () => {
         await spawn('docker', ['stop', container.id]);
 
         const sandbox = await createDockerSandbox({ ...defaults, name });
-        const result = await sandbox.executeCommand('echo back-online');
-        assert.strictEqual(result.exitCode, 0);
-        assert.strictEqual(result.stdout.trim(), 'back-online');
-
-        await sandbox.dispose();
+        try {
+          const result = await sandbox.executeCommand('echo back-online');
+          assert.strictEqual(result.exitCode, 0);
+          assert.strictEqual(result.stdout.trim(), 'back-online');
+          const found = await (
+            await testbed.client()
+          ).containers.find(`sandbox-${name}`);
+          assert.ok(found, `sandbox-${name} must exist`);
+          assert.strictEqual(found.id, container.id);
+          assert.strictEqual((await found.inspect()).State?.Running, true);
+        } finally {
+          await sandbox.dispose();
+        }
       });
 
       it('rejects names that are not Docker-legal', async () => {
