@@ -1,3 +1,5 @@
+import { untilAborted } from '@zukhruf/async';
+
 import {
   type ContextFragment,
   isFragment,
@@ -61,7 +63,7 @@ export class FragmentLoaderResolver {
     path: string,
   ): Promise<unknown> {
     if (ctx.signal?.aborted) {
-      throw ctx.signal.reason ?? new Error('Resolver aborted');
+      throw ctx.signal.reason;
     }
     if (depth > this.#maxDepth) {
       throw new Error(
@@ -78,10 +80,7 @@ export class FragmentLoaderResolver {
       }
       let resolved: unknown;
       try {
-        resolved = await this.#raceWithSignal(
-          handler.resolve(value, ctx),
-          ctx.signal,
-        );
+        resolved = await untilAborted(handler.resolve(value, ctx), ctx.signal);
       } catch (cause) {
         throw new Error(
           `Async fragment '${path}' failed in ${handler.name}: ${
@@ -143,28 +142,6 @@ export class FragmentLoaderResolver {
     }
 
     return value;
-  }
-
-  #raceWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
-    if (!signal) return promise;
-    if (signal.aborted) {
-      return Promise.reject(signal.reason ?? new Error('Resolver aborted'));
-    }
-    return new Promise<T>((resolve, reject) => {
-      const onAbort = () =>
-        reject(signal.reason ?? new Error('Resolver aborted'));
-      signal.addEventListener('abort', onAbort, { once: true });
-      promise.then(
-        (value) => {
-          signal.removeEventListener('abort', onAbort);
-          resolve(value);
-        },
-        (err) => {
-          signal.removeEventListener('abort', onAbort);
-          reject(err);
-        },
-      );
-    });
   }
 }
 
