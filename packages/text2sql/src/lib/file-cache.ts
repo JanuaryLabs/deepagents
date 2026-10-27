@@ -1,6 +1,7 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { atomicWrite } from '@zukhruf/fs';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -24,9 +25,7 @@ export class FileCache {
 
   async set(content: string) {
     await mkdir(path.dirname(this.path), { recursive: true });
-    const tempPath = `${this.path}.${randomUUID()}.tmp`;
-    await writeFile(tempPath, content, 'utf-8');
-    await rename(tempPath, this.path);
+    await atomicWrite(this.path, content);
   }
 }
 
