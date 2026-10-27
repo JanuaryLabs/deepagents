@@ -14,10 +14,9 @@
  *   node convert-to-gguf.ts ./qwen3-sql-final ./qwen3-sql.gguf
  *   node convert-to-gguf.ts ./qwen3-sql-final ./qwen3-sql-q4.gguf q4_0
  */
-
-import spawn from 'nano-spawn';
+import { Docker } from '@zukhruf/docker';
 import { existsSync, mkdirSync } from 'node:fs';
-import { dirname, basename, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 
 const DOCKER_IMAGE = 'ghcr.io/ggml-org/llama.cpp:full';
 
@@ -67,18 +66,48 @@ Examples:
   console.log(`  Quantization: ${quantType}`);
   console.log('');
 
-  await spawn('docker', [
-    'run', '--rm',
-    '-v', `${modelPath}:/model:ro`,
-    '-v', `${outputPath}:/output`,
-    DOCKER_IMAGE,
-    'python3', '/app/convert_hf_to_gguf.py',
-    '/model',
-    '--outfile', `/output/${outputName}`,
-    '--outtype', quantType,
-  ], {
-    stdio: 'inherit',
+  // The first Ctrl-C stops and removes the container; a second one ends the process.
+  const interrupt = new AbortController();
+  process.once('SIGINT', () =>
+    interrupt.abort(new Error('The conversion was interrupted')),
+  );
+  const { signal } = interrupt;
+
+  await using docker = await Docker.connect({
+    environment: process.env,
+    signal,
   });
+  if (!(await docker.images.inspect(DOCKER_IMAGE, { signal }))) {
+    console.log(`Pulling ${DOCKER_IMAGE}...`);
+    await docker.images.pull(DOCKER_IMAGE, { signal });
+  }
+  await using container = await docker.containers.create(
+    {
+      Image: DOCKER_IMAGE,
+      Cmd: [
+        'python3',
+        '/app/convert_hf_to_gguf.py',
+        '/model',
+        '--outfile',
+        `/output/${outputName}`,
+        '--outtype',
+        quantType,
+      ],
+      HostConfig: {
+        Binds: [`${modelPath}:/model:ro`, `${outputPath}:/output`],
+      },
+    },
+    { signal },
+  );
+  const output = await container.attach({ signal });
+  await container.start({ signal });
+  for await (const { stream, data } of output) {
+    (stream === 'stdout' ? process.stdout : process.stderr).write(data);
+  }
+  const exitCode = await output.exitCode;
+  if (exitCode !== 0) {
+    throw new Error(`The conversion exited with code ${exitCode}`);
+  }
 
   console.log('');
   console.log(`Done! GGUF model saved to: ${outputPath}/${outputName}`);
