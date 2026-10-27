@@ -1,5 +1,6 @@
+import { durableWrite } from '@zukhruf/fs';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import pLimit from 'p-limit';
 import z from 'zod';
 
@@ -54,6 +55,9 @@ export class Checkpoint {
   private points: Record<string, PointData>;
   private path: string;
   private configHash: string | undefined;
+  readonly #writes = pLimit(1);
+  #changes = 0;
+  #writtenChanges = 0;
 
   private constructor(
     path: string,
@@ -180,17 +184,23 @@ export class Checkpoint {
     return this.path;
   }
 
-  private async save(): Promise<void> {
-    const file: CheckpointFile = {
-      configHash: this.configHash,
-      points: this.points,
-    };
-    const content = JSON.stringify(file, null, 2);
-
-    // Atomic write: write to temp file, then rename
-    const tempPath = `${this.path}.tmp`;
-    writeFileSync(tempPath, content);
-    renameSync(tempPath, this.path);
+  /**
+   * Writes one snapshot at a time, so an older snapshot never lands after a
+   * newer one. Each write takes the snapshot when it starts, so a save that
+   * waited behind a write that already holds its change writes nothing.
+   */
+  private save(): Promise<void> {
+    this.#changes += 1;
+    return this.#writes(async () => {
+      const changes = this.#changes;
+      if (changes === this.#writtenChanges) return;
+      const file: CheckpointFile = {
+        configHash: this.configHash,
+        points: this.points,
+      };
+      await durableWrite(this.path, JSON.stringify(file, null, 2));
+      this.#writtenChanges = changes;
+    });
   }
 }
 
