@@ -1,5 +1,4 @@
 import { DockerTestbed } from '@zukhruf/testing/docker';
-import spawn from 'nano-spawn';
 import assert from 'node:assert';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -37,11 +36,8 @@ function testVolumeName(prefix: string): string {
 }
 
 async function removeDockerVolume(name: string): Promise<void> {
-  try {
-    await spawn('docker', ['volume', 'rm', name]);
-  } catch {
-    // Test cleanup should be best-effort.
-  }
+  const volume = await (await testbed.client()).volumes.find(name);
+  await volume?.remove();
 }
 
 /**
@@ -65,8 +61,10 @@ class DeleteVolumeThenFailInstaller extends Installer {
   }
 
   async install(ctx: InstallerContext): Promise<void> {
-    await spawn('docker', ['stop', ctx.containerId]);
-    await spawn('docker', ['volume', 'rm', this.volumeName]);
+    const client = await testbed.client();
+    const container = await client.containers.find(ctx.containerId);
+    await container?.remove({ force: true });
+    await removeDockerVolume(this.volumeName);
     throw new Error('installer failed after deleting volume');
   }
 }
@@ -508,44 +506,44 @@ describe('Docker Sandbox', () => {
         );
       });
 
-      it('creates and removes a managed Docker volume on dispose', async (t) => {
+      it('creates and removes a managed Docker volume on dispose', async () => {
         const volumeName = testVolumeName('deepagents-managed');
-        t.after(() => removeDockerVolume(volumeName));
-        const sandbox = await createDockerSandbox({
-          ...defaults,
-          volumes: [
-            {
-              type: 'volume',
-              name: volumeName,
-              containerPath: '/data',
-              lifecycle: 'managed',
-              readOnly: false,
-            },
-          ],
-        });
-
         try {
-          // Root filesystem cleanup keeps Docker's auto-removal in progress
-          // after stop returns, while it still holds the volume reference.
-          const files = await sandbox.executeCommand(
-            'mkdir -p /tmp/disposal-files; for file in {1..5000}; do : > /tmp/disposal-files/$file; done',
-          );
-          assert.strictEqual(files.exitCode, 0);
-          const writeResult = await sandbox.executeCommand(
-            'echo "managed" > /data/file.txt',
-          );
-          assert.strictEqual(writeResult.exitCode, 0);
-        } finally {
-          await sandbox.dispose();
-        }
+          const sandbox = await createDockerSandbox({
+            ...defaults,
+            volumes: [
+              {
+                type: 'volume',
+                name: volumeName,
+                containerPath: '/data',
+                lifecycle: 'managed',
+                readOnly: false,
+              },
+            ],
+          });
 
-        await assert.rejects(
-          spawn('docker', ['volume', 'inspect', volumeName]),
-          (err: Error & { exitCode?: number; stderr?: string }) => {
-            assert.strictEqual(err.exitCode, 1);
-            return true;
-          },
-        );
+          try {
+            // Root filesystem cleanup keeps Docker's auto-removal in progress
+            // after stop returns, while it still holds the volume reference.
+            const files = await sandbox.executeCommand(
+              'mkdir -p /tmp/disposal-files; for file in {1..5000}; do : > /tmp/disposal-files/$file; done',
+            );
+            assert.strictEqual(files.exitCode, 0);
+            const writeResult = await sandbox.executeCommand(
+              'echo "managed" > /data/file.txt',
+            );
+            assert.strictEqual(writeResult.exitCode, 0);
+          } finally {
+            await sandbox.dispose();
+          }
+
+          assert.strictEqual(
+            await (await testbed.client()).volumes.find(volumeName),
+            undefined,
+          );
+        } finally {
+          await removeDockerVolume(volumeName);
+        }
       });
 
       it('attaches managed Docker volume as read-only by default', async () => {
@@ -1152,11 +1150,19 @@ describe('Docker Sandbox', () => {
       }
 
       async function removeContainer(containerId: string): Promise<void> {
-        try {
-          await spawn('docker', ['rm', '-f', containerId]);
-        } catch {
-          // best-effort
-        }
+        const container = await (
+          await testbed.client()
+        ).containers.find(containerId);
+        await container?.remove({ force: true });
+      }
+
+      async function containerNames(name: string): Promise<string[]> {
+        const client = await testbed.client();
+        const containers = await client.containers.list({
+          all: true,
+          filters: { name: [`^/${name}$`] },
+        });
+        return containers.flatMap(({ Names }) => Names ?? []);
       }
 
       it('names the container `sandbox-<name>`', async () => {
@@ -1164,14 +1170,9 @@ describe('Docker Sandbox', () => {
         const sandbox = await createDockerSandbox({ ...defaults, name });
 
         try {
-          const inspect = await spawn('docker', [
-            'container',
-            'inspect',
-            '--format',
-            '{{.Name}}',
-            `sandbox-${name}`,
+          assert.deepStrictEqual(await containerNames(`sandbox-${name}`), [
+            `/sandbox-${name}`,
           ]);
-          assert.strictEqual(inspect.stdout.trim(), `/sandbox-${name}`);
         } finally {
           await sandbox.dispose();
           await removeContainer(`sandbox-${name}`);
@@ -1240,15 +1241,9 @@ describe('Docker Sandbox', () => {
           assert.strictEqual(read.stdout.trim(), 'converged');
 
           // Exactly one container exists with that name.
-          const ls = await spawn('docker', [
-            'ps',
-            '-a',
-            '--filter',
-            `name=^/sandbox-${name}$`,
-            '--format',
-            '{{.Names}}',
+          assert.deepStrictEqual(await containerNames(`sandbox-${name}`), [
+            `/sandbox-${name}`,
           ]);
-          assert.strictEqual(ls.stdout.trim(), `sandbox-${name}`);
         } finally {
           await a?.dispose();
           await b?.dispose();
@@ -1266,7 +1261,7 @@ describe('Docker Sandbox', () => {
           { Image: 'bash:5.3-alpine3.24', Cmd: ['tail', '-f', '/dev/null'] },
           { name: `sandbox-${name}` },
         );
-        await spawn('docker', ['stop', container.id]);
+        await container.stop();
 
         const sandbox = await createDockerSandbox({ ...defaults, name });
         try {
@@ -1320,18 +1315,9 @@ describe('Docker Sandbox', () => {
           assert.strictEqual(ra.stdout.trim(), 'a');
           assert.strictEqual(rb.stdout.trim(), 'b');
 
-          const list = await spawn('docker', [
-            'ps',
-            '--filter',
-            `name=^${containerId}$`,
-            '--format',
-            '{{.Names}}',
+          assert.deepStrictEqual(await containerNames(containerId), [
+            `/${containerId}`,
           ]);
-          const matches = list.stdout
-            .trim()
-            .split('\n')
-            .filter((n) => n === containerId);
-          assert.strictEqual(matches.length, 1);
 
           await a.dispose();
         } finally {

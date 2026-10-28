@@ -3,7 +3,7 @@ title: Apple Container Sandbox
 description: Execute real binaries in per-container lightweight VMs on Apple silicon via Apple's container CLI
 ---
 
-import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 
 The Apple Container sandbox runs commands inside Linux containers backed by
 Apple's [`container`](https://github.com/apple/container) CLI. Unlike the Docker
@@ -16,12 +16,13 @@ sandbox (shared host kernel via `runc`), each container is its own
   Apple silicon, **macOS 26+** only. The `container` service must be running and
   a guest kernel configured:
 
-  ```bash
-  container system start
-  container system kernel set --recommended
-  ```
+```bash
+container system start
+container system kernel set --recommended
+```
 
-  If the service is down, the sandbox throws `ContainerServiceNotRunningError`.
+If the service is down, the sandbox throws `ContainerServiceNotRunningError`.
+
 </Callout>
 
 ## Strategies
@@ -107,9 +108,9 @@ When attaching, installer execution, volume preparation, and env setup are skipp
 <Callout type="warn">
   This is get-or-create for **sequential** callers. Creating the same name from
   two callers concurrently is not supported — the `container` runtime races on
-  duplicate-name `run`. Serialize creation of a given name. Also note `dispose()`
-  stops and removes the container (containers use `--rm`) even when this call
-  attached to an existing one.
+  duplicate-name `run`. Serialize creation of a given name. Also note
+  `dispose()` stops and removes the container (containers use `--rm`) even when
+  this call attached to an existing one.
 </Callout>
 
 ## Architecture Selection
@@ -202,7 +203,9 @@ const result = await sandbox.executeCommand('python3 --version');
 console.log(result.stdout, result.stderr, result.exitCode);
 
 const controller = new AbortController();
-const pending = sandbox.executeCommand('sleep 30', { signal: controller.signal });
+const pending = sandbox.executeCommand('sleep 30', {
+  signal: controller.signal,
+});
 setTimeout(() => controller.abort(), 1_000);
 await pending;
 ```
@@ -210,7 +213,7 @@ await pending;
 For live byte streams, use `spawn` (accepts `cwd`, `env`, `signal`):
 
 ```typescript
-const proc = sandbox.spawn('python3 long-task.py', { cwd: '/workspace' });
+const proc = await sandbox.spawn('python3 long-task.py', { cwd: '/workspace' });
 const decoder = new TextDecoder();
 for await (const chunk of proc.stdout) {
   process.stdout.write(decoder.decode(chunk, { stream: true }));
@@ -225,7 +228,7 @@ Aborting a running process kills it with `SIGKILL`, so `proc.exit` reports a non
 The installer suite is shared with the Docker sandbox — `pkg([...])`, `urlBinary({...})`, `npm(...)`, `pip(...)`, `githubRelease({...})`, and custom `Installer` subclasses all work unchanged, driven through `container exec`. See the [Docker sandbox installer reference](/docs/context/docker-sandbox#installers) for the full API; the only difference is the factory you pass them to.
 
 ```typescript
-import { createAppleContainerSandbox, pkg, npm } from '@deepagents/context';
+import { createAppleContainerSandbox, npm, pkg } from '@deepagents/context';
 
 await using sandbox = await createAppleContainerSandbox({
   image: 'docker.io/library/node:lts-bookworm-slim',
@@ -247,7 +250,7 @@ Parent directories are created automatically. Content is base64-encoded for bina
 ## Container Lifecycle
 
 ```typescript
-import { useAppleContainerSandbox, pkg } from '@deepagents/context';
+import { pkg, useAppleContainerSandbox } from '@deepagents/context';
 
 const version = await useAppleContainerSandbox(
   { installers: [pkg(['curl'])] },
@@ -262,28 +265,28 @@ const version = await useAppleContainerSandbox(
 
 ## Differences from the Docker Sandbox
 
-| Capability | Docker sandbox | Apple Container sandbox |
-| --- | --- | --- |
-| Isolation | Shared host kernel (`runc`) | Per-container lightweight VM |
-| Compose / multi-service | `compose` strategy | Not supported |
-| Architecture | `platform: 'linux/amd64'` | `arch: 'amd64'` |
-| Security knobs | Grouped `security`, `network`, `resources`, and `runtime` options | Per-VM isolation; no `--security-opt` |
-| Volume drivers | `driver` / `driverOptions` | Local `ext4` only; bind-mount for remotes |
-| Host requirement | Docker daemon | `container` service + guest kernel (macOS 26+) |
+| Capability              | Docker sandbox                                                    | Apple Container sandbox                        |
+| ----------------------- | ----------------------------------------------------------------- | ---------------------------------------------- |
+| Isolation               | Shared host kernel (`runc`)                                       | Per-container lightweight VM                   |
+| Compose / multi-service | `compose` strategy                                                | Not supported                                  |
+| Architecture            | `platform: 'linux/amd64'`                                         | `arch: 'amd64'`                                |
+| Security knobs          | Grouped `security`, `network`, `resources`, and `runtime` options | Per-VM isolation; no `--security-opt`          |
+| Volume drivers          | `driver` / `driverOptions`                                        | Local `ext4` only; bind-mount for remotes      |
+| Host requirement        | Docker daemon                                                     | `container` service + guest kernel (macOS 26+) |
 
 ## Error Handling
 
 All errors extend `AppleContainerSandboxError`:
 
-| Error | When |
-| --- | --- |
-| `ContainerServiceNotRunningError` | The `container` service is not running |
-| `AppleContainerCreationError` | Container fails to start |
-| `AppleContainerImageBuildError` | `container build` fails (includes stderr) |
-| `AppleContainerVolumePathError` | Invalid bind or volume path configuration |
+| Error                              | When                                                  |
+| ---------------------------------- | ----------------------------------------------------- |
+| `ContainerServiceNotRunningError`  | The `container` service is not running                |
+| `AppleContainerCreationError`      | Container fails to start                              |
+| `AppleContainerImageBuildError`    | `container build` fails (includes stderr)             |
+| `AppleContainerVolumePathError`    | Invalid bind or volume path configuration             |
 | `AppleContainerVolumeInspectError` | External volume does not exist or cannot be inspected |
-| `AppleContainerVolumeCreateError` | Managed volume cannot be created |
-| `AppleContainerVolumeRemoveError` | Managed volume cannot be removed during cleanup |
+| `AppleContainerVolumeCreateError`  | Managed volume cannot be created                      |
+| `AppleContainerVolumeRemoveError`  | Managed volume cannot be removed during cleanup       |
 
 Installer failures reuse `PackageInstallError` / `InstallError` from the shared installer suite.
 

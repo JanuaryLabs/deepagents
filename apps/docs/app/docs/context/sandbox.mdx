@@ -13,17 +13,17 @@ policy, or binary bridges to combine approaches.
 
 ## When to Use What
 
-| Approach | Use Case | Requires Docker? |
-|----------|----------|-------------------|
-| `createDockerSandbox` + `createBashTool` | Agent needs real binaries in isolated container | Yes |
-| `createDockerSandbox` | Direct container control without AI agent wiring | Yes |
-| `createAppleContainerSandbox` + `createBashTool` | Agent needs real binaries in Apple Container lightweight VMs | No |
-| `createAppleContainerSandbox` | Direct VM-backed container control on Apple silicon/macOS 26+ | No |
-| [`createMicrosandboxSandbox`](/docs/context/microsandbox-sandbox) + `createBashTool` | Agent needs OCI images in local microVMs with streaming process output | No |
-| `createMicrosandboxSandbox` | Direct local microVM control with get-or-create named sandboxes | No |
-| `createDaytonaSandbox(client, options)` + `createBashTool` | Managed remote sandbox with caller-owned Daytona client | No |
-| `createVirtualSandbox` | In-process bash with a virtual filesystem and optional JavaScript command support | No |
-| `createBinaryBridges` | Bridge specific host binaries into just-bash virtual FS | No |
+| Approach                                                                             | Use Case                                                                          | Requires Docker? |
+| ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- | ---------------- |
+| `createDockerSandbox` + `createBashTool`                                             | Agent needs real binaries in isolated container                                   | Yes              |
+| `createDockerSandbox`                                                                | Direct container control without AI agent wiring                                  | Yes              |
+| `createAppleContainerSandbox` + `createBashTool`                                     | Agent needs real binaries in Apple Container lightweight VMs                      | No               |
+| `createAppleContainerSandbox`                                                        | Direct VM-backed container control on Apple silicon/macOS 26+                     | No               |
+| [`createMicrosandboxSandbox`](/docs/context/microsandbox-sandbox) + `createBashTool` | Agent needs OCI images in local microVMs with streaming process output            | No               |
+| `createMicrosandboxSandbox`                                                          | Direct local microVM control with get-or-create named sandboxes                   | No               |
+| `createDaytonaSandbox(client, options)` + `createBashTool`                           | Managed remote sandbox with caller-owned Daytona client                           | No               |
+| `createVirtualSandbox`                                                               | In-process bash with a virtual filesystem and optional JavaScript command support | No               |
+| `createBinaryBridges`                                                                | Bridge specific host binaries into just-bash virtual FS                           | No               |
 
 All AI-agent-facing surfaces compose the same way: pick a backend factory
 (`createDockerSandbox` / `createAppleContainerSandbox` /
@@ -43,7 +43,7 @@ All backends expose the buffered command + file API (`executeCommand`,
 `readFile`, `writeFiles`, `dispose`). Backends that can stream real processes,
 including Docker, Apple Container, Microsandbox, and Daytona
 sandboxes, additionally expose an optional `spawn(command, options?)` for live
-streaming stdio.
+streaming stdio. `spawn` is async: await it to get the process.
 Feature-detect it with `if (!sandbox.spawn) { ... }` when writing
 backend-agnostic code.
 
@@ -67,6 +67,7 @@ The fastest path for giving an AI agent a bash tool that runs in Docker:
 
 ```typescript
 import { groq } from '@ai-sdk/groq';
+
 import { printer } from '@deepagents/agent';
 import {
   type AvailableSkill,
@@ -184,6 +185,7 @@ Bridge specific host binaries into a just-bash virtual file system (no Docker ne
 
 ```typescript
 import { Bash, ReadWriteFs } from 'just-bash';
+
 import { createBashTool, createBinaryBridges } from '@deepagents/context';
 
 const bridges = createBinaryBridges(
@@ -209,6 +211,7 @@ surface without Docker:
 
 ```typescript
 import { InMemoryFs } from 'just-bash';
+
 import { createBashTool, createVirtualSandbox } from '@deepagents/context';
 
 const sandbox = await createBashTool({
