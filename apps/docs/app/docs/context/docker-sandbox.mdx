@@ -121,7 +121,7 @@ const sandbox = await createDockerSandbox({ commandTimeout: 300_000 });
 ```
 
 A deadline terminates the command's process group inside the container before
-`executeCommand` returns exit code `124` or `spawn().exit` resolves with
+`executeCommand` returns exit code `124` or `(await spawn()).exit` resolves with
 `{ code: 124, signal: null, success: false }`. A per-call `AbortSignal` remains
 separate caller cancellation: `spawn` reports an unsuccessful `SIGKILL`, while
 `executeCommand` returns non-zero; neither is reported as a timeout.
@@ -177,6 +177,21 @@ const sandbox = await createDockerSandbox({
 
 Compose sandboxes do not use this option. Configure command behavior in the
 compose file (for example, `command:` or `entrypoint:` per service).
+
+## Engine
+
+The sandbox uses the Docker engine that the Docker CLI selects:
+`DOCKER_HOST`, `DOCKER_CONTEXT` and `DOCKER_CONFIG` decide it. To select an
+engine without changing `process.env`, pass `environment`:
+
+```typescript
+const sandbox = await createDockerSandbox({
+  environment: { ...process.env, DOCKER_CONTEXT: 'build-server' },
+});
+```
+
+The sandbox checks the container name and the env keys before it connects, so
+a wrong value is reported even when the engine is down.
 
 ## Runtime Flags
 
@@ -371,7 +386,7 @@ await pending;
 For live byte streams, use `spawn`:
 
 ```typescript
-const proc = sandbox.spawn('python3 long-task.py', {
+const proc = await sandbox.spawn('python3 long-task.py', {
   cwd: '/workspace',
   env: { MODE: 'stream' },
 });
@@ -508,7 +523,8 @@ class CargoInstaller extends Installer {
 
 ## File I/O
 
-Read and write files inside the container using base64 encoding for binary safety:
+Read and write files inside the container. The bytes move through Docker's
+archive requests, so binary content is safe:
 
 ```typescript
 // Write files
@@ -521,7 +537,10 @@ await sandbox.writeFiles([
 const content = await sandbox.readFile('/tmp/data.json');
 ```
 
-Parent directories are created automatically during writes.
+Parent directories are created automatically during writes. The files, and the
+directories that a write creates, belong to the container's user: the
+`security.user` value, or the `USER` of the image. A process that runs as that
+user can change them.
 
 ## Container Lifecycle
 

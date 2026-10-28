@@ -164,7 +164,7 @@ export interface DockerNetwork {
 
 /**
  * Run-configuration for the Docker engine. Extends the common options the shared
- * skeleton reads with Docker-only `docker run` knobs that only `dockerEngine`
+ * skeleton reads with Docker-only `docker run` knobs that only `DockerEngine`
  * sees.
  */
 export interface DockerCommonOptions extends CommonSandboxOptions {
