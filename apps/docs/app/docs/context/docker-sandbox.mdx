@@ -3,7 +3,7 @@ title: Docker Sandbox
 description: Execute real binaries in isolated Docker containers with three creation strategies
 ---
 
-import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 
 The Docker sandbox provides isolated code execution by running commands inside Docker containers. It supports three strategies for creating sandboxes, each suited to different use cases.
 
@@ -265,7 +265,8 @@ const sandbox = await createDockerSandbox({
 
 ## Volumes
 
-Attach bind paths or Docker-managed volumes to the container. Read-only by default for security.
+Attach bind mounts or Docker volumes to the container. Mounts are read-only by
+default (`readOnly: true`).
 
 ```typescript
 const sandbox = await createDockerSandbox({
@@ -274,13 +275,13 @@ const sandbox = await createDockerSandbox({
       type: 'bind',
       hostPath: '/absolute/path/on/host',
       containerPath: '/workspace',
-      readOnly: true,   // default
+      readOnly: true, // default
     },
     {
       type: 'bind',
       hostPath: process.cwd(),
       containerPath: '/project',
-      readOnly: false,  // allow writes
+      readOnly: false, // allow writes
     },
     {
       type: 'volume',
@@ -300,7 +301,15 @@ const sandbox = await createDockerSandbox({
 });
 ```
 
-Bind paths are validated at creation time. A `VolumePathError` is thrown if a bind `hostPath` doesn't exist on the host.
+Bind mounts use paths on the Docker daemon's host. For a remote daemon, set
+`hostPath` to a path on that machine. DeepAgents leaves the existence check to
+Docker. If Docker reports a missing bind source when the container starts,
+DeepAgents throws `VolumePathError` with the configured `hostPath` and
+`containerPath`.
+
+On macOS, Docker Desktop may report `/host_mnt/private/tmp/data` for a configured
+`/tmp/data` source. DeepAgents recognizes this form when classifying missing-source
+errors. Keep the macOS path in `hostPath`.
 
 External Docker volumes are inspected before the container starts. Managed Docker volumes are created before the container starts and removed on `dispose()` unless `removeOnDispose: false` is set.
 
@@ -311,8 +320,8 @@ Cloud-backed storage should be configured outside DeepAgents through Docker volu
 ```typescript
 const sandbox = await createDockerSandbox({
   resources: {
-    memory: '512m',  // default: '1g'
-    cpus: 1,         // default: 2
+    memory: '512m', // default: '1g'
+    cpus: 1, // default: 2
   },
 });
 ```
@@ -414,7 +423,7 @@ createDockerSandbox({
         x86_64: 'https://github.com/.../presenterm-x86_64-linux-musl.tar.gz',
         aarch64: 'https://github.com/.../presenterm-aarch64-linux-musl.tar.gz',
       },
-      binaryPath: 'presenterm',  // filename inside the archive
+      binaryPath: 'presenterm', // filename inside the archive
     }),
   ],
 });
@@ -431,8 +440,8 @@ import { npm } from '@deepagents/context';
 
 createDockerSandbox({
   installers: [
-    npm('prettier', { ensureRuntime: true }),       // installs node + npm too
-    npm('typescript', { version: '5.4.5' }),         // pinned version
+    npm('prettier', { ensureRuntime: true }), // installs node + npm too
+    npm('typescript', { version: '5.4.5' }), // pinned version
   ],
 });
 
@@ -485,7 +494,9 @@ import { Installer, type InstallerContext } from '@deepagents/context';
 class CargoInstaller extends Installer {
   readonly kind = `cargo:${this.crate}`;
 
-  constructor(private crate: string) { super(); }
+  constructor(private crate: string) {
+    super();
+  }
 
   async install(ctx: InstallerContext) {
     await ctx.ensureTool('cargo');
@@ -547,25 +558,25 @@ Containers are created with `--rm`, so they're removed automatically when stoppe
 
 All errors extend `DockerSandboxError`:
 
-| Error | When |
-|-------|------|
-| `DockerNotAvailableError` | Docker daemon is not running |
-| `ContainerCreationError` | Container fails to start |
-| `PackageInstallError` | Package installation fails (includes package names, manager type, stderr) |
-| `InstallError` | Installer fails. Carries `target` (logical name), `source` (`'url' \| 'npm' \| 'pypi' \| 'github-release'`), `reason` (stderr), `url` (when applicable) |
-| `MissingRuntimeError` | `npm()`/`pip()` ran without `ensureRuntime: true` and the runtime is absent. Carries `runtime` and `required` (binary names) |
-| `VolumePathError` | Invalid bind or volume path configuration |
-| `VolumeInspectError` | External Docker volume does not exist or cannot be inspected |
-| `VolumeCreateError` | Managed Docker volume cannot be created |
-| `VolumeRemoveError` | Managed Docker volume cannot be removed during cleanup |
-| `DockerfileBuildError` | Dockerfile build fails (includes stderr) |
-| `ComposeStartError` | Docker Compose startup fails (includes compose file path, stderr) |
+| Error                     | When                                                                                                                                                    |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DockerNotAvailableError` | Docker daemon is not running                                                                                                                            |
+| `ContainerCreationError`  | Container fails to start                                                                                                                                |
+| `PackageInstallError`     | Package installation fails (includes package names, manager type, stderr)                                                                               |
+| `InstallError`            | Installer fails. Carries `target` (logical name), `source` (`'url' \| 'npm' \| 'pypi' \| 'github-release'`), `reason` (stderr), `url` (when applicable) |
+| `MissingRuntimeError`     | `npm()`/`pip()` ran without `ensureRuntime: true` and the runtime is absent. Carries `runtime` and `required` (binary names)                            |
+| `VolumePathError`         | Invalid mount configuration or a bind source Docker reports as missing                                                                                  |
+| `VolumeInspectError`      | External Docker volume does not exist or cannot be inspected                                                                                            |
+| `VolumeCreateError`       | Managed Docker volume cannot be created                                                                                                                 |
+| `VolumeRemoveError`       | Managed Docker volume cannot be removed during cleanup                                                                                                  |
+| `DockerfileBuildError`    | Dockerfile build fails (includes stderr)                                                                                                                |
+| `ComposeStartError`       | Docker Compose startup fails (includes compose file path, stderr)                                                                                       |
 
 ```typescript
 import {
-  createDockerSandbox,
   DockerNotAvailableError,
   PackageInstallError,
+  createDockerSandbox,
 } from '@deepagents/context';
 
 try {
