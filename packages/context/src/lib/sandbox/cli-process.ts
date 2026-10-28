@@ -25,14 +25,14 @@ export function commandResultFrom(error: unknown): CommandResult {
 }
 
 /**
- * Bridge a Node `child_process` — a `docker exec` / `container exec` child —
- * into the backend-neutral {@link SandboxProcess} shape: web `ReadableStream`
- * stdio plus an `exit` promise that resolves with the child's exit code.
+ * Bridge a Node `child_process` — a `container exec` child — into the
+ * backend-neutral {@link SandboxProcess} shape: web `ReadableStream` stdio plus
+ * an `exit` promise that resolves with the child's exit code.
  *
- * Aborting `abortSignal` sends `SIGKILL`. Both the `docker` and Apple
- * `container` CLIs trap `SIGTERM` in their client wrapper and exit cleanly with
- * code 0, so `SIGTERM` would look like a successful run; only `SIGKILL`
- * reliably tears the child down and surfaces as a non-success exit.
+ * Aborting `abortSignal` sends `SIGKILL`. The Apple `container` CLI traps
+ * `SIGTERM` in its client wrapper and exits cleanly with code 0, so `SIGTERM`
+ * would look like a successful run; only `SIGKILL` reliably tears the child
+ * down and surfaces as a non-success exit.
  */
 export function toSandboxProcess(
   child: ChildProcess,
@@ -75,6 +75,9 @@ export function toSandboxProcess(
   };
 }
 
+/** Runs a Bash command in the container: the only file channel of a CLI engine. */
+type ExecuteCommand = (command: string) => Promise<CommandResult>;
+
 /**
  * base64 chars per write chunk — a multiple of 4 so each chunk decodes to whole
  * bytes (and appends cleanly), keeping every `bash -lc` argument well under the
@@ -83,16 +86,12 @@ export function toSandboxProcess(
 const BASE64_WRITE_CHUNK = 32_768;
 
 /**
- * Build the shell commands that decode `content` into `path`, for sandbox
- * backends whose only channel is `executeCommand` (no native file copy). The
- * payload is split into independently-decodable base64 chunks so large files
- * don't blow ARG_MAX, and every argument is shell-quoted. Always returns at
- * least one command (an empty file is created by the final fallback).
+ * Build the shell commands that decode `content` into `path`. The payload is
+ * split into independently-decodable base64 chunks so large files don't blow
+ * ARG_MAX, and every argument is shell-quoted. Always returns at least one
+ * command (an empty file is created by the final fallback).
  */
-export function base64WriteCommands(
-  path: string,
-  content: string | Buffer,
-): string[] {
+function base64WriteCommands(path: string, content: string | Buffer): string[] {
   const base64 = Buffer.from(content).toString('base64');
   const quotedPath = shellQuote(path);
   const commands: string[] = [];
@@ -109,16 +108,53 @@ export function base64WriteCommands(
   return commands;
 }
 
-/** Build the command that base64-encodes `path` for reading back to the host. */
-export function base64ReadCommand(path: string): string {
-  return `base64 ${shellQuote(path)}`;
+/** Reads `path` as base64 through `executeCommand`. */
+export async function readFileOverExec(
+  executeCommand: ExecuteCommand,
+  path: string,
+): Promise<Uint8Array> {
+  const result = await executeCommand(`base64 ${shellQuote(path)}`);
+  if (result.exitCode !== 0) {
+    throw new Error(`Failed to read file "${path}": ${result.stderr}`);
+  }
+  return Buffer.from(result.stdout, 'base64');
 }
 
 /**
- * Build the command that prints `true` or `false` for whether `path` exists.
- * The answer travels on stdout rather than the exit code because a failed
- * `exec` (engine down, container gone) also exits 1 and would read as "missing".
+ * Whether `path` exists. The answer travels on stdout rather than the exit
+ * code because a failed `exec` (engine down, container gone) also exits 1 and
+ * would read as "missing".
  */
-export function existsCommand(path: string): string {
-  return `test -e ${shellQuote(path)} && printf true || printf false`;
+export async function existsOverExec(
+  executeCommand: ExecuteCommand,
+  path: string,
+): Promise<boolean> {
+  const result = await executeCommand(
+    `test -e ${shellQuote(path)} && printf true || printf false`,
+  );
+  if (result.stdout === 'true') return true;
+  if (result.stdout === 'false') return false;
+  throw new Error(`Failed to check "${path}": ${result.stderr}`);
+}
+
+/** Writes each file as base64 through `executeCommand`, creating its parent directory. */
+export async function writeFilesOverExec(
+  executeCommand: ExecuteCommand,
+  files: Array<{ path: string; content: string | Buffer }>,
+): Promise<void> {
+  for (const file of files) {
+    const dir = file.path.substring(0, file.path.lastIndexOf('/'));
+    if (dir) {
+      await executeCommand(`mkdir -p ${shellQuote(dir)}`);
+    }
+
+    for (const command of base64WriteCommands(file.path, file.content)) {
+      const result = await executeCommand(command);
+      if (result.exitCode !== 0) {
+        throw new Error(
+          `Failed to write file "${file.path}": ${result.stderr}`,
+        );
+      }
+    }
+  }
 }

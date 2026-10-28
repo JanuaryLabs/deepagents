@@ -1,19 +1,40 @@
+import {
+  BindSourceNotFoundError,
+  ConnectionFailedError,
+  type Container,
+  ContainerNotFoundError,
+  Docker,
+  type EngineApi,
+  ImageNotFoundError,
+  NameConflictError,
+  VolumeInUseError,
+} from '@zukhruf/docker';
 import spawn, { SubprocessError } from 'nano-spawn';
 import { type StdioOptions, spawn as childSpawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { commandResultFrom, toSandboxProcess } from './cli-process.ts';
+import {
+  commandResultFrom,
+  existsOverExec,
+  readFileOverExec,
+  toSandboxProcess,
+  writeFilesOverExec,
+} from './cli-process.ts';
 import type {
   CommonSandboxOptions,
   ContainerEngine,
+  ContainerErrorFactory,
+  EngineContainer,
   ImageBuildSpec,
+  RunResult,
   SandboxNamedVolume,
   SandboxResources,
   SandboxVolume,
 } from './container-engine.ts';
 import {
+  type AcquiredContainer,
   ContainerSandboxStrategy,
   ContainerfileStrategy,
   RuntimeStrategy,
@@ -31,6 +52,7 @@ import {
 } from './docker-sandbox-errors.ts';
 import {
   type Installer,
+  type InstallerContext,
   createInstallerContext,
 } from './installers/installer.ts';
 import { shellQuote } from './shell-quote.ts';
@@ -236,36 +258,216 @@ export function isComposeOptions(
   return 'compose' in opts;
 }
 
-function dockerMountArg(volume: SandboxVolume): string {
-  const readOnly = volume.readOnly !== false;
-  const parts =
-    volume.type === 'bind'
-      ? ['type=bind', `src=${volume.hostPath}`, `dst=${volume.containerPath}`]
-      : [
-          'type=volume',
-          `src=${volume.name}`,
-          `dst=${volume.containerPath}`,
-          ...(volume.subPath ? [`volume-subpath=${volume.subPath}`] : []),
-          ...(volume.noCopy ? ['volume-nocopy'] : []),
-        ];
+/** Container units `docker run` takes for sizes: a number with an optional binary unit. */
+const SIZE_UNITS: Record<string, number> = {
+  '': 1,
+  k: 1024,
+  m: 1024 ** 2,
+  g: 1024 ** 3,
+  t: 1024 ** 4,
+  p: 1024 ** 5,
+};
 
-  if (readOnly) {
-    parts.push('readonly');
+/** Bytes of a `docker run` size such as `'1g'`, `'512m'` or `'1073741824b'`. */
+function sizeInBytes(flag: string, value: string): number {
+  const match = /^(\d+(?:\.\d+)?)\s*([kmgtp]?)(?:i?b)?$/i.exec(value);
+  if (!match) {
+    throw new DockerSandboxError(`Invalid ${flag} size: "${value}"`);
   }
+  return Math.floor(Number(match[1]) * SIZE_UNITS[match[2].toLowerCase()]);
+}
 
-  return parts.join(',');
+/** A `--ulimit` entry such as `'nofile=1024:2048'` or `'nproc=64'`. */
+function ulimit(value: string): EngineApi.Ulimit {
+  const match = /^([a-z]+)=(-?\d+)(?::(-?\d+))?$/.exec(value);
+  if (!match) {
+    throw new DockerSandboxError(`Invalid ulimit: "${value}"`);
+  }
+  const soft = Number(match[2]);
+  return {
+    Name: match[1],
+    Soft: soft,
+    Hard: match[3] === undefined ? soft : Number(match[3]),
+  };
+}
+
+/** A `--device` entry: `host[:container[:permissions]]`. */
+function device(value: string): EngineApi.DeviceMapping {
+  const [host, container = host, permissions = 'rwm'] = value.split(':');
+  return {
+    PathOnHost: host,
+    PathInContainer: container,
+    CgroupPermissions: permissions,
+  };
+}
+
+/** The `--gpus` request: `'all'`, a count, or `'device=0,1'`. */
+function gpuRequest(value: string): EngineApi.DeviceRequest {
+  if (value === 'all') return { Count: -1, Capabilities: [['gpu']] };
+  if (/^\d+$/.test(value)) {
+    return { Count: Number(value), Capabilities: [['gpu']] };
+  }
+  const devices = /^device=(.+)$/.exec(value);
+  if (devices) {
+    return { DeviceIDs: devices[1].split(','), Capabilities: [['gpu']] };
+  }
+  throw new DockerSandboxError(`Invalid gpus value: "${value}"`);
+}
+
+/** A `--publish` entry: `[ip:][hostPort:]containerPort[/protocol]`. */
+function publishedPort(value: string): {
+  port: string;
+  binding: EngineApi.PortBinding;
+} {
+  const [address, protocol = 'tcp'] = value.split('/');
+  const parts = address.split(':');
+  const containerPort = parts.pop();
+  const hostPort = parts.pop() ?? '';
+  const hostIp = parts.join(':');
+  if (!containerPort || !/^\d+$/.test(containerPort)) {
+    throw new DockerSandboxError(`Invalid publish value: "${value}"`);
+  }
+  return {
+    port: `${containerPort}/${protocol}`,
+    binding: { HostIp: hostIp, HostPort: hostPort },
+  };
+}
+
+/**
+ * A `--security-opt` entry as the engine takes it. The CLI reads a seccomp
+ * profile from this machine and sends its JSON; the engine cannot read a path
+ * on the client.
+ */
+function securityOption(entry: string): string {
+  const match = /^seccomp[=:](.+)$/.exec(entry);
+  if (!match || match[1] === 'unconfined') return entry;
+  return `seccomp=${JSON.stringify(JSON.parse(readFileSync(match[1], 'utf-8')))}`;
+}
+
+function mount(volume: SandboxVolume): EngineApi.Mount {
+  const ReadOnly = volume.readOnly !== false;
+  if (volume.type === 'bind') {
+    return {
+      Type: 'bind',
+      Source: volume.hostPath,
+      Target: volume.containerPath,
+      ReadOnly,
+    };
+  }
+  return {
+    Type: 'volume',
+    Source: volume.name,
+    Target: volume.containerPath,
+    ReadOnly,
+    ...(volume.subPath || volume.noCopy
+      ? {
+          VolumeOptions: {
+            ...(volume.subPath ? { Subpath: volume.subPath } : {}),
+            ...(volume.noCopy ? { NoCopy: true } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+/**
+ * The body of `POST /containers/create` for a long-running sandbox container:
+ * what `docker run -d --rm` sends for the same options.
+ */
+function containerCreateRequest(
+  image: string,
+  opts: DockerCommonOptions,
+  workdir: string,
+): EngineApi.ContainerCreateRequest {
+  const {
+    memory = '1g',
+    cpus = 2,
+    memorySwap,
+    shmSize,
+    pidsLimit,
+    ulimits = [],
+    cpusetCpus,
+    cpuShares,
+  } = opts.resources ?? {};
+  const security = opts.security ?? {};
+  const network = opts.network ?? {};
+  const published = (network.publish ?? []).map(publishedPort);
+
+  return {
+    Image: image,
+    WorkingDir: workdir,
+    Env: Object.entries(opts.env ?? {}).map(
+      ([key, value]) => `${key}=${value}`,
+    ),
+    Labels: opts.labels ?? {},
+    ...(opts.command === undefined
+      ? { Cmd: ['tail', '-f', '/dev/null'] }
+      : opts.command === null || opts.command.length === 0
+        ? {}
+        : { Cmd: [...opts.command] }),
+    ...(opts.entrypoint === undefined ? {} : { Entrypoint: [opts.entrypoint] }),
+    ...(security.user ? { User: security.user } : {}),
+    ...(network.hostname ? { Hostname: network.hostname } : {}),
+    ExposedPorts: Object.fromEntries(published.map(({ port }) => [port, {}])),
+    HostConfig: {
+      AutoRemove: true,
+      Memory: sizeInBytes('memory', memory),
+      NanoCpus: Math.round(cpus * 1e9),
+      ...(memorySwap
+        ? {
+            MemorySwap:
+              memorySwap === '-1' ? -1 : sizeInBytes('memorySwap', memorySwap),
+          }
+        : {}),
+      ...(shmSize ? { ShmSize: sizeInBytes('shmSize', shmSize) } : {}),
+      ...(pidsLimit === undefined ? {} : { PidsLimit: pidsLimit }),
+      Ulimits: ulimits.map(ulimit),
+      ...(cpusetCpus ? { CpusetCpus: cpusetCpus } : {}),
+      ...(cpuShares === undefined ? {} : { CpuShares: cpuShares }),
+      ...(opts.runtime ? { Runtime: opts.runtime } : {}),
+      CapDrop: security.capDrop ?? [],
+      CapAdd: security.capAdd ?? [],
+      ReadonlyRootfs: security.readOnly === true,
+      Tmpfs: Object.fromEntries(
+        (security.tmpfs ?? []).map((entry) => {
+          const separator = entry.indexOf(':');
+          return separator < 0
+            ? [entry, '']
+            : [entry.slice(0, separator), entry.slice(separator + 1)];
+        }),
+      ),
+      SecurityOpt: (security.securityOpt ?? []).map(securityOption),
+      ...(network.mode ? { NetworkMode: network.mode } : {}),
+      PortBindings: published.reduce<Record<string, EngineApi.PortBinding[]>>(
+        (bindings, { port, binding }) => ({
+          ...bindings,
+          [port]: [...(bindings[port] ?? []), binding],
+        }),
+        {},
+      ),
+      Dns: network.dns ?? [],
+      ExtraHosts: network.addHost ?? [],
+      ...(opts.gpus ? { DeviceRequests: [gpuRequest(opts.gpus)] } : {}),
+      Devices: (opts.devices ?? []).map(device),
+      ...(opts.init ? { Init: true } : {}),
+      Sysctls: opts.sysctls ?? {},
+      Mounts: (opts.volumes ?? []).map(mount),
+    },
+  };
 }
 
 /**
  * Runs `docker build`. An inline Dockerfile is piped to `docker build -f -` over
  * stdin (no shell, no quoting). With `showBuildLogs`, output streams live to the
  * parent terminal; otherwise it is buffered so the failure stderr can be
- * surfaced in a {@link DockerfileBuildError}.
+ * surfaced in a {@link DockerfileBuildError}. `env` sends the CLI to the
+ * engine of the sandbox.
  */
 function runDockerBuild(
   args: string[],
   stdin: string | undefined,
   showBuildLogs: boolean,
+  env: NodeJS.ProcessEnv,
 ): Promise<void> {
   const stdio: StdioOptions = [
     stdin === undefined ? 'inherit' : 'pipe',
@@ -274,7 +476,7 @@ function runDockerBuild(
   ];
 
   return new Promise((resolve, reject) => {
-    const child = childSpawn('docker', args, { stdio });
+    const child = childSpawn('docker', args, { stdio, env });
 
     let stderr = '';
     child.stderr?.on('data', (chunk) => {
@@ -305,333 +507,30 @@ function runDockerBuild(
   });
 }
 
-export const dockerEngine: ContainerEngine<DockerCommonOptions> = {
-  cli: 'docker',
-  bindMountsOnClient: false,
-  isMissingBindSource(message, source) {
-    // Docker Desktop reports VM paths and resolves macOS's root symlinks.
-    const canonicalSource = source.replace(
-      /^\/(tmp|var|etc)(?=\/|$)/,
-      '/private/$1',
-    );
-    return [source, `/host_mnt${source}`, `/host_mnt${canonicalSource}`].some(
-      (candidate) => {
-        const marker = `bind source path does not exist: ${candidate}`;
-        const index = message.indexOf(marker);
-        if (index < 0) return false;
-        // A parent mount must not match its missing child.
-        const remainder = message.slice(index + marker.length);
-        return (
-          remainder === '' ||
-          remainder.startsWith('\n') ||
-          remainder.startsWith('\r\n')
-        );
-      },
-    );
-  },
+/** Maps an unreachable engine to {@link DockerNotAvailableError}. */
+function unavailable(error: unknown): never {
+  if (error instanceof ConnectionFailedError) {
+    throw new DockerNotAvailableError();
+  }
+  throw error;
+}
 
-  runArgs(
-    image: string,
-    containerId: string,
-    opts: DockerCommonOptions,
-    workdir: string,
-  ): string[] {
-    const {
-      memory = '1g',
-      cpus = 2,
-      memorySwap,
-      shmSize,
-      pidsLimit,
-      ulimits = [],
-      cpusetCpus,
-      cpuShares,
-    } = opts.resources ?? {};
-    const security = opts.security ?? {};
-    const network = opts.network ?? {};
+/** Docker Desktop reports bind sources as VM paths and resolves macOS's root symlinks. */
+function isBindSource(reported: string, hostPath: string): boolean {
+  const canonical = hostPath.replace(/^\/(tmp|var|etc)(?=\/|$)/, '/private/$1');
+  return [hostPath, `/host_mnt${hostPath}`, `/host_mnt${canonical}`].includes(
+    reported,
+  );
+}
 
-    const args: string[] = [
-      'run',
-      '-d',
-      '--rm',
-      '--name',
-      containerId,
-      '--memory',
-      memory,
-      '--cpus',
-      String(cpus),
-      '-w',
-      workdir,
-    ];
-
-    if (memorySwap) {
-      args.push('--memory-swap', memorySwap);
-    }
-    if (shmSize) {
-      args.push('--shm-size', shmSize);
-    }
-    if (pidsLimit !== undefined) {
-      args.push('--pids-limit', String(pidsLimit));
-    }
-    for (const ulimit of ulimits) {
-      args.push('--ulimit', ulimit);
-    }
-    if (cpusetCpus) {
-      args.push('--cpuset-cpus', cpusetCpus);
-    }
-    if (cpuShares !== undefined) {
-      args.push('--cpu-shares', String(cpuShares));
-    }
-
-    if (opts.platform) {
-      args.push('--platform', opts.platform);
-    }
-    if (opts.runtime) {
-      args.push('--runtime', opts.runtime);
-    }
-
-    for (const cap of security.capDrop ?? []) {
-      args.push('--cap-drop', cap);
-    }
-    for (const cap of security.capAdd ?? []) {
-      args.push('--cap-add', cap);
-    }
-    if (security.readOnly) {
-      args.push('--read-only');
-    }
-    if (security.user) {
-      args.push('--user', security.user);
-    }
-    for (const mount of security.tmpfs ?? []) {
-      args.push('--tmpfs', mount);
-    }
-    for (const opt of security.securityOpt ?? []) {
-      args.push('--security-opt', opt);
-    }
-
-    if (network.mode) {
-      args.push('--network', network.mode);
-    }
-    for (const port of network.publish ?? []) {
-      args.push('--publish', port);
-    }
-    for (const server of network.dns ?? []) {
-      args.push('--dns', server);
-    }
-    for (const host of network.addHost ?? []) {
-      args.push('--add-host', host);
-    }
-    if (network.hostname) {
-      args.push('--hostname', network.hostname);
-    }
-
-    if (opts.gpus) {
-      args.push('--gpus', opts.gpus);
-    }
-    for (const device of opts.devices ?? []) {
-      args.push('--device', device);
-    }
-    if (opts.init) {
-      args.push('--init');
-    }
-    for (const [key, value] of Object.entries(opts.labels ?? {})) {
-      args.push('--label', `${key}=${value}`);
-    }
-    for (const [key, value] of Object.entries(opts.sysctls ?? {})) {
-      args.push('--sysctl', `${key}=${value}`);
-    }
-    if (opts.entrypoint) {
-      args.push('--entrypoint', opts.entrypoint);
-    }
-
-    for (const [key, value] of Object.entries(opts.env ?? {})) {
-      args.push('-e', `${key}=${value}`);
-    }
-
-    for (const volume of opts.volumes ?? []) {
-      args.push('--mount', dockerMountArg(volume));
-    }
-
-    args.push(image);
-    if (opts.command === undefined) {
-      args.push('tail', '-f', '/dev/null');
-    } else if (opts.command !== null) {
-      args.push(...opts.command);
-    }
-
-    return args;
-  },
-
-  execArgs(
-    containerId: string,
-    command: string,
-    options?: { cwd?: string; env?: Record<string, string> },
-  ): string[] {
-    const flags: string[] = [];
-    if (options?.cwd) {
-      flags.push('-w', options.cwd);
-    }
-    if (options?.env) {
-      for (const [key, value] of Object.entries(options.env)) {
-        if (key.length === 0 || key.includes('=')) {
-          throw new DockerSandboxError(
-            `Invalid environment variable key: "${key}"`,
-          );
-        }
-        flags.push('-e', `${key}=${value}`);
-      }
-    }
-    return ['exec', ...flags, containerId, 'bash', '-lc', command];
-  },
-
-  inspectArgs(containerId: string): string[] {
-    return [
-      'container',
-      'inspect',
-      '--format',
-      '{{.State.Status}}',
-      containerId,
-    ];
-  },
-
-  parseStatus(status: string): 'running' | 'stopped' | 'absent' {
-    return status === 'running' ? 'running' : 'stopped';
-  },
-
-  volumeCreateArgs(
-    volume: SandboxNamedVolume,
-    opts: DockerCommonOptions,
-  ): string[] {
-    const args = ['volume', 'create'];
-    for (const [key, value] of Object.entries(opts.labels ?? {}))
-      args.push('--label', `${key}=${value}`);
-    if (volume.driver) {
-      args.push('--driver', volume.driver);
-    }
-    for (const [key, value] of Object.entries(volume.driverOptions ?? {})) {
-      args.push('--opt', `${key}=${value}`);
-    }
-    args.push(volume.name);
-    return args;
-  },
-
-  errorMessage(error: unknown): string {
-    if (error instanceof SubprocessError) {
-      return error.stderr || error.stdout || error.message;
-    }
-    return (error instanceof Error && error.message) || String(error);
-  },
-
-  async removeVolume(name) {
-    // Docker's --rm cleanup releases volume references after stop returns.
-    const deadline = performance.now() + 30_000;
-    while (true) {
-      try {
-        await spawn('docker', ['volume', 'rm', name]);
-        return;
-      } catch (error) {
-        if (
-          !this.errorMessage(error).includes('volume is in use') ||
-          performance.now() >= deadline
-        ) {
-          throw error;
-        }
-        await delay(25);
-      }
-    }
-  },
-
-  isServiceDown(message: string): boolean {
-    return (
-      message.includes('Cannot connect') || message.includes('docker daemon')
-    );
-  },
-
-  isMissingContainer(message: string): boolean {
-    return message.toLowerCase().includes('no such container');
-  },
-
-  isMissingVolume(message: string): boolean {
-    return /no such volume|volume \S+ not found/i.test(message);
-  },
-
-  isNameConflict(message: string): boolean {
-    return message.toLowerCase().includes('is already in use by container');
-  },
-
-  async ensureWorkdir(): Promise<void> {},
-
-  defaultImage: 'bash:5.3-alpine3.24',
-
-  createInstallerContext: (containerId, image) =>
-    createInstallerContext(
-      { binary: 'docker', SandboxError: DockerSandboxError },
-      containerId,
-      image,
-    ),
-
-  async imageExists(tag: string): Promise<boolean> {
-    try {
-      await spawn('docker', ['image', 'inspect', tag]);
-      return true;
-    } catch {
-      return false;
-    }
-  },
-
-  async buildImage(spec: ImageBuildSpec): Promise<void> {
-    const inline = spec.dockerfile.includes('\n');
-    const args = [
-      'build',
-      ...(spec.identity ? ['--platform', spec.identity] : []),
-      '-t',
-      spec.tag,
-      '-f',
-      inline ? '-' : spec.dockerfile,
-      spec.context,
-    ];
-    await runDockerBuild(
-      args,
-      inline ? spec.dockerfile : undefined,
-      spec.showBuildLogs,
-    );
-  },
-
-  errors: {
-    serviceNotAvailable: () => new DockerNotAvailableError(),
-    creation: (message, image, cause) =>
-      new ContainerCreationError(message, image, cause),
-    generic: (message, containerId) =>
-      new DockerSandboxError(message, containerId),
-    volumePath: (source, containerPath, reason) =>
-      new VolumePathError(source, containerPath, reason),
-    volumeInspect: (name, reason) => new VolumeInspectError(name, reason),
-    volumeCreate: (name, reason) => new VolumeCreateError(name, reason),
-    volumeRemove: (name, reason) => new VolumeRemoveError(name, reason),
-  },
+const dockerErrors: ContainerErrorFactory = {
+  generic: (message, containerId) =>
+    new DockerSandboxError(message, containerId),
+  volumePath: (source, containerPath, reason) =>
+    new VolumePathError(source, containerPath, reason),
+  volumeInspect: (name, reason) => new VolumeInspectError(name, reason),
+  volumeCreate: (name, reason) => new VolumeCreateError(name, reason),
 };
-
-function validateEnvKey(key: string): void {
-  if (key.length === 0 || key.includes('=')) {
-    throw new DockerSandboxError(`Invalid environment variable key: "${key}"`);
-  }
-}
-
-function buildDockerExecFlags(options?: SpawnOptions): string[] {
-  const flags: string[] = [];
-  if (options?.cwd) {
-    flags.push('-w', options.cwd);
-  }
-  if (options?.env) {
-    for (const [key, value] of Object.entries(options.env)) {
-      validateEnvKey(key);
-      flags.push('-e', `${key}=${value}`);
-    }
-  }
-  return flags;
-}
-
-type DockerExecArgs = (command: string, options?: SpawnOptions) => string[];
-
 function managedDockerCommand(
   command: string,
   controlPath: string,
@@ -668,7 +567,7 @@ function managedDockerCommand(
 }
 
 async function waitForDockerExecPid(
-  execArgs: DockerExecArgs,
+  cli: DockerCli,
   controlPath: string,
   localExit: Promise<unknown>,
 ): Promise<number | undefined> {
@@ -679,7 +578,9 @@ async function waitForDockerExecPid(
   const readPid = `if IFS= read -r pid < ${shellQuote(controlPath)}; then printf '%s' "$pid"; fi`;
 
   while (true) {
-    const result = await spawn('docker', execArgs(readPid));
+    const result = await spawn('docker', cli.execArgs(readPid), {
+      env: cli.env,
+    });
     if (result.stdout) return Number(result.stdout);
     if (await Promise.race([exited, delay(10).then(() => false)])) {
       return undefined;
@@ -688,16 +589,16 @@ async function waitForDockerExecPid(
 }
 
 async function terminateDockerExec(
-  execArgs: DockerExecArgs,
+  cli: DockerCli,
   controlPath: string,
   localExit: Promise<unknown>,
 ): Promise<boolean> {
-  const pid = await waitForDockerExecPid(execArgs, controlPath, localExit);
+  const pid = await waitForDockerExecPid(cli, controlPath, localExit);
   if (pid === undefined) return false;
 
   const result = await spawn(
     'docker',
-    execArgs(
+    cli.execArgs(
       [
         `pid=${pid}`,
         `IFS= read -r control_pid < ${shellQuote(controlPath)} || exit 0`,
@@ -717,19 +618,20 @@ async function terminateDockerExec(
         'printf terminated',
       ].join('\n'),
     ),
+    { env: cli.env },
   );
   return result.stdout === 'terminated';
 }
 
 function spawnDockerProcess(
-  execArgs: DockerExecArgs,
+  cli: DockerCli,
   command: string,
   options: SpawnOptions = {},
   commandTimeout?: number,
 ): SandboxProcess {
   if (!commandTimeout && options.signal === undefined) {
     return toSandboxProcess(
-      childSpawn('docker', execArgs(command, options)),
+      childSpawn('docker', cli.execArgs(command, options), { env: cli.env }),
       undefined,
     );
   }
@@ -738,20 +640,17 @@ function spawnDockerProcess(
   const localProcess = toSandboxProcess(
     childSpawn(
       'docker',
-      execArgs(
+      cli.execArgs(
         managedDockerCommand(command, controlPath, commandTimeout),
         options,
       ),
+      { env: cli.env },
     ),
     undefined,
   );
   let termination: Promise<boolean> | undefined;
   const onAbort = () => {
-    termination ??= terminateDockerExec(
-      execArgs,
-      controlPath,
-      localProcess.exit,
-    );
+    termination ??= terminateDockerExec(cli, controlPath, localProcess.exit);
     // Observe transport failures immediately; the exit promise still reports
     // the original rejection once the command's transport finishes.
     void termination.catch(() => {});
@@ -777,14 +676,16 @@ function spawnDockerProcess(
 }
 
 async function executeDockerCommand(
-  execArgs: DockerExecArgs,
+  cli: DockerCli,
   command: string,
   options: ExecuteCommandOptions = {},
   commandTimeout?: number,
 ): Promise<CommandResult> {
   if (!commandTimeout && options.signal === undefined) {
     try {
-      const result = await spawn('docker', execArgs(command));
+      const result = await spawn('docker', cli.execArgs(command), {
+        env: cli.env,
+      });
       return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
     } catch (error) {
       return commandResultFrom(error);
@@ -792,7 +693,7 @@ async function executeDockerCommand(
   }
 
   const process = spawnDockerProcess(
-    execArgs,
+    cli,
     command,
     { signal: options.signal },
     commandTimeout,
@@ -816,59 +717,346 @@ async function executeDockerCommand(
   return { ...result, exitCode: info.code ?? 1 };
 }
 
-class DockerRuntimeStrategy extends RuntimeStrategy<DockerCommonOptions> {
-  protected override exec(
+/** How the commands of one container reach it through the docker CLI. */
+interface DockerCli {
+  env: NodeJS.ProcessEnv;
+  execArgs(command: string, options?: SpawnOptions): string[];
+}
+
+/** A sandbox container on the Docker engine. */
+class DockerContainer implements EngineContainer {
+  readonly name: string;
+  readonly #container: Container;
+  readonly #cli: DockerCli;
+  readonly #commandTimeout: number | undefined;
+
+  constructor(
+    name: string,
+    container: Container,
+    env: NodeJS.ProcessEnv,
+    commandTimeout: number | undefined,
+  ) {
+    this.name = name;
+    this.#container = container;
+    this.#commandTimeout = commandTimeout;
+    this.#cli = {
+      env,
+      execArgs: (command, options) => {
+        const flags: string[] = [];
+        if (options?.cwd) {
+          flags.push('-w', options.cwd);
+        }
+        for (const [key, value] of Object.entries(options?.env ?? {})) {
+          if (key.length === 0 || key.includes('=')) {
+            throw new DockerSandboxError(
+              `Invalid environment variable key: "${key}"`,
+            );
+          }
+          flags.push('-e', `${key}=${value}`);
+        }
+        return ['exec', ...flags, container.id, 'bash', '-lc', command];
+      },
+    };
+  }
+
+  executeCommand(
     command: string,
     options?: ExecuteCommandOptions,
   ): Promise<CommandResult> {
     return executeDockerCommand(
-      (value, spawnOptions) =>
-        this.engine.execArgs(this.context.containerId, value, spawnOptions),
+      this.#cli,
       command,
       options,
-      this.opts.commandTimeout,
+      this.#commandTimeout,
     );
   }
 
-  protected override spawnProcess(
-    command: string,
-    options?: SpawnOptions,
-  ): SandboxProcess {
+  spawn(command: string, options?: SpawnOptions): SandboxProcess {
     return spawnDockerProcess(
-      (value, spawnOptions) =>
-        this.engine.execArgs(this.context.containerId, value, spawnOptions),
+      this.#cli,
       command,
       options,
-      this.opts.commandTimeout,
+      this.#commandTimeout,
     );
+  }
+
+  readFile(path: string): Promise<Uint8Array> {
+    return readFileOverExec((command) => this.executeCommand(command), path);
+  }
+
+  writeFiles(
+    files: Array<{ path: string; content: string | Buffer }>,
+  ): Promise<void> {
+    return writeFilesOverExec((command) => this.executeCommand(command), files);
+  }
+
+  exists(path: string): Promise<boolean> {
+    return existsOverExec((command) => this.executeCommand(command), path);
+  }
+
+  installerContext(image: string): InstallerContext {
+    return createInstallerContext(
+      {
+        // Installers run with `sh -c`, before the sandbox knows Bash exists.
+        exec: async (command) => {
+          try {
+            const result = await spawn(
+              'docker',
+              ['exec', this.#container.id, 'sh', '-c', command],
+              { env: this.#cli.env },
+            );
+            return {
+              stdout: result.stdout,
+              stderr: result.stderr,
+              exitCode: 0,
+            };
+          } catch (error) {
+            return commandResultFrom(error);
+          }
+        },
+        SandboxError: DockerSandboxError,
+      },
+      this.name,
+      image,
+    );
+  }
+
+  async start(image: string): Promise<void> {
+    try {
+      await this.#container.start();
+    } catch (error) {
+      if (error instanceof ConnectionFailedError) {
+        throw new DockerNotAvailableError();
+      }
+      throw new ContainerCreationError(
+        error instanceof Error ? error.message : String(error),
+        image,
+        error instanceof Error ? error : undefined,
+      );
+    }
+  }
+
+  async stop(): Promise<void> {
+    try {
+      await this.#container.stop();
+    } catch (error) {
+      // The container is gone: AutoRemove removed it, or another handle of a
+      // named sandbox stopped it first.
+      if (error instanceof ContainerNotFoundError) return;
+      throw error;
+    }
   }
 }
 
-class DockerContainerfileStrategy extends ContainerfileStrategy<DockerCommonOptions> {
-  protected override exec(
-    command: string,
-    options?: ExecuteCommandOptions,
-  ): Promise<CommandResult> {
-    return executeDockerCommand(
-      (value, spawnOptions) =>
-        this.engine.execArgs(this.context.containerId, value, spawnOptions),
-      command,
-      options,
-      this.opts.commandTimeout,
+/**
+ * The Docker engine, reached through the Engine API of `@zukhruf/docker`. It
+ * selects the engine that the Docker CLI selects (`DOCKER_HOST`,
+ * `DOCKER_CONTEXT`, the current context), so a remote SSH context works as it
+ * does for the CLI. Image builds and Compose stay on the CLI, sent to the same
+ * engine through `docker.cliEnvironment`.
+ */
+export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
+  readonly bindMountsOnClient = false;
+  readonly defaultImage = 'bash:5.3-alpine3.24';
+  readonly errors = dockerErrors;
+  readonly docker: Docker;
+  /** The environment of a docker CLI process that targets this engine. */
+  readonly cliEnv: NodeJS.ProcessEnv;
+  readonly #commandTimeout: number | undefined;
+
+  private constructor(docker: Docker, commandTimeout: number | undefined) {
+    this.docker = docker;
+    this.cliEnv = { ...process.env, ...docker.cliEnvironment };
+    this.#commandTimeout = commandTimeout;
+  }
+
+  /**
+   * Connects to the engine that the Docker CLI selects from `process.env`.
+   * `commandTimeout` bounds each command of the sandbox's containers.
+   */
+  static async connect(
+    commandTimeout: number | undefined,
+  ): Promise<DockerEngine> {
+    const docker = await Docker.connect({ environment: process.env }).catch(
+      unavailable,
+    );
+    return new DockerEngine(docker, commandTimeout);
+  }
+
+  /** A sandbox container handle for a container of this engine. */
+  container(name: string, container: Container): DockerContainer {
+    return new DockerContainer(
+      name,
+      container,
+      this.cliEnv,
+      this.#commandTimeout,
     );
   }
 
-  protected override spawnProcess(
-    command: string,
-    options?: SpawnOptions,
-  ): SandboxProcess {
-    return spawnDockerProcess(
-      (value, spawnOptions) =>
-        this.engine.execArgs(this.context.containerId, value, spawnOptions),
-      command,
-      options,
-      this.opts.commandTimeout,
+  async attach(
+    name: string,
+    image: string,
+  ): Promise<DockerContainer | undefined> {
+    const found = await this.docker.containers.find(name).catch(unavailable);
+    if (!found) return undefined;
+    const container = this.container(name, found);
+    const { State } = await found.inspect();
+    if (State?.Status !== 'running') {
+      await container.start(image);
+    }
+    return container;
+  }
+
+  async run(
+    image: string,
+    name: string,
+    opts: DockerCommonOptions,
+    workdir: string,
+  ): Promise<RunResult> {
+    try {
+      const body = containerCreateRequest(image, opts, workdir);
+      const create = () =>
+        this.docker.containers.createOrGet(body, {
+          name,
+          platform: opts.platform,
+        });
+      const result = await create().catch(async (error: unknown) => {
+        if (!(error instanceof ImageNotFoundError)) throw error;
+        await this.docker.images.pull(image, { platform: opts.platform });
+        return create();
+      });
+      if (!result.created) return { created: false };
+      try {
+        await result.container.start();
+      } catch (error) {
+        await result.container[Symbol.asyncDispose]();
+        throw error;
+      }
+      return {
+        created: true,
+        container: this.container(name, result.container),
+      };
+    } catch (error) {
+      throw this.#runError(error, image, opts.volumes ?? []);
+    }
+  }
+
+  #runError(error: unknown, image: string, volumes: SandboxVolume[]): Error {
+    if (error instanceof ConnectionFailedError) {
+      return new DockerNotAvailableError();
+    }
+    if (error instanceof BindSourceNotFoundError) {
+      const volume = volumes.find(
+        (candidate) =>
+          candidate.type === 'bind' &&
+          isBindSource(error.source, candidate.hostPath),
+      );
+      if (volume) {
+        return new VolumePathError(
+          error.source,
+          volume.containerPath,
+          'hostPath does not exist on host',
+        );
+      }
+    }
+    return new ContainerCreationError(
+      error instanceof Error ? error.message : String(error),
+      image,
+      error instanceof Error ? error : undefined,
     );
+  }
+
+  async volumeExists(name: string): Promise<boolean> {
+    try {
+      return (await this.docker.volumes.find(name)) !== undefined;
+    } catch (error) {
+      if (error instanceof ConnectionFailedError) {
+        throw new DockerNotAvailableError();
+      }
+      throw new VolumeInspectError(
+        name,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  async createVolume(
+    volume: SandboxNamedVolume,
+    opts: DockerCommonOptions,
+  ): Promise<void> {
+    try {
+      await this.docker.volumes.create({
+        Name: volume.name,
+        Labels: opts.labels ?? {},
+        ...(volume.driver ? { Driver: volume.driver } : {}),
+        DriverOpts: volume.driverOptions ?? {},
+      });
+    } catch (error) {
+      if (error instanceof ConnectionFailedError) {
+        throw new DockerNotAvailableError();
+      }
+      throw new VolumeCreateError(
+        volume.name,
+        error instanceof NameConflictError
+          ? 'managed volume already exists'
+          : error instanceof Error
+            ? error.message
+            : String(error),
+      );
+    }
+  }
+
+  async removeVolume(name: string): Promise<void> {
+    // AutoRemove releases the container's volume references after stop
+    // returns, so the volume stays in use for a moment.
+    const deadline = performance.now() + 30_000;
+    while (true) {
+      try {
+        await this.docker.volumes.find(name).then((volume) => volume?.remove());
+        return;
+      } catch (error) {
+        if (error instanceof VolumeInUseError && performance.now() < deadline) {
+          await delay(25);
+          continue;
+        }
+        if (error instanceof ConnectionFailedError) {
+          throw new DockerNotAvailableError();
+        }
+        throw new VolumeRemoveError(
+          name,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+  }
+
+  async ensureWorkdir(): Promise<void> {}
+
+  async imageExists(tag: string): Promise<boolean> {
+    return (await this.docker.images.inspect(tag)) !== undefined;
+  }
+
+  async buildImage(spec: ImageBuildSpec): Promise<void> {
+    const inline = spec.dockerfile.includes('\n');
+    const args = [
+      'build',
+      ...(spec.identity ? ['--platform', spec.identity] : []),
+      '-t',
+      spec.tag,
+      '-f',
+      inline ? '-' : spec.dockerfile,
+      spec.context,
+    ];
+    await runDockerBuild(
+      args,
+      inline ? spec.dockerfile : undefined,
+      spec.showBuildLogs,
+      this.cliEnv,
+    );
+  }
+
+  dispose(): Promise<void> {
+    return this.docker[Symbol.asyncDispose]();
   }
 }
 
@@ -876,25 +1064,25 @@ export interface ComposeStrategyArgs {
   compose: string;
   service: string;
   resources?: DockerResources;
-  commandTimeout?: number;
 }
 
 /**
- * Manages multi-container environments via `docker compose`. Docker-only — not
- * part of the engine bridge. Commands run inside the named service; `dispose()`
- * brings the whole stack down.
+ * Manages multi-container environments via `docker compose`. Docker-only — the
+ * stack starts and stops through the Compose CLI, sent to the engine of
+ * `engine`; commands and files reach the named service's container through
+ * the Engine API. `dispose()` brings the whole stack down.
  */
-export class ComposeStrategy extends ContainerSandboxStrategy {
+export class ComposeStrategy extends ContainerSandboxStrategy<DockerCommonOptions> {
   private projectName: string;
   private composeFile: string;
   private service: string;
-  private commandTimeout?: number;
+  private dockerEngine: DockerEngine;
 
-  constructor(args: ComposeStrategyArgs) {
-    super({ resources: args.resources }, dockerEngine);
+  constructor(args: ComposeStrategyArgs, engine: DockerEngine) {
+    super({ resources: args.resources }, engine);
+    this.dockerEngine = engine;
     this.composeFile = args.compose;
     this.service = args.service;
-    this.commandTimeout = args.commandTimeout;
     this.projectName = this.computeProjectName();
   }
 
@@ -904,98 +1092,59 @@ export class ComposeStrategy extends ContainerSandboxStrategy {
     return `sandbox-${hash}`;
   }
 
+  private compose(command: string[]): Promise<unknown> {
+    return spawn(
+      'docker',
+      ['compose', '-f', this.composeFile, '-p', this.projectName, ...command],
+      { env: this.dockerEngine.cliEnv },
+    );
+  }
+
   protected async getImage(): Promise<string> {
     return '';
   }
 
-  protected override async startContainer(
-    _image: string,
-    _containerId: string,
-  ): Promise<void> {
+  protected override async acquireContainer(): Promise<AcquiredContainer> {
     try {
-      await spawn('docker', [
-        'compose',
-        '-f',
-        this.composeFile,
-        '-p',
-        this.projectName,
-        'up',
-        '-d',
-      ]);
+      await this.compose(['up', '-d']);
     } catch (error) {
-      const stderr = error instanceof SubprocessError ? error.stderr : '';
-      if (stderr.includes('Cannot connect')) {
-        throw this.engine.errors.serviceNotAvailable();
-      }
       throw new ComposeStartError(
         this.composeFile,
-        stderr || (error instanceof Error ? error.message : String(error)),
+        (error instanceof SubprocessError && error.stderr) ||
+          (error instanceof Error ? error.message : String(error)),
       );
     }
-  }
 
-  protected override defaultContainerId(): string {
-    return this.projectName;
+    const { containers } = this.dockerEngine.docker;
+    const [summary] = await containers.list({
+      filters: {
+        label: [
+          `com.docker.compose.project=${this.projectName}`,
+          `com.docker.compose.service=${this.service}`,
+        ],
+      },
+    });
+    const container = summary && (await containers.find(summary.Id));
+    if (!container) {
+      await this.compose(['down']).catch(() => {});
+      throw new ComposeStartError(
+        this.composeFile,
+        `service "${this.service}" has no running container`,
+      );
+    }
+    return {
+      container: this.dockerEngine.container(this.projectName, container),
+      attached: false,
+    };
   }
 
   protected async configure(): Promise<void> {
     // Compose file is the source of truth.
   }
 
-  protected override async exec(
-    command: string,
-    options?: ExecuteCommandOptions,
-  ): Promise<CommandResult> {
-    return executeDockerCommand(
-      (value, spawnOptions) => this.execArgs(value, spawnOptions),
-      command,
-      options,
-      this.commandTimeout,
-    );
-  }
-
-  protected override spawnProcess(
-    command: string,
-    options?: SpawnOptions,
-  ): SandboxProcess {
-    return spawnDockerProcess(
-      (value, spawnOptions) => this.execArgs(value, spawnOptions),
-      command,
-      options,
-      this.commandTimeout,
-    );
-  }
-
-  private execArgs(command: string, options?: SpawnOptions): string[] {
-    return [
-      'compose',
-      '-f',
-      this.composeFile,
-      '-p',
-      this.projectName,
-      'exec',
-      '-T',
-      ...buildDockerExecFlags(options),
-      this.service,
-      'bash',
-      '-lc',
-      command,
-    ];
-  }
-
-  protected override async stopContainer(_containerId: string): Promise<void> {
-    try {
-      await spawn('docker', [
-        'compose',
-        '-f',
-        this.composeFile,
-        '-p',
-        this.projectName,
-        'down',
-      ]);
-    } catch {
-      // ignore cleanup errors
-    }
+  protected override async release(): Promise<void> {
+    // Cleanup errors are ignored: the stack may already be down.
+    await this.compose(['down']).catch(() => {});
   }
 }
 
@@ -1037,26 +1186,36 @@ export class ComposeStrategy extends ContainerSandboxStrategy {
 export async function createDockerSandbox(
   options: DockerSandboxOptions = {},
 ): Promise<DisposableSandbox> {
-  if (isComposeOptions(options)) {
-    return new ComposeStrategy({
-      compose: options.compose,
-      service: options.service,
-      resources: options.resources,
-      commandTimeout: options.commandTimeout,
-    }).create();
+  const engine = await DockerEngine.connect(options.commandTimeout);
+  let strategy: ContainerSandboxStrategy<DockerCommonOptions>;
+  try {
+    if (isComposeOptions(options)) {
+      strategy = new ComposeStrategy(
+        {
+          compose: options.compose,
+          service: options.service,
+          resources: options.resources,
+        },
+        engine,
+      );
+    } else if (isDockerfileOptions(options)) {
+      strategy = new ContainerfileStrategy(options, engine, {
+        dockerfile: options.dockerfile,
+        context: options.context ?? '.',
+        showBuildLogs: options.showBuildLogs ?? false,
+        identity: options.platform,
+      });
+    } else {
+      strategy = new RuntimeStrategy(options, engine, {
+        image: options.image ?? engine.defaultImage,
+        installers: options.installers ?? [],
+      });
+    }
+  } catch (error) {
+    await engine.dispose();
+    throw error;
   }
-  if (isDockerfileOptions(options)) {
-    return new DockerContainerfileStrategy(options, dockerEngine, {
-      dockerfile: options.dockerfile,
-      context: options.context ?? '.',
-      showBuildLogs: options.showBuildLogs ?? false,
-      identity: options.platform,
-    }).create();
-  }
-  return new DockerRuntimeStrategy(options, dockerEngine, {
-    image: options.image ?? dockerEngine.defaultImage,
-    installers: options.installers ?? [],
-  }).create();
+  return strategy.create();
 }
 
 /**

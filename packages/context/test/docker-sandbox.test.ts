@@ -1,7 +1,7 @@
 import { DockerTestbed } from '@zukhruf/testing/docker';
 import spawn from 'nano-spawn';
 import assert from 'node:assert';
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -1753,59 +1753,6 @@ describe('Docker Sandbox', () => {
             return true;
           },
         );
-      });
-
-      it('does not treat non-missing managed volume inspect failures as absent volumes', async () => {
-        const fakeBinDir = join(
-          tmpdir(),
-          `docker-sandbox-fake-bin-${Date.now()}`,
-        );
-        const fakeDocker = join(fakeBinDir, 'docker');
-        const originalPath = process.env.PATH;
-        await mkdir(fakeBinDir, { recursive: true });
-        await writeFile(
-          fakeDocker,
-          [
-            '#!/bin/sh',
-            'if [ "$1" = "volume" ] && [ "$2" = "inspect" ]; then',
-            '  echo "permission denied inspecting volume" >&2',
-            '  exit 1',
-            'fi',
-            'if [ "$1" = "volume" ] && [ "$2" = "create" ]; then',
-            '  echo "create should not run" >&2',
-            '  exit 1',
-            'fi',
-            'echo "unexpected docker call: $*" >&2',
-            'exit 1',
-            '',
-          ].join('\n'),
-        );
-        await chmod(fakeDocker, 0o755);
-        process.env.PATH = `${fakeBinDir}:${originalPath ?? ''}`;
-
-        try {
-          await assert.rejects(
-            createDockerSandbox({
-              ...defaults,
-              volumes: [
-                {
-                  type: 'volume',
-                  name: testVolumeName('deepagents-inspect-failure'),
-                  containerPath: '/data',
-                  lifecycle: 'managed',
-                },
-              ],
-            }),
-            (err: Error) => {
-              assert.ok(err instanceof VolumeInspectError);
-              assert.match(err.reason, /permission denied inspecting volume/);
-              return true;
-            },
-          );
-        } finally {
-          process.env.PATH = originalPath;
-          await rm(fakeBinDir, { recursive: true, force: true });
-        }
       });
     });
 

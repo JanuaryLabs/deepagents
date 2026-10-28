@@ -1,5 +1,3 @@
-import spawn, { SubprocessError } from 'nano-spawn';
-
 import { PackageInstallError } from '../docker-sandbox-errors.ts';
 import { shellQuote } from '../shell-quote.ts';
 import type { CommandResult } from '../types.ts';
@@ -49,14 +47,15 @@ export function isDebianBased(image: string): boolean {
   return debianPatterns.some((pattern) => lower.includes(pattern));
 }
 
-/** The container CLI an installer runs commands with, and the error it raises. */
-export interface InstallerCli {
-  binary: string;
+/** How an installer runs a command in the container, and the error it raises. */
+export interface InstallerShell {
+  /** Runs `command` with `sh -c`: installers run before Bash is known to exist. */
+  exec(command: string): Promise<CommandResult>;
   SandboxError: new (message: string, containerId?: string) => Error;
 }
 
 export function createInstallerContext(
-  cli: InstallerCli,
+  shell: InstallerShell,
   containerId: string,
   image: string,
 ): InstallerContext {
@@ -68,38 +67,14 @@ export function createInstallerContext(
   const ensuredTools = new Set<string>();
   let aptUpdated = false;
 
-  const exec = async (command: string): Promise<CommandResult> => {
-    try {
-      const result = await spawn(cli.binary, [
-        'exec',
-        containerId,
-        'sh',
-        '-c',
-        command,
-      ]);
-      return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
-    } catch (error) {
-      if (error instanceof SubprocessError) {
-        return {
-          stdout: error.stdout,
-          stderr: error.stderr,
-          exitCode: error.exitCode ?? 1,
-        };
-      }
-      return {
-        stdout: '',
-        stderr: error instanceof Error ? error.message : '',
-        exitCode: 1,
-      };
-    }
-  };
+  const { exec } = shell;
 
   const arch = async (): Promise<string> => {
     if (!archPromise) {
       const attempt = (async () => {
         const result = await exec('uname -m');
         if (result.exitCode !== 0) {
-          throw new cli.SandboxError(
+          throw new shell.SandboxError(
             `Failed to detect container architecture: ${result.stderr}`,
             containerId,
           );

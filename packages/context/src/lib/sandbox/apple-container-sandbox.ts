@@ -15,18 +15,33 @@ import {
   AppleContainerVolumeRemoveError,
   ContainerServiceNotRunningError,
 } from './apple-container-sandbox-errors.ts';
+import {
+  commandResultFrom,
+  existsOverExec,
+  readFileOverExec,
+  toSandboxProcess,
+  writeFilesOverExec,
+} from './cli-process.ts';
 import type {
   ContainerEngine,
+  EngineContainer,
   ImageBuildSpec,
   SandboxVolume,
 } from './container-engine.ts';
 import { ContainerfileStrategy, RuntimeStrategy } from './container-sandbox.ts';
 import {
   type Installer,
+  type InstallerContext,
   createInstallerContext,
 } from './installers/installer.ts';
 import { shellQuote } from './shell-quote.ts';
-import type { DisposableSandbox } from './types.ts';
+import type {
+  CommandResult,
+  DisposableSandbox,
+  ExecuteCommandOptions,
+  SandboxProcess,
+  SpawnOptions,
+} from './types.ts';
 
 export {
   AppleContainerCreationError,
@@ -207,21 +222,126 @@ function readContainerStatus(entry: unknown): 'running' | 'stopped' {
   );
 }
 
+function isServiceDown(message: string): boolean {
+  return /apiserver|not running|connection refused|could not connect|xpc/i.test(
+    message,
+  );
+}
+
+function isMissing(message: string): boolean {
+  return /not found|no such/i.test(message);
+}
+
+function isNameConflict(message: string): boolean {
+  return /already exists/i.test(message);
+}
+
+function execArgs(
+  name: string,
+  command: string,
+  options?: { cwd?: string; env?: Record<string, string> },
+): string[] {
+  const flags: string[] = ['--cwd', options?.cwd || WORKDIR];
+  for (const [key, value] of Object.entries(options?.env ?? {})) {
+    if (key.length === 0 || key.includes('=')) {
+      throw new AppleContainerSandboxError(
+        `Invalid environment variable key: "${key}"`,
+      );
+    }
+    flags.push('--env', `${key}=${value}`);
+  }
+  return ['exec', ...flags, name, 'bash', '-lc', command];
+}
+
+/** Runs `args` with the `container` CLI as a command result. */
+async function run(
+  args: string[],
+  signal?: AbortSignal,
+): Promise<CommandResult> {
+  try {
+    const result = await spawn(CLI, args, { signal });
+    return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
+  } catch (error) {
+    return commandResultFrom(error);
+  }
+}
+
+/** A sandbox container of the Apple `container` runtime. */
+class AppleContainer implements EngineContainer {
+  readonly name: string;
+
+  constructor(name: string) {
+    this.name = name;
+  }
+
+  executeCommand(
+    command: string,
+    options?: ExecuteCommandOptions,
+  ): Promise<CommandResult> {
+    return run(execArgs(this.name, command), options?.signal);
+  }
+
+  spawn(command: string, options?: SpawnOptions): SandboxProcess {
+    return toSandboxProcess(
+      childSpawn(CLI, execArgs(this.name, command, options)),
+      options?.signal,
+    );
+  }
+
+  readFile(path: string): Promise<Uint8Array> {
+    return readFileOverExec((command) => this.executeCommand(command), path);
+  }
+
+  writeFiles(
+    files: Array<{ path: string; content: string | Buffer }>,
+  ): Promise<void> {
+    return writeFilesOverExec((command) => this.executeCommand(command), files);
+  }
+
+  exists(path: string): Promise<boolean> {
+    return existsOverExec((command) => this.executeCommand(command), path);
+  }
+
+  installerContext(image: string): InstallerContext {
+    // The Docker installer suite, driven through `container exec`.
+    return createInstallerContext(
+      {
+        exec: (command) => run(['exec', this.name, 'sh', '-c', command]),
+        SandboxError: AppleContainerSandboxError,
+      },
+      this.name,
+      image,
+    );
+  }
+
+  async stop(): Promise<void> {
+    try {
+      await spawn(CLI, ['stop', this.name]);
+    } catch {
+      // already stopped
+    }
+  }
+}
+
 /**
  * The Apple `container` CLI dialect, plugged into the shared
- * `ContainerSandboxStrategy` skeleton. Mirrors `dockerEngine` but for the
- * micro-VM runtime: `--cwd`/`--env` exec flags, JSON `inspect` parsing,
- * virtiofs mounts, `apiserver`-down detection, and Apple error classes.
+ * `ContainerSandboxStrategy` skeleton: `--cwd`/`--env` exec flags, JSON
+ * `inspect` parsing, virtiofs mounts, `apiserver`-down detection, and Apple
+ * error classes. `runArgs` and `parseStatus` are its argv and status dialect.
  */
-export const appleEngine: ContainerEngine<AppleContainerCommonOptions> = {
-  cli: CLI,
-  bindMountsOnClient: true,
-
+export const appleEngine: ContainerEngine<AppleContainerCommonOptions> & {
   runArgs(
     image: string,
     containerId: string,
     opts: AppleContainerCommonOptions,
-  ): string[] {
+    workdir: string,
+  ): string[];
+  parseStatus(stdout: string): 'running' | 'stopped' | 'absent';
+} = {
+  bindMountsOnClient: true,
+  defaultImage: 'docker.io/library/bash:5.3-alpine3.24',
+
+  runArgs(image, containerId, opts) {
     const { memory = '1024M', cpus = 2 } = opts.resources ?? {};
     const args: string[] = [
       'run',
@@ -261,81 +381,102 @@ export const appleEngine: ContainerEngine<AppleContainerCommonOptions> = {
     return args;
   },
 
-  execArgs(containerId, command, options) {
-    const flags: string[] = ['--cwd', options?.cwd || WORKDIR];
-    if (options?.env) {
-      for (const [key, value] of Object.entries(options.env)) {
-        if (key.length === 0 || key.includes('=')) {
-          throw new AppleContainerSandboxError(
-            `Invalid environment variable key: "${key}"`,
-          );
-        }
-        flags.push('--env', `${key}=${value}`);
-      }
-    }
-    return ['exec', ...flags, containerId, 'bash', '-lc', command];
-  },
-
-  inspectArgs(containerId) {
-    return ['inspect', containerId];
-  },
-
   parseStatus(stdout) {
     const entries = safeParseArray(stdout);
     if (entries.length === 0) return 'absent';
     return readContainerStatus(entries[0]);
   },
 
-  volumeCreateArgs(volume) {
-    return ['volume', 'create', volume.name];
+  async attach(name, image) {
+    let status: 'running' | 'stopped' | 'absent';
+    try {
+      const result = await spawn(CLI, ['inspect', name]);
+      status = this.parseStatus(result.stdout.trim());
+    } catch (error) {
+      const message = getCliErrorMessage(error);
+      if (isServiceDown(message)) throw new ContainerServiceNotRunningError();
+      if (isMissing(message)) return undefined;
+      throw new AppleContainerSandboxError(
+        `Failed to inspect container "${name}": ${message}`,
+      );
+    }
+    if (status === 'absent') return undefined;
+    if (status === 'stopped') {
+      try {
+        await spawn(CLI, ['start', name]);
+      } catch (error) {
+        const message = getCliErrorMessage(error);
+        if (isServiceDown(message)) throw new ContainerServiceNotRunningError();
+        throw new AppleContainerCreationError(
+          message,
+          image,
+          error instanceof Error ? error : undefined,
+        );
+      }
+    }
+    return new AppleContainer(name);
+  },
+
+  async run(image, name, opts, workdir) {
+    try {
+      await spawn(CLI, this.runArgs(image, name, opts, workdir));
+    } catch (error) {
+      const message = getCliErrorMessage(error);
+      if (isServiceDown(message)) throw new ContainerServiceNotRunningError();
+      if (isNameConflict(message)) return { created: false };
+      throw new AppleContainerCreationError(
+        message,
+        image,
+        error instanceof Error ? error : undefined,
+      );
+    }
+    return { created: true, container: new AppleContainer(name) };
+  },
+
+  async volumeExists(name) {
+    try {
+      await spawn(CLI, ['volume', 'inspect', name]);
+      return true;
+    } catch (error) {
+      const reason = getCliErrorMessage(error);
+      if (isServiceDown(reason)) throw new ContainerServiceNotRunningError();
+      if (isMissing(reason)) return false;
+      throw new AppleContainerVolumeInspectError(name, reason);
+    }
+  },
+
+  async createVolume(volume) {
+    try {
+      await spawn(CLI, ['volume', 'create', volume.name]);
+    } catch (error) {
+      const reason = getCliErrorMessage(error);
+      if (isServiceDown(reason)) throw new ContainerServiceNotRunningError();
+      throw new AppleContainerVolumeCreateError(volume.name, reason);
+    }
   },
 
   async removeVolume(name) {
-    await spawn(CLI, ['volume', 'rm', name]);
+    try {
+      await spawn(CLI, ['volume', 'rm', name]);
+    } catch (error) {
+      const reason = getCliErrorMessage(error);
+      if (isServiceDown(reason)) throw new ContainerServiceNotRunningError();
+      throw new AppleContainerVolumeRemoveError(name, reason);
+    }
   },
 
-  errorMessage: getCliErrorMessage,
-
-  isServiceDown(message) {
-    return /apiserver|not running|connection refused|could not connect|xpc/i.test(
-      message,
-    );
-  },
-
-  isMissingContainer(message) {
-    return /not found|no such/i.test(message);
-  },
-
-  isMissingVolume(message) {
-    return /not found|no such/i.test(message);
-  },
-
-  isNameConflict(message) {
-    return /already exists/i.test(message);
-  },
-
-  async ensureWorkdir(containerId: string, workdir: string): Promise<void> {
+  async ensureWorkdir(container, workdir) {
     // `container exec --cwd <dir>` fails if <dir> is absent, so the workdir
     // can't be created from inside itself — bootstrap it from the image's
     // default cwd with a plain (no `--cwd`) exec.
     await spawn(CLI, [
       'exec',
-      containerId,
+      container.name,
       'bash',
       '-lc',
       `mkdir -p ${shellQuote(workdir)}`,
     ]);
   },
-
-  defaultImage: 'docker.io/library/bash:5.3-alpine3.24',
-
-  // The Docker installer suite, driven through `container exec`.
-  createInstallerContext: (containerId, image) =>
-    createInstallerContext(
-      { binary: CLI, SandboxError: AppleContainerSandboxError },
-      containerId,
-      image,
-    ),
 
   async imageExists(tag: string): Promise<boolean> {
     try {
@@ -379,10 +520,11 @@ export const appleEngine: ContainerEngine<AppleContainerCommonOptions> = {
     );
   },
 
+  async dispose() {
+    // The CLI holds no connection.
+  },
+
   errors: {
-    serviceNotAvailable: () => new ContainerServiceNotRunningError(),
-    creation: (message, image, cause) =>
-      new AppleContainerCreationError(message, image, cause),
     generic: (message, containerId) =>
       new AppleContainerSandboxError(message, containerId),
     volumePath: (source, containerPath, reason) =>
@@ -391,8 +533,6 @@ export const appleEngine: ContainerEngine<AppleContainerCommonOptions> = {
       new AppleContainerVolumeInspectError(name, reason),
     volumeCreate: (name, reason) =>
       new AppleContainerVolumeCreateError(name, reason),
-    volumeRemove: (name, reason) =>
-      new AppleContainerVolumeRemoveError(name, reason),
   },
 };
 

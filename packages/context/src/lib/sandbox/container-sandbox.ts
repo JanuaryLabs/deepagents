@@ -1,51 +1,45 @@
-import spawn from 'nano-spawn';
-import { spawn as childSpawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 
-import {
-  base64ReadCommand,
-  base64WriteCommands,
-  commandResultFrom,
-  existsCommand,
-  toSandboxProcess,
-} from './cli-process.ts';
 import type {
   CommonSandboxOptions,
   ContainerEngine,
-  SandboxNamedVolume,
+  EngineContainer,
   SandboxVolume,
 } from './container-engine.ts';
-import { ContainerSandboxError } from './container-sandbox-errors.ts';
 import { type Installer } from './installers/installer.ts';
 import { readFileContent } from './read-file.ts';
-import { shellQuote } from './shell-quote.ts';
-import type {
-  CommandResult,
-  DisposableSandbox,
-  ExecuteCommandOptions,
-  SandboxProcess,
-  SpawnOptions,
-} from './types.ts';
-
-interface StrategyContext {
-  containerId: string;
-  image: string;
-}
+import type { DisposableSandbox } from './types.ts';
 
 const CONTAINER_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
+
+/** A container the strategy runs in, and whether an earlier caller created it. */
+export interface AcquiredContainer {
+  container: EngineContainer;
+  attached: boolean;
+}
+
+/** Records a cleanup failure on the error that started the cleanup. */
+function suppress(originalError: unknown, cleanupError: unknown): void {
+  if (!(originalError instanceof Error)) return;
+  const suppressed: unknown[] =
+    'suppressed' in originalError && Array.isArray(originalError.suppressed)
+      ? originalError.suppressed
+      : [];
+  Object.assign(originalError, { suppressed: [...suppressed, cleanupError] });
+}
 
 /**
  * Template Method base for sandbox creation strategies, shared across engines.
  * Subclasses choose the image and define post-start configuration; the base owns
- * container lifecycle, exec, and file I/O, delegating every CLI dialect to the
- * injected {@link ContainerEngine}. Typed to {@link CommonSandboxOptions} so the
- * skeleton can never read an engine-only knob.
+ * the container lifecycle (find or create, volumes, disposal) and delegates
+ * every engine operation to the injected {@link ContainerEngine}. Typed to
+ * {@link CommonSandboxOptions} so the skeleton can never read an engine-only
+ * knob.
  */
 export abstract class ContainerSandboxStrategy<
   TOpts extends CommonSandboxOptions = CommonSandboxOptions,
 > {
-  protected context!: StrategyContext;
   protected engine: ContainerEngine<TOpts>;
   protected opts: TOpts;
   protected volumes: SandboxVolume[];
@@ -74,27 +68,35 @@ export abstract class ContainerSandboxStrategy<
     this.workdir = workdir;
   }
 
+  /**
+   * Creates the sandbox. On failure, everything it made is released and the
+   * engine is disposed.
+   */
   async create(): Promise<DisposableSandbox> {
-    const image = await this.getImage();
-    let acquired: { containerId: string; attached: boolean } | undefined;
+    let acquired: AcquiredContainer | undefined;
 
     try {
+      const image = await this.getImage();
       acquired = await this.acquireContainer(image);
-      this.context = { containerId: acquired.containerId, image };
       if (!acquired.attached) {
-        await this.engine.ensureWorkdir(this.context.containerId, this.workdir);
-        await this.configure();
+        await this.engine.ensureWorkdir(acquired.container, this.workdir);
+        await this.configure(acquired.container, image);
       }
-      await this.assertBashAvailable();
+      await this.assertBashAvailable(acquired.container);
     } catch (error) {
       if (acquired && !acquired.attached) {
-        await this.stopContainer(acquired.containerId);
+        await this.release(acquired.container).catch((stopError: unknown) =>
+          suppress(error, stopError),
+        );
       }
-      await this.cleanupCreatedVolumesAfterFailure(error);
+      await this.cleanupCreatedVolumes().catch((cleanupError: unknown) =>
+        suppress(error, cleanupError),
+      );
+      await this.engine.dispose();
       throw error;
     }
 
-    const sandbox = this.createSandboxMethods();
+    const sandbox = this.createSandboxMethods(acquired.container);
     if (this.opts.readiness) {
       try {
         await this.opts.readiness(sandbox);
@@ -106,116 +108,49 @@ export abstract class ContainerSandboxStrategy<
     return sandbox;
   }
 
-  private namedContainerId(): string {
-    return `sandbox-${this.name}`;
+  protected containerName(): string {
+    return this.name
+      ? `sandbox-${this.name}`
+      : `sandbox-${randomUUID().slice(0, 8)}`;
   }
 
-  protected defaultContainerId(): string {
-    return `sandbox-${crypto.randomUUID().slice(0, 8)}`;
-  }
-
-  protected async acquireContainer(
-    image: string,
-  ): Promise<{ containerId: string; attached: boolean }> {
-    if (!this.name) {
-      const containerId = this.defaultContainerId();
-      await this.prepareVolumes();
-      await this.startContainer(image, containerId);
-      return { containerId, attached: false };
-    }
-
-    const containerId = this.namedContainerId();
-    const probe = await this.inspectContainer(containerId);
-    if (probe === 'running') {
-      return { containerId, attached: true };
-    }
-    if (probe === 'stopped') {
-      await this.startStoppedContainer(containerId, image);
-      return { containerId, attached: true };
+  protected async acquireContainer(image: string): Promise<AcquiredContainer> {
+    const name = this.containerName();
+    if (this.name) {
+      const container = await this.engine.attach(name, image);
+      if (container) return { container, attached: true };
     }
 
     await this.prepareVolumes();
-    try {
-      await this.startContainer(image, containerId);
-      return { containerId, attached: false };
-    } catch (error) {
-      // A name collision means another caller created this named container
-      // between our inspect and run (a TOCTOU). Reprobe and attach if it is a
-      // usable container. `inspectContainer` fails loud on an unexpected state
-      // (a half-built container left by a runtime race throws rather than
-      // parsing as running), so we never attach to a broken one.
-      if (this.engine.isNameConflict(this.engine.errorMessage(error))) {
-        await this.cleanupCreatedVolumes();
-        const raced = await this.waitForRacedContainer(containerId, image);
-        if (raced) {
-          return raced;
-        }
-      }
-      throw error;
+    const result = await this.engine.run(image, name, this.opts, this.workdir);
+    if (result.created) {
+      return { container: result.container, attached: false };
     }
+
+    // Another caller created this name between our attach and run. Attach to
+    // it when it is usable; `attach` fails loud on an unexpected state, so we
+    // never attach to a broken one.
+    await this.cleanupCreatedVolumes();
+    if (this.name) {
+      const raced = await this.waitForRacedContainer(name, image);
+      if (raced) return raced;
+    }
+    throw this.engine.errors.generic(
+      `Container name "${name}" is already in use`,
+    );
   }
 
   private async waitForRacedContainer(
-    containerId: string,
+    name: string,
     image: string,
-  ): Promise<{ containerId: string; attached: true } | undefined> {
+  ): Promise<AcquiredContainer | undefined> {
     const timeoutAt = Date.now() + 1_000;
 
     while (true) {
-      const state = await this.inspectContainer(containerId);
-      if (state === 'running') {
-        return { containerId, attached: true };
-      }
-      if (state === 'stopped') {
-        await this.startStoppedContainer(containerId, image);
-        return { containerId, attached: true };
-      }
-      if (Date.now() >= timeoutAt) {
-        return undefined;
-      }
+      const container = await this.engine.attach(name, image);
+      if (container) return { container, attached: true };
+      if (Date.now() >= timeoutAt) return undefined;
       await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-  }
-
-  private async startStoppedContainer(
-    containerId: string,
-    image: string,
-  ): Promise<void> {
-    try {
-      await spawn(this.engine.cli, ['start', containerId]);
-    } catch (error) {
-      const message = this.engineErrorMessage(error);
-      if (this.isServiceDown(message)) {
-        throw this.engine.errors.serviceNotAvailable();
-      }
-      throw this.engine.errors.creation(
-        message,
-        image,
-        error instanceof Error ? error : undefined,
-      );
-    }
-  }
-
-  protected async inspectContainer(
-    containerId: string,
-  ): Promise<'running' | 'stopped' | 'absent'> {
-    try {
-      const result = await spawn(
-        this.engine.cli,
-        this.engine.inspectArgs(containerId),
-      );
-      return this.engine.parseStatus(result.stdout.trim());
-    } catch (error) {
-      const message = this.engineErrorMessage(error);
-      if (this.isServiceDown(message)) {
-        throw this.engine.errors.serviceNotAvailable();
-      }
-      if (this.engine.isMissingContainer(message)) {
-        return 'absent';
-      }
-      throw this.engine.errors.generic(
-        `Failed to inspect container "${containerId}": ${message}`,
-      );
     }
   }
 
@@ -228,12 +163,17 @@ export abstract class ContainerSandboxStrategy<
       }
 
       const lifecycle = volume.lifecycle ?? 'external';
+      const exists = await this.engine.volumeExists(volume.name);
       if (lifecycle === 'external') {
-        await this.inspectVolume(volume.name);
+        if (!exists) {
+          throw this.engine.errors.volumeInspect(
+            volume.name,
+            'volume does not exist',
+          );
+        }
         continue;
       }
 
-      const exists = await this.volumeExists(volume.name);
       if (exists) {
         throw this.engine.errors.volumeCreate(
           volume.name,
@@ -241,7 +181,7 @@ export abstract class ContainerSandboxStrategy<
         );
       }
 
-      await this.createVolume(volume);
+      await this.engine.createVolume(volume, this.opts);
       if (volume.removeOnDispose !== false) {
         this.createdVolumes.add(volume.name);
       }
@@ -323,240 +263,68 @@ export abstract class ContainerSandboxStrategy<
     );
   }
 
-  protected buildRunArgs(image: string, containerId: string): string[] {
-    return this.engine.runArgs(image, containerId, this.opts, this.workdir);
-  }
-
-  private async inspectVolume(name: string): Promise<void> {
-    try {
-      await spawn(this.engine.cli, ['volume', 'inspect', name]);
-    } catch (error) {
-      const reason = this.engineErrorMessage(error);
-      if (this.isServiceDown(reason)) {
-        throw this.engine.errors.serviceNotAvailable();
-      }
-      throw this.engine.errors.volumeInspect(name, reason);
-    }
-  }
-
-  private async volumeExists(name: string): Promise<boolean> {
-    try {
-      await this.inspectVolume(name);
-      return true;
-    } catch (error) {
-      if (
-        error instanceof ContainerSandboxError &&
-        this.engine.isMissingVolume(error.message)
-      ) {
-        return false;
-      }
-      throw error;
-    }
-  }
-
-  private async createVolume(volume: SandboxNamedVolume): Promise<void> {
-    const args = this.engine.volumeCreateArgs(volume, this.opts);
-
-    try {
-      await spawn(this.engine.cli, args);
-    } catch (error) {
-      const reason = this.engineErrorMessage(error);
-      if (this.isServiceDown(reason)) {
-        throw this.engine.errors.serviceNotAvailable();
-      }
-      throw this.engine.errors.volumeCreate(volume.name, reason);
-    }
-  }
-
   private async cleanupCreatedVolumes(): Promise<void> {
     const volumes = [...this.createdVolumes].reverse();
     for (const volume of volumes) {
-      try {
-        await this.engine.removeVolume(volume);
-        this.createdVolumes.delete(volume);
-      } catch (error) {
-        const reason = this.engineErrorMessage(error);
-        if (this.isServiceDown(reason)) {
-          throw this.engine.errors.serviceNotAvailable();
-        }
-        throw this.engine.errors.volumeRemove(volume, reason);
-      }
+      await this.engine.removeVolume(volume);
+      this.createdVolumes.delete(volume);
     }
   }
 
-  private async cleanupCreatedVolumesAfterFailure(
-    originalError: unknown,
-  ): Promise<void> {
-    try {
-      await this.cleanupCreatedVolumes();
-    } catch (cleanupError) {
-      if (originalError instanceof Error) {
-        const suppressed: unknown[] =
-          'suppressed' in originalError &&
-          Array.isArray(originalError.suppressed)
-            ? originalError.suppressed
-            : [];
-        Object.assign(originalError, {
-          suppressed: [...suppressed, cleanupError],
-        });
-      }
-    }
+  /** Ends the sandbox's hold on its container: stops it, by default. */
+  protected release(container: EngineContainer): Promise<void> {
+    return container.stop();
   }
 
-  private engineErrorMessage(error: unknown): string {
-    return this.engine.errorMessage(error);
-  }
-
-  private isServiceDown(message: string): boolean {
-    return this.engine.isServiceDown(message);
-  }
-
-  protected async startContainer(
-    image: string,
-    containerId: string,
-  ): Promise<void> {
-    const args = this.buildRunArgs(image, containerId);
-
-    try {
-      await spawn(this.engine.cli, args);
-    } catch (error) {
-      const message = this.engineErrorMessage(error);
-      if (this.isServiceDown(message)) {
-        throw this.engine.errors.serviceNotAvailable();
-      }
-      for (const volume of this.volumes) {
-        if (
-          volume.type === 'bind' &&
-          this.engine.isMissingBindSource?.(message, volume.hostPath)
-        ) {
-          throw this.engine.errors.volumePath(
-            volume.hostPath,
-            volume.containerPath,
-            'hostPath does not exist on host',
-          );
-        }
-      }
-      throw this.engine.errors.creation(
-        message,
-        image,
-        error instanceof Error ? error : undefined,
-      );
-    }
-  }
-
-  protected async stopContainer(containerId: string): Promise<void> {
-    try {
-      await spawn(this.engine.cli, ['stop', containerId]);
-    } catch {
-      // already stopped
-    }
-  }
-
-  protected async exec(
-    command: string,
-    options?: ExecuteCommandOptions,
-  ): Promise<CommandResult> {
-    try {
-      const result = await spawn(
-        this.engine.cli,
-        this.engine.execArgs(this.context.containerId, command),
-        { signal: options?.signal },
-      );
-      return {
-        stdout: result.stdout,
-        stderr: result.stderr,
-        exitCode: 0,
-      };
-    } catch (error) {
-      return commandResultFrom(error);
-    }
-  }
-
-  private async assertBashAvailable(): Promise<void> {
-    const result = await this.exec(':');
+  private async assertBashAvailable(container: EngineContainer): Promise<void> {
+    const result = await container.executeCommand(':');
     if (result.exitCode === 0) return;
     const detail = result.stderr.trim() || result.stdout.trim();
     throw this.engine.errors.generic(
       `Bash is required to execute sandbox commands but could not be started${detail ? `: ${detail}` : '.'}`,
-      this.context.containerId,
+      container.name,
     );
   }
 
-  protected spawnProcess(
-    command: string,
-    options?: SpawnOptions,
-  ): SandboxProcess {
-    const child = childSpawn(
-      this.engine.cli,
-      this.engine.execArgs(this.context.containerId, command, options),
-    );
-    return toSandboxProcess(child, options?.signal);
-  }
-
-  protected createSandboxMethods(): DisposableSandbox {
-    const { containerId } = this.context;
-
-    const sandbox: DisposableSandbox = {
-      executeCommand: async (command, options) => this.exec(command, options),
-      spawn: (command, options) => this.spawnProcess(command, options),
-
-      readFile: async (path, options) => {
-        const result = await sandbox.executeCommand(base64ReadCommand(path));
-        if (result.exitCode !== 0) {
-          throw new Error(`Failed to read file "${path}": ${result.stderr}`);
-        }
-        return readFileContent(Buffer.from(result.stdout, 'base64'), options);
-      },
-
-      exists: async (path) => {
-        const result = await sandbox.executeCommand(existsCommand(path));
-        if (result.stdout === 'true') return true;
-        if (result.stdout === 'false') return false;
-        throw new Error(`Failed to check "${path}": ${result.stderr}`);
-      },
-
-      writeFiles: async (
-        files: Array<{ path: string; content: string | Buffer }>,
-      ): Promise<void> => {
-        for (const file of files) {
-          const dir = file.path.substring(0, file.path.lastIndexOf('/'));
-          if (dir) {
-            await sandbox.executeCommand(`mkdir -p ${shellQuote(dir)}`);
-          }
-
-          for (const command of base64WriteCommands(file.path, file.content)) {
-            const result = await sandbox.executeCommand(command);
-            if (result.exitCode !== 0) {
-              throw new Error(
-                `Failed to write file "${file.path}": ${result.stderr}`,
-              );
-            }
-          }
-        }
-      },
-
-      dispose: async (): Promise<void> => {
-        await this.stopContainer(containerId);
+  protected createSandboxMethods(
+    container: EngineContainer,
+  ): DisposableSandbox {
+    let disposal: Promise<void> | undefined;
+    const dispose = async (): Promise<void> => {
+      try {
+        await this.release(container);
         await this.cleanupCreatedVolumes();
-      },
+      } finally {
+        await this.engine.dispose();
+      }
+    };
 
+    return {
+      executeCommand: (command, options) =>
+        container.executeCommand(command, options),
+      spawn: (command, options) => container.spawn(command, options),
+      readFile: async (path, options) =>
+        readFileContent(await container.readFile(path), options),
+      exists: (path) => container.exists(path),
+      writeFiles: (files) => container.writeFiles(files),
+      dispose: () => (disposal ??= dispose()),
       [Symbol.asyncDispose](this: DisposableSandbox): Promise<void> {
         return this.dispose();
       },
     };
-
-    return sandbox;
   }
 
   protected abstract getImage(): Promise<string>;
-  protected abstract configure(): Promise<void>;
+  protected abstract configure(
+    container: EngineContainer,
+    image: string,
+  ): Promise<void>;
 }
 
 /**
  * Starts a vanilla image and runs the supplied installers in order. Shared by
- * both engines — the post-start installer context comes from
- * `engine.createInstallerContext`, so the same class drives `docker exec` and
- * `container exec`.
+ * both engines — the post-start installer context comes from the engine's
+ * container, so the same class drives Docker and Apple `container` installs.
  */
 export class RuntimeStrategy<
   TOpts extends CommonSandboxOptions = CommonSandboxOptions,
@@ -578,11 +346,11 @@ export class RuntimeStrategy<
     return this.image;
   }
 
-  protected async configure(): Promise<void> {
-    const ctx = this.engine.createInstallerContext(
-      this.context.containerId,
-      this.image,
-    );
+  protected async configure(
+    container: EngineContainer,
+    image: string,
+  ): Promise<void> {
+    const ctx = container.installerContext(image);
     for (const installer of this.installers) {
       await installer.install(ctx);
     }

@@ -1,14 +1,15 @@
 import type { ContainerSandboxError } from './container-sandbox-errors.ts';
 import type { InstallerContext } from './installers/installer.ts';
-import type { SandboxReadinessOptions } from './types.ts';
+import type {
+  CommandResult,
+  ExecuteCommandOptions,
+  SandboxProcess,
+  SandboxReadinessOptions,
+  SpawnOptions,
+} from './types.ts';
 
+/** The errors the shared skeleton raises itself; each engine gives its own classes. */
 export interface ContainerErrorFactory {
-  serviceNotAvailable(): ContainerSandboxError;
-  creation(
-    message: string,
-    image: string,
-    cause?: Error,
-  ): ContainerSandboxError;
   generic(message: string, containerId?: string): ContainerSandboxError;
   volumePath(
     source: string,
@@ -17,7 +18,6 @@ export interface ContainerErrorFactory {
   ): ContainerSandboxError;
   volumeInspect(name: string, reason: string): ContainerSandboxError;
   volumeCreate(name: string, reason: string): ContainerSandboxError;
-  volumeRemove(name: string, reason: string): ContainerSandboxError;
 }
 
 /** Resolved build request handed to {@link ContainerEngine.buildImage}. */
@@ -115,62 +115,82 @@ export interface CommonSandboxOptions extends SandboxReadinessOptions {
 }
 
 /**
- * The CLI dialect seam. Captures everything that differs between container
- * runtimes (binary, run/exec arg flags, status parsing, error-string detection,
- * workdir bootstrap, image build) so one shared strategy can orchestrate any
- * engine. Generic over `TOpts` so each engine reads its own dialect-specific run
- * knobs off the resolved options while the skeleton only ever supplies the
- * common subset. Implemented by `dockerEngine` (docker-sandbox.ts) and
- * `appleEngine` (apple-container-sandbox.ts).
+ * One running container of an engine. The sandbox methods delegate here, so
+ * each engine owns how commands and files reach its containers.
+ */
+export interface EngineContainer {
+  /** The container name: `sandbox-<name>` or `sandbox-<8hex>`. */
+  readonly name: string;
+  executeCommand(
+    command: string,
+    options?: ExecuteCommandOptions,
+  ): Promise<CommandResult>;
+  spawn(command: string, options?: SpawnOptions): SandboxProcess;
+  /** The bytes of the file at `path`. */
+  readFile(path: string): Promise<Uint8Array>;
+  writeFiles(
+    files: Array<{ path: string; content: string | Buffer }>,
+  ): Promise<void>;
+  exists(path: string): Promise<boolean>;
+  /**
+   * The installer context that drives the post-start installer phase
+   * (`pkg`/`npm`/`pip`/…) in this container.
+   */
+  installerContext(image: string): InstallerContext;
+  /** Stops the container; the engine removes it. Resolves when it is already gone. */
+  stop(): Promise<void>;
+}
+
+/** The result of {@link ContainerEngine.run}: `created: false` when another caller has the name. */
+export type RunResult =
+  { created: true; container: EngineContainer } | { created: false };
+
+/**
+ * The engine seam. Captures everything that differs between container
+ * runtimes (how a container is found, started and stopped, how volumes and
+ * images are handled, how commands and files reach it) so one shared strategy
+ * can orchestrate any engine. Generic over `TOpts` so each engine reads its own
+ * dialect-specific run knobs off the resolved options while the skeleton only
+ * ever supplies the common subset. Implemented by `DockerEngine`
+ * (docker-sandbox.ts, Engine API) and `appleEngine`
+ * (apple-container-sandbox.ts, `container` CLI).
  */
 export interface ContainerEngine<
   TOpts extends CommonSandboxOptions = CommonSandboxOptions,
 > {
-  readonly cli: string;
   /** Docker validates bind sources on the daemon host; Apple uses this host. */
   readonly bindMountsOnClient: boolean;
-  isMissingBindSource?(message: string, source: string): boolean;
-  /**
-   * Build the `<cli> run` argv from resolved options. The shared skeleton
-   * supplies `image`, `containerId`, and `workdir`; every other flag is the
-   * engine's own dialect read off `opts`.
-   */
-  runArgs(
-    image: string,
-    containerId: string,
-    opts: TOpts,
-    workdir: string,
-  ): string[];
-  execArgs(
-    containerId: string,
-    command: string,
-    options?: { cwd?: string; env?: Record<string, string> },
-  ): string[];
-  inspectArgs(containerId: string): string[];
-  parseStatus(status: string): 'running' | 'stopped' | 'absent';
-  volumeCreateArgs(volume: SandboxNamedVolume, opts: TOpts): string[];
-  removeVolume(name: string): Promise<void>;
-  errorMessage(error: unknown): string;
-  isServiceDown(message: string): boolean;
-  isMissingContainer(message: string): boolean;
-  isMissingVolume(message: string): boolean;
-  isNameConflict(message: string): boolean;
-  /**
-   * Ensure `workdir` exists before any `exec` runs in it. Docker's `run -w`
-   * auto-creates the workdir (no-op here); Apple's per-exec `--cwd` fails on a
-   * missing dir, so its engine bootstraps it with `mkdir -p`.
-   */
-  ensureWorkdir(containerId: string, workdir: string): Promise<void>;
   /** Image used when no `image` option is given. */
   readonly defaultImage: string;
+  readonly errors: ContainerErrorFactory;
   /**
-   * Build the installer context that drives this engine's post-start installer
-   * phase (`pkg`/`npm`/`pip`/…) over the engine's own `exec`.
+   * The container named `name`, started when it is stopped, or `undefined`
+   * when there is none. `image` names the requested image in a start error.
    */
-  createInstallerContext(containerId: string, image: string): InstallerContext;
+  attach(name: string, image: string): Promise<EngineContainer | undefined>;
+  /**
+   * Creates and starts a long-running, auto-removed container. A named
+   * container whose name another caller holds gives `{ created: false }`.
+   */
+  run(
+    image: string,
+    name: string,
+    opts: TOpts,
+    workdir: string,
+  ): Promise<RunResult>;
+  volumeExists(name: string): Promise<boolean>;
+  createVolume(volume: SandboxNamedVolume, opts: TOpts): Promise<void>;
+  removeVolume(name: string): Promise<void>;
+  /**
+   * Ensure `workdir` exists before any `exec` runs in it. Docker creates the
+   * workdir at the create (no-op here); Apple's per-exec `--cwd` fails on a
+   * missing dir, so its engine bootstraps it with `mkdir -p`.
+   */
+  ensureWorkdir(container: EngineContainer, workdir: string): Promise<void>;
   /** Whether image `tag` already exists locally (so the build can be skipped). */
   imageExists(tag: string): Promise<boolean>;
   /** Build the image described by `spec`. The engine owns the build dialect. */
   buildImage(spec: ImageBuildSpec): Promise<void>;
-  readonly errors: ContainerErrorFactory;
+  /** Releases what the engine holds, such as its connection. */
+  dispose(): Promise<void>;
 }
