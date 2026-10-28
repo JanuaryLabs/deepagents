@@ -694,10 +694,15 @@ describe('Docker Sandbox', () => {
         }
       });
 
-      it('rejects env keys containing equals sign', async () => {
+      it('rejects env keys containing equals sign before it reaches the engine', async () => {
+        // No engine listens here: the error must come from the input alone.
+        const environment = {
+          DOCKER_HOST: 'unix:///nonexistent/deepagents-sandbox.sock',
+        };
         await assert.rejects(
           createDockerSandbox({
             ...defaults,
+            environment,
             env: { 'FOO=BAR': 'val' },
           }),
           /Invalid environment variable key/,
@@ -1279,17 +1284,21 @@ describe('Docker Sandbox', () => {
         }
       });
 
-      it('rejects names that are not Docker-legal', async () => {
+      it('rejects names that are not Docker-legal before it reaches the engine', async () => {
+        // No engine listens here: the error must come from the input alone.
+        const environment = {
+          DOCKER_HOST: 'unix:///nonexistent/deepagents-sandbox.sock',
+        };
         await assert.rejects(
-          createDockerSandbox({ ...defaults, name: '' }),
+          createDockerSandbox({ ...defaults, environment, name: '' }),
           /Invalid container name/,
         );
         await assert.rejects(
-          createDockerSandbox({ ...defaults, name: 'has spaces' }),
+          createDockerSandbox({ ...defaults, environment, name: 'has spaces' }),
           /Invalid container name/,
         );
         await assert.rejects(
-          createDockerSandbox({ ...defaults, name: 'has/slash' }),
+          createDockerSandbox({ ...defaults, environment, name: 'has/slash' }),
           /Invalid container name/,
         );
       });

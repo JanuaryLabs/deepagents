@@ -7,6 +7,7 @@ import {
   Docker,
   DockerError,
   type EngineApi,
+  type Environment,
   ImageNotFoundError,
   NameConflictError,
   NotAFileError,
@@ -35,6 +36,7 @@ import {
   ContainerSandboxStrategy,
   ContainerfileStrategy,
   RuntimeStrategy,
+  validateSandboxOptions,
 } from './container-sandbox.ts';
 import {
   ComposeStartError,
@@ -165,6 +167,11 @@ export interface DockerNetwork {
  * sees.
  */
 export interface DockerCommonOptions extends CommonSandboxOptions {
+  /**
+   * The environment whose `DOCKER_HOST`, `DOCKER_CONTEXT` and `DOCKER_CONFIG`
+   * select the engine, as they do for the Docker CLI. Default: `process.env`.
+   */
+  environment?: Environment;
   volumes?: SandboxVolume[];
   resources?: DockerResources;
   /** Container execution timeout in milliseconds; excludes Docker/SSH connection setup. */
@@ -234,6 +241,11 @@ export interface DockerfileSandboxOptions extends DockerCommonOptions {
 }
 
 export interface ComposeSandboxOptions {
+  /**
+   * The environment whose `DOCKER_HOST`, `DOCKER_CONTEXT` and `DOCKER_CONFIG`
+   * select the engine, as they do for the Docker CLI. Default: `process.env`.
+   */
+  environment?: Environment;
   compose: string;
   service: string;
   resources?: DockerResources;
@@ -1016,15 +1028,14 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
   }
 
   /**
-   * Connects to the engine that the Docker CLI selects from `process.env`.
+   * Connects to the engine that the Docker CLI selects from `environment`.
    * `commandTimeout` bounds each command of the sandbox's containers.
    */
   static async connect(
+    environment: Environment,
     commandTimeout: number | undefined,
   ): Promise<DockerEngine> {
-    const docker = await Docker.connect({ environment: process.env }).catch(
-      unavailable,
-    );
+    const docker = await Docker.connect({ environment }).catch(unavailable);
     return new DockerEngine(docker, commandTimeout);
   }
 
@@ -1342,7 +1353,13 @@ export class ComposeStrategy extends ContainerSandboxStrategy<DockerCommonOption
 export async function createDockerSandbox(
   options: DockerSandboxOptions = {},
 ): Promise<DisposableSandbox> {
-  const engine = await DockerEngine.connect(options.commandTimeout);
+  if (!isComposeOptions(options)) {
+    validateSandboxOptions(options, dockerErrors);
+  }
+  const engine = await DockerEngine.connect(
+    options.environment ?? process.env,
+    options.commandTimeout,
+  );
   let strategy: ContainerSandboxStrategy<DockerCommonOptions>;
   try {
     if (isComposeOptions(options)) {

@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import type {
   CommonSandboxOptions,
   ContainerEngine,
+  ContainerErrorFactory,
   EngineContainer,
   SandboxVolume,
 } from './container-engine.ts';
@@ -17,6 +18,27 @@ const CONTAINER_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
 export interface AcquiredContainer {
   container: EngineContainer;
   attached: boolean;
+}
+
+/**
+ * Checks the caller's env keys and container name. It needs no engine, so a
+ * factory runs it before it connects: a bad input is the caller's error even
+ * when the engine is down.
+ */
+export function validateSandboxOptions(
+  opts: CommonSandboxOptions,
+  errors: ContainerErrorFactory,
+): void {
+  for (const key of Object.keys(opts.env ?? {})) {
+    if (key.length === 0 || key.includes('=')) {
+      throw errors.generic(`Invalid environment variable key: "${key}"`);
+    }
+  }
+  if (opts.name !== undefined && !CONTAINER_NAME_PATTERN.test(opts.name)) {
+    throw errors.generic(
+      `Invalid container name: "${opts.name}". Use only letters, numbers, underscore, period, or hyphen. The "sandbox-" prefix is added automatically.`,
+    );
+  }
 }
 
 /** Records a cleanup failure on the error that started the cleanup. */
@@ -50,19 +72,8 @@ export abstract class ContainerSandboxStrategy<
   constructor(opts: TOpts, engine: ContainerEngine<TOpts>) {
     this.opts = opts;
     this.engine = engine;
-    const { volumes = [], env = {}, name, workdir = '/workspace' } = opts;
-    for (const key of Object.keys(env)) {
-      if (key.length === 0 || key.includes('=')) {
-        throw this.engine.errors.generic(
-          `Invalid environment variable key: "${key}"`,
-        );
-      }
-    }
-    if (name !== undefined && !CONTAINER_NAME_PATTERN.test(name)) {
-      throw this.engine.errors.generic(
-        `Invalid container name: "${name}". Use only letters, numbers, underscore, period, or hyphen. The "sandbox-" prefix is added automatically.`,
-      );
-    }
+    validateSandboxOptions(opts, engine.errors);
+    const { volumes = [], name, workdir = '/workspace' } = opts;
     this.volumes = volumes;
     this.name = name;
     this.workdir = workdir;
