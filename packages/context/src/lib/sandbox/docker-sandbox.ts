@@ -9,19 +9,16 @@ import {
   type EngineApi,
   ImageNotFoundError,
   NameConflictError,
+  NotAFileError,
   VolumeInUseError,
 } from '@zukhruf/docker';
 import spawn, { SubprocessError } from 'nano-spawn';
 import { type StdioOptions, spawn as childSpawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { posix } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import {
-  existsOverExec,
-  readFileOverExec,
-  writeFilesOverExec,
-} from './cli-process.ts';
 import type {
   CommonSandboxOptions,
   ContainerEngine,
@@ -619,19 +616,60 @@ function managedDockerCommand(
   ].join('\n');
 }
 
+/** Symbolic links a path may pass through before a read gives up, as Linux's ELOOP limit. */
+const MAX_SYMLINK_HOPS = 40;
+
+/** The kernel filesystems, which the archive requests cannot reach. */
+const KERNEL_FILESYSTEMS = ['/proc', '/sys', '/dev'];
+
+/** Where the files of a container are, for the archive requests. */
+interface FileLayout {
+  /** Relative sandbox paths resolve here, as they did in an exec's shell. */
+  workdir: string;
+  /** Paths only an exec reaches: tmpfs mounts and the kernel filesystems. */
+  execOnly: string[];
+  /** The numeric `uid[:gid]` of the container user, so its written files are its own. */
+  owner: { uid?: number; gid?: number };
+}
+
+/** The layout of a container from its configuration, as created or inspected. */
+function fileLayout(
+  config: EngineApi.ContainerConfig | undefined,
+  hostConfig: EngineApi.HostConfig | undefined,
+): FileLayout {
+  const user = /^(\d+)(?::(\d+))?$/.exec(config?.User ?? '');
+  return {
+    workdir: config?.WorkingDir || '/',
+    execOnly: [...KERNEL_FILESYSTEMS, ...Object.keys(hostConfig?.Tmpfs ?? {})],
+    owner: user
+      ? {
+          uid: Number(user[1]),
+          ...(user[2] === undefined ? {} : { gid: Number(user[2]) }),
+        }
+      : {},
+  };
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /** A sandbox container on the Docker engine. */
 class DockerContainer implements EngineContainer {
   readonly name: string;
   readonly #container: Container;
+  readonly #layout: FileLayout;
   readonly #commandTimeout: number | undefined;
 
   constructor(
     name: string,
     container: Container,
+    layout: FileLayout,
     commandTimeout: number | undefined,
   ) {
     this.name = name;
     this.#container = container;
+    this.#layout = layout;
     this.#commandTimeout = commandTimeout;
   }
 
@@ -795,18 +833,125 @@ class DockerContainer implements EngineContainer {
     return stdout === 'terminated';
   }
 
-  readFile(path: string): Promise<Uint8Array> {
-    return readFileOverExec((command) => this.executeCommand(command), path);
+  #resolve(path: string): string {
+    return posix.resolve(this.#layout.workdir, path);
   }
 
-  writeFiles(
+  /** The archive requests cannot reach a tmpfs mount or a kernel filesystem. */
+  #isExecOnly(path: string): boolean {
+    return this.#layout.execOnly.some(
+      (root) => path === root || path.startsWith(`${root}/`),
+    );
+  }
+
+  async readFile(path: string): Promise<Uint8Array> {
+    const target = this.#resolve(path);
+    try {
+      return this.#isExecOnly(target)
+        ? await this.#readByExec(target)
+        : await this.#readArchive(target);
+    } catch (error) {
+      throw new Error(`Failed to read file "${path}": ${messageOf(error)}`, {
+        cause: error,
+      });
+    }
+  }
+
+  /** Follows symbolic links, as reading through the container's shell does. */
+  async #readArchive(path: string): Promise<Uint8Array> {
+    let target = path;
+    for (let hops = 0; ; hops++) {
+      try {
+        return await this.#container.readFile(target);
+      } catch (error) {
+        if (
+          !(error instanceof NotAFileError && error.kind === 'symlink') ||
+          hops === MAX_SYMLINK_HOPS
+        ) {
+          throw error;
+        }
+        const stat = await this.#container.stat(target);
+        if (!stat) throw error;
+        target = posix.resolve(posix.dirname(target), stat.linkTarget);
+      }
+    }
+  }
+
+  async #readByExec(path: string): Promise<Uint8Array> {
+    const process = await this.#container.spawn({ Cmd: ['cat', '--', path] });
+    const stdout: Uint8Array[] = [];
+    const stderr: Uint8Array[] = [];
+    for await (const { stream, data } of process) {
+      (stream === 'stdout' ? stdout : stderr).push(data);
+    }
+    if ((await process.exitCode) !== 0) {
+      throw new Error(Buffer.concat(stderr).toString('utf-8').trim());
+    }
+    return Buffer.concat(stdout);
+  }
+
+  async writeFiles(
     files: Array<{ path: string; content: string | Buffer }>,
   ): Promise<void> {
-    return writeFilesOverExec((command) => this.executeCommand(command), files);
+    const resolved = files.map(({ path, content }) => ({
+      path: this.#resolve(path),
+      content,
+    }));
+    const byArchive = resolved.filter(({ path }) => !this.#isExecOnly(path));
+    if (byArchive.length > 0) {
+      try {
+        await this.#container.writeFiles(
+          byArchive.map(({ path, content }) => ({
+            path,
+            data: content,
+            ...this.#layout.owner,
+          })),
+        );
+      } catch (error) {
+        throw new Error(
+          `Failed to write file "${byArchive.map(({ path }) => path).join('", "')}": ${messageOf(error)}`,
+          { cause: error },
+        );
+      }
+    }
+
+    for (const { path, content } of resolved.filter(({ path }) =>
+      this.#isExecOnly(path),
+    )) {
+      const result = await this.#container.exec(
+        {
+          Cmd: [
+            'sh',
+            '-c',
+            'mkdir -p "$(dirname "$1")" && cat > "$1"',
+            'sh',
+            path,
+          ],
+        },
+        { stdin: content },
+      );
+      if (result.exitCode !== 0) {
+        throw new Error(`Failed to write file "${path}": ${result.stderr}`);
+      }
+    }
   }
 
-  exists(path: string): Promise<boolean> {
-    return existsOverExec((command) => this.executeCommand(command), path);
+  async exists(path: string): Promise<boolean> {
+    let target = this.#resolve(path);
+    if (this.#isExecOnly(target)) {
+      const { exitCode } = await this.#container.exec({
+        Cmd: ['test', '-e', target],
+      });
+      return exitCode === 0;
+    }
+    for (let hops = 0; hops <= MAX_SYMLINK_HOPS; hops++) {
+      const stat = await this.#container.stat(target);
+      if (!stat) return false;
+      if (stat.linkTarget === '') return true;
+      target = posix.resolve(posix.dirname(target), stat.linkTarget);
+    }
+    // A symbolic link loop, which `test -e` also reports as missing.
+    return false;
   }
 
   installerContext(image: string): InstallerContext {
@@ -884,8 +1029,17 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
   }
 
   /** A sandbox container handle for a container of this engine. */
-  container(name: string, container: Container): DockerContainer {
-    return new DockerContainer(name, container, this.#commandTimeout);
+  container(
+    name: string,
+    container: Container,
+    info: Pick<EngineApi.ContainerInspectResponse, 'Config' | 'HostConfig'>,
+  ): DockerContainer {
+    return new DockerContainer(
+      name,
+      container,
+      fileLayout(info.Config, info.HostConfig),
+      this.#commandTimeout,
+    );
   }
 
   async attach(
@@ -894,9 +1048,9 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
   ): Promise<DockerContainer | undefined> {
     const found = await this.docker.containers.find(name).catch(unavailable);
     if (!found) return undefined;
-    const container = this.container(name, found);
-    const { State } = await found.inspect();
-    if (State?.Status !== 'running') {
+    const info = await found.inspect();
+    const container = this.container(name, found, info);
+    if (info.State?.Status !== 'running') {
       await container.start(image);
     }
     return container;
@@ -929,7 +1083,10 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
       }
       return {
         created: true,
-        container: this.container(name, result.container),
+        container: this.container(name, result.container, {
+          Config: body,
+          HostConfig: body.HostConfig,
+        }),
       };
     } catch (error) {
       throw this.#runError(error, image, opts.volumes ?? []);
@@ -1128,7 +1285,11 @@ export class ComposeStrategy extends ContainerSandboxStrategy<DockerCommonOption
       );
     }
     return {
-      container: this.dockerEngine.container(this.projectName, container),
+      container: this.dockerEngine.container(
+        this.projectName,
+        container,
+        await container.inspect(),
+      ),
       attached: false,
     };
   }

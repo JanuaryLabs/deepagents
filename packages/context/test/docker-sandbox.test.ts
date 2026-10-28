@@ -290,6 +290,45 @@ describe('Docker Sandbox', () => {
         assert.strictEqual(content, specialContent);
       });
 
+      it('reads a file through a symbolic link', async () => {
+        await using sandbox = await createDockerSandbox(defaults);
+        await sandbox.writeFiles([
+          { path: '/tmp/target.txt', content: 'linked content' },
+        ]);
+        const link = await sandbox.executeCommand(
+          'mkdir -p /tmp/links && ln -s ../target.txt /tmp/links/relative.txt',
+        );
+        assert.strictEqual(link.exitCode, 0, link.stderr);
+
+        const content = await sandbox.readFile('/tmp/links/relative.txt');
+
+        assert.strictEqual(content, 'linked content');
+        assert.strictEqual(
+          await sandbox.exists('/tmp/links/relative.txt'),
+          true,
+        );
+      });
+
+      it('writes files that a non-root sandbox user can modify', async () => {
+        await using sandbox = await createDockerSandbox({
+          ...defaults,
+          security: { user: '1000:1000' },
+        });
+        await sandbox.writeFiles([
+          { path: '/tmp/owned/notes.txt', content: 'first' },
+        ]);
+
+        const append = await sandbox.executeCommand(
+          'printf " second" >> /tmp/owned/notes.txt',
+        );
+
+        assert.strictEqual(append.exitCode, 0, append.stderr);
+        assert.strictEqual(
+          await sandbox.readFile('/tmp/owned/notes.txt'),
+          'first second',
+        );
+      });
+
       it('throws error when reading non-existent file', async () => {
         await using sandbox = await createDockerSandbox(defaults);
         await assert.rejects(
