@@ -258,7 +258,7 @@ describe('Microsandbox Sandbox', async () => {
         await using sandbox = await createMicrosandboxSandbox();
         assert.ok(sandbox.spawn);
         const controller = new AbortController();
-        const child = sandbox.spawn(
+        const child = await sandbox.spawn(
           'printf "hi\\n"; sleep 30; printf "bye\\n"',
           {
             signal: controller.signal,
@@ -279,7 +279,7 @@ describe('Microsandbox Sandbox', async () => {
       it('exit resolves with non-zero code on command failure', async () => {
         await using sandbox = await createMicrosandboxSandbox();
         assert.ok(sandbox.spawn);
-        const child = sandbox.spawn('exit 42');
+        const child = await sandbox.spawn('exit 42');
         await streamText(child.stdout);
         await streamText(child.stderr);
         assert.deepStrictEqual(await child.exit, {
@@ -292,7 +292,7 @@ describe('Microsandbox Sandbox', async () => {
       it('stdout and stderr both close after the child exits', async () => {
         await using sandbox = await createMicrosandboxSandbox();
         assert.ok(sandbox.spawn);
-        const child = sandbox.spawn('echo hi; echo err >&2');
+        const child = await sandbox.spawn('echo hi; echo err >&2');
         const [out, err, info] = await Promise.all([
           streamText(child.stdout),
           streamText(child.stderr),
@@ -308,7 +308,9 @@ describe('Microsandbox Sandbox', async () => {
       it('delivers stdout bytes before the child exits', async () => {
         await using sandbox = await createMicrosandboxSandbox();
         assert.ok(sandbox.spawn);
-        const child = sandbox.spawn('printf "hi\\n"; sleep 2; printf "bye\\n"');
+        const child = await sandbox.spawn(
+          'printf "hi\\n"; sleep 2; printf "bye\\n"',
+        );
 
         const winner = await Promise.race([
           readFirstChunk(child.stdout).then(() => 'chunk' as const),
@@ -329,7 +331,7 @@ describe('Microsandbox Sandbox', async () => {
       it('streams stderr independently of stdout', async () => {
         await using sandbox = await createMicrosandboxSandbox();
         assert.ok(sandbox.spawn);
-        const child = sandbox.spawn(
+        const child = await sandbox.spawn(
           'echo "to stdout"; echo "to stderr" >&2; echo "also stdout"',
         );
         const [out, err] = await Promise.all([
@@ -349,7 +351,7 @@ describe('Microsandbox Sandbox', async () => {
       it('forwards env into the child', async () => {
         await using sandbox = await createMicrosandboxSandbox();
         assert.ok(sandbox.spawn);
-        const child = sandbox.spawn('printf "%s\\n" "$MY_VAR"', {
+        const child = await sandbox.spawn('printf "%s\\n" "$MY_VAR"', {
           env: { MY_VAR: 'hello-from-host' },
         });
         const text = await streamText(child.stdout);
@@ -365,7 +367,7 @@ describe('Microsandbox Sandbox', async () => {
         const mkdir = await sandbox.executeCommand(`mkdir -p ${cwd}`);
         assert.strictEqual(mkdir.exitCode, 0);
 
-        const child = sandbox.spawn('pwd', { cwd });
+        const child = await sandbox.spawn('pwd', { cwd });
         const text = await streamText(child.stdout);
         const info = await child.exit;
         assert.strictEqual(text.trim(), cwd);
@@ -668,7 +670,7 @@ describe('Microsandbox Sandbox', async () => {
             destination: MICROSANDBOX_DEFAULT_DESTINATION,
           });
           assert.ok(agent.sandbox.spawn);
-          const child = agent.sandbox.spawn(
+          const child = await agent.sandbox.spawn(
             'printf "hi\\n"; sleep 2; printf "bye\\n"',
           );
 

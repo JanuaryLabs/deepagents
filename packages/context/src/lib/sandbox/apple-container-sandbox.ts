@@ -281,7 +281,10 @@ class AppleContainer implements EngineContainer {
     return run(execArgs(this.name, command), options?.signal);
   }
 
-  spawn(command: string, options?: SpawnOptions): SandboxProcess {
+  async spawn(
+    command: string,
+    options?: SpawnOptions,
+  ): Promise<SandboxProcess> {
     return toSandboxProcess(
       childSpawn(CLI, execArgs(this.name, command, options)),
       options?.signal,

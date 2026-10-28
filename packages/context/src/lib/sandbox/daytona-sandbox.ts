@@ -375,7 +375,7 @@ function createDaytonaSandboxMethods(args: {
   return {
     executeCommand,
 
-    spawn(command, options) {
+    async spawn(command, options) {
       return spawnDaytonaProcess(sandbox, command, {
         ...options,
         commandTimeout,

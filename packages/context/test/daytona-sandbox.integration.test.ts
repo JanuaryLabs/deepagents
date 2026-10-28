@@ -154,7 +154,7 @@ describe('Daytona Sandbox', async () => {
         const { sandbox } = live;
         assert.ok(sandbox.spawn, 'daytona sandbox must expose spawn');
         const controller = new AbortController();
-        const child = sandbox.spawn(
+        const child = await sandbox.spawn(
           'printf "hi\\n"; sleep 30; printf "bye\\n"',
           {
             signal: controller.signal,
@@ -176,7 +176,7 @@ describe('Daytona Sandbox', async () => {
         await using live = await liveDaytonaSandbox();
         const { sandbox } = live;
         assert.ok(sandbox.spawn, 'daytona sandbox must expose spawn');
-        const child = sandbox.spawn('exit 42');
+        const child = await sandbox.spawn('exit 42');
         await streamText(child.stdout);
         await streamText(child.stderr);
         assert.deepStrictEqual(await child.exit, {
@@ -190,7 +190,7 @@ describe('Daytona Sandbox', async () => {
         await using live = await liveDaytonaSandbox();
         const { sandbox } = live;
         assert.ok(sandbox.spawn, 'daytona sandbox must expose spawn');
-        const child = sandbox.spawn('echo hi; echo err >&2');
+        const child = await sandbox.spawn('echo hi; echo err >&2');
         const [out, err, info] = await Promise.all([
           streamText(child.stdout),
           streamText(child.stderr),
@@ -211,7 +211,9 @@ describe('Daytona Sandbox', async () => {
         await using live = await liveDaytonaSandbox();
         const { sandbox } = live;
         assert.ok(sandbox.spawn, 'daytona sandbox must expose spawn');
-        const child = sandbox.spawn('printf "hi\\n"; sleep 2; printf "bye\\n"');
+        const child = await sandbox.spawn(
+          'printf "hi\\n"; sleep 2; printf "bye\\n"',
+        );
 
         const winner = await Promise.race([
           readFirstChunk(child.stdout).then(() => 'chunk' as const),
@@ -233,7 +235,7 @@ describe('Daytona Sandbox', async () => {
         await using live = await liveDaytonaSandbox();
         const { sandbox } = live;
         assert.ok(sandbox.spawn, 'daytona sandbox must expose spawn');
-        const child = sandbox.spawn(
+        const child = await sandbox.spawn(
           'echo "to stdout"; echo "to stderr" >&2; echo "also stdout"',
         );
         const [out, err] = await Promise.all([
@@ -254,7 +256,7 @@ describe('Daytona Sandbox', async () => {
         await using live = await liveDaytonaSandbox();
         const { sandbox } = live;
         assert.ok(sandbox.spawn, 'daytona sandbox must expose spawn');
-        const child = sandbox.spawn('printf "%s\\n" "$MY_VAR"', {
+        const child = await sandbox.spawn('printf "%s\\n" "$MY_VAR"', {
           env: { MY_VAR: 'hello-from-host' },
         });
         const text = await streamText(child.stdout);
@@ -271,7 +273,7 @@ describe('Daytona Sandbox', async () => {
         const mkdir = await sandbox.executeCommand(`mkdir -p ${cwd}`);
         assert.strictEqual(mkdir.exitCode, 0);
 
-        const child = sandbox.spawn('pwd', { cwd });
+        const child = await sandbox.spawn('pwd', { cwd });
         const text = await streamText(child.stdout);
         const info = await child.exit;
         assert.strictEqual(text.trim(), cwd);
@@ -311,7 +313,7 @@ describe('Daytona Sandbox', async () => {
           destination: DAYTONA_DEFAULT_DESTINATION,
         });
         assert.ok(agent.sandbox.spawn);
-        const child = agent.sandbox.spawn(
+        const child = await agent.sandbox.spawn(
           'printf "hi\\n"; sleep 2; printf "bye\\n"',
         );
 

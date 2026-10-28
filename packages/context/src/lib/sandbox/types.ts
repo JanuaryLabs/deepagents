@@ -89,7 +89,7 @@ export interface SandboxProcess {
  */
 export interface DisposableSandbox extends Sandbox, AsyncDisposable {
   /** Spawn `command` with the same Bash contract as {@link Sandbox.executeCommand}. */
-  spawn?(command: string, options?: SpawnOptions): SandboxProcess;
+  spawn?(command: string, options?: SpawnOptions): Promise<SandboxProcess>;
   /**
    * Release the backend's external resources. Called explicitly, or
    * automatically at scope exit via `await using` — every backend also

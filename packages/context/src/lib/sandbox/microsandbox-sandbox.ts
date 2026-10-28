@@ -317,7 +317,7 @@ function createMicrosandboxMethods(args: {
       return { stdout, stderr, exitCode: info.code ?? 1 };
     },
 
-    spawn,
+    spawn: async (command, options) => spawn(command, options),
 
     async readFile(path, options) {
       try {

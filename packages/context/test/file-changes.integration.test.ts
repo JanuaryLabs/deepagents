@@ -459,7 +459,7 @@ describe('strace file-change tracking (docker backend)', () => {
   it('traces spawn — change reported when the process exits', async () => {
     await withSandbox(async (s, rec) => {
       assert.ok(s.sandbox.spawn, 'docker sandbox should expose spawn');
-      const child = s.sandbox.spawn(`echo spawned > ${ROOT}/sp.txt`);
+      const child = await s.sandbox.spawn(`echo spawned > ${ROOT}/sp.txt`);
       await Promise.all([drainStream(child.stdout), drainStream(child.stderr)]);
       const info = await child.exit;
       assert.strictEqual(info.success, true);
@@ -769,7 +769,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
     try {
       await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
       assert.ok(s.sandbox.spawn, 'docker sandbox should expose spawn');
-      const child = s.sandbox.spawn(`echo hi > ${ROOT}/sp.txt`);
+      const child = await s.sandbox.spawn(`echo hi > ${ROOT}/sp.txt`);
       await Promise.all([drainStream(child.stdout), drainStream(child.stderr)]);
       const info = await child.exit;
       assert.strictEqual(info.success, true);
@@ -799,7 +799,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
     try {
       await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
       assert.ok(s.sandbox.spawn, 'docker sandbox should expose spawn');
-      const child = s.sandbox.spawn(`echo hi > ${ROOT}/sp-err.txt`);
+      const child = await s.sandbox.spawn(`echo hi > ${ROOT}/sp-err.txt`);
       await Promise.all([drainStream(child.stdout), drainStream(child.stderr)]);
       // onError throws inside collectSpawn's catch; the isolation boundary must
       // swallow it so the exit still resolves rather than reject.

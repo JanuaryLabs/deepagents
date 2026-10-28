@@ -3,7 +3,9 @@ import {
   ConnectionFailedError,
   type Container,
   ContainerNotFoundError,
+  type ContainerProcess,
   Docker,
+  DockerError,
   type EngineApi,
   ImageNotFoundError,
   NameConflictError,
@@ -16,10 +18,8 @@ import { readFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import {
-  commandResultFrom,
   existsOverExec,
   readFileOverExec,
-  toSandboxProcess,
   writeFilesOverExec,
 } from './cli-process.ts';
 import type {
@@ -60,6 +60,7 @@ import type {
   CommandResult,
   DisposableSandbox,
   ExecuteCommandOptions,
+  ExitInfo,
   SandboxProcess,
   SpawnOptions,
 } from './types.ts';
@@ -531,6 +532,58 @@ const dockerErrors: ContainerErrorFactory = {
   volumeInspect: (name, reason) => new VolumeInspectError(name, reason),
   volumeCreate: (name, reason) => new VolumeCreateError(name, reason),
 };
+/** The CLI dropped one final newline; the sandbox contract keeps dropping it. */
+function withoutFinalNewline(text: string): string {
+  return text.replace(/\r?\n$/, '');
+}
+
+/**
+ * The output of a container process as two streams and an exit. The chunks
+ * queue until their stream is read, so a reader of one stream never blocks the
+ * other.
+ */
+function sandboxProcess(process: ContainerProcess): SandboxProcess {
+  const queue = { highWaterMark: Number.POSITIVE_INFINITY };
+  const stdout = new TransformStream<Uint8Array, Uint8Array>(
+    undefined,
+    undefined,
+    queue,
+  );
+  const stderr = new TransformStream<Uint8Array, Uint8Array>(
+    undefined,
+    undefined,
+    queue,
+  );
+  const writers = {
+    stdout: stdout.writable.getWriter(),
+    stderr: stderr.writable.getWriter(),
+  };
+
+  const exit = (async (): Promise<ExitInfo> => {
+    try {
+      for await (const { stream, data } of process) {
+        await writers[stream].write(data);
+      }
+    } catch (error) {
+      await Promise.all([
+        writers.stdout.abort(error),
+        writers.stderr.abort(error),
+      ]);
+      throw error;
+    }
+    await Promise.all([writers.stdout.close(), writers.stderr.close()]);
+    const code = await process.exitCode;
+    return { code, signal: null, success: code === 0 };
+  })();
+
+  return { stdout: stdout.readable, stderr: stderr.readable, exit };
+}
+
+/**
+ * Wraps `command` so the sandbox can stop it: the container has no request
+ * that stops an exec, so the wrapper writes the command's process group to
+ * `controlPath` for a later exec to kill, and enforces `commandTimeout` itself.
+ */
 function managedDockerCommand(
   command: string,
   controlPath: string,
@@ -566,218 +619,180 @@ function managedDockerCommand(
   ].join('\n');
 }
 
-async function waitForDockerExecPid(
-  cli: DockerCli,
-  controlPath: string,
-  localExit: Promise<unknown>,
-): Promise<number | undefined> {
-  const exited = localExit.then(
-    () => true,
-    () => true,
-  );
-  const readPid = `if IFS= read -r pid < ${shellQuote(controlPath)}; then printf '%s' "$pid"; fi`;
-
-  while (true) {
-    const result = await spawn('docker', cli.execArgs(readPid), {
-      env: cli.env,
-    });
-    if (result.stdout) return Number(result.stdout);
-    if (await Promise.race([exited, delay(10).then(() => false)])) {
-      return undefined;
-    }
-  }
-}
-
-async function terminateDockerExec(
-  cli: DockerCli,
-  controlPath: string,
-  localExit: Promise<unknown>,
-): Promise<boolean> {
-  const pid = await waitForDockerExecPid(cli, controlPath, localExit);
-  if (pid === undefined) return false;
-
-  const result = await spawn(
-    'docker',
-    cli.execArgs(
-      [
-        `pid=${pid}`,
-        `IFS= read -r control_pid < ${shellQuote(controlPath)} || exit 0`,
-        '[ "$control_pid" = "$pid" ] || exit 0',
-        'kill -KILL -- "-$pid" 2>/dev/null || exit 0',
-        'group_alive() {',
-        '  local stat rest state pgrp',
-        '  for stat_path in /proc/[0-9]*/stat; do',
-        '    IFS= read -r stat < "$stat_path" || continue',
-        '    rest=${stat##*) }',
-        '    read -r state _ pgrp _ <<< "$rest"',
-        '    if [ "$pgrp" = "$pid" ] && [ "$state" != Z ]; then return 0; fi',
-        '  done',
-        '  return 1',
-        '}',
-        'while group_alive; do sleep 0.01; done',
-        'printf terminated',
-      ].join('\n'),
-    ),
-    { env: cli.env },
-  );
-  return result.stdout === 'terminated';
-}
-
-function spawnDockerProcess(
-  cli: DockerCli,
-  command: string,
-  options: SpawnOptions = {},
-  commandTimeout?: number,
-): SandboxProcess {
-  if (!commandTimeout && options.signal === undefined) {
-    return toSandboxProcess(
-      childSpawn('docker', cli.execArgs(command, options), { env: cli.env }),
-      undefined,
-    );
-  }
-
-  const controlPath = `/dev/shm/deepagents-exec-${randomUUID()}.pid`;
-  const localProcess = toSandboxProcess(
-    childSpawn(
-      'docker',
-      cli.execArgs(
-        managedDockerCommand(command, controlPath, commandTimeout),
-        options,
-      ),
-      { env: cli.env },
-    ),
-    undefined,
-  );
-  let termination: Promise<boolean> | undefined;
-  const onAbort = () => {
-    termination ??= terminateDockerExec(cli, controlPath, localProcess.exit);
-    // Observe transport failures immediately; the exit promise still reports
-    // the original rejection once the command's transport finishes.
-    void termination.catch(() => {});
-  };
-  if (options.signal?.aborted) onAbort();
-  else options.signal?.addEventListener('abort', onAbort, { once: true });
-
-  return {
-    stdout: localProcess.stdout,
-    stderr: localProcess.stderr,
-    exit: localProcess.exit
-      .then(async (info) => {
-        const activeTermination = termination;
-        if (!activeTermination || !(await activeTermination)) {
-          return info;
-        }
-        return { code: null, signal: 'SIGKILL' as const, success: false };
-      })
-      .finally(() => {
-        options.signal?.removeEventListener('abort', onAbort);
-      }),
-  };
-}
-
-async function executeDockerCommand(
-  cli: DockerCli,
-  command: string,
-  options: ExecuteCommandOptions = {},
-  commandTimeout?: number,
-): Promise<CommandResult> {
-  if (!commandTimeout && options.signal === undefined) {
-    try {
-      const result = await spawn('docker', cli.execArgs(command), {
-        env: cli.env,
-      });
-      return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
-    } catch (error) {
-      return commandResultFrom(error);
-    }
-  }
-
-  const process = spawnDockerProcess(
-    cli,
-    command,
-    { signal: options.signal },
-    commandTimeout,
-  );
-  const [stdout, stderr, info] = await Promise.all([
-    new Response(process.stdout).text(),
-    new Response(process.stderr).text(),
-    process.exit,
-  ]);
-  const result = {
-    stdout: stdout.replace(/\r?\n$/, ''),
-    stderr: stderr.replace(/\r?\n$/, ''),
-  };
-  if (info.signal === 'SIGKILL') {
-    return {
-      ...result,
-      stderr: result.stderr || 'Command aborted',
-      exitCode: 1,
-    };
-  }
-  return { ...result, exitCode: info.code ?? 1 };
-}
-
-/** How the commands of one container reach it through the docker CLI. */
-interface DockerCli {
-  env: NodeJS.ProcessEnv;
-  execArgs(command: string, options?: SpawnOptions): string[];
-}
-
 /** A sandbox container on the Docker engine. */
 class DockerContainer implements EngineContainer {
   readonly name: string;
   readonly #container: Container;
-  readonly #cli: DockerCli;
   readonly #commandTimeout: number | undefined;
 
   constructor(
     name: string,
     container: Container,
-    env: NodeJS.ProcessEnv,
     commandTimeout: number | undefined,
   ) {
     this.name = name;
     this.#container = container;
     this.#commandTimeout = commandTimeout;
-    this.#cli = {
-      env,
-      execArgs: (command, options) => {
-        const flags: string[] = [];
-        if (options?.cwd) {
-          flags.push('-w', options.cwd);
-        }
-        for (const [key, value] of Object.entries(options?.env ?? {})) {
-          if (key.length === 0 || key.includes('=')) {
-            throw new DockerSandboxError(
-              `Invalid environment variable key: "${key}"`,
-            );
-          }
-          flags.push('-e', `${key}=${value}`);
-        }
-        return ['exec', ...flags, container.id, 'bash', '-lc', command];
-      },
+  }
+
+  /** `command` under `bash -lc`, with the spawn options' directory and environment. */
+  #bash(command: string, options: SpawnOptions = {}): EngineApi.ExecConfig {
+    const env = Object.entries(options.env ?? {}).map(([key, value]) => {
+      if (key.length === 0 || key.includes('=')) {
+        throw new DockerSandboxError(
+          `Invalid environment variable key: "${key}"`,
+        );
+      }
+      return `${key}=${value}`;
+    });
+    return {
+      Cmd: ['bash', '-lc', command],
+      Env: env,
+      ...(options.cwd ? { WorkingDir: options.cwd } : {}),
     };
   }
 
-  executeCommand(
-    command: string,
-    options?: ExecuteCommandOptions,
-  ): Promise<CommandResult> {
-    return executeDockerCommand(
-      this.#cli,
-      command,
-      options,
-      this.#commandTimeout,
-    );
+  async #exec(config: EngineApi.ExecConfig): Promise<CommandResult> {
+    try {
+      const { stdout, stderr, exitCode } = await this.#container.exec(config);
+      return {
+        stdout: withoutFinalNewline(stdout),
+        stderr: withoutFinalNewline(stderr),
+        exitCode,
+      };
+    } catch (error) {
+      if (!(error instanceof DockerError)) throw error;
+      // As with `docker exec`: a command the engine cannot run is a failed
+      // command, not a thrown error.
+      return { stdout: '', stderr: error.message, exitCode: 1 };
+    }
   }
 
-  spawn(command: string, options?: SpawnOptions): SandboxProcess {
-    return spawnDockerProcess(
-      this.#cli,
-      command,
-      options,
-      this.#commandTimeout,
+  async executeCommand(
+    command: string,
+    options: ExecuteCommandOptions = {},
+  ): Promise<CommandResult> {
+    if (!this.#commandTimeout && options.signal === undefined) {
+      return this.#exec(this.#bash(command));
+    }
+
+    const process = await this.spawn(command, { signal: options.signal });
+    const [stdout, stderr, info] = await Promise.all([
+      new Response(process.stdout).text(),
+      new Response(process.stderr).text(),
+      process.exit,
+    ]);
+    const result = {
+      stdout: withoutFinalNewline(stdout),
+      stderr: withoutFinalNewline(stderr),
+    };
+    if (info.signal === 'SIGKILL') {
+      return {
+        ...result,
+        stderr: result.stderr || 'Command aborted',
+        exitCode: 1,
+      };
+    }
+    return { ...result, exitCode: info.code ?? 1 };
+  }
+
+  async spawn(
+    command: string,
+    options: SpawnOptions = {},
+  ): Promise<SandboxProcess> {
+    if (!this.#commandTimeout && options.signal === undefined) {
+      return sandboxProcess(
+        await this.#container.spawn(this.#bash(command, options)),
+      );
+    }
+
+    const controlPath = `/dev/shm/deepagents-exec-${randomUUID()}.pid`;
+    const execution = sandboxProcess(
+      await this.#container.spawn(
+        this.#bash(
+          managedDockerCommand(command, controlPath, this.#commandTimeout),
+          options,
+        ),
+      ),
     );
+    let termination: Promise<boolean> | undefined;
+    const onAbort = () => {
+      termination ??= this.#terminate(controlPath, execution.exit);
+      // Observe transport failures immediately; the exit promise still reports
+      // the original rejection once the command's transport finishes.
+      void termination.catch(() => {});
+    };
+    if (options.signal?.aborted) onAbort();
+    else options.signal?.addEventListener('abort', onAbort, { once: true });
+
+    return {
+      stdout: execution.stdout,
+      stderr: execution.stderr,
+      exit: execution.exit
+        .then(async (info) => {
+          const activeTermination = termination;
+          if (!activeTermination || !(await activeTermination)) {
+            return info;
+          }
+          return { code: null, signal: 'SIGKILL' as const, success: false };
+        })
+        .finally(() => {
+          options.signal?.removeEventListener('abort', onAbort);
+        }),
+    };
+  }
+
+  /** The PID that the managed command wrote, or `undefined` once it exited. */
+  async #managedPid(
+    controlPath: string,
+    exit: Promise<unknown>,
+  ): Promise<number | undefined> {
+    const exited = exit.then(
+      () => true,
+      () => true,
+    );
+    const readPid = `if IFS= read -r pid < ${shellQuote(controlPath)}; then printf '%s' "$pid"; fi`;
+
+    while (true) {
+      const { stdout } = await this.#container.exec(this.#bash(readPid));
+      if (stdout) return Number(stdout);
+      if (await Promise.race([exited, delay(10).then(() => false)])) {
+        return undefined;
+      }
+    }
+  }
+
+  /** Kills the managed command's process group; `true` when it was still running. */
+  async #terminate(
+    controlPath: string,
+    exit: Promise<unknown>,
+  ): Promise<boolean> {
+    const pid = await this.#managedPid(controlPath, exit);
+    if (pid === undefined) return false;
+
+    const { stdout } = await this.#container.exec(
+      this.#bash(
+        [
+          `pid=${pid}`,
+          `IFS= read -r control_pid < ${shellQuote(controlPath)} || exit 0`,
+          '[ "$control_pid" = "$pid" ] || exit 0',
+          'kill -KILL -- "-$pid" 2>/dev/null || exit 0',
+          'group_alive() {',
+          '  local stat rest state pgrp',
+          '  for stat_path in /proc/[0-9]*/stat; do',
+          '    IFS= read -r stat < "$stat_path" || continue',
+          '    rest=${stat##*) }',
+          '    read -r state _ pgrp _ <<< "$rest"',
+          '    if [ "$pgrp" = "$pid" ] && [ "$state" != Z ]; then return 0; fi',
+          '  done',
+          '  return 1',
+          '}',
+          'while group_alive; do sleep 0.01; done',
+          'printf terminated',
+        ].join('\n'),
+      ),
+    );
+    return stdout === 'terminated';
   }
 
   readFile(path: string): Promise<Uint8Array> {
@@ -798,22 +813,7 @@ class DockerContainer implements EngineContainer {
     return createInstallerContext(
       {
         // Installers run with `sh -c`, before the sandbox knows Bash exists.
-        exec: async (command) => {
-          try {
-            const result = await spawn(
-              'docker',
-              ['exec', this.#container.id, 'sh', '-c', command],
-              { env: this.#cli.env },
-            );
-            return {
-              stdout: result.stdout,
-              stderr: result.stderr,
-              exitCode: 0,
-            };
-          } catch (error) {
-            return commandResultFrom(error);
-          }
-        },
+        exec: (command) => this.#exec({ Cmd: ['sh', '-c', command] }),
         SandboxError: DockerSandboxError,
       },
       this.name,
@@ -885,12 +885,7 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
 
   /** A sandbox container handle for a container of this engine. */
   container(name: string, container: Container): DockerContainer {
-    return new DockerContainer(
-      name,
-      container,
-      this.cliEnv,
-      this.#commandTimeout,
-    );
+    return new DockerContainer(name, container, this.#commandTimeout);
   }
 
   async attach(

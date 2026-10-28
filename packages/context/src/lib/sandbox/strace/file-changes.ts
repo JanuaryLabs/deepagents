@@ -219,9 +219,9 @@ export async function withStraceFileChanges(
 
   if (sandbox.spawn) {
     const innerSpawn = sandbox.spawn.bind(sandbox);
-    decorated.spawn = (command, spawnOptions) => {
+    decorated.spawn = async (command, spawnOptions) => {
       const traceFile = `${traceDir}/${randomUUID()}.strace`;
-      const child = innerSpawn(
+      const child = await innerSpawn(
         buildStraceCommand(command, traceFile, traceDir),
         spawnOptions,
       );

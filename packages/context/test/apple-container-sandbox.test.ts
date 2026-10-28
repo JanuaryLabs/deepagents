@@ -328,7 +328,7 @@ describe('Apple container sandbox (runtime)', async () => {
   it('streams output via spawn()', async () => {
     await using sandbox = await createAppleContainerSandbox();
     assert.ok(sandbox.spawn, 'backend should expose spawn');
-    const proc = sandbox.spawn('for i in 1 2 3; do echo "line$i"; done');
+    const proc = await sandbox.spawn('for i in 1 2 3; do echo "line$i"; done');
     const [stdout, exit] = await Promise.all([
       readStream(proc.stdout),
       proc.exit,

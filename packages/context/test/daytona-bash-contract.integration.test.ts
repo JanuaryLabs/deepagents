@@ -179,7 +179,7 @@ describe('Daytona Bash contract (live)', { skip: !liveAvailable }, () => {
       assert.ok(spawn);
 
       // Act
-      const child = spawn(literalHeredoc(43));
+      const child = await spawn(literalHeredoc(43));
       const [stdout, stderr, exit] = await Promise.all([
         streamText(child.stdout),
         streamText(child.stderr),
@@ -220,10 +220,13 @@ describe('Daytona Bash contract (live)', { skip: !liveAvailable }, () => {
       assert.ok(spawn);
 
       // Act
-      const child = spawn('printf \'<%s>\\n<%s>\\n\' "$TRICKY_VALUE" "$PWD"', {
-        cwd,
-        env: { TRICKY_VALUE: envValue },
-      });
+      const child = await spawn(
+        'printf \'<%s>\\n<%s>\\n\' "$TRICKY_VALUE" "$PWD"',
+        {
+          cwd,
+          env: { TRICKY_VALUE: envValue },
+        },
+      );
       const [stdout, stderr, exit] = await Promise.all([
         streamText(child.stdout),
         streamText(child.stderr),
@@ -252,7 +255,9 @@ describe('Daytona Bash contract (live)', { skip: !liveAvailable }, () => {
       assert.ok(spawn);
 
       // Act
-      const child = spawn("printf 'first\\n'; sleep 2; printf 'second\\n'");
+      const child = await spawn(
+        "printf 'first\\n'; sleep 2; printf 'second\\n'",
+      );
       const winner = await Promise.race([
         readFirstChunk(child.stdout).then((text) => ({
           kind: 'chunk' as const,

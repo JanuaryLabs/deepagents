@@ -125,7 +125,7 @@ export interface EngineContainer {
     command: string,
     options?: ExecuteCommandOptions,
   ): Promise<CommandResult>;
-  spawn(command: string, options?: SpawnOptions): SandboxProcess;
+  spawn(command: string, options?: SpawnOptions): Promise<SandboxProcess>;
   /** The bytes of the file at `path`. */
   readFile(path: string): Promise<Uint8Array>;
   writeFiles(
