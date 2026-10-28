@@ -307,22 +307,47 @@ describe('Docker Sandbox', () => {
         );
       });
 
-      it('writes files that a non-root sandbox user can modify', async () => {
+      it('writes files and directories that a numeric non-root user can modify', async () => {
         await using sandbox = await createDockerSandbox({
           ...defaults,
           security: { user: '1000:1000' },
         });
         await sandbox.writeFiles([
-          { path: '/tmp/owned/notes.txt', content: 'first' },
+          { path: '/tmp/owned/deep/notes.txt', content: 'first' },
         ]);
 
-        const append = await sandbox.executeCommand(
-          'printf " second" >> /tmp/owned/notes.txt',
+        const modify = await sandbox.executeCommand(
+          'printf " second" >> /tmp/owned/deep/notes.txt && touch /tmp/owned/deep/sibling /tmp/owned/sibling',
         );
 
-        assert.strictEqual(append.exitCode, 0, append.stderr);
+        assert.strictEqual(modify.exitCode, 0, modify.stderr);
         assert.strictEqual(
-          await sandbox.readFile('/tmp/owned/notes.txt'),
+          await sandbox.readFile('/tmp/owned/deep/notes.txt'),
+          'first second',
+        );
+      });
+
+      it('writes files and directories that a named image user can modify', async () => {
+        await using sandbox = await createDockerSandbox({
+          ...defaults,
+          dockerfile: [
+            'FROM bash:5.3-alpine3.24',
+            'RUN adduser -D sandboxer',
+            'USER sandboxer',
+            '',
+          ].join('\n'),
+        });
+        await sandbox.writeFiles([
+          { path: '/tmp/named/deep/notes.txt', content: 'first' },
+        ]);
+
+        const modify = await sandbox.executeCommand(
+          'printf " second" >> /tmp/named/deep/notes.txt && touch /tmp/named/deep/sibling /tmp/named/sibling',
+        );
+
+        assert.strictEqual(modify.exitCode, 0, modify.stderr);
+        assert.strictEqual(
+          await sandbox.readFile('/tmp/named/deep/notes.txt'),
           'first second',
         );
       });

@@ -11,6 +11,7 @@ import {
   ImageNotFoundError,
   NameConflictError,
   NotAFileError,
+  type OwnedContainer,
   VolumeInUseError,
 } from '@zukhruf/docker';
 import spawn, { SubprocessError } from 'nano-spawn';
@@ -517,6 +518,25 @@ function runDockerBuild(
   });
 }
 
+/** Starts a stopped container of a named sandbox; `image` names the request in an error. */
+async function startContainer(
+  container: Container,
+  image: string,
+): Promise<void> {
+  try {
+    await container.start();
+  } catch (error) {
+    if (error instanceof ConnectionFailedError) {
+      throw new DockerNotAvailableError();
+    }
+    throw new ContainerCreationError(
+      messageOf(error),
+      image,
+      error instanceof Error ? error : undefined,
+    );
+  }
+}
+
 /** Maps an unreachable engine to {@link DockerNotAvailableError}. */
 function unavailable(error: unknown): never {
   if (error instanceof ConnectionFailedError) {
@@ -640,26 +660,66 @@ interface FileLayout {
   workdir: string;
   /** Paths only an exec reaches: tmpfs mounts and the kernel filesystems. */
   execOnly: string[];
-  /** The numeric `uid[:gid]` of the container user, so its written files are its own. */
-  owner: { uid?: number; gid?: number };
+  /** The container user (`Config.User`): `''` for root, or `user[:group]` by name or ID. */
+  user: string;
 }
+
+/** The IDs that own a file the sandbox writes. */
+interface Owner {
+  uid: number;
+  gid: number;
+}
+
+/**
+ * Prints `<uid> <gid>` of a `user[:group]` inside the container, as the engine
+ * resolves the user of an exec: a name through the container's own user
+ * database, a numeric ID as is, and a missing group as the user's primary
+ * group, or 0 when the user has no entry.
+ */
+const RESOLVE_OWNER = [
+  'user=$1 group=$2',
+  'case $user in *[!0-9]*) uid=$(id -u "$user") || exit 1 ;; *) uid=$user ;; esac',
+  'case $group in',
+  '  "") gid=$(id -g "$user" 2>/dev/null) || gid=0 ;;',
+  '  *[!0-9]*) gid=$(awk -F: -v name="$group" \'$1 == name { print $3 }\' /etc/group); [ -n "$gid" ] || { echo "unknown group $group" >&2; exit 1; } ;;',
+  '  *) gid=$group ;;',
+  'esac',
+  'printf \'%s %s\' "$uid" "$gid"',
+].join('\n');
 
 /** The layout of a container from its configuration, as created or inspected. */
 function fileLayout(
   config: EngineApi.ContainerConfig | undefined,
   hostConfig: EngineApi.HostConfig | undefined,
 ): FileLayout {
-  const user = /^(\d+)(?::(\d+))?$/.exec(config?.User ?? '');
   return {
     workdir: config?.WorkingDir || '/',
     execOnly: [...KERNEL_FILESYSTEMS, ...Object.keys(hostConfig?.Tmpfs ?? {})],
-    owner: user
-      ? {
-          uid: Number(user[1]),
-          ...(user[2] === undefined ? {} : { gid: Number(user[2]) }),
-        }
-      : {},
+    user: config?.User ?? '',
   };
+}
+
+/** The user that runs the container's commands, or `undefined` for root. */
+async function resolveOwner(
+  container: Container,
+  user: string,
+): Promise<Owner | undefined> {
+  if (user === '') return undefined;
+  const separator = user.indexOf(':');
+  const [name, group] =
+    separator < 0
+      ? [user, '']
+      : [user.slice(0, separator), user.slice(separator + 1)];
+  const result = await container.exec({
+    Cmd: ['sh', '-c', RESOLVE_OWNER, 'sh', name, group],
+  });
+  if (result.exitCode !== 0) {
+    throw new DockerSandboxError(
+      `Failed to resolve the container user "${user}": ${result.stderr.trim()}`,
+    );
+  }
+  const [uid, gid] = result.stdout.split(' ').map(Number);
+  return { uid, gid };
 }
 
 function messageOf(error: unknown): string {
@@ -671,17 +731,21 @@ class DockerContainer implements EngineContainer {
   readonly name: string;
   readonly #container: Container;
   readonly #layout: FileLayout;
+  /** Who owns the files the sandbox writes: the container user, or root. */
+  readonly #owner: Owner | undefined;
   readonly #commandTimeout: number | undefined;
 
   constructor(
     name: string,
     container: Container,
     layout: FileLayout,
+    owner: Owner | undefined,
     commandTimeout: number | undefined,
   ) {
     this.name = name;
     this.#container = container;
     this.#layout = layout;
+    this.#owner = owner;
     this.#commandTimeout = commandTimeout;
   }
 
@@ -912,13 +976,26 @@ class DockerContainer implements EngineContainer {
     const byArchive = resolved.filter(({ path }) => !this.#isExecOnly(path));
     if (byArchive.length > 0) {
       try {
-        await this.#container.writeFiles(
-          byArchive.map(({ path, content }) => ({
+        const owner = this.#owner;
+        // The engine creates implied parent directories as root, so a
+        // non-root user gets its new directories as explicit entries.
+        const directories = owner
+          ? await this.#missingDirectories(
+              byArchive.map(({ path }) => posix.dirname(path)),
+            )
+          : [];
+        await this.#container.writeFiles([
+          ...directories.map((path) => ({
+            path,
+            directory: true as const,
+            ...owner,
+          })),
+          ...byArchive.map(({ path, content }) => ({
             path,
             data: content,
-            ...this.#layout.owner,
+            ...owner,
           })),
-        );
+        ]);
       } catch (error) {
         throw new Error(
           `Failed to write file "${byArchive.map(({ path }) => path).join('", "')}": ${messageOf(error)}`,
@@ -946,6 +1023,22 @@ class DockerContainer implements EngineContainer {
         throw new Error(`Failed to write file "${path}": ${result.stderr}`);
       }
     }
+  }
+
+  /** The directories, parents first, that a write into `directories` creates. */
+  async #missingDirectories(directories: string[]): Promise<string[]> {
+    const missing = new Set<string>();
+    for (const start of new Set(directories)) {
+      for (
+        let directory = start;
+        directory !== '/' && !missing.has(directory);
+        directory = posix.dirname(directory)
+      ) {
+        if (await this.#container.stat(directory)) break;
+        missing.add(directory);
+      }
+    }
+    return [...missing].sort((a, b) => a.length - b.length);
   }
 
   async exists(path: string): Promise<boolean> {
@@ -976,21 +1069,6 @@ class DockerContainer implements EngineContainer {
       this.name,
       image,
     );
-  }
-
-  async start(image: string): Promise<void> {
-    try {
-      await this.#container.start();
-    } catch (error) {
-      if (error instanceof ConnectionFailedError) {
-        throw new DockerNotAvailableError();
-      }
-      throw new ContainerCreationError(
-        error instanceof Error ? error.message : String(error),
-        image,
-        error instanceof Error ? error : undefined,
-      );
-    }
   }
 
   async stop(): Promise<void> {
@@ -1040,15 +1118,17 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
   }
 
   /** A sandbox container handle for a container of this engine. */
-  container(
+  async container(
     name: string,
     container: Container,
-    info: Pick<EngineApi.ContainerInspectResponse, 'Config' | 'HostConfig'>,
-  ): DockerContainer {
+    info: EngineApi.ContainerInspectResponse,
+  ): Promise<DockerContainer> {
+    const layout = fileLayout(info.Config, info.HostConfig);
     return new DockerContainer(
       name,
       container,
-      fileLayout(info.Config, info.HostConfig),
+      layout,
+      await resolveOwner(container, layout.user),
       this.#commandTimeout,
     );
   }
@@ -1060,11 +1140,10 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
     const found = await this.docker.containers.find(name).catch(unavailable);
     if (!found) return undefined;
     const info = await found.inspect();
-    const container = this.container(name, found, info);
     if (info.State?.Status !== 'running') {
-      await container.start(image);
+      await startContainer(found, image);
     }
-    return container;
+    return this.container(name, found, info);
   }
 
   async run(
@@ -1073,6 +1152,27 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
     opts: DockerCommonOptions,
     workdir: string,
   ): Promise<RunResult> {
+    const started = await this.#createAndStart(image, name, opts, workdir);
+    if (!started) return { created: false };
+    try {
+      return {
+        created: true,
+        // The image's own USER and WORKDIR are in the inspect, not the body.
+        container: await this.container(name, started, await started.inspect()),
+      };
+    } catch (error) {
+      await started[Symbol.asyncDispose]();
+      throw error;
+    }
+  }
+
+  /** Creates and starts the container; `undefined` when another caller has the name. */
+  async #createAndStart(
+    image: string,
+    name: string,
+    opts: DockerCommonOptions,
+    workdir: string,
+  ): Promise<OwnedContainer | undefined> {
     try {
       const body = containerCreateRequest(image, opts, workdir);
       const create = () =>
@@ -1085,20 +1185,14 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
         await this.docker.images.pull(image, { platform: opts.platform });
         return create();
       });
-      if (!result.created) return { created: false };
+      if (!result.created) return undefined;
       try {
         await result.container.start();
       } catch (error) {
         await result.container[Symbol.asyncDispose]();
         throw error;
       }
-      return {
-        created: true,
-        container: this.container(name, result.container, {
-          Config: body,
-          HostConfig: body.HostConfig,
-        }),
-      };
+      return result.container;
     } catch (error) {
       throw this.#runError(error, image, opts.volumes ?? []);
     }
@@ -1296,7 +1390,7 @@ export class ComposeStrategy extends ContainerSandboxStrategy<DockerCommonOption
       );
     }
     return {
-      container: this.dockerEngine.container(
+      container: await this.dockerEngine.container(
         this.projectName,
         container,
         await container.inspect(),
