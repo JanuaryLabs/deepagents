@@ -3,7 +3,7 @@ import type {
   Tensor,
 } from '@huggingface/transformers';
 
-import type { Embedder } from '../stores/store.js';
+import type { Embedder } from '../stores/store.ts';
 
 export type FeatureExtractionFn = FeatureExtractionPipeline;
 

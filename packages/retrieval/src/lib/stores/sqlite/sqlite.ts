@@ -10,9 +10,9 @@ import type {
   SearchOptions,
   SearchResult,
   Store,
-} from '../store.js';
-import { SETUP, statements, vectors } from './ddl.sqlite.js';
-import { open } from './open.js';
+} from '../store.ts';
+import { SETUP, statements, vectors } from './ddl.sqlite.ts';
+import { open } from './open.ts';
 
 const DEFAULT_TOP_N = 10;
 

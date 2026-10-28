@@ -9,7 +9,9 @@
       "executor": "@nx/esbuild:esbuild",
       "outputs": ["{options.outputPath}"],
       "options": {
-        "bundle": false
+        "additionalEntryPoints": [
+          "packages/retrieval/src/lib/connectors/index.ts"
+        ]
       }
     },
     "test": {}

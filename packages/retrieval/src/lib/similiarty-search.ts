@@ -1,6 +1,6 @@
 import { embedMany } from 'ai';
 
-import { type IngestionConfig, ingest } from './ingest.js';
+import { type IngestionConfig, ingest } from './ingest.ts';
 
 export async function similaritySearch(
   query: string,

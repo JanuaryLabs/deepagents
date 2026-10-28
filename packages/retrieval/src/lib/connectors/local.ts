@@ -1,10 +1,9 @@
+import fg from 'fast-glob';
+import ignore from 'ignore';
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 
-import fg from 'fast-glob';
-import ignore from 'ignore';
-
-import type { Connector } from './connector.js';
+import type { Connector } from './connector.ts';
 
 /**
  * Cache for gitignore patterns to avoid repeated file reads

@@ -2,7 +2,7 @@ import fg from 'fast-glob';
 import { opendir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import type { Connector } from './connector.js';
+import type { Connector } from './connector.ts';
 
 export function repo(
   dir: string,

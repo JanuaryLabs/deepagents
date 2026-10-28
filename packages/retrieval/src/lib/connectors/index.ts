@@ -1,8 +1,7 @@
-export * from './connector.js';
-export * from './github.js';
-export * from './linear.js';
-export * from './local.js';
-export * from './pdf.js';
-export * from './rss.js';
-export * from './repo.js';
-
+export * from './connector.ts';
+export * from './github.ts';
+export * from './linear.ts';
+export * from './local.ts';
+export * from './pdf.ts';
+export * from './rss.ts';
+export * from './repo.ts';

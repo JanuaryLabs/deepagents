@@ -3,10 +3,10 @@ import {
   RecursiveCharacterTextSplitter,
 } from '@langchain/textsplitters';
 
-import type { Connector } from './connectors/connector.js';
-import type { Splitter } from './pipeline.js';
-import { cid } from './stores/cid.js';
-import type { Embedder, Store } from './stores/store.js';
+import type { Connector } from './connectors/connector.ts';
+import type { Splitter } from './pipeline.ts';
+import { cid } from './stores/cid.ts';
+import type { Embedder, Store } from './stores/store.ts';
 
 export interface IngestionConfig {
   connector: Connector;

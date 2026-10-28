@@ -1,8 +1,7 @@
 import { glob, readFile } from 'node:fs/promises';
-
 import { extractText, getDocumentProxy } from 'unpdf';
 
-import type { Connector } from './connector.js';
+import type { Connector } from './connector.ts';
 
 export function pdf(pattern: string): Connector {
   const sourceId = `pdf:${pattern}`;
@@ -44,7 +43,9 @@ export function pdfFile(source: string): Connector {
           if (isUrl) {
             const response = await fetch(source);
             if (!response.ok) {
-              throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+              throw new Error(
+                `HTTP ${response.status}: ${response.statusText}`,
+              );
             }
             buffer = new Uint8Array(await response.arrayBuffer());
           } else {

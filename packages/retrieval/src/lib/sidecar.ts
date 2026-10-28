@@ -4,12 +4,12 @@
 // import { join, relative } from 'node:path';
 // import { env, pipeline } from '@huggingface/transformers';
 // import Conf from 'conf';
-// import * as connectors from './connectors/index.js';
-// import { findAllGitRepos } from './connectors/repo.js';
-// import { huggingface } from './embedders/huggingface.js';
-// import { type IngestionConfig, ingest, splitTypeScript } from './ingest.js';
-// import { similaritySearch } from './similiarty-search.js';
-// import { nodeSQLite } from './stores/sqlite/node-sqlite.js';
+// import * as connectors from './connectors/index.ts';
+// import { findAllGitRepos } from './connectors/repo.ts';
+// import { huggingface } from './embedders/huggingface.ts';
+// import { type IngestionConfig, ingest, splitTypeScript } from './ingest.ts';
+// import { similaritySearch } from './similiarty-search.ts';
+// import { nodeSQLite } from './stores/sqlite/node-sqlite.ts';
 // /**
 //  * Common programming language / source code file extensions(excluding config & docs);
 //  */
