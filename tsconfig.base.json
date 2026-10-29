@@ -20,6 +20,7 @@
     "target": "ESNext",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
     "forceConsistentCasingInFileNames": true
   }
 }
