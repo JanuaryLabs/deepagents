@@ -121,7 +121,6 @@
     "p-retry": "^8.0.0",
     "sql-formatter": "^15.8.2",
     "uuid": "^14.0.1",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^4.4.3",
     "p-memoize": "^8.0.0"
   },
@@ -136,7 +135,8 @@
   "peerDependencies": {
     "@duckdb/node-api": "^1.5.5-r.3",
     "mssql": "^12.7.0",
-    "pg": "^8.22.0"
+    "pg": "^8.22.0",
+    "xlsx": "^0.20.3"
   },
   "peerDependenciesMeta": {
     "@duckdb/node-api": {
@@ -146,6 +146,9 @@
       "optional": true
     },
     "pg": {
+      "optional": true
+    },
+    "xlsx": {
       "optional": true
     }
   }

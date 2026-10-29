@@ -85,7 +85,8 @@
     "typescript": "6.0.3",
     "typescript-eslint": "8.64.0",
     "vite": "8.1.5",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "workspaces": [
     "packages/*",

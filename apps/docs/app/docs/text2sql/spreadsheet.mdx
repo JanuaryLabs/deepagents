@@ -5,11 +5,27 @@ description: Query Excel and CSV files with natural language using Text2SQL
 
 The Spreadsheet adapter loads Excel (.xlsx/.xls) and CSV/TSV files into an in-memory SQLite database, enabling natural language queries against spreadsheet data. Each sheet becomes a queryable table.
 
+## Installation
+
+The adapter reads files with `xlsx`. SheetJS publishes the current `xlsx` only
+on its CDN, so you install it from a URL. npm 12 refuses URL dependencies
+unless you allow them. Add this line to your project's `.npmrc` first:
+
+```ini
+allow-remote=root
+```
+
+Then install the package and `xlsx`:
+
+```bash
+npm install @deepagents/text2sql https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
+```
+
 ## Basic Setup
 
 ```typescript
 import { Text2Sql, toSql } from '@deepagents/text2sql';
-import { Spreadsheet, tables, info } from '@deepagents/text2sql/spreadsheet';
+import { Spreadsheet, info, tables } from '@deepagents/text2sql/spreadsheet';
 
 // Reuse model from Getting Started.
 const adapter = new Spreadsheet({
@@ -36,18 +52,19 @@ adapter.close();
 ## Configuration Options
 
 ```typescript
-import { Spreadsheet, tables, info, rowCount } from '@deepagents/text2sql/spreadsheet';
+import {
+  Spreadsheet,
+  info,
+  rowCount,
+  tables,
+} from '@deepagents/text2sql/spreadsheet';
 
 new Spreadsheet({
   // Required: Path to Excel or CSV/TSV file
   file: './data.xlsx',
 
   // Required: Grounding functions for schema introspection
-  grounding: [
-    tables(),
-    info(),
-    rowCount(),
-  ],
+  grounding: [tables(), info(), rowCount()],
 
   // Optional: Persist SQLite database to file (default: in-memory)
   database: './cache.db',
@@ -56,35 +73,35 @@ new Spreadsheet({
 
 ## Supported File Formats
 
-| Format | Extension | Table Naming |
-|--------|-----------|--------------|
-| Excel | `.xlsx`, `.xls` | Each sheet becomes a table (sheet name → table name) |
-| CSV | `.csv` | Filename becomes table name |
-| TSV | `.tsv` | Filename becomes table name |
+| Format | Extension       | Table Naming                                         |
+| ------ | --------------- | ---------------------------------------------------- |
+| Excel  | `.xlsx`, `.xls` | Each sheet becomes a table (sheet name → table name) |
+| CSV    | `.csv`          | Filename becomes table name                          |
+| TSV    | `.tsv`          | Filename becomes table name                          |
 
 ## Table and Column Naming
 
 The adapter automatically sanitizes identifiers for SQL compatibility:
 
-| Original | Sanitized | Rule |
-|----------|-----------|------|
-| `My Sheet!` | `my_sheet` | Special chars → underscore, lowercase |
-| `123Data` | `_123data` | Prefix underscore if starts with number |
-| `Customer ID` | `customer_id` | Spaces → underscores |
-| `aaaa...` (100 chars) | `aaaa...` (64 chars) | Truncated to 64 characters |
-| `col`, `col`, `col` | `col`, `col_2`, `col_3` | Duplicates get numeric suffix |
+| Original              | Sanitized               | Rule                                    |
+| --------------------- | ----------------------- | --------------------------------------- |
+| `My Sheet!`           | `my_sheet`              | Special chars → underscore, lowercase   |
+| `123Data`             | `_123data`              | Prefix underscore if starts with number |
+| `Customer ID`         | `customer_id`           | Spaces → underscores                    |
+| `aaaa...` (100 chars) | `aaaa...` (64 chars)    | Truncated to 64 characters              |
+| `col`, `col`, `col`   | `col`, `col_2`, `col_3` | Duplicates get numeric suffix           |
 
 ## Type Inference
 
 The adapter automatically infers SQLite types from your data:
 
-| Data Pattern | SQLite Type | Example Values |
-|--------------|-------------|----------------|
-| All integers | `INTEGER` | `1`, `42`, `100` |
-| Any decimals | `REAL` | `3.14`, `99.99` |
-| Dates | `TEXT` | Stored as `YYYY-MM-DD` |
-| Mixed/text | `TEXT` | `"hello"`, `"123"` |
-| Empty/null | `NULL` | Empty cells become NULL |
+| Data Pattern | SQLite Type | Example Values          |
+| ------------ | ----------- | ----------------------- |
+| All integers | `INTEGER`   | `1`, `42`, `100`        |
+| Any decimals | `REAL`      | `3.14`, `99.99`         |
+| Dates        | `TEXT`      | Stored as `YYYY-MM-DD`  |
+| Mixed/text   | `TEXT`      | `"hello"`, `"123"`      |
+| Empty/null   | `NULL`      | Empty cells become NULL |
 
 ## Multi-Sheet Excel Files
 
@@ -116,13 +133,13 @@ adapter.close();
 
 The Spreadsheet adapter reuses SQLite grounding functions. Import from `@deepagents/text2sql/spreadsheet`:
 
-| Function | Description |
-|----------|-------------|
-| `tables()` | Lists all tables (sheets) with their columns and types |
-| `info()` | Reports SQLite dialect and version info |
-| `rowCount()` | Counts rows per table with size classification |
-| `columnStats()` | Collects min, max, null fraction for columns |
-| `columnValues()` | Samples distinct values from columns |
+| Function         | Description                                            |
+| ---------------- | ------------------------------------------------------ |
+| `tables()`       | Lists all tables (sheets) with their columns and types |
+| `info()`         | Reports SQLite dialect and version info                |
+| `rowCount()`     | Counts rows per table with size classification         |
+| `columnStats()`  | Collects min, max, null fraction for columns           |
+| `columnValues()` | Samples distinct values from columns                   |
 
 See [Grounding](/docs/text2sql/grounding) for detailed configuration options.
 
@@ -151,7 +168,9 @@ const adapter = new Spreadsheet({
   grounding: [tables()],
 });
 
-const results = await adapter.execute("SELECT * FROM data WHERE text LIKE '%日本%'");
+const results = await adapter.execute(
+  "SELECT * FROM data WHERE text LIKE '%日本%'",
+);
 ```
 
 ### Dates
@@ -179,11 +198,11 @@ const incomplete = await adapter.execute(`
 
 ## Error Handling
 
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `Failed to read spreadsheet` | File not found or corrupted | Check file path and format |
-| `No valid sheets found` | All sheets are empty | Ensure spreadsheet has data |
-| `Cannot create table with no columns` | Sheet has no headers | Add header row to sheet |
+| Error                                 | Cause                       | Solution                    |
+| ------------------------------------- | --------------------------- | --------------------------- |
+| `Failed to read spreadsheet`          | File not found or corrupted | Check file path and format  |
+| `No valid sheets found`               | All sheets are empty        | Ensure spreadsheet has data |
+| `Cannot create table with no columns` | Sheet has no headers        | Add header row to sheet     |
 
 ## Full Example
 
@@ -191,21 +210,16 @@ const incomplete = await adapter.execute(`
 import { Text2Sql, toSql } from '@deepagents/text2sql';
 import {
   Spreadsheet,
-  tables,
+  columnStats,
   info,
   rowCount,
-  columnStats,
+  tables,
 } from '@deepagents/text2sql/spreadsheet';
 
 // Load an Excel file with customer and order data
 const adapter = new Spreadsheet({
   file: './ecommerce.xlsx',
-  grounding: [
-    tables(),
-    info(),
-    rowCount(),
-    columnStats(),
-  ],
+  grounding: [tables(), info(), rowCount(), columnStats()],
 });
 
 const text2sql = new Text2Sql({
@@ -236,10 +250,10 @@ adapter.close();
 
 Tables are classified by row count (inherited from SQLite adapter):
 
-| Size Hint | Row Count |
-|-----------|-----------|
-| tiny | < 100 |
-| small | 100 - 999 |
-| medium | 1,000 - 9,999 |
-| large | 10,000 - 99,999 |
-| huge | >= 100,000 |
+| Size Hint | Row Count       |
+| --------- | --------------- |
+| tiny      | < 100           |
+| small     | 100 - 999       |
+| medium    | 1,000 - 9,999   |
+| large     | 10,000 - 99,999 |
+| huge      | >= 100,000      |
