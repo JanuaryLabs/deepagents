@@ -177,5 +177,19 @@
   },
   "overrides": {
     "tar": "7.5.20"
+  },
+  "allowScripts": {
+    "cpu-features": true,
+    "node-liblzma": true,
+    "sharp": true,
+    "ssh2": true,
+    "@mongodb-js/zstd": true,
+    "onnxruntime-node": true,
+    "esbuild": true,
+    "nx": false,
+    "protobufjs": false,
+    "unrs-resolver": false,
+    "@parcel/watcher": false,
+    "@swc/core": false
   }
 }
