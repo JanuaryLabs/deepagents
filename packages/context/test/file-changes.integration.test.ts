@@ -33,10 +33,10 @@ const STRACE_IMAGE =
 
 // `selfTestStrace` runs in-process (nano-spawn + node:fs), so the probe tests
 // exercise it the way the real consumer does: a node process inside the
-// container. That needs node AND the probe code in the image. `node:24-slim` is
+// container. That needs node AND the probe code in the image. `node:lts-slim` is
 // debian-based, so apt adds strace; the strace-less variant reuses the same base
 // minus that layer.
-const NODE_BASE = 'node:24-slim';
+const NODE_BASE = 'node:lts-slim';
 const NODE_STRACE_IMAGE =
   `FROM ${NODE_BASE}\n` +
   'RUN apt-get update && apt-get install -y --no-install-recommends strace ' +
@@ -64,7 +64,6 @@ async function buildProbeBundle(): Promise<string> {
     bundle: true,
     platform: 'node',
     format: 'esm',
-    target: 'node22',
     write: false,
   });
   return result.outputFiles[0].text;
