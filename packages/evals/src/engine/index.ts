@@ -237,11 +237,10 @@ export async function runEval<T>(config: EvalConfig<T>): Promise<RunSummary> {
       });
     })();
 
-  const items: Array<{ index: number; input: T }> = [];
-  let idx = 0;
-  for await (const item of ds) {
-    items.push({ index: idx++, input: item });
-  }
+  const items = await Array.fromAsync(ds, (input, index) => ({
+    index,
+    input,
+  }));
 
   emitter.emit('run:start', { runId, totalCases: items.length, name, model });
 

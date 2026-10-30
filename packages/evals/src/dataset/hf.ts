@@ -85,10 +85,9 @@ export async function fetchHfRows(
 }
 
 export async function downloadHf(options: HfOptions): Promise<string> {
-  const lines: string[] = [];
-  for await (const row of hf(options)) {
-    lines.push(JSON.stringify(row));
-  }
+  const lines = await Array.fromAsync(hf(options), (row) =>
+    JSON.stringify(row),
+  );
   return lines.join('\n');
 }
 

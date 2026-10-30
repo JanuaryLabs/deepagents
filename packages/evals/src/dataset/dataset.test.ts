@@ -1,6 +1,6 @@
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import assert from 'node:assert';
-import { mkdtempDisposable, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
@@ -10,15 +10,12 @@ describe('dataset', () => {
   it('inline array yields all elements in order', async () => {
     const items = [1, 2, 3, 4, 5];
     const ds = dataset(items);
-    const result: number[] = [];
-    for await (const item of ds) {
-      result.push(item);
-    }
+    const result = await Array.fromAsync(ds);
     assert.deepStrictEqual(result, [1, 2, 3, 4, 5]);
   });
 
   it('JSON file loads correctly', async () => {
-    await using dir = await mkdtempDisposable(join(tmpdir(), 'evals-dataset-'));
+    await using dir = await new TemporaryFiles().directory('evals-dataset-');
     const filePath = join(dir.path, 'data.json');
     const data = [
       { id: 1, name: 'alice' },
@@ -31,7 +28,7 @@ describe('dataset', () => {
   });
 
   it('JSONL file loads correctly', async () => {
-    await using dir = await mkdtempDisposable(join(tmpdir(), 'evals-dataset-'));
+    await using dir = await new TemporaryFiles().directory('evals-dataset-');
     const filePath = join(dir.path, 'data.jsonl');
     const lines = [
       JSON.stringify({ q: 'hello', a: 'world' }),
@@ -50,7 +47,7 @@ describe('dataset', () => {
   });
 
   it('CSV file loads with headers', async () => {
-    await using dir = await mkdtempDisposable(join(tmpdir(), 'evals-dataset-'));
+    await using dir = await new TemporaryFiles().directory('evals-dataset-');
     const filePath = join(dir.path, 'data.csv');
     const csv = ['name,age,city', 'alice,30,nyc', 'bob,25,sf'].join('\n');
     await writeFile(filePath, csv);

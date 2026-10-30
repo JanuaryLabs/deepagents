@@ -56,10 +56,7 @@ export class Dataset<T> implements AsyncIterable<T> {
   shuffle(): Dataset<T> {
     const source = this.#source;
     return new Dataset(async function* () {
-      const items: T[] = [];
-      for await (const item of source()) {
-        items.push(item);
-      }
+      const items = await Array.fromAsync(source());
       for (let i = items.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         const temp = items[i];
@@ -73,10 +70,7 @@ export class Dataset<T> implements AsyncIterable<T> {
   sample(n: number): Dataset<T> {
     const source = this.#source;
     return new Dataset(async function* () {
-      const items: T[] = [];
-      for await (const item of source()) {
-        items.push(item);
-      }
+      const items = await Array.fromAsync(source());
       const count = Math.min(Math.max(0, n), items.length);
       for (let i = items.length - 1; i > items.length - count - 1; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -108,11 +102,7 @@ export class Dataset<T> implements AsyncIterable<T> {
   }
 
   async toArray(): Promise<T[]> {
-    const result: T[] = [];
-    for await (const item of this.#source()) {
-      result.push(item);
-    }
-    return result;
+    return Array.fromAsync(this.#source());
   }
 
   [Symbol.asyncIterator](): AsyncIterator<T> {

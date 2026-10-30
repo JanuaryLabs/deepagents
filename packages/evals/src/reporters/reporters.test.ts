@@ -1,6 +1,6 @@
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import assert from 'node:assert';
-import { mkdtempDisposable, readFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
@@ -14,8 +14,8 @@ import type { CaseResult, RunEndData } from '@deepagents/evals/reporters';
 
 describe('reporters serialization', () => {
   it('serializes reporter payloads with plain JSON.stringify behavior', async () => {
-    await using directory = await mkdtempDisposable(
-      join(tmpdir(), 'eval-reporters-'),
+    await using directory = await new TemporaryFiles().directory(
+      'eval-reporters-',
     );
     const outputDir = directory.path;
 

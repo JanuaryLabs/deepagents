@@ -348,10 +348,7 @@ async function evaluateEach<T, V extends { name: string }>(
   options: EvaluateEachOptions<T, V>,
   perModelFailedIndexes?: Map<string, Set<number>>,
 ): Promise<RunSummary[]> {
-  const items: T[] = [];
-  for await (const item of options.dataset) {
-    items.push(item);
-  }
+  const items = await Array.fromAsync(options.dataset);
 
   const suite = options.store.createSuite(options.name);
 

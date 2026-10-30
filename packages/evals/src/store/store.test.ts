@@ -1,7 +1,6 @@
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert';
-import { mkdtempDisposable } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
@@ -53,8 +52,8 @@ function createRunInSuite(
 
 describe('RunStore', () => {
   it("waits for another process's write transaction and then saves the suite", async () => {
-    await using directory = await mkdtempDisposable(
-      join(tmpdir(), 'evals-store-lock-'),
+    await using directory = await new TemporaryFiles().directory(
+      'evals-store-lock-',
     );
     const path = join(directory.path, 'store.db');
     using db = new DatabaseSync(path);
