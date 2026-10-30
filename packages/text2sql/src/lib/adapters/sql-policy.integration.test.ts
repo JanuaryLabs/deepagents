@@ -1,6 +1,7 @@
 /** Live adapter contract tests for SQL policy enforcement. */
 import type { Dataset } from '@google-cloud/bigquery';
 import { BigQuery as TestBigQuery } from '@zukhruf/testing/bigquery';
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { type MysqlDatabase, Mysql as TestMysql } from '@zukhruf/testing/mysql';
 import { Postgres as TestPostgres } from '@zukhruf/testing/postgres';
 import { Sqlite as TestSqlite } from '@zukhruf/testing/sqlite';
@@ -8,9 +9,8 @@ import { SqlServer as TestSqlServer } from '@zukhruf/testing/sqlserver';
 import sql from 'mssql';
 import assert from 'node:assert';
 import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
-import { type TestContext, describe, it, mock } from 'node:test';
+import { type MockTracker, type TestContext, describe, it } from 'node:test';
 import pg from 'pg';
 import { z } from 'zod';
 
@@ -48,6 +48,8 @@ import {
   views as sqlServerViews,
 } from '@deepagents/text2sql/sqlserver';
 
+const temporaryFiles = new TemporaryFiles();
+
 const scopeErrorPayload = z.object({
   error: z.string(),
   error_type: z.enum(['OUT_OF_SCOPE', 'SQL_SCOPE_PARSE_ERROR']),
@@ -84,8 +86,12 @@ type AdapterFactoryResult = {
 };
 
 type AdapterPolicyTestEnvironment = AsyncDisposable & {
-  create: () => AdapterFactoryResult | Promise<AdapterFactoryResult>;
-  createEmptyScope: () => AdapterFactoryResult | Promise<AdapterFactoryResult>;
+  create: (
+    mock: MockTracker,
+  ) => AdapterFactoryResult | Promise<AdapterFactoryResult>;
+  createEmptyScope: (
+    mock: MockTracker,
+  ) => AdapterFactoryResult | Promise<AdapterFactoryResult>;
   queries: AdapterQueries;
 };
 
@@ -153,7 +159,10 @@ const policySqliteDdl = `
   INSERT INTO users (id, name) VALUES (1, 'Ada');
 `;
 
-async function createSqlitePolicyAdapter(options: PolicyTestOptions) {
+async function createSqlitePolicyAdapter(
+  mock: MockTracker,
+  options: PolicyTestOptions,
+) {
   await using resources = new AsyncDisposableStack();
   const database = resources.use(await new TestSqlite().database());
   const db = database.connection;
@@ -313,7 +322,11 @@ function isBigQueryGroundingQuery(sqlText: string): boolean {
   return sqlText.includes('INFORMATION_SCHEMA.');
 }
 
-function createPostgresScope(pool: pg.Pool, options: PolicyTestOptions = {}) {
+function createPostgresScope(
+  mock: MockTracker,
+  pool: pg.Pool,
+  options: PolicyTestOptions = {},
+) {
   const executeProbe = mock.fn();
   const groundingProbe = mock.fn();
   const validateProbe = mock.fn();
@@ -351,6 +364,7 @@ function createPostgresScope(pool: pg.Pool, options: PolicyTestOptions = {}) {
 }
 
 function createMysqlScope(
+  mock: MockTracker,
   container: MysqlDatabase,
   options: PolicyTestOptions = {},
 ) {
@@ -392,6 +406,7 @@ function createMysqlScope(
 }
 
 function createSqlServerScope(
+  mock: MockTracker,
   pool: sql.ConnectionPool,
   options: PolicyTestOptions = {},
 ) {
@@ -490,6 +505,7 @@ async function startBigQueryRuntime(): Promise<BigQueryRuntime | undefined> {
 }
 
 function createBigQueryScope(
+  mock: MockTracker,
   runtime: BigQueryRuntime,
   options: PolicyTestOptions = {},
 ) {
@@ -546,9 +562,12 @@ const adapterCases: AdapterCase[] = [
     setup: async () => {
       const resources = new AsyncDisposableStack();
       return {
-        create: async () => resources.use(await createSqlitePolicyAdapter({})),
-        createEmptyScope: async () =>
-          resources.use(await createSqlitePolicyAdapter({ grounding: [] })),
+        create: async (mock) =>
+          resources.use(await createSqlitePolicyAdapter(mock, {})),
+        createEmptyScope: async (mock) =>
+          resources.use(
+            await createSqlitePolicyAdapter(mock, { grounding: [] }),
+          ),
         queries: defaultPolicyQueries,
         [Symbol.asyncDispose]: () => resources.disposeAsync(),
       };
@@ -567,8 +586,9 @@ const adapterCases: AdapterCase[] = [
       const owned = resources.move();
 
       return {
-        create: () => createPostgresScope(pool),
-        createEmptyScope: () => createPostgresScope(pool, { grounding: [] }),
+        create: (mock) => createPostgresScope(mock, pool),
+        createEmptyScope: (mock) =>
+          createPostgresScope(mock, pool, { grounding: [] }),
         queries: {
           ...defaultPolicyQueries,
           outOfScopeSql: 'SELECT * FROM private.secrets',
@@ -591,8 +611,9 @@ const adapterCases: AdapterCase[] = [
       const owned = resources.move();
 
       return {
-        create: () => createMysqlScope(database),
-        createEmptyScope: () => createMysqlScope(database, { grounding: [] }),
+        create: (mock) => createMysqlScope(mock, database),
+        createEmptyScope: (mock) =>
+          createMysqlScope(mock, database, { grounding: [] }),
         queries: {
           ...defaultPolicyQueries,
           executeResult: [{ id: '1', name: 'Ada' }],
@@ -616,8 +637,9 @@ const adapterCases: AdapterCase[] = [
       const owned = resources.move();
 
       return {
-        create: () => createSqlServerScope(pool),
-        createEmptyScope: () => createSqlServerScope(pool, { grounding: [] }),
+        create: (mock) => createSqlServerScope(mock, pool),
+        createEmptyScope: (mock) =>
+          createSqlServerScope(mock, pool, { grounding: [] }),
         queries: {
           ...defaultPolicyQueries,
           inScopeSql: 'SELECT TOP 1 * FROM users',
@@ -637,8 +659,9 @@ const adapterCases: AdapterCase[] = [
       if (!runtime) return undefined;
 
       return {
-        create: () => createBigQueryScope(runtime),
-        createEmptyScope: () => createBigQueryScope(runtime, { grounding: [] }),
+        create: (mock) => createBigQueryScope(mock, runtime),
+        createEmptyScope: (mock) =>
+          createBigQueryScope(mock, runtime, { grounding: [] }),
         queries: {
           ...defaultPolicyQueries,
           setOperationSql: 'SELECT * FROM users UNION ALL SELECT * FROM users',
@@ -660,7 +683,7 @@ for (const adapterCase of adapterCases) {
     it('allows entity-free queries', async (t) => {
       await using runtime = await acquireRuntime(t);
       if (!runtime) return;
-      const { adapter, probes } = await runtime.create();
+      const { adapter, probes } = await runtime.create(t.mock);
 
       const result = await adapter.validate('SELECT 1');
 
@@ -673,7 +696,7 @@ for (const adapterCase of adapterCases) {
     it('allows in-scope table queries in validate', async (t) => {
       await using runtime = await acquireRuntime(t);
       if (!runtime) return;
-      const { adapter, probes } = await runtime.create();
+      const { adapter, probes } = await runtime.create(t.mock);
 
       const result = await adapter.validate(runtime.queries.inScopeSql);
 
@@ -686,7 +709,7 @@ for (const adapterCase of adapterCases) {
     it('allows in-scope table queries in execute', async (t) => {
       await using runtime = await acquireRuntime(t);
       if (!runtime) return;
-      const { adapter, probes } = await runtime.create();
+      const { adapter, probes } = await runtime.create(t.mock);
 
       const result = await adapter.execute(runtime.queries.inScopeSql);
 
@@ -699,7 +722,7 @@ for (const adapterCase of adapterCases) {
     it('allows in-scope view queries in validate', async (t) => {
       await using runtime = await acquireRuntime(t);
       if (!runtime) return;
-      const { adapter, probes } = await runtime.create();
+      const { adapter, probes } = await runtime.create(t.mock);
 
       const result = await adapter.validate(runtime.queries.inScopeViewSql);
 
@@ -712,7 +735,7 @@ for (const adapterCase of adapterCases) {
     it('allows in-scope view queries in execute', async (t) => {
       await using runtime = await acquireRuntime(t);
       if (!runtime) return;
-      const { adapter, probes } = await runtime.create();
+      const { adapter, probes } = await runtime.create(t.mock);
 
       const result = await adapter.execute(runtime.queries.inScopeViewSql);
 
@@ -725,7 +748,7 @@ for (const adapterCase of adapterCases) {
     it('allows CTE queries when their base entities are grounded', async (t) => {
       await using runtime = await acquireRuntime(t);
       if (!runtime) return;
-      const { adapter, probes } = await runtime.create();
+      const { adapter, probes } = await runtime.create(t.mock);
 
       const result = await adapter.validate(runtime.queries.cteSql);
 
@@ -738,7 +761,7 @@ for (const adapterCase of adapterCases) {
     it('allows subquery queries when their base entities are grounded', async (t) => {
       await using runtime = await acquireRuntime(t);
       if (!runtime) return;
-      const { adapter, probes } = await runtime.create();
+      const { adapter, probes } = await runtime.create(t.mock);
 
       const result = await adapter.validate(runtime.queries.subquerySql);
 
@@ -751,7 +774,7 @@ for (const adapterCase of adapterCases) {
     it('allows set-operation queries when their base entities are grounded', async (t) => {
       await using runtime = await acquireRuntime(t);
       if (!runtime) return;
-      const { adapter, probes } = await runtime.create();
+      const { adapter, probes } = await runtime.create(t.mock);
 
       const result = await adapter.validate(runtime.queries.setOperationSql);
 
@@ -764,7 +787,7 @@ for (const adapterCase of adapterCases) {
     it('blocks out-of-scope validate queries before hitting the db validator', async (t) => {
       await using runtime = await acquireRuntime(t);
       if (!runtime) return;
-      const { adapter, probes } = await runtime.create();
+      const { adapter, probes } = await runtime.create(t.mock);
 
       const result = await adapter.validate(runtime.queries.outOfScopeSql);
 
@@ -779,7 +802,7 @@ for (const adapterCase of adapterCases) {
     it('blocks out-of-scope execute queries before hitting the db executor', async (t) => {
       await using runtime = await acquireRuntime(t);
       if (!runtime) return;
-      const { adapter, probes } = await runtime.create();
+      const { adapter, probes } = await runtime.create(t.mock);
 
       await assert.rejects(
         () => adapter.execute(runtime.queries.outOfScopeSql),
@@ -800,7 +823,7 @@ for (const adapterCase of adapterCases) {
     it('blocks base-entity validate queries when grounded scope resolves no entities', async (t) => {
       await using runtime = await acquireRuntime(t);
       if (!runtime) return;
-      const { adapter, probes } = await runtime.createEmptyScope();
+      const { adapter, probes } = await runtime.createEmptyScope(t.mock);
 
       const result = await adapter.validate(runtime.queries.inScopeSql);
 
@@ -814,7 +837,7 @@ for (const adapterCase of adapterCases) {
     it('blocks base-entity execute queries when grounded scope resolves no entities', async (t) => {
       await using runtime = await acquireRuntime(t);
       if (!runtime) return;
-      const { adapter, probes } = await runtime.createEmptyScope();
+      const { adapter, probes } = await runtime.createEmptyScope(t.mock);
 
       await assert.rejects(
         () => adapter.execute(runtime.queries.inScopeSql),
@@ -834,7 +857,7 @@ for (const adapterCase of adapterCases) {
     it('returns SQL_SCOPE_PARSE_ERROR and never touches the db on parse failure', async (t) => {
       await using runtime = await acquireRuntime(t);
       if (!runtime) return;
-      const { adapter, probes } = await runtime.create();
+      const { adapter, probes } = await runtime.create(t.mock);
 
       const result = await adapter.validate('SELECT * FROM');
 
@@ -849,8 +872,8 @@ for (const adapterCase of adapterCases) {
 }
 
 describe('sqlite SQL policy traversal', () => {
-  it('uses the closest supported parser dialect for sqlite reserved identifiers', async () => {
-    await using fixture = await createSqlitePolicyAdapter({
+  it('uses the closest supported parser dialect for sqlite reserved identifiers', async (t) => {
+    await using fixture = await createSqlitePolicyAdapter(t.mock, {
       tables: ['persist', 'integers'],
       views: [],
     });
@@ -868,8 +891,8 @@ describe('sqlite SQL policy traversal', () => {
     assert.strictEqual(probes.validate.mock.callCount(), 2);
   });
 
-  it('parses sqlite-only syntax (json_each, dotted quoted identifiers)', async () => {
-    await using fixture = await createSqlitePolicyAdapter({
+  it('parses sqlite-only syntax (json_each, dotted quoted identifiers)', async (t) => {
+    await using fixture = await createSqlitePolicyAdapter(t.mock, {
       tables: ['BoardGames'],
       views: [],
     });
@@ -891,8 +914,8 @@ describe('sqlite SQL policy traversal', () => {
     assert.strictEqual(probes.validate.mock.callCount(), 1);
   });
 
-  it('allows traversal-expanded grounded tables', async () => {
-    await using fixture = await createSqlitePolicyAdapter({
+  it('allows traversal-expanded grounded tables', async (t) => {
+    await using fixture = await createSqlitePolicyAdapter(t.mock, {
       grounding: [sqliteTables({ filter: ['posts'], forward: true })],
     });
     const { adapter, probes } = fixture;
@@ -911,9 +934,7 @@ describe('sqlite SQL policy traversal', () => {
 
 describe('spreadsheet SQL policy', () => {
   it('enforces SQL policy through the inherited sqlite adapter', async () => {
-    await using dir = await fs.mkdtempDisposable(
-      path.join(os.tmpdir(), 'text2sql-scope-'),
-    );
+    await using dir = await temporaryFiles.directory('text2sql-scope-');
 
     const file = path.join(dir.path, 'users.csv');
     await fs.writeFile(file, 'id,name\n1,Ada\n');
@@ -948,12 +969,16 @@ describe('spreadsheet SQL policy', () => {
 });
 
 describe('scope enforcement edge cases', () => {
-  async function createSqlite(tables: string[], views: string[] = []) {
-    return createSqlitePolicyAdapter({ tables, views });
+  async function createSqlite(
+    mock: MockTracker,
+    tables: string[],
+    views: string[] = [],
+  ) {
+    return createSqlitePolicyAdapter(mock, { tables, views });
   }
 
-  it('allows multiple allowed tables via JOIN', async () => {
-    await using fixture = await createSqlite(['users', 'orders']);
+  it('allows multiple allowed tables via JOIN', async (t) => {
+    await using fixture = await createSqlite(t.mock, ['users', 'orders']);
     const { adapter, probes } = fixture;
     const result = await adapter.validate(
       'SELECT u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id',
@@ -963,8 +988,8 @@ describe('scope enforcement edge cases', () => {
     assert.strictEqual(probes.validate.mock.callCount(), 1);
   });
 
-  it('blocks when one of multiple JOINed tables is unauthorized', async () => {
-    await using fixture = await createSqlite(['users']);
+  it('blocks when one of multiple JOINed tables is unauthorized', async (t) => {
+    await using fixture = await createSqlite(t.mock, ['users']);
     const { adapter } = fixture;
     const result = await adapter.validate(
       'SELECT * FROM users JOIN secrets ON users.id = secrets.user_id',
@@ -975,15 +1000,15 @@ describe('scope enforcement edge cases', () => {
     assert.ok(payload.referenced_entities?.includes('secrets'));
   });
 
-  it('matches table names case-insensitively', async () => {
-    await using fixture = await createSqlite(['users']);
+  it('matches table names case-insensitively', async (t) => {
+    await using fixture = await createSqlite(t.mock, ['users']);
     const { adapter } = fixture;
     const result = await adapter.validate('SELECT * FROM USERS');
     assert.strictEqual(result, undefined);
   });
 
-  it('blocks subquery referencing unauthorized table', async () => {
-    await using fixture = await createSqlite(['users']);
+  it('blocks subquery referencing unauthorized table', async (t) => {
+    await using fixture = await createSqlite(t.mock, ['users']);
     const { adapter } = fixture;
     const result = await adapter.validate(
       'SELECT * FROM users WHERE id IN (SELECT user_id FROM secrets)',
@@ -994,8 +1019,8 @@ describe('scope enforcement edge cases', () => {
     assert.ok(payload.referenced_entities?.includes('secrets'));
   });
 
-  it('lists all unauthorized tables in error payload', async () => {
-    await using fixture = await createSqlite(['users']);
+  it('lists all unauthorized tables in error payload', async (t) => {
+    await using fixture = await createSqlite(t.mock, ['users']);
     const { adapter } = fixture;
     const result = await adapter.validate(
       'SELECT * FROM secrets JOIN passwords ON secrets.id = passwords.secret_id',
@@ -1006,8 +1031,8 @@ describe('scope enforcement edge cases', () => {
     assert.ok(payload.referenced_entities?.includes('passwords'));
   });
 
-  it('blocks UNION query when one table is unauthorized', async () => {
-    await using fixture = await createSqlite(['users']);
+  it('blocks UNION query when one table is unauthorized', async (t) => {
+    await using fixture = await createSqlite(t.mock, ['users']);
     const { adapter } = fixture;
     const result = await adapter.validate(
       'SELECT name FROM users UNION SELECT name FROM secrets',
@@ -1018,8 +1043,8 @@ describe('scope enforcement edge cases', () => {
     assert.ok(payload.referenced_entities?.includes('secrets'));
   });
 
-  it('normalizes mixed-case entries in grounding', async () => {
-    await using fixture = await createSqlite(['Users', 'ORDERS']);
+  it('normalizes mixed-case entries in grounding', async (t) => {
+    await using fixture = await createSqlite(t.mock, ['Users', 'ORDERS']);
     const { adapter } = fixture;
     const result = await adapter.validate(
       'SELECT * FROM users JOIN orders ON users.id = orders.user_id',
@@ -1027,8 +1052,8 @@ describe('scope enforcement edge cases', () => {
     assert.strictEqual(result, undefined);
   });
 
-  it('passes through entity-free query even with empty allowed set', async () => {
-    await using fixture = await createSqlite([]);
+  it('passes through entity-free query even with empty allowed set', async (t) => {
+    await using fixture = await createSqlite(t.mock, []);
     const { adapter } = fixture;
     const result = await adapter.validate('SELECT 1 + 1');
     assert.strictEqual(result, undefined);
@@ -1043,11 +1068,12 @@ describe('bigquery scope normalization', () => {
   }
 
   function createBigQuery(
+    mock: MockTracker,
     runtime: BigQueryRuntime,
     tables: string[],
     views: string[] = [],
   ) {
-    return createBigQueryScope(runtime, {
+    return createBigQueryScope(mock, runtime, {
       tables,
       views,
       grounding: [
@@ -1060,7 +1086,9 @@ describe('bigquery scope normalization', () => {
   it('allows backtick-quoted 3-part name when dataset.table is in allowed set', async (t) => {
     await using runtime = await acquireRuntime(t);
     if (!runtime) return;
-    const { adapter } = createBigQuery(runtime, [`${runtime.datasetId}.users`]);
+    const { adapter } = createBigQuery(t.mock, runtime, [
+      `${runtime.datasetId}.users`,
+    ]);
     const result = await adapter.validate(
       `SELECT id, name FROM \`${runtime.projectId}.${runtime.datasetId}.users\` LIMIT 50`,
     );
@@ -1070,7 +1098,9 @@ describe('bigquery scope normalization', () => {
   it('blocks unauthorized backtick-quoted 3-part name', async (t) => {
     await using runtime = await acquireRuntime(t);
     if (!runtime) return;
-    const { adapter } = createBigQuery(runtime, [`${runtime.datasetId}.users`]);
+    const { adapter } = createBigQuery(t.mock, runtime, [
+      `${runtime.datasetId}.users`,
+    ]);
     const result = await adapter.validate(
       `SELECT * FROM \`${runtime.projectId}.${runtime.datasetId}.secrets\``,
     );
@@ -1082,7 +1112,9 @@ describe('bigquery scope normalization', () => {
   it('allows unquoted 2-part dataset.table name', async (t) => {
     await using runtime = await acquireRuntime(t);
     if (!runtime) return;
-    const { adapter } = createBigQuery(runtime, [`${runtime.datasetId}.users`]);
+    const { adapter } = createBigQuery(t.mock, runtime, [
+      `${runtime.datasetId}.users`,
+    ]);
     const result = await adapter.validate(
       `SELECT * FROM ${runtime.datasetId}.users`,
     );
@@ -1091,8 +1123,8 @@ describe('bigquery scope normalization', () => {
 });
 
 describe('scope resolution grounding cost (sqlite)', () => {
-  it('resolves the allowlist through entity-producing groundings only', async () => {
-    await using fixture = await createSqlitePolicyAdapter({
+  it('resolves the allowlist through entity-producing groundings only', async (t) => {
+    await using fixture = await createSqlitePolicyAdapter(t.mock, {
       grounding: [
         sqliteInfo(),
         sqliteTables({ filter: ['users'] }),
