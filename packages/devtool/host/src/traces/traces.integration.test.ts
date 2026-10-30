@@ -6,11 +6,11 @@ import {
   ATTR_SESSION_ID,
   ATTR_USER_ID,
 } from '@opentelemetry/semantic-conventions/incubating';
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { MockLanguageModelV4, simulateReadableStream } from 'ai/test';
 import { Hono } from 'hono';
 import assert from 'node:assert/strict';
-import { mkdtempDisposable, readFile, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -276,8 +276,8 @@ function createDeclaration(
 }
 
 test('fileTelemetry() composes plugin integrations with agent policy and serves owner-scoped trace reads from one real AgentRuntime turn', async () => {
-  await using directory = await mkdtempDisposable(
-    join(tmpdir(), 'deepagents-traces-'),
+  await using directory = await new TemporaryFiles().directory(
+    'deepagents-traces-',
   );
   const telemetry = join(directory.path, 'telemetry.jsonl');
   await using resources = new AsyncDisposableStack();
@@ -534,8 +534,8 @@ test('fileTelemetry() composes plugin integrations with agent policy and serves 
 });
 
 test('fileTelemetry() preserves cancellation and recording policy in exported traces', async (t) => {
-  await using directory = await mkdtempDisposable(
-    join(tmpdir(), 'deepagents-traces-'),
+  await using directory = await new TemporaryFiles().directory(
+    'deepagents-traces-',
   );
   await using resources = new AsyncDisposableStack();
   const stores = createStores(resources);
@@ -602,8 +602,8 @@ test('fileTelemetry() preserves cancellation and recording policy in exported tr
 });
 
 test('FileTraceAdapter treats an AI operation under an external OTel parent as the trace root', async () => {
-  await using directory = await mkdtempDisposable(
-    join(tmpdir(), 'deepagents-traces-'),
+  await using directory = await new TemporaryFiles().directory(
+    'deepagents-traces-',
   );
   const path = join(directory.path, 'telemetry.jsonl');
   const traceId = '1'.repeat(32);
@@ -655,8 +655,8 @@ test('FileTraceAdapter treats an AI operation under an external OTel parent as t
 });
 
 test('fileTelemetry() advertises an empty file, omits absent telemetry, and rejects duplicate HTTP projections', async () => {
-  await using directory = await mkdtempDisposable(
-    join(tmpdir(), 'deepagents-traces-'),
+  await using directory = await new TemporaryFiles().directory(
+    'deepagents-traces-',
   );
   await using resources = new AsyncDisposableStack();
   const stores = createStores(resources);

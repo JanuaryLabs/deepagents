@@ -5,11 +5,11 @@ import {
   ATTR_SESSION_ID,
   ATTR_USER_ID,
 } from '@opentelemetry/semantic-conventions/incubating';
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
 import assert from 'node:assert/strict';
-import { mkdtempDisposable, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
 import { z } from 'zod';
@@ -122,8 +122,8 @@ function telemetryRecords(
 }
 
 test('one host server mounts Zukhruf and the DevTool UI on one origin', async () => {
-  await using directory = await mkdtempDisposable(
-    join(tmpdir(), 'deepagents-devtool-'),
+  await using directory = await new TemporaryFiles().directory(
+    'deepagents-devtool-',
   );
   const telemetry = join(directory.path, 'telemetry.jsonl');
   const conversation = { chatId: 'chat-1', userId: 'user-1' };
