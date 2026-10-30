@@ -1,6 +1,7 @@
 import { NoSuchModelError } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
 import { settleWithin } from '@zukhruf/testing/async';
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import {
   createProviderRegistry,
   defaultSettingsMiddleware,
@@ -13,14 +14,7 @@ import {
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import {
-  mkdtempDisposable,
-  readFile,
-  realpath,
-  stat,
-  writeFile,
-} from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { type TestContext, test } from 'node:test';
@@ -67,17 +61,14 @@ function login(accountId = 'account-a', expiresAt?: number) {
 }
 
 async function localHome(t: TestContext) {
-  const directory = await mkdtempDisposable(
-    join(tmpdir(), 'chatgpt-provider-'),
-  );
-  t.after(() => directory.remove());
+  const directory = await new TemporaryFiles().directory('chatgpt-provider-');
   t.mock.property(process, 'env', {
     ...process.env,
     CODEX_HOME: directory.path,
     OPENAI_API_KEY: 'must-not-be-used',
   });
   await writeFile(join(directory.path, 'auth.json'), JSON.stringify(login()));
-  return directory.path;
+  return directory;
 }
 
 function response(text: string, toolCall = false) {
@@ -171,7 +162,8 @@ function response(text: string, toolCall = false) {
 }
 
 test('AI SDK registry and middleware share the callable provider contract', async (t) => {
-  await localHome(t);
+  await using _home = await localHome(t);
+  void _home;
   const requests: Record<string, unknown>[] = [];
   t.mock.method(
     globalThis,
@@ -232,7 +224,8 @@ test('AI SDK registry and middleware share the callable provider contract', asyn
 });
 
 test('the public model keeps host tool execution and stateless follow-up history', async (t) => {
-  await localHome(t);
+  await using _home = await localHome(t);
+  void _home;
   const requests: Record<string, unknown>[] = [];
   t.mock.method(
     globalThis,
@@ -313,7 +306,8 @@ test('the public model keeps host tool execution and stateless follow-up history
 });
 
 test('generateText uses streaming transport, including host tool calls', async (t) => {
-  await localHome(t);
+  await using _home = await localHome(t);
+  void _home;
   let requests = 0;
   t.mock.method(globalThis, 'fetch', async () =>
     response('blue', ++requests === 1),
@@ -341,9 +335,9 @@ test('generateText uses streaming transport, including host tool calls', async (
 });
 
 test('authentication is lazy, notices account changes, and never uses an API key', async (t) => {
-  const home = await localHome(t);
+  await using home = await localHome(t);
   await writeFile(
-    join(home, 'auth.json'),
+    join(home.path, 'auth.json'),
     JSON.stringify({ auth_mode: 'apikey', OPENAI_API_KEY: 'do-not-use' }),
   );
   const model = codex('gpt-5.5');
@@ -364,7 +358,10 @@ test('authentication is lazy, notices account changes, and never uses an API key
   );
   assert.deepEqual(accounts, []);
   for (const account of ['account-a', 'account-b']) {
-    await writeFile(join(home, 'auth.json'), JSON.stringify(login(account)));
+    await writeFile(
+      join(home.path, 'auth.json'),
+      JSON.stringify(login(account)),
+    );
     assert.equal(
       (await generateText({ model, prompt: 'hello', maxRetries: 0 })).text,
       'ok',
@@ -375,9 +372,9 @@ test('authentication is lazy, notices account changes, and never uses an API key
 
 for (const rotate of [true, false]) {
   test(`concurrent providers refresh once and preserve native fields (rotate=${rotate})`, async (t) => {
-    const home = await localHome(t);
+    await using home = await localHome(t);
     await writeFile(
-      join(home, 'auth.json'),
+      join(home.path, 'auth.json'),
       JSON.stringify(login('account-a', rotate ? 0 : Date.now() + 30_000)),
     );
     let refreshes = 0;
@@ -414,7 +411,9 @@ for (const rotate of [true, false]) {
         }),
       ),
     );
-    const saved = JSON.parse(await readFile(join(home, 'auth.json'), 'utf8'));
+    const saved = JSON.parse(
+      await readFile(join(home.path, 'auth.json'), 'utf8'),
+    );
     assert.equal(refreshes, 1);
     assert.equal(
       saved.tokens.refresh_token,
@@ -423,14 +422,15 @@ for (const rotate of [true, false]) {
     assert.equal(saved.tokens.id_token, 'original-id-token');
     assert.equal(saved.tokens.account_id, 'account-a');
     assert.deepEqual(saved.extra, { preserve: true });
-    assert.equal((await stat(join(home, 'auth.json'))).mode & 0o777, 0o600);
+    assert.equal(
+      (await stat(join(home.path, 'auth.json'))).mode & 0o777,
+      0o600,
+    );
   });
 }
 
 test('a request aborted while another request refreshes the login stops waiting for that refresh', async (t) => {
-  await using home = await mkdtempDisposable(
-    join(tmpdir(), 'chatgpt-provider-'),
-  );
+  await using home = await new TemporaryFiles().directory('chatgpt-provider-');
   t.mock.property(process, 'env', {
     ...process.env,
     CODEX_HOME: home.path,
@@ -491,9 +491,9 @@ test('a request aborted while another request refreshes the login stops waiting 
 });
 
 test('a refresh cannot replace a newer native login', async (t) => {
-  const home = await localHome(t);
+  await using home = await localHome(t);
   await writeFile(
-    join(home, 'auth.json'),
+    join(home.path, 'auth.json'),
     JSON.stringify(login('account-a', 0)),
   );
   t.mock.method(
@@ -502,7 +502,7 @@ test('a refresh cannot replace a newer native login', async (t) => {
     async (input: string | URL | Request, init?: RequestInit) => {
       if (new URL(input.toString()).hostname === 'auth.openai.com') {
         await writeFile(
-          join(home, 'auth.json'),
+          join(home.path, 'auth.json'),
           JSON.stringify(login('account-b')),
         );
         return Response.json({
@@ -524,20 +524,32 @@ test('a refresh cannot replace a newer native login', async (t) => {
     maxRetries: 0,
   });
   assert.equal(
-    JSON.parse(await readFile(join(home, 'auth.json'), 'utf8')).tokens
+    JSON.parse(await readFile(join(home.path, 'auth.json'), 'utf8')).tokens
       .refresh_token,
     'refresh-account-b',
   );
 });
 
 test('keyring mode uses the Codex service and canonical-home account', async (t) => {
-  const home = await localHome(t);
+  await using directory = await new TemporaryFiles().directory(
+    'chatgpt-provider-',
+  );
+  const home = join(directory.path, 'home');
+  await mkdir(home);
+  const link = join(directory.path, 'link');
+  await symlink(home, link);
+  t.mock.property(process, 'env', {
+    ...process.env,
+    CODEX_HOME: link,
+    OPENAI_API_KEY: 'must-not-be-used',
+  });
+  await writeFile(join(home, 'auth.json'), JSON.stringify(login()));
   await writeFile(
     join(home, 'config.toml'),
     'cli_auth_credentials_store = "keyring"\n',
   );
   const account = `cli|${createHash('sha256')
-    .update(await realpath(home))
+    .update(home)
     .digest('hex')
     .slice(0, 16)}`;
   t.mock.module('@napi-rs/keyring', {
@@ -572,9 +584,9 @@ test('keyring mode uses the Codex service and canonical-home account', async (t)
 });
 
 test('ephemeral mode does not reuse an older auth.json', async (t) => {
-  const home = await localHome(t);
+  await using home = await localHome(t);
   await writeFile(
-    join(home, 'config.toml'),
+    join(home.path, 'config.toml'),
     'cli_auth_credentials_store = "ephemeral"\n',
   );
   const fetch = t.mock.method(globalThis, 'fetch', async () => {
@@ -592,7 +604,8 @@ test('ephemeral mode does not reuse an older auth.json', async (t) => {
 });
 
 test('cancellation reaches the model request', async (t) => {
-  await localHome(t);
+  await using _home = await localHome(t);
+  void _home;
   const controller = new AbortController();
   t.mock.method(
     globalThis,
@@ -615,7 +628,8 @@ test('cancellation reaches the model request', async (t) => {
 });
 
 test('Zukhruf executes a host tool and persists history across queued turns', async (t) => {
-  await localHome(t);
+  await using _home = await localHome(t);
+  void _home;
   const requests: Record<string, unknown>[] = [];
   t.mock.method(
     globalThis,

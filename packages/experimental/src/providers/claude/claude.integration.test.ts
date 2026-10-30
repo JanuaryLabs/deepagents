@@ -1,5 +1,6 @@
 import { NoSuchModelError } from '@ai-sdk/provider';
 import { settleWithin } from '@zukhruf/testing/async';
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import {
   createProviderRegistry,
   generateText,
@@ -9,8 +10,7 @@ import {
 } from 'ai';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempDisposable, readFile, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type TestContext, test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -35,8 +35,7 @@ function login(accessToken = 'access-a', expiresAt = Date.now() + 3_600_000) {
 }
 
 async function localHome(t: TestContext, platform: NodeJS.Platform = 'linux') {
-  const directory = await mkdtempDisposable(join(tmpdir(), 'claude-provider-'));
-  t.after(() => directory.remove());
+  const directory = await new TemporaryFiles().directory('claude-provider-');
   t.mock.property(process, 'platform', platform);
   t.mock.property(process, 'env', {
     ...process.env,
@@ -49,7 +48,7 @@ async function localHome(t: TestContext, platform: NodeJS.Platform = 'linux') {
     join(directory.path, '.credentials.json'),
     JSON.stringify(login()),
   );
-  return directory.path;
+  return directory;
 }
 
 function response(text: string, stream = false, toolCall = false) {
@@ -121,7 +120,8 @@ function response(text: string, stream = false, toolCall = false) {
 
 for (const streaming of [true, false]) {
   test(`native Anthropic ${streaming ? 'streaming' : 'generation'} preserves host tools, caching and follow-up history`, async (t) => {
-    await localHome(t);
+    await using _home = await localHome(t);
+    void _home;
     const requests: {
       cache_control: unknown;
       system: { text: string }[];
@@ -208,7 +208,7 @@ for (const streaming of [true, false]) {
 }
 
 test('authentication is lazy and observes account changes without using API credentials', async (t) => {
-  const home = await localHome(t);
+  await using home = await localHome(t);
   const model = claude('claude-sonnet-4-6');
   const tokens: (string | null)[] = [];
   t.mock.method(
@@ -221,12 +221,12 @@ test('authentication is lazy and observes account changes without using API cred
   );
   await generateText({ model, prompt: 'hello', maxRetries: 0 });
   await writeFile(
-    join(home, '.credentials.json'),
+    join(home.path, '.credentials.json'),
     JSON.stringify(login('access-b')),
   );
   await generateText({ model, prompt: 'hello', maxRetries: 0 });
   await writeFile(
-    join(home, '.credentials.json'),
+    join(home.path, '.credentials.json'),
     JSON.stringify({ apiKey: 'wrong' }),
   );
   await assert.rejects(
@@ -238,8 +238,8 @@ test('authentication is lazy and observes account changes without using API cred
 
 for (const rotate of [true, false]) {
   test(`concurrent providers refresh once and preserve native fields (rotate=${rotate})`, async (t) => {
-    const home = await localHome(t);
-    const path = join(home, '.credentials.json');
+    await using home = await localHome(t);
+    const path = join(home.path, '.credentials.json');
     await writeFile(path, JSON.stringify(login('old', Date.now() + 30_000)));
     let refreshes = 0;
     t.mock.method(
@@ -289,8 +289,8 @@ for (const rotate of [true, false]) {
 }
 
 test('refresh cannot overwrite a newer native login', async (t) => {
-  const home = await localHome(t);
-  const path = join(home, '.credentials.json');
+  await using home = await localHome(t);
+  const path = join(home.path, '.credentials.json');
   await writeFile(path, JSON.stringify(login('old', Date.now() - 1000)));
   const newer = JSON.stringify(login('new-login'));
   t.mock.method(
@@ -321,7 +321,7 @@ test('refresh cannot overwrite a newer native login', async (t) => {
 });
 
 test('macOS uses the configured home keychain first and falls back only when absent', async (t) => {
-  const home = await localHome(t, 'darwin');
+  await using home = await localHome(t, 'darwin');
   let password: string | undefined = JSON.stringify(
     login('keychain', Date.now() - 1000),
   );
@@ -331,7 +331,7 @@ test('macOS uses the configured home keychain first and falls back only when abs
         constructor(service: string, account: string) {
           assert.equal(
             service,
-            `Claude Code-credentials-${createHash('sha256').update(home.normalize('NFC')).digest('hex').slice(0, 8)}`,
+            `Claude Code-credentials-${createHash('sha256').update(home.path.normalize('NFC')).digest('hex').slice(0, 8)}`,
           );
           assert.equal(account, process.env.USER);
         }
@@ -385,8 +385,8 @@ test('macOS uses the configured home keychain first and falls back only when abs
 });
 
 test('refresh failures preserve credentials and hide server response bodies', async (t) => {
-  const home = await localHome(t);
-  const path = join(home, '.credentials.json');
+  await using home = await localHome(t);
+  const path = join(home.path, '.credentials.json');
   const original = JSON.stringify(login('old', Date.now() - 1000));
   await writeFile(path, original);
   t.mock.method(
@@ -412,10 +412,10 @@ test('refresh failures preserve credentials and hide server response bodies', as
 
 for (const refresh of [true, false]) {
   test(`cancellation reaches ${refresh ? 'refresh' : 'model'} requests`, async (t) => {
-    const home = await localHome(t);
+    await using home = await localHome(t);
     if (refresh)
       await writeFile(
-        join(home, '.credentials.json'),
+        join(home.path, '.credentials.json'),
         JSON.stringify(login('old', Date.now() - 1000)),
       );
     const controller = new AbortController();
@@ -441,9 +441,7 @@ for (const refresh of [true, false]) {
 }
 
 test('a request aborted while another request refreshes the login stops waiting for that refresh', async (t) => {
-  await using home = await mkdtempDisposable(
-    join(tmpdir(), 'claude-provider-'),
-  );
+  await using home = await new TemporaryFiles().directory('claude-provider-');
   t.mock.property(process, 'platform', 'linux');
   t.mock.property(process, 'env', {
     ...process.env,
