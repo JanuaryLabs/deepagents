@@ -126,10 +126,7 @@ describe('DeduplicatedProducer', () => {
       dialect: 'postgresql',
     });
 
-    const chunks: ExtractedPair[][] = [];
-    for await (const chunk of dedup.produce()) {
-      chunks.push(chunk);
-    }
+    const chunks = await Array.fromAsync(dedup.produce());
     assert.strictEqual(chunks.length, 1);
   });
 });

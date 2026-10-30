@@ -138,10 +138,7 @@ describe('FilteredProducer', () => {
       dialect: 'postgresql',
     });
 
-    const chunks: ExtractedPair[][] = [];
-    for await (const chunk of filtered.produce()) {
-      chunks.push(chunk);
-    }
+    const chunks = await Array.fromAsync(filtered.produce());
     assert.strictEqual(chunks.length, 1);
     assert.strictEqual(chunks[0].length, 1);
   });

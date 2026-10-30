@@ -794,8 +794,9 @@ function jsonErrors(
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) chunks.push(Buffer.from(chunk));
+  const chunks = await Array.fromAsync(request, (chunk: Buffer) =>
+    Buffer.from(chunk),
+  );
   if (chunks.length === 0) return undefined;
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
