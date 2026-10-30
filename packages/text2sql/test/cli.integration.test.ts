@@ -1,3 +1,4 @@
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { Sqlite as TestSqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
@@ -6,11 +7,8 @@ import {
   existsSync,
   readFileSync,
   readdirSync,
-  realpathSync,
   writeFileSync,
 } from 'node:fs';
-import { mkdtempDisposable } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { text as streamText } from 'node:stream/consumers';
 import { describe, it } from 'node:test';
@@ -24,6 +22,8 @@ import {
   XmlRenderer,
   isFragment,
 } from '@deepagents/context';
+
+const temporaryFiles = new TemporaryFiles();
 
 const sqlite = new TestSqlite();
 
@@ -176,7 +176,7 @@ function readEvents(file: string): z.output<typeof indexEvent>[] {
 }
 
 function assertManifestFiles(cwd: string, manifest: IndexManifest): void {
-  const sqlDir = path.join(realpathSync(cwd), 'sql');
+  const sqlDir = path.join(cwd, 'sql');
   assert.ok(path.isAbsolute(manifest.fragmentsPath));
   assert.ok(path.isAbsolute(manifest.eventsPath));
   assert.ok(
@@ -200,9 +200,7 @@ function assertManifestFiles(cwd: string, manifest: IndexManifest): void {
 
 describe('sql binary', () => {
   it('run: writes rows under cwd/sql by default and prints metadata', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(
       ['run', 'mem', 'SELECT id, name FROM users ORDER BY id'],
@@ -210,7 +208,7 @@ describe('sql binary', () => {
     );
     assert.equal(result.exitCode, 0);
     assert.equal(result.stderr, '');
-    const sqlDir = path.join(realpathSync(cwd), 'sql');
+    const sqlDir = path.join(cwd, 'sql');
     const expected = new RegExp(
       `^results stored in ${RegExp.escape(sqlDir)}/[a-f0-9-]+\\.json\\ncolumns: id, name\\nrows: 2\\n$`,
     );
@@ -228,13 +226,10 @@ describe('sql binary', () => {
   });
 
   it('run: --out-dir flag writes to the supplied path', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
-    await using outDirDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using outDirDirectory =
+      await temporaryFiles.directory('sql-cli-test-');
     const outDir = path.join(outDirDirectory.path, 'nested');
     const result = await runBin(
       ['--out-dir', outDir, 'run', 'mem', 'SELECT id FROM users ORDER BY id'],
@@ -254,13 +249,10 @@ describe('sql binary', () => {
   });
 
   it('run: TEXT2SQL_OUT_DIR env redirects writes', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
-    await using outDirDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using outDirDirectory =
+      await temporaryFiles.directory('sql-cli-test-');
     const outDir = path.join(outDirDirectory.path, 'env-out');
     const result = await runBin(['run', 'mem', 'SELECT id FROM users'], {
       cwd,
@@ -275,17 +267,13 @@ describe('sql binary', () => {
   });
 
   it('run: --out-dir flag wins over TEXT2SQL_OUT_DIR env', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
-    await using envDirDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using envDirDirectory =
+      await temporaryFiles.directory('sql-cli-test-');
     const envDir = path.join(envDirDirectory.path, 'env-dir');
-    await using flagDirDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using flagDirDirectory =
+      await temporaryFiles.directory('sql-cli-test-');
     const flagDir = path.join(flagDirDirectory.path, 'flag-dir');
     const result = await runBin(
       ['--out-dir', flagDir, 'run', 'mem', 'SELECT id FROM users'],
@@ -300,13 +288,10 @@ describe('sql binary', () => {
   });
 
   it('run: --out-dir can be provided after the subcommand', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
-    await using outDirDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using outDirDirectory =
+      await temporaryFiles.directory('sql-cli-test-');
     const outDir = path.join(outDirDirectory.path, 'post-command-out');
     const result = await runBin(
       ['run', 'mem', 'SELECT id FROM users', '--out-dir', outDir],
@@ -321,9 +306,7 @@ describe('sql binary', () => {
   });
 
   it('run: empty result sets print no columns and rows 0', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(
       ['run', 'mem', 'SELECT id FROM users WHERE 0'],
@@ -336,9 +319,7 @@ describe('sql binary', () => {
   });
 
   it('run: adapter execute errors are reported as run failures', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
       cwd,
@@ -361,9 +342,7 @@ describe('sql binary', () => {
   });
 
   it('run: non-Error execute throws are reported as run failures', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
       cwd,
@@ -385,9 +364,7 @@ describe('sql binary', () => {
   });
 
   it('run: non-array execute results are rejected', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
       cwd,
@@ -412,9 +389,7 @@ describe('sql binary', () => {
   });
 
   it('run: routes queries to the requested adapter', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
       cwd,
@@ -458,9 +433,7 @@ describe('sql binary', () => {
   });
 
   it('run: adapter format output is validated and executed', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
       cwd,
@@ -485,9 +458,7 @@ describe('sql binary', () => {
   });
 
   it('run: supports literal backtick identifiers in SQL argv', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(
       ['run', 'mem', 'SELECT `name` FROM users ORDER BY id'],
@@ -504,9 +475,7 @@ describe('sql binary', () => {
   });
 
   it('run: adapter format errors are reported as run failures', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
       cwd,
@@ -530,9 +499,7 @@ describe('sql binary', () => {
   });
 
   it('run: blank queries are rejected after argv parsing', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['run', 'mem', '   '], { cwd });
 
@@ -542,9 +509,7 @@ describe('sql binary', () => {
   });
 
   it('run: output write failures are reported as run failures', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const outDir = path.join(cwd, 'not-a-directory');
     writeFileSync(outDir, 'file');
@@ -560,9 +525,7 @@ describe('sql binary', () => {
   });
 
   it('index: indexes all adapters by default and writes a JSON manifest', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const manifest = parseIndexManifest(await runBin(['index'], { cwd }));
 
@@ -575,13 +538,11 @@ describe('sql binary', () => {
   });
 
   it('index: --all matches the default behavior', async () => {
-    await using defaultCwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using defaultCwdDirectory =
+      await temporaryFiles.directory('sql-cli-test-');
     const defaultCwd = defaultCwdDirectory.path;
-    await using explicitCwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using explicitCwdDirectory =
+      await temporaryFiles.directory('sql-cli-test-');
     const explicitCwd = explicitCwdDirectory.path;
     const defaultManifest = parseIndexManifest(
       await runBin(['index'], { cwd: defaultCwd }),
@@ -598,9 +559,7 @@ describe('sql binary', () => {
   });
 
   it('index: adapter names limit indexing to those adapters', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const manifest = parseIndexManifest(
       await runBin(['index', 'mem'], { cwd }),
@@ -615,9 +574,7 @@ describe('sql binary', () => {
   });
 
   it('index: duplicate adapter names are indexed once', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const manifest = parseIndexManifest(
       await runBin(['index', 'mem', 'mem'], { cwd }),
@@ -632,9 +589,7 @@ describe('sql binary', () => {
   });
 
   it('index: --all indexes every adapter even when names are provided', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
       cwd,
@@ -661,9 +616,7 @@ describe('sql binary', () => {
   });
 
   it('index: unknown adapter fails with available adapters', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['index', 'missing'], { cwd });
 
@@ -674,9 +627,7 @@ describe('sql binary', () => {
   });
 
   it('index: events file is NDJSON with index, adapter, and phase events', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const manifest = parseIndexManifest(await runBin(['index'], { cwd }));
     const events = readEvents(manifest.eventsPath);
@@ -693,14 +644,11 @@ describe('sql binary', () => {
   });
 
   it('index: TEXT2SQL_INDEX_EVENTS_PATH redirects the events stream to a chosen path', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
-    await using listenerDirDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
-    const listenerDir = realpathSync(listenerDirDirectory.path);
+    await using listenerDirDirectory =
+      await temporaryFiles.directory('sql-cli-test-');
+    const listenerDir = listenerDirDirectory.path;
     const eventsPath = path.join(listenerDir, 'nested', 'live.ndjson');
 
     const result = await runBin(['index'], { cwd, eventsPathEnv: eventsPath });
@@ -720,7 +668,7 @@ describe('sql binary', () => {
     assert.ok(types.includes('index:start'));
     assert.ok(types.includes('index:end'));
 
-    const sqlDir = path.join(realpathSync(cwd), 'sql');
+    const sqlDir = path.join(cwd, 'sql');
     const sqlDirEntries = readdirSync(sqlDir);
     assert.ok(
       sqlDirEntries.every((entry) => !entry.endsWith('.events.ndjson')),
@@ -729,12 +677,10 @@ describe('sql binary', () => {
   });
 
   it('index: TEXT2SQL_INDEX_EVENTS_PATH resolves relative paths against cwd', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const relative = path.join('live', 'events.ndjson');
-    const expected = path.join(realpathSync(cwd), relative);
+    const expected = path.join(cwd, relative);
 
     const result = await runBin(['index'], { cwd, eventsPathEnv: relative });
     const manifest = parseIndexManifest(result);
@@ -745,9 +691,7 @@ describe('sql binary', () => {
   });
 
   it('index: empty TEXT2SQL_INDEX_EVENTS_PATH falls back to the auto-generated path', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['index'], { cwd, eventsPathEnv: '' });
     const manifest = parseIndexManifest(result);
@@ -759,15 +703,12 @@ describe('sql binary', () => {
   });
 
   it('index: TEXT2SQL_INDEX_EVENTS_PATH appends to a pre-existing regular file without a FIFO warning', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
-    await using eventsPathDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using eventsPathDirectory =
+      await temporaryFiles.directory('sql-cli-test-');
     const eventsPath = path.join(
-      realpathSync(eventsPathDirectory.path),
+      eventsPathDirectory.path,
       'pre-existing.ndjson',
     );
     writeFileSync(eventsPath, '{"type":"prelude"}\n');
@@ -787,17 +728,11 @@ describe('sql binary', () => {
       t.skip('mkfifo is POSIX-only');
       return;
     }
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
-    await using fifoPathDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
-    const fifoPath = path.join(
-      realpathSync(fifoPathDirectory.path),
-      'live.ndjson',
-    );
+    await using fifoPathDirectory =
+      await temporaryFiles.directory('sql-cli-test-');
+    const fifoPath = path.join(fifoPathDirectory.path, 'live.ndjson');
     mkfifo(fifoPath);
 
     const readerPromise = streamText(
@@ -825,17 +760,11 @@ describe('sql binary', () => {
       t.skip('mkfifo is POSIX-only');
       return;
     }
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
-    await using fifoPathDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
-    const fifoPath = path.join(
-      realpathSync(fifoPathDirectory.path),
-      'live.ndjson',
-    );
+    await using fifoPathDirectory =
+      await temporaryFiles.directory('sql-cli-test-');
+    const fifoPath = path.join(fifoPathDirectory.path, 'live.ndjson');
     mkfifo(fifoPath);
 
     const child = spawn(process.execPath, ['--no-warnings', BIN, 'index'], {
@@ -879,9 +808,7 @@ describe('sql binary', () => {
   });
 
   it('index: stderr is silent without --verbose', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['index'], { cwd });
     assert.equal(result.exitCode, 0, result.stderr);
@@ -889,9 +816,7 @@ describe('sql binary', () => {
   });
 
   it('index: --verbose mirrors pretty progress lines to stderr without polluting stdout', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['index', '--verbose'], { cwd });
     assert.equal(result.exitCode, 0, result.stderr);
@@ -910,9 +835,7 @@ describe('sql binary', () => {
   });
 
   it('index: --verbose=json mirrors raw NDJSON events to stderr', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['index', '--verbose', 'json'], { cwd });
     assert.equal(result.exitCode, 0, result.stderr);
@@ -929,9 +852,7 @@ describe('sql binary', () => {
   });
 
   it('index: --verbose with invalid format fails with helpful message', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['index', '--verbose', 'garbage'], { cwd });
     assert.notEqual(result.exitCode, 0);
@@ -940,9 +861,7 @@ describe('sql binary', () => {
   });
 
   it('index: introspection failures are reported and recorded as events', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
       cwd,
@@ -966,7 +885,7 @@ describe('sql binary', () => {
       /sql index: introspecting adapter "mem": metadata unavailable/,
     );
 
-    const sqlDir = path.join(realpathSync(cwd), 'sql');
+    const sqlDir = path.join(cwd, 'sql');
     const files = readdirSync(sqlDir);
     assert.equal(files.length, 1);
     assert.match(files[0], /\.events\.ndjson$/);
@@ -978,9 +897,7 @@ describe('sql binary', () => {
   });
 
   it('index: output write failures are reported as index failures', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     writeFileSync(path.join(cwd, 'sql'), 'file');
 
@@ -994,9 +911,7 @@ describe('sql binary', () => {
   });
 
   it('index: fragments file is usable as context fragments', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const manifest = parseIndexManifest(await runBin(['index'], { cwd }));
     const fragments = readFragments(manifest.fragmentsPath);
@@ -1012,9 +927,7 @@ describe('sql binary', () => {
   });
 
   it('errors: --out-dir without value', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['run', 'mem', 'SELECT 1', '--out-dir'], {
       cwd,
@@ -1024,9 +937,7 @@ describe('sql binary', () => {
   });
 
   it('errors: unknown subcommand', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['ask', 'mem', 'SELECT 1'], { cwd });
     assert.equal(result.exitCode, 2);
@@ -1034,9 +945,7 @@ describe('sql binary', () => {
   });
 
   it('errors: unknown global option without a subcommand', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['--bad-option'], { cwd });
     assert.equal(result.exitCode, 2);
@@ -1044,9 +953,7 @@ describe('sql binary', () => {
   });
 
   it('errors: unknown option on a matched command', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['run', 'mem', 'SELECT 1', '--bad-option'], {
       cwd,
@@ -1056,9 +963,7 @@ describe('sql binary', () => {
   });
 
   it('errors: missing subcommand', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin([], { cwd });
     assert.equal(result.exitCode, 2);
@@ -1066,9 +971,7 @@ describe('sql binary', () => {
   });
 
   it('--help lists run and validate subcommands with descriptions', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['--help'], { cwd, adaptersPath: null });
     assert.equal(result.exitCode, 0);
@@ -1087,9 +990,7 @@ describe('sql binary', () => {
   });
 
   it('run --help prints command-specific usage without loading adapters', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['run', '--help'], { cwd, adaptersPath: null });
     assert.equal(result.exitCode, 0);
@@ -1099,9 +1000,7 @@ describe('sql binary', () => {
   });
 
   it('validate --help prints command-specific usage without loading adapters', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['validate', '--help'], {
       cwd,
@@ -1113,9 +1012,7 @@ describe('sql binary', () => {
   });
 
   it('index --help prints command-specific usage without loading adapters', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['index', '--help'], {
       cwd,
@@ -1135,9 +1032,7 @@ describe('sql binary', () => {
   });
 
   it('validate: query can be passed as multiple argv parts', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(
       ['validate', 'mem', 'SELECT', 'id', 'FROM', 'users'],
@@ -1148,9 +1043,7 @@ describe('sql binary', () => {
   });
 
   it('validate: read-only enforcement rejects INSERT', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(
       ['validate', 'mem', "INSERT INTO users (id, name) VALUES (3, 'Carol')"],
@@ -1166,9 +1059,7 @@ describe('sql binary', () => {
     database.connection.exec(
       'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);',
     );
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
       cwd,
@@ -1198,9 +1089,7 @@ describe('sql binary', () => {
   });
 
   it('validate: adapter format output is validated', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
       cwd,
@@ -1222,9 +1111,7 @@ describe('sql binary', () => {
   });
 
   it('validate: adapter validation errors are reported as validate failures', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
       cwd,
@@ -1248,9 +1135,7 @@ describe('sql binary', () => {
   });
 
   it('validate: blank queries are rejected after argv parsing', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['validate', 'mem', '   '], { cwd });
 
@@ -1260,9 +1145,7 @@ describe('sql binary', () => {
   });
 
   it('validate: unknown db name lists available adapters when multiple are configured', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeMultiAdapters(cwd);
     const result = await runBin(['validate', 'nonexistent', 'SELECT 1 as n'], {
@@ -1275,9 +1158,7 @@ describe('sql binary', () => {
   });
 
   it('validate: routes a wrong db name to the sole configured database silently', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['validate', 'main', 'SELECT 1 as n'], { cwd });
     assert.equal(result.exitCode, 0, result.stderr);
@@ -1285,9 +1166,7 @@ describe('sql binary', () => {
   });
 
   it('validate: missing db arg is rejected by the parser', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['validate'], { cwd });
     assert.equal(result.exitCode, 2);
@@ -1298,9 +1177,7 @@ describe('sql binary', () => {
   });
 
   it('validate: missing sql arg is rejected by the parser', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['validate', 'mem'], { cwd });
     assert.equal(result.exitCode, 2);
@@ -1311,9 +1188,7 @@ describe('sql binary', () => {
   });
 
   it('errors: adapter module with invalid name fails to load', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
       cwd,
@@ -1331,9 +1206,7 @@ describe('sql binary', () => {
   });
 
   it('loads adapter modules from a relative TEXT2SQL_ADAPTERS path', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     writeAdaptersModule(
       cwd,
@@ -1356,9 +1229,7 @@ describe('sql binary', () => {
   });
 
   it('loads adapter modules from non-path import specifiers', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const source = encodeURIComponent(`export default {
       mem: {
@@ -1376,9 +1247,7 @@ describe('sql binary', () => {
   });
 
   it('run: read-only enforcement rejects INSERT', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(
       ['run', 'mem', "INSERT INTO users (id, name) VALUES (3, 'Carol')"],
@@ -1390,9 +1259,7 @@ describe('sql binary', () => {
   });
 
   it('run: allows a line comment before SELECT', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['run', 'mem', ' -- note\nSELECT 1 AS n'], {
       cwd,
@@ -1402,9 +1269,7 @@ describe('sql binary', () => {
   });
 
   it('run: invalid SQL syntax exits non-zero', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['run', 'mem', 'SELECT FROM users WHERE'], {
       cwd,
@@ -1418,9 +1283,7 @@ describe('sql binary', () => {
   });
 
   it('validate: happy path exits 0 and prints "valid"', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['validate', 'mem', 'SELECT id FROM users'], {
       cwd,
@@ -1430,9 +1293,7 @@ describe('sql binary', () => {
   });
 
   it('validate: bad SQL exits non-zero with stderr', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['validate', 'mem', 'SELECT FROM'], { cwd });
     assert.notEqual(result.exitCode, 0);
@@ -1440,9 +1301,7 @@ describe('sql binary', () => {
   });
 
   it('errors: missing TEXT2SQL_ADAPTERS env var', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['run', 'mem', 'SELECT 1 as n'], {
       cwd,
@@ -1453,9 +1312,7 @@ describe('sql binary', () => {
   });
 
   it('errors: index requires TEXT2SQL_ADAPTERS env var', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['index'], {
       cwd,
@@ -1466,9 +1323,7 @@ describe('sql binary', () => {
   });
 
   it('errors: adapter module import failure', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['run', 'mem', 'SELECT 1 as n'], {
       cwd,
@@ -1479,9 +1334,7 @@ describe('sql binary', () => {
   });
 
   it('errors: empty adapter module default export', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
       cwd,
@@ -1498,9 +1351,7 @@ describe('sql binary', () => {
   });
 
   it('errors: adapter module without a default export', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
       cwd,
@@ -1520,9 +1371,7 @@ describe('sql binary', () => {
   });
 
   it('errors: null adapter module default export', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
       cwd,
@@ -1542,9 +1391,7 @@ describe('sql binary', () => {
   });
 
   it('errors: array adapter module default export', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
       cwd,
@@ -1564,9 +1411,7 @@ describe('sql binary', () => {
   });
 
   it('errors: malformed adapter value', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
       cwd,
@@ -1586,9 +1431,7 @@ describe('sql binary', () => {
   });
 
   it('errors: invalid adapter name (leading digit) rejected at load time', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
       cwd,
@@ -1612,9 +1455,7 @@ describe('sql binary', () => {
   });
 
   it('errors: unknown db name lists available adapters when multiple are configured', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeMultiAdapters(cwd);
     const result = await runBin(['run', 'nonexistent', 'SELECT 1 as n'], {
@@ -1627,9 +1468,7 @@ describe('sql binary', () => {
   });
 
   it('run: routes a wrong db name to the sole configured database silently', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['run', 'main', 'SELECT 1 as n'], { cwd });
     assert.equal(result.exitCode, 0, result.stderr);
@@ -1638,9 +1477,7 @@ describe('sql binary', () => {
   });
 
   it('errors: missing db arg', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['run'], { cwd });
     assert.equal(result.exitCode, 2);
@@ -1651,9 +1488,7 @@ describe('sql binary', () => {
   });
 
   it('errors: missing sql arg', async () => {
-    await using cwdDirectory = await mkdtempDisposable(
-      path.join(tmpdir(), 'sql-cli-test-'),
-    );
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const result = await runBin(['run', 'mem'], { cwd });
     assert.equal(result.exitCode, 2);

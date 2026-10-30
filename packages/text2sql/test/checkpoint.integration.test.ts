@@ -1,6 +1,5 @@
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import assert from 'node:assert';
-import { mkdtempDisposable } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { setImmediate } from 'node:timers/promises';
@@ -8,11 +7,11 @@ import z from 'zod';
 
 import { Checkpoint, jsonCodec } from '@deepagents/text2sql';
 
+const temporaryFiles = new TemporaryFiles();
+
 describe('Checkpoint — concurrent saves', () => {
   it('resumes every entry that a concurrent run stored before it stopped', async () => {
-    await using directory = await mkdtempDisposable(
-      path.join(tmpdir(), 'checkpoint-test-'),
-    );
+    await using directory = await temporaryFiles.directory('checkpoint-test-');
     const codec = jsonCodec(z.string());
     const inputs = Array.from({ length: 200 }, (_, i) => i);
     // A large first output makes every save of the run large, so a save that

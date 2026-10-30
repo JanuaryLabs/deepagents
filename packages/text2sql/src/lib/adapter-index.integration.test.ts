@@ -1,7 +1,7 @@
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { Sqlite as TestSqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert';
-import { mkdtempDisposable, readdir, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readdir, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -13,6 +13,8 @@ import {
   type Text2SqlIndexProgressEvent,
 } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
+
+const temporaryFiles = new TemporaryFiles();
 
 const testSqlite = new TestSqlite();
 
@@ -45,9 +47,7 @@ describe('AdapterIndexer with a cache', () => {
     });
 
     const introspections = countIntrospections(adapter);
-    await using directory = await mkdtempDisposable(
-      path.join(tmpdir(), 'text2sql-cache-'),
-    );
+    await using directory = await temporaryFiles.directory('text2sql-cache-');
     const cache = new FileIndexCache({ dir: directory.path });
     const indexer = new AdapterIndexer({
       adapters: { main: adapter },
@@ -103,9 +103,7 @@ describe('AdapterIndexer without a cache', () => {
 
 describe('FileIndexCache shared across indexers', () => {
   it('deduplicates introspection across separate indexers sharing a cache dir', async () => {
-    await using directory = await mkdtempDisposable(
-      path.join(tmpdir(), 'text2sql-cache-'),
-    );
+    await using directory = await temporaryFiles.directory('text2sql-cache-');
     const dir = directory.path;
 
     await using hostADatabase = await testSqlite.database();
@@ -177,9 +175,7 @@ describe('FileIndexCache corrupt-file resilience', () => {
       grounding: [],
     });
 
-    await using directory = await mkdtempDisposable(
-      path.join(tmpdir(), 'text2sql-cache-'),
-    );
+    await using directory = await temporaryFiles.directory('text2sql-cache-');
     const dir = directory.path;
     const introspections = countIntrospections(adapter);
     const indexer = new AdapterIndexer({
@@ -219,9 +215,7 @@ describe('AdapterIndexer.indexAdapter (single-adapter entry point)', () => {
       execute: (sql) => database.connection.prepare(sql).all(),
       grounding: [],
     });
-    await using directory = await mkdtempDisposable(
-      path.join(tmpdir(), 'text2sql-cache-'),
-    );
+    await using directory = await temporaryFiles.directory('text2sql-cache-');
     const dir = directory.path;
     const introspections = countIntrospections(adapter);
     const indexer = new AdapterIndexer({
@@ -264,9 +258,7 @@ describe('AdapterIndexer.indexAdapter (single-adapter entry point)', () => {
       execute: (sql) => database.connection.prepare(sql).all(),
       grounding: [],
     });
-    await using directory = await mkdtempDisposable(
-      path.join(tmpdir(), 'text2sql-cache-'),
-    );
+    await using directory = await temporaryFiles.directory('text2sql-cache-');
     const dir = directory.path;
     const indexer = new AdapterIndexer({
       adapters: { main: adapter },

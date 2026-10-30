@@ -1,7 +1,6 @@
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import assert from 'node:assert';
 import fs from 'node:fs';
-import { mkdtempDisposable } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
@@ -13,6 +12,8 @@ import {
   rowCount,
   tables,
 } from '@deepagents/text2sql/spreadsheet';
+
+const temporaryFiles = new TemporaryFiles();
 
 // Helper to normalize SQLite results (which have null prototype) to plain objects
 const normalize = <T extends Record<string, unknown>>(rows: T[]): T[] =>
@@ -46,8 +47,8 @@ function createExcel(
 describe('Spreadsheet Adapter', () => {
   describe('CSV loading and querying', () => {
     it('should load CSV and query data', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const csvPath = path.join(directory.path, 'users.csv');
 
@@ -74,8 +75,8 @@ describe('Spreadsheet Adapter', () => {
     });
 
     it('should derive table name from filename', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const csvPath = path.join(directory.path, 'customers.csv');
 
@@ -95,8 +96,8 @@ describe('Spreadsheet Adapter', () => {
 
   describe('Excel multi-sheet loading', () => {
     it('should load multiple sheets as separate tables', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const xlsxPath = path.join(directory.path, 'multi.xlsx');
 
@@ -136,8 +137,8 @@ describe('Spreadsheet Adapter', () => {
     });
 
     it('should allow joining tables from different sheets', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const xlsxPath = path.join(directory.path, 'join.xlsx');
 
@@ -177,8 +178,8 @@ describe('Spreadsheet Adapter', () => {
 
   describe('Type inference', () => {
     it('should preserve integer types', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const csvPath = path.join(directory.path, 'integers.csv');
 
@@ -198,8 +199,8 @@ describe('Spreadsheet Adapter', () => {
     });
 
     it('should preserve real/float types', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const csvPath = path.join(directory.path, 'floats.csv');
 
@@ -219,8 +220,8 @@ describe('Spreadsheet Adapter', () => {
     });
 
     it('should handle mixed types as TEXT', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const csvPath = path.join(directory.path, 'mixed.csv');
 
@@ -243,8 +244,8 @@ describe('Spreadsheet Adapter', () => {
 
   describe('Table name sanitization', () => {
     it('should sanitize special characters in sheet names', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const xlsxPath = path.join(directory.path, 'special.xlsx');
 
@@ -265,8 +266,8 @@ describe('Spreadsheet Adapter', () => {
     });
 
     it('should prefix sheet names starting with numbers', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const xlsxPath = path.join(directory.path, 'numeric.xlsx');
 
@@ -287,8 +288,8 @@ describe('Spreadsheet Adapter', () => {
     });
 
     it('should lowercase all identifiers', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const xlsxPath = path.join(directory.path, 'uppercase.xlsx');
 
@@ -318,8 +319,8 @@ describe('Spreadsheet Adapter', () => {
     });
 
     it('should truncate long identifiers to 64 characters', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const xlsxPath = path.join(directory.path, 'longname.xlsx');
 
@@ -346,8 +347,8 @@ describe('Spreadsheet Adapter', () => {
 
   describe('NULL handling', () => {
     it('should treat empty cells as NULL', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const xlsxPath = path.join(directory.path, 'nulls.xlsx');
 
@@ -387,8 +388,8 @@ describe('Spreadsheet Adapter', () => {
 
   describe('Introspection with groundings', () => {
     it('should introspect schema with tables grounding', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const xlsxPath = path.join(directory.path, 'products.xlsx');
 
@@ -418,8 +419,8 @@ describe('Spreadsheet Adapter', () => {
     });
 
     it('should work with rowCount grounding', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const csvPath = path.join(directory.path, 'rowcount.csv');
 
@@ -446,8 +447,8 @@ describe('Spreadsheet Adapter', () => {
     });
 
     it('should work with info grounding', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const csvPath = path.join(directory.path, 'info.csv');
 
@@ -488,8 +489,8 @@ describe('Spreadsheet Adapter', () => {
     });
 
     it('should throw error for empty spreadsheet', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const xlsxPath = path.join(directory.path, 'empty.xlsx');
 
@@ -509,8 +510,8 @@ describe('Spreadsheet Adapter', () => {
 
   describe('Cleanup', () => {
     it('should close without error', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const csvPath = path.join(directory.path, 'close.csv');
 
@@ -528,8 +529,8 @@ describe('Spreadsheet Adapter', () => {
     });
 
     it('should support file-based database', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const csvPath = path.join(directory.path, 'persist.csv');
       const dbPath = path.join(directory.path, 'persist.db');
@@ -552,8 +553,8 @@ describe('Spreadsheet Adapter', () => {
     });
 
     it("throws SQLite's disk-full error when the database runs out of space while loading a sheet", async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const csvPath = path.join(directory.path, 'notes.csv');
       createCSV(
@@ -602,8 +603,8 @@ describe('Spreadsheet Adapter', () => {
       },
     ]) {
       it(`closes its database when ${failing} fails`, async () => {
-        await using directory = await mkdtempDisposable(
-          path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+        await using directory = await temporaryFiles.directory(
+          'text2sql-spreadsheet-',
         );
         const file = write(directory.path);
         const database = `file:sheet-${crypto.randomUUID()}?mode=memory&cache=shared`;
@@ -630,8 +631,8 @@ describe('Spreadsheet Adapter', () => {
 
   describe('Data type handling', () => {
     it('should handle Unicode characters', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const xlsxPath = path.join(directory.path, 'unicode.xlsx');
 
@@ -659,8 +660,8 @@ describe('Spreadsheet Adapter', () => {
     });
 
     it('should handle special characters in text values', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const xlsxPath = path.join(directory.path, 'specialtext.xlsx');
 
@@ -688,8 +689,8 @@ describe('Spreadsheet Adapter', () => {
     });
 
     it('should floor decimal values for INTEGER columns', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const xlsxPath = path.join(directory.path, 'floor.xlsx');
 
@@ -711,8 +712,8 @@ describe('Spreadsheet Adapter', () => {
     });
 
     it('should handle non-numeric values in numeric columns as NULL', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const xlsxPath = path.join(directory.path, 'nonnumeric.xlsx');
 
@@ -745,8 +746,8 @@ describe('Spreadsheet Adapter', () => {
     });
 
     it('should handle rows with fewer values than columns', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const xlsxPath = path.join(directory.path, 'sparse.xlsx');
 
@@ -775,8 +776,8 @@ describe('Spreadsheet Adapter', () => {
     });
 
     it('should handle dates formatted as YYYY-MM-DD', async () => {
-      await using directory = await mkdtempDisposable(
-        path.join(os.tmpdir(), 'text2sql-spreadsheet-'),
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
       );
       const xlsxPath = path.join(directory.path, 'dates.xlsx');
 
