@@ -5,6 +5,7 @@ import type {
 } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
 import { settleWithin, timebox } from '@zukhruf/testing/async';
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import {
   type ToolSet,
   type UIMessage,
@@ -18,8 +19,7 @@ import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtempDisposable, unlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { setImmediate, setTimeout as sleep } from 'node:timers/promises';
@@ -976,8 +976,8 @@ describe('zukhruf runtime — host sessions', () => {
   });
 
   it('synchronizes a Markdown schedule and runs it as a fresh root task', async () => {
-    await using directory = await mkdtempDisposable(
-      join(tmpdir(), 'zukhruf-schedules-'),
+    await using directory = await new TemporaryFiles().directory(
+      'zukhruf-schedules-',
     );
     const file = join(directory.path, 'monday-report.md');
     await writeFile(
@@ -1091,8 +1091,8 @@ Missing a timezone.
   });
 
   it('blocks runtime initialization on an invalid schedule source', async () => {
-    await using directory = await mkdtempDisposable(
-      join(tmpdir(), 'zukhruf-invalid-schedules-'),
+    await using directory = await new TemporaryFiles().directory(
+      'zukhruf-invalid-schedules-',
     );
     await writeFile(
       join(directory.path, 'invalid.md'),
@@ -1338,8 +1338,8 @@ describe('zukhruf runtime — background executor', () => {
   });
 
   it('installs only the plugin skills selected by each agent', async () => {
-    await using directory = await mkdtempDisposable(
-      join(tmpdir(), 'zukhruf-plugin-skill-'),
+    await using directory = await new TemporaryFiles().directory(
+      'zukhruf-plugin-skill-',
     );
     const schedulesSkill = join(directory.path, 'manage-schedules');
     const reviewSkill = join(directory.path, 'review-code');
@@ -1484,8 +1484,8 @@ describe('zukhruf runtime — background executor', () => {
   });
 
   it('discovers explicitly uploaded sandbox skills once per conversation', async () => {
-    await using directory = await mkdtempDisposable(
-      join(tmpdir(), 'zukhruf-skills-'),
+    await using directory = await new TemporaryFiles().directory(
+      'zukhruf-skills-',
     );
     const skillDirectory = join(directory.path, 'skills', 'forecast-sales');
     await mkdir(join(skillDirectory, 'scripts'), { recursive: true });
@@ -2599,20 +2599,19 @@ describe('zukhruf runtime — background executor', () => {
       conversation,
       turn('after approval'),
     );
-    const parkedDeadline = performance.now() + 5_000;
-    let parkedState: string | undefined;
-    while (performance.now() < parkedDeadline) {
-      const jobs = await h.boss.findJobs(h.queue.queue, {
-        key: conversation.chatId,
-      });
-      parkedState = jobs.find(
-        (job) =>
-          queuedTurnSchema.safeParse(job.data).data?.streamId === followup.id,
-      )?.state;
-      if (parkedState === 'cancelled') break;
-      await sleep(25);
-    }
-    assert.equal(parkedState, 'cancelled', 'the follow-up is parked first');
+    await t.waitFor(
+      async () => {
+        const jobs = await h.boss.findJobs(h.queue.queue, {
+          key: conversation.chatId,
+        });
+        const parkedState = jobs.find(
+          (job) =>
+            queuedTurnSchema.safeParse(job.data).data?.streamId === followup.id,
+        )?.state;
+        assert.equal(parkedState, 'cancelled', 'the follow-up is parked first');
+      },
+      { interval: 25, timeout: 5_000 },
+    );
 
     await submitApprovalResponses(h.runtime, conversation, {
       toolCallId: part.toolCallId,

@@ -3,7 +3,7 @@ import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { type TestContext, describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
@@ -126,16 +126,20 @@ async function drainStream(stream: ReadableStream): Promise<void> {
 }
 
 async function waitForStatus(
+  t: TestContext,
   store: SqliteStreamStore,
   id: string,
   expected: string,
 ): Promise<void> {
-  const deadline = performance.now() + 5_000;
-  while (performance.now() < deadline) {
-    if ((await store.getStreamStatus(id)) === expected) return;
-    await sleep(20);
-  }
-  throw new Error(`timed out waiting for ${id} to become ${expected}`);
+  await t.waitFor(
+    async () =>
+      assert.equal(
+        await store.getStreamStatus(id),
+        expected,
+        `timed out waiting for ${id} to become ${expected}`,
+      ),
+    { interval: 20, timeout: 5_000 },
+  );
 }
 
 describe('zukhruf runtime mailbox delivery', () => {
@@ -297,7 +301,7 @@ describe('zukhruf runtime mailbox delivery', () => {
       positions.toSorted((a, b) => a - b),
       positions,
     );
-    await waitForStatus(h.streamStore, wake.streamId, 'completed');
+    await waitForStatus(t, h.streamStore, wake.streamId, 'completed');
     const resumed = await h.runtime.observe(researcher).resume();
     assert.ok(
       resumed,

@@ -1,12 +1,11 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
-import { mkdtempDisposable } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
@@ -136,8 +135,8 @@ test(
   async (t) => {
     const database = new PGlite();
     const boss = new PgBoss({ db: fromPglite(database), backend: 'pglite' });
-    await using directory = await mkdtempDisposable(
-      join(tmpdir(), 'child-activity-'),
+    await using directory = await new TemporaryFiles().directory(
+      'child-activity-',
     );
     const contextPath = join(directory.path, 'context.sqlite');
     using contextDb = new DatabaseSync(contextPath);

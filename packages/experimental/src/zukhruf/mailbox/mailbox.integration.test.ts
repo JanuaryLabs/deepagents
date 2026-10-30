@@ -1,7 +1,6 @@
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert/strict';
-import { mkdtempDisposable } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
@@ -107,8 +106,8 @@ describe('zukhruf mailbox', () => {
   });
 
   it('does not redeliver a consumed terminal id after store restart', async () => {
-    await using directory = await mkdtempDisposable(
-      join(tmpdir(), 'zukhruf-mailbox-dedup-'),
+    await using directory = await new TemporaryFiles().directory(
+      'zukhruf-mailbox-dedup-',
     );
     const path = join(directory.path, 'mailbox.sqlite');
     const completion = createInterAgentCommunication({
@@ -135,8 +134,8 @@ describe('zukhruf mailbox', () => {
   });
 
   it('keeps pending mail across store re-instantiation', async () => {
-    await using directory = await mkdtempDisposable(
-      join(tmpdir(), 'zukhruf-mailbox-'),
+    await using directory = await new TemporaryFiles().directory(
+      'zukhruf-mailbox-',
     );
     const path = join(directory.path, 'mailbox.sqlite');
     {
@@ -154,8 +153,8 @@ describe('zukhruf mailbox', () => {
   });
 
   it('atomically hands active-turn mail off across store instances', async () => {
-    await using directory = await mkdtempDisposable(
-      join(tmpdir(), 'zukhruf-mailbox-active-'),
+    await using directory = await new TemporaryFiles().directory(
+      'zukhruf-mailbox-active-',
     );
     const path = join(directory.path, 'mailbox.sqlite');
     using turnStore = new SqliteMailboxStore(path);
@@ -189,8 +188,8 @@ describe('zukhruf mailbox', () => {
 
   it('waits for cross-process writers while enqueueing and draining in FIFO order', async () => {
     const sqlite = new Sqlite();
-    await using directory = await mkdtempDisposable(
-      join(tmpdir(), 'zukhruf-mailbox-lock-'),
+    await using directory = await new TemporaryFiles().directory(
+      'zukhruf-mailbox-lock-',
     );
     const path = join(directory.path, 'mailbox.sqlite');
     using store = new SqliteMailboxStore(path);

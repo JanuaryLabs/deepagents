@@ -1,9 +1,9 @@
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
-import { mkdir, mkdtempDisposable, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
@@ -411,8 +411,8 @@ test('code_mode is reserved only when code mode is enabled', async () => {
 });
 
 test('AgentRuntime rejects duplicate plugin skills during initialization', async () => {
-  await using directory = await mkdtempDisposable(
-    join(tmpdir(), 'zukhruf-plugin-skill-'),
+  await using directory = await new TemporaryFiles().directory(
+    'zukhruf-plugin-skill-',
   );
   const skillDirectory = join(directory.path, 'duplicate');
   await mkdir(skillDirectory);
@@ -447,8 +447,8 @@ test('AgentRuntime rejects unknown agent plugin skill selections', async () => {
 });
 
 test('skill composition collects directories before configure and loads their contents afterward', async () => {
-  await using directory = await mkdtempDisposable(
-    join(tmpdir(), 'zukhruf-skill-order-'),
+  await using directory = await new TemporaryFiles().directory(
+    'zukhruf-skill-order-',
   );
   const skillDirectory = join(directory.path, 'assembled-skill');
   await mkdir(skillDirectory);
@@ -471,8 +471,8 @@ test('skill composition collects directories before configure and loads their co
 });
 
 test('agent composition reads configured sources and validates the graph before skill loading', async () => {
-  await using directory = await mkdtempDisposable(
-    join(tmpdir(), 'zukhruf-agent-order-'),
+  await using directory = await new TemporaryFiles().directory(
+    'zukhruf-agent-order-',
   );
   await writeFile(
     join(directory.path, 'reviewer.md'),
@@ -512,8 +512,8 @@ test('agent composition reads configured sources and validates the graph before 
 });
 
 test('AgentRuntime loads deterministic plugin-scoped agents before startup', async () => {
-  await using directory = await mkdtempDisposable(
-    join(tmpdir(), 'zukhruf-plugin-agents-'),
+  await using directory = await new TemporaryFiles().directory(
+    'zukhruf-plugin-agents-',
   );
   await writeFile(join(directory.path, 'b.md'), agentDeclaration('b'));
   await writeFile(join(directory.path, 'a.md'), agentDeclaration('a'));
@@ -557,8 +557,8 @@ test('AgentRuntime loads deterministic plugin-scoped agents before startup', asy
 });
 
 test('AgentRuntime rejects malformed and duplicate plugin agent declarations', async () => {
-  await using malformed = await mkdtempDisposable(
-    join(tmpdir(), 'zukhruf-plugin-agent-malformed-'),
+  await using malformed = await new TemporaryFiles().directory(
+    'zukhruf-plugin-agent-malformed-',
   );
   await writeFile(
     join(malformed.path, 'reviewer.md'),
@@ -572,11 +572,11 @@ test('AgentRuntime rejects malformed and duplicate plugin agent declarations', a
     /unknown frontmatter field "tools"/,
   );
 
-  await using first = await mkdtempDisposable(
-    join(tmpdir(), 'zukhruf-plugin-agent-first-'),
+  await using first = await new TemporaryFiles().directory(
+    'zukhruf-plugin-agent-first-',
   );
-  await using second = await mkdtempDisposable(
-    join(tmpdir(), 'zukhruf-plugin-agent-second-'),
+  await using second = await new TemporaryFiles().directory(
+    'zukhruf-plugin-agent-second-',
   );
   await writeFile(
     join(first.path, 'reviewer.md'),
