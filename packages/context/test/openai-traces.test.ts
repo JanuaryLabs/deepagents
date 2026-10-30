@@ -1,9 +1,9 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { Latch } from '@zukhruf/async';
+import { Msw } from '@zukhruf/testing/msw';
 import { type Telemetry, isStepCount, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { HttpResponse, http } from 'msw';
-import { setupServer } from 'msw/node';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import { z } from 'zod';
@@ -133,9 +133,11 @@ function traceMetadataValue(trace: WireTrace, key: string): unknown {
   }
 }
 
+const msw = new Msw();
+
 function captureIngestRequests() {
   const captured: IngestBody[] = [];
-  const server = setupServer(
+  const interception = msw.intercept(
     http.post(
       'https://api.openai.com/v1/traces/ingest',
       async ({ request }) => {
@@ -144,9 +146,8 @@ function captureIngestRequests() {
       },
     ),
   );
-  server.listen({ onUnhandledFrame: 'error' });
   return Object.assign(captured, {
-    [Symbol.dispose]: () => server.close(),
+    [Symbol.dispose]: () => interception.cleanup(),
   });
 }
 
@@ -1040,25 +1041,18 @@ describe('OpenAI Traces Integration', () => {
 
   describe('OpenAITracesExporter', () => {
     it('throws on missing API key', async () => {
-      const original = process.env.OPENAI_API_KEY;
-      delete process.env.OPENAI_API_KEY;
-
-      try {
-        const exporter = new OpenAITracesExporter({ apiKey: '' });
-        await assert.rejects(
-          () =>
-            exporter.export([
-              {
-                object: 'trace',
-                id: 'trace_abc',
-                workflow_name: 'test',
-              },
-            ]),
-          /API key is required/,
-        );
-      } finally {
-        if (original) process.env.OPENAI_API_KEY = original;
-      }
+      const exporter = new OpenAITracesExporter({ apiKey: '' });
+      await assert.rejects(
+        () =>
+          exporter.export([
+            {
+              object: 'trace',
+              id: 'trace_abc',
+              workflow_name: 'test',
+            },
+          ]),
+        /API key is required/,
+      );
     });
 
     it('skips export for empty items', async () => {

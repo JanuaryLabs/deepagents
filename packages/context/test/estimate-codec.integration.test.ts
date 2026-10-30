@@ -1,6 +1,6 @@
+import { Msw } from '@zukhruf/testing/msw';
 import { InMemoryFs } from 'just-bash';
 import { HttpResponse, http } from 'msw';
-import { setupServer } from 'msw/node';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -35,14 +35,14 @@ const modelsDevResponse = {
   },
 };
 
+const msw = new Msw();
+
 function stubModelsDev() {
-  const server = setupServer(
+  return msw.intercept(
     http.get('https://models.dev/api.json', () =>
       HttpResponse.json(modelsDevResponse),
     ),
   );
-  server.listen({ onUnhandledFrame: 'error' });
-  return { [Symbol.dispose]: () => server.close() };
 }
 
 describe('ContextEngine.estimate() with message codecs', () => {
