@@ -158,8 +158,7 @@ test('one setup creates independent ready hosts with plugins, HTTP, and queued t
     'queued',
   );
   await host.work();
-  const chunks = [];
-  for await (const chunk of turn.stream) chunks.push(chunk);
+  const chunks = await Array.fromAsync(turn.stream);
   assert.equal(
     chunks
       .filter((chunk) => chunk.type === 'text-delta')

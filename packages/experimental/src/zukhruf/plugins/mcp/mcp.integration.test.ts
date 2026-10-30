@@ -86,8 +86,7 @@ test('MCP uses real HTTP clients per runtime and closes them on failure or dispo
       response.writeHead(405).end();
       return;
     }
-    const chunks: Buffer[] = [];
-    for await (const chunk of request) chunks.push(chunk);
+    const chunks: Buffer[] = await Array.fromAsync(request);
     const message = JSON.parse(Buffer.concat(chunks).toString());
     if (message.id === undefined) {
       response.writeHead(202).end();

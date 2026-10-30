@@ -239,8 +239,7 @@ async function send(
     message: { id, role: 'user', parts: [{ type: 'text', text }] },
     trigger,
   });
-  const chunks = [];
-  for await (const chunk of turn.stream) chunks.push(chunk);
+  const chunks = await Array.fromAsync(turn.stream);
   return {
     id: turn.id,
     status: await host.observe(conversation).status(turn.id),
@@ -1654,8 +1653,7 @@ for (const [name, triggers] of [
       }
       const replay = await host.observe(conversation).resume();
       assert.ok(replay);
-      const replayed = [];
-      for await (const chunk of replay) replayed.push(chunk);
+      const replayed = await Array.fromAsync(replay);
       assert.deepEqual(
         compactionEvents(replayed),
         events,
