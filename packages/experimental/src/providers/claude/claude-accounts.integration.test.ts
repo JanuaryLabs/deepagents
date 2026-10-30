@@ -1,8 +1,8 @@
 import { MemoryStore } from '@opencoredev/loginwithchatgpt-core';
 import { settleWithin } from '@zukhruf/testing/async';
+import { Msw } from '@zukhruf/testing/msw';
 import { generateText } from 'ai';
 import { http } from 'msw';
-import { setupServer } from 'msw/node';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
@@ -49,11 +49,13 @@ async function replaceGlobalPool() {
   await pool.destroy();
 }
 
+const msw = new Msw();
+
 function interceptWire(
   handle: (request: WireRequest) => Response | Promise<Response>,
 ) {
   const requests: WireRequest[] = [];
-  const server = setupServer(
+  const interception = msw.intercept(
     ...ORIGINS.map((origin) =>
       http.all(`${origin}/*`, async ({ request }) => {
         const body = await request.text();
@@ -71,10 +73,9 @@ function interceptWire(
       }),
     ),
   );
-  server.listen({ onUnhandledFrame: 'error' });
   return Object.assign(requests, {
     [Symbol.asyncDispose]: async () => {
-      server.close();
+      interception.cleanup();
       await replaceGlobalPool();
     },
   });
