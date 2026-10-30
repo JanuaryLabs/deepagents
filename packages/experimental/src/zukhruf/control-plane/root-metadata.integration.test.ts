@@ -167,12 +167,13 @@ const usage = {
   outputTokens: { total: 1, text: 1, reasoning: undefined },
 } as const;
 
-test('enqueue only queues; worker execution initializes root metadata', async (t) => {
+test('enqueue only queues; worker execution initializes root metadata', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new RecordingTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -239,12 +240,13 @@ test('enqueue only queues; worker execution initializes root metadata', async (t
   });
 });
 
-test('an existing chat can only be used by its stored owner', async (t) => {
+test('an existing chat can only be used by its stored owner', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new RecordingTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -293,12 +295,13 @@ test('an existing chat can only be used by its stored owner', async (t) => {
   );
 });
 
-test('caller turn ids are scoped to their owning conversation', async (t) => {
+test('caller turn ids are scoped to their owning conversation', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new RecordingTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -331,12 +334,13 @@ test('caller turn ids are scoped to their owning conversation', async (t) => {
   assert.notEqual(queue.turns[0]?.streamId, queue.turns[1]?.streamId);
 });
 
-test('explicit cancellation rejects a stream owned by another conversation', async (t) => {
+test('explicit cancellation rejects a stream owned by another conversation', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new RecordingTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -367,12 +371,13 @@ test('explicit cancellation rejects a stream owned by another conversation', asy
   assert.equal(await streamStore.getStreamStatus(alice.id), 'queued');
 });
 
-test('reserved but malformed agent metadata fails closed at enqueue', async (t) => {
+test('reserved but malformed agent metadata fails closed at enqueue', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new RecordingTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -415,12 +420,13 @@ test('reserved but malformed agent metadata fails closed at enqueue', async (t) 
   assert.equal(await streamStore.getStreamStatus('must-not-queue'), undefined);
 });
 
-test('enqueue rejects an empty conversation before registering a stream', async (t) => {
+test('enqueue rejects an empty conversation before registering a stream', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new RecordingTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -451,12 +457,13 @@ test('enqueue rejects an empty conversation before registering a stream', async 
   assert.equal(queue.turns.length, 0);
 });
 
-test('root initialization preserves a concurrent host metadata write', async (t) => {
+test('root initialization preserves a concurrent host metadata write', async () => {
   const store = new ConcurrentRootMetadataStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new RecordingTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -508,12 +515,13 @@ test('root initialization preserves a concurrent host metadata write', async (t)
   assert.equal(metadata?.zukhrufTreeId, 'root-cas');
 });
 
-test('a child must point to the immediate ancestor of its canonical path', async (t) => {
+test('a child must point to the immediate ancestor of its canonical path', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new RecordingTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -567,12 +575,13 @@ test('a child must point to the immediate ancestor of its canonical path', async
   assert.equal(queue.turns.length, 0);
 });
 
-test('host delivery rejects a recipient that does not own the stored chat', async (t) => {
+test('host delivery rejects a recipient that does not own the stored chat', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new RecordingTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -610,12 +619,13 @@ test('host delivery rejects a recipient that does not own the stored chat', asyn
   assert.equal(queue.turns.length, 0);
 });
 
-test('explicit cancellation rejects a conversation that does not own the stored chat', async (t) => {
+test('explicit cancellation rejects a conversation that does not own the stored chat', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new RecordingTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -650,7 +660,7 @@ test('explicit cancellation rejects a conversation that does not own the stored 
   assert.equal(await streamStore.getStreamStatus(alice.id), 'queued');
 });
 
-test('cancelling during sandbox setup prevents model sampling', async (t) => {
+test('cancelling during sandbox setup prevents model sampling', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
@@ -658,7 +668,8 @@ test('cancelling during sandbox setup prevents model sampling', async (t) => {
   const sandboxStarted = Promise.withResolvers<void>();
   const releaseSandbox = Promise.withResolvers<void>();
   let modelCalls = 0;
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -716,13 +727,14 @@ test('cancelling during sandbox setup prevents model sampling', async (t) => {
   assert.equal(modelCalls, 0);
 });
 
-test('cancellation that wins the execution claim prevents model sampling', async (t) => {
+test('cancellation that wins the execution claim prevents model sampling', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new CancelAfterStatusReadStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new RecordingTurnQueue();
   let modelCalls = 0;
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -775,7 +787,7 @@ test('cancellation that wins the execution claim prevents model sampling', async
   assert.equal(modelCalls, 0);
 });
 
-test('cancellation after execution claim aborts pending provider setup', async (t) => {
+test('cancellation after execution claim aborts pending provider setup', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
@@ -783,7 +795,8 @@ test('cancellation after execution claim aborts pending provider setup', async (
   const providerStarted = Promise.withResolvers<void>();
   const releaseProvider = Promise.withResolvers<void>();
   let providerSignal: AbortSignal | undefined;
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });

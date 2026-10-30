@@ -155,12 +155,13 @@ function agentPath(metadata: Record<string, unknown> | undefined) {
     : undefined;
 }
 
-test('concurrent identical spawn_agent calls reserve one canonical child path', async (t) => {
+test('concurrent identical spawn_agent calls reserve one canonical child path', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -250,13 +251,14 @@ test('concurrent identical spawn_agent calls reserve one canonical child path', 
   assert.equal(children.length, 1);
 });
 
-test('spawn_agent retries an enqueue gap but does not restart a completed child path', async (t) => {
+test('spawn_agent retries an enqueue gap but does not restart a completed child path', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
   queue.childPushFaults.push(new Error('queue unavailable'));
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });

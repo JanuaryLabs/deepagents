@@ -507,12 +507,13 @@ function listAgentsModel(capturedPrompts: unknown[]) {
   });
 }
 
-test('worker dispatches a child chat to the declaration named by its metadata', async (t) => {
+test('worker dispatches a child chat to the declaration named by its metadata', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -592,12 +593,13 @@ test('worker dispatches a child chat to the declaration named by its metadata', 
   );
 });
 
-test('a terminal duplicate cannot replace a newer latest turn', async (t) => {
+test('a terminal duplicate cannot replace a newer latest turn', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -643,12 +645,13 @@ test('a terminal duplicate cannot replace a newer latest turn', async (t) => {
   assert.equal(modelCalls.length, 2);
 });
 
-test('spawn_agent queues an independent child turn and returns before it runs', async (t) => {
+test('spawn_agent queues an independent child turn and returns before it runs', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -745,12 +748,13 @@ test('spawn_agent queues an independent child turn and returns before it runs', 
   assert.equal(childCalls.length, 1);
 });
 
-test('a completed child queues its final answer to the parent without waking it', async (t) => {
+test('a completed child queues its final answer to the parent without waking it', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -824,12 +828,13 @@ test('a completed child queues its final answer to the parent without waking it'
   assert.equal(completion.triggerTurn, false);
 });
 
-test('an approval-paused child sends one final answer only after continuation', async (t) => {
+test('an approval-paused child sends one final answer only after continuation', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -947,12 +952,13 @@ test('an approval-paused child sends one final answer only after continuation', 
   assert.equal(completions[0]?.content, 'published research complete');
 });
 
-test('a failed approval continuation reports failure instead of remaining paused', async (t) => {
+test('a failed approval continuation reports failure instead of remaining paused', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -1079,7 +1085,7 @@ test('a failed approval continuation reports failure instead of remaining paused
   assert.equal(researcherCalls, 2);
 });
 
-test('a cancelled approval continuation clears the gate and revives parked turns', async (t) => {
+test('a cancelled approval continuation clears the gate and revives parked turns', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
@@ -1088,7 +1094,8 @@ test('a cancelled approval continuation clears the gate and revives parked turns
   const releaseContinuationSandbox = Promise.withResolvers<void>();
   let sandboxCalls = 0;
   let modelCalls = 0;
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -1170,13 +1177,14 @@ test('a cancelled approval continuation clears the gate and revives parked turns
   assert.equal(modelCalls, 2);
 });
 
-test('failed continuation preserves denied sibling semantics', async (t) => {
+test('failed continuation preserves denied sibling semantics', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
   let sandboxCalls = 0;
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -1265,12 +1273,13 @@ test('failed continuation preserves denied sibling semantics', async (t) => {
   );
 });
 
-test('a terminal child completion survives a transient parent-mailbox failure', async (t) => {
+test('a terminal child completion survives a transient parent-mailbox failure', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new FailFirstMailboxEnqueueStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -1341,12 +1350,13 @@ test('a terminal child completion survives a transient parent-mailbox failure', 
   assert.equal(completion[0]?.content, 'durable result');
 });
 
-test('a stale orphan retry cannot clear or supersede a successor turn', async (t) => {
+test('a stale orphan retry cannot clear or supersede a successor turn', async () => {
   const store = new DelayedStaleLatestTurnStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new FailTwiceMailboxEnqueueStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -1497,12 +1507,13 @@ test('a stale orphan retry cannot clear or supersede a successor turn', async (t
   }
 });
 
-test('terminal child recovery does not duplicate a completion committed before a crash', async (t) => {
+test('terminal child recovery does not duplicate a completion committed before a crash', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new CommitThenFailFirstMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -1575,12 +1586,13 @@ test('terminal child recovery does not duplicate a completion committed before a
   assert.equal(completions[0]?.content, 'one durable result');
 });
 
-test('a failed child asynchronously notifies its parent with the terminal status', async (t) => {
+test('a failed child asynchronously notifies its parent with the terminal status', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -1674,12 +1686,13 @@ test('a failed child asynchronously notifies its parent with the terminal status
   );
 });
 
-test('list_agents reports a child whose turn fails before setup completes', async (t) => {
+test('list_agents reports a child whose turn fails before setup completes', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new FailFirstMailboxBeginStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -1759,12 +1772,13 @@ test('list_agents reports a child whose turn fails before setup completes', asyn
   );
 });
 
-test('a cancelled child asynchronously notifies its parent with the terminal status', async (t) => {
+test('a cancelled child asynchronously notifies its parent with the terminal status', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -1866,12 +1880,13 @@ test('a cancelled child asynchronously notifies its parent with the terminal sta
   );
 });
 
-test('a child cancelled while queued notifies its parent once without running the model', async (t) => {
+test('a child cancelled while queued notifies its parent once without running the model', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -1955,12 +1970,13 @@ test('a child cancelled while queued notifies its parent once without running th
   assert.equal(notifications[0]?.content, 'Agent was interrupted.');
 });
 
-test('send_message resolves a canonical sibling path and queues mail without waking it', async (t) => {
+test('send_message resolves a canonical sibling path and queues mail without waking it', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -2083,12 +2099,13 @@ test('send_message resolves a canonical sibling path and queues mail without wak
   });
 });
 
-test('followup_task wakes a non-root target with a new task', async (t) => {
+test('followup_task wakes a non-root target with a new task', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -2205,12 +2222,13 @@ test('followup_task wakes a non-root target with a new task', async (t) => {
   assert.equal(completion[0]?.content, 'follow-up complete');
 });
 
-test('interrupt_agent cancels the oldest queued child turn and reports its prior status', async (t) => {
+test('interrupt_agent cancels the oldest queued child turn and reports its prior status', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -2319,12 +2337,13 @@ test('interrupt_agent cancels the oldest queued child turn and reports its prior
   );
 });
 
-test('interrupt_agent can retry terminal projection before deleting a queued child turn', async (t) => {
+test('interrupt_agent can retry terminal projection before deleting a queued child turn', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new FailFirstMailboxEnqueueStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -2408,14 +2427,15 @@ test('interrupt_agent can retry terminal projection before deleting a queued chi
   );
 });
 
-test('interrupt_agent aborts a running child across runtime instances without queue-local access', async (t) => {
+test('interrupt_agent aborts a running child across runtime instances without queue-local access', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queueState = new SharedTurnQueueState();
   const rootQueue = new SharedControlledTurnQueue(queueState);
   const childQueue = new SharedControlledTurnQueue(queueState);
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -2537,12 +2557,13 @@ test('interrupt_agent aborts a running child across runtime instances without qu
   );
 });
 
-test('interrupt_agent rejects root and self targets', async (t) => {
+test('interrupt_agent rejects root and self targets', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -2615,12 +2636,13 @@ test('interrupt_agent rejects root and self targets', async (t) => {
   assert.match(prompt, /agent cannot interrupt itself/);
 });
 
-test('interrupt_agent leaves terminal and approval-paused children unchanged', async (t) => {
+test('interrupt_agent leaves terminal and approval-paused children unchanged', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -2740,12 +2762,13 @@ test('interrupt_agent leaves terminal and approval-paused children unchanged', a
   );
 });
 
-test('wait_agent returns for pending caller mail without consuming it', async (t) => {
+test('wait_agent returns for pending caller mail without consuming it', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -2807,14 +2830,15 @@ test('wait_agent returns for pending caller mail without consuming it', async (t
   );
 });
 
-test('wait_agent is released by cross-runtime mail that reaches the next model step', async (t) => {
+test('wait_agent is released by cross-runtime mail that reaches the next model step', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queueState = new SharedTurnQueueState();
   const callerQueue = new SharedControlledTurnQueue(queueState);
   const deliveryQueue = new SharedControlledTurnQueue(queueState);
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -2899,7 +2923,8 @@ test('wait_agent reports a bounded timeout when no mail arrives', async (t) => {
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -2956,12 +2981,13 @@ test('wait_agent reports a bounded timeout when no mail arrives', async (t) => {
   assert.match(JSON.stringify(prompts[1]), /"timed_out":true/);
 });
 
-test('cancelling the caller aborts an active wait_agent call', async (t) => {
+test('cancelling the caller aborts an active wait_agent call', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new WaitObservedMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -3009,14 +3035,15 @@ test('cancelling the caller aborts an active wait_agent call', async (t) => {
   assert.equal(await streamStore.getStreamStatus(enqueued.id), 'cancelled');
 });
 
-test('send_message crosses runtime instances and reaches an active recipient at its next model step', async (t) => {
+test('send_message crosses runtime instances and reaches an active recipient at its next model step', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queueState = new SharedTurnQueueState();
   const senderQueue = new SharedControlledTurnQueue(queueState);
   const recipientQueue = new SharedControlledTurnQueue(queueState);
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -3154,14 +3181,15 @@ test('send_message crosses runtime instances and reaches an active recipient at 
   assert.equal(queueState.turns.length, 0);
 });
 
-test('followup_task crosses runtime instances and wakes an idle recipient', async (t) => {
+test('followup_task crosses runtime instances and wakes an idle recipient', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queueState = new SharedTurnQueueState();
   const senderQueue = new SharedControlledTurnQueue(queueState);
   const recipientQueue = new SharedControlledTurnQueue(queueState);
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -3268,12 +3296,13 @@ test('followup_task crosses runtime instances and wakes an idle recipient', asyn
   assert.equal(queueState.turns.length, 0);
 });
 
-test('followup_task stays behind an unstarted initial ask as a distinct later turn', async (t) => {
+test('followup_task stays behind an unstarted initial ask as a distinct later turn', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -3391,12 +3420,13 @@ test('followup_task stays behind an unstarted initial ask as a distinct later tu
   );
 });
 
-test('followup_task rejects the root agent without storing mail or scheduling a turn', async (t) => {
+test('followup_task rejects the root agent without storing mail or scheduling a turn', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -3467,12 +3497,13 @@ test('followup_task rejects the root agent without storing mail or scheduling a 
   );
 });
 
-test('list_agents returns exact Codex items with canonical paths and current statuses', async (t) => {
+test('list_agents returns exact Codex items with canonical paths and current statuses', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -3573,12 +3604,13 @@ test('list_agents returns exact Codex items with canonical paths and current sta
   assert.doesNotMatch(prompt, /"last_task_message"/);
 });
 
-test('list_agents resolves a relative path prefix and returns only that subtree', async (t) => {
+test('list_agents resolves a relative path prefix and returns only that subtree', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -3695,12 +3727,13 @@ test('list_agents resolves a relative path prefix and returns only that subtree'
   assert.doesNotMatch(prompt, /\/root\/reviewer/);
 });
 
-test('list_agents reports a completed child with its result', async (t) => {
+test('list_agents reports a completed child with its result', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -3801,12 +3834,13 @@ test('list_agents reports a completed child with its result', async (t) => {
   assert.match(prompt, /"agent_status":\{"completed":"verified result"\}/);
 });
 
-test('list_agents reports a completed child with a queued follow-up as running', async (t) => {
+test('list_agents reports a completed child with a queued follow-up as running', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -3917,12 +3951,13 @@ test('list_agents reports a completed child with a queued follow-up as running',
   assert.doesNotMatch(prompt, /"completed":"initial result"/);
 });
 
-test('nested agents run independently, consume sibling mail, and remain visible from the root', async (t) => {
+test('nested agents run independently, consume sibling mail, and remain visible from the root', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -4094,14 +4129,15 @@ test('nested agents run independently, consume sibling mail, and remain visible 
   assert.match(listed, /"completed":"reviewer complete"/);
 });
 
-test('spawn_agent is rejected with the Codex limit error while the tree has no free execution slot', async (t) => {
+test('spawn_agent is rejected with the Codex limit error while the tree has no free execution slot', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queueState = new SharedTurnQueueState();
   const rootQueue = new SharedControlledTurnQueue(queueState);
   const childQueue = new SharedControlledTurnQueue(queueState);
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -4231,14 +4267,15 @@ test('spawn_agent is rejected with the Codex limit error while the tree has no f
   }
 });
 
-test('followup_task is rejected with the Codex limit error while send_message still queues mail', async (t) => {
+test('followup_task is rejected with the Codex limit error while send_message still queues mail', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queueState = new SharedTurnQueueState();
   const rootQueue = new SharedControlledTurnQueue(queueState);
   const childQueue = new SharedControlledTurnQueue(queueState);
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -4379,12 +4416,13 @@ test('followup_task is rejected with the Codex limit error while send_message st
   }
 });
 
-test('a settled child frees its execution slot for the next spawn', async (t) => {
+test('a settled child frees its execution slot for the next spawn', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -4469,13 +4507,14 @@ test('a settled child frees its execution slot for the next spawn', async (t) =>
   );
 });
 
-test('a host cannot start a sub-agent turn while the tree has no free execution slot', async (t) => {
+test('a host cannot start a sub-agent turn while the tree has no free execution slot', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queueState = new SharedTurnQueueState();
   const childQueue = new SharedControlledTurnQueue(queueState);
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });

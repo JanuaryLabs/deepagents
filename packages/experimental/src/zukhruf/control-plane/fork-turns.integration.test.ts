@@ -2,7 +2,7 @@ import { type ToolSet, type UIMessage, simulateReadableStream, tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
-import test, { type TestContext } from 'node:test';
+import test from 'node:test';
 import { z } from 'zod';
 
 import {
@@ -197,25 +197,23 @@ function textOf(messages: UIMessage[]): string {
     .join('\n');
 }
 
-async function spawnAfter(
-  t: TestContext,
-  options: {
-    history: Array<{ input: string; answer: string }>;
-    forkTurns?: string;
-    rootResponses?: Array<
-      | ReturnType<typeof textResponse>
-      | ReturnType<typeof spawnResponse>
-      | ReturnType<typeof toolCallResponse>
-    >;
-    tools?: ToolSet;
-    expectSpawn?: boolean;
-  },
-) {
+async function spawnAfter(options: {
+  history: Array<{ input: string; answer: string }>;
+  forkTurns?: string;
+  rootResponses?: Array<
+    | ReturnType<typeof textResponse>
+    | ReturnType<typeof spawnResponse>
+    | ReturnType<typeof toolCallResponse>
+  >;
+  tools?: ToolSet;
+  expectSpawn?: boolean;
+}) {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
+  using stores = new DisposableStack();
+  stores.defer(() => {
     streamStore.close();
     mailboxStore.close();
   });
@@ -317,8 +315,8 @@ async function spawnAfter(
   };
 }
 
-test('spawn_agent rejects omitted fork_turns before creating a child', async (t) => {
-  const result = await spawnAfter(t, {
+test('spawn_agent rejects omitted fork_turns before creating a child', async () => {
+  const result = await spawnAfter({
     history: [{ input: 'first question', answer: 'first answer' }],
     expectSpawn: false,
   });
@@ -327,8 +325,8 @@ test('spawn_agent rejects omitted fork_turns before creating a child', async (t)
   assert.match(JSON.stringify(result.parentHistory), /"state":"output-error"/);
 });
 
-test('spawn_agent fork_turns none starts the child with no parent history', async (t) => {
-  const result = await spawnAfter(t, {
+test('spawn_agent fork_turns none starts the child with no parent history', async () => {
+  const result = await spawnAfter({
     history: [{ input: 'private parent question', answer: 'private answer' }],
     forkTurns: 'none',
   });
@@ -340,8 +338,8 @@ test('spawn_agent fork_turns none starts the child with no parent history', asyn
   assert.match(prompt, /child task/);
 });
 
-test('spawn_agent fork_turns N keeps the latest N user turns', async (t) => {
-  const result = await spawnAfter(t, {
+test('spawn_agent fork_turns N keeps the latest N user turns', async () => {
+  const result = await spawnAfter({
     history: [
       { input: 'old question', answer: 'old answer' },
       { input: 'recent question', answer: 'recent answer' },
@@ -357,8 +355,8 @@ test('spawn_agent fork_turns N keeps the latest N user turns', async (t) => {
   assert.match(history, /delegate current request/);
 });
 
-test('forked history keeps final assistant content without tool traffic', async (t) => {
-  const result = await spawnAfter(t, {
+test('forked history keeps final assistant content without tool traffic', async () => {
+  const result = await spawnAfter({
     history: [{ input: 'look up the private record', answer: '' }],
     rootResponses: [
       toolCallResponse('private_lookup'),
@@ -380,8 +378,8 @@ test('forked history keeps final assistant content without tool traffic', async 
   assert.doesNotMatch(history, /private tool result/);
 });
 
-test('spawn_agent rejects invalid fork_turns before creating a child', async (t) => {
-  const result = await spawnAfter(t, {
+test('spawn_agent rejects invalid fork_turns before creating a child', async () => {
+  const result = await spawnAfter({
     history: [],
     forkTurns: '0',
     expectSpawn: false,

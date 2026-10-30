@@ -1,12 +1,12 @@
 import type { LanguageModelV4FunctionTool } from '@ai-sdk/provider';
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
-import { mkdtempDisposable, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import test, { type TestContext } from 'node:test';
+import test from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
@@ -208,21 +208,27 @@ function functionTools(tools: unknown): LanguageModelV4FunctionTool[] {
     : [];
 }
 
-function harness(t: TestContext) {
+function harness() {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const streams = streamsFor(streamStore);
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
-  t.after(() => {
-    streamStore.close();
-    mailboxStore.close();
-  });
-  return { store, streams, streamStore, mailboxStore, queue };
+  return {
+    store,
+    streams,
+    streamStore,
+    mailboxStore,
+    queue,
+    [Symbol.dispose]() {
+      streamStore.close();
+      mailboxStore.close();
+    },
+  };
 }
 
-test('host config injects root guidance, spawn guidance, namespace, and wait bounds', async (t) => {
-  const h = harness(t);
+test('host config injects root guidance, spawn guidance, namespace, and wait bounds', async () => {
+  using h = harness();
   let request: { prompt: unknown; tools: unknown } | undefined;
   const model = new MockLanguageModelV4({
     doStream: async ({ prompt, tools }) => {
@@ -388,8 +394,8 @@ test('wait_agent clamps a below-minimum timeout and reports it to the model', as
   }
 });
 
-test('subagent guidance replaces root guidance on a child turn', async (t) => {
-  const h = harness(t);
+test('subagent guidance replaces root guidance on a child turn', async () => {
+  using h = harness();
   let childPrompt: unknown;
   const child = defineAgent({
     name: 'worker',
@@ -455,8 +461,8 @@ test('subagent guidance replaces root guidance on a child turn', async (t) => {
   assert.doesNotMatch(systemText(childPrompt), /ROOT COLLABORATION GUIDANCE/);
 });
 
-test('spawn output is the canonical task name without agent_path', async (t) => {
-  const h = harness(t);
+test('spawn output is the canonical task name without agent_path', async () => {
+  using h = harness();
   let calls = 0;
   let parentPrompt: unknown;
   const model = new MockLanguageModelV4({
@@ -504,16 +510,16 @@ test('spawn output is the canonical task name without agent_path', async (t) => 
   assert.doesNotMatch(serialized, /agent_path/);
 });
 
-test('plugin-contributed subagent uses AI SDK code mode collaboration', async (t) => {
-  await using directory = await mkdtempDisposable(
-    join(tmpdir(), 'zukhruf-code-mode-'),
+test('plugin-contributed subagent uses AI SDK code mode collaboration', async () => {
+  await using directory = await new TemporaryFiles().directory(
+    'zukhruf-code-mode-',
   );
   await writeFile(
     join(directory.path, 'reviewer.md'),
     `---\nname: reviewer\ndescription: Reviews the current change.\n---\n\nReview the implementation.\n`,
   );
 
-  const h = harness(t);
+  using h = harness();
   const requests: Array<{ prompt: unknown; tools: unknown }> = [];
   const model = new MockLanguageModelV4({
     doStream: async ({ prompt, tools }) => {
@@ -583,8 +589,8 @@ test('plugin-contributed subagent uses AI SDK code mode collaboration', async (t
   );
 });
 
-test('interrupt_agent reports not_found for a missing target', async (t) => {
-  const h = harness(t);
+test('interrupt_agent reports not_found for a missing target', async () => {
+  using h = harness();
   let calls = 0;
   let prompt: unknown;
   const model = new MockLanguageModelV4({
@@ -682,8 +688,8 @@ test('host config rejects invalid namespaces and wait bounds', async () => {
   }
 });
 
-test('default guidance tells root and child agents the Codex concurrency slots', async (t) => {
-  const h = harness(t);
+test('default guidance tells root and child agents the Codex concurrency slots', async () => {
+  using h = harness();
   const prompts: Record<string, unknown> = {};
   const capturing = (name: string) =>
     new MockLanguageModelV4({
