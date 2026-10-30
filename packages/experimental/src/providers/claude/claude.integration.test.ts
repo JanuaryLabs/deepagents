@@ -10,7 +10,7 @@ import {
 } from 'ai';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFile, stat, writeFile } from 'node:fs/promises';
+import { readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type TestContext, test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -264,12 +264,35 @@ test('a Claude Code OAuth token in the environment authenticates each request in
   assert.equal(await readFile(path, 'utf8'), stored);
 });
 
-test('a rejected Claude Code OAuth token fails the request without a refresh', async (t) => {
+test('a Claude Code OAuth token in the environment authenticates requests on a machine with no stored login', async (t) => {
   await using home = await localHome(t);
-  await writeFile(
-    join(home.path, '.credentials.json'),
-    JSON.stringify(login('stored', Date.now() - 1000)),
+  await rm(join(home.path, '.credentials.json'));
+  process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-setup-token';
+  const requests: string[] = [];
+  t.mock.method(
+    globalThis,
+    'fetch',
+    async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push(
+        `${String(input)} ${new Headers(init?.headers).get('authorization')}`,
+      );
+      return response('ok');
+    },
   );
+  const result = await generateText({
+    model: claude('claude-sonnet-4-6'),
+    prompt: 'hello',
+    maxRetries: 0,
+  });
+  assert.equal(result.text, 'ok');
+  assert.deepEqual(requests, [
+    'https://api.anthropic.com/v1/messages Bearer sk-ant-oat01-setup-token',
+  ]);
+});
+
+test('a rejected Claude Code OAuth token fails the request', async (t) => {
+  await using home = await localHome(t);
+  await rm(join(home.path, '.credentials.json'));
   process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-revoked-token';
   const requests: string[] = [];
   t.mock.method(
@@ -279,18 +302,8 @@ test('a rejected Claude Code OAuth token fails the request without a refresh', a
       requests.push(
         `${String(input)} ${new Headers(init?.headers).get('authorization')}`,
       );
-      if (String(input).endsWith('/oauth/token'))
-        return Response.json({ access_token: 'refreshed', expires_in: 3600 });
-      return Response.json(
-        {
-          type: 'error',
-          error: {
-            type: 'authentication_error',
-            message: 'Invalid bearer token',
-          },
-        },
-        { status: 401 },
-      );
+      // Only the status matters here; the body is not load-bearing.
+      return new Response('rejected', { status: 401 });
     },
   );
   await assert.rejects(
