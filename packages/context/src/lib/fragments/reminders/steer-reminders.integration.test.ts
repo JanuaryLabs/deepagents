@@ -13,7 +13,7 @@ import {
 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
-import { describe, it, mock } from 'node:test';
+import { describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { z } from 'zod';
 
@@ -1127,61 +1127,57 @@ describe('steer reminders integration (chat flow)', () => {
     );
   });
 
-  it('elapsedExceeds fires every mid-loop step once past the threshold (no engine reset)', async () => {
-    mock.timers.enable({ apis: ['Date'] });
-    mock.timers.setTime(new Date('2026-06-08T10:00:00Z').getTime());
-    try {
-      const store = new InMemoryContextStore();
-      const context = new ContextEngine({
-        store,
-        chatId: 'recur',
-        userId: 'u1',
-      });
-      const model = scriptedModel([
-        { tool: 'slow' },
-        { tool: 'slow' },
-        { tool: 'slow' },
-        { text: 'done' },
-      ]);
-      const slowTool = tool({
-        description: 'a tool that takes 61 seconds',
-        inputSchema: z.object({}),
-        execute: async () => {
-          mock.timers.tick(61_000);
-          return { ok: true };
-        },
-      });
-      const sandbox = await createBashTool({
-        sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      });
-      const chatAgent = agent({
-        sandbox,
-        name: 'recur',
-        context,
-        model,
-        tools: { slow: slowTool },
-      });
+  it('elapsedExceeds fires every mid-loop step once past the threshold (no engine reset)', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'] });
+    t.mock.timers.setTime(new Date('2026-06-08T10:00:00Z').getTime());
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'recur',
+      userId: 'u1',
+    });
+    const model = scriptedModel([
+      { tool: 'slow' },
+      { tool: 'slow' },
+      { tool: 'slow' },
+      { text: 'done' },
+    ]);
+    const slowTool = tool({
+      description: 'a tool that takes 61 seconds',
+      inputSchema: z.object({}),
+      execute: async () => {
+        t.mock.timers.tick(61_000);
+        return { ok: true };
+      },
+    });
+    const sandbox = await createBashTool({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    });
+    const chatAgent = agent({
+      sandbox,
+      name: 'recur',
+      context,
+      model,
+      tools: { slow: slowTool },
+    });
 
-      context.set(
-        reminder('NUDGE', { when: elapsedExceeds(60_000), target: 'steer' }),
-      );
+    context.set(
+      reminder('NUDGE', { when: elapsedExceeds(60_000), target: 'steer' }),
+    );
 
-      await context.continue(userMessage('long-running task'));
-      await drain(await chat(chatAgent));
+    await context.continue(userMessage('long-running task'));
+    await drain(await chat(chatAgent));
 
-      const chain = await storedEntries(store, 'recur');
-      const synthCount = chain.filter(
-        (e) => e.name === 'user' && isSyntheticEntry(e),
-      ).length;
-      // elapsed (from the real user, never reset by a nudge) is past 60s at all
-      // three mid-loop steps, so a bare elapsedExceeds fires at each.
-      assert.strictEqual(
-        synthCount,
-        3,
-        `bare elapsedExceeds fires every step past threshold; got ${synthCount}`,
-      );
-    } finally {
-      mock.timers.reset();
-    }
+    const chain = await storedEntries(store, 'recur');
+    const synthCount = chain.filter(
+      (e) => e.name === 'user' && isSyntheticEntry(e),
+    ).length;
+    // elapsed (from the real user, never reset by a nudge) is past 60s at all
+    // three mid-loop steps, so a bare elapsedExceeds fires at each.
+    assert.strictEqual(
+      synthCount,
+      3,
+      `bare elapsedExceeds fires every step past threshold; got ${synthCount}`,
+    );
   });
 });

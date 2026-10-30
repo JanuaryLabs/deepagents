@@ -1,7 +1,7 @@
 import { type ToolUIPart, type UIMessage, isStaticToolUIPart } from 'ai';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
-import { describe, it, mock } from 'node:test';
+import { type TestContext, describe, it } from 'node:test';
 
 import {
   ContextEngine,
@@ -42,10 +42,7 @@ async function createVirtualAgentSandbox() {
 type TestToolName = 'bash' | 'sql';
 type TestToolType = 'tool-bash' | 'tool-sql';
 type TestToolState =
-  | 'output-available'
-  | 'output-error'
-  | 'input-available'
-  | 'input-streaming';
+  'output-available' | 'output-error' | 'input-available' | 'input-streaming';
 type OutputAvailableToolPart = ToolUIPart & {
   state: 'output-available';
   output: unknown;
@@ -187,6 +184,7 @@ function getReminderMetadata(
 }
 
 async function useFakeTime<T>(
+  mock: TestContext['mock'],
   iso: string,
   fn: () => T | Promise<T>,
 ): Promise<T> {
@@ -1045,8 +1043,8 @@ describe('ContextEngine conditional reminders', () => {
     );
   });
 
-  it('applies dayChanged temporal predicate when day crosses between turns', async () => {
-    await useFakeTime('2026-03-27T23:00:00Z', async () => {
+  it('applies dayChanged temporal predicate when day crosses between turns', async (t) => {
+    await useFakeTime(t.mock, '2026-03-27T23:00:00Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -1057,7 +1055,7 @@ describe('ContextEngine conditional reminders', () => {
       engine.set(user('turn 1'), assistantText('reply'));
       await engine.save();
 
-      mock.timers.setTime(new Date('2026-03-28T01:00:00Z').getTime());
+      t.mock.timers.setTime(new Date('2026-03-28T01:00:00Z').getTime());
 
       engine.set(reminder('new-day', { when: dayChanged() }), user('turn 2'));
       await engine.save();
@@ -1103,8 +1101,8 @@ describe('ContextEngine conditional reminders', () => {
     );
   });
 
-  it('composes dayChanged with afterTurn in engine context', async () => {
-    await useFakeTime('2026-03-27T23:00:00Z', async () => {
+  it('composes dayChanged with afterTurn in engine context', async (t) => {
+    await useFakeTime(t.mock, '2026-03-27T23:00:00Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -1115,7 +1113,7 @@ describe('ContextEngine conditional reminders', () => {
       engine.set(user('turn 1'), assistantText('reply'));
       await engine.save();
 
-      mock.timers.setTime(new Date('2026-03-28T01:00:00Z').getTime());
+      t.mock.timers.setTime(new Date('2026-03-28T01:00:00Z').getTime());
 
       engine.set(
         reminder('composed', { when: and(dayChanged(), afterTurn(2)) }),
@@ -1137,8 +1135,8 @@ describe('ContextEngine conditional reminders', () => {
     });
   });
 
-  it('applies hourChanged temporal predicate when hour crosses', async () => {
-    await useFakeTime('2026-03-27T14:55:00Z', async () => {
+  it('applies hourChanged temporal predicate when hour crosses', async (t) => {
+    await useFakeTime(t.mock, '2026-03-27T14:55:00Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -1149,7 +1147,7 @@ describe('ContextEngine conditional reminders', () => {
       engine.set(user('turn 1'), assistantText('reply'));
       await engine.save();
 
-      mock.timers.setTime(new Date('2026-03-27T15:05:00Z').getTime());
+      t.mock.timers.setTime(new Date('2026-03-27T15:05:00Z').getTime());
 
       engine.set(reminder('new-hour', { when: hourChanged() }), user('turn 2'));
       await engine.save();

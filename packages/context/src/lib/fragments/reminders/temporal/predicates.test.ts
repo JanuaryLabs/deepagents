@@ -1,6 +1,6 @@
 import type { UIMessage } from 'ai';
 import assert from 'node:assert';
-import { describe, it, mock } from 'node:test';
+import { type TestContext, describe, it } from 'node:test';
 
 import {
   type WhenContext,
@@ -31,7 +31,11 @@ function wctx(
   };
 }
 
-function useFakeTime<T>(iso: string, fn: () => T): T {
+function useFakeTime<T>(
+  mock: TestContext['mock'],
+  iso: string,
+  fn: () => T,
+): T {
   mock.timers.enable({ apis: ['Date'] });
   mock.timers.setTime(new Date(iso).getTime());
   try {
@@ -42,6 +46,7 @@ function useFakeTime<T>(iso: string, fn: () => T): T {
 }
 
 async function useFakeTimeAsync<T>(
+  mock: TestContext['mock'],
   iso: string,
   fn: () => Promise<T>,
 ): Promise<T> {
@@ -55,14 +60,14 @@ async function useFakeTimeAsync<T>(
 }
 
 describe('dayChanged', () => {
-  it('fires on first turn when lastMessageAt is undefined', () => {
-    useFakeTime('2026-03-27T12:00:00Z', () => {
+  it('fires on first turn when lastMessageAt is undefined', (t) => {
+    useFakeTime(t.mock, '2026-03-27T12:00:00Z', () => {
       assert.strictEqual(dayChanged()(wctx({ turn: 1, content: '' })), true);
     });
   });
 
-  it('does not fire when still the same day', () => {
-    useFakeTime('2026-03-27T23:00:00Z', () => {
+  it('does not fire when still the same day', (t) => {
+    useFakeTime(t.mock, '2026-03-27T23:00:00Z', () => {
       assert.strictEqual(
         dayChanged()(
           wctx({
@@ -76,8 +81,8 @@ describe('dayChanged', () => {
     });
   });
 
-  it('fires when the day has changed', () => {
-    useFakeTime('2026-03-28T01:00:00Z', () => {
+  it('fires when the day has changed', (t) => {
+    useFakeTime(t.mock, '2026-03-28T01:00:00Z', () => {
       assert.strictEqual(
         dayChanged()(
           wctx({
@@ -91,8 +96,8 @@ describe('dayChanged', () => {
     });
   });
 
-  it('respects timezone for day boundary', () => {
-    useFakeTime('2026-03-27T16:00:00Z', () => {
+  it('respects timezone for day boundary', (t) => {
+    useFakeTime(t.mock, '2026-03-27T16:00:00Z', () => {
       assert.strictEqual(
         dayChanged({ tz: 'Asia/Tokyo' })(
           wctx({
@@ -109,14 +114,14 @@ describe('dayChanged', () => {
 });
 
 describe('hourChanged', () => {
-  it('fires on first turn', () => {
-    useFakeTime('2026-03-27T12:00:00Z', () => {
+  it('fires on first turn', (t) => {
+    useFakeTime(t.mock, '2026-03-27T12:00:00Z', () => {
       assert.strictEqual(hourChanged()(wctx({ turn: 1, content: '' })), true);
     });
   });
 
-  it('does not fire within the same hour', () => {
-    useFakeTime('2026-03-27T12:45:00Z', () => {
+  it('does not fire within the same hour', (t) => {
+    useFakeTime(t.mock, '2026-03-27T12:45:00Z', () => {
       assert.strictEqual(
         hourChanged()(
           wctx({
@@ -130,8 +135,8 @@ describe('hourChanged', () => {
     });
   });
 
-  it('fires when the hour has changed', () => {
-    useFakeTime('2026-03-27T13:05:00Z', () => {
+  it('fires when the hour has changed', (t) => {
+    useFakeTime(t.mock, '2026-03-27T13:05:00Z', () => {
       assert.strictEqual(
         hourChanged()(
           wctx({
@@ -147,14 +152,14 @@ describe('hourChanged', () => {
 });
 
 describe('monthChanged', () => {
-  it('fires on first turn', () => {
-    useFakeTime('2026-03-15T12:00:00Z', () => {
+  it('fires on first turn', (t) => {
+    useFakeTime(t.mock, '2026-03-15T12:00:00Z', () => {
       assert.strictEqual(monthChanged()(wctx({ turn: 1, content: '' })), true);
     });
   });
 
-  it('does not fire within the same month', () => {
-    useFakeTime('2026-03-28T12:00:00Z', () => {
+  it('does not fire within the same month', (t) => {
+    useFakeTime(t.mock, '2026-03-28T12:00:00Z', () => {
       assert.strictEqual(
         monthChanged()(
           wctx({
@@ -168,8 +173,8 @@ describe('monthChanged', () => {
     });
   });
 
-  it('fires when the month has changed', () => {
-    useFakeTime('2026-04-01T00:05:00Z', () => {
+  it('fires when the month has changed', (t) => {
+    useFakeTime(t.mock, '2026-04-01T00:05:00Z', () => {
       assert.strictEqual(
         monthChanged()(
           wctx({
@@ -185,14 +190,14 @@ describe('monthChanged', () => {
 });
 
 describe('yearChanged', () => {
-  it('fires on first turn', () => {
-    useFakeTime('2026-06-15T12:00:00Z', () => {
+  it('fires on first turn', (t) => {
+    useFakeTime(t.mock, '2026-06-15T12:00:00Z', () => {
       assert.strictEqual(yearChanged()(wctx({ turn: 1, content: '' })), true);
     });
   });
 
-  it('does not fire within the same year', () => {
-    useFakeTime('2026-12-31T12:00:00Z', () => {
+  it('does not fire within the same year', (t) => {
+    useFakeTime(t.mock, '2026-12-31T12:00:00Z', () => {
       assert.strictEqual(
         yearChanged()(
           wctx({
@@ -206,8 +211,8 @@ describe('yearChanged', () => {
     });
   });
 
-  it('fires when the year has changed', () => {
-    useFakeTime('2027-01-01T00:05:00Z', () => {
+  it('fires when the year has changed', (t) => {
+    useFakeTime(t.mock, '2027-01-01T00:05:00Z', () => {
       assert.strictEqual(
         yearChanged()(
           wctx({
@@ -223,14 +228,14 @@ describe('yearChanged', () => {
 });
 
 describe('seasonChanged', () => {
-  it('fires on first turn', () => {
-    useFakeTime('2026-06-15T12:00:00Z', () => {
+  it('fires on first turn', (t) => {
+    useFakeTime(t.mock, '2026-06-15T12:00:00Z', () => {
       assert.strictEqual(seasonChanged()(wctx({ turn: 1, content: '' })), true);
     });
   });
 
-  it('does not fire within the same season', () => {
-    useFakeTime('2026-07-15T12:00:00Z', () => {
+  it('does not fire within the same season', (t) => {
+    useFakeTime(t.mock, '2026-07-15T12:00:00Z', () => {
       assert.strictEqual(
         seasonChanged()(
           wctx({
@@ -245,8 +250,8 @@ describe('seasonChanged', () => {
     });
   });
 
-  it('fires when the season changes (Spring -> Summer)', () => {
-    useFakeTime('2026-06-01T12:00:00Z', () => {
+  it('fires when the season changes (Spring -> Summer)', (t) => {
+    useFakeTime(t.mock, '2026-06-01T12:00:00Z', () => {
       assert.strictEqual(
         seasonChanged()(
           wctx({
@@ -263,14 +268,14 @@ describe('seasonChanged', () => {
 });
 
 describe('weekChanged', () => {
-  it('fires on first turn', () => {
-    useFakeTime('2026-03-25T12:00:00Z', () => {
+  it('fires on first turn', (t) => {
+    useFakeTime(t.mock, '2026-03-25T12:00:00Z', () => {
       assert.strictEqual(weekChanged()(wctx({ turn: 1, content: '' })), true);
     });
   });
 
-  it('does not fire within the same week', () => {
-    useFakeTime('2026-03-26T12:00:00Z', () => {
+  it('does not fire within the same week', (t) => {
+    useFakeTime(t.mock, '2026-03-26T12:00:00Z', () => {
       assert.strictEqual(
         weekChanged()(
           wctx({
@@ -285,8 +290,8 @@ describe('weekChanged', () => {
     });
   });
 
-  it('fires when the week changes', () => {
-    useFakeTime('2026-04-06T12:00:00Z', () => {
+  it('fires when the week changes', (t) => {
+    useFakeTime(t.mock, '2026-04-06T12:00:00Z', () => {
       assert.strictEqual(
         weekChanged()(
           wctx({
@@ -303,8 +308,8 @@ describe('weekChanged', () => {
 });
 
 describe('temporal predicate composition', () => {
-  it('composes dayChanged with afterTurn', async () => {
-    await useFakeTimeAsync('2026-03-28T12:00:00Z', async () => {
+  it('composes dayChanged with afterTurn', async (t) => {
+    await useFakeTimeAsync(t.mock, '2026-03-28T12:00:00Z', async () => {
       const pred = and(dayChanged(), afterTurn(3));
 
       assert.strictEqual(
@@ -333,8 +338,8 @@ describe('temporal predicate composition', () => {
     });
   });
 
-  it('composes hourChanged with not()', async () => {
-    await useFakeTimeAsync('2026-03-27T13:05:00Z', async () => {
+  it('composes hourChanged with not()', async (t) => {
+    await useFakeTimeAsync(t.mock, '2026-03-27T13:05:00Z', async () => {
       const pred = not(hourChanged());
 
       assert.strictEqual(
@@ -364,10 +369,11 @@ function messageWithLocale(metadata: Record<string, unknown>): UIMessage {
 const JAPANESE_TOKYO = { language: 'Japanese', timeZone: 'Asia/Tokyo' };
 
 function inTokyoCrossingWindow(
+  mock: TestContext['mock'],
   lastMessage: UIMessage,
   fn: (ctx: WhenContext) => void,
 ): void {
-  useFakeTime('2026-03-27T16:00:00Z', () => {
+  useFakeTime(mock, '2026-03-27T16:00:00Z', () => {
     fn(
       wctx({
         turn: 2,
@@ -380,8 +386,9 @@ function inTokyoCrossingWindow(
 }
 
 describe('predicate metadata-fallback', () => {
-  it('dayChanged() honors locale metadata when no options provided', () => {
+  it('dayChanged() honors locale metadata when no options provided', (t) => {
     inTokyoCrossingWindow(
+      t.mock,
       messageWithLocale({ locale: JAPANESE_TOKYO }),
       (ctx) => {
         assert.strictEqual(
@@ -393,8 +400,8 @@ describe('predicate metadata-fallback', () => {
     );
   });
 
-  it('dayChanged({ tz }) overrides locale metadata when both are present', () => {
-    useFakeTime('2026-03-28T06:00:00Z', () => {
+  it('dayChanged({ tz }) overrides locale metadata when both are present', (t) => {
+    useFakeTime(t.mock, '2026-03-28T06:00:00Z', () => {
       const lastMessage = messageWithLocale({ locale: JAPANESE_TOKYO });
 
       assert.strictEqual(
@@ -412,8 +419,8 @@ describe('predicate metadata-fallback', () => {
     });
   });
 
-  it('hourChanged() honors locale metadata (proves wiring is shared across predicates)', () => {
-    useFakeTime('2026-03-27T15:00:00Z', () => {
+  it('hourChanged() honors locale metadata (proves wiring is shared across predicates)', (t) => {
+    useFakeTime(t.mock, '2026-03-27T15:00:00Z', () => {
       const lastMessage = messageWithLocale({
         locale: { language: 'Hindi', timeZone: 'Asia/Kolkata' },
       });
@@ -433,8 +440,9 @@ describe('predicate metadata-fallback', () => {
     });
   });
 
-  it('empty-string tz falls through to metadata', () => {
+  it('empty-string tz falls through to metadata', (t) => {
     inTokyoCrossingWindow(
+      t.mock,
       messageWithLocale({ locale: JAPANESE_TOKYO }),
       (ctx) => {
         assert.strictEqual(
@@ -446,8 +454,9 @@ describe('predicate metadata-fallback', () => {
     );
   });
 
-  it('invalid locale metadata shape falls back to UTC', () => {
+  it('invalid locale metadata shape falls back to UTC', (t) => {
     inTokyoCrossingWindow(
+      t.mock,
       messageWithLocale({ locale: { language: 'Japanese' } }),
       (ctx) => {
         assert.strictEqual(

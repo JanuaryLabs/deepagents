@@ -1,7 +1,7 @@
 import type { UIMessage } from 'ai';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
-import { describe, it, mock } from 'node:test';
+import { type TestContext, describe, it } from 'node:test';
 
 import {
   ContextEngine,
@@ -39,6 +39,7 @@ function getLastUserMessage(messages: UIMessage[]): UIMessage {
 }
 
 async function useFakeTime<T>(
+  mock: TestContext['mock'],
   iso: string,
   fn: () => T | Promise<T>,
 ): Promise<T> {
@@ -52,8 +53,8 @@ async function useFakeTime<T>(
 }
 
 describe('dateReminder', () => {
-  it('injects date and day of week on first turn', async () => {
-    await useFakeTime('2026-03-27T14:30:00.000Z', async () => {
+  it('injects date and day of week on first turn', async (t) => {
+    await useFakeTime(t.mock, '2026-03-27T14:30:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -81,8 +82,8 @@ describe('dateReminder', () => {
     });
   });
 
-  it('skips when same day', async () => {
-    await useFakeTime('2026-03-27T14:00:00.000Z', async () => {
+  it('skips when same day', async (t) => {
+    await useFakeTime(t.mock, '2026-03-27T14:00:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -96,7 +97,7 @@ describe('dateReminder', () => {
       engine.set(assistantText('reply'));
       await engine.save();
 
-      mock.timers.setTime(new Date('2026-03-27T20:00:00.000Z').getTime());
+      t.mock.timers.setTime(new Date('2026-03-27T20:00:00.000Z').getTime());
 
       engine.set(dateReminder(), user('turn 2'));
       await engine.save();
@@ -115,8 +116,8 @@ describe('dateReminder', () => {
     });
   });
 
-  it('produces diff when day changes', async () => {
-    await useFakeTime('2026-03-27T23:30:00.000Z', async () => {
+  it('produces diff when day changes', async (t) => {
+    await useFakeTime(t.mock, '2026-03-27T23:30:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -130,7 +131,7 @@ describe('dateReminder', () => {
       engine.set(assistantText('reply'));
       await engine.save();
 
-      mock.timers.setTime(new Date('2026-03-28T00:30:00.000Z').getTime());
+      t.mock.timers.setTime(new Date('2026-03-28T00:30:00.000Z').getTime());
 
       engine.set(dateReminder(), user('turn 2'));
       await engine.save();
@@ -153,8 +154,8 @@ describe('dateReminder', () => {
     });
   });
 
-  it('respects custom timezone', async () => {
-    await useFakeTime('2026-03-27T16:00:00.000Z', async () => {
+  it('respects custom timezone', async (t) => {
+    await useFakeTime(t.mock, '2026-03-27T16:00:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -180,8 +181,8 @@ describe('dateReminder', () => {
     });
   });
 
-  it('falls back to timezone from locale metadata when tz option is omitted', async () => {
-    await useFakeTime('2026-03-27T14:00:00.000Z', async () => {
+  it('falls back to timezone from locale metadata when tz option is omitted', async (t) => {
+    await useFakeTime(t.mock, '2026-03-27T14:00:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -204,7 +205,7 @@ describe('dateReminder', () => {
       engine.set(assistantText('reply'));
       await engine.save();
 
-      mock.timers.setTime(new Date('2026-03-27T16:00:00.000Z').getTime());
+      t.mock.timers.setTime(new Date('2026-03-27T16:00:00.000Z').getTime());
 
       engine.set(dateReminder(), user('turn 2'));
       await engine.save();
@@ -223,8 +224,8 @@ describe('dateReminder', () => {
     });
   });
 
-  it('adopts locale tz from the same turn via user metadata (turn 1)', async () => {
-    await useFakeTime('2026-03-27T16:00:00.000Z', async () => {
+  it('adopts locale tz from the same turn via user metadata (turn 1)', async (t) => {
+    await useFakeTime(t.mock, '2026-03-27T16:00:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -258,8 +259,8 @@ describe('dateReminder', () => {
     });
   });
 
-  it('current message locale wins over last message locale', async () => {
-    await useFakeTime('2026-03-26T16:00:00.000Z', async () => {
+  it('current message locale wins over last message locale', async (t) => {
+    await useFakeTime(t.mock, '2026-03-26T16:00:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -280,7 +281,7 @@ describe('dateReminder', () => {
       engine.set(assistantText('reply'));
       await engine.save();
 
-      mock.timers.setTime(new Date('2026-03-27T16:00:00.000Z').getTime());
+      t.mock.timers.setTime(new Date('2026-03-27T16:00:00.000Z').getTime());
 
       engine.set(
         dateReminder(),
@@ -308,8 +309,8 @@ describe('dateReminder', () => {
     });
   });
 
-  it('caller-supplied user metadata.locale survives save() unchanged', async () => {
-    await useFakeTime('2026-03-27T16:00:00.000Z', async () => {
+  it('caller-supplied user metadata.locale survives save() unchanged', async (t) => {
+    await useFakeTime(t.mock, '2026-03-27T16:00:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -345,8 +346,8 @@ describe('dateReminder', () => {
     });
   });
 
-  it('uses metadata tz for the change-detection predicate, not UTC', async () => {
-    await useFakeTime('2026-03-27T14:00:00.000Z', async () => {
+  it('uses metadata tz for the change-detection predicate, not UTC', async (t) => {
+    await useFakeTime(t.mock, '2026-03-27T14:00:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -369,7 +370,7 @@ describe('dateReminder', () => {
       engine.set(assistantText('reply'));
       await engine.save();
 
-      mock.timers.setTime(new Date('2026-03-27T16:00:00.000Z').getTime());
+      t.mock.timers.setTime(new Date('2026-03-27T16:00:00.000Z').getTime());
 
       engine.set(dateReminder(), user('turn 2'));
       await engine.save();
@@ -389,8 +390,8 @@ describe('dateReminder', () => {
 });
 
 describe('timeReminder', () => {
-  it('injects time on first turn', async () => {
-    await useFakeTime('2026-03-27T14:30:00.000Z', async () => {
+  it('injects time on first turn', async (t) => {
+    await useFakeTime(t.mock, '2026-03-27T14:30:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -413,8 +414,8 @@ describe('timeReminder', () => {
     });
   });
 
-  it('skips within the same hour', async () => {
-    await useFakeTime('2026-03-27T14:00:00.000Z', async () => {
+  it('skips within the same hour', async (t) => {
+    await useFakeTime(t.mock, '2026-03-27T14:00:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -428,7 +429,7 @@ describe('timeReminder', () => {
       engine.set(assistantText('reply'));
       await engine.save();
 
-      mock.timers.setTime(new Date('2026-03-27T14:45:00.000Z').getTime());
+      t.mock.timers.setTime(new Date('2026-03-27T14:45:00.000Z').getTime());
 
       engine.set(timeReminder(), user('turn 2'));
       await engine.save();
@@ -447,8 +448,8 @@ describe('timeReminder', () => {
     });
   });
 
-  it('produces diff when hour changes', async () => {
-    await useFakeTime('2026-03-27T14:55:00.000Z', async () => {
+  it('produces diff when hour changes', async (t) => {
+    await useFakeTime(t.mock, '2026-03-27T14:55:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -462,7 +463,7 @@ describe('timeReminder', () => {
       engine.set(assistantText('reply'));
       await engine.save();
 
-      mock.timers.setTime(new Date('2026-03-27T15:05:00.000Z').getTime());
+      t.mock.timers.setTime(new Date('2026-03-27T15:05:00.000Z').getTime());
 
       engine.set(timeReminder(), user('turn 2'));
       await engine.save();
@@ -483,8 +484,8 @@ describe('timeReminder', () => {
 });
 
 describe('monthReminder', () => {
-  it('injects month on first turn', async () => {
-    await useFakeTime('2026-03-15T12:00:00.000Z', async () => {
+  it('injects month on first turn', async (t) => {
+    await useFakeTime(t.mock, '2026-03-15T12:00:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -507,8 +508,8 @@ describe('monthReminder', () => {
     });
   });
 
-  it('produces diff when month changes', async () => {
-    await useFakeTime('2026-03-31T23:55:00.000Z', async () => {
+  it('produces diff when month changes', async (t) => {
+    await useFakeTime(t.mock, '2026-03-31T23:55:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -522,7 +523,7 @@ describe('monthReminder', () => {
       engine.set(assistantText('reply'));
       await engine.save();
 
-      mock.timers.setTime(new Date('2026-04-01T00:05:00.000Z').getTime());
+      t.mock.timers.setTime(new Date('2026-04-01T00:05:00.000Z').getTime());
 
       engine.set(monthReminder(), user('turn 2'));
       await engine.save();
@@ -543,8 +544,8 @@ describe('monthReminder', () => {
 });
 
 describe('yearReminder', () => {
-  it('injects year on first turn', async () => {
-    await useFakeTime('2026-06-15T12:00:00.000Z', async () => {
+  it('injects year on first turn', async (t) => {
+    await useFakeTime(t.mock, '2026-06-15T12:00:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -567,8 +568,8 @@ describe('yearReminder', () => {
     });
   });
 
-  it('produces diff when year changes', async () => {
-    await useFakeTime('2026-12-31T23:55:00.000Z', async () => {
+  it('produces diff when year changes', async (t) => {
+    await useFakeTime(t.mock, '2026-12-31T23:55:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -582,7 +583,7 @@ describe('yearReminder', () => {
       engine.set(assistantText('reply'));
       await engine.save();
 
-      mock.timers.setTime(new Date('2027-01-01T00:05:00.000Z').getTime());
+      t.mock.timers.setTime(new Date('2027-01-01T00:05:00.000Z').getTime());
 
       engine.set(yearReminder(), user('turn 2'));
       await engine.save();
@@ -603,8 +604,8 @@ describe('yearReminder', () => {
 });
 
 describe('seasonReminder', () => {
-  it('injects season on first turn', async () => {
-    await useFakeTime('2026-07-15T12:00:00.000Z', async () => {
+  it('injects season on first turn', async (t) => {
+    await useFakeTime(t.mock, '2026-07-15T12:00:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -627,8 +628,8 @@ describe('seasonReminder', () => {
     });
   });
 
-  it('produces diff when season changes', async () => {
-    await useFakeTime('2026-05-31T23:55:00.000Z', async () => {
+  it('produces diff when season changes', async (t) => {
+    await useFakeTime(t.mock, '2026-05-31T23:55:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -642,7 +643,7 @@ describe('seasonReminder', () => {
       engine.set(assistantText('reply'));
       await engine.save();
 
-      mock.timers.setTime(new Date('2026-06-01T00:05:00.000Z').getTime());
+      t.mock.timers.setTime(new Date('2026-06-01T00:05:00.000Z').getTime());
 
       engine.set(seasonReminder(), user('turn 2'));
       await engine.save();
@@ -661,7 +662,7 @@ describe('seasonReminder', () => {
     });
   });
 
-  it('computes seasons correctly', async () => {
+  it('computes seasons correctly', async (t) => {
     const cases: Array<{ date: string; expected: string }> = [
       { date: '2026-01-15T00:00:00.000Z', expected: 'Winter' },
       { date: '2026-04-15T00:00:00.000Z', expected: 'Spring' },
@@ -671,7 +672,7 @@ describe('seasonReminder', () => {
     ];
 
     for (const { date, expected } of cases) {
-      await useFakeTime(date, async () => {
+      await useFakeTime(t.mock, date, async () => {
         const store = new InMemoryContextStore();
         const engine = new ContextEngine({
           store,
@@ -936,8 +937,8 @@ describe('temporalReminder', () => {
     assert.strictEqual(fragments.length, 5, 'should have 5 temporal atoms');
   });
 
-  it('injects all temporal data on first turn', async () => {
-    await useFakeTime('2026-03-27T14:30:00.000Z', async () => {
+  it('injects all temporal data on first turn', async (t) => {
+    await useFakeTime(t.mock, '2026-03-27T14:30:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -967,8 +968,8 @@ describe('temporalReminder', () => {
     });
   });
 
-  it('each atom fires independently on its own schedule', async () => {
-    await useFakeTime('2026-03-27T14:00:00.000Z', async () => {
+  it('each atom fires independently on its own schedule', async (t) => {
+    await useFakeTime(t.mock, '2026-03-27T14:00:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -982,7 +983,7 @@ describe('temporalReminder', () => {
       engine.set(assistantText('reply'));
       await engine.save();
 
-      mock.timers.setTime(new Date('2026-03-27T15:30:00.000Z').getTime());
+      t.mock.timers.setTime(new Date('2026-03-27T15:30:00.000Z').getTime());
 
       engine.set(...temporalReminder(), user('turn 2'));
       await engine.save();
@@ -1009,8 +1010,8 @@ describe('temporalReminder', () => {
     });
   });
 
-  it('passes custom timezone to all atoms', async () => {
-    await useFakeTime('2026-03-27T16:00:00.000Z', async () => {
+  it('passes custom timezone to all atoms', async (t) => {
+    await useFakeTime(t.mock, '2026-03-27T16:00:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -1050,8 +1051,8 @@ describe('temporalReminder', () => {
     });
   });
 
-  it('each atom appends inline reminder text', async () => {
-    await useFakeTime('2026-03-27T14:30:00.000Z', async () => {
+  it('each atom appends inline reminder text', async (t) => {
+    await useFakeTime(t.mock, '2026-03-27T14:30:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -1093,8 +1094,8 @@ describe('temporalReminder', () => {
     });
   });
 
-  it('diffs across engine instances', async () => {
-    await useFakeTime('2026-03-27T14:30:00.000Z', async () => {
+  it('diffs across engine instances', async (t) => {
+    await useFakeTime(t.mock, '2026-03-27T14:30:00.000Z', async () => {
       const store = new InMemoryContextStore();
 
       const engine1 = new ContextEngine({
@@ -1108,7 +1109,7 @@ describe('temporalReminder', () => {
       engine1.set(assistantText('reply'));
       await engine1.save();
 
-      mock.timers.setTime(new Date('2026-03-28T14:30:00.000Z').getTime());
+      t.mock.timers.setTime(new Date('2026-03-28T14:30:00.000Z').getTime());
 
       const engine2 = new ContextEngine({
         store,
@@ -1132,8 +1133,8 @@ describe('temporalReminder', () => {
     });
   });
 
-  it('is double-resolve safe after save', async () => {
-    await useFakeTime('2026-06-15T12:00:00.000Z', async () => {
+  it('is double-resolve safe after save', async (t) => {
+    await useFakeTime(t.mock, '2026-06-15T12:00:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,

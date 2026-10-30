@@ -1,6 +1,6 @@
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
-import { describe, it, mock } from 'node:test';
+import { type TestContext, describe, it } from 'node:test';
 
 import {
   ContextEngine,
@@ -23,6 +23,7 @@ async function createVirtualAgentSandbox() {
 }
 
 async function withFakeTime<T>(
+  mock: TestContext['mock'],
   startIso: string,
   fn: (advance: (ms: number) => void) => Promise<T>,
 ): Promise<T> {
@@ -44,8 +45,8 @@ async function lastUserText(engine: ContextEngine): Promise<string> {
 }
 
 describe('elapsedExceeds', () => {
-  it('fires when elapsed since last user message exceeds threshold', async () => {
-    await withFakeTime('2026-05-06T10:00:00Z', async (advance) => {
+  it('fires when elapsed since last user message exceeds threshold', async (t) => {
+    await withFakeTime(t.mock, '2026-05-06T10:00:00Z', async (advance) => {
       const engine = new ContextEngine({
         store: new InMemoryContextStore(),
         chatId: 'elapsed-above',
@@ -66,8 +67,8 @@ describe('elapsedExceeds', () => {
     });
   });
 
-  it('fires AT the threshold (>= semantics)', async () => {
-    await withFakeTime('2026-05-06T10:00:00Z', async (advance) => {
+  it('fires AT the threshold (>= semantics)', async (t) => {
+    await withFakeTime(t.mock, '2026-05-06T10:00:00Z', async (advance) => {
       const engine = new ContextEngine({
         store: new InMemoryContextStore(),
         chatId: 'elapsed-at',
@@ -88,8 +89,8 @@ describe('elapsedExceeds', () => {
     });
   });
 
-  it('does NOT fire when elapsed is below threshold', async () => {
-    await withFakeTime('2026-05-06T10:00:00Z', async (advance) => {
+  it('does NOT fire when elapsed is below threshold', async (t) => {
+    await withFakeTime(t.mock, '2026-05-06T10:00:00Z', async (advance) => {
       const engine = new ContextEngine({
         store: new InMemoryContextStore(),
         chatId: 'elapsed-below',

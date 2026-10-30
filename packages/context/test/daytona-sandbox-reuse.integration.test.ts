@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { describe, it, mock } from 'node:test';
+import { type Mock, type TestContext, describe, it } from 'node:test';
 
 import {
   DaytonaCreationError,
@@ -25,13 +25,16 @@ interface SandboxStub {
   id: string;
   name?: string;
   state?: string;
-  start: ReturnType<typeof mock.fn>;
-  delete: ReturnType<typeof mock.fn>;
+  start: Mock<(...args: unknown[]) => Promise<void>>;
+  delete: Mock<() => Promise<void>>;
   fs: { downloadFile: () => Promise<Buffer>; uploadFiles: () => Promise<void> };
   process: { executeCommand: () => Promise<{ exitCode: number }> };
 }
 
-function fakeSandbox(over: Partial<SandboxStub> = {}): SandboxStub {
+function fakeSandbox(
+  mock: TestContext['mock'],
+  over: Partial<SandboxStub>,
+): SandboxStub {
   return {
     id: 'sb-fixed',
     start: mock.fn(async () => {}),
@@ -61,12 +64,10 @@ interface Calls {
 class FakeDaytona {
   config: unknown;
   readonly calls: Calls = { get: [], create: [], asyncDispose: 0 };
-  readonly behavior: Behavior = {
-    get: async () => fakeSandbox(),
-    create: async () => fakeSandbox(),
-  };
-  constructor(config: unknown) {
+  readonly behavior: Behavior;
+  constructor(config: unknown, behavior: Behavior) {
     this.config = config;
+    this.behavior = behavior;
   }
   async get(idOrName: string): Promise<SandboxStub> {
     this.calls.get.push(idOrName);
@@ -81,31 +82,38 @@ class FakeDaytona {
   }
 }
 
-mock.module('@daytona/sdk', {
-  namedExports: {
-    Daytona: FakeDaytona,
-    DaytonaError,
-    DaytonaNotFoundError,
-    DaytonaAuthenticationError,
-  },
-});
-
 /**
  * Builds the client through the mocked SDK constructor, as a consumer would, so
  * it carries the SDK's `Daytona` type; the instanceof check exposes the fake's
  * recorded calls. Each test gets its own client, calls, and behavior.
  */
-async function fakeDaytona(behavior: Partial<Behavior> = {}) {
+async function fakeDaytona(t: TestContext, behavior: Partial<Behavior>) {
+  const resolved: Behavior = {
+    get: async () => fakeSandbox(t.mock, {}),
+    create: async () => fakeSandbox(t.mock, {}),
+    ...behavior,
+  };
+  t.mock.module('@daytona/sdk', {
+    namedExports: {
+      Daytona: class extends FakeDaytona {
+        constructor(config: unknown) {
+          super(config, resolved);
+        }
+      },
+      DaytonaError,
+      DaytonaNotFoundError,
+      DaytonaAuthenticationError,
+    },
+  });
   const { Daytona } = await import('@daytona/sdk');
   const client = new Daytona();
   assert.ok(client instanceof FakeDaytona);
-  Object.assign(client.behavior, behavior);
   return client;
 }
 
 describe('createDaytonaSandbox typed-error propagation', () => {
-  it('propagates a not-found from the attach (sandboxId) path unchanged', async () => {
-    const client = await fakeDaytona({
+  it('propagates a not-found from the attach (sandboxId) path unchanged', async (t) => {
+    const client = await fakeDaytona(t, {
       get: async () => {
         throw new DaytonaNotFoundError('no sandbox sb-missing');
       },
@@ -128,8 +136,8 @@ describe('createDaytonaSandbox typed-error propagation', () => {
     );
   });
 
-  it('wraps a non-SDK failure from the create path as DaytonaCreationError', async () => {
-    const client = await fakeDaytona({
+  it('wraps a non-SDK failure from the create path as DaytonaCreationError', async (t) => {
+    const client = await fakeDaytona(t, {
       get: async () => {
         throw new DaytonaNotFoundError('dai-chat-1 absent');
       },
@@ -155,8 +163,8 @@ describe('createDaytonaSandbox typed-error propagation', () => {
     );
   });
 
-  it('rejects resources without an image', async () => {
-    const client = await fakeDaytona();
+  it('rejects resources without an image', async (t) => {
+    const client = await fakeDaytona(t, {});
 
     await assert.rejects(
       createDaytonaSandbox(client, { resources: { cpu: 2 } }),
@@ -164,8 +172,8 @@ describe('createDaytonaSandbox typed-error propagation', () => {
     );
   });
 
-  it('requires a name or a sandboxId', async () => {
-    const client = await fakeDaytona();
+  it('requires a name or a sandboxId', async (t) => {
+    const client = await fakeDaytona(t, {});
 
     await assert.rejects(createDaytonaSandbox(client, {}), (error: unknown) => {
       assert.ok(error instanceof DaytonaSandboxError);
@@ -181,9 +189,9 @@ describe('createDaytonaSandbox typed-error propagation', () => {
 });
 
 describe('createDaytonaSandbox name implies get-or-create', () => {
-  it('attaches to the existing sandbox resolved by name, without creating', async () => {
-    const client = await fakeDaytona({
-      get: async (name) => fakeSandbox({ id: 'sb-existing', name }),
+  it('attaches to the existing sandbox resolved by name, without creating', async (t) => {
+    const client = await fakeDaytona(t, {
+      get: async (name) => fakeSandbox(t.mock, { id: 'sb-existing', name }),
       create: async () => {
         throw new Error('create must not be called when the sandbox exists');
       },
@@ -198,9 +206,9 @@ describe('createDaytonaSandbox name implies get-or-create', () => {
     assert.strictEqual(client.calls.create.length, 0);
   });
 
-  it('starts the resolved sandbox when it is not already started', async () => {
-    const stub = fakeSandbox({ id: 'sb-existing', state: 'stopped' });
-    const client = await fakeDaytona({ get: async () => stub });
+  it('starts the resolved sandbox when it is not already started', async (t) => {
+    const stub = fakeSandbox(t.mock, { id: 'sb-existing', state: 'stopped' });
+    const client = await fakeDaytona(t, { get: async () => stub });
 
     await createDaytonaSandbox(client, {
       name: 'dai-chat-1',
@@ -211,12 +219,12 @@ describe('createDaytonaSandbox name implies get-or-create', () => {
     assert.deepStrictEqual(stub.start.mock.calls[0].arguments, [5]);
   });
 
-  it('creates a new sandbox when no sandbox matches the name', async () => {
-    const client = await fakeDaytona({
+  it('creates a new sandbox when no sandbox matches the name', async (t) => {
+    const client = await fakeDaytona(t, {
       get: async () => {
         throw new DaytonaNotFoundError('dai-chat-1 absent');
       },
-      create: async () => fakeSandbox({ id: 'sb-created' }),
+      create: async () => fakeSandbox(t.mock, { id: 'sb-created' }),
     });
 
     const sandbox = await createDaytonaSandbox(client, {
@@ -235,15 +243,15 @@ describe('createDaytonaSandbox name implies get-or-create', () => {
     });
   });
 
-  it('replaces a sandbox stuck in an unrecoverable state', async () => {
-    const poisoned = fakeSandbox({ id: 'sb-poisoned', state: 'error' });
-    const get = mock.fn<Behavior['get']>(async () => {
+  it('replaces a sandbox stuck in an unrecoverable state', async (t) => {
+    const poisoned = fakeSandbox(t.mock, { id: 'sb-poisoned', state: 'error' });
+    const get = t.mock.fn<Behavior['get']>(async () => {
       throw new DaytonaNotFoundError('gone after delete');
     });
     get.mock.mockImplementationOnce(async () => poisoned);
-    const client = await fakeDaytona({
+    const client = await fakeDaytona(t, {
       get,
-      create: async () => fakeSandbox({ id: 'sb-fresh' }),
+      create: async () => fakeSandbox(t.mock, { id: 'sb-fresh' }),
     });
 
     await createDaytonaSandbox(client, {
@@ -255,8 +263,8 @@ describe('createDaytonaSandbox name implies get-or-create', () => {
     assert.strictEqual(client.calls.create.length, 1);
   });
 
-  it('propagates a non-not-found typed error from the lookup without creating', async () => {
-    const client = await fakeDaytona({
+  it('propagates a non-not-found typed error from the lookup without creating', async (t) => {
+    const client = await fakeDaytona(t, {
       get: async () => {
         throw new DaytonaAuthenticationError();
       },
@@ -282,8 +290,8 @@ describe('createDaytonaSandbox name implies get-or-create', () => {
     assert.strictEqual(client.calls.create.length, 0);
   });
 
-  it('rejects a name combined with sandboxId', async () => {
-    const client = await fakeDaytona();
+  it('rejects a name combined with sandboxId', async (t) => {
+    const client = await fakeDaytona(t, {});
 
     await assert.rejects(
       createDaytonaSandbox(client, {
@@ -301,9 +309,9 @@ describe('createDaytonaSandbox name implies get-or-create', () => {
 });
 
 describe('createDaytonaSandbox borrows the client', () => {
-  it('leaves both the sandbox and the client untouched on dispose', async () => {
-    const stub = fakeSandbox({ id: 'sb-existing' });
-    const client = await fakeDaytona({ get: async () => stub });
+  it('leaves both the sandbox and the client untouched on dispose', async (t) => {
+    const stub = fakeSandbox(t.mock, { id: 'sb-existing' });
+    const client = await fakeDaytona(t, { get: async () => stub });
 
     const sandbox = await createDaytonaSandbox(client, {
       name: 'dai-chat-1',

@@ -1,8 +1,8 @@
+import { Msw } from '@zukhruf/testing/msw';
 import { InMemoryFs } from 'just-bash';
 import { HttpResponse, http } from 'msw';
-import { setupServer } from 'msw/node';
 import assert from 'node:assert';
-import { describe, it, mock } from 'node:test';
+import { describe, it } from 'node:test';
 
 import {
   ContextEngine,
@@ -44,14 +44,14 @@ const modelsDevResponse = {
   },
 };
 
+const msw = new Msw();
+
 function stubModelsDev() {
-  const server = setupServer(
+  return msw.intercept(
     http.get('https://models.dev/api.json', () =>
       HttpResponse.json(modelsDevResponse),
     ),
   );
-  server.listen({ onUnhandledFrame: 'error' });
-  return { [Symbol.dispose]: () => server.close() };
 }
 
 describe('engine + resolver chain integration', () => {
@@ -70,10 +70,10 @@ describe('engine + resolver chain integration', () => {
     assert.ok(systemPrompt.includes('project documentation'));
   });
 
-  it('caches resolved values across resolve() calls', async () => {
+  it('caches resolved values across resolve() calls', async (t) => {
     const engine = newEngine();
     const sandbox = await createVirtualAgentSandbox();
-    const loader = mock.fn(async () => 'loaded-once');
+    const loader = t.mock.fn(async () => 'loaded-once');
     engine.set(fragment('cached', loader));
 
     await engine.resolve({ renderer: new XmlRenderer(), sandbox });
@@ -251,11 +251,11 @@ describe('engine + resolver chain integration', () => {
     );
   });
 
-  it('estimate() invokes a loader exactly once (caching)', async () => {
+  it('estimate() invokes a loader exactly once (caching)', async (t) => {
     using _modelsDev = stubModelsDev();
     const engine = newEngine();
     const sandbox = await createVirtualAgentSandbox();
-    const loader = mock.fn(async () => 'estimate-content');
+    const loader = t.mock.fn(async () => 'estimate-content');
     engine.set(fragment('once', loader));
 
     await engine.estimate('openai:gpt-4o', { sandbox });

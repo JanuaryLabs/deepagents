@@ -5,7 +5,7 @@ import { StreamHarness } from '@zukhruf/testing/streams';
 import { type UIMessageChunk, simulateReadableStream } from 'ai';
 import assert from 'node:assert';
 import { DatabaseSync } from 'node:sqlite';
-import { describe, it, mock } from 'node:test';
+import { type TestContext, describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
@@ -196,35 +196,21 @@ const DEFAULT_WAIT_TIMEOUT_MS = (() => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 5_000;
 })();
 
-async function waitFor(
-  predicate: () => boolean | Promise<boolean>,
-  {
-    timeoutMs = DEFAULT_WAIT_TIMEOUT_MS,
-    pollMs = 10,
-    label = 'condition',
-  }: {
-    timeoutMs?: number;
-    pollMs?: number;
-    label?: string;
-  } = {},
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (await predicate()) return;
-    await sleep(pollMs);
-  }
-  throw new Error(`waitFor(${label}) timed out after ${timeoutMs}ms`);
-}
+const WAIT = { interval: 10, timeout: DEFAULT_WAIT_TIMEOUT_MS };
 
 function waitForStatus(
+  t: TestContext,
   store: StreamStore,
   streamId: string,
   target: StreamStatus,
 ): Promise<void> {
-  return waitFor(
-    async () => (await store.getStreamStatus(streamId)) === target,
-    { label: `status="${target}" for ${streamId}` },
-  );
+  return t.waitFor(async () => {
+    assert.strictEqual(
+      await store.getStreamStatus(streamId),
+      target,
+      `status="${target}" for ${streamId}`,
+    );
+  }, WAIT);
 }
 
 function makeManager(
@@ -402,7 +388,7 @@ describe('Stream Chunks', () => {
       }
     });
 
-    it('should reject when aborted flush fails during persist', async () => {
+    it('should reject when aborted flush fails during persist', async (t) => {
       const store = new FlakyFlushStore(':memory:');
       const streams = makeManager(store);
       const streamId = crypto.randomUUID();
@@ -433,7 +419,7 @@ describe('Stream Chunks', () => {
 
       const persistPromise = streams.persist(source, streamId);
       try {
-        await waitForStatus(store, streamId, 'running');
+        await waitForStatus(t, store, streamId, 'running');
         await settleWithin(
           chunksBuffered.promise,
           'source chunks reach the persistence buffer before cancellation',
@@ -475,24 +461,20 @@ describe('Stream Chunks', () => {
       assert.strictEqual(await store.getStreamStatus(streamId), 'cancelled');
     });
 
-    it('should keep adaptive jitter delay within configured bounds', () => {
-      mock.method(Math, 'random', () => 1);
-      try {
-        const state = createAdaptivePollingState({
-          minMs: 100,
-          maxMs: 200,
-          multiplier: 2,
-          jitterRatio: 0.5,
-        });
-        nextAdaptivePollingDelay(state);
-        const delay = nextAdaptivePollingDelay(state);
-        assert.ok(
-          delay <= 200,
-          `delay should stay within max bound, got ${delay}`,
-        );
-      } finally {
-        mock.reset();
-      }
+    it('should keep adaptive jitter delay within configured bounds', (t) => {
+      t.mock.method(Math, 'random', () => 1);
+      const state = createAdaptivePollingState({
+        minMs: 100,
+        maxMs: 200,
+        multiplier: 2,
+        jitterRatio: 0.5,
+      });
+      nextAdaptivePollingDelay(state);
+      const delay = nextAdaptivePollingDelay(state);
+      assert.ok(
+        delay <= 200,
+        `delay should stay within max bound, got ${delay}`,
+      );
     });
 
     it('should expose explicit close() for sqlite stream store lifecycle', () => {
@@ -1306,11 +1288,8 @@ describe('Stream Chunks', () => {
       }
       await store.updateStreamStatus(stream.id, 'completed');
 
-      const received: unknown[] = [];
       const readable = streams.watch(stream.id);
-      for await (const chunk of readable) {
-        received.push(chunk);
-      }
+      const received = await Array.fromAsync(readable);
 
       assert.strictEqual(received.length, 5);
       assert.deepStrictEqual(received[0], textDeltaChunk(0));
@@ -1331,17 +1310,14 @@ describe('Stream Chunks', () => {
       await store.appendChunks([createChunk(stream.id, 0)]);
       await store.appendChunks([createChunk(stream.id, 1)]);
 
-      const received: unknown[] = [];
       const readable = streams.watch(stream.id);
-      const consume = (async () => {
-        for await (const chunk of readable) received.push(chunk);
-      })();
+      const consume = Array.fromAsync(readable);
 
       await store.appendChunks([createChunk(stream.id, 2)]);
       await store.appendChunks([createChunk(stream.id, 3)]);
       await store.updateStreamStatus(stream.id, 'completed');
 
-      await consume;
+      const received = await consume;
 
       assert.strictEqual(received.length, 4);
       assert.deepStrictEqual(received[0], textDeltaChunk(0));
@@ -1361,18 +1337,15 @@ describe('Stream Chunks', () => {
 
       await store.appendChunks([createChunk(stream.id, 0)]);
 
-      const received: unknown[] = [];
       const readable = streams.watch(stream.id);
-      const consume = (async () => {
-        for await (const chunk of readable) received.push(chunk);
-      })();
+      const consume = Array.fromAsync(readable);
 
       await store.appendChunks([createChunk(stream.id, 1)]);
       await store.updateStreamStatus(stream.id, 'failed', {
         error: 'test error',
       });
 
-      await consume;
+      const received = await consume;
 
       assert.strictEqual(received.length, 3);
       assert.deepStrictEqual(received[0], textDeltaChunk(0));
@@ -1399,11 +1372,8 @@ describe('Stream Chunks', () => {
       await store.createStream(stream);
       await store.updateStreamStatus(stream.id, 'failed', { error: '' });
 
-      const received: unknown[] = [];
       const readable = streams.watch(stream.id);
-      for await (const chunk of readable) {
-        received.push(chunk);
-      }
+      const received = await Array.fromAsync(readable);
 
       assert.strictEqual(received.length, 1);
       assert.deepStrictEqual(received[0], {
@@ -1426,11 +1396,8 @@ describe('Stream Chunks', () => {
         error: 'boom',
       });
 
-      const received: unknown[] = [];
       const readable = streams.watch(stream.id);
-      for await (const chunk of readable) {
-        received.push(chunk);
-      }
+      const received = await Array.fromAsync(readable);
 
       assert.strictEqual(received.length, 1);
       assert.deepStrictEqual(received[0], {
@@ -1456,11 +1423,8 @@ describe('Stream Chunks', () => {
       await store.appendChunks([createChunk(stream.id, 0)]);
       await store.updateStreamStatus(stream.id, 'cancelled');
 
-      const received: unknown[] = [];
       const readable = streams.watch(stream.id);
-      for await (const chunk of readable) {
-        received.push(chunk);
-      }
+      const received = await Array.fromAsync(readable);
 
       assert.strictEqual(received.length, 1);
 
@@ -1478,18 +1442,15 @@ describe('Stream Chunks', () => {
       const stream = createStream({ status: 'queued' });
       await store.createStream(stream);
 
-      const received: unknown[] = [];
       const readable = streams.watch(stream.id);
-      const consume = (async () => {
-        for await (const chunk of readable) received.push(chunk);
-      })();
+      const consume = Array.fromAsync(readable);
 
       await store.updateStreamStatus(stream.id, 'running');
       await store.appendChunks([createChunk(stream.id, 0)]);
       await store.appendChunks([createChunk(stream.id, 1)]);
       await store.updateStreamStatus(stream.id, 'completed');
 
-      await consume;
+      const received = await consume;
 
       assert.strictEqual(received.length, 2);
       assert.deepStrictEqual(received[0], textDeltaChunk(0));
@@ -1536,25 +1497,20 @@ describe('Stream Chunks', () => {
       await writerStore.createStream(stream);
       await writerStore.appendChunks([createChunk(stream.id, 0)]);
 
-      const received: unknown[] = [];
       const readable = streams.watch(stream.id);
-      const consume = (async () => {
-        for await (const chunk of readable) {
-          received.push(chunk);
-        }
-      })();
+      const consume = Array.fromAsync(readable);
 
       await writerStore.appendChunks([createChunk(stream.id, 1)]);
       await writerStore.appendChunks([createChunk(stream.id, 2)]);
       await writerStore.updateStreamStatus(stream.id, 'completed');
 
-      await consume;
+      const received = await consume;
       assert.strictEqual(received.length, 3);
       assert.deepStrictEqual(received[0], textDeltaChunk(0));
       assert.deepStrictEqual(received[2], textDeltaChunk(2));
     });
 
-    it('should keep adaptive delays within configured bounds', async () => {
+    it('should keep adaptive delays within configured bounds', async (t) => {
       await using database = await sqlite.database();
       const store = new SqliteStreamStore(database.connection);
       const pollEvents: PollingTelemetryEvent[] = [];
@@ -1585,9 +1541,15 @@ describe('Stream Chunks', () => {
 
       const idleCount = () =>
         pollEvents.filter((e) => e.type === 'idle').length;
-      await waitFor(() => idleCount() >= 3, { label: 'idleCount >= 3' });
+      await t.waitFor(
+        () => assert.ok(idleCount() >= 3, 'idleCount >= 3'),
+        WAIT,
+      );
       await store.appendChunks([createChunk(stream.id, 0)]);
-      await waitFor(() => idleCount() >= 5, { label: 'idleCount >= 5' });
+      await t.waitFor(
+        () => assert.ok(idleCount() >= 5, 'idleCount >= 5'),
+        WAIT,
+      );
       await store.updateStreamStatus(stream.id, 'completed');
       await consume;
 
@@ -1603,7 +1565,7 @@ describe('Stream Chunks', () => {
       );
     });
 
-    it('should reset adaptive delays on queued→running transition', async () => {
+    it('should reset adaptive delays on queued→running transition', async (t) => {
       await using database = await sqlite.database();
       const store = new SqliteStreamStore(database.connection);
       const pollEvents: PollingTelemetryEvent[] = [];
@@ -1629,15 +1591,22 @@ describe('Stream Chunks', () => {
         }
       })();
 
-      await waitFor(
-        () => pollEvents.filter((e) => e.type === 'idle').length >= 3,
-        { label: 'queued idle count >= 3' },
+      await t.waitFor(
+        () =>
+          assert.ok(
+            pollEvents.filter((e) => e.type === 'idle').length >= 3,
+            'queued idle count >= 3',
+          ),
+        WAIT,
       );
       await store.updateStreamStatus(stream.id, 'running');
-      await waitFor(
+      await t.waitFor(
         () =>
-          pollEvents.some((e) => e.type === 'poll' && e.status === 'running'),
-        { label: 'observed running poll' },
+          assert.ok(
+            pollEvents.some((e) => e.type === 'poll' && e.status === 'running'),
+            'observed running poll',
+          ),
+        WAIT,
       );
       await store.updateStreamStatus(stream.id, 'completed');
       await consume;
@@ -1693,11 +1662,8 @@ describe('Stream Chunks', () => {
       await store.appendChunks(chunks);
       await store.updateStreamStatus(stream.id, 'completed');
 
-      const received: unknown[] = [];
       const readable = streams.watch(stream.id);
-      for await (const chunk of readable) {
-        received.push(chunk);
-      }
+      const received = await Array.fromAsync(readable);
 
       assert.strictEqual(received.length, totalChunks);
       assert.deepStrictEqual(received[0], textDeltaChunk(0));
@@ -1777,16 +1743,13 @@ describe('Stream Chunks', () => {
 
       await store.appendChunks([createChunk(stream.id, 0)]);
 
-      const received: unknown[] = [];
       const readable = streams.watch(stream.id);
-      const consume = (async () => {
-        for await (const chunk of readable) received.push(chunk);
-      })();
+      const consume = Array.fromAsync(readable);
 
       await store.appendChunks([createChunk(stream.id, 1)]);
       await streams.cancel(stream.id);
 
-      await consume;
+      const received = await consume;
 
       assert.strictEqual(received.length, 2);
 
@@ -1795,7 +1758,7 @@ describe('Stream Chunks', () => {
       assert.strictEqual(updated.status, 'cancelled');
     });
 
-    it('should not let completion overwrite a cancellation that committed first', async () => {
+    it('should not let completion overwrite a cancellation that committed first', async (t) => {
       await using database = await sqlite.database();
       const store = new SqliteStreamStore(database.connection);
       const watcherSleeping = Promise.withResolvers<void>();
@@ -1822,7 +1785,7 @@ describe('Stream Chunks', () => {
         }),
         streamId,
       );
-      await waitForStatus(store, streamId, 'running');
+      await waitForStatus(t, store, streamId, 'running');
       await watcherSleeping.promise;
 
       await streams.cancel(streamId);
@@ -1866,10 +1829,7 @@ describe('Stream Chunks', () => {
       ]);
       await store.updateStreamStatus(stream.id, 'completed');
 
-      const received: unknown[] = [];
-      for await (const chunk of streams.watch(stream.id)) {
-        received.push(chunk);
-      }
+      const received = await Array.fromAsync(streams.watch(stream.id));
 
       assert.strictEqual(received.length, 2);
     });
@@ -1969,7 +1929,7 @@ describe('Stream Chunks', () => {
   });
 
   describe('StreamManager.persist() onCancelDetected', () => {
-    it('should invoke onCancelDetected exactly once when cancelled', async () => {
+    it('should invoke onCancelDetected exactly once when cancelled', async (t) => {
       await using database = await sqlite.database();
       const store = new SqliteStreamStore(database.connection);
       const streams = makeManager(store);
@@ -1994,7 +1954,7 @@ describe('Stream Chunks', () => {
         },
       });
 
-      await waitForStatus(store, streamId, 'running');
+      await waitForStatus(t, store, streamId, 'running');
       void streams.cancel(streamId);
 
       await persistPromise;
@@ -2008,7 +1968,7 @@ describe('Stream Chunks', () => {
       assert.strictEqual(typeof calls[0].latencyMs, 'number');
     });
 
-    it('should recover after a transient source failure and detect remote cancellation', async () => {
+    it('should recover after a transient source failure and detect remote cancellation', async (t) => {
       await using database = await sqlite.database();
       const store = new SqliteStreamStore(database.connection);
       const changeSource = new FailFirstThenPollingChangeSource(store);
@@ -2025,7 +1985,7 @@ describe('Stream Chunks', () => {
         },
       });
       try {
-        await waitForStatus(store, streamId, 'running');
+        await waitForStatus(t, store, streamId, 'running');
         await settleWithin(
           changeSource.firstFailure.wait(),
           'cancellation watcher subscribes',
@@ -2045,7 +2005,7 @@ describe('Stream Chunks', () => {
       }
     });
 
-    it('should abort persistence when cancellation telemetry cannot read the stream', async () => {
+    it('should abort persistence when cancellation telemetry cannot read the stream', async (t) => {
       const store = new FailNextStreamReadStore(':memory:');
       try {
         const streams = makeManager(store);
@@ -2055,7 +2015,7 @@ describe('Stream Chunks', () => {
         using source = streamHarness.source<UIMessageChunk>();
         const persist = streams.persist(source.stream, streamId);
         try {
-          await waitForStatus(store, streamId, 'running');
+          await waitForStatus(t, store, streamId, 'running');
           store.failNextStreamRead();
 
           let cancelError: unknown;
@@ -2132,7 +2092,7 @@ describe('Stream Chunks', () => {
       }
     });
 
-    it('should not fail persist when onCancelDetected throws', async () => {
+    it('should not fail persist when onCancelDetected throws', async (t) => {
       await using database = await sqlite.database();
       const store = new SqliteStreamStore(database.connection);
       const streams = makeManager(store);
@@ -2156,7 +2116,7 @@ describe('Stream Chunks', () => {
         },
       });
 
-      await waitForStatus(store, streamId, 'running');
+      await waitForStatus(t, store, streamId, 'running');
       void streams.cancel(streamId);
 
       await persistPromise;
@@ -2166,7 +2126,7 @@ describe('Stream Chunks', () => {
       assert.strictEqual(stream.status, 'cancelled');
     });
 
-    it('should work unchanged when no onCancelDetected is provided', async () => {
+    it('should work unchanged when no onCancelDetected is provided', async (t) => {
       await using database = await sqlite.database();
       const store = new SqliteStreamStore(database.connection);
       const streams = makeManager(store);
@@ -2186,7 +2146,7 @@ describe('Stream Chunks', () => {
 
       const persistPromise = streams.persist(source, streamId);
 
-      await waitForStatus(store, streamId, 'running');
+      await waitForStatus(t, store, streamId, 'running');
       void streams.cancel(streamId);
 
       await persistPromise;
@@ -2198,7 +2158,7 @@ describe('Stream Chunks', () => {
   });
 
   describe('StreamManager.persist() error chunks', () => {
-    it('should fail the stream when a top-level error chunk is persisted', async () => {
+    it('should fail the stream when a top-level error chunk is persisted', async (t) => {
       await using database = await sqlite.database();
       const store = new SqliteStreamStore(database.connection);
       const streams = makeManager(store);
@@ -2221,7 +2181,7 @@ describe('Stream Chunks', () => {
         strategy: 'immediate',
       });
 
-      await waitForStatus(store, streamId, 'failed');
+      await waitForStatus(t, store, streamId, 'failed');
       await persistPromise;
 
       const updated = await store.getStream(streamId);
