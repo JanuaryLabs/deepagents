@@ -1,3 +1,5 @@
+import { openai } from '@ai-sdk/openai';
+
 import participants from './participants.ts';
 import { WhatsAppGroup } from './whatsapp.ts';
 
@@ -8,7 +10,7 @@ console.log('Zukhruf WhatsApp group\n');
 
 await using group = await WhatsAppGroup.create({
   userId: process.env.USER ?? 'local',
-  participants,
+  participants: participants(openai),
   onMessage: ({ author, content }) => {
     console.log(`${author}: ${content}\n`);
   },

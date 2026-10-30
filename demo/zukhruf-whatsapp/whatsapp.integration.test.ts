@@ -117,11 +117,7 @@ test('reserves the human author name from participants', async () => {
 
 test('every member sees a group message concurrently and only volunteers publish replies', async () => {
   // The provider refuses to build a request without a key, even one msw answers.
-  const keyed = createOpenAI({ apiKey: 'test' });
-  const members = participants.map((participant) => ({
-    ...participant,
-    model: keyed('gpt-5.6-terra'),
-  }));
+  const members = participants(createOpenAI({ apiKey: 'test' }));
   const firstNotificationStarted = Promise.withResolvers<void>();
   const firstParticipants = new Set<string>();
   let activeParticipationChecks = 0;
@@ -133,7 +129,7 @@ test('every member sees a group message concurrently and only volunteers publish
       maxActiveParticipationChecks,
       activeParticipationChecks,
     );
-    if (firstParticipants.size === participants.length) {
+    if (firstParticipants.size === members.length) {
       firstNotificationStarted.resolve();
     }
     await settleWithin(
@@ -173,7 +169,7 @@ test('every member sees a group message concurrently and only volunteers publish
     'Should we launch the proposed product immediately?',
   );
 
-  assert.equal(maxActiveParticipationChecks, participants.length);
+  assert.equal(maxActiveParticipationChecks, members.length);
   assert.deepEqual(
     messages.map(({ author, content }) => ({ author, content })),
     [
@@ -187,7 +183,7 @@ test('every member sees a group message concurrently and only volunteers publish
       },
     ],
   );
-  for (const { name } of participants) {
+  for (const { name } of members) {
     if (name === 'researcher') continue;
     assert.equal(
       JSON.stringify(calls[name].at(-1)).includes(
