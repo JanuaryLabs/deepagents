@@ -1,9 +1,10 @@
 import { PGlite } from '@electric-sql/pglite';
+import { timebox } from '@zukhruf/testing/async';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
-import { type TestContext, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
@@ -126,19 +127,22 @@ async function drainStream(stream: ReadableStream): Promise<void> {
 }
 
 async function waitForStatus(
-  t: TestContext,
   store: SqliteStreamStore,
   id: string,
   expected: string,
 ): Promise<void> {
-  await t.waitFor(
+  await timebox(
     async () =>
       assert.equal(
         await store.getStreamStatus(id),
         expected,
         `timed out waiting for ${id} to become ${expected}`,
       ),
-    { interval: 20, timeout: 5_000 },
+    {
+      minTimeout: 20,
+      maxRetryTime: 5_000,
+      shouldRetry: ({ error }) => error instanceof assert.AssertionError,
+    },
   );
 }
 
@@ -301,7 +305,7 @@ describe('zukhruf runtime mailbox delivery', () => {
       positions.toSorted((a, b) => a - b),
       positions,
     );
-    await waitForStatus(t, h.streamStore, wake.streamId, 'completed');
+    await waitForStatus(h.streamStore, wake.streamId, 'completed');
     const resumed = await h.runtime.observe(researcher).resume();
     assert.ok(
       resumed,

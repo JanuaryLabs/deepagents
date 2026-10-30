@@ -2599,7 +2599,7 @@ describe('zukhruf runtime — background executor', () => {
       conversation,
       turn('after approval'),
     );
-    await t.waitFor(
+    await timebox(
       async () => {
         const jobs = await h.boss.findJobs(h.queue.queue, {
           key: conversation.chatId,
@@ -2610,7 +2610,11 @@ describe('zukhruf runtime — background executor', () => {
         )?.state;
         assert.equal(parkedState, 'cancelled', 'the follow-up is parked first');
       },
-      { interval: 25, timeout: 5_000 },
+      {
+        minTimeout: 25,
+        maxRetryTime: 5_000,
+        shouldRetry: ({ error }) => error instanceof assert.AssertionError,
+      },
     );
 
     await submitApprovalResponses(h.runtime, conversation, {
