@@ -13,12 +13,6 @@ import {
   views,
 } from '@deepagents/text2sql/bigquery';
 
-import {
-  type SqlResponder,
-  requireOne,
-  createExecuteStub as sharedExecuteStub,
-} from './test-helpers.test.ts';
-
 const columnFragment = z.object({
   data: z.object({
     name: z.string(),
@@ -47,13 +41,25 @@ function tablesIn(fragments: ContextFragment[]) {
     .map((f) => tableData.parse(f.data));
 }
 
+type SqlResponder = (sql: string) => unknown;
+
+function requireOne<T>(items: T[], message: string): T {
+  if (items.length !== 1) {
+    throw new Error(`${message}. Expected 1, got ${items.length}`);
+  }
+  return items[0];
+}
+
 function createExecuteStub(responder: SqlResponder) {
-  return sharedExecuteStub((sql) => {
+  const calls: string[] = [];
+  const execute = (sql: string) => {
+    calls.push(sql);
     if (/\bcount\s*\(/i.test(sql)) {
       throw new Error(`Unexpected COUNT() query in introspection: ${sql}`);
     }
     return responder(sql);
-  });
+  };
+  return { execute, calls };
 }
 
 function standardResponder(sql: string): unknown {
