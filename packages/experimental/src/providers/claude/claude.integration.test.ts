@@ -40,6 +40,7 @@ async function localHome(t: TestContext, platform: NodeJS.Platform = 'linux') {
   t.mock.property(process, 'env', {
     ...process.env,
     CLAUDE_CONFIG_DIR: directory.path,
+    CLAUDE_CODE_OAUTH_TOKEN: undefined,
     ANTHROPIC_API_KEY: 'must-not-be-used',
     ANTHROPIC_AUTH_TOKEN: 'must-not-be-used',
     ANTHROPIC_BASE_URL: 'https://must-not-receive-credentials.invalid',
@@ -234,6 +235,96 @@ test('authentication is lazy and observes account changes without using API cred
     /claude auth login/,
   );
   assert.deepEqual(tokens, ['Bearer access-a', 'Bearer access-b']);
+});
+
+test('a Claude Code OAuth token in the environment authenticates each request instead of an expired stored login', async (t) => {
+  await using home = await localHome(t);
+  const path = join(home.path, '.credentials.json');
+  const stored = JSON.stringify(login('stored', Date.now() - 1000));
+  await writeFile(path, stored);
+  process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-setup-token';
+  const requests: string[] = [];
+  t.mock.method(
+    globalThis,
+    'fetch',
+    async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push(
+        `${String(input)} ${new Headers(init?.headers).get('authorization')}`,
+      );
+      return response('ok');
+    },
+  );
+  const model = claude('claude-sonnet-4-6');
+  await generateText({ model, prompt: 'hello', maxRetries: 0 });
+  await generateText({ model, prompt: 'hello', maxRetries: 0 });
+  assert.deepEqual(requests, [
+    'https://api.anthropic.com/v1/messages Bearer sk-ant-oat01-setup-token',
+    'https://api.anthropic.com/v1/messages Bearer sk-ant-oat01-setup-token',
+  ]);
+  assert.equal(await readFile(path, 'utf8'), stored);
+});
+
+test('a rejected Claude Code OAuth token fails the request without a refresh', async (t) => {
+  await using home = await localHome(t);
+  await writeFile(
+    join(home.path, '.credentials.json'),
+    JSON.stringify(login('stored', Date.now() - 1000)),
+  );
+  process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-revoked-token';
+  const requests: string[] = [];
+  t.mock.method(
+    globalThis,
+    'fetch',
+    async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push(
+        `${String(input)} ${new Headers(init?.headers).get('authorization')}`,
+      );
+      if (String(input).endsWith('/oauth/token'))
+        return Response.json({ access_token: 'refreshed', expires_in: 3600 });
+      return Response.json(
+        {
+          type: 'error',
+          error: {
+            type: 'authentication_error',
+            message: 'Invalid bearer token',
+          },
+        },
+        { status: 401 },
+      );
+    },
+  );
+  await assert.rejects(
+    generateText({
+      model: claude('claude-sonnet-4-6'),
+      prompt: 'hello',
+      maxRetries: 0,
+    }),
+    { statusCode: 401 },
+  );
+  assert.deepEqual(requests, [
+    'https://api.anthropic.com/v1/messages Bearer sk-ant-oat01-revoked-token',
+  ]);
+});
+
+test('an empty Claude Code OAuth token variable uses the stored login', async (t) => {
+  await using _home = await localHome(t);
+  void _home;
+  process.env.CLAUDE_CODE_OAUTH_TOKEN = '';
+  const tokens: (string | null)[] = [];
+  t.mock.method(
+    globalThis,
+    'fetch',
+    async (_input: unknown, init?: RequestInit) => {
+      tokens.push(new Headers(init?.headers).get('authorization'));
+      return response('ok');
+    },
+  );
+  await generateText({
+    model: claude('claude-sonnet-4-6'),
+    prompt: 'hello',
+    maxRetries: 0,
+  });
+  assert.deepEqual(tokens, ['Bearer access-a']);
 });
 
 for (const rotate of [true, false]) {
@@ -446,6 +537,7 @@ test('a request aborted while another request refreshes the login stops waiting 
   t.mock.property(process, 'env', {
     ...process.env,
     CLAUDE_CONFIG_DIR: home.path,
+    CLAUDE_CODE_OAUTH_TOKEN: undefined,
     ANTHROPIC_API_KEY: 'must-not-be-used',
     ANTHROPIC_AUTH_TOKEN: 'must-not-be-used',
     ANTHROPIC_BASE_URL: 'https://must-not-receive-credentials.invalid',

@@ -33,6 +33,10 @@ export async function getLocalClaudeAuth(
   signal?: AbortSignal,
 ): Promise<string> {
   signal?.throwIfAborted();
+  // Claude Code reads its long-lived `claude setup-token` token first and
+  // treats an empty value as unset. The token has no refresh token.
+  const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  if (token) return token;
   const directory = (
     process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude')
   ).normalize('NFC');

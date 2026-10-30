@@ -26,6 +26,12 @@ resolved on each request from `CLAUDE_CONFIG_DIR`, or `~/.claude` when unset:
   falls back to `.credentials.json`; malformed or inaccessible entries fail.
 - Linux and Windows: read `.credentials.json` in that config directory.
 
+Claude Code reads `CLAUDE_CODE_OAUTH_TOKEN` before the stored login, and this
+provider does the same. Run `claude setup-token` to get this long-lived token.
+When the variable has a value, each request uses it, and the provider does not
+read the stored login. The provider does not refresh this token. A rejected token
+fails the request. An empty value is the same as no value.
+
 The login must contain Claude inference scopes. API-key environment variables and
 `ANTHROPIC_BASE_URL` do not redirect this provider; requests go to Anthropic's
 Messages endpoint using the native login. For credentials your application owns,
