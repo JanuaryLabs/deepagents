@@ -1,4 +1,5 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { type UIMessage, generateId, simulateReadableStream, tool } from 'ai';
 import {
   MockLanguageModelV4,
@@ -6,8 +7,7 @@ import {
 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
-import { mkdtempDisposable, readFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { z } from 'zod';
@@ -25,6 +25,8 @@ import {
   toolOutput,
 } from '@deepagents/context';
 import { createFileTelemetry } from '@deepagents/context/telemetry/file';
+
+const temporaryFiles = new TemporaryFiles();
 
 /** One JSONL line written by createFileTelemetry. */
 const telemetryRecord = z.object({
@@ -85,9 +87,7 @@ async function streakFired(
   turns: number,
   withNoise: boolean,
 ): Promise<boolean> {
-  await using directory = await mkdtempDisposable(
-    join(tmpdir(), 'deepagents-reply-'),
-  );
+  await using directory = await temporaryFiles.directory('deepagents-reply-');
   const path = join(directory.path, 'ai.jsonl');
   const context = new ContextEngine({
     store: new InMemoryContextStore(),

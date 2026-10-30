@@ -1,11 +1,11 @@
 import type { LanguageModelV4Prompt } from '@ai-sdk/provider';
 import type { ToolResultOutput } from '@ai-sdk/provider-utils';
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { asSchema, generateText, isStepCount } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
-import { mkdtempDisposable, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
@@ -22,6 +22,8 @@ import {
   createVirtualSandbox,
   readFileContent,
 } from '@deepagents/context';
+
+const temporaryFiles = new TemporaryFiles();
 
 const testUsage = {
   inputTokens: {
@@ -127,8 +129,8 @@ function toolResultOutputs(prompt: LanguageModelV4Prompt) {
 
 describe('bash toolkit', () => {
   it('uploads dotfiles and lets inline files override directory files', async () => {
-    await using source = await mkdtempDisposable(
-      join(tmpdir(), 'deepagents-bash-tool-'),
+    await using source = await temporaryFiles.directory(
+      'deepagents-bash-tool-',
     );
     await writeFile(join(source.path, '.env'), 'MODE=test');
     await writeFile(join(source.path, 'shared.txt'), 'from directory');
@@ -161,8 +163,8 @@ describe('bash toolkit', () => {
   });
 
   it('applies the upload filter before enforcing the file limit', async () => {
-    await using source = await mkdtempDisposable(
-      join(tmpdir(), 'deepagents-bash-tool-'),
+    await using source = await temporaryFiles.directory(
+      'deepagents-bash-tool-',
     );
     await writeFile(join(source.path, 'included.txt'), 'included');
     await writeFile(join(source.path, 'excluded.log'), 'excluded');
@@ -190,8 +192,8 @@ describe('bash toolkit', () => {
   });
 
   it('rejects an over-limit upload before writing any files', async () => {
-    await using source = await mkdtempDisposable(
-      join(tmpdir(), 'deepagents-bash-tool-'),
+    await using source = await temporaryFiles.directory(
+      'deepagents-bash-tool-',
     );
     await writeFile(join(source.path, 'first.txt'), 'first');
     await writeFile(join(source.path, 'second.txt'), 'second');

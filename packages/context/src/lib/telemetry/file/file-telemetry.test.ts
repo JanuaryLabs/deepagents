@@ -1,4 +1,5 @@
 import { settleWithin } from '@zukhruf/testing/async';
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import {
   type Telemetry,
   embed,
@@ -16,14 +17,15 @@ import {
   convertArrayToReadableStream,
 } from 'ai/test';
 import assert from 'node:assert';
-import { mkdtempDisposable, readFile, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
 import { createFileTelemetry } from '@deepagents/context/telemetry/file';
+
+const temporaryFiles = new TemporaryFiles();
 
 const usage = {
   inputTokens: { total: 3, noCache: 3, cacheRead: 0, cacheWrite: 0 },
@@ -155,8 +157,8 @@ describe('createFileTelemetry()', () => {
     const timestamp = '2026-07-12T10:00:00.000Z';
     t.mock.timers.enable({ apis: ['Date'] });
     t.mock.timers.setTime(Date.parse(timestamp));
-    await using directory = await mkdtempDisposable(
-      join(tmpdir(), 'deepagents-telemetry-'),
+    await using directory = await temporaryFiles.directory(
+      'deepagents-telemetry-',
     );
     const path = join(directory.path, 'nested', 'ai.jsonl');
     const telemetry = createFileTelemetry({ path });
@@ -192,8 +194,8 @@ describe('createFileTelemetry()', () => {
   });
 
   it('redacts runtime context when inputs are not recorded', async () => {
-    await using directory = await mkdtempDisposable(
-      join(tmpdir(), 'deepagents-telemetry-'),
+    await using directory = await temporaryFiles.directory(
+      'deepagents-telemetry-',
     );
     const path = join(directory.path, 'nested', 'ai.jsonl');
     const telemetry = createFileTelemetry({ path });
@@ -218,8 +220,8 @@ describe('createFileTelemetry()', () => {
   });
 
   it('writes every AI SDK telemetry lifecycle callback', async () => {
-    await using directory = await mkdtempDisposable(
-      join(tmpdir(), 'deepagents-telemetry-'),
+    await using directory = await temporaryFiles.directory(
+      'deepagents-telemetry-',
     );
     const path = join(directory.path, 'nested', 'ai.jsonl');
     const telemetry = createFileTelemetry({ path });
@@ -253,8 +255,8 @@ describe('createFileTelemetry()', () => {
   });
 
   it('preserves existing records and serializes concurrent writes', async () => {
-    await using directory = await mkdtempDisposable(
-      join(tmpdir(), 'deepagents-telemetry-'),
+    await using directory = await temporaryFiles.directory(
+      'deepagents-telemetry-',
     );
     const path = join(directory.path, 'nested', 'ai.jsonl');
     await generateText({
@@ -296,8 +298,8 @@ describe('createFileTelemetry()', () => {
   });
 
   it('reports write failures without rejecting telemetry callbacks', async () => {
-    await using directory = await mkdtempDisposable(
-      join(tmpdir(), 'deepagents-telemetry-'),
+    await using directory = await temporaryFiles.directory(
+      'deepagents-telemetry-',
     );
     const blockingFile = join(directory.path, 'not-a-directory');
     await writeFile(blockingFile, 'content');
@@ -321,8 +323,8 @@ describe('createFileTelemetry()', () => {
   });
 
   it('handles initialization failures before any telemetry event', async () => {
-    await using directory = await mkdtempDisposable(
-      join(tmpdir(), 'deepagents-telemetry-'),
+    await using directory = await temporaryFiles.directory(
+      'deepagents-telemetry-',
     );
     const blockingFile = join(directory.path, 'not-a-directory');
     await writeFile(blockingFile, 'content');

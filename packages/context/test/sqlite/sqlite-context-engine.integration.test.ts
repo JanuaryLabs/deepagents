@@ -1,11 +1,11 @@
 import { settleWithin } from '@zukhruf/testing/async';
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import { validateUIMessages } from 'ai';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
@@ -23,6 +23,8 @@ import {
   reminder,
   user,
 } from '@deepagents/context';
+
+const temporaryFiles = new TemporaryFiles();
 
 const sqlite = new Sqlite();
 
@@ -52,11 +54,11 @@ async function withDiskImage<T>(
   sizeMegabytes: number,
   fn: (mountPath: string) => Promise<T>,
 ) {
-  const dir = await mkdtemp(
-    path.join(os.tmpdir(), `context-${sanitizeLabel(label)}-`),
+  await using dir = await temporaryFiles.directory(
+    `context-${sanitizeLabel(label)}-`,
   );
-  const imagePath = path.join(dir, 'disk.img');
-  const mountPath = path.join(dir, 'mnt');
+  const imagePath = path.join(dir.path, 'disk.img');
+  const mountPath = path.join(dir.path, 'mnt');
   try {
     try {
       await execFileAsync('hdiutil', [
@@ -97,7 +99,6 @@ async function withDiskImage<T>(
     } catch {
       // best effort cleanup
     }
-    await rm(dir, { recursive: true, force: true });
   }
 }
 

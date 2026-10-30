@@ -1,3 +1,4 @@
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { InMemoryFs, MountableFs, OverlayFs, ReadWriteFs } from 'just-bash';
 import assert from 'node:assert';
 import * as fs from 'node:fs/promises';
@@ -5,6 +6,8 @@ import * as path from 'node:path';
 import { describe, it } from 'node:test';
 
 import { createBashTool, createVirtualSandbox } from '@deepagents/context';
+
+const temporaryFiles = new TemporaryFiles();
 
 /**
  * Integration tests for just-bash filesystem mounting with skills.
@@ -54,8 +57,11 @@ describe('bash sandbox skills mounting', () => {
    * included fsMounts in the MountableFs configuration.
    */
   it('FAILS: demonstrates bug when fsMounts is created but not used', async () => {
-    await using testDir = await fs.mkdtempDisposable(
-      path.join(process.cwd(), '.test-bash-sandbox-'),
+    await using testDir = await temporaryFiles.directory(
+      '.test-bash-sandbox-',
+      {
+        parent: process.cwd(),
+      },
     );
     const { skillsDir, artifactsDir } = await seedSkills(testDir.path);
     // This is the BUGGY pattern from client's code
@@ -123,8 +129,11 @@ describe('bash sandbox skills mounting', () => {
    * at /skills/home/user/project/... instead of /skills/...
    */
   it('FAILS: demonstrates bug when OverlayFs uses wrong mountPoint', async () => {
-    await using testDir = await fs.mkdtempDisposable(
-      path.join(process.cwd(), '.test-bash-sandbox-'),
+    await using testDir = await temporaryFiles.directory(
+      '.test-bash-sandbox-',
+      {
+        parent: process.cwd(),
+      },
     );
     const { skillsDir, artifactsDir } = await seedSkills(testDir.path);
     const listOfSkills = [
@@ -194,8 +203,11 @@ describe('bash sandbox skills mounting', () => {
    * 2. Use `mountPoint: '/'` in OverlayFs so files appear at root of the mount
    */
   it('SUCCESS: correct way to mount skills with mountPoint: "/"', async () => {
-    await using testDir = await fs.mkdtempDisposable(
-      path.join(process.cwd(), '.test-bash-sandbox-'),
+    await using testDir = await temporaryFiles.directory(
+      '.test-bash-sandbox-',
+      {
+        parent: process.cwd(),
+      },
     );
     const { skillsDir, artifactsDir } = await seedSkills(testDir.path);
     const listOfSkills = [
@@ -248,8 +260,11 @@ describe('bash sandbox skills mounting', () => {
   });
 
   it('SUCCESS: OverlayFs + MountableFs exposes host skill files at sandbox path', async () => {
-    await using testDir = await fs.mkdtempDisposable(
-      path.join(process.cwd(), '.test-bash-sandbox-'),
+    await using testDir = await temporaryFiles.directory(
+      '.test-bash-sandbox-',
+      {
+        parent: process.cwd(),
+      },
     );
     const { skillsDir, artifactsDir } = await seedSkills(testDir.path);
     const skillMounts = [{ host: skillsDir, sandbox: '/skills/skills' }];
@@ -317,8 +332,11 @@ describe('bash sandbox skills mounting', () => {
    * Multiple skills mounted correctly.
    */
   it('SUCCESS: multiple skills mounted independently', async () => {
-    await using testDir = await fs.mkdtempDisposable(
-      path.join(process.cwd(), '.test-bash-sandbox-'),
+    await using testDir = await temporaryFiles.directory(
+      '.test-bash-sandbox-',
+      {
+        parent: process.cwd(),
+      },
     );
     const { skillsDir } = await seedSkills(testDir.path);
     // Create another skill
@@ -379,8 +397,11 @@ description: Data analysis skill
    * Skills are read-only - cannot write to them.
    */
   it('SUCCESS: skills are read-only', async () => {
-    await using testDir = await fs.mkdtempDisposable(
-      path.join(process.cwd(), '.test-bash-sandbox-'),
+    await using testDir = await temporaryFiles.directory(
+      '.test-bash-sandbox-',
+      {
+        parent: process.cwd(),
+      },
     );
     const { skillsDir } = await seedSkills(testDir.path);
     const fsMounts = [

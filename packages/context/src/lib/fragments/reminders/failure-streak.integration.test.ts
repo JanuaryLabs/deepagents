@@ -1,4 +1,5 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { type UIMessage, generateId, simulateReadableStream, tool } from 'ai';
 import {
   MockLanguageModelV4,
@@ -6,8 +7,7 @@ import {
 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { z } from 'zod';
@@ -24,6 +24,8 @@ import {
   toolFailureStreak,
 } from '@deepagents/context';
 import { createFileTelemetry } from '@deepagents/context/telemetry/file';
+
+const temporaryFiles = new TemporaryFiles();
 
 /** One JSONL line written by createFileTelemetry. */
 const telemetryRecord = z.object({
@@ -107,61 +109,58 @@ function remindersInPrompts(jsonl: string): string[] {
 
 describe('tool-failure streak reminders', () => {
   it('escalates severity across consecutive failures and resets on success', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'deepagents-streak-'));
-    const path = join(directory, 'ai.jsonl');
-    try {
-      let bashCalls = 0;
-      const context = new ContextEngine({
-        store: new InMemoryContextStore(),
-        chatId: 'streak',
-        userId: 'u1',
-      });
-      const model = scriptedModel();
-      const chatAgent = agent({
-        name: 'streak',
-        context,
-        model,
-        sandbox: await createBashTool({
-          sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    await using directory =
+      await temporaryFiles.directory('deepagents-streak-');
+    const path = join(directory.path, 'ai.jsonl');
+    let bashCalls = 0;
+    const context = new ContextEngine({
+      store: new InMemoryContextStore(),
+      chatId: 'streak',
+      userId: 'u1',
+    });
+    const model = scriptedModel();
+    const chatAgent = agent({
+      name: 'streak',
+      context,
+      model,
+      sandbox: await createBashTool({
+        sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      }),
+      tools: {
+        bash: tool({
+          description: 'run a shell command',
+          inputSchema: z.object({ cmd: z.string() }),
+          execute: async () => {
+            bashCalls++;
+            if (bashCalls <= 4)
+              throw new Error(`bash: not found #${bashCalls}`);
+            return { ok: true };
+          },
         }),
-        tools: {
-          bash: tool({
-            description: 'run a shell command',
-            inputSchema: z.object({ cmd: z.string() }),
-            execute: async () => {
-              bashCalls++;
-              if (bashCalls <= 4)
-                throw new Error(`bash: not found #${bashCalls}`);
-              return { ok: true };
-            },
-          }),
-        },
-        telemetry: {
-          integrations: createFileTelemetry({ path }),
-        },
-      });
-      context.set(repeatedFailureReminder('bash'));
+      },
+      telemetry: {
+        integrations: createFileTelemetry({ path }),
+      },
+    });
+    context.set(repeatedFailureReminder('bash'));
 
-      await context.continue({
-        id: generateId(),
-        role: 'user',
-        parts: [{ type: 'text', text: 'list the files' }],
-      } satisfies UIMessage);
-      await drain(await chat(chatAgent));
+    await context.continue({
+      id: generateId(),
+      role: 'user',
+      parts: [{ type: 'text', text: 'list the files' }],
+    } satisfies UIMessage);
+    await drain(await chat(chatAgent));
 
-      assert.strictEqual(bashCalls, 5, 'expected 4 failures then a success');
-      assert.deepStrictEqual(
-        remindersInPrompts(await readFile(path, 'utf8')),
-        [
-          'bash failed once: try another approach.',
-          'bash failed 2 times in a row: change the command.',
-          'bash failed 3 times in a row: change the command.',
-          'bash failed 4 times in a row: STOP and explain the blocker.',
-        ],
-        'the successful 5th call must not add a 5th reminder',
-      );
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
+    assert.strictEqual(bashCalls, 5, 'expected 4 failures then a success');
+    assert.deepStrictEqual(
+      remindersInPrompts(await readFile(path, 'utf8')),
+      [
+        'bash failed once: try another approach.',
+        'bash failed 2 times in a row: change the command.',
+        'bash failed 3 times in a row: change the command.',
+        'bash failed 4 times in a row: STOP and explain the blocker.',
+      ],
+      'the successful 5th call must not add a 5th reminder',
+    );
   });
 });
