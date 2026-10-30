@@ -3,7 +3,6 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/devtool/host/src",
   "projectType": "library",
-  "tags": ["test:node"],
   "targets": {
     "build": {
       "executor": "@nx/esbuild:esbuild",
@@ -26,7 +25,6 @@
         ],
         "includeIgnoredAssetFiles": true
       }
-    },
-    "test": {}
+    }
   }
 }

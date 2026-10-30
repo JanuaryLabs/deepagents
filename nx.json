@@ -71,6 +71,12 @@
         "testTargetName": "test",
         "testMode": "run"
       }
+    },
+    {
+      "plugin": "@zukhruf/nx/test",
+      "options": {
+        "flags": ["--experimental-test-module-mocks"]
+      }
     }
   ],
   "workspaceLayout": {
@@ -146,22 +152,7 @@
     },
     "test": [
       {
-        "executor": "nx:run-commands",
-        "dependsOn": ["build"],
-        "options": {
-          "cwd": "{projectRoot}"
-        }
-      },
-      {
-        "filter": {
-          "projects": ["tag:test:node"]
-        },
-        "executor": "nx:run-commands",
-        "inputs": ["default", "^production"],
-        "outputs": ["{projectRoot}/test-results.xml"],
-        "options": {
-          "command": "node --test --no-warnings --test-timeout=60000 --experimental-test-module-mocks --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=test-results.xml"
-        }
+        "dependsOn": ["...", "build"]
       },
       {
         "filter": {

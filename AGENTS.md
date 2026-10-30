@@ -18,9 +18,10 @@
 node --test --no-warnings --test-timeout=60000 path/to/package/test/file.test.ts
 ```
 
-- Nx Node test targets share the command in `nx.json`, including a 60-second per-test
-  timeout and module mocks. Pass `--args="--test-timeout=<ms> path/to/file.test.ts"`
-  to narrow a run or adjust its timeout. Compaction and devtool-history keep 10 seconds.
+- The `@zukhruf/nx/test` plugin in `nx.json` gives each project with `node:test` files
+  its `test` target, with a 60-second per-test timeout and module mocks. Pass
+  `--args="--test-timeout=<ms> path/to/file.test.ts"` to narrow a run or adjust its
+  timeout: `--args` replaces the test selection. Compaction and devtool-history keep 10 seconds.
 - **Always pass `--test-timeout=<ms>` to direct `node --test` runs.** Prefer Nx for
   dependency-aware builds. Database classes share servers without runner setup;
   servers persist until explicit cleanup. See [TEST_PRIMITIVES.md](./TEST_PRIMITIVES.md).

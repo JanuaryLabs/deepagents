@@ -3,7 +3,6 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/compaction/src",
   "projectType": "library",
-  "tags": ["test:node"],
   "targets": {
     "build": {
       "executor": "@nx/esbuild:esbuild",
@@ -14,7 +13,7 @@
     },
     "test": {
       "options": {
-        "args": ["--test-timeout=10000"]
+        "args": "--test-timeout=10000 \"src/**/*.test.ts\""
       }
     },
     "format": {
