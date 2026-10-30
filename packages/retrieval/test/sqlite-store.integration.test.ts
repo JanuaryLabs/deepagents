@@ -1,7 +1,6 @@
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert/strict';
-import { mkdtempDisposable } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
@@ -13,8 +12,8 @@ const sqlite = new Sqlite();
 
 describe('SQLiteStore under a cross-process write lock', () => {
   it("rejects with SQLite's busy error when another process takes the write lock while the corpus is chunked", async () => {
-    await using directory = await mkdtempDisposable(
-      join(tmpdir(), 'retrieval-lock-'),
+    await using directory = await new TemporaryFiles().directory(
+      'retrieval-lock-',
     );
     const path = join(directory.path, 'store.sqlite');
     using database = new DatabaseSync(path, { allowExtension: true });
@@ -42,8 +41,8 @@ describe('SQLiteStore under a cross-process write lock', () => {
   });
 
   it("waits for another process's write transaction and then indexes the corpus", async () => {
-    await using directory = await mkdtempDisposable(
-      join(tmpdir(), 'retrieval-lock-'),
+    await using directory = await new TemporaryFiles().directory(
+      'retrieval-lock-',
     );
     const path = join(directory.path, 'store.sqlite');
     using database = new DatabaseSync(path, { allowExtension: true });
