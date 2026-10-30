@@ -1,7 +1,7 @@
-import { openai } from '@ai-sdk/openai';
+import { createOpenAI, openai } from '@ai-sdk/openai';
 import { settleWithin } from '@zukhruf/testing/async';
+import { Msw } from '@zukhruf/testing/msw';
 import { HttpResponse, http } from 'msw';
-import { setupServer } from 'msw/node';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { z } from 'zod';
@@ -117,7 +117,11 @@ test('reserves the human author name from participants', async () => {
 
 test('every member sees a group message concurrently and only volunteers publish replies', async () => {
   // The provider refuses to build a request without a key, even one msw answers.
-  process.env.OPENAI_API_KEY ??= 'test';
+  const keyed = createOpenAI({ apiKey: 'test' });
+  const members = participants.map((participant) => ({
+    ...participant,
+    model: keyed('gpt-5.6-terra'),
+  }));
   const firstNotificationStarted = Promise.withResolvers<void>();
   const firstParticipants = new Set<string>();
   let activeParticipationChecks = 0;
@@ -141,7 +145,7 @@ test('every member sees a group message concurrently and only volunteers publish
   };
 
   const calls: Record<string, ResponsesRequest[]> = {};
-  const openaiApi = setupServer(
+  using _openaiApi = new Msw().intercept(
     http.post(RESPONSES, async ({ request }) => {
       const body = responsesRequestSchema.parse(await request.json());
       const name = /You are (?<name>\w+) in a WhatsApp-style group chat/.exec(
@@ -160,42 +164,37 @@ test('every member sees a group message concurrently and only volunteers publish
       return textResponse('I have nothing useful to add.');
     }),
   );
-  openaiApi.listen({ onUnhandledFrame: 'error' });
-  try {
-    await using group = await WhatsAppGroup.create({
-      userId: 'user-1',
-      participants,
-    });
+  await using group = await WhatsAppGroup.create({
+    userId: 'user-1',
+    participants: members,
+  });
 
-    const messages = await group.send(
-      'Should we launch the proposed product immediately?',
-    );
+  const messages = await group.send(
+    'Should we launch the proposed product immediately?',
+  );
 
-    assert.equal(maxActiveParticipationChecks, participants.length);
-    assert.deepEqual(
-      messages.map(({ author, content }) => ({ author, content })),
-      [
-        {
-          author: 'user',
-          content: 'Should we launch the proposed product immediately?',
-        },
-        {
-          author: 'researcher',
-          content: 'The evidence supports a small pilot first.',
-        },
-      ],
+  assert.equal(maxActiveParticipationChecks, participants.length);
+  assert.deepEqual(
+    messages.map(({ author, content }) => ({ author, content })),
+    [
+      {
+        author: 'user',
+        content: 'Should we launch the proposed product immediately?',
+      },
+      {
+        author: 'researcher',
+        content: 'The evidence supports a small pilot first.',
+      },
+    ],
+  );
+  for (const { name } of participants) {
+    if (name === 'researcher') continue;
+    assert.equal(
+      JSON.stringify(calls[name].at(-1)).includes(
+        'The evidence supports a small pilot first.',
+      ),
+      true,
+      `the researcher reply is broadcast back to ${name}`,
     );
-    for (const { name } of participants) {
-      if (name === 'researcher') continue;
-      assert.equal(
-        JSON.stringify(calls[name].at(-1)).includes(
-          'The evidence supports a small pilot first.',
-        ),
-        true,
-        `the researcher reply is broadcast back to ${name}`,
-      );
-    }
-  } finally {
-    openaiApi.close();
   }
 });
