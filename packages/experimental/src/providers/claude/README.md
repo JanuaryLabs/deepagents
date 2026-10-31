@@ -32,6 +32,10 @@ When the variable has a value, each request uses it, and the provider does not
 read the stored login. The provider does not refresh this token. A rejected token
 fails the request. An empty value is the same as no value.
 
+The provider reads these variables from `process.env`. To give it another
+environment, pass it to `createClaude({ env })`. The provider reads
+`CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR` and `USER` from that environment.
+
 The login must contain Claude inference scopes. API-key environment variables and
 `ANTHROPIC_BASE_URL` do not redirect this provider; requests go to Anthropic's
 Messages endpoint using the native login. For credentials your application owns,

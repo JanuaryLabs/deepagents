@@ -242,7 +242,6 @@ test('a Claude Code OAuth token in the environment authenticates each request in
   const path = join(home.path, '.credentials.json');
   const stored = JSON.stringify(login('stored', Date.now() - 1000));
   await writeFile(path, stored);
-  process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-setup-token';
   const requests: string[] = [];
   t.mock.method(
     globalThis,
@@ -254,7 +253,12 @@ test('a Claude Code OAuth token in the environment authenticates each request in
       return response('ok');
     },
   );
-  const model = claude('claude-sonnet-4-6');
+  const model = createClaude({
+    env: {
+      ...process.env,
+      CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-setup-token',
+    },
+  })('claude-sonnet-4-6');
   await generateText({ model, prompt: 'hello', maxRetries: 0 });
   await generateText({ model, prompt: 'hello', maxRetries: 0 });
   assert.deepEqual(requests, [
@@ -267,7 +271,6 @@ test('a Claude Code OAuth token in the environment authenticates each request in
 test('a Claude Code OAuth token in the environment authenticates requests on a machine with no stored login', async (t) => {
   await using home = await localHome(t);
   await rm(join(home.path, '.credentials.json'));
-  process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-setup-token';
   const requests: string[] = [];
   t.mock.method(
     globalThis,
@@ -280,7 +283,12 @@ test('a Claude Code OAuth token in the environment authenticates requests on a m
     },
   );
   const result = await generateText({
-    model: claude('claude-sonnet-4-6'),
+    model: createClaude({
+      env: {
+        ...process.env,
+        CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-setup-token',
+      },
+    })('claude-sonnet-4-6'),
     prompt: 'hello',
     maxRetries: 0,
   });
@@ -293,7 +301,6 @@ test('a Claude Code OAuth token in the environment authenticates requests on a m
 test('a rejected Claude Code OAuth token fails the request', async (t) => {
   await using home = await localHome(t);
   await rm(join(home.path, '.credentials.json'));
-  process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-revoked-token';
   const requests: string[] = [];
   t.mock.method(
     globalThis,
@@ -308,7 +315,12 @@ test('a rejected Claude Code OAuth token fails the request', async (t) => {
   );
   await assert.rejects(
     generateText({
-      model: claude('claude-sonnet-4-6'),
+      model: createClaude({
+        env: {
+          ...process.env,
+          CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-revoked-token',
+        },
+      })('claude-sonnet-4-6'),
       prompt: 'hello',
       maxRetries: 0,
     }),
@@ -322,7 +334,6 @@ test('a rejected Claude Code OAuth token fails the request', async (t) => {
 test('an empty Claude Code OAuth token variable uses the stored login', async (t) => {
   await using _home = await localHome(t);
   void _home;
-  process.env.CLAUDE_CODE_OAUTH_TOKEN = '';
   const tokens: (string | null)[] = [];
   t.mock.method(
     globalThis,
@@ -333,7 +344,9 @@ test('an empty Claude Code OAuth token variable uses the stored login', async (t
     },
   );
   await generateText({
-    model: claude('claude-sonnet-4-6'),
+    model: createClaude({
+      env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: '' },
+    })('claude-sonnet-4-6'),
     prompt: 'hello',
     maxRetries: 0,
   });

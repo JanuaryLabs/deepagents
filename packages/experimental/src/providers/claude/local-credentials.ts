@@ -30,15 +30,16 @@ const signInMessage =
 
 /** Reads Claude Code's native store without running the Claude agent. */
 export async function getLocalClaudeAuth(
+  env: NodeJS.ProcessEnv,
   signal?: AbortSignal,
 ): Promise<string> {
   signal?.throwIfAborted();
   // Claude Code reads its long-lived `claude setup-token` token first and
   // treats an empty value as unset. The token has no refresh token.
-  const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  const token = env.CLAUDE_CODE_OAUTH_TOKEN;
   if (token) return token;
   const directory = (
-    process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude')
+    env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude')
   ).normalize('NFC');
   const home = await realpath(directory).catch(
     (error: NodeJS.ErrnoException) => {
@@ -46,7 +47,7 @@ export async function getLocalClaudeAuth(
       throw error;
     },
   );
-  const initial = await snapshot(home, directory);
+  const initial = await snapshot(home, directory, env);
   if (initial.value.claudeAiOauth.expiresAt > Date.now() + 60_000)
     return initial.value.claudeAiOauth.accessToken;
 
@@ -56,7 +57,7 @@ export async function getLocalClaudeAuth(
     async () => {
       for (let attempt = 0; attempt < 3; attempt++) {
         signal?.throwIfAborted();
-        const current = await snapshot(home, directory);
+        const current = await snapshot(home, directory, env);
         const tokens = current.value.claudeAiOauth;
         if (tokens.expiresAt > Date.now() + 60_000) return tokens.accessToken;
         let fresh;
@@ -112,8 +113,12 @@ export async function getLocalClaudeAuth(
   );
 }
 
-async function snapshot(home: string, directory: string) {
-  const store = await credentialStore(home, directory);
+async function snapshot(
+  home: string,
+  directory: string,
+  env: NodeJS.ProcessEnv,
+) {
+  const store = await credentialStore(home, directory, env);
   const raw = await store.read();
   try {
     return { store, raw, value: nativeLogin.parse(JSON.parse(raw ?? 'null')) };
@@ -122,16 +127,20 @@ async function snapshot(home: string, directory: string) {
   }
 }
 
-async function credentialStore(home: string, directory: string) {
+async function credentialStore(
+  home: string,
+  directory: string,
+  env: NodeJS.ProcessEnv,
+) {
   if (process.platform === 'darwin') {
     const { AsyncEntry } = await import('@napi-rs/keyring');
     // Claude namespaces explicitly configured homes, even the default path.
-    const suffix = process.env.CLAUDE_CONFIG_DIR
+    const suffix = env.CLAUDE_CONFIG_DIR
       ? `-${createHash('sha256').update(directory).digest('hex').slice(0, 8)}`
       : '';
     const entry = new AsyncEntry(
       `Claude Code-credentials${suffix}`,
-      process.env.USER || userInfo().username,
+      env.USER || userInfo().username,
     );
     const keychain = {
       read: () => entry.getPassword(),
