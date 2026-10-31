@@ -159,11 +159,7 @@
         "filter": {
           "projects": ["tag:test:docker"]
         },
-        "options": {
-          "command": "if [ -z \"${DOCKER_CONTEXT+x}${DOCKER_HOST+x}\" ]; then export DOCKER_CONTEXT=limerence-dokploy; fi; case \"$(docker context inspect --format '{{.Endpoints.docker.Host}}')\" in ssh://*) CONCURRENCY=--test-concurrency=1 ;; esac; node --test $CONCURRENCY --test-global-setup=\"$NX_WORKSPACE_ROOT/tools/src/docker-global-setup.ts\" --no-warnings --test-timeout=60000 --experimental-test-module-mocks --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=test-results.xml"
-        },
-        "parallelism": false,
-        "cache": false
+        "parallelism": false
       }
     ],
     "lint": {

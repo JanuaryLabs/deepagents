@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/context/src",
   "projectType": "library",
-  "tags": ["test:node", "test:docker"],
+  "tags": ["test:docker"],
   "targets": {
     "build": {
       "executor": "@nx/esbuild:esbuild",
@@ -17,11 +17,6 @@
           "packages/context/src/lib/sandbox/strace/index.ts"
         ],
         "assets": []
-      }
-    },
-    "test": {
-      "options": {
-        "args": ["--test-force-exit"]
       }
     }
   }

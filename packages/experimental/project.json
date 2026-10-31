@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/experimental/src",
   "projectType": "library",
-  "tags": ["test:node", "test:docker"],
+  "tags": ["test:docker"],
   "targets": {
     "build": {
       "executor": "@nx/esbuild:esbuild",
@@ -23,11 +23,6 @@
           "packages/experimental/src/zukhruf/plugins/uploads/http.ts"
         ],
         "assets": []
-      }
-    },
-    "test": {
-      "options": {
-        "args": ["--test-force-exit"]
       }
     }
   }

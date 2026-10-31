@@ -8,21 +8,21 @@ import path, documented in the package README. Repeated fixture data,
 product-specific harnesses, and infrastructure compositions stay with their
 tests.
 
-| Need                     | Use                                          | Important behavior                                                                                       |
-| ------------------------ | -------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Strict assertions        | `node:assert/strict`                         | Makes methods such as `equal` and `deepEqual` strict by default.                                         |
-| Delay                    | `setTimeout` from `node:timers/promises`     | Alias it to `sleep`; it supports `AbortSignal` and avoids hand-written promises.                         |
-| Retry an observation     | `TestContext.waitFor` from `node:test`       | The callback must throw or reject while waiting. Returning `false` counts as success.                    |
-| Measure a deadline       | `performance.now()`                          | Monotonic elapsed time; do not use it as a timestamp or compare it across processes.                     |
-| Temporary directory      | `mkdtempDisposable` from `node:fs/promises`  | Use with `await using`; cleanup recursively removes the directory.                                       |
-| Resource cleanup         | `using` / `await using`                      | Calls `Symbol.dispose` / `Symbol.asyncDispose` in reverse declaration order, including after errors.     |
-| Deferred promise         | `Promise.withResolvers()`                    | Provides `{ promise, resolve, reject }` without capturing callbacks in a promise constructor.            |
-| Disposable timeout       | `using timer = globalThis.setTimeout(...)`   | Node timers implement `Symbol.dispose`, which cancels the timer when its scope exits.                    |
-| Wait for one event       | `once` from `node:events`                    | Register before triggering the event; it resolves with the emitted arguments.                            |
-| Current module directory | `import.meta.dirname`                        | Replaces `fileURLToPath(import.meta.url)` plus `dirname` in Node ESM files.                              |
-| Current Node executable  | `process.execPath`                           | Use when spawning another Node process instead of assuming `node` is on `PATH`.                          |
-| Non-mutating sort        | `Array.prototype.toSorted()`                 | Returns a shallow sorted copy; provide `(a, b) => a - b` for numbers.                                    |
-| Bound promise settlement | `settleWithin` from `@zukhruf/testing/async` | Rejects if a non-abortable promise does not settle in time; it does not cancel the underlying operation. |
+| Need                     | Use                                                                 | Important behavior                                                                                                 |
+| ------------------------ | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Strict assertions        | `node:assert/strict`                                                | Makes methods such as `equal` and `deepEqual` strict by default.                                                   |
+| Delay                    | `setTimeout` from `node:timers/promises`                            | Alias it to `sleep`; it supports `AbortSignal` and avoids hand-written promises.                                   |
+| Retry an observation     | `TestContext.waitFor` from `node:test`                              | The callback must throw or reject while waiting. Returning `false` counts as success.                              |
+| Measure a deadline       | `performance.now()`                                                 | Monotonic elapsed time; do not use it as a timestamp or compare it across processes.                               |
+| Temporary directory      | `new TemporaryFiles().directory(prefix)` from `@zukhruf/testing/fs` | Use with `await using`; cleanup removes the directory and its contents, with retries for a file that is held open. |
+| Resource cleanup         | `using` / `await using`                                             | Calls `Symbol.dispose` / `Symbol.asyncDispose` in reverse declaration order, including after errors.               |
+| Deferred promise         | `Promise.withResolvers()`                                           | Provides `{ promise, resolve, reject }` without capturing callbacks in a promise constructor.                      |
+| Disposable timeout       | `using timer = globalThis.setTimeout(...)`                          | Node timers implement `Symbol.dispose`, which cancels the timer when its scope exits.                              |
+| Wait for one event       | `once` from `node:events`                                           | Register before triggering the event; it resolves with the emitted arguments.                                      |
+| Current module directory | `import.meta.dirname`                                               | Replaces `fileURLToPath(import.meta.url)` plus `dirname` in Node ESM files.                                        |
+| Current Node executable  | `process.execPath`                                                  | Use when spawning another Node process instead of assuming `node` is on `PATH`.                                    |
+| Non-mutating sort        | `Array.prototype.toSorted()`                                        | Returns a shallow sorted copy; provide `(a, b) => a - b` for numbers.                                              |
+| Bound promise settlement | `settleWithin` from `@zukhruf/testing/async`                        | Rejects if a non-abortable promise does not settle in time; it does not cancel the underlying operation.           |
 
 ## Established patterns
 
@@ -35,21 +35,23 @@ await t.waitFor(() => assert.equal(messages.length, 2), {
 });
 ```
 
-Keep database polling explicit when a database error must fail immediately:
+`t.waitFor` retries every error, also a database error. When a database error
+must fail the test immediately, poll with `timebox` from
+`@zukhruf/testing/async` and retry only the failed assertion:
 
 ```ts
-const deadline = performance.now() + 5_000;
-while (performance.now() < deadline) {
-  if ((await store.status()) === 'ready') break;
-  await sleep(20);
-}
+await timebox(async () => assert.equal(await store.status(), 'ready'), {
+  minTimeout: 20,
+  maxRetryTime: 5_000,
+  shouldRetry: ({ error }) => error instanceof assert.AssertionError,
+});
 ```
 
 Declare resources after their disposable parent so reverse-order cleanup closes
 handles before deleting the directory:
 
 ```ts
-await using directory = await mkdtempDisposable(join(tmpdir(), 'test-'));
+await using directory = await new TemporaryFiles().directory('test-');
 await using file = await open(join(directory.path, 'data.txt'), 'w');
 ```
 
@@ -206,9 +208,9 @@ credentials through its normal authentication configuration.
 
 ### Database servers
 
-Node test projects declare `test:node` and a `test` target. `nx.json` owns their
-common command, reporters, module mocks, timeout, and build dependency. JUnit
-reports are written to each project's `test-results.xml`.
+The `@zukhruf/nx/test` plugin gives each project with `node:test` files its `test`
+target: the command, reporters and timeout. `nx.json` adds module mocks and the
+build dependency. JUnit reports are written to each project's `test-results.xml`.
 
 For PostgreSQL, MySQL, and SQL Server, create an engine instance and acquire a
 disposable database for each test:
@@ -301,10 +303,13 @@ ran, as well as checking their exit code.
 
 ### Local and remote Docker tests
 
-Nx Docker tests default to the `limerence-dokploy` context (Hetzner) only when
-neither `DOCKER_CONTEXT` nor `DOCKER_HOST` is set. An explicitly set endpoint
-takes precedence, including an empty context as used by CI. The default is scoped
-to these test commands; it does not change the Docker CLI's globally selected
+Nx Docker tests default to the `limerence-dokploy` context (Hetzner) when
+`DOCKER_CONTEXT` is not set. Each Docker test project sets this default in its
+`.env.test`, which Nx loads for the `test` target. A `DOCKER_CONTEXT` that is set
+takes precedence. An empty `DOCKER_CONTEXT` does not: Nx fills an empty value from
+`.env.test`. To use the endpoint in `DOCKER_HOST`, set `DOCKER_CONTEXT=default`, as
+CI does. `DOCKER_HOST` takes precedence over the context. The default applies only
+to these test targets; it does not change the Docker CLI's globally selected
 context.
 
 ```sh
@@ -315,20 +320,24 @@ DOCKER_CONTEXT=desktop-linux nx run @deepagents/context:test
 nx run-many -t test --projects=@deepagents/context,@deepagents/text2sql,@deepagents/experimental
 ```
 
-Projects tagged `test:docker` run `node --test` with
-`--test-global-setup="$NX_WORKSPACE_ROOT/tools/src/docker-global-setup.ts"`.
-The file re-exports `globalSetup` and `globalTeardown` from
-`@zukhruf/testing/docker-global-setup`. Setup resolves the selected Docker
+For projects tagged `test:docker`, the `@zukhruf/nx/test` plugin adds
+`--test-global-setup` with `@zukhruf/testing/docker-global-setup`, and
+`--test-force-exit`. Setup resolves the selected Docker
 context once, pins its Unix or SSH endpoint for the test processes, and
 recovers resources left by exited runs on that endpoint.
 
 These targets set `parallelism: false` and disable Nx test caching, so Nx runs
 them exclusively within each invocation, locally and in CI. Other targets keep
-their parallelism when no Docker test target runs. For SSH endpoints, the Nx
-command adds `--test-concurrency=1` to run one test file at a time. Add
-`--args="--test-concurrency=2"` to run two files at a time within the active
-project; the later flag wins. Cases within a file run sequentially unless a
-test enables concurrency. These settings limit test scheduling; a single case
+their parallelism when no Docker test target runs. Within a project, Node runs
+test files in parallel at its default concurrency, on a local engine and on an SSH
+engine. On `limerence-dokploy` on 2026-10-30, the context tests passed in parallel
+(1568 of 1568, 1 skipped) in 19.6 minutes, with no SSH error and at most 34 SSH
+processes. With `--test-concurrency=1`, the same tests took more than 73 minutes.
+To give a run other flags, pass them with the test selection in `--args`, and
+start the value with a flag: `--args='--test-concurrency=2 "src/**/*.test.ts"
+"test/**/*.test.ts"'`. Nx removes the first and the last quote of a value that
+starts with a quote, so `--args='"src/**/*.test.ts" "test/**/*.test.ts"'` runs
+no tests. Cases within a file run sequentially unless a test enables concurrency. These settings limit test scheduling; a single case
 can still start multiple containers, and separate Nx invocations can overlap.
 Other Node.js projects keep the standard Node.js test command.
 
