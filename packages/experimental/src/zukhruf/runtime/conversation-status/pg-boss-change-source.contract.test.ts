@@ -2,7 +2,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { settleWithin } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert/strict';
-import { suite, test } from 'node:test';
+import { type TestContext, suite, test } from 'node:test';
 import { type Db, PgBoss, fromPglite } from 'pg-boss';
 
 import {
@@ -96,17 +96,17 @@ async function collect(
 }
 
 async function waitForHints(
+  t: TestContext,
   hints: ConversationStatusChangeHint[],
   expected: ConversationId[],
 ): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (hints.length < expected.length) {
-    if (Date.now() > deadline) break;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  assert.deepStrictEqual(
-    hints,
-    expected.map((conversation) => ({ type: 'change', conversation })),
+  await t.waitFor(
+    () =>
+      assert.deepStrictEqual(
+        hints,
+        expected.map((conversation) => ({ type: 'change', conversation })),
+      ),
+    { interval: 20, timeout: 5_000 },
   );
 }
 
@@ -117,14 +117,14 @@ const contracts = [
 
 for (const contract of contracts) {
   suite(`ConversationStatusChangeSource contract — ${contract.name}`, () => {
-    test('a hint raised through one pg-boss instance reaches a subscriber on another', async () => {
+    test('a hint raised through one pg-boss instance reaches a subscriber on another', async (t) => {
       await using h = await contract.makeHarness();
       const abort = new AbortController();
       const { hints, done } = await collect(h.subscriber, abort.signal);
       try {
         await h.notifier.notify({ chatId: 'chat-a', userId: 'u1' });
         await h.notifier.notify({ chatId: 'chat-b', userId: 'u2' });
-        await waitForHints(hints, [
+        await waitForHints(t, hints, [
           { chatId: 'chat-a', userId: 'u1' },
           { chatId: 'chat-b', userId: 'u2' },
         ]);
@@ -134,7 +134,7 @@ for (const contract of contracts) {
       }
     });
 
-    test('payloads that are not conversation hints are ignored', async () => {
+    test('payloads that are not conversation hints are ignored', async (t) => {
       await using h = await contract.makeHarness();
       const abort = new AbortController();
       const { hints, done } = await collect(h.subscriber, abort.signal);
@@ -142,7 +142,7 @@ for (const contract of contracts) {
         await h.raw('not json');
         await h.raw(JSON.stringify({ chatId: 'missing-user' }));
         await h.notifier.notify({ chatId: 'chat-c', userId: 'u3' });
-        await waitForHints(hints, [{ chatId: 'chat-c', userId: 'u3' }]);
+        await waitForHints(t, hints, [{ chatId: 'chat-c', userId: 'u3' }]);
       } finally {
         abort.abort();
         await settleWithin(done, 'subscription ends on abort');

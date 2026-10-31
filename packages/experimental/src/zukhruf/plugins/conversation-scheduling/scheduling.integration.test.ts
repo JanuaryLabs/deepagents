@@ -3,16 +3,15 @@ import type {
   LanguageModelV4StreamPart,
 } from '@ai-sdk/provider';
 import { Latch } from '@zukhruf/async';
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { type UIMessage, isToolUIPart, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
-import { mkdtempDisposable } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import test, { type TestContext, mock } from 'node:test';
+import test from 'node:test';
 import { z } from 'zod';
 
 import {
@@ -356,16 +355,6 @@ function functionToolNames(tools: unknown): string[] {
     .toSorted();
 }
 
-function harness(
-  t: TestContext,
-  scheduler: RecordingWakeScheduler,
-  store: ContextStore = new InMemoryContextStore(),
-) {
-  const resources = disposableHarness(scheduler, store);
-  t.after(() => resources[Symbol.dispose]());
-  return resources;
-}
-
 function disposableHarness(
   scheduler: RecordingWakeScheduler,
   store: ContextStore = new InMemoryContextStore(),
@@ -486,9 +475,9 @@ async function runTurn(
   await queue.runNext();
 }
 
-test('configured runtime injects top-level Claude-compatible scheduling tools', async (t) => {
+test('configured runtime injects top-level Claude-compatible scheduling tools', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   let modelTools: LanguageModelV4FunctionTool[] = [];
   const model = new MockLanguageModelV4({
     doStream: async ({ tools }) => {
@@ -555,9 +544,9 @@ test('configured runtime injects top-level Claude-compatible scheduling tools', 
   }
 });
 
-test('CronCreate, CronList, and CronDelete run through the model loop in one conversation', async (t) => {
+test('CronCreate, CronList, and CronDelete run through the model loop in one conversation', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'create cron',
@@ -632,12 +621,11 @@ test('CronCreate, CronList, and CronDelete run through the model loop in one con
 });
 
 test('CronCreate reports the exact next run and timezone for a one-shot cron', async (t) => {
-  mock.timers.enable({ apis: ['Date'] });
-  mock.timers.setTime(new Date('2026-08-13T12:09:00Z').getTime());
-  t.after(() => mock.timers.reset());
+  t.mock.timers.enable({ apis: ['Date'] });
+  t.mock.timers.setTime(new Date('2026-08-13T12:09:00Z').getTime());
 
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'create passed one shot',
@@ -688,9 +676,9 @@ test('CronCreate reports the exact next run and timezone for a one-shot cron', a
   });
 });
 
-test('parallel model tool calls preserve concurrent cron creates and deletes', async (t) => {
+test('parallel model tool calls preserve concurrent cron creates and deletes', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const calls = new Map<string, number>();
   let definitionIds: string[] = [];
   const model = new MockLanguageModelV4({
@@ -783,9 +771,9 @@ test('parallel model tool calls preserve concurrent cron creates and deletes', a
   assert.equal(scheduler.wakes.size, 0);
 });
 
-test('ScheduleWakeup fires an ask and persists scheduled provenance', async (t) => {
+test('ScheduleWakeup fires an ask and persists scheduled provenance', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'schedule dynamic',
@@ -862,9 +850,9 @@ test('ScheduleWakeup fires an ask and persists scheduled provenance', async (t) 
   );
 });
 
-test('ScheduleWakeup rejects delays outside its supported window', async (t) => {
+test('ScheduleWakeup rejects delays outside its supported window', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'schedule immediately',
@@ -909,12 +897,11 @@ test('ScheduleWakeup rejects delays outside its supported window', async (t) => 
 });
 
 test('a busy cron window materializes one catch-up ask after queued user work', async (t) => {
-  mock.timers.enable({ apis: ['Date'] });
-  mock.timers.setTime(new Date('2026-08-12T10:00:00Z').getTime());
-  t.after(() => mock.timers.reset());
+  t.mock.timers.enable({ apis: ['Date'] });
+  t.mock.timers.setTime(new Date('2026-08-12T10:00:00Z').getTime());
 
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const firstStarted = Promise.withResolvers<void>();
   const finishFirst = Promise.withResolvers<void>();
   const seenUserText: string[] = [];
@@ -1003,7 +990,7 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
   );
 
   for (let occurrence = 1; occurrence <= 3; occurrence++) {
-    mock.timers.tick(10 * 60_000);
+    t.mock.timers.tick(10 * 60_000);
     const due = [...scheduler.wakes.values()].find(
       ({ runAt }) => runAt.getTime() <= Date.now(),
     );
@@ -1017,7 +1004,7 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
     );
   }
 
-  mock.timers.tick(5 * 60_000);
+  t.mock.timers.tick(5 * 60_000);
   finishFirst.resolve();
   await running;
   assert.deepEqual(
@@ -1055,9 +1042,9 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
   );
 });
 
-test('unconfigured runtime exposes no scheduling tools', async (t) => {
+test('unconfigured runtime exposes no scheduling tools', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   let toolNames: string[] = [];
   const runtimeSetup = new AgentRuntime(
     defineAgent({
@@ -1103,9 +1090,9 @@ test('unconfigured runtime exposes no scheduling tools', async (t) => {
   assert.equal(scheduler.handler, undefined);
 });
 
-test('runtime rejects an invalid scheduling timezone during initialization', async (t) => {
+test('runtime rejects an invalid scheduling timezone during initialization', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const runtime = new AgentRuntime(
     defineAgent({
       name: 'root',
@@ -1128,9 +1115,9 @@ test('runtime rejects an invalid scheduling timezone during initialization', asy
   );
 });
 
-test('one conversation-scheduling definition creates a fresh instance per runtime', async (t) => {
+test('one conversation-scheduling definition creates a fresh instance per runtime', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const plugin = conversationScheduling();
   const declaration = defineAgent({
     name: 'root',
@@ -1155,9 +1142,9 @@ test('one conversation-scheduling definition creates a fresh instance per runtim
   assert.notEqual(first.plugin(plugin), second.plugin(plugin));
 });
 
-test('conversation availability reaches every plugin before reporting failures', async (t) => {
+test('conversation availability reaches every plugin before reporting failures', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const calls: string[] = [];
   const runtimeSetup = new AgentRuntime(
     defineAgent({
@@ -1199,9 +1186,9 @@ test('conversation availability reaches every plugin before reporting failures',
   assert.deepEqual(calls, ['failing', 'following']);
 });
 
-test('failed wake insertion does not commit a cron definition', async (t) => {
+test('failed wake insertion does not commit a cron definition', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'create during outage',
@@ -1241,9 +1228,9 @@ test('failed wake insertion does not commit a cron definition', async (t) => {
   );
 });
 
-test('retrying a completed CronCreate tool call reuses its definition and wake', async (t) => {
+test('retrying a completed CronCreate tool call reuses its definition and wake', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'retry create response',
@@ -1293,10 +1280,10 @@ test('retrying a completed CronCreate tool call reuses its definition and wake',
   assert.ok(!('version' in scheduling));
 });
 
-test('retry after enqueue-before-dispatch-clear executes one scheduled turn', async (t) => {
+test('retry after enqueue-before-dispatch-clear executes one scheduled turn', async () => {
   const scheduler = new RecordingWakeScheduler();
   const store = new FailOnceDispatchClearStore();
-  const h = harness(t, scheduler, store);
+  using h = disposableHarness(scheduler, store);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'schedule crash window',
@@ -1373,9 +1360,9 @@ test('retry after enqueue-before-dispatch-clear executes one scheduled turn', as
   );
 });
 
-test('retry after claim-before-enqueue executes one scheduled turn', async (t) => {
+test('retry after claim-before-enqueue executes one scheduled turn', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'schedule claim crash window',
@@ -1540,9 +1527,9 @@ test('deleting a claimed cron during successor insertion prevents its scheduled 
   assert.equal(h.queue.turns.length, 0);
 });
 
-test('failed successor insertion leaves the current cron retryable', async (t) => {
+test('failed successor insertion leaves the current cron retryable', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'create recurring crash window',
@@ -1655,9 +1642,9 @@ test('pg-boss can retry successor insertion through a prolonged outage', async (
   );
 });
 
-test('ScheduleWakeup replacement and stop leave cron definitions active', async (t) => {
+test('ScheduleWakeup replacement and stop leave cron definitions active', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'create fixed',
@@ -1737,9 +1724,9 @@ test('ScheduleWakeup replacement and stop leave cron definitions active', async 
   assert.equal(h.queue.turns.length, 0, 'a stopped receipt must be stale');
 });
 
-test('a queued scheduled turn can be cancelled through AgentObservation', async (t) => {
+test('a queued scheduled turn can be cancelled through AgentObservation', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'schedule cancellable',
@@ -1785,12 +1772,11 @@ test('a queued scheduled turn can be cancelled through AgentObservation', async 
 });
 
 test('cancelling the last queued user turn materializes one overdue occurrence', async (t) => {
-  mock.timers.enable({ apis: ['Date'] });
-  mock.timers.setTime(new Date('2026-08-12T10:00:00Z').getTime());
-  t.after(() => mock.timers.reset());
+  t.mock.timers.enable({ apis: ['Date'] });
+  t.mock.timers.setTime(new Date('2026-08-12T10:00:00Z').getTime());
 
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'create catch-up cron',
@@ -1826,7 +1812,7 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
     conversation,
     userTurn('cancel-user-turn', 'cancel me'),
   );
-  mock.timers.tick(10 * 60_000);
+  t.mock.timers.tick(10 * 60_000);
   await scheduler.fire(wake.id);
   assert.equal(h.queue.turns.length, 1);
 
@@ -1842,12 +1828,11 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
 });
 
 test('an overdue occurrence waits for approval before materializing', async (t) => {
-  mock.timers.enable({ apis: ['Date'] });
-  mock.timers.setTime(new Date('2026-08-12T10:00:00Z').getTime());
-  t.after(() => mock.timers.reset());
+  t.mock.timers.enable({ apis: ['Date'] });
+  t.mock.timers.setTime(new Date('2026-08-12T10:00:00Z').getTime());
 
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'create approval cron',
@@ -1889,7 +1874,7 @@ test('an overdue occurrence waits for approval before materializing', async (t) 
   await runTurn(runtime, h.queue, conversation, 'create approval cron');
   const wake = [...scheduler.wakes.values()][0];
   await runTurn(runtime, h.queue, conversation, 'needs approval');
-  mock.timers.tick(10 * 60_000);
+  t.mock.timers.tick(10 * 60_000);
   await scheduler.fire(wake.id);
   assert.equal(h.queue.turns.length, 0);
 
@@ -1904,9 +1889,9 @@ test('an overdue occurrence waits for approval before materializing', async (t) 
   assert.equal(messageText(catchUp), 'approval catch-up');
 });
 
-test('a non-recurring cron fires once and removes its definition', async (t) => {
+test('a non-recurring cron fires once and removes its definition', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'create one shot',
@@ -1955,9 +1940,9 @@ test('a non-recurring cron fires once and removes its definition', async (t) => 
   assert.deepEqual(list?.output, { jobs: [] });
 });
 
-test('recurrence keeps the timezone persisted at creation across runtime restart', async (t) => {
+test('recurrence keeps the timezone persisted at creation across runtime restart', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'create zoned cron',
@@ -2004,9 +1989,9 @@ test('recurrence keeps the timezone persisted at creation across runtime restart
   );
 });
 
-test('cron definitions are isolated by conversation and user across runtimes', async (t) => {
+test('cron definitions are isolated by conversation and user across runtimes', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'create private cron',
@@ -2055,9 +2040,9 @@ test('cron definitions are isolated by conversation and user across runtimes', a
   assert.deepEqual(result?.output, { jobs: [] });
 });
 
-test('scheduling tools bind to the current root, child, and sibling conversations', async (t) => {
+test('scheduling tools bind to the current root, child, and sibling conversations', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'spawn owner',
@@ -2165,9 +2150,9 @@ test('scheduling tools bind to the current root, child, and sibling conversation
   assert.deepEqual(rootList?.output, { jobs: [] });
 });
 
-test('resume ignores scheduling metadata while scheduling tools fail closed', async (t) => {
+test('resume ignores scheduling metadata while scheduling tools fail closed', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
@@ -2208,9 +2193,9 @@ test('resume ignores scheduling metadata while scheduling tools fail closed', as
   );
 });
 
-test('CronCreate rejects six-field and unreachable expressions', async (t) => {
+test('CronCreate rejects six-field and unreachable expressions', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'six fields',
@@ -2264,9 +2249,9 @@ test('CronCreate rejects six-field and unreachable expressions', async (t) => {
   assert.equal(errors.length, 3);
 });
 
-test('CronCreate enforces the 50-definition conversation cap', async (t) => {
+test('CronCreate enforces the 50-definition conversation cap', async () => {
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
+  using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'create fifty first',
@@ -2336,15 +2321,15 @@ test('CronCreate enforces the 50-definition conversation cap', async (t) => {
   assert.equal(result?.state, 'output-error');
 });
 
-test('a dynamic wake remains usable across a context-store restart', async (t) => {
-  await using directory = await mkdtempDisposable(
-    join(tmpdir(), 'zukhruf-dynamic-restart-'),
+test('a dynamic wake remains usable across a context-store restart', async () => {
+  await using directory = await new TemporaryFiles().directory(
+    'zukhruf-dynamic-restart-',
   );
   const databasePath = join(directory.path, 'context.sqlite');
   const firstDatabase = new DatabaseSync(databasePath);
   const firstStore = new SqliteContextStore(firstDatabase);
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler, firstStore);
+  using h = disposableHarness(scheduler, firstStore);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'schedule persistent dynamic',
@@ -2383,8 +2368,7 @@ test('a dynamic wake remains usable across a context-store restart', async (t) =
   await firstWorker[Symbol.asyncDispose]();
   firstDatabase.close();
 
-  const secondDatabase = new DatabaseSync(databasePath);
-  t.after(() => secondDatabase.close());
+  using secondDatabase = new DatabaseSync(databasePath);
   const restartedSetup = new AgentRuntime(declaration);
   const restartedStack2 = defineStack(async () => ({
     ...h,
@@ -2400,15 +2384,15 @@ test('a dynamic wake remains usable across a context-store restart', async (t) =
   assert.equal(seenUserText.at(-1), 'restarted dynamic prompt');
 });
 
-test('a cron wake remains usable across a context-store restart', async (t) => {
-  await using directory = await mkdtempDisposable(
-    join(tmpdir(), 'zukhruf-scheduling-restart-'),
+test('a cron wake remains usable across a context-store restart', async () => {
+  await using directory = await new TemporaryFiles().directory(
+    'zukhruf-scheduling-restart-',
   );
   const databasePath = join(directory.path, 'context.sqlite');
   const firstDatabase = new DatabaseSync(databasePath);
   const firstStore = new SqliteContextStore(firstDatabase);
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler, firstStore);
+  using h = disposableHarness(scheduler, firstStore);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'create restart cron',
@@ -2438,8 +2422,7 @@ test('a cron wake remains usable across a context-store restart', async (t) => {
   await firstWorker[Symbol.asyncDispose]();
   firstDatabase.close();
 
-  const restartedDatabase = new DatabaseSync(databasePath);
-  t.after(() => restartedDatabase.close());
+  using restartedDatabase = new DatabaseSync(databasePath);
   const restartedStore = new SqliteContextStore(restartedDatabase);
   const restartedSetup = new AgentRuntime(declaration);
   const restartedStack3 = defineStack(async () => ({
@@ -2464,61 +2447,57 @@ test('a cron wake remains usable across a context-store restart', async (t) => {
   );
 });
 
-test('a recurring cron does not fire when its first occurrence is beyond its seven-day expiry', async () => {
-  mock.timers.enable({ apis: ['Date'] });
-  try {
-    mock.timers.setTime(new Date('2026-08-13T00:00:00Z').getTime());
-    const scheduler = new RecordingWakeScheduler();
-    using h = disposableHarness(scheduler);
-    const commands = new Map<string, { name: string; input: unknown }>([
-      [
-        'create sparse cron',
-        {
-          name: 'CronCreate',
-          input: { cron: '0 0 1 * *', prompt: 'expired monthly prompt' },
-        },
-      ],
-      ['list sparse cron', { name: 'CronList', input: {} }],
-    ]);
-    const runtimeSetup = new AgentRuntime(
-      defineAgent({
-        name: 'root',
-        model: toolModel(commands, []),
-        sandbox: virtualSandbox,
-        instructions: [],
-        plugins: [conversationScheduling()],
-      }),
-    );
-    const runtimeStack25 = defineStack(async () => ({
-      ...h,
-      bindings: [
-        conversationSchedulingCapabilities.scheduler.bind(scheduler),
-        conversationSchedulingCapabilities.timezone.bind('UTC'),
-      ],
-    }));
-    const runtime = await runtimeSetup.initialize(runtimeStack25);
-    const conversation = { chatId: 'sparse-expiry', userId: 'user-1' };
-    await using _worker = await runtime.work();
-    void _worker;
-    await runTurn(runtime, h.queue, conversation, 'create sparse cron');
-    const wake = [...scheduler.wakes.values()][0];
-    assert.ok(wake.runAt.getTime() > Date.now() + 7 * 24 * 60 * 60 * 1_000);
+test('a recurring cron does not fire when its first occurrence is beyond its seven-day expiry', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'] });
+  t.mock.timers.setTime(new Date('2026-08-13T00:00:00Z').getTime());
+  const scheduler = new RecordingWakeScheduler();
+  using h = disposableHarness(scheduler);
+  const commands = new Map<string, { name: string; input: unknown }>([
+    [
+      'create sparse cron',
+      {
+        name: 'CronCreate',
+        input: { cron: '0 0 1 * *', prompt: 'expired monthly prompt' },
+      },
+    ],
+    ['list sparse cron', { name: 'CronList', input: {} }],
+  ]);
+  const runtimeSetup = new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: toolModel(commands, []),
+      sandbox: virtualSandbox,
+      instructions: [],
+      plugins: [conversationScheduling()],
+    }),
+  );
+  const runtimeStack25 = defineStack(async () => ({
+    ...h,
+    bindings: [
+      conversationSchedulingCapabilities.scheduler.bind(scheduler),
+      conversationSchedulingCapabilities.timezone.bind('UTC'),
+    ],
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack25);
+  const conversation = { chatId: 'sparse-expiry', userId: 'user-1' };
+  await using _worker = await runtime.work();
+  void _worker;
+  await runTurn(runtime, h.queue, conversation, 'create sparse cron');
+  const wake = [...scheduler.wakes.values()][0];
+  assert.ok(wake.runAt.getTime() > Date.now() + 7 * 24 * 60 * 60 * 1_000);
 
-    mock.timers.setTime(wake.runAt.getTime());
-    await scheduler.fire(wake.id);
-    assert.deepEqual(h.queue.turns, []);
+  t.mock.timers.setTime(wake.runAt.getTime());
+  await scheduler.fire(wake.id);
+  assert.deepEqual(h.queue.turns, []);
 
-    await runTurn(runtime, h.queue, conversation, 'list sparse cron');
-    const result = last(
-      await runtime.observe(conversation).engine.getMessages(),
-    ).parts.find(isToolUIPart);
-    assert.deepEqual(result?.output, { jobs: [] });
-  } finally {
-    mock.timers.reset();
-  }
+  await runTurn(runtime, h.queue, conversation, 'list sparse cron');
+  const result = last(
+    await runtime.observe(conversation).engine.getMessages(),
+  ).parts.find(isToolUIPart);
+  assert.deepEqual(result?.output, { jobs: [] });
 });
 
-test('duplicate wake delivery across runtimes advances PostgreSQL state once', async (t) => {
+test('duplicate wake delivery across runtimes advances PostgreSQL state once', async () => {
   await using container = await testPostgres.database();
 
   const firstStore = await PostgresContextStore.create({
@@ -2528,7 +2507,7 @@ test('duplicate wake delivery across runtimes advances PostgreSQL state once', a
     pool: container.connectionString,
   });
   const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler, firstStore);
+  using h = disposableHarness(scheduler, firstStore);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'schedule postgres duplicate',

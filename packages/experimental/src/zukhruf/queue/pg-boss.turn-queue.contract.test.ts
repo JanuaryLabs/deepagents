@@ -1,5 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
-import { settleWithin } from '@zukhruf/testing/async';
+import { settleWithin, timebox } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
@@ -82,12 +82,14 @@ async function waitForAsync(
   what: string,
   timeoutMs = 10_000,
 ) {
-  const deadline = performance.now() + timeoutMs;
-  while (performance.now() < deadline) {
-    if (await condition()) return;
-    await sleep(25);
-  }
-  throw new Error(`timed out waiting for: ${what}`);
+  await timebox(
+    async () => assert.ok(await condition(), `timed out waiting for: ${what}`),
+    {
+      minTimeout: 25,
+      maxRetryTime: timeoutMs,
+      shouldRetry: ({ error }) => error instanceof assert.AssertionError,
+    },
+  );
 }
 
 type MessageRef = Extract<TurnRef, { kind: 'message' }>;

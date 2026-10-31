@@ -1,3 +1,4 @@
+import { timebox } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
@@ -7,7 +8,6 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { describe, it } from 'node:test';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { PgBoss } from 'pg-boss';
 
 import {
@@ -97,15 +97,21 @@ async function waitForStatus(
   accept: string[],
   timeoutMs: number,
 ) {
-  const deadline = performance.now() + timeoutMs;
-  while (performance.now() < deadline) {
-    const status = await streamStore.getStreamStatus(id);
-    if (status && accept.includes(status)) return status;
-    await sleep(200);
-  }
-  throw new Error(
-    `timed out after ${timeoutMs}ms waiting for ${accept.join('/')} on ${id} ` +
-      `(last: ${await streamStore.getStreamStatus(id)})`,
+  return timebox(
+    async () => {
+      const status = await streamStore.getStreamStatus(id);
+      assert.ok(
+        status && accept.includes(status),
+        `timed out after ${timeoutMs}ms waiting for ${accept.join('/')} on ${id} ` +
+          `(last: ${status})`,
+      );
+      return status;
+    },
+    {
+      minTimeout: 200,
+      maxRetryTime: timeoutMs,
+      shouldRetry: ({ error }) => error instanceof assert.AssertionError,
+    },
   );
 }
 
