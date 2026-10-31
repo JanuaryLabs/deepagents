@@ -1,11 +1,11 @@
 import type { LanguageModelV4Prompt } from '@ai-sdk/provider';
 import { DockerTestbed } from '@zukhruf/testing/docker';
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { generateText, isStepCount } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { build } from 'esbuild';
 import assert from 'node:assert';
-import { mkdtempDisposable, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { z } from 'zod';
@@ -20,6 +20,8 @@ import {
 } from '@deepagents/context';
 
 import { dockerSandboxDefaults } from './helpers/docker-sandbox-defaults.ts';
+
+const temporaryFiles = new TemporaryFiles();
 
 const testbed = new DockerTestbed({ environment: process.env });
 const defaults = dockerSandboxDefaults(testbed.defaults);
@@ -850,9 +852,7 @@ describe('selfTestStrace (in-container)', () => {
   it('reports ptrace-blocked when ptrace is denied', async () => {
     // Real ptrace denial: a default-allow seccomp profile that errnos `ptrace`,
     // so strace's PTRACE_TRACEME fails exactly as a hardened runtime would.
-    await using fixture = await mkdtempDisposable(
-      join(tmpdir(), 'strace-seccomp-'),
-    );
+    await using fixture = await temporaryFiles.directory('strace-seccomp-');
     const seccomp = join(fixture.path, 'deny-ptrace.json');
     await writeFile(
       seccomp,

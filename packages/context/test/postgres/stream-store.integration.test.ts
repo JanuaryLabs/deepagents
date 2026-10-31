@@ -1,9 +1,8 @@
-import { settleWithin } from '@zukhruf/testing/async';
+import { settleWithin, timebox } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { type UIMessageChunk, simulateReadableStream } from 'ai';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
-import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
   PollingChangeSource,
@@ -11,7 +10,6 @@ import {
   type StreamChunkData,
   type StreamData,
   StreamManager,
-  type StreamStatus,
 } from '@deepagents/context';
 
 const POSTGRES_18 = { image: 'postgres:18-alpine' };
@@ -69,24 +67,19 @@ async function withStore<T>(
   }
 }
 
-async function openStoreWithRetry(
+function openStoreWithRetry(
   connectionString: string,
   schema: string,
 ): Promise<PostgresStreamStore> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      return await PostgresStreamStore.create({
-        pool: connectionString,
-        schema,
-      });
-    } catch (error) {
-      lastError = error;
-      if (!isTransientPostgresStartupError(error)) break;
-      await sleep(100);
-    }
-  }
-  throw lastError;
+  return timebox(
+    () => PostgresStreamStore.create({ pool: connectionString, schema }),
+    {
+      retries: 9,
+      minTimeout: 100,
+      maxRetryTime: Number.POSITIVE_INFINITY,
+      shouldRetry: ({ error }) => isTransientPostgresStartupError(error),
+    },
+  );
 }
 
 function isTransientPostgresStartupError(error: unknown): boolean {
@@ -96,22 +89,6 @@ function isTransientPostgresStartupError(error: unknown): boolean {
     maybeCode === 'ECONNRESET' ||
     maybeCode === 'ECONNREFUSED' ||
     maybeCode === '57P03'
-  );
-}
-
-async function waitForStatus(
-  store: PostgresStreamStore,
-  streamId: string,
-  status: StreamStatus,
-  timeoutMs = 5_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if ((await store.getStreamStatus(streamId)) === status) return;
-    await sleep(10);
-  }
-  throw new Error(
-    `Timed out waiting for stream ${streamId} to become ${status}`,
   );
 }
 
@@ -464,21 +441,16 @@ describe('PostgreSQL StreamStore Integration', () => {
         }),
       });
 
-      const received: unknown[] = [];
-      const consume = (async () => {
-        for await (const chunk of manager.watch(stream.id)) {
-          received.push(chunk);
-        }
-      })();
+      const consume = Array.fromAsync(manager.watch(stream.id));
 
       await store.appendChunks([createChunk(stream.id, 1)]);
       await store.updateStreamStatus(stream.id, 'completed');
-      await settleWithin(consume, 'polling stream watch');
+      const received = await settleWithin(consume, 'polling stream watch');
 
       assert.deepStrictEqual(received, [textDeltaChunk(0), textDeltaChunk(1)]);
     }));
 
-  it('should fail a PostgreSQL persisted stream when a top-level error chunk is persisted', async () =>
+  it('should fail a PostgreSQL persisted stream when a top-level error chunk is persisted', async (t) =>
     await withStore(async (store) => {
       const streamId = crypto.randomUUID();
       const manager = new StreamManager({
@@ -512,7 +484,11 @@ describe('PostgreSQL StreamStore Integration', () => {
         strategy: 'immediate',
       });
 
-      await waitForStatus(store, streamId, 'failed');
+      await t.waitFor(
+        async () =>
+          assert.strictEqual(await store.getStreamStatus(streamId), 'failed'),
+        { interval: 10, timeout: 5_000 },
+      );
       await settleWithin(persistPromise, 'persist error chunk');
 
       const updated = await store.getStream(streamId);

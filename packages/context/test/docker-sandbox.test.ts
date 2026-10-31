@@ -1,6 +1,7 @@
 import { DockerTestbed } from '@zukhruf/testing/docker';
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import assert from 'node:assert';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -27,6 +28,8 @@ import {
 } from '@deepagents/context';
 
 import { dockerSandboxDefaults } from './helpers/docker-sandbox-defaults.ts';
+
+const temporaryFiles = new TemporaryFiles();
 
 const testbed = new DockerTestbed({ environment: process.env });
 const defaults = dockerSandboxDefaults(testbed.defaults);
@@ -1114,27 +1117,23 @@ describe('Docker Sandbox', () => {
       });
 
       it('builds an image from a Dockerfile path', async () => {
-        const dir = await mkdtemp(join(tmpdir(), 'sandbox-dockerfile-'));
+        await using dir = await temporaryFiles.directory('sandbox-dockerfile-');
         await writeFile(
-          join(dir, 'Dockerfile'),
+          join(dir.path, 'Dockerfile'),
           'FROM bash:5.3-alpine3.24\nRUN echo file-build > /built-marker\n',
         );
 
+        const sandbox = await createDockerSandbox({
+          ...defaults,
+          dockerfile: join(dir.path, 'Dockerfile'),
+          context: dir.path,
+        });
         try {
-          const sandbox = await createDockerSandbox({
-            ...defaults,
-            dockerfile: join(dir, 'Dockerfile'),
-            context: dir,
-          });
-          try {
-            const result = await sandbox.executeCommand('cat /built-marker');
-            assert.strictEqual(result.exitCode, 0);
-            assert.strictEqual(result.stdout.trim(), 'file-build');
-          } finally {
-            await sandbox.dispose();
-          }
+          const result = await sandbox.executeCommand('cat /built-marker');
+          assert.strictEqual(result.exitCode, 0);
+          assert.strictEqual(result.stdout.trim(), 'file-build');
         } finally {
-          await rm(dir, { recursive: true, force: true });
+          await sandbox.dispose();
         }
       });
     });

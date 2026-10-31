@@ -335,13 +335,8 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       await store.updateStreamStatus(stream.id, 'completed');
 
       const manager = new StreamManager({ store, changeSource: source });
-      const received: unknown[] = [];
-      await settleWithin(
-        (async () => {
-          for await (const chunk of manager.watch(stream.id)) {
-            received.push(chunk);
-          }
-        })(),
+      const received = await settleWithin(
+        Array.fromAsync(manager.watch(stream.id)),
         'initial tick stream drain',
       );
 

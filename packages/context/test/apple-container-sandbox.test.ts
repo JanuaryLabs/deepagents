@@ -1,6 +1,7 @@
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import spawn from 'nano-spawn';
 import assert from 'node:assert';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
@@ -14,6 +15,8 @@ import {
   pkg,
   useAppleContainerSandbox,
 } from '@deepagents/context';
+
+const temporaryFiles = new TemporaryFiles();
 
 const ALPINE = 'docker.io/library/bash:5.3-alpine3.24';
 
@@ -379,27 +382,23 @@ describe('Apple container sandbox (runtime)', async () => {
   });
 
   it('mounts a read-only host bind volume', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'apple-sbx-bind-'));
-    await writeFile(join(dir, 'note.txt'), 'from-host');
-    try {
-      await useAppleContainerSandbox(
-        {
-          volumes: [
-            { type: 'bind', hostPath: dir, containerPath: '/mnt/data' },
-          ],
-        },
-        async (sandbox) => {
-          const read = await sandbox.executeCommand('cat /mnt/data/note.txt');
-          assert.strictEqual(read.stdout.trim(), 'from-host');
-          const write = await sandbox.executeCommand(
-            'echo x > /mnt/data/should-fail 2>&1',
-          );
-          assert.notStrictEqual(write.exitCode, 0);
-        },
-      );
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    await using dir = await temporaryFiles.directory('apple-sbx-bind-');
+    await writeFile(join(dir.path, 'note.txt'), 'from-host');
+    await useAppleContainerSandbox(
+      {
+        volumes: [
+          { type: 'bind', hostPath: dir.path, containerPath: '/mnt/data' },
+        ],
+      },
+      async (sandbox) => {
+        const read = await sandbox.executeCommand('cat /mnt/data/note.txt');
+        assert.strictEqual(read.stdout.trim(), 'from-host');
+        const write = await sandbox.executeCommand(
+          'echo x > /mnt/data/should-fail 2>&1',
+        );
+        assert.notStrictEqual(write.exitCode, 0);
+      },
+    );
   });
 
   it('reuses a stably-named container across handles', async () => {
