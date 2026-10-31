@@ -18,35 +18,46 @@ it does not start Claude Code or the Claude Agent SDK.
 
 ## Existing login
 
-Run `claude auth login` as the same OS user as the application. Credentials are
-resolved on each request from `CLAUDE_CONFIG_DIR`, or `~/.claude` when unset:
+The provider resolves credentials on each request. A nonempty
+`CLAUDE_CODE_OAUTH_TOKEN` takes precedence over the stored Claude Code login.
+By default, the provider reads `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR`,
+and `USER` from `process.env`. Pass `createClaude({ env })` to use another
+environment. The supplied environment replaces `process.env` for these reads;
+include any values you want to retain. Changes to its values apply to the next
+request.
+
+### Environment token
+
+Run `claude setup-token` to obtain a long-lived token, then set
+`CLAUDE_CODE_OAUTH_TOKEN` in the application's environment. No stored login is
+required. The provider uses this token without reading the keychain or
+credentials file, acquiring a refresh lock, or refreshing the token. A 401 fails
+the request without falling back to the stored login. An empty value falls
+through to the stored login.
+
+### Stored Claude Code login
+
+Run `claude auth login` as the same OS user as the application. When
+`CLAUDE_CODE_OAUTH_TOKEN` is unset or empty, the provider reads credentials from
+`CLAUDE_CONFIG_DIR`, or `~/.claude` when unset:
 
 - macOS: read the native `Claude Code-credentials` keychain entry. An explicit
   config directory selects its native hash-suffixed entry. Only an absent entry
   falls back to `.credentials.json`; malformed or inaccessible entries fail.
 - Linux and Windows: read `.credentials.json` in that config directory.
 
-Claude Code reads `CLAUDE_CODE_OAUTH_TOKEN` before the stored login, and this
-provider does the same. Run `claude setup-token` to get this long-lived token.
-When the variable has a value, each request uses it, and the provider does not
-read the stored login. The provider does not refresh this token. A rejected token
-fails the request. An empty value is the same as no value.
-
-The provider reads these variables from `process.env`. To give it another
-environment, pass it to `createClaude({ env })`. The provider reads
-`CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR` and `USER` from that environment.
-
-The login must contain Claude inference scopes. API-key environment variables and
-`ANTHROPIC_BASE_URL` do not redirect this provider; requests go to Anthropic's
-Messages endpoint using the native login. For credentials your application owns,
-see [Application-owned accounts](#application-owned-accounts).
-
-Tokens within one minute of expiry are refreshed and persisted to the same store,
+The stored login must contain Claude inference scopes. Tokens within one minute
+of expiry are refreshed and persisted to the same store,
 preserving other fields. File writes are atomic with mode `0600`. Concurrent
 provider processes coordinate refresh through a lock and recheck the saved login
 before writing. The native CLI does not share that lock, so a simultaneous
 CLI/provider rotation can still race (backlog #1812). Cancellation reaches both
 refresh and model requests.
+
+API-key environment variables and `ANTHROPIC_BASE_URL` do not redirect this
+provider; requests go to Anthropic's Messages endpoint using the selected OAuth
+token. For credentials your application owns, see
+[Application-owned accounts](#application-owned-accounts).
 
 ## Application-owned accounts
 
