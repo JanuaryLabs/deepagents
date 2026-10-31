@@ -16,6 +16,16 @@ Zukhruf owns tools, history, reminders, mailbox, and scheduling. The provider
 uses `@ai-sdk/anthropic` to encode requests and parse JSON and streaming responses;
 it does not start Claude Code or the Claude Agent SDK.
 
+## Recipes
+
+One use case each, with a full program that you can run.
+
+1. [Call Claude with your Claude Code login](./docs/recipes/call-claude-with-your-claude-code-login.md)
+2. [Run on a server with a long-lived token](./docs/recipes/run-on-a-server-with-a-long-lived-token.md)
+3. [Extract typed data from a page](./docs/recipes/extract-typed-data-from-a-page.md)
+4. [Let each user connect their own Claude account](./docs/recipes/let-each-user-connect-their-own-claude-account.md)
+5. [Handle a rejected token or a usage limit](./docs/recipes/handle-a-rejected-token-or-a-usage-limit.md)
+
 ## Existing login
 
 The provider resolves credentials on each request. A nonempty
