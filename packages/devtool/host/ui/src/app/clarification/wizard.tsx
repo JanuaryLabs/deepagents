@@ -156,9 +156,7 @@ function WizardRoot({
     totalSteps: questions.length,
   };
 
-  return (
-    <WizardContext.Provider value={value}>{children}</WizardContext.Provider>
-  );
+  return <WizardContext value={value}>{children}</WizardContext>;
 }
 
 function WizardHeader() {
