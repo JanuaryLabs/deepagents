@@ -9,11 +9,4 @@ export default [
   {
     ignores: ['.source/**'],
   },
-  {
-    files: ['app/routes/docs.tsx'],
-    rules: {
-      // fumadocs clientLoader.getComponent() dynamically creates components by design
-      'react-hooks/static-components': 'off',
-    },
-  },
 ];

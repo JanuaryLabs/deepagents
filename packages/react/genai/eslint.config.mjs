@@ -8,9 +8,6 @@ export default [
   ...react,
   ...baseConfig,
   {
-    settings: { react: { version: '19' } },
-  },
-  {
     files: ['src/**/*.ts', 'src/**/*.tsx'],
     rules: {
       'no-restricted-imports': [

@@ -3,17 +3,4 @@ import react from '@zukhruf/eslint/react';
 import baseConfig from '../../../eslint.config.mjs';
 
 // The React preset comes first, so the root config's settings win.
-export default [
-  ...react,
-  ...baseConfig,
-  {
-    // Copied Shadcn registry files: keep them updateable without local rewrites.
-    files: ['ui/src/components/ui/**/*.{ts,tsx}', 'ui/src/hooks/use-mobile.ts'],
-    rules: {
-      eqeqeq: 'off',
-      'jsx-a11y/anchor-has-content': 'off',
-      'react-hooks/set-state-in-effect': 'off',
-      '@typescript-eslint/consistent-type-assertions': 'off',
-    },
-  },
-];
+export default [...react, ...baseConfig];

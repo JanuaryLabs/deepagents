@@ -108,7 +108,6 @@ export function AgentProvider({
   }, []);
 
   const [manager] = useState(
-    // eslint-disable-next-line react-hooks/refs -- forwardResetChat reads its ref only at call time: ChatManager stores the callback (chat-manager.ts constructor) and invokes it solely from resetChat(), never during construction/render. The analyzer cannot see past the opaque constructor.
     () =>
       new ChatManager({
         queueEnabled,
@@ -159,7 +158,6 @@ export function AgentProvider({
   // SDK methods change with the chat ID; snapshots stay stable until updated.
   const messagesValue = useMemo(
     () => agent,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [agent.id, agent.messages, agent.status, agent.error],
   );
 

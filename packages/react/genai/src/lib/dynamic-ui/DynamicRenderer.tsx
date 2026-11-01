@@ -29,7 +29,6 @@ function evalCode(code: string): EvalResult {
     const scopeValues = getScopeValues();
 
     // Create function with safe scope - dangerous globals are set to undefined
-    // eslint-disable-next-line no-new-func
     const factory = new Function(...scopeKeys, wrappedCode);
     const Component = factory(...scopeValues);
 

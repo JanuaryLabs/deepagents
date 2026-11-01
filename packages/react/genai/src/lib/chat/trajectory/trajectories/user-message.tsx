@@ -209,7 +209,7 @@ export function UserMessageContent({
       message: stripReminders(rawMessage),
       reminders: extractReminders(rawMessage),
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- remindersRef is the load-bearing change signal: rawMessage identity often stays stable while its `metadata.reminders` array swaps in place during streaming
+    // remindersRef is the load-bearing change signal: rawMessage identity often stays stable while its `metadata.reminders` array swaps in place during streaming
     [rawMessage, remindersRef],
   );
   const rawAlias = metadataField(rawMessage, 'alias');
