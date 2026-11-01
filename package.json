@@ -54,7 +54,7 @@
     "@vitest/ui": "4.1.10",
     "@zukhruf/async": "^0.6.0",
     "@zukhruf/eslint": "^0.6.9",
-    "@zukhruf/git-hooks": "^0.6.8",
+    "@zukhruf/git-hooks": "^0.6.9",
     "@zukhruf/nx": "^0.6.9",
     "@zukhruf/testing": "^0.6.9",
     "autoprefixer": "10.5.4",
