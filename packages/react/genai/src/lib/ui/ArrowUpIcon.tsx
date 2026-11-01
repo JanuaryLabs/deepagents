@@ -1,8 +1,8 @@
 import { cn } from 'cn';
 import type { Variants } from 'motion/react';
 import { motion, useAnimation } from 'motion/react';
-import type { HTMLAttributes } from 'react';
-import { forwardRef, useCallback, useImperativeHandle, useRef } from 'react';
+import type { HTMLAttributes, Ref } from 'react';
+import { useCallback, useImperativeHandle, useRef } from 'react';
 
 export interface ArrowUpIconHandle {
   startAnimation: () => void;
@@ -34,75 +34,80 @@ const SECOND_PATH_VARIANTS: Variants = {
   },
 };
 
-const ArrowUpIcon = forwardRef<ArrowUpIconHandle, ArrowUpIconProps>(
-  ({ onMouseEnter, onMouseLeave, className, size = 20, ...props }, ref) => {
-    const controls = useAnimation();
-    const isControlledRef = useRef(false);
+const ArrowUpIcon = ({
+  ref,
+  onMouseEnter,
+  onMouseLeave,
+  className,
+  size = 20,
+  ...props
+}: ArrowUpIconProps & { ref?: Ref<ArrowUpIconHandle> }) => {
+  const controls = useAnimation();
+  const isControlledRef = useRef(false);
 
-    useImperativeHandle(ref, () => {
-      isControlledRef.current = true;
+  useImperativeHandle(ref, () => {
+    isControlledRef.current = true;
 
-      return {
-        startAnimation: () => controls.start('animate'),
-        stopAnimation: () => controls.start('normal'),
-      };
-    });
+    return {
+      startAnimation: () => controls.start('animate'),
+      stopAnimation: () => controls.start('normal'),
+    };
+  });
 
-    const handleMouseEnter = useCallback(
-      (e: React.MouseEvent<HTMLDivElement>) => {
-        if (isControlledRef.current) {
-          onMouseEnter?.(e);
-        } else {
-          void controls.start('animate');
-        }
-      },
-      [controls, onMouseEnter],
-    );
+  const handleMouseEnter = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (isControlledRef.current) {
+        onMouseEnter?.(e);
+      } else {
+        void controls.start('animate');
+      }
+    },
+    [controls, onMouseEnter],
+  );
 
-    const handleMouseLeave = useCallback(
-      (e: React.MouseEvent<HTMLDivElement>) => {
-        if (isControlledRef.current) {
-          onMouseLeave?.(e);
-        } else {
-          void controls.start('normal');
-        }
-      },
-      [controls, onMouseLeave],
-    );
+  const handleMouseLeave = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (isControlledRef.current) {
+        onMouseLeave?.(e);
+      } else {
+        void controls.start('normal');
+      }
+    },
+    [controls, onMouseLeave],
+  );
 
-    return (
-      <div
-        className={cn(className)}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-        {...props}
+  return (
+    <div
+      className={cn(className)}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      {...props}
+    >
+      <svg
+        fill="none"
+        height={size}
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+        viewBox="0 0 24 24"
+        width={size}
+        xmlns="http://www.w3.org/2000/svg"
       >
-        <svg
-          fill="none"
-          height={size}
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-          viewBox="0 0 24 24"
-          width={size}
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <motion.path
-            animate={controls}
-            d="m5 12 7-7 7 7"
-            variants={PATH_VARIANTS}
-          />
-          <motion.path
-            animate={controls}
-            d="M12 19V5"
-            variants={SECOND_PATH_VARIANTS}
-          />
-        </svg>
-      </div>
-    );
-  },
-);
+        <motion.path
+          animate={controls}
+          d="m5 12 7-7 7 7"
+          variants={PATH_VARIANTS}
+        />
+        <motion.path
+          animate={controls}
+          d="M12 19V5"
+          variants={SECOND_PATH_VARIANTS}
+        />
+      </svg>
+    </div>
+  );
+};
 
 ArrowUpIcon.displayName = 'ArrowUpIcon';
 

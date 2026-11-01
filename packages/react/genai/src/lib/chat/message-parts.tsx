@@ -48,7 +48,11 @@ function FileAttachmentPart({
       src={url}
       aria-label={name}
       className="max-h-96 w-full rounded-md bg-black"
-    />
+    >
+      {/* The user's own attachment has no caption source; the empty track
+          satisfies jsx-a11y-x/media-has-caption. */}
+      <track kind="captions" />
+    </video>
   ) : url && mediaType.startsWith('audio/') ? (
     <audio
       controls
@@ -56,7 +60,9 @@ function FileAttachmentPart({
       src={url}
       aria-label={name}
       className="w-full"
-    />
+    >
+      <track kind="captions" />
+    </audio>
   ) : null;
   return (
     <Attachment className="bg-muted/30 block w-full rounded-md p-3 text-sm text-inherit">

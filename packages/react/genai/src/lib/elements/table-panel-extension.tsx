@@ -287,7 +287,7 @@ function MarkdownTablePanel({
   title,
   description,
 }: MarkdownTablePanelProps) {
-  const { actions, controls } = React.useContext(MarkdownTableContext);
+  const { actions, controls } = React.use(MarkdownTableContext);
   const showCopy = isTableActionEnabled(controls, 'copy');
   const showDownload = isTableActionEnabled(controls, 'download');
   const hasMetadata = Boolean(title || description);
@@ -393,7 +393,7 @@ export function TablePanelStreamdown({
   }, [children, dir, mode]);
 
   return (
-    <MarkdownTableContext.Provider value={tableContext}>
+    <MarkdownTableContext value={tableContext}>
       <Streamdown
         allowedTags={tablePanelAllowedTags}
         BlockComponent={tablePanelBlockComponent}
@@ -410,6 +410,6 @@ export function TablePanelStreamdown({
           Object.keys(tablePanelAllowedTags),
         )}
       </Streamdown>
-    </MarkdownTableContext.Provider>
+    </MarkdownTableContext>
   );
 }

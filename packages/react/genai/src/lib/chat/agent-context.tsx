@@ -10,8 +10,8 @@ import type {
 import {
   type ReactNode,
   createContext,
+  use,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -168,21 +168,19 @@ export function AgentProvider({
 
   return (
     <ChatManagerContext value={manager}>
-      <AgentConfigContext.Provider value={configValue}>
-        <AgentStatusContext.Provider value={agent.status}>
-          <AgentMessagesContext.Provider value={messagesValue}>
-            <AgentMetaContext.Provider value={metaValue}>
-              {children}
-            </AgentMetaContext.Provider>
-          </AgentMessagesContext.Provider>
-        </AgentStatusContext.Provider>
-      </AgentConfigContext.Provider>
+      <AgentConfigContext value={configValue}>
+        <AgentStatusContext value={agent.status}>
+          <AgentMessagesContext value={messagesValue}>
+            <AgentMetaContext value={metaValue}>{children}</AgentMetaContext>
+          </AgentMessagesContext>
+        </AgentStatusContext>
+      </AgentConfigContext>
     </ChatManagerContext>
   );
 }
 
 export function useAgent() {
-  const context = useContext(AgentConfigContext);
+  const context = use(AgentConfigContext);
   if (context === undefined) {
     throw new Error('useAgent must be used within an AgentProvider');
   }
@@ -190,12 +188,12 @@ export function useAgent() {
 }
 
 export function useAgentStatus() {
-  const status = useContext(AgentStatusContext);
+  const status = use(AgentStatusContext);
   return { status };
 }
 
 export function useAgentMeta() {
-  const meta = useContext(AgentMetaContext);
+  const meta = use(AgentMetaContext);
   if (meta === undefined) {
     throw new Error('useAgentMeta must be used within an AgentProvider');
   }
@@ -203,7 +201,7 @@ export function useAgentMeta() {
 }
 
 export function useAgentMessages() {
-  const context = useContext(AgentMessagesContext);
+  const context = use(AgentMessagesContext);
   if (context === undefined) {
     throw new Error('useAgentMessages must be used within an AgentProvider');
   }
@@ -211,7 +209,7 @@ export function useAgentMessages() {
 }
 
 export function useChatManager() {
-  const manager = useContext(ChatManagerContext);
+  const manager = use(ChatManagerContext);
   if (!manager) {
     throw new Error('useChatManager must be used within an AgentProvider');
   }

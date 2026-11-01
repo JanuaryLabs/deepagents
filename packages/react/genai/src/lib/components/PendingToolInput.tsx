@@ -16,29 +16,25 @@ export function useActivePendingToolInput(): ActivePendingTool | null {
   const agent = useAgentMessages();
   const messages = agent.messages;
 
-  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- deps are correct; compiler can't verify registry shape
   return useMemo(() => {
     if (!registry) return null;
 
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const message = messages[i];
-      if (message.role !== 'assistant') continue;
+    const message = messages.findLast(({ role }) => role === 'assistant');
+    if (!message) return null;
 
-      for (const part of message.parts) {
-        if (!isStaticToolUIPart(part)) continue;
-        if (part.state !== 'input-available') continue;
+    const pending = message.parts.flatMap((part) => {
+      if (!isStaticToolUIPart(part)) return [];
+      if (part.state !== 'input-available') return [];
 
-        const toolKey = part.type.replace('tool-', '');
-        const entry = registry[toolKey];
-        if (!entry || entry.static !== false) continue;
-        if (!entry.requiresUserInput) continue;
+      const toolKey = part.type.replace('tool-', '');
+      const entry = registry[toolKey];
+      if (!entry || entry.static !== false) return [];
+      if (!entry.requiresUserInput) return [];
 
-        return { part, entry };
-      }
-      break;
-    }
+      return [{ part, entry }];
+    });
 
-    return null;
+    return pending.at(0) ?? null;
   }, [messages, registry]);
 }
 

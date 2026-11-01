@@ -8,7 +8,7 @@ import {
 import { cn } from 'cn';
 import { BrainIcon, ZapIcon } from 'lucide-react';
 import type { ComponentProps, ReactNode } from 'react';
-import { createContext, memo, useContext } from 'react';
+import { createContext, memo, use } from 'react';
 
 type ChainOfThoughtContextValue = {
   isOpen: boolean;
@@ -20,7 +20,7 @@ const ChainOfThoughtContext = createContext<ChainOfThoughtContextValue | null>(
 );
 
 const useChainOfThought = () => {
-  const context = useContext(ChainOfThoughtContext);
+  const context = use(ChainOfThoughtContext);
   if (!context) {
     throw new Error(
       'ChainOfThought components must be used within ChainOfThought',
@@ -51,14 +51,14 @@ export const ChainOfThought = memo(
     });
 
     return (
-      <ChainOfThoughtContext.Provider value={{ isOpen, setIsOpen }}>
+      <ChainOfThoughtContext value={{ isOpen, setIsOpen }}>
         <div
           className={cn('not-prose max-w-prose space-y-4', className)}
           {...props}
         >
           {children}
         </div>
-      </ChainOfThoughtContext.Provider>
+      </ChainOfThoughtContext>
     );
   },
 );

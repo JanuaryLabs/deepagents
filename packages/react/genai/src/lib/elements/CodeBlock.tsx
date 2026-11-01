@@ -2,7 +2,7 @@ import { Button } from '@zukhruf/shadcn';
 import { cn } from 'cn';
 import { CheckIcon, CopyIcon } from 'lucide-react';
 import type { ComponentProps, HTMLAttributes, ReactNode } from 'react';
-import { createContext, useContext } from 'react';
+import { createContext, use } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import {
   oneDark,
@@ -40,7 +40,7 @@ export const CodeBlock = ({
   children,
   ...props
 }: CodeBlockProps) => (
-  <CodeBlockContext.Provider value={{ code }}>
+  <CodeBlockContext value={{ code }}>
     <div
       className={cn(
         'bg-background text-foreground relative w-full overflow-hidden rounded-md border',
@@ -97,14 +97,14 @@ export const CodeBlock = ({
         >
           {code}
         </SyntaxHighlighter>
-        {children && (
+        {Boolean(children) && (
           <div className="absolute top-1 right-1 flex items-center gap-1">
             {children}
           </div>
         )}
       </div>
     </div>
-  </CodeBlockContext.Provider>
+  </CodeBlockContext>
 );
 
 export type CodeBlockCopyButtonProps = ComponentProps<typeof Button> & {
@@ -122,7 +122,7 @@ export const CodeBlockCopyButton = ({
   ...props
 }: CodeBlockCopyButtonProps) => {
   const [isCopied, copy] = useCopyFeedback(timeout);
-  const { code } = useContext(CodeBlockContext);
+  const { code } = use(CodeBlockContext);
 
   const copyToClipboard = async () => {
     if (typeof window === 'undefined' || !navigator.clipboard.writeText) {

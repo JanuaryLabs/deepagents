@@ -53,8 +53,8 @@ import {
   type RefObject,
   createContext,
   startTransition,
+  use,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -90,15 +90,14 @@ export type PromptInputControllerProps = {
   ) => void;
 };
 
-const PromptInputController = createContext<PromptInputControllerProps | null>(
-  null,
-);
+const PromptInputControllerContext =
+  createContext<PromptInputControllerProps | null>(null);
 const ProviderAttachmentsContext = createContext<AttachmentsContext | null>(
   null,
 );
 
 export const usePromptInputController = () => {
-  const ctx = useContext(PromptInputController);
+  const ctx = use(PromptInputControllerContext);
   if (!ctx) {
     throw new Error(
       'Wrap your component inside <PromptInputProvider> to use usePromptInputController().',
@@ -109,10 +108,10 @@ export const usePromptInputController = () => {
 
 // Optional variants (do NOT throw). Useful for dual-mode components.
 const useOptionalPromptInputController = () =>
-  useContext(PromptInputController);
+  use(PromptInputControllerContext);
 
 export const useProviderAttachments = () => {
-  const ctx = useContext(ProviderAttachmentsContext);
+  const ctx = use(ProviderAttachmentsContext);
   if (!ctx) {
     throw new Error(
       'Wrap your component inside <PromptInputProvider> to use useProviderAttachments().',
@@ -121,8 +120,7 @@ export const useProviderAttachments = () => {
   return ctx;
 };
 
-const useOptionalProviderAttachments = () =>
-  useContext(ProviderAttachmentsContext);
+const useOptionalProviderAttachments = () => use(ProviderAttachmentsContext);
 
 export type PromptInputProviderProps = PropsWithChildren<{
   initialInput?: string;
@@ -243,11 +241,11 @@ export function PromptInputProvider({
   );
 
   return (
-    <PromptInputController.Provider value={controller}>
-      <ProviderAttachmentsContext.Provider value={attachments}>
+    <PromptInputControllerContext value={controller}>
+      <ProviderAttachmentsContext value={attachments}>
         {children}
-      </ProviderAttachmentsContext.Provider>
-    </PromptInputController.Provider>
+      </ProviderAttachmentsContext>
+    </PromptInputControllerContext>
   );
 }
 
@@ -260,7 +258,7 @@ const LocalAttachmentsContext = createContext<AttachmentsContext | null>(null);
 export const usePromptInputAttachments = () => {
   // Dual-mode: prefer provider if present, otherwise use local
   const provider = useOptionalProviderAttachments();
-  const local = useContext(LocalAttachmentsContext);
+  const local = use(LocalAttachmentsContext);
   const context = provider ?? local;
   if (!context) {
     throw new Error(
@@ -793,9 +791,7 @@ export const PromptInput = ({
   return usingProvider ? (
     inner
   ) : (
-    <LocalAttachmentsContext.Provider value={ctx}>
-      {inner}
-    </LocalAttachmentsContext.Provider>
+    <LocalAttachmentsContext value={ctx}>{inner}</LocalAttachmentsContext>
   );
 };
 

@@ -9,10 +9,11 @@ import {
 import { cn } from 'cn';
 import * as React from 'react';
 
-const TablePanelRoot = React.forwardRef<
-  HTMLDivElement,
-  React.ComponentPropsWithoutRef<'div'>
->(function TablePanelRoot({ className, ...props }, ref) {
+function TablePanelRoot({
+  ref,
+  className,
+  ...props
+}: React.ComponentProps<'div'>) {
   return (
     <Card
       ref={ref}
@@ -25,7 +26,7 @@ const TablePanelRoot = React.forwardRef<
       {...props}
     />
   );
-});
+}
 TablePanelRoot.displayName = 'TablePanel.Root';
 
 function TablePanelHeader({

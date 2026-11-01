@@ -116,12 +116,12 @@ export function TipProvider<C>({
 }) {
   const [session] = useState(() => resolveSession(chatId));
   const [tip, setTip] = useState('');
-  const prevStreaming = useRef(false);
-  const selecting = useRef(false);
+  const prevStreamingRef = useRef(false);
+  const selectingRef = useRef(false);
 
   const pick = useEffectEvent(() => {
-    if (selecting.current) return;
-    selecting.current = true;
+    if (selectingRef.current) return;
+    selectingRef.current = true;
     void selectTip(tips, context, session)
       .then((result) => {
         if (result) {
@@ -130,7 +130,7 @@ export function TipProvider<C>({
         }
       })
       .finally(() => {
-        selecting.current = false;
+        selectingRef.current = false;
       });
   });
 
@@ -139,8 +139,8 @@ export function TipProvider<C>({
   }, []);
 
   useEffect(() => {
-    const justStarted = streaming && !prevStreaming.current;
-    prevStreaming.current = streaming;
+    const justStarted = streaming && !prevStreamingRef.current;
+    prevStreamingRef.current = streaming;
     if (!justStarted) return;
     pick();
   }, [streaming]);

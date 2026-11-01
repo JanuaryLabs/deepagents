@@ -158,7 +158,7 @@ function AgentHeaderDescription(props: { children?: React.ReactNode }) {
   const { hasSubmitted } = useAgentMeta();
   return (
     <AnimatePresence>
-      {hasSubmitted && props.children && (
+      {hasSubmitted && Boolean(props.children) && (
         <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}

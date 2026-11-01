@@ -15,15 +15,15 @@ type MessageItemContextValue = {
   index: number;
 };
 
-export const MessagesCtx = createContext<MessagesContextValue | undefined>(
+export const MessagesContext = createContext<MessagesContextValue | undefined>(
   undefined,
 );
-export const MessageItemCtx = createContext<
+export const MessageItemContext = createContext<
   MessageItemContextValue | undefined
 >(undefined);
 
 export function useMessagesContext() {
-  const ctx = use(MessagesCtx);
+  const ctx = use(MessagesContext);
   if (!ctx) {
     throw new Error('useMessagesContext must be used within <Messages>');
   }
@@ -31,7 +31,7 @@ export function useMessagesContext() {
 }
 
 export function useMessagesStatus() {
-  const ctx = use(MessagesCtx);
+  const ctx = use(MessagesContext);
   const { status } = useAgentStatus();
   // Soft fallback: status is derivable from agent context, so we don't
   // force callers to wrap in <Messages.Root> or pass status= just to read it.
@@ -39,7 +39,7 @@ export function useMessagesStatus() {
 }
 
 export function useMessageItem() {
-  const ctx = use(MessageItemCtx);
+  const ctx = use(MessageItemContext);
   if (!ctx) {
     throw new Error('useMessageItem must be used within <Messages.Item>');
   }

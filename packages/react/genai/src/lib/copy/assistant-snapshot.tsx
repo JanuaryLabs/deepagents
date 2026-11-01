@@ -4,8 +4,8 @@ import { cn } from 'cn';
 import { Check, Copy } from 'lucide-react';
 import {
   type ReactNode,
+  use,
   useCallback,
-  useContext,
   useMemo,
   useRef,
   useState,
@@ -24,7 +24,7 @@ export function extractAssistantRawText(message: UIMessage): string {
 }
 
 export function useIsAssistantSnapshotRender() {
-  return useContext(SnapshotRenderContext);
+  return use(SnapshotRenderContext);
 }
 
 export function AssistantSnapshot({

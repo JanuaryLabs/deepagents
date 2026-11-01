@@ -5,8 +5,8 @@ export {
   type IndexProgressEventType,
 } from './IndexProgressSegment.tsx';
 export {
-  MessageItemCtx,
-  MessagesCtx,
+  MessageItemContext,
+  MessagesContext,
   useMessageItem,
   useMessagesContext,
   useMessagesStatus,

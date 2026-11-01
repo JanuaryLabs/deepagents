@@ -4,9 +4,9 @@ import { useMemo } from 'react';
 
 import type { GenAIInteractiveElement } from '../../../components/InteractiveResponse.tsx';
 import {
-  MessageItemCtx,
+  MessageItemContext,
+  MessagesContext,
   type MessagesContextValue,
-  MessagesCtx,
 } from '../messages-context.ts';
 
 export function MessagesRoot({
@@ -28,11 +28,11 @@ export function MessagesRoot({
   );
 
   return (
-    <MessagesCtx.Provider value={value}>
+    <MessagesContext value={value}>
       <div className={cn('flex h-full flex-col', className)}>
         <div className="flex h-full min-h-0 flex-1 flex-col">{children}</div>
       </div>
-    </MessagesCtx.Provider>
+    </MessagesContext>
   );
 }
 
@@ -60,8 +60,8 @@ export function MessagesItem({
   const value = useMemo(() => ({ message, index }), [message, index]);
 
   return (
-    <MessageItemCtx.Provider value={value}>
+    <MessageItemContext value={value}>
       <div className={className}>{children}</div>
-    </MessageItemCtx.Provider>
+    </MessageItemContext>
   );
 }

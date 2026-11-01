@@ -9,7 +9,7 @@ import {
   Fragment,
   type ReactNode,
   createContext,
-  useContext,
+  use,
   useMemo,
   useState,
 } from 'react';
@@ -302,7 +302,7 @@ const IndexProgressContext = createContext<IndexProgressContextValue | null>(
 );
 
 function useIndexProgress(component: string): IndexProgressContextValue {
-  const ctx = useContext(IndexProgressContext);
+  const ctx = use(IndexProgressContext);
   if (!ctx) {
     throw new Error(
       `<IndexProgress.${component}> must be used inside <IndexProgress.Root>`,
@@ -337,7 +337,7 @@ function Root({
   if (shouldHideIndexProgress(events, state)) return null;
 
   return (
-    <IndexProgressContext.Provider value={{ state, events }}>
+    <IndexProgressContext value={{ state, events }}>
       <Collapsible
         open={isOpen}
         onOpenChange={handleOpenChange}
@@ -347,7 +347,7 @@ function Root({
       >
         {children}
       </Collapsible>
-    </IndexProgressContext.Provider>
+    </IndexProgressContext>
   );
 }
 
