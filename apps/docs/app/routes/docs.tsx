@@ -42,17 +42,13 @@ const clientLoader = browserCollections.docs.createClientLoader({
   },
 });
 
-function DocsContent({ path }: { path: string }) {
-  const Content: any = clientLoader.getComponent(path);
-  return <Content />;
-}
-
 export default function Page({ loaderData }: Route.ComponentProps) {
   const { tree, path } = useFumadocsLoader(loaderData);
+  const content = clientLoader.useContent(path);
 
   return (
     <DocsLayout {...baseOptions()} tree={tree} tabMode="top">
-      <DocsContent path={path} />
+      {content}
     </DocsLayout>
   );
 }
