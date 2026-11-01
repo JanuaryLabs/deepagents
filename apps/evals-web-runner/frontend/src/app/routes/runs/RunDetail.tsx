@@ -1,7 +1,3 @@
-import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
-
-import { cn } from 'cn';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -19,11 +15,11 @@ import {
   TableRow,
   buttonVariants,
 } from '@zukhruf/shadcn';
+import { cn } from 'cn';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
 
-import {
-  CaseTable,
-  isCaseWithScores,
-} from '../../components/CaseTable.tsx';
+import { CaseTable, isCaseWithScores } from '../../components/CaseTable.tsx';
 import { RunStatusBadge } from '../../components/RunStatusBadge.tsx';
 import { StatsGrid } from '../../components/StatsGrid.tsx';
 import { useAction, useData } from '../../hooks/use-client.ts';
@@ -48,6 +44,10 @@ export default function RunDetailPage() {
   );
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (isEditing) renameInputRef.current?.focus();
+  }, [isEditing]);
   const [progressMap, setProgressMap] = useState<Record<string, number>>({});
 
   const runningIds = data?.run.status === 'running' ? [data.run.id] : [];
@@ -165,8 +165,8 @@ export default function RunDetailPage() {
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   onKeyDown={(e) => e.key === 'Escape' && setIsEditing(false)}
+                  ref={renameInputRef}
                   className="text-2xl font-bold"
-                  autoFocus
                 />
                 <Button type="submit" size="sm" variant="outline">
                   Save
@@ -182,14 +182,14 @@ export default function RunDetailPage() {
               </form>
             ) : (
               <div className="flex items-center gap-3">
-                <h1
-                  className="cursor-pointer text-2xl font-bold decoration-dashed underline-offset-4 hover:underline"
-                  onClick={startEditing}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => e.key === 'Enter' && startEditing()}
-                >
-                  {run.name}
+                <h1 className="text-2xl font-bold">
+                  <button
+                    type="button"
+                    className="cursor-pointer decoration-dashed underline-offset-4 hover:underline"
+                    onClick={startEditing}
+                  >
+                    {run.name}
+                  </button>
                 </h1>
                 <RunStatusBadge status={run.status} />
               </div>

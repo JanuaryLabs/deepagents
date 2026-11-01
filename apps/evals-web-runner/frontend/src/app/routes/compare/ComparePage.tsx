@@ -7,13 +7,14 @@ import {
   SelectValue,
   Skeleton,
 } from '@zukhruf/shadcn';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { ComparisonTable } from '../../components/ComparisonTable.tsx';
 import { useData } from '../../hooks/use-client.ts';
 
 export default function ComparePage() {
+  const id = useId();
   const [searchParams, setSearchParams] = useSearchParams();
   const baselineParam = searchParams.get('baseline') ?? '';
   const candidateParam = searchParams.get('candidate') ?? '';
@@ -69,8 +70,11 @@ export default function ComparePage() {
 
       <div className="mb-8 max-w-lg space-y-4">
         <div>
-          <label className="text-sm font-medium">Baseline Run</label>
+          <label htmlFor={`${id}-baseline`} className="text-sm font-medium">
+            Baseline Run
+          </label>
           <Select
+            id={`${id}-baseline`}
             value={selectedBaseline}
             onValueChange={(value) =>
               value !== null && setSelectedBaseline(value)
@@ -91,8 +95,11 @@ export default function ComparePage() {
         </div>
 
         <div>
-          <label className="text-sm font-medium">Candidate Run</label>
+          <label htmlFor={`${id}-candidate`} className="text-sm font-medium">
+            Candidate Run
+          </label>
           <Select
+            id={`${id}-candidate`}
             value={selectedCandidate}
             onValueChange={(value) =>
               value !== null && setSelectedCandidate(value)

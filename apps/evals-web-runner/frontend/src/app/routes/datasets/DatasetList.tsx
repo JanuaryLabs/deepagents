@@ -10,13 +10,14 @@ import {
   TableHeader,
   TableRow,
 } from '@zukhruf/shadcn';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Link } from 'react-router';
 
 import { useAction, useData } from '../../hooks/use-client.ts';
 import { formatSize } from '../../lib/format.ts';
 
 export default function DatasetListPage() {
+  const id = useId();
   const { data: datasets, isLoading } = useData('GET /datasets', {});
 
   const [hfDataset, setHfDataset] = useState('');
@@ -75,8 +76,11 @@ export default function DatasetListPage() {
       <div className="mb-6 space-y-4">
         <form onSubmit={handleUpload} className="flex items-end gap-4">
           <div>
-            <label className="text-sm font-medium">Upload Dataset</label>
+            <label htmlFor={`${id}-file`} className="text-sm font-medium">
+              Upload Dataset
+            </label>
             <Input
+              id={`${id}-file`}
               type="file"
               name="file"
               accept=".json,.jsonl,.csv"
@@ -91,10 +95,11 @@ export default function DatasetListPage() {
 
         <form onSubmit={handleHfAdd} className="flex items-end gap-4">
           <div>
-            <label className="text-sm font-medium">
+            <label htmlFor={`${id}-hf-dataset`} className="text-sm font-medium">
               Import from HuggingFace
             </label>
             <Input
+              id={`${id}-hf-dataset`}
               value={hfDataset}
               onChange={(e) => setHfDataset(e.target.value)}
               placeholder="e.g. squad, glue"
@@ -103,24 +108,36 @@ export default function DatasetListPage() {
             />
           </div>
           <div>
-            <label className="text-sm font-medium">Config</label>
+            <label htmlFor={`${id}-hf-config`} className="text-sm font-medium">
+              Config
+            </label>
             <Input
+              id={`${id}-hf-config`}
               value={hfConfig}
               onChange={(e) => setHfConfig(e.target.value)}
               className="mt-1 w-32"
             />
           </div>
           <div>
-            <label className="text-sm font-medium">Split</label>
+            <label htmlFor={`${id}-hf-split`} className="text-sm font-medium">
+              Split
+            </label>
             <Input
+              id={`${id}-hf-split`}
               value={hfSplit}
               onChange={(e) => setHfSplit(e.target.value)}
               className="mt-1 w-24"
             />
           </div>
           <div>
-            <label className="text-sm font-medium">Max Rows</label>
+            <label
+              htmlFor={`${id}-hf-max-rows`}
+              className="text-sm font-medium"
+            >
+              Max Rows
+            </label>
             <Input
+              id={`${id}-hf-max-rows`}
               type="number"
               value={hfMaxRows}
               onChange={(e) => setHfMaxRows(e.target.value)}

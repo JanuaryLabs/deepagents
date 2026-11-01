@@ -15,7 +15,7 @@ import {
   TableRow,
   Textarea,
 } from '@zukhruf/shadcn';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 
 import { useAction, useData } from '../../hooks/use-client.ts';
 
@@ -61,6 +61,7 @@ function formatDate(timestamp: number): string {
 }
 
 export default function PromptsPage() {
+  const id = useId();
   const { data: prompts, isLoading } = useData('GET /prompts', {});
 
   const [promptName, setPromptName] = useState('');
@@ -107,8 +108,11 @@ export default function PromptsPage() {
 
       <form onSubmit={handleCreate} className="mb-6 max-w-2xl space-y-3">
         <div>
-          <label className="text-sm font-medium">Name</label>
+          <label htmlFor={`${id}-name`} className="text-sm font-medium">
+            Name
+          </label>
           <Input
+            id={`${id}-name`}
             value={promptName}
             onChange={(e) => setPromptName(e.target.value)}
             placeholder="e.g. code-reviewer, summarizer"
@@ -117,8 +121,11 @@ export default function PromptsPage() {
           />
         </div>
         <div>
-          <label className="text-sm font-medium">Content (new version)</label>
+          <label htmlFor={`${id}-content`} className="text-sm font-medium">
+            Content (new version)
+          </label>
           <Textarea
+            id={`${id}-content`}
             value={promptContent}
             onChange={(e) => setPromptContent(e.target.value)}
             placeholder="You are a helpful assistant that..."

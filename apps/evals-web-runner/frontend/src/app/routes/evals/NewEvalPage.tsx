@@ -72,7 +72,7 @@ export default function NewEvalPage() {
   const [endpointUrl, setEndpointUrl] = useState('');
   const [selectedDataset, setSelectedDataset] = useState('');
   const [selectedScorers, setSelectedScorers] = useState<Set<string>>(
-    new Set(),
+    () => new Set(),
   );
   const [scorerModel, setScorerModel] = useState('');
   const [scorerSelectorOpen, setScorerSelectorOpen] = useState(false);

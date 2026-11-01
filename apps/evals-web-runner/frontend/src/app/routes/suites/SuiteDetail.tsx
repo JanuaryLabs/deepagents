@@ -23,7 +23,7 @@ import {
   buttonVariants,
 } from '@zukhruf/shadcn';
 import { cn } from 'cn';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 
 import { RunStatusBadge } from '../../components/RunStatusBadge.tsx';
@@ -50,7 +50,13 @@ export default function SuiteDetailPage() {
   );
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
-  const [selectedRunIds, setSelectedRunIds] = useState<Set<string>>(new Set());
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (isEditing) renameInputRef.current?.focus();
+  }, [isEditing]);
+  const [selectedRunIds, setSelectedRunIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [showComparison, setShowComparison] = useState(false);
 
   const [progressMap, setProgressMap] = useState<Record<string, number>>({});
@@ -147,8 +153,8 @@ export default function SuiteDetailPage() {
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   onKeyDown={(e) => e.key === 'Escape' && setIsEditing(false)}
+                  ref={renameInputRef}
                   className="text-2xl font-bold"
-                  autoFocus
                 />
                 <Button type="submit" size="sm" variant="outline">
                   Save
@@ -163,14 +169,14 @@ export default function SuiteDetailPage() {
                 </Button>
               </form>
             ) : (
-              <h1
-                className="cursor-pointer text-2xl font-bold decoration-dashed underline-offset-4 hover:underline"
-                onClick={startEditing}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => e.key === 'Enter' && startEditing()}
-              >
-                {suite.name}
+              <h1 className="text-2xl font-bold">
+                <button
+                  type="button"
+                  className="cursor-pointer decoration-dashed underline-offset-4 hover:underline"
+                  onClick={startEditing}
+                >
+                  {suite.name}
+                </button>
               </h1>
             )}
             <p className="text-muted-foreground mt-1 text-sm">
