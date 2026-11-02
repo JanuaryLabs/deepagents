@@ -93,20 +93,18 @@ test('one setup creates independent ready hosts with plugins, HTTP, and queued t
   const value = new AgentPluginCapability<number>('test.instance');
   const plugin: AgentPluginDefinition<{
     instance: number;
-    initialized: boolean;
+    initializations: readonly unknown[];
   }> = {
     name: 'bound',
     capabilities: [value],
     create: (bindings) => {
-      let initialized = false;
+      const initializations: unknown[] = [];
       return {
         instance: bindings.get(value),
-        get initialized() {
-          return initialized;
-        },
-        async initialize() {
+        initializations,
+        async initialize(pluginHost) {
           await Promise.resolve();
-          initialized = true;
+          initializations.push(pluginHost);
         },
       };
     },
@@ -131,8 +129,8 @@ test('one setup creates independent ready hosts with plugins, HTTP, and queued t
   assert.notEqual(host, second);
   assert.equal(host.plugin(plugin).instance, 1);
   assert.equal(second.plugin(plugin).instance, 2);
-  assert.equal(host.plugin(plugin).initialized, true);
-  assert.equal(second.plugin(plugin).initialized, true);
+  assert.equal(host.plugin(plugin).initializations.length, 1);
+  assert.equal(second.plugin(plugin).initializations.length, 1);
   assert.equal(host.info.root, root.name);
 
   const app = new Hono<HttpEnv>();

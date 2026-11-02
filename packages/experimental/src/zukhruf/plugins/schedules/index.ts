@@ -1,4 +1,5 @@
 import { isToolUIPart } from 'ai';
+import pMemoize from 'p-memoize';
 import type { JobPollingOptions, PgBoss } from 'pg-boss';
 import { z } from 'zod';
 
@@ -115,8 +116,16 @@ class SchedulesPlugin implements Schedules {
   readonly #scheduled: ScheduledTasks<ExecutionConfig>;
   readonly #sources: readonly ScheduleSource[] | undefined;
   readonly #workerOptions: JobPollingOptions | undefined;
-  #host?: AgentPluginHost;
-  #initialization?: Promise<void>;
+  #host: {
+    require(): AgentPluginHost;
+    is(host: AgentPluginHost): boolean;
+  } = {
+    require() {
+      throw new Error('schedules plugin is not initialized');
+    },
+    is: () => false,
+  };
+  readonly #initializeOnce = pMemoize(() => this.#initialize());
 
   constructor({
     sources,
@@ -138,16 +147,15 @@ class SchedulesPlugin implements Schedules {
   }
 
   initialize(host: AgentPluginHost): Promise<void> {
-    this.#host = host;
-    if (!this.#initialization) this.#initialization = this.#initialize();
-    return this.#initialization;
+    this.#host = { require: () => host, is: (other) => other === host };
+    return this.#initializeOnce();
   }
 
   work(
     host: AgentPluginHost,
     waitForActive?: boolean,
   ): Promise<AsyncDisposable> {
-    if (this.#host !== host) {
+    if (!this.#host.is(host)) {
       throw new Error(
         'schedules plugin must be initialized before work starts',
       );
@@ -290,7 +298,7 @@ class SchedulesPlugin implements Schedules {
     prompt: string;
     executionConfig: ExecutionConfig;
   }): Promise<{ executionId: string }> {
-    const host = this.#requiredHost();
+    const host = this.#host.require();
     const conversation = executionConversation(runId, ownerId, executionConfig);
     if (
       executionConfig.target?.kind === 'existing-conversation' &&
@@ -328,9 +336,9 @@ class SchedulesPlugin implements Schedules {
     executionId: string;
     executionConfig: ExecutionConfig;
   }): Promise<ScheduledExecutionObservation> {
-    const observation = this.#requiredHost().observe(
-      executionConversation(runId, ownerId, executionConfig),
-    );
+    const observation = this.#host
+      .require()
+      .observe(executionConversation(runId, ownerId, executionConfig));
     const execution = await observation.status(executionId);
     if (!execution) {
       throw new Error(`Scheduled execution "${executionId}" was not found`);
@@ -384,7 +392,8 @@ class SchedulesPlugin implements Schedules {
     executionId: string;
     executionConfig: ExecutionConfig;
   }): Promise<void> {
-    await this.#requiredHost()
+    await this.#host
+      .require()
       .observe(executionConversation(runId, ownerId, executionConfig))
       .cancel(executionId);
   }
@@ -398,17 +407,12 @@ class SchedulesPlugin implements Schedules {
       chatId: executionConfig.target.chatId,
       userId: ownerId,
     };
-    if (await this.#requiredHost().conversationExists(conversation)) return;
+    if (await this.#host.require().conversationExists(conversation)) return;
     throw new ScheduledTasksError(
       'invalid-input',
       'task',
       `Scheduled target conversation "${conversation.chatId}" was not found`,
     );
-  }
-
-  #requiredHost(): AgentPluginHost {
-    if (!this.#host) throw new Error('schedules plugin is not initialized');
-    return this.#host;
   }
 }
 

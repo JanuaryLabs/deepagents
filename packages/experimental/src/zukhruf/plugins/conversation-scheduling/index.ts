@@ -32,24 +32,21 @@ export function conversationScheduling(): AgentPluginDefinition {
       conversationSchedulingCapabilities.timezone,
     ],
     create(bindings) {
-      let host: AgentPluginHost | undefined;
+      let host = (): AgentPluginHost => {
+        throw new Error(
+          'conversation-scheduling plugin must be initialized before use',
+        );
+      };
       const scheduler = new ConversationScheduler({
         scheduler: bindings.get(conversationSchedulingCapabilities.scheduler),
-        host: () => {
-          if (!host) {
-            throw new Error(
-              'conversation-scheduling plugin must be initialized before use',
-            );
-          }
-          return host;
-        },
+        host: () => host(),
         timezone: bindings.get(conversationSchedulingCapabilities.timezone),
       });
 
       return {
         tools: createSchedulingTools(scheduler),
         async initialize(runtimeHost) {
-          host = runtimeHost;
+          host = () => runtimeHost;
         },
         work: (_host, waitForActive) => scheduler.work(waitForActive),
         conversationAvailable: (_host, conversation) =>

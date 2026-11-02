@@ -158,7 +158,11 @@ const publishInputSchema = z.object({
 class UploadsPlugin implements Uploads {
   readonly #directory: string;
   readonly #publicUrl: string | undefined;
-  #host: AgentPluginHost | undefined;
+  #requiredHost = (): AgentPluginHost => {
+    throw new Error(
+      'uploads plugin must be initialized before storing or reading uploads',
+    );
+  };
 
   readonly tools = {
     publish_upload: tool<
@@ -190,7 +194,7 @@ class UploadsPlugin implements Uploads {
   }
 
   initialize(host: AgentPluginHost): Promise<void> {
-    this.#host = host;
+    this.#requiredHost = () => host;
     return Promise.resolve();
   }
 
@@ -297,12 +301,7 @@ class UploadsPlugin implements Uploads {
   }
 
   #sandboxFor(scope: UploadScope): Promise<ZukhrufSandbox> {
-    if (this.#host === undefined) {
-      throw new Error(
-        'uploads plugin must be initialized before storing or reading uploads',
-      );
-    }
-    return this.#host.sandbox({
+    return this.#requiredHost().sandbox({
       chatId: scope.sessionId,
       userId: scope.userId,
     });
