@@ -108,7 +108,7 @@ export interface CreateAgent<
   tools?: ToolSet;
   model: AgentModel;
   toolChoice?: ToolChoice<Record<string, COut>>;
-  output?: z.Schema<Output>;
+  output?: z.ZodType<Output>;
   providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
   logging?: boolean;
 }
@@ -123,7 +123,7 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
   readonly handoff: Handoff<CIn>;
   readonly handoffToolName: transfer_tool;
   readonly handoffTool: ToolSet;
-  readonly output?: z.Schema<Output>;
+  readonly output?: z.ZodType<Output>;
   readonly providerOptions?: CreateAgent<Output, CIn, COut>['providerOptions'];
   readonly logging?: boolean;
   readonly reasoning?: AgentControls['reasoning'];

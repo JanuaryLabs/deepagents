@@ -60,7 +60,7 @@ class PlanExecuteStateManager {
   }
 
   private generateStepId(): StepId {
-    return `step_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return `step_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
   }
 
   getCurrentState() {

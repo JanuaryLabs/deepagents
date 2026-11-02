@@ -8,6 +8,7 @@ import {
   type UIMessage,
   type UITools,
   generateId,
+  toUIMessageStream,
 } from 'ai';
 import { flow } from 'lodash-es';
 import { createWriteStream } from 'node:fs';
@@ -96,7 +97,7 @@ export const printer = {
     const includeText = options?.text ?? true;
     const wrapInTags = options?.wrapInTags ?? true;
     const state = { reasoningOpen: false };
-    for await (const chunk of response.toUIMessageStream()) {
+    for await (const chunk of toUIMessageStream({ stream: response.stream })) {
       printChunk(
         chunk,
         { reasoning: includeReasoning, text: includeText, wrapInTags },
