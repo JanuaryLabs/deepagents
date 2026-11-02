@@ -154,7 +154,7 @@ export async function compact(options: CompactOptions): Promise<CompactResult> {
     abortSignal,
   });
   abortSignal?.throwIfAborted();
-  const usage = generated.totalUsage;
+  const { usage } = generated;
   if (
     generated.finishReason !== 'stop' ||
     generated.content.some(
