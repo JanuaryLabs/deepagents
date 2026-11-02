@@ -1,3 +1,4 @@
+import pMemoize from 'p-memoize';
 import { type SqlLanguage, format as formatSql } from 'sql-formatter';
 import { z } from 'zod';
 
@@ -476,13 +477,7 @@ export abstract class Adapter {
       .replace(/\\(?=$)/gm, '');
   }
 
-  #cachedAllowedEntities: string[] | null = null;
-
-  async #resolveScope(): Promise<string[]> {
-    if (this.#cachedAllowedEntities) return this.#cachedAllowedEntities;
-    this.#cachedAllowedEntities = await this.resolveAllowedEntities();
-    return this.#cachedAllowedEntities;
-  }
+  readonly #resolveScope = pMemoize(() => this.resolveAllowedEntities());
 
   async #analyzePolicy(sql: string): Promise<SqlPolicyViolation | null> {
     return this.#policyAnalyzer.analyze(sql, {

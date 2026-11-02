@@ -1,3 +1,5 @@
+import pMemoize from 'p-memoize';
+
 import type { Adapter, Relationship, Table } from '../adapter.ts';
 import { nameRow } from '../groundings/rows.ts';
 import {
@@ -14,7 +16,7 @@ import { foreignKeyListRow, tableInfoRow } from './sqlite-rows.ts';
  */
 export class SqliteTableGrounding extends TableGrounding {
   #adapter: Adapter;
-  #relationshipCache: Relationship[] | null = null;
+  readonly #allRelationships = pMemoize(() => this.#loadAllRelationships());
 
   constructor(adapter: Adapter, config: TableGroundingConfig = {}) {
     super(config);
@@ -82,10 +84,7 @@ export class SqliteTableGrounding extends TableGrounding {
   ): Promise<Relationship[]> {
     // SQLite limitation: PRAGMA only shows outgoing FKs
     // Must scan all tables and cache the results
-    if (!this.#relationshipCache) {
-      this.#relationshipCache = await this.#loadAllRelationships();
-    }
-    return this.#relationshipCache.filter(
+    return (await this.#allRelationships()).filter(
       (r) => r.referenced_table === tableName,
     );
   }
