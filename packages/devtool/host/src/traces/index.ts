@@ -81,14 +81,14 @@ function fileExporter(
   calls: Map<string, TraceCallState>,
   onWriteError?: FileTelemetryOptions['onWriteError'],
 ): SpanExporter {
-  let initialized = false;
+  let ensureDirectory = () => {
+    mkdirSync(dirname(path), { recursive: true });
+    ensureDirectory = () => {};
+  };
   return {
     export(spans, done) {
       try {
-        if (!initialized) {
-          mkdirSync(dirname(path), { recursive: true });
-          initialized = true;
-        }
+        ensureDirectory();
         appendFileSync(
           path,
           `${spans
