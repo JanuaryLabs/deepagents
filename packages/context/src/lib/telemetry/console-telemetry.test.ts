@@ -1,8 +1,8 @@
 import {
   NoObjectGeneratedError,
+  Output,
   type Telemetry,
   embed,
-  generateObject,
   generateText,
   isStepCount,
   rerank,
@@ -61,7 +61,7 @@ function textModel(text: string): MockLanguageModelV4 {
 
 /**
  * Runs real AI SDK operations that, together, fire every telemetry callback:
- * a two-step generateText with a tool call, generateObject, embed, rerank, a
+ * a two-step generateText with a tool call, embed, rerank, a
  * streamText aborted before it starts, and a generateText whose model fails.
  */
 async function triggerEveryTelemetryCallback(
@@ -99,12 +99,6 @@ async function triggerEveryTelemetryCallback(
       }),
     },
     stopWhen: isStepCount(2),
-    telemetry: { integrations: telemetry },
-  });
-  await generateObject({
-    model: textModel('{"value":"object"}'),
-    schema: z.object({ value: z.string() }),
-    prompt: 'make an object',
     telemetry: { integrations: telemetry },
   });
   await embed({
@@ -355,19 +349,23 @@ describe('createConsoleTelemetry()', () => {
         recordOutputs: false,
       },
     });
-    await generateObject({
+    await generateText({
       model: textModel('{"value":"public object"}'),
-      schema: z.object({ value: z.string().describe('SECRET_OBJECT_SCHEMA') }),
-      schemaName: 'SECRET_SCHEMA_NAME',
-      schemaDescription: 'SECRET_SCHEMA_DESCRIPTION',
+      output: Output.object({
+        schema: z.object({
+          value: z.string().describe('SECRET_OBJECT_SCHEMA'),
+        }),
+        name: 'SECRET_SCHEMA_NAME',
+        description: 'SECRET_SCHEMA_DESCRIPTION',
+      }),
       instructions: 'SECRET_OBJECT_SYSTEM',
       prompt: 'SECRET_OBJECT_PROMPT',
       telemetry: { integrations: telemetry, recordInputs: false },
     });
     await assert.rejects(
-      generateObject({
+      generateText({
         model: textModel('SECRET_INVALID_OBJECT_OUTPUT'),
-        schema: z.object({ value: z.string() }),
+        output: Output.object({ schema: z.object({ value: z.string() }) }),
         prompt: 'produce an object',
         telemetry: { integrations: telemetry, recordOutputs: false },
       }),
@@ -388,20 +386,23 @@ describe('createConsoleTelemetry()', () => {
         'onEmbedEnd',
         'onEnd',
         'onStart',
-        'onObjectStepStart',
-        'onObjectStepEnd',
+        'onStepStart',
+        'onLanguageModelCallStart',
+        'onLanguageModelCallEnd',
+        'onStepEnd',
         'onEnd',
         'onStart',
-        'onObjectStepStart',
-        'onObjectStepEnd',
+        'onStepStart',
+        'onLanguageModelCallStart',
+        'onLanguageModelCallEnd',
+        'onStepEnd',
+        'onEnd',
         'onError',
       ],
     );
     for (const { data } of records) {
       assert.strictEqual(Object.hasOwn(data, 'toolCall'), false);
       assert.strictEqual(Object.hasOwn(data, 'toolOutput'), false);
-      assert.strictEqual(Object.hasOwn(data, 'steps'), false);
-      assert.strictEqual(Object.hasOwn(data, 'finalStep'), false);
     }
   });
 
@@ -525,8 +526,6 @@ describe('createConsoleTelemetry()', () => {
       'onToolExecutionStart',
       'onToolExecutionEnd',
       'onStepEnd',
-      'onObjectStepStart',
-      'onObjectStepEnd',
       'onEmbedStart',
       'onEmbedEnd',
       'onRerankStart',
@@ -545,6 +544,6 @@ describe('createConsoleTelemetry()', () => {
       errors.map((line) => parseRecord(line).event),
       ['onError'],
     );
-    assert.strictEqual(telemetry.onStepFinish, undefined);
+    assert.strictEqual(Object.hasOwn(telemetry, 'onStepFinish'), false);
   });
 });

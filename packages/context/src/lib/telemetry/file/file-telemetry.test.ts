@@ -3,7 +3,6 @@ import { TemporaryFiles } from '@zukhruf/testing/fs';
 import {
   type Telemetry,
   embed,
-  generateObject,
   generateText,
   isStepCount,
   rerank,
@@ -64,7 +63,7 @@ async function readRecords(path: string) {
 
 /**
  * Runs real AI SDK operations that, together, fire every telemetry callback:
- * a two-step generateText with a tool call, generateObject, embed, rerank, a
+ * a two-step generateText with a tool call, embed, rerank, a
  * streamText aborted before it starts, and a generateText whose model fails.
  */
 async function triggerEveryTelemetryCallback(
@@ -102,12 +101,6 @@ async function triggerEveryTelemetryCallback(
       }),
     },
     stopWhen: isStepCount(2),
-    telemetry: { integrations: telemetry },
-  });
-  await generateObject({
-    model: createTextModel('{"value":"object"}'),
-    schema: z.object({ value: z.string() }),
-    prompt: 'make an object',
     telemetry: { integrations: telemetry },
   });
   await embed({
@@ -233,8 +226,6 @@ describe('createFileTelemetry()', () => {
       'onToolExecutionStart',
       'onToolExecutionEnd',
       'onStepEnd',
-      'onObjectStepStart',
-      'onObjectStepEnd',
       'onEmbedStart',
       'onEmbedEnd',
       'onRerankStart',
@@ -251,7 +242,7 @@ describe('createFileTelemetry()', () => {
       new Set(records.map(({ event }) => event)),
       new Set(callbackNames),
     );
-    assert.strictEqual(telemetry.onStepFinish, undefined);
+    assert.strictEqual(Object.hasOwn(telemetry, 'onStepFinish'), false);
   });
 
   it('preserves existing records and serializes concurrent writes', async () => {

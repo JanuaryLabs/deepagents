@@ -25,8 +25,6 @@ export function createTelemetryIntegration(
     onToolExecutionStart: (event) => log('onToolExecutionStart', event),
     onToolExecutionEnd: (event) => log('onToolExecutionEnd', event),
     onStepEnd: (event) => log('onStepEnd', event),
-    onObjectStepStart: (event) => log('onObjectStepStart', event),
-    onObjectStepEnd: (event) => log('onObjectStepEnd', event),
     onEmbedStart: (event) => log('onEmbedStart', event),
     onEmbedEnd: (event) => log('onEmbedEnd', event),
     onRerankStart: (event) => log('onRerankStart', event),

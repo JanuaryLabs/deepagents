@@ -55,11 +55,7 @@ const OUTPUT_FIELDS = [
   'error',
 ] as const;
 
-const OUTPUT_SPECIFICATION_EVENTS = new Set([
-  'onStart',
-  'onStepStart',
-  'onObjectStepStart',
-]);
+const OUTPUT_SPECIFICATION_EVENTS = new Set(['onStart', 'onStepStart']);
 
 export function redactTelemetryEvent(event: string, data: unknown): unknown {
   if (!isRecord(data)) return data;
