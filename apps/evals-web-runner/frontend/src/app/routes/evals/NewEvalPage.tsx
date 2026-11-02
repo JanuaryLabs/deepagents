@@ -195,7 +195,7 @@ export default function NewEvalPage() {
     });
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.SubmitEvent) {
     e.preventDefault();
 
     if (models.length === 0) {

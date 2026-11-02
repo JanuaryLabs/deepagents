@@ -120,7 +120,7 @@ export default function RunDetailPage() {
     setIsEditing(true);
   }
 
-  function handleRename(e: React.FormEvent) {
+  function handleRename(e: React.SubmitEvent) {
     e.preventDefault();
     const trimmed = editName.trim();
     if (trimmed && trimmed !== run.name) {

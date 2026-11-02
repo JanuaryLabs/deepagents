@@ -40,14 +40,14 @@ export default function DatasetListPage() {
     invalidate: ['GET /datasets'],
   });
 
-  function handleUpload(e: React.FormEvent<HTMLFormElement>) {
+  function handleUpload(e: React.SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     const file = new FormData(e.currentTarget).get('file');
     if (file instanceof File) uploadMutation.mutate({ file });
     e.currentTarget.reset();
   }
 
-  function handleHfAdd(e: React.FormEvent) {
+  function handleHfAdd(e: React.SubmitEvent) {
     e.preventDefault();
     if (hfDataset.trim()) {
       const maxRows = hfMaxRows ? Number(hfMaxRows) : undefined;

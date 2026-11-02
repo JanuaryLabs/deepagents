@@ -79,7 +79,7 @@ export default function PromptsPage() {
     invalidate: ['GET /prompts'],
   });
 
-  function handleCreate(e: React.FormEvent) {
+  function handleCreate(e: React.SubmitEvent) {
     e.preventDefault();
     if (promptName.trim() && promptContent.trim()) {
       createMutation.mutate({ name: promptName, content: promptContent });

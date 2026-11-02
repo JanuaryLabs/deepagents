@@ -420,7 +420,7 @@ export default function (router: Hono<AppBindings>) {
       },
       endpointUrl: {
         select: payload.body.endpointUrl,
-        against: z.string().url().optional(),
+        against: z.url().optional(),
       },
       promptId: {
         select: payload.body.promptId,
