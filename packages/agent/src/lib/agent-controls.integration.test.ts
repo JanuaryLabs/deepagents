@@ -47,10 +47,10 @@ for (const mode of ['generate', 'execute'] as const) {
         name: 'approvals',
         prompt: 'Help.',
         model,
+        toolApproval: { record: 'user-approval' },
         tools: {
           record: tool({
             inputSchema: z.object({}),
-            needsApproval: true,
             execute: () => ++runs,
           }),
         },
@@ -281,10 +281,10 @@ for (const mode of modes) {
       prompt: 'Help.',
       model: toolCallingModel(['guarded']),
       experimental_toolApprovalSecret: 'secret',
+      toolApproval: { guarded: 'user-approval' },
       tools: {
         guarded: tool({
           inputSchema: z.object({}),
-          needsApproval: true,
           execute: () => 'ran',
         }),
       },
