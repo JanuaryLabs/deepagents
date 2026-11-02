@@ -23,7 +23,6 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 
-/* eslint-disable @nx/enforce-module-boundaries -- This probe intentionally exercises the package's public entrypoints. */
 import {
   ContextEngine,
   type FileChange,

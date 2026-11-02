@@ -58,6 +58,8 @@ export default defineConfig(
       '**/*.eval.ts',
       '**/*.{test,spec,fixture}.{ts,tsx,js,jsx}',
       '**/{test,tests}/**/*.{ts,tsx,js,jsx}',
+      // A probe script runs the built package through its public entrypoints.
+      '**/scripts/probe-*.ts',
     ],
     rules: {
       '@nx/enforce-module-boundaries': 'off',
