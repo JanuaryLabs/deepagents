@@ -43,14 +43,14 @@ import {
   Children,
   type ClipboardEventHandler,
   type ComponentProps,
-  type FormEvent,
-  type FormEventHandler,
   Fragment,
   type HTMLAttributes,
   type KeyboardEventHandler,
   type PropsWithChildren,
   type ReactNode,
   type RefObject,
+  type SubmitEvent,
+  type SubmitEventHandler,
   createContext,
   startTransition,
   use,
@@ -438,7 +438,7 @@ export type PromptInputProps = Omit<
   }) => void;
   onSubmit: (
     message: PromptInputMessage,
-    event: FormEvent<HTMLFormElement>,
+    event: SubmitEvent<HTMLFormElement>,
   ) => void | Promise<void>;
 };
 
@@ -687,7 +687,7 @@ export const PromptInput = ({
     [files, add, remove, clear, openFileDialog],
   );
 
-  const handleSubmit: FormEventHandler<HTMLFormElement> = (event) => {
+  const handleSubmit: SubmitEventHandler<HTMLFormElement> = (event) => {
     event.preventDefault();
 
     const form = event.currentTarget;

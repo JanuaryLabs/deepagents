@@ -1,6 +1,6 @@
 import type { ToolUIPart } from 'ai';
 import type { ComponentType } from 'react';
-import type { ZodTypeAny } from 'zod';
+import type { ZodType } from 'zod';
 
 import type { ToolTip } from '../elements/interactive-element.ts';
 
@@ -20,7 +20,7 @@ export type StaticTool = {
   static: true;
 };
 
-export type ComponentTool<TSchema extends ZodTypeAny = ZodTypeAny> = {
+export type ComponentTool<TSchema extends ZodType = ZodType> = {
   component: ComponentType<{ part: ToolUIPart }>;
   label?: (part: ToolUIPart) => ToolLabel;
   inputSchema: TSchema;
