@@ -347,7 +347,7 @@ describe('OpenAI Traces Integration', () => {
         // consume stream
       }
 
-      await result.response;
+      await result.finalStep;
       await flushTelemetry();
 
       assert.strictEqual(captured.length, 1, 'should have exported once');
@@ -428,7 +428,7 @@ describe('OpenAI Traces Integration', () => {
           // consume stream
         }
 
-        await result.response;
+        await result.finalStep;
       }
 
       await flushTelemetry();
@@ -475,7 +475,7 @@ describe('OpenAI Traces Integration', () => {
           // consume stream
         }
 
-        await result.response;
+        await result.finalStep;
       }
 
       await Promise.all([run('Run A'), run('Run B')]);
@@ -588,7 +588,7 @@ describe('OpenAI Traces Integration', () => {
         // consume stream
       }
 
-      await result.response;
+      await result.finalStep;
       await flushTelemetry();
 
       assert.strictEqual(captured.length, 1);
@@ -638,7 +638,7 @@ describe('OpenAI Traces Integration', () => {
         // consume
       }
 
-      await result.response;
+      await result.finalStep;
       await flushTelemetry();
 
       assert.strictEqual(captured.length, 1);
@@ -742,7 +742,7 @@ describe('OpenAI Traces Integration', () => {
         // consume
       }
 
-      await result.response;
+      await result.finalStep;
       await flushTelemetry();
 
       const items = captured[0].data;
@@ -1104,7 +1104,7 @@ describe('OpenAI Traces wire format', () => {
     for await (const _chunk of result.textStream) {
       // consume
     }
-    await result.response;
+    await result.finalStep;
     await flushTelemetry();
 
     assert.ok(captured.length >= 1, 'should have posted to /v1/traces/ingest');
@@ -1144,7 +1144,7 @@ describe('OpenAI Traces wire format', () => {
     for await (const _chunk of result.textStream) {
       // consume
     }
-    await result.response;
+    await result.finalStep;
     await flushTelemetry();
 
     const [genSpan] = spansOfType(captured[0], 'generation');
@@ -1189,7 +1189,7 @@ describe('OpenAI Traces wire format', () => {
     for await (const _chunk of result.textStream) {
       // consume
     }
-    await result.response;
+    await result.finalStep;
     await flushTelemetry();
 
     const [fnSpan] = spansOfType(captured[0], 'function');
@@ -1226,7 +1226,7 @@ describe('OpenAI Traces wire format', () => {
     for await (const _chunk of result.textStream) {
       // consume
     }
-    await result.response;
+    await result.finalStep;
     await flushTelemetry();
 
     const [genSpan] = spansOfType(captured[0], 'generation');
@@ -1345,7 +1345,7 @@ describe('OpenAI Traces wire format', () => {
     for await (const _chunk of result.textStream) {
       // consume
     }
-    await result.response;
+    await result.finalStep;
     await flushTelemetry();
 
     const spans = captured.flatMap((body) =>
@@ -1389,7 +1389,7 @@ describe('OpenAI Traces wire format', () => {
       for await (const _chunk of result.textStream) {
         // consume
       }
-      await result.response;
+      await result.finalStep;
     }
 
     await Promise.all([run('Alpha'), run('Beta')]);
