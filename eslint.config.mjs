@@ -1,5 +1,5 @@
 import nx from '@nx/eslint-plugin';
-import zukhruf from '@zukhruf/eslint';
+import zukhruf, { noUnassignedImport } from '@zukhruf/eslint';
 import { manifest, moduleBoundaries } from '@zukhruf/eslint/nx';
 import prettier from 'eslint-config-prettier';
 import { defineConfig } from 'eslint/config';
@@ -84,19 +84,14 @@ export default defineConfig(
       // before the move, and stay warnings.
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-non-null-assertion': 'warn',
-      // Loading these modules is the point of importing them: stylesheets,
-      // env.ts / startup.ts modules that set up the process on load, and
-      // jest-dom's vitest entry, which registers its matchers.
+      // Base allows *.css, env.ts and startup.ts. Loading these too is the
+      // point of importing them: Sass stylesheets, and jest-dom's vitest
+      // entry, which registers its matchers.
       'import-x/no-unassigned-import': [
         'error',
-        {
-          allow: [
-            '**/*.{css,scss,sass}',
-            '**/env.ts',
-            '**/startup.ts',
-            '@testing-library/jest-dom/vitest',
-          ],
-        },
+        noUnassignedImport({
+          allow: ['**/*.{scss,sass}', '@testing-library/jest-dom/vitest'],
+        }),
       ],
     },
   },
@@ -119,38 +114,6 @@ export default defineConfig(
         },
       ],
     },
-  },
-  // Transient: these checks are new here and have findings that the next
-  // commits fix package by package. Each line goes when its findings are gone;
-  // the last commit removes the block. A severity alone keeps the options
-  // @zukhruf/eslint gave the rule.
-  {
-    files: typescript,
-    rules: {
-      '@typescript-eslint/consistent-type-assertions': 'warn',
-      '@typescript-eslint/no-floating-promises': 'warn',
-      '@typescript-eslint/no-misused-promises': 'warn',
-      'zukhruf/no-enum': 'warn',
-      'zukhruf/no-phase-flag': 'warn',
-      'zukhruf/no-promise-field': 'warn',
-    },
-  },
-  {
-    files: source,
-    rules: {
-      '@typescript-eslint/parameter-properties': 'warn',
-      'import-x/no-duplicates': 'warn',
-      'import-x/no-unassigned-import': 'warn',
-    },
-  },
-  {
-    files: typescript,
-    ignores: [...tests, '**/*.fixture.ts'],
-    rules: { 'functional/no-let': 'warn' },
-  },
-  {
-    files: tests,
-    rules: { 'zukhruf/no-test-lifecycle-hooks': 'warn' },
   },
   prettier,
 );
