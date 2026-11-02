@@ -11,7 +11,7 @@ The `rss` connector indexes RSS feed content. Enable `fetchFullArticles` to fetc
 import { rss } from '@deepagents/retrieval/connectors';
 ```
 
-## Basic Usage
+## Basic usage
 
 ```typescript
 import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
@@ -54,7 +54,7 @@ When enabled, the connector:
 
 Article requests use the SDK's private-network protections, 10 MiB response limit, and 30-second timeout. The connector keeps the full extracted text within those limits, including articles longer than the tool's default 50,000-character result. Blocked or oversized responses fall back to feed content. The feed URL itself is fetched separately by `rss-parser`.
 
-## Content Format
+## Content format
 
 Each article is formatted as:
 
@@ -81,9 +81,9 @@ Last Updated: {lastBuildDate}
 Total Items: {count}
 ```
 
-## Real-World Examples
+## Real-world examples
 
-### Tech News Aggregator
+### Tech news aggregator
 
 Build a searchable tech news knowledge base:
 
@@ -135,7 +135,7 @@ async function searchNews(query: string) {
 const results = await searchNews('artificial intelligence regulation');
 ```
 
-### Blog Content Search
+### Blog content search
 
 Index a company blog for internal search:
 
@@ -165,7 +165,7 @@ async function searchBlog(query: string) {
 const results = await searchBlog('product launch announcement');
 ```
 
-### Research Paper Monitoring
+### Research paper monitoring
 
 Track academic preprints and papers:
 
@@ -195,7 +195,7 @@ async function searchPapers(query: string) {
 const results = await searchPapers('transformer architecture improvements');
 ```
 
-### Newsletter Archive
+### Newsletter archive
 
 Index newsletter content for reference:
 
@@ -224,7 +224,7 @@ async function searchNewsletters(query: string) {
 const results = await searchNewsletters('developer productivity tips');
 ```
 
-## Instructions Property
+## Instructions property
 
 The RSS connector includes an `instructions` property with context about the feed:
 
@@ -252,15 +252,15 @@ rss('https://example.com/feed.xml');
 // sourceId: "rss:https://example.com/feed.xml"
 ```
 
-## Error Handling
+## Error handling
 
-The connector handles common RSS parsing issues:
+The connector distinguishes article extraction failures from feed failures:
 
-- Missing fields are replaced with empty strings
-- Failed article fetches fall back to RSS summary content
-- Parse errors are logged but don't stop ingestion
+- Missing article text fields default to empty strings; missing categories default to an empty list.
+- Failed article fetches fall back to the content already included in the feed.
+- Feed fetch or parse failures are logged and rethrown as `RSS parsing failed: …`, stopping ingestion for that connector.
 
-## Next Steps
+## Next steps
 
 - [PDF Connector](/docs/retrieval/pdf) - Index PDF documents
 - [Ingestion Modes](/docs/retrieval/ingestion-modes) - Control re-indexing
