@@ -1,12 +1,12 @@
 # Recipe: Extract typed data from a page
 
-**Use case.** You have the text of a page about a company. You want an object with typed fields. A model can give a value that the page does not state. You must keep only the values that the page states.
+**Use case.** Extract typed fields from a company page and ask the model to quote the source for each value. Discard values whose quotes are missing from the page. This checks that the quoted text exists; it does not prove that the text supports the value.
 
-**What you need.** A login ([Existing login](../../README.md#existing-login)), and the packages `ai` and `zod`. The model options are those of `@ai-sdk/anthropic` ([Model behavior](../../README.md#model-behavior)).
+**What you need.** An [existing login](../../README.md#existing-login), plus the `@deepagents/experimental`, `ai`, and `zod` packages. The provider uses `@ai-sdk/anthropic` model options; see [Model behavior](../../README.md#model-behavior).
 
 ## The steps
 
-1. Make a zod schema. Each field has a `value` and a `quote`. The quote is the words of the page that state the value.
+1. Define a Zod schema with a `value` and a `quote` for each field. Ask the model to copy the exact source text supporting the value.
 2. Call `generateText` with `output: Output.object({ schema })`.
 3. Keep a value only when the page contains its quote.
 
@@ -75,11 +75,13 @@ Output:
 
 ## Why it works
 
-`Output.object` sends the schema to the model and parses the answer with zod. `output` has the type of the schema. A quote is a claim that the program can check: `page.includes(quote)` finds it in the page, or not. A value with no quote, or with a quote that is not in the page, becomes `null`. The page does not state the revenue, so `revenue` is `null`.
+`Output.object` sends the schema to the model and validates the answer with Zod. The inferred schema type determines the type of `output`. The program then uses `page.includes(quote)` to check that each nonempty quote appears in the page. A value with a missing or unmatched quote becomes `null`. In the sample output, `revenue` is `null` because the page does not state it.
+
+A matching quote can still accompany an incorrect value. For example, the model could return `value: '2099'` with `quote: 'founded in 2014'`; this check would retain it. Review whether each quote supports its value when accuracy matters.
 
 ## Things to know
 
 - **Set the effort in `providerOptions.anthropic`.** Claude 5.5 models think before they answer. `effort` (`low`, `medium`, `high`, `xhigh` or `max`) sets how much. `low` is enough to extract data.
 - **`maxOutputTokens` counts the thinking too.** If the limit is too low, the answer stops before the object ends, and the parse fails.
 - **Do not send `temperature`, `topP` or `topK`.** The AI SDK does not send them to Claude 5.5 models. It removes them and gives a warning.
-- **The check compares exact text.** A quote across a line break must have the same line break. If the page has irregular spaces, normalize the spaces of the page and of the quote before you compare them.
+- **The check compares exact text.** A quote spanning a line break must preserve that line break. If the page has irregular whitespace, normalize both the page and the quote before comparing them.

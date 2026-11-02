@@ -1,19 +1,19 @@
 # Recipe: Run on a server with a long-lived token
 
-**Use case.** Your program runs on a server, in a container or in CI. Nobody can run `claude auth login` there, so there is no stored login. The program must call Claude with your Claude subscription.
+**Use case.** Call Claude with your subscription from a server, container, or CI job that has no stored Claude Code login.
 
 **What you need.** A long-lived token from `claude setup-token`, in your secret store. Read [Environment token](../../README.md#environment-token).
 
 ## The steps
 
-1. On your computer, run `claude setup-token`. Copy the token that it shows.
+1. Run `claude setup-token` on your computer and copy the token.
 2. Put the token in your secret store, for example as a Docker or Kubernetes secret.
 3. In the program, read the token from the secret store.
-4. Give the token to `createClaude({ env: { CLAUDE_CODE_OAUTH_TOKEN: token } })`. Do not write it to `process.env`.
+4. Pass the token to `createClaude({ env: { CLAUDE_CODE_OAUTH_TOKEN: token } })` to configure this provider without changing `process.env`.
 
 ## The program
 
-The program reads the token from a secret file. Give the path of the file as the first argument, for example `node server-token.ts /run/secrets/claude-oauth-token`. Docker puts the secret `claude-oauth-token` at that path.
+The program reads the token from a secret file. Pass its path as the first argument, for example `node server-token.ts /run/secrets/claude-oauth-token`. This example assumes a secret named `claude-oauth-token` is mounted at that path.
 
 ```ts title="server-token.ts"
 import { generateText } from 'ai';
@@ -51,11 +51,11 @@ CLAUDE_CODE_OAUTH_TOKEN in process.env: false
 
 ## Why it works
 
-The `env` option replaces `process.env` for the values that the provider reads: `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR` and `USER`. The provider finds a token there, so it does not read a stored login. It sends the token on each request and does not refresh it. Other code in the process and child processes do not see the token.
+The `env` option replaces `process.env` for the provider's reads of `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, and `USER`. A nonempty token takes precedence over the stored login. The provider sends it on each request without refreshing it. Passing `env` here does not add the token to the process environment or to child processes' inherited environments.
 
 ## Things to know
 
 - **A 401 fails the request.** The provider does not try the stored login after Anthropic rejects the token. Make a new token with `claude setup-token`, and put it in the secret store. See [Handle a rejected token or a usage limit](./handle-a-rejected-token-or-a-usage-limit.md).
-- **An empty token is not a token.** If the secret is empty, the provider reads the stored login. On a server with no stored login, the request fails.
+- **An empty token falls back to the stored login.** On a server with no stored login, the request fails.
 - **The provider reads `env` on each request.** If you change `CLAUDE_CODE_OAUTH_TOKEN` in the same object, the next request uses the new token. You do not need a new provider.
 - **Without the `env` option**, the provider reads `process.env`. If the server process starts with `CLAUDE_CODE_OAUTH_TOKEN` in its environment, `claude` uses that token, and you do not need `createClaude`.

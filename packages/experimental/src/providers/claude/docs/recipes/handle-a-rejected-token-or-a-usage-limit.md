@@ -1,20 +1,20 @@
 # Recipe: Handle a rejected token or a usage limit
 
-**Use case.** A model call fails. The program must tell the user what to do. A rejected token needs a new login. A usage limit of the account needs a wait, sometimes of days. For another 429, the program shows the headers that Anthropic sent.
+**Use case.** Explain a failed model call and the next step: sign in again for a rejected token, or wait for an account usage limit to reset. For other HTTP 429 responses, show the available rate-limit headers.
 
-**What you need.** `APICallError` of the AI SDK, for the provider `claude` with an [environment token](../../README.md#environment-token) or a [stored login](../../README.md#stored-claude-code-login). `ClaudeAuthError` of the provider, for [application-owned accounts](../../README.md#application-owned-accounts).
+**What you need.** The AI SDK's `APICallError` for model request failures, including calls using an [environment token](../../README.md#environment-token) or a [stored login](../../README.md#stored-claude-code-login). Use the provider's `ClaudeAuthError` for authentication failures from [application-owned accounts](../../README.md#application-owned-accounts).
 
 ## The steps
 
-1. Call `generateText` with `maxRetries: 0`. Then the program decides when to try again.
+1. Call `generateText` with `maxRetries: 0` so the program controls retries.
 2. Catch the error. If it is a `ClaudeAuthError`, read its `code`.
 3. If it is an `APICallError` with `statusCode` 401, Anthropic rejected the token.
-4. If `statusCode` is 429, read the response headers. If `anthropic-ratelimit-unified-status` is `rejected`, the account is at a usage limit. `anthropic-ratelimit-unified-representative-claim` names the limit, and `anthropic-ratelimit-unified-reset` gives its end in seconds since 1970.
-5. Throw all other errors again.
+4. If `statusCode` is 429, read the response headers. If `anthropic-ratelimit-unified-status` is `rejected`, the account has reached a usage limit. `anthropic-ratelimit-unified-representative-claim` identifies the limit, and `anthropic-ratelimit-unified-reset` gives its reset time as a Unix timestamp in seconds.
+5. Rethrow all other errors.
 
 ## The program
 
-The program asks two models: `claude`, and the model of an owner with no connected account.
+The program makes two model calls: one through `claude`, and one through an application-owned account with no connected tokens.
 
 ```ts title="handle-failures.ts"
 import { MemoryStore } from '@opencoredev/loginwithchatgpt-core';
@@ -97,18 +97,18 @@ account: { failed: 'application-owned account', code: 'not-connected' }
 
 ## Why it works
 
-The AI SDK changes each error response of Anthropic into an `APICallError`. The error keeps the status code and the response headers. For a subscription login, Anthropic sends the `anthropic-ratelimit-unified-*` headers. They give the status, the utilization and the reset of each limit of the account: `5h` for five hours and `7d` for seven days. The models of an application-owned account throw `ClaudeAuthError` when they cannot get a token. Here the owner has no tokens, so the provider throws `not-connected` and sends no request.
+The AI SDK exposes Anthropic model request failures as `APICallError`, retaining the HTTP status and response headers. Subscription responses can include `anthropic-ratelimit-unified-*` headers describing the status, utilization, and reset time of account limits: `5h` for five hours and `7d` for seven days. Application-owned accounts throw `ClaudeAuthError` when they cannot get a usable token or list models. In this example, the owner has no tokens, so the provider throws `not-connected` before sending a request.
 
 ## Things to know
 
-- **The codes of `ClaudeAuthError`:**
+- **`ClaudeAuthError` codes:**
   - `not-connected`: the owner has no tokens. Call `connect`.
   - `refresh-token-invalid`: the connection expired, or the user revoked it. The provider deleted the tokens. Call `connect`.
   - `access-token-invalid`: Anthropic rejected the token after one refresh. Call `connect`.
   - `refresh-failed`: the refresh did not complete. Try the request again.
   - `invalid-token-response`: Anthropic sent a refresh response that the provider cannot read. Try again later.
   - `models-request-failed`: `listModels` failed.
-- **The default retries waste calls at a usage limit.** Without `maxRetries: 0`, the AI SDK sends a 429 request two more times. Then it throws a `RetryError`, with the last `APICallError` in `lastError`.
+- **Default retries repeat requests while the account is at its limit.** Without `maxRetries: 0`, the AI SDK retries HTTP 429 responses twice. If both retries fail, it throws a `RetryError` with the last `APICallError` in `lastError`.
 - **A 401 needs a new login.** For an environment token, run `claude setup-token`. For a stored login, run `claude auth login`. The provider does not use the stored login after it rejects an environment token.
-- **`anthropic-ratelimit-unified-overage-disabled-reason`** tells why the account cannot use extra usage after the limit.
+- **`anthropic-ratelimit-unified-overage-disabled-reason`** explains why extra usage is unavailable after the account reaches its limit.
 - **These headers are part of a private protocol.** Anthropic can change them. See [Model behavior](../../README.md#model-behavior).

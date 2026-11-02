@@ -18,7 +18,7 @@ it does not start Claude Code or the Claude Agent SDK.
 
 ## Recipes
 
-One use case each, with a full program that you can run.
+Each recipe includes a runnable program for one use case.
 
 1. [Call Claude with your Claude Code login](./docs/recipes/call-claude-with-your-claude-code-login.md)
 2. [Run on a server with a long-lived token](./docs/recipes/run-on-a-server-with-a-long-lived-token.md)
@@ -90,7 +90,7 @@ const model = accounts.provider(userId)('claude-sonnet-5-5');
 const modelIds = await accounts.listModels(userId);
 ```
 
-Each owner (for example your user id) connects a Claude Pro or Max account
+Each owner (for example, your application's user ID) connects a Claude Pro or Max account
 through PKCE sign-in; neither Claude Code nor a local login is involved. The
 store is the `KeyValueStore` from `@opencoredev/loginwithchatgpt-core`
 (`get`/`set`/`delete`), so any encrypted backend works. Values that do not parse
