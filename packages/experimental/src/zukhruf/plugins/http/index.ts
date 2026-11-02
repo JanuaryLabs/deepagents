@@ -265,7 +265,13 @@ export function http(
     async (context) => {
       const { body, sessionId } = context.var.input;
       if (body.sessionId !== sessionId) {
-        throw invalidSessionId('Route and body session IDs must match');
+        throw new HTTPException(400, {
+          message: 'Invalid session ID',
+          cause: {
+            code: 'api/validation-failed',
+            detail: 'Route and body session IDs must match',
+          },
+        });
       }
       const conversation = {
         chatId: sessionId,
@@ -274,10 +280,22 @@ export function http(
       const request = await validateTurnRequest(body);
       if (!(await runtime.sessionExists(conversation))) {
         if (request.message.role !== 'user') {
-          throw invalidMessage('A new session must start with a user message');
+          throw new HTTPException(400, {
+            message: 'Invalid message',
+            cause: {
+              code: 'api/validation-failed',
+              detail: 'A new session must start with a user message',
+            },
+          });
         }
         if (request.trigger !== 'submit-message') {
-          throw invalidMessage('A new session cannot regenerate a response');
+          throw new HTTPException(400, {
+            message: 'Invalid message',
+            cause: {
+              code: 'api/validation-failed',
+              detail: 'A new session cannot regenerate a response',
+            },
+          });
         }
         await runtime.createSession(conversation);
       }
@@ -507,10 +525,20 @@ async function validateTurnMessage(
   value: unknown,
 ): Promise<Parameters<HttpRuntime['enqueue']>[1]['message']> {
   const result = await safeValidateUIMessages({ messages: [value] });
-  if (!result.success) throw invalidMessage(result.error.message);
+  if (!result.success)
+    throw new HTTPException(400, {
+      message: 'Invalid message',
+      cause: { code: 'api/validation-failed', detail: result.error.message },
+    });
   const message = result.data[0];
   if (!isTurnMessage(message))
-    throw invalidMessage('System messages are not accepted');
+    throw new HTTPException(400, {
+      message: 'Invalid message',
+      cause: {
+        code: 'api/validation-failed',
+        detail: 'System messages are not accepted',
+      },
+    });
   return message;
 }
 
@@ -523,9 +551,14 @@ async function validateTurnRequest(
     body.elements === undefined ? {} : { elements: body.elements };
   if (message.role === 'assistant') {
     if (body.trigger === 'regenerate-message') {
-      throw invalidMessage(
-        'Regeneration requires the user message preceding the assistant response',
-      );
+      throw new HTTPException(400, {
+        message: 'Invalid message',
+        cause: {
+          code: 'api/validation-failed',
+          detail:
+            'Regeneration requires the user message preceding the assistant response',
+        },
+      });
     }
     return { message, trigger: 'submit-message', ...tools, ...elements };
   }
@@ -536,20 +569,6 @@ function isTurnMessage(
   message: UIMessage,
 ): message is Parameters<HttpRuntime['enqueue']>[1]['message'] {
   return message.role === 'user' || message.role === 'assistant';
-}
-
-function invalidMessage(detail: string): HTTPException {
-  return new HTTPException(400, {
-    message: 'Invalid message',
-    cause: { code: 'api/validation-failed', detail },
-  });
-}
-
-function invalidSessionId(detail: string): HTTPException {
-  return new HTTPException(400, {
-    message: 'Invalid session ID',
-    cause: { code: 'api/validation-failed', detail },
-  });
 }
 
 async function requireSession(
