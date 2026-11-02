@@ -1,11 +1,15 @@
 /**
- * Convert HuggingFace model to GGUF format using Docker
- * Uses the official llama.cpp image - no local installation needed
+ * Convert a Hugging Face model to GGUF format using Docker
+ * Uses the official llama.cpp image; no local llama.cpp installation needed
+ * Requires a running Docker daemon selected by the process environment and
+ * Docker context configuration. Pulls the image if it is missing, streams
+ * conversion output, and removes the container when finished or interrupted.
+ * Model and output directories must be accessible on the Docker daemon's host.
  *
  * Usage: node convert-to-gguf.ts <model_dir> <output.gguf> [quantization]
  *
  * Arguments:
- *   model_dir     Path to HuggingFace model directory (contains model.safetensors)
+ *   model_dir     Path to Hugging Face model directory (contains model.safetensors)
  *   output.gguf   Output path for the GGUF file
  *   quantization  Quantization type (default: q8_0)
  *                 Options: f32, f16, bf16, q8_0, q4_0, q4_1, q5_0, q5_1
@@ -25,12 +29,18 @@ async function main() {
 
   if (args.length < 2 || args.includes('--help') || args.includes('-h')) {
     console.log(`
-Convert HuggingFace model to GGUF format using Docker
+Convert a Hugging Face model to GGUF format using Docker
+
+Requires a running Docker daemon. Uses the process environment and Docker
+context configuration to select it. The llama.cpp image is pulled if missing.
+Model and output directories must be accessible on the Docker daemon's host.
+Conversion output streams to the terminal. A nonzero container exit code fails
+the conversion. The container is removed when finished or interrupted with Ctrl-C.
 
 Usage: node convert-to-gguf.ts <model_dir> <output.gguf> [quantization]
 
 Arguments:
-  model_dir     Path to HuggingFace model directory
+  model_dir     Path to Hugging Face model directory
   output.gguf   Output path for the GGUF file
   quantization  Quantization type (default: q8_0)
                 Options: f32, f16, bf16, q8_0, q4_0, q4_1, q5_0, q5_1

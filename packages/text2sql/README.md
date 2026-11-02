@@ -29,7 +29,22 @@ npm install @clickhouse/client       # ClickHouse, or use your preferred client
 # PostHog uses native fetch and needs no additional client package
 ```
 
-Requires Node.js LTS
+The Spreadsheet adapter requires `xlsx` for Excel, CSV, and TSV files. It is
+an optional peer dependency; install it only if you use
+`@deepagents/text2sql/spreadsheet`. With npm 12, add this to your project's
+`.npmrc` to allow directly declared URL dependencies:
+
+```ini
+allow-remote=root
+```
+
+Then install SheetJS `xlsx` 0.20.3 from its CDN:
+
+```bash
+npm install https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
+```
+
+Requires Node.js LTS.
 
 ## Quick Start
 
@@ -395,6 +410,23 @@ for await (const chunk of followUp) {
   // handle streaming response
 }
 ```
+
+## Checkpoint files
+
+`Checkpoint` from `@deepagents/text2sql` saves completed computations so a
+pipeline can resume without repeating them. Load a file with
+`Checkpoint.load({ path, configHash })`, then use `run()` for one computation
+or `each()` for a sequence of inputs. Both require a codec to encode outputs
+and validate them on resume; `jsonCodec(schema)` handles plain JSON values.
+When both the file and the caller supply a nonempty `configHash`, a mismatch
+starts a fresh checkpoint.
+
+Writes from one `Checkpoint` instance run in order. Each write captures the
+latest state when it starts, so an earlier snapshot cannot overwrite a later
+one. The checkpoint uses `durableWrite` to flush the file before replacing it and
+sync the parent directory where supported. Await `run()`, `each()`, or
+`point().through()` before exiting. Separate instances or processes do not
+coordinate writes to the same file.
 
 ## Schema index caching
 
