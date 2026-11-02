@@ -96,5 +96,48 @@ export default defineConfig(
       ],
     },
   },
+  // @opentelemetry/semantic-conventions 1.44 deprecates the gen_ai attribute
+  // names: they moved to the GenAI semantic-conventions repository, which
+  // publishes no npm package yet (backlog #3610). By name: the constants are
+  // string literals, whose type no package declares.
+  {
+    files: ['**/src/traces/file-trace-adapter.ts'],
+    rules: {
+      '@typescript-eslint/no-deprecated': [
+        'error',
+        {
+          allow: [
+            'ATTR_GEN_AI_INPUT_MESSAGES',
+            'ATTR_GEN_AI_OUTPUT_MESSAGES',
+            'ATTR_GEN_AI_REQUEST_MODEL',
+            'ATTR_GEN_AI_TOOL_CALL_ARGUMENTS',
+            'ATTR_GEN_AI_TOOL_CALL_RESULT',
+            'ATTR_GEN_AI_TOOL_NAME',
+          ],
+        },
+      ],
+    },
+  },
+  // @typescript-eslint/eslint-plugin 8.72.1 no-deprecated reads the JSDoc tags
+  // of a union's combined property (dist/rules/no-deprecated.js:184-187 and
+  // :354-358), so any `type` of the AI SDK tool-result content parts takes
+  // the @deprecated of its 'file-data' and 'image-data' members, also in the
+  // { type: 'file', … } shape that replaces them. A read is allowed by name;
+  // a literal's contextual type is an anonymous union that `allow` cannot
+  // name, so the rule is off in the files that build those parts.
+  {
+    files: ['**/compaction/src/messages.ts'],
+    rules: {
+      '@typescript-eslint/no-deprecated': ['error', { allow: ['type'] }],
+    },
+  },
+  {
+    files: [
+      '**/context/src/lib/sandbox/read-file-tool/format.ts',
+      '**/context/test/bash-tool.integration.test.ts',
+      '**/context/src/lib/fragments/reminders/tool-output-reminders.integration.test.ts',
+    ],
+    rules: { '@typescript-eslint/no-deprecated': 'off' },
+  },
   prettier,
 );
