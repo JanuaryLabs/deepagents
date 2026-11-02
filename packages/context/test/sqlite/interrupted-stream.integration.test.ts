@@ -1,5 +1,5 @@
 import { createOpenAI } from '@ai-sdk/openai';
-import { streamText } from 'ai';
+import { streamText, toUIMessageStream } from 'ai';
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 
@@ -50,7 +50,10 @@ for (const complete of [false, true]) {
       const result = streamText({ model, prompt: 'Reply', maxRetries: 0 });
       await streams.register('turn');
 
-      await streams.persist(result.toUIMessageStream(), 'turn');
+      await streams.persist(
+        toUIMessageStream({ stream: result.stream }),
+        'turn',
+      );
 
       assert.equal(
         (await store.getStream('turn'))?.status,

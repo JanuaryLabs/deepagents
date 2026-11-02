@@ -252,7 +252,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
       tools: { runSql: sqlTool },
     });
 
-    const result = await sut.stream();
+    const { result } = await sut.stream();
     const toolResults: unknown[] = [];
     for await (const part of result.stream) {
       if (part.type === 'tool-result') toolResults.push(part.output);

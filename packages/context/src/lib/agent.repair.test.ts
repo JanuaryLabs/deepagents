@@ -108,7 +108,7 @@ describe('context agent repair tool calls', () => {
       },
     });
 
-    const result = await assistant.stream({
+    const { result } = await assistant.stream({
       abortSignal: abortController.signal,
       transform: () => new TransformStream(),
     });

@@ -554,7 +554,7 @@ function createAbortMockAgent(
     sandbox,
     stream: async () => ({
       toUIMessageStream: () => createChunkedStream(uiChunks),
-      usage: Promise.resolve(abortedUsage),
+      result: { usage: Promise.resolve(abortedUsage) },
     }),
   };
 }

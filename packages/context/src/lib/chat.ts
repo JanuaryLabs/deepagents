@@ -42,8 +42,10 @@ export interface ChatStreamResult {
   toUIMessageStream(
     options?: UIMessageStreamOptions<UIMessage>,
   ): ReadableStream<UIMessageChunk>;
-  /** AI SDK v7 can settle an aborted stream without usage data. */
-  readonly usage: PromiseLike<LanguageModelUsage | undefined>;
+  readonly result: {
+    /** AI SDK v7 can settle an aborted stream without usage data. */
+    readonly usage: PromiseLike<LanguageModelUsage | undefined>;
+  };
 }
 
 export interface ChatAgentLike<TOOLS extends ToolSet = {}> {
@@ -142,7 +144,7 @@ export async function chat<const TOOLS extends ToolSet>(
           : settled;
 
       await context.writeAssistantSegment(message);
-      const usage = await result?.usage;
+      const usage = await result?.result.usage;
       // The provider may never have emitted a finish chunk.
       if (usage !== undefined) {
         await context.trackUsage(usage);

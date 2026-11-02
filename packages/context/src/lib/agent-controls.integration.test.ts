@@ -78,8 +78,8 @@ for (const mode of ['generate', 'stream'] as const) {
         ToolChoiceViolationError.isInstance,
       );
     } else {
-      const result = await assistant.stream();
-      const parts = await Array.fromAsync(result.fullStream);
+      const { result } = await assistant.stream();
+      const parts = await Array.fromAsync(result.stream);
       assert.ok(
         parts.some(
           (part) =>
@@ -254,7 +254,7 @@ for (const mode of [
     if (mode === 'generate') {
       assert.equal((await agent(options).generate()).text, '{"answer":"done"}');
     } else if (mode === 'stream') {
-      const result = await agent(options).stream();
+      const { result } = await agent(options).stream();
       await result.consumeStream();
       assert.equal(await result.text, '{"answer":"done"}');
     } else if (mode === 'asTool') {

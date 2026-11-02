@@ -15,6 +15,9 @@ import {
   type Tool,
   type ToolLoopAgentSettings,
   type ToolSet,
+  type UIMessage,
+  type UIMessageChunk,
+  type UIMessageStreamOptions,
   type UIMessageStreamWriter,
   convertToModelMessages,
   createUIMessageStream,
@@ -23,6 +26,7 @@ import {
   isStepCount,
   smoothStream,
   streamText,
+  toUIMessageStream,
   tool,
 } from 'ai';
 import chalk from 'chalk';
@@ -120,6 +124,18 @@ export type StreamOptions<TOOLS extends ToolSet = ToolSet> = Pick<
   transform?: StreamTextTransform<TOOLS> | StreamTextTransform<TOOLS>[];
   maxRetries?: number;
 };
+
+/**
+ * A streamed agent turn. Read it through `toUIMessageStream()`, which applies
+ * the agent's guardrails; `result.stream` bypasses them.
+ */
+export interface AgentStream<TOOLS extends ToolSet> {
+  /** The first model call. A guardrail retry starts a new call, which this result does not include. */
+  readonly result: ReturnType<typeof streamText<TOOLS>>;
+  toUIMessageStream(
+    options?: UIMessageStreamOptions<UIMessage>,
+  ): ReadableStream<UIMessageChunk>;
+}
 
 export interface CreateAgent<TOOLS extends ToolSet = {}> extends AgentControls<
   AgentModelTools<TOOLS>
@@ -251,8 +267,8 @@ class Agent<TOOLS extends ToolSet> {
   /**
    * Stream a response from the agent.
    *
-   * When guardrails are configured, `toUIMessageStream()` is wrapped to provide
-   * self-correction behavior. Direct access to fullStream/textStream bypasses guardrails.
+   * When guardrails are configured, `toUIMessageStream()` provides
+   * self-correction behavior. Direct access to `result.stream` bypasses guardrails.
    *
    * @example
    * ```typescript
@@ -267,7 +283,7 @@ class Agent<TOOLS extends ToolSet> {
       AgentModelTools<TOOLS>,
       StreamOptions<AgentModelTools<TOOLS>>
     >
-  ): Promise<StreamTextResult<AgentModelTools<TOOLS>, any, any>> {
+  ): Promise<AgentStream<AgentModelTools<TOOLS>>> {
     if (!this.#options.context) {
       throw new Error(`Agent ${this.#options.name} is missing a context.`);
     }
@@ -288,15 +304,26 @@ class Agent<TOOLS extends ToolSet> {
     );
 
     if (this.#guardrails.length === 0) {
-      return result;
+      return {
+        result,
+        toUIMessageStream: (uiOptions) =>
+          toUIMessageStream({
+            stream: result.stream,
+            tools: this.tools,
+            ...uiOptions,
+          }),
+      };
     }
 
-    return this.#wrapWithGuardrails(
+    return {
       result,
-      options?.toolsContext,
-      options,
-      prepareStep,
-    );
+      toUIMessageStream: this.#guardedUIMessageStream(
+        result,
+        options?.toolsContext,
+        options,
+        prepareStep,
+      ),
+    };
   }
 
   #withPrepareStep(
@@ -375,19 +402,19 @@ class Agent<TOOLS extends ToolSet> {
   }
 
   /**
-   * Wrap a StreamTextResult with guardrail protection on toUIMessageStream().
+   * Build a UI message stream with guardrail protection.
    *
    * When a guardrail fails:
    * 1. The feedback is written to the output stream (user sees the correction)
    * 2. A finish-step is emitted, triggering onStepEnd to persist the self-correction
    * 3. A new stream is started and the model continues from the correction
    */
-  #wrapWithGuardrails(
+  #guardedUIMessageStream(
     result: StreamTextResult<AgentModelTools<TOOLS>, any, any>,
     toolsContext: AgentToolsContext<TOOLS>,
     config?: StreamOptions<AgentModelTools<TOOLS>>,
     prepareStep?: PrepareStepFunction<AgentModelTools<TOOLS>>,
-  ): StreamTextResult<AgentModelTools<TOOLS>, any, any> {
+  ): AgentStream<AgentModelTools<TOOLS>>['toUIMessageStream'] {
     const maxRetries =
       config?.maxRetries ?? this.#options.maxGuardrailRetries ?? 3;
     const context = this.#options.context;
@@ -395,11 +422,7 @@ class Agent<TOOLS extends ToolSet> {
       throw new Error(`Agent ${this.#options.name} is missing a context.`);
     }
 
-    // Save original method BEFORE override (prevents infinite recursion)
-    const originalToUIMessageStream = result.toUIMessageStream.bind(result);
-
-    // Override toUIMessageStream with guardrail logic
-    result.toUIMessageStream = (options) => {
+    return (options) => {
       const assistantMsgId = options?.generateMessageId?.();
       let stepSaved: PromiseWithResolvers<void> | null = null;
 
@@ -455,10 +478,11 @@ class Agent<TOOLS extends ToolSet> {
             // permanent `state: 'streaming'`.
             let openTextId: string | undefined;
 
-            const uiStream =
-              currentResult === result
-                ? originalToUIMessageStream(options)
-                : currentResult.toUIMessageStream(options);
+            const uiStream = toUIMessageStream({
+              stream: currentResult.stream,
+              tools: this.tools,
+              ...options,
+            });
 
             for await (const part of uiStream) {
               if (part.type === 'text-start') openTextId = chunkId(part);
@@ -532,8 +556,6 @@ class Agent<TOOLS extends ToolSet> {
         },
       });
     };
-
-    return result;
   }
 
   public asTool<T = string>(props?: {
