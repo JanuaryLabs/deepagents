@@ -16,7 +16,7 @@ import {
   buttonVariants,
 } from '@zukhruf/shadcn';
 import { cn } from 'cn';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 
 import { CaseTable, isCaseWithScores } from '../../components/CaseTable.tsx';
@@ -44,10 +44,6 @@ export default function RunDetailPage() {
   );
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
-  const renameInputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (isEditing) renameInputRef.current?.focus();
-  }, [isEditing]);
   const [progressMap, setProgressMap] = useState<Record<string, number>>({});
 
   const runningIds = data?.run.status === 'running' ? [data.run.id] : [];
@@ -165,7 +161,7 @@ export default function RunDetailPage() {
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   onKeyDown={(e) => e.key === 'Escape' && setIsEditing(false)}
-                  ref={renameInputRef}
+                  ref={focusOnMount}
                   className="text-2xl font-bold"
                 />
                 <Button type="submit" size="sm" variant="outline">
@@ -305,4 +301,9 @@ export default function RunDetailPage() {
       />
     </div>
   );
+}
+
+/** Focuses the rename input when it mounts, which is when editing starts. */
+function focusOnMount(input: HTMLInputElement | null) {
+  input?.focus();
 }

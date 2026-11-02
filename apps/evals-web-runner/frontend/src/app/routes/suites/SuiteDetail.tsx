@@ -23,7 +23,7 @@ import {
   buttonVariants,
 } from '@zukhruf/shadcn';
 import { cn } from 'cn';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 
 import { RunStatusBadge } from '../../components/RunStatusBadge.tsx';
@@ -50,10 +50,6 @@ export default function SuiteDetailPage() {
   );
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
-  const renameInputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (isEditing) renameInputRef.current?.focus();
-  }, [isEditing]);
   const [selectedRunIds, setSelectedRunIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -153,7 +149,7 @@ export default function SuiteDetailPage() {
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   onKeyDown={(e) => e.key === 'Escape' && setIsEditing(false)}
-                  ref={renameInputRef}
+                  ref={focusOnMount}
                   className="text-2xl font-bold"
                 />
                 <Button type="submit" size="sm" variant="outline">
@@ -405,4 +401,9 @@ export default function SuiteDetailPage() {
       </div>
     </div>
   );
+}
+
+/** Focuses the rename input when it mounts, which is when editing starts. */
+function focusOnMount(input: HTMLInputElement | null) {
+  input?.focus();
 }
