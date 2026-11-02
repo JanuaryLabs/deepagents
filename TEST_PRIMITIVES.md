@@ -1,4 +1,4 @@
-# Test Primitives
+# Test primitives
 
 Tests target the repository's current Node.js version. Prefer these native
 primitives before adding helpers or dependencies.
@@ -35,9 +35,9 @@ await t.waitFor(() => assert.equal(messages.length, 2), {
 });
 ```
 
-`t.waitFor` retries every error, also a database error. When a database error
-must fail the test immediately, poll with `timebox` from
-`@zukhruf/testing/async` and retry only the failed assertion:
+`t.waitFor` retries every error, including database errors. To retry assertion
+failures while letting other errors fail immediately, use `timebox` from
+`@zukhruf/testing/async`:
 
 ```ts
 await timebox(async () => assert.equal(await store.status(), 'ready'), {
@@ -208,9 +208,11 @@ credentials through its normal authentication configuration.
 
 ### Database servers
 
-The `@zukhruf/nx/test` plugin gives each project with `node:test` files its `test`
-target: the command, reporters and timeout. `nx.json` adds module mocks and the
-build dependency. JUnit reports are written to each project's `test-results.xml`.
+The `@zukhruf/nx/test` plugin infers `test` targets from `*.test.*` files outside
+Vitest projects. It supplies the command, reporters, and a 240-second per-test
+timeout. Compaction and devtool-history override the timeout to 10 seconds.
+`nx.json` adds module mocks and the build dependency. JUnit reports are written
+to each project's `test-results.xml`.
 
 For PostgreSQL, MySQL, and SQL Server, create an engine instance and acquire a
 disposable database for each test:
@@ -303,14 +305,13 @@ ran, as well as checking their exit code.
 
 ### Local and remote Docker tests
 
-Nx Docker tests default to the `limerence-dokploy` context (Hetzner) when
-`DOCKER_CONTEXT` is not set. Each Docker test project sets this default in its
-`.env.test`, which Nx loads for the `test` target. A `DOCKER_CONTEXT` that is set
-takes precedence. An empty `DOCKER_CONTEXT` does not: Nx fills an empty value from
-`.env.test`. To use the endpoint in `DOCKER_HOST`, set `DOCKER_CONTEXT=default`, as
-CI does. `DOCKER_HOST` takes precedence over the context. The default applies only
-to these test targets; it does not change the Docker CLI's globally selected
-context.
+The context, text2sql, and experimental Nx test targets default to the
+`limerence-dokploy` Docker context (Hetzner). Each project's `.env.test` sets
+this value when `DOCKER_CONTEXT` is unset or empty; a nonempty environment value
+takes precedence. For a run that uses `DOCKER_HOST`, also set
+`DOCKER_CONTEXT=default`, as CI does. The setup's endpoint resolver gives
+`DOCKER_HOST` precedence over the context. These defaults apply only to the test
+targets and leave the Docker CLI's globally selected context unchanged.
 
 ```sh
 nx run @deepagents/context:test
@@ -321,10 +322,10 @@ nx run-many -t test --projects=@deepagents/context,@deepagents/text2sql,@deepage
 ```
 
 For projects tagged `test:docker`, the `@zukhruf/nx/test` plugin adds
-`--test-global-setup` with `@zukhruf/testing/docker-global-setup`, and
-`--test-force-exit`. Setup resolves the selected Docker
-context once, pins its Unix or SSH endpoint for the test processes, and
-recovers resources left by exited runs on that endpoint.
+`--test-global-setup` with `@zukhruf/testing/docker-global-setup` and
+`--test-force-exit`. Setup resolves the Docker endpoint once, pins its Unix or
+SSH address for the test processes, and recovers resources left by exited runs
+on that endpoint.
 
 These targets set `parallelism: false` and disable Nx test caching, so Nx runs
 them exclusively within each invocation, locally and in CI. Other targets keep
@@ -333,13 +334,21 @@ test files in parallel at its default concurrency, on a local engine and on an S
 engine. On `limerence-dokploy` on 2026-10-30, the context tests passed in parallel
 (1568 of 1568, 1 skipped) in 19.6 minutes, with no SSH error and at most 34 SSH
 processes. With `--test-concurrency=1`, the same tests took more than 73 minutes.
-To give a run other flags, pass them with the test selection in `--args`, and
-start the value with a flag: `--args='--test-concurrency=2 "src/**/*.test.ts"
-"test/**/*.test.ts"'`. Nx removes the first and the last quote of a value that
-starts with a quote, so `--args='"src/**/*.test.ts" "test/**/*.test.ts"'` runs
-no tests. Cases within a file run sequentially unless a test enables concurrency. These settings limit test scheduling; a single case
-can still start multiple containers, and separate Nx invocations can overlap.
-Other Node.js projects keep the standard Node.js test command.
+
+`--args` replaces the test selection; include every file or glob you want to run.
+To change flags and select multiple globs, start the value with a flag:
+
+```sh
+nx run @deepagents/context:test \
+  --args='--test-concurrency=2 "src/**/*.test.ts" "test/**/*.test.ts"'
+```
+
+Nx removes the first and last quotes when the value starts with a quote, so
+`--args='"src/**/*.test.ts" "test/**/*.test.ts"'` runs no tests. Cases within a
+file run sequentially unless a test enables concurrency. These settings limit
+test scheduling; a single case can still start multiple containers, and separate
+Nx invocations can overlap. Other Node.js projects use the same inferred test
+command without the Docker setup and force-exit flags.
 
 `Docker`, `Postgres`, `Mysql`, and `SqlServer` support local Unix sockets and SSH
 endpoints. Published test ports bind to the engine host's loopback interface.

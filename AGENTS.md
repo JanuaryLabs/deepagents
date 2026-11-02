@@ -1,4 +1,4 @@
-### General Rules
+### General rules
 
 - Always ask more questions using AskUserQuestionTool until you have enough context to give an accurate & confident answer.
 
@@ -12,16 +12,18 @@
 - **No test-only side doors to internal classes.** Never add package `imports` aliases, extra build entry points, or `internal.ts` re-exports so tests can construct something the public barrel deliberately hides. If a test can't reach behavior through the public surface, rewrite the test to drive the public API (e.g. `AgentRuntime.deliver`/`work`), not the internals — test as a user would use it.
 - Before adding test utilities, read [TEST_PRIMITIVES.md](./TEST_PRIMITIVES.md). Prefer its native Node.js APIs; reserve `@zukhruf/testing` for domain-free primitives, not shared fixtures or product-specific harnesses.
 
-### Running Tests
+### Running tests
 
 ```sh
 node --test --no-warnings --test-timeout=60000 path/to/package/test/file.test.ts
 ```
 
-- The `@zukhruf/nx/test` plugin in `nx.json` gives each project with `node:test` files
-  its `test` target, with a 60-second per-test timeout and module mocks. Pass
-  `--args="--test-timeout=<ms> path/to/file.test.ts"` to narrow a run or adjust its
-  timeout: `--args` replaces the test selection. Compaction and devtool-history keep 10 seconds.
+- The `@zukhruf/nx/test` plugin in `nx.json` infers `test` targets from `*.test.*`
+  files outside Vitest projects. The default per-test timeout is 240 seconds;
+  `nx.json` enables module mocks and builds before tests. Pass
+  `--args="--test-timeout=<ms> path/to/file.test.ts"` to override the timeout and
+  test selection. Paths are relative to the project root. Compaction and
+  devtool-history override the timeout to 10 seconds.
 - **Always pass `--test-timeout=<ms>` to direct `node --test` runs.** Prefer Nx for
   dependency-aware builds. Database classes share servers without runner setup;
   servers persist until explicit cleanup. See [TEST_PRIMITIVES.md](./TEST_PRIMITIVES.md).
@@ -30,7 +32,7 @@ node --test --no-warnings --test-timeout=60000 path/to/package/test/file.test.ts
   test is importing. Use one `nx run-many` task graph or isolated worktrees when
   parallel verification is needed.
 
-### Test Import Rules
+### Test import rules
 
 - **Always use package module specifiers** in test files, not relative source paths:
 
@@ -51,7 +53,7 @@ node --test --no-warnings --test-timeout=60000 path/to/package/test/file.test.ts
   path is proven by the package's integration test (e.g. `schedules-http.integration.test.ts`
   composes `http(runtime)` without `schedulesHttp`), never by a second way to run the demo.
 
-## Package Overview
+## Package overview
 
 ### @deepagents/agent (`packages/agent`)
 
@@ -123,28 +125,29 @@ nx run <package-name>:build
 For example, to build the `agent` package, run:
 
 ```sh
-nx run agent:build
+nx run @deepagents/agent:build
 ```
 
-### Running Typescript files
+### Running TypeScript files
 
-We use node version that support running typescript files directly without precompilation. To run a typescript file, use the following command:
+The workspace's Node.js version runs TypeScript files directly without a separate build:
 
 ```sh
 node path/to/file.ts
 ```
 
-Always import files with extension. For example:
+Include the file extension in relative imports:
 
 ```ts
 import { someFunction } from './some-file.ts';
 ```
 
-Otherwise, node will throw an error.
+Node.js requires these extensions to resolve modules.
 
-### Running Evals
+### Running evals
+
+Pass an eval file relative to `packages/text2sql/src/evals`:
 
 ```bash
-nx run text2sql:eval                    # Run all evals
-nx run text2sql:eval path/to/eval.ts    # Run specific eval file
+nx run @deepagents/text2sql:eval sql-create-context/sql-create-context.eval.ts
 ```

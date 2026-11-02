@@ -89,6 +89,22 @@ bash calls need SQL quote repair, proxy blocking, and formatted-SQL metadata.
 
 ## Development
 
+Use the Node.js LTS version selected by `.nvmrc` and its bundled npm:
+
+```bash
+nvm install
+nvm use
+npm ci
+```
+
+The root `.npmrc` allows directly declared URL dependencies so npm 12 can
+install the workspace's SheetJS `xlsx` development dependency. The root
+`package.json` lists allowed dependency install scripts in `allowScripts`.
+
+`tsconfig.base.json` sets `erasableSyntaxOnly` so TypeScript rejects syntax
+that Node.js cannot remove when running `.ts` files, such as enums and
+constructor parameter properties.
+
 Use Nx targets for package work:
 
 ```bash
@@ -123,13 +139,11 @@ The source imports `.md` and `.txt` files as text. The build does
 this with esbuild. Without the loader, Node.js stops with
 `ERR_UNKNOWN_FILE_EXTENSION`.
 
-Node.js cannot run some source files, so these exports need a bundler that
-sets the condition, for example Vite with `resolve.conditions`:
-
-- `@deepagents/retrieval` and `@deepagents/toolbox`: relative imports end in
-  `.js`.
-- `@deepagents/react-genai`, `@deepagents/react-input/browser` and
-  `@deepagents/devtool-history`: the source is `.tsx`.
+`@deepagents/retrieval` and `@deepagents/toolbox` load their source in Node.js
+with this condition and loader. The source of `@deepagents/react-genai`,
+`@deepagents/react-input/browser`, and `@deepagents/devtool-history` includes
+`.tsx`, so use a bundler that sets the condition, for example Vite with
+`resolve.conditions`.
 
 In the `tsconfig.json` of the other repo:
 
