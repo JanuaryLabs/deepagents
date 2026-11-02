@@ -32,9 +32,14 @@ const context = new ContextEngine({
 
 **Features:**
 
-- Creates the database file and its tables on first use. On later opens, it keeps the rows of chats, messages, branches and checkpoints. When `messages_fts` is stale, the store makes it again with no rows. The messages stay
+- Creates the database file and its tables on first use. Schema updates preserve
+  chats, messages, branches, and checkpoints.
 - FTS5 full-text search
 - Single file, easy to back up
+
+If the `messages_fts` schema changes, the store recreates the search table empty.
+Stored messages remain available through history APIs, but the store does not
+automatically repopulate the search table from those messages.
 
 </Tab>
 <Tab value="PostgreSQL">

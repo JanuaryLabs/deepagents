@@ -71,7 +71,13 @@ or later for local persistence.
 ### Initialization
 
 ```typescript
+import { Declaration } from '@zukhruf/sqlite-drift';
 import { DatabaseSync, type SQLTagStore } from 'node:sqlite';
+
+import { SETUP, searchStatements, statements } from './ddl.sqlite.ts';
+
+const tables = new Declaration(statements, { rows: 'keep' });
+const search = new Declaration(searchStatements, { rows: 'replace' });
 
 class SqliteContextStore extends ContextStore {
   #db: DatabaseSync;
@@ -81,7 +87,9 @@ class SqliteContextStore extends ContextStore {
     super();
     this.#db =
       typeof pathOrDb === 'string' ? new DatabaseSync(pathOrDb) : pathOrDb;
-    this.#db.exec(STORE_DDL);
+    this.#db.exec(SETUP);
+    tables.apply(this.#db);
+    search.apply(this.#db);
     this.#sql = this.#db.createTagStore();
   }
 }
@@ -351,7 +359,15 @@ DELETE FROM chats WHERE id = ?
 
 ### Complete SQLite schema
 
-The store keeps these statements in a TypeScript module, one CREATE statement for each object. When it opens a file, the store runs the PRAGMAs first. Then it declares the tables with `@zukhruf/sqlite-drift` and applies the declaration. A new file gets every table. In an existing file, a stale table gets the declared text and keeps its rows. `messages_fts` has its own declaration with `rows: 'replace'`: when it is stale, the store makes it again with no rows. The store does not add the stored messages to the new `messages_fts`. node:sqlite enables foreign keys by default, so the store sets no PRAGMA for them.
+The schema module defines one `CREATE` statement per object. On each open, the
+store runs the connection PRAGMAs, then applies two `@zukhruf/sqlite-drift`
+declarations. The main tables use `rows: 'keep'` to preserve their rows during
+schema updates. The search table uses `rows: 'replace'`: if its schema changes,
+`messages_fts` is recreated empty. Stored messages remain available through history
+APIs, but the store does not automatically repopulate the search table from them.
+
+`node:sqlite` enables foreign keys by default, so the store does not set a
+foreign-key PRAGMA.
 
 ```sql
 -- Performance PRAGMAs

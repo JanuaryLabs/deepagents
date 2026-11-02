@@ -11,7 +11,7 @@ caller-owned Daytona sandboxes for managed remote workspaces, virtual file
 systems for simulation, custom `Sandbox` implementations for specialized
 policy, or binary bridges to combine approaches.
 
-## When to Use What
+## When to use what
 
 | Approach                                                                             | Use Case                                                                          | Requires Docker? |
 | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- | ---------------- |
@@ -61,7 +61,7 @@ await backend.executeCommand('jq --version');
 // backend.dispose() runs automatically when this scope exits
 ```
 
-## Quick Start: Docker + Bash Tool
+## Quick start: Docker + Bash tool
 
 The fastest path for giving an AI agent a bash tool that runs in Docker:
 
@@ -129,7 +129,7 @@ try {
 }
 ```
 
-## Quick Start: Docker Sandbox
+## Quick start: Docker sandbox
 
 For direct container control without AI agent wiring:
 
@@ -179,7 +179,7 @@ const output = await useSandbox(
 );
 ```
 
-## Quick Start: Binary Bridges
+## Quick start: Binary bridges
 
 Bridge specific host binaries into a just-bash virtual file system (no Docker needed):
 
@@ -204,7 +204,7 @@ const { bash } = await createBashTool({
 
 Binary bridges resolve virtual paths to real host paths and use the host's `PATH` for binary resolution, while restricting access via optional `allowedArgs` regex.
 
-## Quick Start: Virtual Sandbox
+## Quick start: Virtual sandbox
 
 Use the virtual sandbox when an agent needs the standard bash/read/write tool
 surface without Docker:
@@ -232,7 +232,7 @@ When you want command groups such as `sql run`, `tool validate`, or
 `createVirtualSandbox()` and build them with
 [Subcommand Builders](/docs/context/subcommand).
 
-## Bash Tool Schema
+## Bash tool schema
 
 `createBashTool()` from `@deepagents/context` returns a bash tool whose input schema requires two fields: `command` and `reasoning`. The LLM must provide a brief reason on every call; the owned tool enforces it at the Zod schema level.
 
@@ -267,7 +267,7 @@ await sandbox.tools.bash.execute(
 
 Type-safe consumers can import `WrappedBashTool` and `BashToolInput` directly from `@deepagents/context`.
 
-## Command Metadata
+## Command metadata
 
 A bash hook can return host-only metadata alongside an optional replacement
 result. `createBashTool()` merges it with metadata already returned by sandbox
@@ -286,7 +286,7 @@ const sandbox = await createBashTool({
 `meta` is preserved in the raw tool result for host-side consumers and stripped
 from model-visible output by the toolkit's shared toolset projection.
 
-## Custom Errors: `BashException`
+## Custom errors: `BashException`
 
 Subclass `BashException` when you want a command or transform hook to fail with
 an explicit `CommandResult` shape.
@@ -312,7 +312,7 @@ class RateLimitError extends BashException {
 `createBashTool()` catches `BashException` instances around sandbox execution
 and returns `format()` to the caller. Other error types still propagate normally.
 
-## Debug Logging
+## Debug logging
 
 Gate bash logging behind your own environment variable when you construct the
 tool:
@@ -343,7 +343,7 @@ await createBashTool({
 });
 ```
 
-## Next Steps
+## Next steps
 
 - [Docker Sandbox](/docs/context/docker-sandbox) - Three strategies for container creation
 - [Apple Container Sandbox](/docs/context/apple-container-sandbox) - Per-container lightweight VMs on Apple silicon

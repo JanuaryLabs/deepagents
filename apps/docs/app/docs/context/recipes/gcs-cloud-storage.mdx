@@ -14,12 +14,14 @@ In both cases, the cloud wiring (plugin, credentials, IAM, and host mounts) stay
 
 ### Topology
 
-The recommended deployment runs the agent on one server and the Docker daemon on a GCP VM. Every `docker` call DeepAgents makes is routed to the VM, so the bucket mount, the FUSE process, and the containers all live on the VM:
+In this setup, the agent runs on one server and the Docker daemon runs on a
+GCP VM. DeepAgents sends Engine API requests to that VM through the selected
+SSH context. The bucket mount, FUSE process, and containers all run on the VM:
 
 ```
 ┌──────────── App server ────────────┐        ┌─────────────── GCP VM ───────────────┐
 │ Node app → createDockerSandbox      │  ssh   │ Docker Engine (daemon)                │
-│ Docker CLI                          │ ─────▶ │  ├─ rclone plugin (env_auth = true)   │
+│ @zukhruf/docker (Engine API)         │ ─────▶ │  ├─ rclone plugin (env_auth = true)   │
 │ DOCKER_CONTEXT=gcp-vm               │        │  ├─ volume "agent-storage" → gcs:…    │
 │ (no daemon here)                    │        │  └─ sandbox containers mount it       │
 └─────────────────────────────────────┘        │ Attached service account ──▶ metadata │
@@ -27,7 +29,9 @@ The recommended deployment runs the agent on one server and the Docker daemon on
                                                 └───────────────────────────────────────┘
 ```
 
-> Named volumes (not bind mounts) are required for a remote daemon. A bind mount's `hostPath` is validated on the **app server** and resolved by the daemon on the **VM** — two different machines. A `type: 'volume'` with `lifecycle: 'external'` is inspected on the daemon, so it stays entirely VM-side.
+> This setup uses an external named volume backed by rclone. A bind mount also
+> works with a remote daemon when its `hostPath` exists on the VM: Docker checks
+> the path on the daemon host. Files on the app server are not mounted remotely.
 
 ### VM setup
 
@@ -102,7 +106,7 @@ docker volume create agent-b -d rclone -o remote=gcs:shared/agent-b -o vfs-cache
 
 ### App server setup
 
-#### 5. Point the docker CLI at the VM
+#### 5. Point the Docker CLI at the VM
 
 A [docker context](https://docs.docker.com/engine/manage-resources/contexts/) is the cleanest way to target the remote daemon. SSH needs no exposed ports or TLS certs:
 
@@ -116,7 +120,14 @@ Select it per-process via the environment that runs your app (preferred over `do
 DOCKER_CONTEXT=gcp-vm node your-app.ts
 ```
 
-DeepAgents shells out to the `docker` CLI without overriding the host, so it inherits this context automatically. Make sure `DOCKER_HOST` is **unset** — it would override the context.
+DeepAgents reads this context from `process.env` and connects through
+`@zukhruf/docker`. Image builds and Compose use the Docker CLI with the same
+resolved engine. Keep `DOCKER_HOST` unset when selecting by `DOCKER_CONTEXT`;
+the installed client gives `DOCKER_HOST` precedence.
+
+To select an engine for one sandbox, pass
+`environment: { ...process.env, DOCKER_CONTEXT: 'gcp-vm' }` to
+`createDockerSandbox()`. This leaves the process environment unchanged.
 
 #### 6. Attach the volume
 
@@ -145,7 +156,11 @@ The file written at `/workspace/storage/output.txt` becomes an object in `gcs:YO
 
 When your app process and the Docker daemon run on the **same Linux host**, you can skip the rclone plugin: mount the bucket on the host with [gcsfuse](https://github.com/GoogleCloudPlatform/gcsfuse) and bind that mountpoint in with the `gcs()` helper. The host does all the FUSE work; the sandbox gets a plain bind mount with **no capabilities and no in-container FUSE**.
 
-> `gcs()` returns a **bind** volume, so its `hostPath` is validated on the machine running your app — which must therefore be the daemon host. For a **remote** daemon use the named-volume approach above instead, and on **macOS/Docker Desktop** neither host-side option works because the daemon host is a hidden VM.
+> `gcs()` returns a bind volume. Its `hostPath` must name the mounted directory
+> on the Docker daemon's host; Docker checks that the path exists. This recipe
+> mounts the bucket on a Linux daemon host. The app may run on that host or
+> connect remotely. For an app on macOS, the remote Linux daemon setup above
+> keeps gcsfuse and the bucket mount on the VM.
 
 ### On the daemon host
 
@@ -185,7 +200,7 @@ await sandbox.executeCommand('echo "result" > /workspace/storage/output.txt');
 
 ## Things to know
 
-- **Writes are eventually consistent.** With `vfs-cache-mode=writes`, writes land in a local cache and upload asynchronously after the file closes and the `--vfs-write-back` delay elapses (rclone default `5s`; the volume above uses `1s`), with a final flush on unmount. The upload is async even at `0s`, so a reader on the GCS side must poll for the object or read through the mount. A low `vfs-write-back` costs extra uploads when the same file is re-written rapidly (no coalescing) — fine for whole-file create-and-close writes.
-- **One app process targets one daemon.** DeepAgents resolves the daemon globally per `docker` invocation, so a single app process sends all sandboxes to whichever VM the context points at. To spread sandboxes across multiple VMs, run one app instance per VM, each with its own `DOCKER_CONTEXT`.
+- **Uploads are asynchronous.** With `vfs-cache-mode=writes`, writes land in a local cache and upload asynchronously after the file closes and the `--vfs-write-back` delay elapses (rclone default `5s`; the volume above uses `1s`), with a final flush on unmount. The upload is async even at `0s`, so a reader on the GCS side must poll for the object or read through the mount. A low `vfs-write-back` costs extra uploads when the same file is re-written rapidly (no coalescing) — fine for whole-file create-and-close writes.
+- **Each sandbox selects its own daemon.** By default, `createDockerSandbox()` reads `process.env`. Pass a separate `environment` to each call to target multiple VMs from one app process. Container variables belong in `env`.
 - **This is FUSE over object storage.** Tools that do in-place random writes can misbehave; whole-file create-and-close writes are the reliable pattern.
 - **No backend logic in the mount path.** The sandbox attaches only ordinary Docker storage primitives (named volumes and bind mounts). `gcs()` is a naming convenience that produces a bind volume — not a special volume type and not a code path that talks to GCS; credentials, gcsfuse, and IAM all live on the host. The same approach works for any backend (S3, Azure, SFTP) by changing the host mount or the rclone `remote`.

@@ -111,7 +111,7 @@ try {
 </Tab>
 </Tabs>
 
-## Command Timeouts and Cancellation
+## Command timeouts and cancellation
 
 Set `commandTimeout` once on any Docker sandbox strategy to limit every
 `executeCommand` and `spawn` call in milliseconds:
@@ -126,7 +126,7 @@ A deadline terminates the command's process group inside the container before
 separate caller cancellation: `spawn` reports an unsuccessful `SIGKILL`, while
 `executeCommand` returns non-zero; neither is reported as a timeout.
 
-## Stable Container Names
+## Stable container names
 
 Runtime and Dockerfile strategies accept an optional `name` to reuse the same
 container across calls:
@@ -157,10 +157,11 @@ already be configured.
   existing one. Coordinate lifecycle if multiple callers share the same `name`.
 </Callout>
 
-## Container Command Overrides
+## Container command overrides
 
-Runtime and Dockerfile strategies accept an optional `command` to control what
-is appended after the image in `docker run`:
+Runtime and Dockerfile strategies accept an optional `command` to control the
+container command, with the same behavior as arguments after the image in
+`docker run`:
 
 - Omit `command` (default) to append `tail -f /dev/null` as a keep-alive.
 - Set `command: null` or `command: []` to append nothing, so the image or
@@ -190,14 +191,22 @@ const sandbox = await createDockerSandbox({
 });
 ```
 
-The sandbox checks the container name and the env keys before it connects, so
-a wrong value is reported even when the engine is down.
+Container lifecycle, command execution, and file operations use the Engine API
+through `@zukhruf/docker`. Image builds and Compose startup and shutdown use
+the Docker CLI, configured to target the same engine.
 
-## Runtime Flags
+`environment` selects the engine for this sandbox; `env` sets variables inside
+the container. Runtime and Dockerfile strategies validate `name` and `env` keys
+before connecting, so invalid input is reported even when the engine is down.
 
-Runtime and Dockerfile strategies accept pass-through `docker run` controls,
-grouped by concern. Every field is optional; omit a group for the daemon's
-defaults (shared kernel, root user, writable root filesystem, default network).
+## Runtime flags
+
+Runtime and Dockerfile strategies accept controls equivalent to `docker run`
+flags, grouped by concern. Every field is optional. Omitted fields use the
+sandbox's defaults where defined, then the image or Docker defaults. For
+example, resource limits default to 1 GiB of memory and two CPUs, and the user
+defaults to the image's `USER`.
+
 Compose sandboxes do not use these — configure equivalent settings per service in
 the compose file.
 
@@ -319,18 +328,19 @@ const sandbox = await createDockerSandbox({
 Bind mounts use paths on the Docker daemon's host. For a remote daemon, set
 `hostPath` to a path on that machine. DeepAgents leaves the existence check to
 Docker. If Docker reports a missing bind source when the container starts,
-DeepAgents throws `VolumePathError` with the configured `hostPath` and
-`containerPath`.
+DeepAgents throws `VolumePathError` with Docker's reported source path and the
+configured `containerPath`.
 
 On macOS, Docker Desktop may report `/host_mnt/private/tmp/data` for a configured
 `/tmp/data` source. DeepAgents recognizes this form when classifying missing-source
-errors. Keep the macOS path in `hostPath`.
+errors; the error's `hostPath` retains Docker's reported path. Keep the macOS
+path in the volume's `hostPath` configuration.
 
 External Docker volumes are inspected before the container starts. Managed Docker volumes are created before the container starts and removed on `dispose()` unless `removeOnDispose: false` is set.
 
 Cloud-backed storage should be configured outside DeepAgents through Docker volume drivers or host-mounted filesystems. For example, configure S3 or Azure Blob credentials in the host/daemon/plugin layer, then attach the resulting Docker volume with `type: 'volume'` or the host mount with `type: 'bind'`. For same-host gcsfuse mounts, `gcs({ hostPath, mountPath })` is a typed shortcut for the bind-volume form. Managed Docker volumes may also pass driver-specific options through `driverOptions`; keep in mind that inline credentials can be visible in Docker volume metadata, so use a preconfigured named remote when you need to keep credentials out of `docker volume inspect`. See the [GCS Cloud Storage Volumes recipe](/docs/context/recipes/gcs-cloud-storage) for end-to-end Google Cloud Storage setups for both remote daemons and same-host Linux mounts, and the [MinIO / S3 Cloud Storage Volumes recipe](/docs/context/recipes/minio-cloud-storage) for an rclone connection-string example.
 
-## Resource Limits
+## Resource limits
 
 ```typescript
 const sandbox = await createDockerSandbox({
@@ -341,7 +351,7 @@ const sandbox = await createDockerSandbox({
 });
 ```
 
-## Environment Variables
+## Environment variables
 
 Set environment variables in the container at creation time. Available to all commands executed via `executeCommand`.
 
@@ -362,7 +372,7 @@ Supported on Runtime and Dockerfile strategies. For Compose, define environment 
 
 Keys are validated — empty keys and keys containing `=` throw a `DockerSandboxError`.
 
-## Command Execution APIs
+## Command execution APIs
 
 `executeCommand` is buffered and returns all output at process exit:
 
@@ -542,9 +552,9 @@ directories that a write creates, belong to the container's user: the
 `security.user` value, or the `USER` of the image. A process that runs as that
 user can change them.
 
-## Container Lifecycle
+## Container lifecycle
 
-### Manual Disposal
+### Manual disposal
 
 Always wrap sandbox usage in `try/finally`:
 
@@ -557,7 +567,7 @@ try {
 }
 ```
 
-### Auto-Disposal with `useSandbox`
+### Auto-disposal with `useSandbox`
 
 ```typescript
 import { useSandbox } from '@deepagents/context';
@@ -571,9 +581,11 @@ const version = await useSandbox(
 );
 ```
 
-Containers are created with `--rm`, so they're removed automatically when stopped. `dispose()` calls `docker stop` (or `docker compose down` for Compose).
+Runtime and Dockerfile containers are configured for automatic removal when
+stopped. `dispose()` sends a stop request through the Engine API; Compose
+sandboxes run `docker compose down` to stop the stack.
 
-## Error Handling
+## Error handling
 
 All errors extend `DockerSandboxError`:
 
@@ -612,7 +624,7 @@ try {
 }
 ```
 
-## Next Steps
+## Next steps
 
 - [Agent Wrapper](/docs/context/agent) - High-level wrapper for AI agents
 - [Sandbox Overview](/docs/context/sandbox) - Choosing the right approach

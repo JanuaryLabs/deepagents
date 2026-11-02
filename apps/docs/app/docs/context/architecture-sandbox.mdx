@@ -1,21 +1,20 @@
 ---
 title: 'Architecture: Sandbox'
-description: Engine bridge, binary bridges internals, and the integration pipeline
+description: Container engines, creation strategies, binary bridges, and agent integration
 ---
 
 This page explains the internal architecture of the sandbox system. Read this if you want to understand how the pieces fit together, extend the system with a custom engine or strategy, or debug issues.
 
-## Engine Bridge + Strategies
+## Engine bridge + strategies
 
-The container-backed sandboxes combine two patterns on orthogonal axes, so Docker
-and Apple Container share one strategy family — only the dialect differs:
+Docker and Apple Container share creation strategies. Each backend supplies
+an engine that handles its container runtime:
 
-- **Bridge (dialect axis).** A `ContainerEngine<TOpts>` holds the operations
-  that are different for each container runtime: attach to a named container,
-  run a new container, check, create and remove volumes, build an image, and
-  dispose the engine. Each container that an engine gives is an
-  `EngineContainer`. It runs commands, streams processes, reads and writes
-  files, gives the installer context, and stops. There is one engine per
+- **Bridge (dialect axis).** `ContainerEngine<TOpts>` defines how to attach to
+  a named container, start a container, inspect and manage volumes, build an
+  image, and release the engine connection. It returns an `EngineContainer`
+  that executes commands, streams processes, reads and writes files, provides
+  an installer context, and stops the container. There is one engine per
   backend: `DockerEngine` uses the Engine API through `@zukhruf/docker`, and
   `appleEngine` uses the `container` CLI.
 - **Template Method (mode axis).** A single `ContainerSandboxStrategy<TOpts>`
@@ -34,13 +33,15 @@ ContainerSandboxStrategy<TOpts>   ← shared skeleton, engine-injected
 ├── RuntimeStrategy               — install packages/binaries at runtime
 └── ContainerfileStrategy         — build image from a Dockerfile (cached)
 
-ComposeStrategy                   — Docker-only; not part of the bridge
+ComposeStrategy                   — Docker-only subclass; overrides stack acquisition and release
 ```
 
-### Template Method Flow
+### Template method flow
 
 The base strategy defines the creation algorithm and delegates each engine
-operation to `engine.*`. Subclasses override only `getImage()` and `configure()`:
+operation to the engine or container. Runtime and Dockerfile strategies
+override `getImage()` and `configure()`; Compose also overrides acquisition
+and release:
 
 ```
 create()
@@ -54,24 +55,31 @@ create()
   │     │                       else prepareVolumes() and engine.run(...)
   │     └─ Compose override:  docker compose up -d, then find the service container
   │
-  ├─ 4. engine.ensureWorkdir()  ← engine: no-op on Docker; `mkdir -p` on Apple
+  ├─ 3. engine.ensureWorkdir()  ← new containers only; no-op on Docker, `mkdir -p` on Apple
   │
-  ├─ 5. configure()          ← mode-specific
+  ├─ 4. configure()          ← new containers only, mode-specific
   │     ├─ Runtime:       run installers via container.installerContext()
   │     ├─ Containerfile:  no-op (image already configured)
   │     └─ Compose:       no-op (compose file defines everything)
   │
-  └─ 6. createSandboxMethods()  ← common: return { executeCommand, spawn, readFile, writeFiles, dispose }
+  ├─ 5. assertBashAvailable()   ← new and attached containers
+  │
+  ├─ 6. createSandboxMethods()  ← command, process, file, and disposal methods
+  │
+  └─ 7. readiness(sandbox)      ← optional caller hook, awaited before return
 ```
 
-If `configure()` throws, the base class auto-stops the container before re-throwing.
+If setup fails, the base class releases a newly acquired container, removes
+managed volumes it created, and disposes the engine. An attached container is
+left running when setup fails. If the readiness hook fails, the
+sandbox is disposed, including an attached container.
 
 The methods object returned by `createSandboxMethods()` also implements
 `[Symbol.asyncDispose]`, which delegates to `dispose()`. Because
 `DisposableSandbox extends AsyncDisposable`, callers can bind any backend with
 `await using` and the container is torn down at scope exit.
 
-### Container Startup
+### Container startup
 
 All single-container strategies start a long-running container and then execute
 commands inside it. Docker sends the create request of the Engine API with the
@@ -92,12 +100,12 @@ Commands then run through the exec requests of the Engine API, as
 `bash -lc "<command>"`.
 
 Apple Container follows the same shape with `container run --detach --rm ...`
-and executes commands via `container exec <id> sh -c "<command>"`. It does not
+and executes commands via `container exec <id> bash -lc "<command>"`. It does not
 support Compose, Docker volume drivers, or Docker security/network flags;
 instead each container runs inside its own lightweight VM and exposes a smaller
 set of resource, arch, bind-mount, named-volume, and environment controls.
 
-### Dockerfile Image Caching
+### Dockerfile image caching
 
 The shared `ContainerfileStrategy` generates a deterministic image tag from the
 Dockerfile content plus the build `identity` (Docker's `platform` / Apple's
@@ -112,7 +120,7 @@ Same Dockerfile + identity produces the same tag. The strategy checks
 missing; Docker's layer cache handles `docker build`, and Apple Container skips
 `container build` when the tag already exists locally.
 
-### Compose Overrides
+### Compose overrides
 
 `ComposeStrategy` overrides two base class methods:
 
@@ -121,14 +129,13 @@ missing; Docker's layer cache handles `docker build`, and Apple Container skips
 | `acquireContainer()` | `engine.run(...)`  | `docker compose up -d`, then the service container by its Compose labels |
 | `release()`          | `container.stop()` | `docker compose down`                                                    |
 
-Commands and files of the service container use the Engine API, as for the
-other strategies.
+Commands and file operations use the service container's Engine API handle.
 
-## Binary Bridges
+## Binary bridges
 
 Binary bridges connect just-bash virtual environments to real host binaries. They solve three path resolution problems:
 
-### Virtual CWD to Real CWD
+### Virtual CWD to real CWD
 
 just-bash uses virtual paths like `/home/user`. Binary bridges resolve them to real host paths:
 
@@ -138,11 +145,11 @@ OverlayFs:    fs.toRealPath(ctx.cwd)
 InMemoryFs:   fallback to process.cwd()
 ```
 
-### Virtual PATH to Real PATH
+### Virtual PATH to real PATH
 
 just-bash sets `PATH=/bin:/usr/bin` which doesn't include host binary locations (nvm, homebrew, etc.). Binary bridges always use `process.env.PATH` for binary resolution.
 
-### File Argument Detection
+### File argument detection
 
 Arguments that look like file paths are resolved relative to the real CWD:
 
@@ -165,7 +172,7 @@ createBinaryBridges({
 
 Each argument is tested individually against the regex. Any non-matching argument returns exit code 1 with a security policy error.
 
-## Integration Pipeline
+## Integration pipeline
 
 To give an AI agent a bash tool that runs inside a sandbox, compose the two
 independent systems explicitly at the call site:
@@ -190,7 +197,7 @@ optional `spawn(command, options?)` for streaming stdout/stderr. This is why
 real process backends can be plugged directly into the shared, owned
 `createBashTool` from `@deepagents/context`.
 
-### Decorator Chain Behavior
+### Decorator chain behavior
 
 `createBashTool` layers decorators over the backend sandbox. The decorators
 preserve `spawn` when the backend exposes it:
@@ -201,20 +208,21 @@ preserve `spawn` when the backend exposes it:
   write/modify/delete events under `destination`, and delays `exit` resolution
   until the post-spawn snapshot is captured.
 
-### File Operations
+### File operations
 
 Docker moves files through the archive requests of the Engine API
 (`readFile()`, `writeFiles()`, `stat()`). These requests cannot reach a tmpfs
 mount, `/proc`, `/sys` or `/dev`. For a path there, Docker uses an exec:
 `cat` for a read, and `cat` with the bytes on standard input for a write. A
-read follows symbolic links. A container with a numeric `uid[:gid]` user owns
-the files that the sandbox writes.
+read follows symbolic links. Files and new parent directories belong to the
+container user selected by `security.user` or the image's `USER`. Names and
+numeric IDs are supported; names are resolved inside the container.
 
 Apple Container moves files as base64 text through `container exec`, because
 its CLI has no file requests.
 
-`spawn` is async. It gives the process after the engine starts it: two byte
-streams (`stdout`, `stderr`) and an `exit` promise.
+Await `spawn()` to receive a process with two byte streams (`stdout`, `stderr`)
+and an `exit` promise.
 
 ## Extending
 
@@ -223,7 +231,7 @@ There are two extension points, one per axis:
 **Add a backend → implement `ContainerEngine`.** Provide the engine
 operations (attach, run, volumes, image build, dispose) and an
 `EngineContainer` for each container (commands, processes, files, installer
-context, stop). Then write a factory that gives the engine to the shared
+context, stop). Then write a factory that passes the engine to the shared
 strategies. No strategy subclass is necessary. `appleEngine` works this way.
 
 ```typescript
@@ -257,7 +265,7 @@ export function createPodmanSandbox(options: CommonSandboxOptions = {}) {
 `getImage()` / `configure()` (and any lifecycle method, as `ComposeStrategy`
 does) while it still delegates each engine operation to the injected engine.
 
-## Next Steps
+## Next steps
 
 - [Docker Sandbox](/docs/context/docker-sandbox) - Usage guide for all three strategies
 - [Apple Container Sandbox](/docs/context/apple-container-sandbox) - VM-backed local containers on Apple silicon

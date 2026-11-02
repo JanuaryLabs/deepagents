@@ -127,7 +127,7 @@ await pending;
 For live byte streams, use `spawn`:
 
 ```typescript
-const proc = sandbox.spawn?.('node long-task.js', { cwd: '/workspace' });
+const proc = await sandbox.spawn?.('node long-task.js', { cwd: '/workspace' });
 if (!proc) throw new Error('spawn is unavailable');
 
 const decoder = new TextDecoder();
