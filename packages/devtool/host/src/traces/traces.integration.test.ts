@@ -7,7 +7,8 @@ import {
   ATTR_USER_ID,
 } from '@opentelemetry/semantic-conventions/incubating';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
-import { MockLanguageModelV4, simulateReadableStream } from 'ai/test';
+import { simulateReadableStream } from 'ai';
+import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
