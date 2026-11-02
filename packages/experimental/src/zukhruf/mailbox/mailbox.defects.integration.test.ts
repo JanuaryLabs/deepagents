@@ -123,10 +123,7 @@ function textModel(text = 'done') {
   });
 }
 
-function declaration(
-  model: AgentDeclaration['model'],
-  tools?: AgentDeclaration['tools'],
-): AgentDeclaration {
+function declaration(model: AgentDeclaration['model']): AgentDeclaration {
   return {
     name: 'researcher',
     model,
@@ -135,7 +132,6 @@ function declaration(
         sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
       }),
     instructions: [],
-    tools,
   };
 }
 
@@ -233,15 +229,18 @@ async function runtimeHarness(options?: {
   mailboxStore?: SqliteMailboxStore;
   queue?: ManualTurnQueue;
   tools?: AgentDeclaration['tools'];
+  toolApproval?: AgentDeclaration['toolApproval'];
 }) {
   const contextStore = options?.contextStore ?? new InMemoryContextStore();
   const mailboxStore =
     options?.mailboxStore ?? new SqliteMailboxStore(':memory:');
   const streamStore = new SqliteStreamStore(':memory:');
   const queue = options?.queue ?? new ManualTurnQueue();
-  const runtimeSetup = new AgentRuntime(
-    declaration(options?.model ?? textModel(), options?.tools),
-  );
+  const runtimeSetup = new AgentRuntime({
+    ...declaration(options?.model ?? textModel()),
+    tools: options?.tools,
+    toolApproval: options?.toolApproval,
+  });
   const runtimeStack = defineStack(async () => ({
     store: contextStore,
     streams: streamsFor(streamStore),
@@ -729,11 +728,11 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
     });
     const h = await runtimeHarness({
       model,
+      toolApproval: { sendEmail: 'user-approval' },
       tools: {
         sendEmail: defineTool({
           description: 'Send an email',
           inputSchema: z.object({ to: z.string() }),
-          needsApproval: true,
           execute: async () => 'sent',
         }),
       },

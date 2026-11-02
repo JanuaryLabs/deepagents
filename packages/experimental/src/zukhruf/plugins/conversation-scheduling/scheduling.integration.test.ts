@@ -1849,11 +1849,11 @@ test('an overdue occurrence waits for approval before materializing', async (t) 
       model: toolModel(commands, []),
       sandbox: virtualSandbox,
       instructions: [],
+      toolApproval: { publish: 'user-approval' },
       tools: {
         publish: defineTool({
           description: 'Publish the result',
           inputSchema: z.object({}),
-          needsApproval: true,
           execute: async () => 'published',
         }),
       },

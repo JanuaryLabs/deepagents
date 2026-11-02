@@ -2045,21 +2045,23 @@ test(
             )
           : answer(),
     });
-    const root = declaration(
-      model,
-      { ...compaction(summary), keepLastMessages: 1 },
-      {
-        inspect: defineTool({
-          description: 'Read after approval',
-          inputSchema: z.object({}),
-          needsApproval: true,
-          execute: () => {
-            executed++;
-            return 'Verified CASE-42.';
-          },
-        }),
-      },
-    );
+    const root = defineAgent({
+      ...declaration(
+        model,
+        { ...compaction(summary), keepLastMessages: 1 },
+        {
+          inspect: defineTool({
+            description: 'Read after approval',
+            inputSchema: z.object({}),
+            execute: () => {
+              executed++;
+              return 'Verified CASE-42.';
+            },
+          }),
+        },
+      ),
+      toolApproval: { inspect: 'user-approval' },
+    });
     const runtime = new AgentRuntime(root);
     await using host = await runtime.initialize(stack);
     await host.work();

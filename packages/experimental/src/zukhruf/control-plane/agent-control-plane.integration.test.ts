@@ -857,11 +857,11 @@ test('an approval-paused child sends one final answer only after continuation', 
     }),
     sandbox,
     instructions: [],
+    toolApproval: { publish: 'user-approval' },
     tools: {
       publish: defineTool({
         description: 'Publish the completed report',
         inputSchema: z.object({ report: z.string() }),
-        needsApproval: true,
         execute: async ({ report }) => report,
       }),
     },
@@ -986,11 +986,11 @@ test('a failed approval continuation reports failure instead of remaining paused
       return virtualSandbox();
     },
     instructions: [],
+    toolApproval: { publish: 'user-approval' },
     tools: {
       publish: defineTool({
         description: 'Publish the completed report',
         inputSchema: z.object({ report: z.string() }),
-        needsApproval: true,
         execute: async ({ report }) => report,
       }),
     },
@@ -1121,11 +1121,11 @@ test('a cancelled approval continuation clears the gate and revives parked turns
         return virtualSandbox();
       },
       instructions: [],
+      toolApproval: { publish: 'user-approval' },
       tools: {
         publish: defineTool({
           description: 'Publish a report',
           inputSchema: z.object({ report: z.string() }),
-          needsApproval: true,
           execute: async ({ report }) => report,
         }),
       },
@@ -1223,17 +1223,16 @@ test('failed continuation preserves denied sibling semantics', async () => {
         return virtualSandbox();
       },
       instructions: [],
+      toolApproval: { publish: 'user-approval', archive: 'user-approval' },
       tools: {
         publish: defineTool({
           description: 'Publish',
           inputSchema,
-          needsApproval: true,
           execute: async ({ report }) => report,
         }),
         archive: defineTool({
           description: 'Archive',
           inputSchema,
-          needsApproval: true,
           execute: async ({ report }) => report,
         }),
       },
@@ -2664,11 +2663,11 @@ test('interrupt_agent leaves terminal and approval-paused children unchanged', a
     }),
     sandbox,
     instructions: [],
+    toolApproval: { publish: 'user-approval' },
     tools: {
       publish: defineTool({
         description: 'Publish a report',
         inputSchema: z.object({ report: z.string() }),
-        needsApproval: true,
         execute: async ({ report }) => report,
       }),
     },

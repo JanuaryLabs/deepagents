@@ -227,7 +227,6 @@ function approvalSetup() {
     sendEmail: defineTool({
       description: 'Send an email',
       inputSchema: z.object({ to: z.string() }),
-      needsApproval: true,
       execute: async ({ to }) => {
         track.toolRuns++;
         return `sent:${to}`;
@@ -292,7 +291,11 @@ function approvalSetup() {
       };
     },
   });
-  return { track, tools, model };
+  const agent: AgentDeclaration = {
+    ...declaration(model, tools),
+    toolApproval: { sendEmail: 'user-approval' },
+  };
+  return { track, agent, model };
 }
 
 function siblingApprovalSetup() {
@@ -306,7 +309,6 @@ function siblingApprovalSetup() {
     sendEmail: defineTool({
       description: 'Send an email',
       inputSchema: z.object({ to: z.string() }),
-      needsApproval: true,
       execute: async ({ to }) => {
         track.toolRuns++;
         return `sent:${to}`;
@@ -350,7 +352,11 @@ function siblingApprovalSetup() {
       return { stream: simulateReadableStream({ chunks }) };
     },
   });
-  return { track, tools, model };
+  const agent: AgentDeclaration = {
+    ...declaration(model, tools),
+    toolApproval: { sendEmail: 'user-approval' },
+  };
+  return { track, agent, model };
 }
 
 async function pausedToolCall(
@@ -552,7 +558,6 @@ class FailOnceResumeParkedQueue extends TurnQueue {
 
 async function harness(
   model: AgentDeclaration['model'],
-  tools?: ToolSet,
   options?: {
     /** Wraps the real queue; the runtime uses the returned one. */
     queueFactory?: (queue: PgBossTurnQueue) => TurnQueue;
@@ -594,7 +599,7 @@ async function harness(
   });
   const mailboxStore = resources.use(new SqliteMailboxStore(':memory:'));
   const composition = options?.composition?.({ boss, database: pglite });
-  const root = options?.declaration ?? declaration(model, tools);
+  const root = options?.declaration ?? declaration(model);
   const runtimeSetup = new AgentRuntime(
     composition
       ? defineAgent({
@@ -754,7 +759,7 @@ describe('zukhruf runtime — host sessions', () => {
   it('runs scheduled prompts in fresh, idempotent root sessions', async () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     let scheduled: ReturnType<typeof schedules> | undefined;
-    await using h = await harness(slowModel(track), undefined, {
+    await using h = await harness(slowModel(track), {
       composition: ({ boss, database }) => {
         scheduled = schedules({
           queue: `scheduled-runtime-${crypto.randomUUID()}`,
@@ -843,7 +848,7 @@ describe('zukhruf runtime — host sessions', () => {
   it('runs a scheduled prompt in an existing conversation', async () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     let scheduled: ReturnType<typeof schedules> | undefined;
-    await using h = await harness(scriptedModel(track), undefined, {
+    await using h = await harness(scriptedModel(track), {
       composition: ({ boss, database }) => {
         scheduled = schedules({
           queue: `scheduled-existing-${crypto.randomUUID()}`,
@@ -914,9 +919,10 @@ describe('zukhruf runtime — host sessions', () => {
   });
 
   it('fails a scheduled task that requires interactive approval', async () => {
-    const { track, tools, model } = approvalSetup();
+    const { track, agent, model } = approvalSetup();
     let scheduled: ReturnType<typeof schedules> | undefined;
-    await using h = await harness(model, tools, {
+    await using h = await harness(model, {
+      declaration: agent,
       composition: ({ boss, database }) => {
         scheduled = schedules({
           queue: `scheduled-approval-${crypto.randomUUID()}`,
@@ -996,7 +1002,7 @@ Prepare the engineering report.
       ownerId: 'user-1',
     });
     let scheduled: ReturnType<typeof schedules> | undefined;
-    await using h = await harness(scriptedModel(track), undefined, {
+    await using h = await harness(scriptedModel(track), {
       composition: ({ boss, database }) => {
         scheduled = schedules({
           queue: `scheduled-files-${crypto.randomUUID()}`,
@@ -1105,7 +1111,7 @@ Missing a timezone.
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     let scheduled: ReturnType<typeof schedules> | undefined;
     await assert.rejects(
-      harness(scriptedModel(track), undefined, {
+      harness(scriptedModel(track), {
         composition: ({ boss, database }) => {
           scheduled = schedules({
             queue: `scheduled-invalid-${crypto.randomUUID()}`,
@@ -1140,7 +1146,7 @@ describe('zukhruf runtime — setup failure durability', () => {
       });
     };
 
-    await using h = await harness(model, undefined, {
+    await using h = await harness(model, {
       declaration: agentDeclaration,
     });
     await using worker = await h.runtime.work();
@@ -1182,7 +1188,7 @@ describe('zukhruf runtime — setup failure durability', () => {
       return backend;
     });
 
-    await using h = await harness(model, undefined, {
+    await using h = await harness(model, {
       declaration: agentDeclaration,
     });
     await using worker = await h.runtime.work();
@@ -1215,7 +1221,7 @@ describe('zukhruf runtime — background executor', () => {
       (name) => new Error(name),
     );
     const events: string[] = [];
-    await using h = await harness(new MockLanguageModelV4({}), undefined, {
+    await using h = await harness(new MockLanguageModelV4({}), {
       composition: () => ({
         definitions: failures.slice(0, 2).map((failure) => ({
           name: failure.message,
@@ -1296,7 +1302,7 @@ describe('zukhruf runtime — background executor', () => {
         }),
       }),
     );
-    await using h = await harness(model, undefined, {
+    await using h = await harness(model, {
       declaration: {
         ...declaration(model),
         telemetry: { includeRuntimeContext: { first: true, second: true } },
@@ -1403,7 +1409,7 @@ describe('zukhruf runtime — background executor', () => {
     });
     agentDeclaration.skills = ['manage-schedules'];
 
-    await using h = await harness(model, undefined, {
+    await using h = await harness(model, {
       declaration: agentDeclaration,
       composition: () => ({
         definitions: [
@@ -1539,7 +1545,7 @@ describe('zukhruf runtime — background executor', () => {
       },
     );
 
-    await using h = await harness(model, undefined, {
+    await using h = await harness(model, {
       declaration: agentDeclaration,
     });
     await using worker = await h.runtime.work();
@@ -1615,7 +1621,7 @@ describe('zukhruf runtime — background executor', () => {
       return backend;
     });
 
-    await using h = await harness(model, undefined, {
+    await using h = await harness(model, {
       declaration: agentDeclaration,
     });
     await using worker = await h.runtime.work();
@@ -1662,7 +1668,7 @@ describe('zukhruf runtime — background executor', () => {
       }),
     ];
 
-    await using h = await harness(model, undefined, {
+    await using h = await harness(model, {
       declaration: agentDeclaration,
     });
     await using worker = await h.runtime.work();
@@ -1700,7 +1706,7 @@ describe('zukhruf runtime — background executor', () => {
       ],
     });
 
-    await using h = await harness(model, undefined, {
+    await using h = await harness(model, {
       declaration: agentDeclaration,
     });
     await using worker = await h.runtime.work();
@@ -1795,7 +1801,7 @@ describe('zukhruf runtime — background executor', () => {
         }),
       ],
     });
-    await using h = await harness(model, undefined, {
+    await using h = await harness(model, {
       declaration: agentDeclaration,
     });
     await using worker = await h.runtime.work();
@@ -2138,9 +2144,9 @@ describe('zukhruf runtime — background executor', () => {
     );
   });
 
-  it('a needsApproval tool call pauses the turn: stream completes, chain head carries the pending approval', async () => {
-    const { track, tools, model } = approvalSetup();
-    await using h = await harness(model, tools);
+  it('a tool call that needs user approval pauses the turn: stream completes, chain head carries the pending approval', async () => {
+    const { track, agent, model } = approvalSetup();
+    await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work();
     void _worker;
 
@@ -2311,8 +2317,8 @@ describe('zukhruf runtime — background executor', () => {
   });
 
   it('continues an AI SDK approval response through the assistant message', async () => {
-    const { track, tools, model } = approvalSetup();
-    await using h = await harness(model, tools);
+    const { track, agent, model } = approvalSetup();
+    await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work();
     void _worker;
 
@@ -2419,7 +2425,7 @@ describe('zukhruf runtime — background executor', () => {
         }),
       },
     });
-    await using h = await harness(model, root.tools, { declaration: root });
+    await using h = await harness(model, { declaration: root });
     await h.runtime.work();
 
     const result = await h.runtime.enqueue(
@@ -2444,24 +2450,16 @@ describe('zukhruf runtime — background executor', () => {
 
   for (const tamper of [false, true]) {
     it(`native approval policy ${tamper ? 'rejects a forged signature' : 'resumes signed approval after a host restart'}`, async () => {
-      const { track, tools, model } = approvalSetup();
-      tools.sendEmail = defineTool({
-        inputSchema: z.object({ to: z.string() }),
-        execute: async ({ to }) => {
-          track.toolRuns++;
-          return `sent:${to}`;
-        },
-      });
+      const { track, agent, model } = approvalSetup();
       const root = defineAgent({
-        ...declaration(model, tools),
+        ...agent,
         reasoning: 'low',
         maxOutputTokens: 128,
         timeout: { totalMs: 5_000 },
         toolCallConcurrency: 1,
-        toolApproval: { sendEmail: 'user-approval' },
         experimental_toolApprovalSecret: 'integration-test-persistent-secret',
       });
-      await using h = await harness(model, tools, { declaration: root });
+      await using h = await harness(model, { declaration: root });
       await h.runtime.work();
       const conversation = { chatId: `signed-${tamper}`, userId: 'u1' };
       const ask = await h.runtime.enqueue(conversation, turn('send it'));
@@ -2518,8 +2516,8 @@ describe('zukhruf runtime — background executor', () => {
   }
 
   it('continues once after AI SDK submits every sibling approval response', async () => {
-    const { track, tools, model } = siblingApprovalSetup();
-    await using h = await harness(model, tools);
+    const { track, agent, model } = siblingApprovalSetup();
+    await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work();
     void _worker;
     const conversation = { chatId: 'sibling-approvals', userId: 'u1' };
@@ -2542,8 +2540,8 @@ describe('zukhruf runtime — background executor', () => {
   });
 
   it('persists the sibling decisions carried by the assistant message', async (t) => {
-    const { track, tools, model } = siblingApprovalSetup();
-    await using h = await harness(model, tools);
+    const { track, agent, model } = siblingApprovalSetup();
+    await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work();
     void _worker;
     const conversation = {
@@ -2585,8 +2583,9 @@ describe('zukhruf runtime — background executor', () => {
   });
 
   it('repairs parked-turn revival in the worker after the resumed turn settles', async (t) => {
-    const { track, tools, model } = approvalSetup();
-    await using h = await harness(model, tools, {
+    const { track, agent, model } = approvalSetup();
+    await using h = await harness(model, {
+      declaration: agent,
       queueFactory: (queue) => new FailOnceResumeParkedQueue(queue),
     });
     await using _worker = await h.runtime.work({ concurrency: 2 });
@@ -2634,8 +2633,8 @@ describe('zukhruf runtime — background executor', () => {
   });
 
   it('continues an AI SDK denial without executing the tool', async () => {
-    const { track, tools, model } = approvalSetup();
-    await using h = await harness(model, tools);
+    const { track, agent, model } = approvalSetup();
+    await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work();
     void _worker;
 
@@ -2670,8 +2669,8 @@ describe('zukhruf runtime — background executor', () => {
   });
 
   it('turns enqueued while a chat awaits approval queue behind it, in order', async () => {
-    const { track, tools, model } = approvalSetup();
-    await using h = await harness(model, tools);
+    const { track, agent, model } = approvalSetup();
+    await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work({ concurrency: 2 });
     void _worker;
 
@@ -2709,8 +2708,8 @@ describe('zukhruf runtime — background executor', () => {
   });
 
   it('an AI SDK approval continuation leaves no queue job behind', async () => {
-    const { tools, model } = approvalSetup();
-    await using h = await harness(model, tools);
+    const { agent, model } = approvalSetup();
+    await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work();
     void _worker;
 
@@ -2747,8 +2746,8 @@ describe('zukhruf runtime — background executor', () => {
   });
 
   it('the deny flow leaves no queue job behind', async () => {
-    const { track, tools, model } = approvalSetup();
-    await using h = await harness(model, tools);
+    const { track, agent, model } = approvalSetup();
+    await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work();
     void _worker;
 
@@ -2827,8 +2826,8 @@ describe('zukhruf runtime — background executor', () => {
   );
 
   it('parked follow-ups survive a maintenance pass while gated, then revive in order and leave no jobs behind', async () => {
-    const { track, tools, model } = approvalSetup();
-    await using h = await harness(model, tools);
+    const { track, agent, model } = approvalSetup();
+    await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work({ concurrency: 2 });
     void _worker;
 
@@ -2917,8 +2916,8 @@ describe('zukhruf runtime — background executor', () => {
   });
 
   it('resumeParked revives a user-cancelled follow-up, but the terminal-stream check skips it and cleans it up', async () => {
-    const { track, tools, model } = approvalSetup();
-    await using h = await harness(model, tools);
+    const { track, agent, model } = approvalSetup();
+    await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work({ concurrency: 2 });
     void _worker;
 
@@ -2971,8 +2970,8 @@ describe('zukhruf runtime — background executor', () => {
   });
 
   it('cancelling a paused turn is currently a no-op: the pause survives and is still approvable', async () => {
-    const { track, tools, model } = approvalSetup();
-    await using h = await harness(model, tools);
+    const { track, agent, model } = approvalSetup();
+    await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work();
     void _worker;
 
@@ -3129,8 +3128,8 @@ describe('zukhruf runtime — conversation status', () => {
   });
 
   it('reports waitingOnApproval while paused, keeps it across a parked ask, and clears it after the continuation', async (t) => {
-    const { track, tools, model } = approvalSetup();
-    await using h = await harness(model, tools);
+    const { track, agent, model } = approvalSetup();
+    await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work();
     void _worker;
     const conversation = { chatId: 'status-approval', userId: 'u1' };
@@ -3314,7 +3313,7 @@ describe('zukhruf runtime — conversation status', () => {
         sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
       });
     };
-    await using h = await harness(model, undefined, {
+    await using h = await harness(model, {
       declaration: agentDeclaration,
     });
     await using _worker = await h.runtime.work();
@@ -3359,7 +3358,7 @@ describe('zukhruf runtime — cross-process conversation status', () => {
     const closing = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
     const closed = Promise.withResolvers<void>();
-    await using h = await harness(new MockLanguageModelV4(), undefined, {
+    await using h = await harness(new MockLanguageModelV4(), {
       runtime: ({ boss }) => {
         const db = boss.getDb();
         const listen = db.listen!.bind(db);
@@ -3415,7 +3414,7 @@ describe('zukhruf runtime — cross-process conversation status', () => {
   it('a runtime without a worker observes turns executed by another runtime over the shared database', async (t) => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     const model = scriptedModel(track);
-    await using h = await harness(model, undefined, {
+    await using h = await harness(model, {
       runtime: ({ boss }) => ({
         conversationStatusChanges: new PgBossConversationStatusChangeSource(
           boss,

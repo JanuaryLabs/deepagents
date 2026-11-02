@@ -206,11 +206,11 @@ test(
             name: 'approval',
             sandbox,
             instructions: [],
+            toolApproval: { confirm: 'user-approval' },
             tools: {
               confirm: defineTool({
                 description: 'Needs approval',
                 inputSchema: z.object({}),
-                needsApproval: true,
                 execute: async () => 'approved',
               }),
             },
