@@ -123,10 +123,7 @@ describe('BigQuery adapter class', () => {
     it('formats string errors', async () => {
       const adapter = new BigQuery({
         ...validOpts,
-        validate: async () => {
-          // eslint-disable-next-line @typescript-eslint/only-throw-error -- validate is user code; pins non-Error formatting
-          throw 'raw string error';
-        },
+        validate: () => Promise.reject('raw string error'),
       });
       const result = await adapter.validate('SELECT x');
       assert.ok(typeof result === 'string');
@@ -137,10 +134,7 @@ describe('BigQuery adapter class', () => {
     it('formats object errors with message property', async () => {
       const adapter = new BigQuery({
         ...validOpts,
-        validate: async () => {
-          // eslint-disable-next-line @typescript-eslint/only-throw-error -- validate is user code; pins non-Error formatting
-          throw { message: 'obj error' };
-        },
+        validate: () => Promise.reject({ message: 'obj error' }),
       });
       const result = await adapter.validate('SELECT x');
       assert.ok(typeof result === 'string');
