@@ -1,4 +1,5 @@
 import type { ComponentType } from 'react';
+import type { ExtraProps } from 'streamdown';
 
 import type { ElementDescriptor } from '@deepagents/elements';
 
@@ -14,7 +15,10 @@ export type ToolTip = {
  * network (see `toDescriptor`); `component` and `tips` stay client-side.
  */
 export interface GenAIInteractiveElement extends ElementDescriptor {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- allowedAttributes defines the runtime prop interface for each registered element
-  component: ComponentType<any>;
+  /**
+   * Receives the element's markdown attributes as streamdown passes them:
+   * untyped, so the component narrows each one it reads.
+   */
+  component: ComponentType<Record<string, unknown> & ExtraProps>;
   tips?: ToolTip[];
 }

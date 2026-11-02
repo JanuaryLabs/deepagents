@@ -2,9 +2,9 @@ import { CornerDownRight } from 'lucide-react';
 
 import { defineElements, useAgent } from '@deepagents/react-genai';
 
-function FollowUp({ question }: { question?: string }) {
+function FollowUp({ question }: Record<string, unknown>) {
   const { submit } = useAgent();
-  if (!question) return null;
+  if (typeof question !== 'string' || question === '') return null;
   return (
     <button
       type="button"

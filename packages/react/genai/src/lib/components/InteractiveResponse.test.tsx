@@ -3,7 +3,7 @@ import { expect, test } from 'vitest';
 
 import { InteractiveResponse } from './InteractiveResponse.tsx';
 
-function ParamProbe(props: { param?: string; label?: string }) {
+function ParamProbe(props: Record<string, unknown>) {
   return (
     <div data-testid="probe">
       {JSON.stringify({ param: props.param, label: props.label })}

@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import type { Components } from 'streamdown';
 
 import { assertNoReservedAttributes } from '@deepagents/elements';
 
@@ -15,10 +16,14 @@ type InteractiveResponseProps = Omit<
   elements?: GenAIInteractiveElement[];
 };
 
+// Streamdown's Components types every entry, `p` included, as taking untyped
+// props, so only an inline component gets `children` typed from the context.
+const markdownComponents: Components = {
+  p: ({ children }) => <MarkdownParagraph>{children}</MarkdownParagraph>,
+};
+
 function buildStreamdownRegistry(entries: GenAIInteractiveElement[]) {
-  const components: Record<string, GenAIInteractiveElement['component']> = {
-    p: MarkdownParagraph,
-  };
+  const components: Components = { ...markdownComponents };
   const allowedTags: Record<string, string[]> = {};
   for (const entry of entries) {
     assertNoReservedAttributes(entry);
