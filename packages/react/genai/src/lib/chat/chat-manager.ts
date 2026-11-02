@@ -34,13 +34,14 @@ type Listener = () => void;
 type BoundChat = UseChatHelpers<UIMessage<unknown, UIDataTypes, UITools>>;
 
 export interface ChatManagerOptions {
+  chat: BoundChat;
   queueEnabled?: boolean;
   uploadFile: UploadFile;
   onResetChat: (chatId: string) => void;
 }
 
 export class ChatManager {
-  private chat: BoundChat | null = null;
+  private chat: BoundChat;
   private listeners = new Set<Listener>();
   private _queue: QueuedMessage[] = [];
   private _queueEnabled: boolean;
@@ -54,6 +55,7 @@ export class ChatManager {
   onResetChat: (chatId: string) => void;
 
   constructor(options: ChatManagerOptions) {
+    this.chat = options.chat;
     this._queueEnabled = options.queueEnabled ?? true;
     this.uploadFile = options.uploadFile;
     this.onResetChat = options.onResetChat;
@@ -64,7 +66,6 @@ export class ChatManager {
   }
 
   initialize(chatId?: string): void {
-    if (!this.chat) return;
     if (chatId) this.consumePrefill(chatId);
   }
 
@@ -73,7 +74,6 @@ export class ChatManager {
    * sending nothing, when a file cannot be prepared or uploaded.
    */
   submit(submission: ChatSubmission): Promise<void> {
-    if (!this.chat) return Promise.resolve();
     this.chat.clearError();
     const { files = [], ...message } = submission;
     const chatId = this.chat.id;
@@ -94,13 +94,12 @@ export class ChatManager {
   }
 
   private assertCurrentChat(chatId: string): void {
-    if (this.chat?.id !== chatId) {
+    if (this.chat.id !== chatId) {
       throw new Error('The chat changed before the submission was sent.');
     }
   }
 
   private dispatch(message: PreparedSubmission): void {
-    if (!this.chat) return;
     if (this._queueEnabled) {
       this._queue = [...this._queue, { id: crypto.randomUUID(), ...message }];
       this.notify();
@@ -110,7 +109,6 @@ export class ChatManager {
   }
 
   private directSubmit(message: PreparedSubmission): void {
-    if (!this.chat) return;
     void this.chat.sendMessage({
       role: 'user',
       parts: [{ type: 'text', text: message.prompt }],
@@ -123,7 +121,7 @@ export class ChatManager {
 
   /** Dispatch only from a committed queue and SDK status snapshot. */
   processQueue(queue: readonly QueuedMessage[]): void {
-    if (queue !== this._queue || this.chat?.status !== 'ready') return;
+    if (queue !== this._queue || this.chat.status !== 'ready') return;
     if (!this._queueEnabled || queue.length === 0) return;
     const [next, ...rest] = queue;
     this._queue = rest;
@@ -152,20 +150,17 @@ export class ChatManager {
   }
 
   clearChat(): void {
-    if (!this.chat) return;
     this.chat.setMessages([]);
     this.clearQueue();
     this.notify();
   }
 
   setChat(messages: UIMessage[]): void {
-    if (!this.chat) return;
     this.chat.setMessages(messages);
     this.notify();
   }
 
   stop(): void {
-    if (!this.chat) return;
     void this.chat.stop();
   }
 
@@ -188,7 +183,6 @@ export class ChatManager {
   }
 
   getTriggeringUserMessage(toolCallId: string): UIMessage | null {
-    if (!this.chat) return null;
     const { messages } = this.chat;
     const idx = messages.findIndex(
       (msg) =>
@@ -201,7 +195,6 @@ export class ChatManager {
   }
 
   getLastUserMessageId(): string | null {
-    if (!this.chat) return null;
     const { messages } = this.chat;
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === 'user') return messages[i].id;
@@ -210,7 +203,6 @@ export class ChatManager {
   }
 
   getLastAssistantMessage(): UIMessage | null {
-    if (!this.chat) return null;
     const { messages } = this.chat;
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === 'assistant') return messages[i];
@@ -220,7 +212,7 @@ export class ChatManager {
 
   /** Whether the bound chat has messages: the conversation has started. */
   get hasSubmitted(): boolean {
-    return (this.chat?.messages.length ?? 0) > 0;
+    return this.chat.messages.length > 0;
   }
 
   subscribe = (listener: Listener): (() => void) => {

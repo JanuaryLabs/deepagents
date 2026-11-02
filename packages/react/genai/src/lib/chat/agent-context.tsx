@@ -110,6 +110,7 @@ export function AgentProvider({
   const [manager] = useState(
     () =>
       new ChatManager({
+        chat: agent,
         queueEnabled,
         uploadFile: transport.uploadFile.bind(transport),
         onResetChat: forwardResetChat,

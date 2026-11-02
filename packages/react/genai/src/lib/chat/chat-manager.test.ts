@@ -9,7 +9,7 @@ import type {
   UIMessageChunk,
   UITools,
 } from 'ai';
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -121,11 +121,13 @@ function uploadReceipt(sessionId: string, file: File) {
   };
 }
 
-function createManager(options: Omit<ChatManagerOptions, 'uploadFile'>) {
-  return new ChatManager({
+function withStubUploads(
+  options: Omit<ChatManagerOptions, 'chat' | 'uploadFile'>,
+): Omit<ChatManagerOptions, 'chat'> {
+  return {
     ...options,
     uploadFile: async (sessionId, file) => uploadReceipt(sessionId, file),
-  });
+  };
 }
 
 function imageFile(name = 'shot.png'): File {
@@ -138,7 +140,7 @@ function imageFile(name = 'shot.png'): File {
  * Replicates AgentProvider's committed SDK status and queue subscription.
  */
 function renderChatManager(
-  manager: ChatManager,
+  managerOptions: Omit<ChatManagerOptions, 'chat'>,
   options: {
     transport: ChatTransport<TestUIMessage>;
     chatId?: string;
@@ -151,6 +153,9 @@ function renderChatManager(
       messages: options.initialMessages,
       transport: options.transport,
     });
+    const [manager] = useState(
+      () => new ChatManager({ ...managerOptions, chat: helpers }),
+    );
     manager.bind(helpers);
     const queue = useSyncExternalStore(
       manager.subscribe,
@@ -159,10 +164,18 @@ function renderChatManager(
     );
     useEffect(() => {
       manager.processQueue(queue);
-    }, [helpers.status, queue]);
-    return helpers;
+    }, [manager, helpers.status, queue]);
+    return { helpers, manager };
   });
-  return rendered;
+  return {
+    manager: rendered.result.current.manager,
+    result: {
+      get current() {
+        return rendered.result.current.helpers;
+      },
+    },
+    unmount: rendered.unmount,
+  };
 }
 
 function isBusy(status: ChatStatus): boolean {
@@ -202,8 +215,10 @@ describe('ChatManager', () => {
   describe('submission', () => {
     it('submitted message appears in chat', async () => {
       const transport = new ControllableTransport();
-      const manager = createManager({ onResetChat: () => {} });
-      const { result, unmount } = renderChatManager(manager, { transport });
+      const { manager, result, unmount } = renderChatManager(
+        withStubUploads({ onResetChat: () => {} }),
+        { transport },
+      );
       try {
         await act(async () => {
           await manager.submit(plainSubmission('hello'));
@@ -223,8 +238,10 @@ describe('ChatManager', () => {
 
     it('submitted message includes metadata', async () => {
       const transport = new ControllableTransport();
-      const manager = createManager({ onResetChat: () => {} });
-      const { result, unmount } = renderChatManager(manager, { transport });
+      const { manager, result, unmount } = renderChatManager(
+        withStubUploads({ onResetChat: () => {} }),
+        { transport },
+      );
       try {
         await act(async () => {
           await manager.submit({
@@ -247,8 +264,10 @@ describe('ChatManager', () => {
 
     it('marks conversation as started after first submit', async () => {
       const transport = new ControllableTransport();
-      const manager = createManager({ onResetChat: () => {} });
-      const { unmount } = renderChatManager(manager, { transport });
+      const { manager, unmount } = renderChatManager(
+        withStubUploads({ onResetChat: () => {} }),
+        { transport },
+      );
       try {
         expect(manager.hasSubmitted).toBe(false);
         await act(async () => {
@@ -260,22 +279,18 @@ describe('ChatManager', () => {
         transport.closeAll();
       }
     });
-
-    it('submit is a no-op before bind', async () => {
-      const manager = createManager({ onResetChat: () => {} });
-      await manager.submit(plainSubmission('hello'));
-      expect(manager.hasSubmitted).toBe(false);
-    });
   });
 
   describe('queue', () => {
     it('queues message when chat is busy', async () => {
       const transport = new ControllableTransport();
-      const manager = createManager({
-        queueEnabled: true,
-        onResetChat: () => {},
-      });
-      const { result, unmount } = renderChatManager(manager, { transport });
+      const { manager, result, unmount } = renderChatManager(
+        withStubUploads({
+          queueEnabled: true,
+          onResetChat: () => {},
+        }),
+        { transport },
+      );
       try {
         await makeBusy(manager, result);
         const before = result.current.messages.length;
@@ -295,11 +310,13 @@ describe('ChatManager', () => {
 
     it('queues the second of two submits made in the same tick', async () => {
       const transport = new ControllableTransport();
-      const manager = createManager({
-        queueEnabled: true,
-        onResetChat: () => {},
-      });
-      const { unmount } = renderChatManager(manager, { transport });
+      const { manager, unmount } = renderChatManager(
+        withStubUploads({
+          queueEnabled: true,
+          onResetChat: () => {},
+        }),
+        { transport },
+      );
       try {
         await act(async () => {
           // Neither submission can observe an SDK status update before React commits.
@@ -319,11 +336,13 @@ describe('ChatManager', () => {
 
     it('sends directly when queue is disabled even if busy', async () => {
       const transport = new ControllableTransport();
-      const manager = createManager({
-        queueEnabled: false,
-        onResetChat: () => {},
-      });
-      const { result, unmount } = renderChatManager(manager, { transport });
+      const { manager, result, unmount } = renderChatManager(
+        withStubUploads({
+          queueEnabled: false,
+          onResetChat: () => {},
+        }),
+        { transport },
+      );
       try {
         await makeBusy(manager, result);
         const before = result.current.messages.length;
@@ -345,11 +364,13 @@ describe('ChatManager', () => {
 
     it('drains first queued message when status transitions to ready', async () => {
       const transport = new ControllableTransport();
-      const manager = createManager({
-        queueEnabled: true,
-        onResetChat: () => {},
-      });
-      const { result, unmount } = renderChatManager(manager, { transport });
+      const { manager, result, unmount } = renderChatManager(
+        withStubUploads({
+          queueEnabled: true,
+          onResetChat: () => {},
+        }),
+        { transport },
+      );
       try {
         await makeBusy(manager, result);
 
@@ -377,11 +398,13 @@ describe('ChatManager', () => {
 
     it('does not drain when status stays busy', async () => {
       const transport = new ControllableTransport();
-      const manager = createManager({
-        queueEnabled: true,
-        onResetChat: () => {},
-      });
-      const { result, unmount } = renderChatManager(manager, { transport });
+      const { manager, result, unmount } = renderChatManager(
+        withStubUploads({
+          queueEnabled: true,
+          onResetChat: () => {},
+        }),
+        { transport },
+      );
       try {
         await makeBusy(manager, result);
 
@@ -408,11 +431,13 @@ describe('ChatManager', () => {
 
     it('removes specific message from queue by id', async () => {
       const transport = new ControllableTransport();
-      const manager = createManager({
-        queueEnabled: true,
-        onResetChat: () => {},
-      });
-      const { result, unmount } = renderChatManager(manager, { transport });
+      const { manager, result, unmount } = renderChatManager(
+        withStubUploads({
+          queueEnabled: true,
+          onResetChat: () => {},
+        }),
+        { transport },
+      );
       try {
         await makeBusy(manager, result);
 
@@ -432,11 +457,13 @@ describe('ChatManager', () => {
 
     it('clearQueue empties the queue', async () => {
       const transport = new ControllableTransport();
-      const manager = createManager({
-        queueEnabled: true,
-        onResetChat: () => {},
-      });
-      const { result, unmount } = renderChatManager(manager, { transport });
+      const { manager, result, unmount } = renderChatManager(
+        withStubUploads({
+          queueEnabled: true,
+          onResetChat: () => {},
+        }),
+        { transport },
+      );
       try {
         await makeBusy(manager, result);
 
@@ -455,11 +482,13 @@ describe('ChatManager', () => {
 
     it('queues persisted source but sends the already-resolved prompt', async () => {
       const transport = new ControllableTransport();
-      const manager = createManager({
-        queueEnabled: true,
-        onResetChat: () => {},
-      });
-      const { result, unmount } = renderChatManager(manager, { transport });
+      const { manager, result, unmount } = renderChatManager(
+        withStubUploads({
+          queueEnabled: true,
+          onResetChat: () => {},
+        }),
+        { transport },
+      );
       try {
         await makeBusy(manager, result);
 
@@ -501,14 +530,16 @@ describe('ChatManager', () => {
   describe('files', () => {
     it('uploads files and sends a text-only message carrying the receipts in metadata', async () => {
       const transport = new UploadingTransport();
-      const manager = new ChatManager({
-        uploadFile: transport.uploadFile,
-        onResetChat: () => {},
-      });
-      const { result, unmount } = renderChatManager(manager, {
-        transport,
-        chatId: 'chat-files',
-      });
+      const { manager, result, unmount } = renderChatManager(
+        {
+          uploadFile: transport.uploadFile,
+          onResetChat: () => {},
+        },
+        {
+          transport,
+          chatId: 'chat-files',
+        },
+      );
       try {
         const file = imageFile();
         await act(async () => {
@@ -548,15 +579,17 @@ describe('ChatManager', () => {
 
     it('queued submissions carry the receipts and send them when the chat is ready', async () => {
       const transport = new UploadingTransport();
-      const manager = new ChatManager({
-        queueEnabled: true,
-        uploadFile: transport.uploadFile,
-        onResetChat: () => {},
-      });
-      const { result, unmount } = renderChatManager(manager, {
-        transport,
-        chatId: 'chat-queue',
-      });
+      const { manager, result, unmount } = renderChatManager(
+        {
+          queueEnabled: true,
+          uploadFile: transport.uploadFile,
+          onResetChat: () => {},
+        },
+        {
+          transport,
+          chatId: 'chat-queue',
+        },
+      );
       const receipt = {
         path: '/workspace/.uploads/chat-queue/later.png',
         name: 'later.png',
@@ -602,15 +635,17 @@ describe('ChatManager', () => {
 
     it('a text-only submit waits behind a submit that is still uploading', async () => {
       const transport = new UploadingTransport({ holdUploads: true });
-      const manager = new ChatManager({
-        queueEnabled: true,
-        uploadFile: transport.uploadFile,
-        onResetChat: () => {},
-      });
-      const { result, unmount } = renderChatManager(manager, {
-        transport,
-        chatId: 'chat-order',
-      });
+      const { manager, result, unmount } = renderChatManager(
+        {
+          queueEnabled: true,
+          uploadFile: transport.uploadFile,
+          onResetChat: () => {},
+        },
+        {
+          transport,
+          chatId: 'chat-order',
+        },
+      );
       try {
         let withImage!: Promise<void>;
         let after!: Promise<void>;
@@ -655,22 +690,17 @@ describe('ChatManager', () => {
     it('rejects an upload completion after the manager binds a different chat', async () => {
       const uploading = new UploadingTransport({ holdUploads: true });
       const replacement = new ControllableTransport();
-      const manager = new ChatManager({
-        uploadFile: uploading.uploadFile,
-        onResetChat: () => {},
-      });
-      const first = renderChatManager(manager, {
-        transport: uploading,
-        chatId: 'chat-a',
-      });
-      const second = renderChatManager(manager, {
-        transport: replacement,
-        chatId: 'chat-b',
-      });
+      const first = renderChatManager(
+        { uploadFile: uploading.uploadFile, onResetChat: () => {} },
+        { transport: uploading, chatId: 'chat-a' },
+      );
+      const { manager } = first;
+      const second = renderHook(() =>
+        useChat<TestUIMessage>({ id: 'chat-b', transport: replacement }),
+      );
       try {
         let pending!: Promise<void>;
         await act(async () => {
-          manager.bind(first.result.current);
           pending = manager.submit({
             ...plainSubmission('describe [Image #1]'),
             files: [imageFile()],
@@ -701,11 +731,13 @@ describe('ChatManager', () => {
 
     it('a failed upload rejects the submit and sends nothing', async () => {
       const transport = new UploadingTransport({ holdUploads: true });
-      const manager = new ChatManager({
-        uploadFile: transport.uploadFile,
-        onResetChat: () => {},
-      });
-      const { result, unmount } = renderChatManager(manager, { transport });
+      const { manager, result, unmount } = renderChatManager(
+        {
+          uploadFile: transport.uploadFile,
+          onResetChat: () => {},
+        },
+        { transport },
+      );
       try {
         let rejection!: Promise<void>;
         await act(async () => {
@@ -745,11 +777,13 @@ describe('ChatManager', () => {
   describe('chat operations', () => {
     it('clearChat empties messages, resets hasSubmitted, and clears queue', async () => {
       const transport = new ControllableTransport();
-      const manager = createManager({
-        queueEnabled: true,
-        onResetChat: () => {},
-      });
-      const { result, unmount } = renderChatManager(manager, { transport });
+      const { manager, result, unmount } = renderChatManager(
+        withStubUploads({
+          queueEnabled: true,
+          onResetChat: () => {},
+        }),
+        { transport },
+      );
       try {
         await makeBusy(manager, result);
         await act(async () => {
@@ -774,8 +808,10 @@ describe('ChatManager', () => {
 
     it('setChat replaces messages and derives hasSubmitted', async () => {
       const transport = new ControllableTransport();
-      const manager = createManager({ onResetChat: () => {} });
-      const { result, unmount } = renderChatManager(manager, { transport });
+      const { manager, result, unmount } = renderChatManager(
+        withStubUploads({ onResetChat: () => {} }),
+        { transport },
+      );
       try {
         const messages: TestUIMessage[] = [
           { id: 'u1', role: 'user', parts: [] },
@@ -797,13 +833,15 @@ describe('ChatManager', () => {
 
     it('setChat with empty array marks conversation as not started', async () => {
       const transport = new ControllableTransport();
-      const manager = createManager({ onResetChat: () => {} });
-      const { unmount } = renderChatManager(manager, {
-        transport,
-        initialMessages: [
-          { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi' }] },
-        ],
-      });
+      const { manager, unmount } = renderChatManager(
+        withStubUploads({ onResetChat: () => {} }),
+        {
+          transport,
+          initialMessages: [
+            { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi' }] },
+          ],
+        },
+      );
       try {
         await act(async () => {
           manager.setChat([]);
@@ -818,8 +856,10 @@ describe('ChatManager', () => {
 
     it('stop halts the chat', async () => {
       const transport = new ControllableTransport();
-      const manager = createManager({ onResetChat: () => {} });
-      const { result, unmount } = renderChatManager(manager, { transport });
+      const { manager, result, unmount } = renderChatManager(
+        withStubUploads({ onResetChat: () => {} }),
+        { transport },
+      );
       try {
         await makeBusy(manager, result);
 
@@ -840,42 +880,60 @@ describe('ChatManager', () => {
   describe('reset and prefill', () => {
     it('resetChat generates a new chatId and notifies via callback', () => {
       let receivedChatId: string | undefined;
-      const manager = createManager({
-        onResetChat: (id) => {
-          receivedChatId = id;
-        },
-      });
+      const transport = new ControllableTransport();
+      const { manager, unmount } = renderChatManager(
+        withStubUploads({
+          onResetChat: (id) => {
+            receivedChatId = id;
+          },
+        }),
+        { transport },
+      );
+      try {
+        manager.resetChat();
 
-      manager.resetChat();
-
-      expect(receivedChatId).toBeTruthy();
-      expect(typeof receivedChatId).toBe('string');
-      expect((receivedChatId ?? '').length).toBeGreaterThan(0);
+        expect(receivedChatId).toBeTruthy();
+        expect(typeof receivedChatId).toBe('string');
+        expect((receivedChatId ?? '').length).toBeGreaterThan(0);
+      } finally {
+        unmount();
+        transport.closeAll();
+      }
     });
 
     it('resetChat with prompt stores prefill for the new chatId', () => {
       sessionStorage.clear();
       let receivedChatId: string | undefined;
-      const manager = createManager({
-        onResetChat: (id) => {
-          receivedChatId = id;
-        },
-      });
+      const transport = new ControllableTransport();
+      const { manager, unmount } = renderChatManager(
+        withStubUploads({
+          onResetChat: (id) => {
+            receivedChatId = id;
+          },
+        }),
+        { transport },
+      );
+      try {
+        manager.resetChat('my prompt');
 
-      manager.resetChat('my prompt');
-
-      const raw = sessionStorage.getItem(PREFILL_STORAGE_KEY);
-      expect(raw).not.toBeNull();
-      const prefill: PendingPrefill = JSON.parse(raw ?? '');
-      expect(prefill.prompt).toBe('my prompt');
-      expect(prefill.targetChatId).toBe(receivedChatId);
+        const raw = sessionStorage.getItem(PREFILL_STORAGE_KEY);
+        expect(raw).not.toBeNull();
+        const prefill: PendingPrefill = JSON.parse(raw ?? '');
+        expect(prefill.prompt).toBe('my prompt');
+        expect(prefill.targetChatId).toBe(receivedChatId);
+      } finally {
+        unmount();
+        transport.closeAll();
+      }
     });
 
     it('consumePrefill submits stored prompt when chatId matches', async () => {
       sessionStorage.clear();
       const transport = new ControllableTransport();
-      const manager = createManager({ onResetChat: () => {} });
-      const { result, unmount } = renderChatManager(manager, { transport });
+      const { manager, result, unmount } = renderChatManager(
+        withStubUploads({ onResetChat: () => {} }),
+        { transport },
+      );
       try {
         const chatId = 'target-123';
         writePrefill({ prompt: 'prefilled', targetChatId: chatId });
@@ -899,8 +957,10 @@ describe('ChatManager', () => {
     it('consumePrefill ignores stored prompt when chatId does not match', async () => {
       sessionStorage.clear();
       const transport = new ControllableTransport();
-      const manager = createManager({ onResetChat: () => {} });
-      const { result, unmount } = renderChatManager(manager, { transport });
+      const { manager, result, unmount } = renderChatManager(
+        withStubUploads({ onResetChat: () => {} }),
+        { transport },
+      );
       try {
         writePrefill({ prompt: 'prefilled', targetChatId: 'other-id' });
 
@@ -937,11 +997,13 @@ describe('ChatManager', () => {
         },
       ];
       const transport = new ControllableTransport();
-      const manager = createManager({ onResetChat: () => {} });
-      const { unmount } = renderChatManager(manager, {
-        transport,
-        initialMessages: messages,
-      });
+      const { manager, unmount } = renderChatManager(
+        withStubUploads({ onResetChat: () => {} }),
+        {
+          transport,
+          initialMessages: messages,
+        },
+      );
       try {
         const result = manager.getTriggeringUserMessage('tc1');
 
@@ -954,11 +1016,13 @@ describe('ChatManager', () => {
 
     it('returns null when no message matches the toolCallId', () => {
       const transport = new ControllableTransport();
-      const manager = createManager({ onResetChat: () => {} });
-      const { unmount } = renderChatManager(manager, {
-        transport,
-        initialMessages: [{ id: 'u1', role: 'user', parts: [] }],
-      });
+      const { manager, unmount } = renderChatManager(
+        withStubUploads({ onResetChat: () => {} }),
+        {
+          transport,
+          initialMessages: [{ id: 'u1', role: 'user', parts: [] }],
+        },
+      );
       try {
         expect(manager.getTriggeringUserMessage('nonexistent')).toBeNull();
       } finally {
@@ -974,11 +1038,13 @@ describe('ChatManager', () => {
         { id: 'a2', role: 'assistant', parts: [] },
       ];
       const transport = new ControllableTransport();
-      const manager = createManager({ onResetChat: () => {} });
-      const { unmount } = renderChatManager(manager, {
-        transport,
-        initialMessages: messages,
-      });
+      const { manager, unmount } = renderChatManager(
+        withStubUploads({ onResetChat: () => {} }),
+        {
+          transport,
+          initialMessages: messages,
+        },
+      );
       try {
         expect(manager.getLastUserMessageId()).toBe('u2');
       } finally {
@@ -988,11 +1054,13 @@ describe('ChatManager', () => {
 
     it('returns null when there are no user messages', () => {
       const transport = new ControllableTransport();
-      const manager = createManager({ onResetChat: () => {} });
-      const { unmount } = renderChatManager(manager, {
-        transport,
-        initialMessages: [{ id: 'a1', role: 'assistant', parts: [] }],
-      });
+      const { manager, unmount } = renderChatManager(
+        withStubUploads({ onResetChat: () => {} }),
+        {
+          transport,
+          initialMessages: [{ id: 'a1', role: 'assistant', parts: [] }],
+        },
+      );
       try {
         expect(manager.getLastUserMessageId()).toBeNull();
       } finally {
@@ -1004,8 +1072,10 @@ describe('ChatManager', () => {
   describe('subscription', () => {
     it('notifies listeners when the chat is replaced', async () => {
       const transport = new ControllableTransport();
-      const manager = createManager({ onResetChat: () => {} });
-      const { unmount } = renderChatManager(manager, { transport });
+      const { manager, unmount } = renderChatManager(
+        withStubUploads({ onResetChat: () => {} }),
+        { transport },
+      );
       let notified = false;
       manager.subscribe(() => {
         notified = true;
@@ -1026,11 +1096,13 @@ describe('ChatManager', () => {
 
     it('notifies listeners when a queued message is removed', async () => {
       const transport = new ControllableTransport();
-      const manager = createManager({
-        queueEnabled: true,
-        onResetChat: () => {},
-      });
-      const { result, unmount } = renderChatManager(manager, { transport });
+      const { manager, result, unmount } = renderChatManager(
+        withStubUploads({
+          queueEnabled: true,
+          onResetChat: () => {},
+        }),
+        { transport },
+      );
       try {
         await makeBusy(manager, result);
         await act(async () => {
@@ -1051,21 +1123,32 @@ describe('ChatManager', () => {
     });
 
     it('does not notify when the removed message is not queued', () => {
-      const manager = createManager({ onResetChat: () => {} });
-      let notifyCount = 0;
-      manager.subscribe(() => {
-        notifyCount++;
-      });
+      const transport = new ControllableTransport();
+      const { manager, unmount } = renderChatManager(
+        withStubUploads({ onResetChat: () => {} }),
+        { transport },
+      );
+      try {
+        let notifyCount = 0;
+        manager.subscribe(() => {
+          notifyCount++;
+        });
 
-      manager.removeFromQueue('not-queued');
+        manager.removeFromQueue('not-queued');
 
-      expect(notifyCount).toBe(0);
+        expect(notifyCount).toBe(0);
+      } finally {
+        unmount();
+        transport.closeAll();
+      }
     });
 
     it('unsubscribed listener stops receiving notifications', async () => {
       const transport = new ControllableTransport();
-      const manager = createManager({ onResetChat: () => {} });
-      const { unmount } = renderChatManager(manager, { transport });
+      const { manager, unmount } = renderChatManager(
+        withStubUploads({ onResetChat: () => {} }),
+        { transport },
+      );
       let notifyCount = 0;
       const unsubscribe = manager.subscribe(() => {
         notifyCount++;
@@ -1091,21 +1174,15 @@ describe('ChatManager', () => {
   });
 
   describe('initialize', () => {
-    it('is a no-op when chat is not bound', () => {
-      const manager = createManager({ onResetChat: () => {} });
-
-      manager.initialize('some-chat');
-
-      expect(manager.hasSubmitted).toBe(false);
-    });
-
     it('consumes prefill matching the passed chatId', async () => {
       sessionStorage.clear();
       const chatId = 'target-abc';
       writePrefill({ prompt: 'auto submit', targetChatId: chatId });
       const transport = new ControllableTransport();
-      const manager = createManager({ onResetChat: () => {} });
-      const { result, unmount } = renderChatManager(manager, { transport });
+      const { manager, result, unmount } = renderChatManager(
+        withStubUploads({ onResetChat: () => {} }),
+        { transport },
+      );
       try {
         await act(async () => {
           manager.initialize(chatId);
