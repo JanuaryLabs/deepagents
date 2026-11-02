@@ -50,9 +50,9 @@ async function chat<TOOLS extends ToolSet>(
 
 The return value is a `ReadableStream` produced by the AI SDK's `createUIMessageStream()`. It emits structured chunks (`text-delta`, `tool-call`, `data-chat-title`, etc.) that UI frameworks consume directly.
 
-| Argument  | Type                   | Description                                                                        |
-| --------- | ---------------------- | ---------------------------------------------------------------------------------- |
-| `agent`   | `ChatAgentLike<TOOLS>` | An object with `stream()`, `context`, and optionally `model`                       |
+| Argument  | Type                   | Description                                                                          |
+| --------- | ---------------------- | ------------------------------------------------------------------------------------ |
+| `agent`   | `ChatAgentLike<TOOLS>` | An object with `stream()`, `context`, and optionally `model`                         |
 | `options` | `ChatOptions<TOOLS>`   | Optional tool contexts, title, transform, error-handling, and metadata configuration |
 
 The function throws if:
@@ -69,7 +69,16 @@ interface ChatAgentLike<TOOLS extends ToolSet> {
   context?: ContextEngine;
   model?: AgentModel;
   tools?: TOOLS;
-  stream(options?: ChatOptions<TOOLS>): Promise<StreamTextResult<ToolSet, never>>;
+  stream(options?: ChatOptions<TOOLS>): Promise<ChatStreamResult>;
+}
+
+interface ChatStreamResult {
+  toUIMessageStream(
+    options?: UIMessageStreamOptions<UIMessage>,
+  ): ReadableStream<UIMessageChunk>;
+  readonly result: {
+    readonly usage: PromiseLike<LanguageModelUsage | undefined>;
+  };
 }
 ```
 
@@ -77,7 +86,7 @@ interface ChatAgentLike<TOOLS extends ToolSet> {
 | ---------- | --------------- | -------- | ------------------------------------------------------------------------ |
 | `context`  | `ContextEngine` | Yes      | The context engine scoped to the current chat                            |
 | `model`    | `AgentModel`    | No       | Required for AI-generated titles. If absent, only static titles are used |
-| `stream()` | Function        | Yes      | Resolves context and returns a streaming AI SDK result                   |
+| `stream()` | Function        | Yes      | Resolves context and returns a `ChatStreamResult`                        |
 
 ## ChatOptions
 
@@ -88,9 +97,7 @@ interface ChatOptions<TOOLS extends ToolSet> {
   abortSignal?: AbortSignal;
   generateTitle?: boolean;
   onError?: (error: unknown) => string;
-  messageMetadata?: NonNullable<
-    Parameters<StreamTextResult<ToolSet, never>['toUIMessageStream']>[0]
-  >['messageMetadata'];
+  messageMetadata?: UIMessageStreamOptions<UIMessage>['messageMetadata'];
   finalAssistantMetadata?: (
     message: UIMessage,
   ) =>
@@ -102,7 +109,7 @@ interface ChatOptions<TOOLS extends ToolSet> {
 
 | Option                   | Type                                                       | Default            | Description                                                                                  |
 | ------------------------ | ---------------------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------- |
-| `toolsContext`           | `InferToolSetContext<TOOLS>`                               | contextual tools   | Required only when a tool declares context; keyed by tool name                                |
+| `toolsContext`           | `InferToolSetContext<TOOLS>`                               | contextual tools   | Required only when a tool declares context; keyed by tool name                               |
 | `transform`              | `StreamTextTransform`                                      | `undefined`        | Custom stream transforms forwarded to `agent.stream()`                                       |
 | `abortSignal`            | `AbortSignal`                                              | `undefined`        | Signal to cancel the stream, forwarded to `agent.stream()`                                   |
 | `generateTitle`          | `boolean`                                                  | `false`            | Enable AI-powered title generation for untitled chats                                        |
@@ -229,14 +236,14 @@ async function handleUserMessage(
 
 ## chat() vs agent.stream()
 
-|                     | `chat()`                                          | `agent.stream()`   |
-| ------------------- | ------------------------------------------------- | ------------------ |
-| Message persistence | Assistant is automatic after `context.continue()` | Manual             |
-| Title generation    | Built-in with `generateTitle` option              | Manual             |
-| Usage tracking      | Automatic via `trackUsage()`                      | Manual             |
-| Error formatting    | Built-in with override option                     | Raw errors         |
-| Return type         | `ReadableStream<UIMessageChunk>`                  | `StreamTextResult` |
-| Branch management   | Handles `branch: false` for in-place updates      | N/A                |
+|                     | `chat()`                                          | `agent.stream()` |
+| ------------------- | ------------------------------------------------- | ---------------- |
+| Message persistence | Assistant is automatic after `context.continue()` | Manual           |
+| Title generation    | Built-in with `generateTitle` option              | Manual           |
+| Usage tracking      | Automatic via `trackUsage()`                      | Manual           |
+| Error formatting    | Built-in with override option                     | Raw errors       |
+| Return type         | `ReadableStream<UIMessageChunk>`                  | `AgentStream`    |
+| Branch management   | Handles `branch: false` for in-place updates      | N/A              |
 
 Use `chat()` when building a conversation UI. Use `agent.stream()` directly when you need lower-level control over the streaming pipeline.
 

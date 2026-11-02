@@ -286,7 +286,7 @@ console.log(result.text);
 
 ## stream()
 
-Resolves the context and returns a streaming result. When guardrails are configured, `toUIMessageStream()` is wrapped to intercept parts and retry on failure.
+Resolves the context and returns an `AgentStream`: `result` is the AI SDK `streamText` result of the first model call (`stream.result.text`, `stream.result.stream`, `stream.result.consumeStream()`), and `toUIMessageStream(options)` builds the UI message stream. When guardrails are configured, `toUIMessageStream()` intercepts parts and retries on failure.
 
 ```typescript
 context.set(user('Write a Python quicksort'));
@@ -494,9 +494,11 @@ const person = await extractor.generate();
 `stream()` returns the full `StreamTextResult` with the structured output schema applied. Use this when you need to process stream parts before the final value.
 
 ```typescript
-const stream = await extractor.stream();
+import { toUIMessageStream } from 'ai';
 
-for await (const part of stream.toUIMessageStream()) {
+const result = await extractor.stream();
+
+for await (const part of toUIMessageStream({ stream: result.stream })) {
   if (part.type === 'text-delta') {
     process.stdout.write(part.delta);
   }

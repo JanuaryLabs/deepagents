@@ -18,17 +18,18 @@ This recipe demonstrates how guardrails can catch API-level errors and trigger s
 Create a context engine with a system prompt that references a non-existent tool:
 
 ```typescript
+import { groq } from '@ai-sdk/groq';
 import { randomUUID } from 'node:crypto';
+
 import {
-  type ContextFragment,
   ContextEngine,
+  type ContextFragment,
   InMemoryContextStore,
   agent,
   errorRecoveryGuardrail,
   role,
   user,
 } from '@deepagents/context';
-import { groq } from '@ai-sdk/groq';
 
 function engine(...fragments: ContextFragment[]) {
   const context = new ContextEngine({
@@ -51,7 +52,7 @@ const context = engine(
 You can stack multiple guardrails. Here's a content safety filter alongside the built-in error recovery:
 
 ```typescript
-import { type Guardrail, pass, fail } from '@deepagents/context';
+import { type Guardrail, fail, pass } from '@deepagents/context';
 
 const safetyGuardrail: Guardrail = {
   id: 'safety',
@@ -111,7 +112,7 @@ const response = stream.toUIMessageStream();
 - **`errorRecoveryGuardrail`** handles common API errors (missing tools, malformed JSON, schema mismatches) automatically
 - **Guardrails compose** — stack multiple guardrails and they run sequentially on each stream part
 - **`maxGuardrailRetries`** controls how many self-correction attempts before giving up
-- **Guardrails only apply via `toUIMessageStream()`** — direct `fullStream`/`textStream` access bypasses them
+- **Guardrails only apply via `stream.toUIMessageStream()`** — reading `stream.result.stream` or `stream.result.textStream` bypasses them
 
 ## Next Steps
 

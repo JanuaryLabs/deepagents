@@ -123,7 +123,7 @@ try {
     context,
   });
 
-  await printer.stdout(await assistant.stream());
+  await printer.stdout((await assistant.stream()).result);
 } finally {
   await sandbox.sandbox.dispose();
 }
