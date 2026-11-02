@@ -871,10 +871,11 @@ describe('Stream Chunks', () => {
       await store.createStream(stream);
       // Capping the page count stands in for a full disk: SQLite ends the
       // transaction itself when a write cannot get another page.
-      const { page_count } = connection.prepare('PRAGMA page_count').get() as {
-        page_count: number;
-      };
-      connection.exec(`PRAGMA max_page_count = ${page_count}`);
+      const pageCount = connection.prepare('PRAGMA page_count').get()?.[
+        'page_count'
+      ];
+      assert.ok(typeof pageCount === 'number');
+      connection.exec(`PRAGMA max_page_count = ${pageCount}`);
 
       await assert.rejects(
         store.appendChunks([

@@ -153,10 +153,9 @@ describe('RunStore', () => {
     const [oversized] = makeCases(runId, 1);
     // Capping the page count stands in for a full disk: SQLite ends the
     // transaction itself when a write cannot get another page.
-    const { page_count } = db.prepare('PRAGMA page_count').get() as {
-      page_count: number;
-    };
-    db.exec(`PRAGMA max_page_count = ${page_count}`);
+    const pageCount = db.prepare('PRAGMA page_count').get()?.['page_count'];
+    assert.ok(typeof pageCount === 'number');
+    db.exec(`PRAGMA max_page_count = ${pageCount}`);
 
     assert.throws(
       () => store.saveCases([{ ...oversized, output: 'x'.repeat(200_000) }]),
