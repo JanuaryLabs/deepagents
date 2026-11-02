@@ -50,7 +50,7 @@ const scheduleWakeupInput = z.union([
   z.object({ stop: z.literal(true) }).strict(),
   z
     .object({
-      delaySeconds: z.number().finite().min(60).max(3_600),
+      delaySeconds: z.number().min(60).max(3_600),
       reason: nonBlank,
       prompt: nonBlank,
     })

@@ -13,7 +13,7 @@ const nativeLogin = z.looseObject({
   claudeAiOauth: z.looseObject({
     accessToken: z.string().min(1),
     refreshToken: z.string().min(1),
-    expiresAt: z.number().finite().positive(),
+    expiresAt: z.number().positive(),
     scopes: z
       .array(z.string())
       .refine((scopes) => scopes.includes('user:inference')),
@@ -22,7 +22,7 @@ const nativeLogin = z.looseObject({
 const tokenResponse = z.object({
   access_token: z.string().min(1),
   refresh_token: z.string().min(1).optional(),
-  expires_in: z.number().finite().positive(),
+  expires_in: z.number().positive(),
   scope: z.string().optional(),
 });
 const signInMessage =

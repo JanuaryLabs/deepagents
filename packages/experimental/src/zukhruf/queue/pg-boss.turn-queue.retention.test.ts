@@ -180,7 +180,7 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
     await timebox(
       async () => {
         await h.boss.supervise(control);
-        if (await h.boss.getJobById(control, controlId)) {
+        if ((await h.boss.findJobs(control, { id: controlId })).length > 0) {
           throw new Error('control job not deleted yet');
         }
       },

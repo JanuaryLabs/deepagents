@@ -282,8 +282,8 @@ test('the public model keeps host tool execution and stateless follow-up history
   });
   assert.equal(followup.text, 'The previous marker was blue.');
   assert.equal(followup.usage.inputTokens, 12);
-  assert.equal(followup.reasoningText, 'Checking the marker.');
-  assert.equal(followup.response.id, 'response-1');
+  assert.equal(followup.finalStep.reasoningText, 'Checking the marker.');
+  assert.equal(followup.finalStep.response.id, 'response-1');
   const input = responsesInput.parse(requests[2].input);
   assert.ok(
     input.some(

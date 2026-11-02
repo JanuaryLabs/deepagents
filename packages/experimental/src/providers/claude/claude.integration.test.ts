@@ -201,7 +201,7 @@ for (const streaming of [true, false]) {
     assert.equal(followup.text, 'The marker was blue.');
     assert.equal(followup.usage.outputTokens, 4);
     assert.equal(followup.usage.inputTokenDetails.cacheReadTokens, 2);
-    assert.equal(followup.response.id, 'msg-1');
+    assert.equal(followup.finalStep.response.id, 'msg-1');
     assert.deepEqual(requests[2].cache_control, { type: 'ephemeral' });
     assert.ok(JSON.stringify(requests[2].messages).includes('blue'));
     assert.throws(() => claude.imageModel('unsupported'), NoSuchModelError);
