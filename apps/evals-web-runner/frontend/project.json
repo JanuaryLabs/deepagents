@@ -35,10 +35,12 @@
       }
     },
     "build": {
-      "dependsOn": ["^build", "generate-sdk"]
+      "dependsOn": ["^build", "generate-sdk"],
+      "inputs": ["...", { "dependentTasksOutputFiles": "**/*" }]
     },
     "typecheck": {
-      "dependsOn": ["^typecheck", "generate-sdk"]
+      "dependsOn": ["^typecheck", "generate-sdk"],
+      "inputs": ["...", { "dependentTasksOutputFiles": "**/*" }]
     },
     "dev": {
       "dependsOn": ["^build", "generate-sdk"]
