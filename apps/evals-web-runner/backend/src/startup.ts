@@ -38,7 +38,6 @@ try {
 }
 
 declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace NodeJS {
     // Extend the ProcessEnv interface with the parsed environment variables
 
