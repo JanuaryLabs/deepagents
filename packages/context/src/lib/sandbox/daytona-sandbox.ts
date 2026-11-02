@@ -621,29 +621,35 @@ interface TextReadable {
 
 function createTextReadable(): TextReadable {
   const encoder = new TextEncoder();
-  let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
-  let closed = false;
+  const ended: Omit<TextReadable, 'stream'> = {
+    enqueue() {},
+    close() {},
+    error() {},
+  };
+  let sink = ended;
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      sink = {
+        enqueue(chunk) {
+          if (chunk) controller.enqueue(encoder.encode(chunk));
+        },
+        close() {
+          sink = ended;
+          controller.close();
+        },
+        error(error) {
+          sink = ended;
+          controller.error(error);
+        },
+      };
+    },
+  });
 
   return {
-    stream: new ReadableStream<Uint8Array>({
-      start(streamController) {
-        controller = streamController;
-      },
-    }),
-    enqueue(chunk) {
-      if (closed || !chunk) return;
-      controller?.enqueue(encoder.encode(chunk));
-    },
-    close() {
-      if (closed) return;
-      closed = true;
-      controller?.close();
-    },
-    error(error) {
-      if (closed) return;
-      closed = true;
-      controller?.error(error);
-    },
+    stream,
+    enqueue: (chunk) => sink.enqueue(chunk),
+    close: () => sink.close(),
+    error: (error) => sink.error(error),
   };
 }
 

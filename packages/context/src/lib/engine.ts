@@ -345,9 +345,9 @@ export type PrepareStepInputProvider = () =>
 
 /**
  * Per-stream reminder state. The session object is closure-local to each
- * createPrepareStep() call; only the `#currentReminderSession` pointer lives on
- * the engine so prepareStep can persist model-visible splits before delivery
- * and writeAssistantSegment can fill their reserved assistant segments.
+ * createPrepareStep() call; the engine keeps only a `#writeAssistant` bound to
+ * it, so prepareStep can persist model-visible splits before delivery and
+ * writeAssistantSegment can fill their reserved assistant segments.
  *
  * Guardrail retries reuse the same prepare hook and session.
  * Running two concurrent streams on ONE engine instance is unsupported.
@@ -882,7 +882,14 @@ export class ContextEngine {
     }
   }
 
-  #currentReminderSession: ReminderSession | undefined;
+  /**
+   * Writes the streamed assistant message: the whole message to the reserved
+   * head, until createPrepareStep() binds a reminder session's segments.
+   */
+  #writeAssistant: (headId: string, message: UIMessage) => Promise<void> = (
+    headId,
+    message,
+  ) => this.#writeWholeAssistant(headId, message);
 
   /**
    * Build the `prepareStep` hook that injects reminders between model steps.
@@ -918,7 +925,8 @@ export class ContextEngine {
       stepOffset: 0,
       lastStepNumber: null,
     };
-    this.#currentReminderSession = session;
+    this.#writeAssistant = (headId, message) =>
+      this.#writeSessionSegment(session, headId, message);
 
     return async ({ steps, stepNumber, messages }) => {
       if (stepNumber === 0 && session.lastStepNumber !== null) {
@@ -1067,59 +1075,70 @@ export class ContextEngine {
         'writeAssistantSegment: expected an assistant message at chain head.',
       );
     }
+    await this.#writeAssistant(head.id, message);
+  }
 
-    const session = this.#currentReminderSession;
-    let id = head.id;
+  async #writeWholeAssistant(
+    headId: string,
+    message: UIMessage,
+  ): Promise<void> {
+    this.set(assistant({ ...message, id: headId }));
+    await this.save({ branch: false });
+  }
+
+  async #writeSessionSegment(
+    session: ReminderSession,
+    headId: string,
+    message: UIMessage,
+  ): Promise<void> {
+    let id = headId;
     let parts = message.parts;
 
-    if (session) {
-      if (session.initialStepStarts === null) {
-        const initialId = session.segments[0]?.id ?? head.id;
-        const initial = await this.#store.getMessage(initialId);
-        if (!initial || initial.name !== 'assistant') {
-          throw new Error(
-            `writeAssistantSegment: initial segment "${initialId}" was not found`,
-          );
-        }
-        session.initialStepStarts = requireUIMessage(
-          initial.data,
-          `Stored assistant message "${initial.id}"`,
-        ).parts.filter((part) => part.type === 'step-start').length;
-      }
-
-      const streamStepStarts = message.parts.flatMap((part, index) =>
-        part.type === 'step-start' ? [index] : [],
-      );
-      const completedSteps =
-        streamStepStarts.length - session.initialStepStarts;
-      if (completedSteps < 0) {
+    if (session.initialStepStarts === null) {
+      const initialId = session.segments[0]?.id ?? headId;
+      const initial = await this.#store.getMessage(initialId);
+      if (!initial || initial.name !== 'assistant') {
         throw new Error(
-          'writeAssistantSegment: response lost an existing step boundary',
+          `writeAssistantSegment: initial segment "${initialId}" was not found`,
         );
       }
+      session.initialStepStarts = requireUIMessage(
+        initial.data,
+        `Stored assistant message "${initial.id}"`,
+      ).parts.filter((part) => part.type === 'step-start').length;
+    }
 
-      const segmentIndex = session.segments.findLastIndex(
-        (candidate) => candidate.startStep < completedSteps,
+    const streamStepStarts = message.parts.flatMap((part, index) =>
+      part.type === 'step-start' ? [index] : [],
+    );
+    const completedSteps = streamStepStarts.length - session.initialStepStarts;
+    if (completedSteps < 0) {
+      throw new Error(
+        'writeAssistantSegment: response lost an existing step boundary',
       );
-      if (segmentIndex >= 0) {
-        const segment = session.segments[segmentIndex];
-        id = segment.id;
-        if (segmentIndex > 0) {
-          const start =
-            streamStepStarts[session.initialStepStarts + segment.startStep];
-          if (start === undefined) {
-            throw new Error(
-              `writeAssistantSegment: response is missing step ${segment.startStep + 1}`,
-            );
-          }
-          parts = message.parts.slice(start);
+    }
+
+    const segmentIndex = session.segments.findLastIndex(
+      (candidate) => candidate.startStep < completedSteps,
+    );
+    if (segmentIndex >= 0) {
+      const segment = session.segments[segmentIndex];
+      id = segment.id;
+      if (segmentIndex > 0) {
+        const start =
+          streamStepStarts[session.initialStepStarts + segment.startStep];
+        if (start === undefined) {
+          throw new Error(
+            `writeAssistantSegment: response is missing step ${segment.startStep + 1}`,
+          );
         }
-      } else {
-        const lastSegment = session.segments.at(-1);
-        if (lastSegment) {
-          id = lastSegment.id;
-          parts = [];
-        }
+        parts = message.parts.slice(start);
+      }
+    } else {
+      const lastSegment = session.segments.at(-1);
+      if (lastSegment) {
+        id = lastSegment.id;
+        parts = [];
       }
     }
 
@@ -1128,12 +1147,6 @@ export class ContextEngine {
       id,
       parts,
     });
-
-    if (!session) {
-      this.set(fragment);
-      await this.save({ branch: false });
-      return;
-    }
 
     const stored = await this.#store.getMessage(id);
     if (!stored) {
