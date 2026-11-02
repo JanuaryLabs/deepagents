@@ -77,7 +77,7 @@ export default function DatasetListPage() {
         <form onSubmit={handleUpload} className="flex items-end gap-4">
           <div>
             <label htmlFor={`${id}-file`} className="text-sm font-medium">
-              Upload Dataset
+              Upload dataset
             </label>
             <Input
               id={`${id}-file`}
@@ -96,7 +96,7 @@ export default function DatasetListPage() {
         <form onSubmit={handleHfAdd} className="flex items-end gap-4">
           <div>
             <label htmlFor={`${id}-hf-dataset`} className="text-sm font-medium">
-              Import from HuggingFace
+              Import from Hugging Face
             </label>
             <Input
               id={`${id}-hf-dataset`}
@@ -134,7 +134,7 @@ export default function DatasetListPage() {
               htmlFor={`${id}-hf-max-rows`}
               className="text-sm font-medium"
             >
-              Max Rows
+              Max rows
             </label>
             <Input
               id={`${id}-hf-max-rows`}

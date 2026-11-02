@@ -99,14 +99,16 @@ as tokens read as `unauthenticated`.
 `state(owner)` and `onChange` report `unauthenticated`, `pending`
 (`authorizationUrl`, `expiresAt`, an optional retry `message`), `connected`
 (`user` from the token response or Anthropic's profile), or `error`. A sign-in
-expires after ten minutes; a throttled or failed code exchange stays pending,
-while a rejected code ends it. `cancel(owner)` abandons a sign-in, and
-`disconnect(owner)` also deletes the tokens.
+expires after ten minutes. Invalid input, a code from another sign-in, network
+failures, HTTP 429, and server errors keep it `pending` with a retry message.
+Other token endpoint rejections end sign-in with `error`. `cancel(owner)`
+abandons a sign-in, and `disconnect(owner)` also deletes the tokens.
 
 Create one instance per store. Revisions and refresh serialization live in the
 instance, so a late refresh or sign-in cannot overwrite a disconnect, and
 rotated refresh tokens are used once. Refresh ignores request cancellation so a
-rotated token is never dropped. A 401 forces one refresh and retries the
+rotated token is never dropped. Tokens are refreshed when expired or within one
+minute of expiry. A 401 forces one refresh and retries the
 request; a rejected refresh token deletes the tokens and reports
 `unauthenticated`. Failures throw `ClaudeAuthError` with a `code`; token
 endpoint response bodies never appear in messages. `listModels` returns the

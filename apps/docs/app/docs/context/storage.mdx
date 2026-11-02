@@ -615,9 +615,9 @@ model MessageFts {
 </Tab>
 </Tabs>
 
-## How Storage Works
+## How storage works
 
-### The Persistence Flow
+### The persistence flow
 
 ```typescript
 // 1. Create context
@@ -645,7 +645,7 @@ const { messages } = await context2.resolve({ renderer: new XmlRenderer() });
 // messages loaded from database
 ```
 
-### What Gets Persisted
+### What gets persisted
 
 Only message fragments (with `type: 'message'`) are saved:
 
@@ -663,7 +663,7 @@ context.set(hint('Be concise')); // ❌ Memory only
 
 All stores implement the `ContextStore` abstract class. These methods are used internally by `ContextEngine`, but you can call them directly for advanced use cases.
 
-### Chat Operations
+### Chat operations
 
 ```typescript
 // Create or get chat
@@ -689,7 +689,7 @@ const chats = await store.listChats({
 await store.deleteChat('chat-001');
 ```
 
-### Branch Operations
+### Branch operations
 
 ```typescript
 // List branches
@@ -732,7 +732,7 @@ try {
 }
 ```
 
-### Graph Operations
+### Graph operations
 
 ```typescript
 // Get full conversation graph
@@ -744,9 +744,9 @@ const graph = await store.getGraph('chat-001');
 // }
 ```
 
-## Storage Patterns
+## Storage patterns
 
-### Multi-Tenant Setup
+### Multi-tenant setup
 
 One database, multiple users. You can isolate tenants with the `schema` option:
 
@@ -780,7 +780,7 @@ const context = new ContextEngine({
 });
 ```
 
-### Per-User SQLite Files
+### Per-user SQLite files
 
 Isolate conversations by user:
 
@@ -792,7 +792,7 @@ function getStoreForUser(userId: string) {
 const store = getStoreForUser('user-123');
 ```
 
-### Metadata Filtering
+### Metadata filtering
 
 Store and query custom metadata:
 
@@ -812,7 +812,7 @@ const activeCahts = await store.listChats({
 });
 ```
 
-## Custom Store Implementation
+## Custom store implementation
 
 Implement `ContextStore` for other databases. The abstract class defines all required methods:
 
@@ -835,7 +835,7 @@ See the built-in implementations for reference:
 - `packages/context/src/lib/store/postgres.store.ts`
 - `packages/context/src/lib/store/sqlserver.store.ts`
 
-## Next Steps
+## Next steps
 
 - [Context Engine](/docs/context/context-engine) - Using save() and resolve()
 - [Branching](/docs/context/branching) - Graph operations

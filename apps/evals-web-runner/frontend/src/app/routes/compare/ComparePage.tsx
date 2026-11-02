@@ -66,12 +66,12 @@ export default function ComparePage() {
 
   return (
     <div className="p-8">
-      <h1 className="mb-6 text-2xl font-bold">Compare Runs</h1>
+      <h1 className="mb-6 text-2xl font-bold">Compare runs</h1>
 
       <div className="mb-8 max-w-lg space-y-4">
         <div>
           <label htmlFor={`${id}-baseline`} className="text-sm font-medium">
-            Baseline Run
+            Baseline run
           </label>
           <Select
             id={`${id}-baseline`}
@@ -96,7 +96,7 @@ export default function ComparePage() {
 
         <div>
           <label htmlFor={`${id}-candidate`} className="text-sm font-medium">
-            Candidate Run
+            Candidate run
           </label>
           <Select
             id={`${id}-candidate`}

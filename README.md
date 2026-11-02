@@ -49,6 +49,10 @@ no longer re-exports it.
 `@ai-sdk/otel@^1.0.153`. These ranges allow dependency updates within each
 package's major version.
 
+The message contexts are exported from `@deepagents/react-genai` as
+`MessagesContext` and `MessageItemContext`. Update imports of `MessagesCtx` and
+`MessageItemCtx` to these names; the old names are no longer exported.
+
 ## React chat lifecycle
 
 `AgentProvider` from `@deepagents/react-genai` uses the AI SDK's `useChat`

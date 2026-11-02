@@ -338,7 +338,21 @@ path in the volume's `hostPath` configuration.
 
 External Docker volumes are inspected before the container starts. Managed Docker volumes are created before the container starts and removed on `dispose()` unless `removeOnDispose: false` is set.
 
-Cloud-backed storage should be configured outside DeepAgents through Docker volume drivers or host-mounted filesystems. For example, configure S3 or Azure Blob credentials in the host/daemon/plugin layer, then attach the resulting Docker volume with `type: 'volume'` or the host mount with `type: 'bind'`. For same-host gcsfuse mounts, `gcs({ hostPath, mountPath })` is a typed shortcut for the bind-volume form. Managed Docker volumes may also pass driver-specific options through `driverOptions`; keep in mind that inline credentials can be visible in Docker volume metadata, so use a preconfigured named remote when you need to keep credentials out of `docker volume inspect`. See the [GCS Cloud Storage Volumes recipe](/docs/context/recipes/gcs-cloud-storage) for end-to-end Google Cloud Storage setups for both remote daemons and same-host Linux mounts, and the [MinIO / S3 Cloud Storage Volumes recipe](/docs/context/recipes/minio-cloud-storage) for an rclone connection-string example.
+Configure cloud storage through Docker volume drivers or filesystems mounted on
+the daemon host. Keep S3 or Azure Blob credentials in the host, daemon, or plugin
+configuration, then attach the Docker volume with `type: 'volume'` or the host
+mount with `type: 'bind'`. For a bucket already mounted with gcsfuse on the daemon
+host, `gcs({ hostPath, mountPath })` returns a bind volume. The app can connect to
+that daemon remotely.
+
+Managed Docker volumes accept driver-specific settings through `driverOptions`.
+Inline credentials can appear in Docker volume metadata; use a preconfigured
+named remote to keep credentials out of `docker volume inspect`.
+
+See the [GCS Cloud Storage Volumes recipe](/docs/context/recipes/gcs-cloud-storage)
+for remote daemon and Linux host setups, and the
+[MinIO / S3 Cloud Storage Volumes recipe](/docs/context/recipes/minio-cloud-storage)
+for an rclone connection-string example.
 
 ## Resource limits
 

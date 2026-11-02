@@ -46,7 +46,7 @@ npm install https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
 
 Requires Node.js LTS.
 
-## Quick Start
+## Quick start
 
 ```typescript
 import { groq } from '@ai-sdk/groq';
@@ -111,11 +111,11 @@ maps dynamically, use `isValidAdapterName(name)` to check one key or
 `validateAdapterNames(names)` to fail fast before constructing `Text2Sql` or
 the sandbox-side adapter module used by the `sql` CLI.
 
-## AI Model Providers
+## AI model providers
 
 Text2SQL works with any model provider supported by the [Vercel AI SDK](https://sdk.vercel.ai/docs), including OpenAI, Anthropic, Google, Groq, and more.
 
-## Building a Conversational Agent
+## Building a conversational agent
 
 `Text2Sql` owns SQL generation and schema indexing, but you own the chat loop.
 Build the agent by composing a `ContextEngine`, a sandbox, and `agent` +
@@ -212,7 +212,7 @@ turns, the reminder is persisted as a synthetic user message for replay and
 prompt caching; bare `createPrepareStep()` integrations and
 `agent.generate()` own persistence of their generated assistant history.
 
-## Advanced: SQL CLI in Sandboxes
+## Advanced: SQL CLI in sandboxes
 
 `sql validate <db> "..."` and `sql run <db> "..."` are real commands from the
 `@deepagents/text2sql` package. `<db>` is the configured adapter name. With a
@@ -492,7 +492,7 @@ Postgres advisory lock, and give all hosts the same cache.
 > `FileIndexCache` parse-as-miss behavior tolerates a torn write: the next
 > `index()` call introspects again.
 
-## Streaming Index Progress
+## Streaming index progress
 
 `AdapterIndexer#index({ onProgress })` emits progress events while it warms or reads
 the schema cache for host-side indexing. The sandbox CLI writes the same event
@@ -542,7 +542,7 @@ imposing one duration policy.
 `toSql()` is stateless. It reads the current schema fragments, but it does not
 write messages, titles, or usage into your context store.
 
-## Direct SQL Generation with Extra Fragments
+## Direct SQL generation with extra fragments
 
 This lower-level helper still takes a single `adapter` because it bypasses the
 multi-adapter `Text2Sql` wrapper entirely.
