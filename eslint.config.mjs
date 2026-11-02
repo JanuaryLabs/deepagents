@@ -17,6 +17,7 @@ export default defineConfig(
       'zukhruf/base',
       'zukhruf/tests',
       'zukhruf/react',
+      'zukhruf/hono',
       'manifest/recommended',
     ],
   },
@@ -92,26 +93,6 @@ export default defineConfig(
         noUnassignedImport({
           allow: ['**/*.{scss,sass}', '@testing-library/jest-dom/vitest'],
         }),
-      ],
-    },
-  },
-  {
-    // A React Router route module throws a Response (or data()) to show an
-    // error page, such as a 404; a returned one would render as data.
-    files: ['**/app/routes/**/*.{ts,tsx}'],
-    rules: {
-      '@typescript-eslint/only-throw-error': [
-        'error',
-        {
-          allow: [
-            { from: 'lib', name: 'Response' },
-            {
-              from: 'package',
-              package: 'react-router',
-              name: 'DataWithResponseInit',
-            },
-          ],
-        },
       ],
     },
   },

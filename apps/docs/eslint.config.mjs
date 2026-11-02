@@ -1,3 +1,4 @@
+import zukhruf from '@zukhruf/eslint';
 import react from '@zukhruf/eslint/react';
 
 import baseConfig from '../../eslint.config.mjs';
@@ -6,6 +7,7 @@ import baseConfig from '../../eslint.config.mjs';
 export default [
   ...react,
   ...baseConfig,
+  ...zukhruf.configs['react-router'],
   {
     ignores: ['.source/**'],
   },

@@ -1,6 +1,6 @@
 import { DynamicCodeBlock } from 'fumadocs-ui/components/dynamic-codeblock';
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
-import { Link } from 'react-router';
+import { Link, href } from 'react-router';
 
 const packages = [
   {
@@ -204,15 +204,16 @@ npm install @deepagents/context`}
               <br />
               AGENTS
             </h1>
-            <p
-              className="text-fd-muted-foreground font-sans text-xl leading-relaxed max-w-[540px] mb-10"
-            >
+            <p className="text-fd-muted-foreground mb-10 max-w-[540px] font-sans text-xl leading-relaxed">
               AI-native building blocks for production systems. Composable
               packages for agents, retrieval, and natural language interfaces.
             </p>
 
             <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-              <Link to="/docs/agent" className="btn btn-primary">
+              <Link
+                to={href('/docs/*', { '*': 'agent' })}
+                className="btn btn-primary"
+              >
                 Get Started
               </Link>
               <a
