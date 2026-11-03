@@ -3,9 +3,13 @@ title: Guardrails
 description: Real-time stream interceptors that inspect AI output and trigger self-correction
 ---
 
-Guardrails intercept streaming parts as the model produces them. Each guardrail inspects a part and decides: let it through, retry with feedback, or stop entirely. When a guardrail fails, accumulated text plus your feedback is injected as a self-correction message, and the model retries from that point.
+Guardrails inspect UI message chunks consumed through
+`stream.toUIMessageStream()`. Each handler can pass a chunk, request a retry
+with feedback, or stop the stream. If another attempt is available, the agent
+emits the feedback, saves the assistant's self-correction, and starts a new
+model call from the updated context.
 
-## How Self-Correction Works
+## How self-correction works
 
 ```
 Stream: text-delta → text-delta → text-delta (guardrail fails!)
@@ -19,7 +23,7 @@ Stream: text-delta → text-delta → text-delta (guardrail fails!)
 
 The user sees the correction inline. From the model's perspective, it "caught itself" and changed course.
 
-## The Three Outcomes
+## The three outcomes
 
 Every guardrail handler returns one of three results:
 
@@ -29,7 +33,7 @@ Every guardrail handler returns one of three results:
 | `fail(feedback)` | Stream aborts, feedback triggers retry   | Recoverable issue, model should try again |
 | `stop(part)`     | Stream aborts immediately, no retry      | Unrecoverable error                       |
 
-## Writing a Guardrail
+## Writing a guardrail
 
 A guardrail implements `id`, `name`, and a `handle` function:
 
@@ -50,7 +54,7 @@ const safetyFilter: Guardrail = {
 };
 ```
 
-### Guardrail Interface
+### Guardrail interface
 
 | Property | Type                                                               | Description                     |
 | -------- | ------------------------------------------------------------------ | ------------------------------- |
@@ -84,7 +88,7 @@ const toolAwareGuardrail: Guardrail = {
 };
 ```
 
-## Modifying Parts
+## Modifying parts
 
 `pass()` accepts a modified part. Use this to transform content before it reaches the user:
 
@@ -105,7 +109,7 @@ const redactGuardrail: Guardrail = {
 };
 ```
 
-## Guardrail Chain
+## Guardrail chain
 
 `runGuardrailChain()` runs guardrails sequentially. Each guardrail receives the (possibly modified) part from the previous one. The first `fail` or `stop` short-circuits the chain.
 
@@ -132,7 +136,7 @@ if (result.type === 'fail') {
 }
 ```
 
-## Built-in: Error Recovery Guardrail
+## Built-in: Error recovery guardrail
 
 `errorRecoveryGuardrail` catches common API-level errors and triggers self-correction. This is especially useful for models that hallucinate tool calls.
 
@@ -140,7 +144,7 @@ if (result.type === 'fail') {
 import { errorRecoveryGuardrail } from '@deepagents/context';
 ```
 
-### Errors It Catches
+### Errors it catches
 
 | Pattern                                      | Description                                  | Action                                                                          |
 | -------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------- |
@@ -174,22 +178,34 @@ const myAgent = agent({
 });
 
 const stream = await myAgent.stream();
+const response = stream.toUIMessageStream({
+  onError: (error) => (error instanceof Error ? error.message : String(error)),
+});
 ```
+
+For direct `agent.stream()` calls, supply `onError` so the error-recovery
+guardrail can match provider messages. The AI SDK's default formatter returns
+`An error occurred.`, which this guardrail treats as an unknown error and
+stops. `chat()` supplies its own formatter, which preserves API error messages.
 
 ### Configuration
 
-| Option                | Type          | Default | Description                             |
-| --------------------- | ------------- | ------- | --------------------------------------- |
-| `guardrails`          | `Guardrail[]` | `[]`    | Guardrails to run on each stream part   |
-| `maxGuardrailRetries` | `number`      | `3`     | Maximum retry attempts before giving up |
+| Option                | Type          | Default | Description                                            |
+| --------------------- | ------------- | ------- | ------------------------------------------------------ |
+| `guardrails`          | `Guardrail[]` | `[]`    | Guardrails to run on each stream part                  |
+| `maxGuardrailRetries` | `number`      | `3`     | Maximum stream attempts, including the initial attempt |
 
-### What Happens on Failure
+### What happens on failure
 
 1. Guardrail returns `fail(feedback)`
-2. Accumulated text so far + feedback is saved as the assistant's self-correction message
-3. Feedback is written to the output stream (user sees it)
-4. A new stream starts from the corrected context
-5. Process repeats until success or `maxGuardrailRetries` is exhausted
+2. If the attempt limit has been reached, the stream finishes without another retry
+3. Otherwise, feedback is written to the output stream, then the assistant's self-correction is saved
+4. A new model call starts from the corrected context
+5. Processing repeats until success, a `stop` result, or the attempt limit
+
+Despite its name, `maxGuardrailRetries: 3` allows three attempts in total:
+the initial attempt and up to two retries. Override it for a direct call with
+`agent.stream({ maxRetries: 2 })`, which allows two attempts in total.
 
 <Callout type="warn">
   Guardrails only apply when consuming the stream via
@@ -198,7 +214,7 @@ const stream = await myAgent.stream();
   processing.
 </Callout>
 
-## Custom Guardrail: Content Policy
+## Custom guardrail: Content policy
 
 ```typescript
 const contentPolicy: Guardrail = {
@@ -223,7 +239,7 @@ const contentPolicy: Guardrail = {
 };
 ```
 
-## Custom Guardrail: Error Routing
+## Custom guardrail: Error routing
 
 Use `stop()` for errors that retrying cannot fix:
 
@@ -249,7 +265,7 @@ const errorRouter: Guardrail = {
 };
 ```
 
-## Next Steps
+## Next steps
 
 - [Error Recovery recipe](/docs/context/recipes/error-recovery) - Practical walkthrough of error recovery with guardrails
 - [Checkpoints](/docs/context/checkpoints) - Named restore points for conversation branching

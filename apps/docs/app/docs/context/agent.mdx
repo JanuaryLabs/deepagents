@@ -1,5 +1,5 @@
 ---
-title: Agent Wrapper
+title: Agent wrapper
 description: Convenience wrapper that combines ContextEngine with the AI SDK into a streamable agent
 ---
 
@@ -7,7 +7,7 @@ The `agent()` function combines a `ContextEngine` and an AI SDK model into a sin
 
 Every agent requires a **sandbox** — an `AgentSandbox` that provides `bash`, `readFile`, and `writeFile` tools. The sandbox is created externally and passed in; the agent does not create or dispose it. Skills are declared separately on the context with `skills(availableSkills)`.
 
-## Sandbox Options
+## Sandbox options
 
 | Approach                                                     | When to use                                 | Docker? |
 | ------------------------------------------------------------ | ------------------------------------------- | ------- |
@@ -111,7 +111,7 @@ identifiers.
 
 The agent merges `sandbox.tools` into its toolset automatically. Any `tools` you pass override sandbox tools on name conflict.
 
-## Host-only Tool Metadata
+## Host-only tool metadata
 
 Any object-returning tool can include a top-level `meta` field for information
 the application should retain without sending it back to the model. No
@@ -153,7 +153,7 @@ Host-only means hidden from the model, not secret: metadata can still be
 streamed, persisted, logged, or sent to a client. Keep sensitive values in a
 server-side store and put only an opaque reference in `meta`.
 
-## Creating an Agent
+## Creating an agent
 
 ```typescript
 import { groq } from '@ai-sdk/groq';
@@ -200,7 +200,7 @@ const assistant = agent({
 | `telemetry`           | `object`          | `undefined`        | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText`                                                                                                                                    |
 | `stopWhen`            | `StopCondition`   | `isStepCount(200)` | Ends the agent loop. Raise it for a long agentic run that would otherwise stop mid-task; lower it to bound cost on an untrusted prompt                                                                              |
 | `guardrails`          | `Guardrail[]`     | `[]`               | Guardrails applied during streaming                                                                                                                                                                                 |
-| `maxGuardrailRetries` | `number`          | `3`                | Max retry attempts when a guardrail fails                                                                                                                                                                           |
+| `maxGuardrailRetries` | `number`          | `3`                | Maximum stream attempts, including the initial attempt                                                                                                                                                              |
 | `logging`             | `boolean`         | `undefined`        | Enable debug logging                                                                                                                                                                                                |
 
 ### Native execution controls
@@ -251,7 +251,7 @@ schema and skips unknown tools. It uses the SDK's repair abort signal when
 provided, falling back to the signal passed to the helper, so cancellation
 and execution timeouts also stop the repair request.
 
-## Instance Properties
+## Instance properties
 
 The agent exposes these readonly properties after creation:
 
@@ -286,7 +286,16 @@ console.log(result.text);
 
 ## stream()
 
-Resolves the context and returns an `AgentStream`: `result` is the AI SDK `streamText` result of the first model call (`stream.result.text`, `stream.result.stream`, `stream.result.consumeStream()`), and `toUIMessageStream(options)` builds the UI message stream. When guardrails are configured, `toUIMessageStream()` intercepts parts and retries on failure.
+Resolves the context and returns an `AgentStream` with two members:
+
+- `result` exposes the AI SDK `streamText` result from the first model call,
+  including `text`, `stream`, and `consumeStream()`. It does not include later
+  guardrail retries.
+- `toUIMessageStream(options)` builds the UI message stream and applies any
+  configured guardrails, including their retries.
+
+Consume guarded output through `stream.toUIMessageStream()`. Reading
+`stream.result` directly bypasses guardrails.
 
 ```typescript
 context.set(user('Write a Python quicksort'));
@@ -362,7 +371,7 @@ const writer = agent({
 });
 ```
 
-### asTool() Options
+### asTool() options
 
 | Option            | Type                          | Description                                                  |
 | ----------------- | ----------------------------- | ------------------------------------------------------------ |
@@ -402,7 +411,7 @@ console.log(usage());
 `usage()` reports successful advisor calls plus aggregated model usage for the
 returned advisor instance.
 
-### asAdvisor() Options
+### asAdvisor() options
 
 | Option                | Type                | Description                                                                     |
 | --------------------- | ------------------- | ------------------------------------------------------------------------------- |
@@ -417,7 +426,11 @@ advisor request cannot complete cleanly.
 
 ## Guardrails
 
-Pass `guardrails` and `maxGuardrailRetries` to add real-time stream interception. When a guardrail fails, the agent emits a finish step, persists the corrected assistant state, and retries with self-correction feedback.
+Pass `guardrails` and `maxGuardrailRetries` to inspect UI message chunks as
+they stream. When a guardrail fails and another attempt is available, the
+agent emits the feedback, saves the assistant's self-correction, and starts
+a new model call. Despite its name, `maxGuardrailRetries` counts the initial
+attempt: `3` allows the initial attempt and up to two retries.
 
 ```typescript
 import { agent, errorRecoveryGuardrail } from '@deepagents/context';
@@ -476,7 +489,7 @@ const person = await extractor.generate();
 // { name: "John", age: 30, occupation: "software engineer" }
 ```
 
-### structuredOutput Configuration
+### structuredOutput configuration
 
 | Option            | Type              | Default     | Description                                                                      |
 | ----------------- | ----------------- | ----------- | -------------------------------------------------------------------------------- |
@@ -487,7 +500,7 @@ const person = await extractor.generate();
 | `telemetry`       | `object`          | `undefined` | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText` |
 | `tools`           | `ToolSet`         | `{}`        | Tools available during generation.                                               |
 
-### structuredOutput Methods
+### structuredOutput methods
 
 `generate()` resolves context, calls the model with `Output.object()`, and returns the parsed value directly.
 
@@ -505,7 +518,7 @@ for await (const part of toUIMessageStream({ stream: result.stream })) {
 }
 ```
 
-## How Context Resolution Works
+## How context resolution works
 
 Both `agent()` and `structuredOutput()` call `context.resolve()` with an `XmlRenderer` internally. The resolved system prompt and messages are forwarded to the AI SDK's `generateText` or `streamText`. You don't need to call `resolve()` yourself when using these wrappers.
 
@@ -516,7 +529,7 @@ agent.generate() / agent.stream()
             └─ generateText() / streamText()
 ```
 
-## Next Steps
+## Next steps
 
 - [Context Engine](/docs/context/context-engine) - Full ContextEngine API reference
 - [Fragments](/docs/context/fragments) - Building context with fragments

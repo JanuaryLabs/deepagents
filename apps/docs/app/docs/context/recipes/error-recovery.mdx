@@ -1,17 +1,20 @@
 ---
-title: Error Recovery with Guardrails
+title: Error recovery with guardrails
 description: Intercept API errors and trigger self-correction retries using guardrails
 ---
 
-This recipe demonstrates how guardrails can catch API-level errors and trigger self-correction. The scenario: a model is told to use a tool that doesn't exist, the API returns an error, and the guardrail intercepts it to retry gracefully.
+This recipe configures an agent to recover when a provider rejects a call to
+an unregistered tool. The guardrail returns corrective feedback, and the
+agent can retry with the updated context. Whether a model attempts the invalid
+call depends on the provider and model.
 
 ## Scenario
 
 1. System prompt tells the model to use a `tell_joke` tool
-2. No tools are provided to the agent
-3. Model tries to call the tool — API returns `invalid_request_error`
-4. `errorRecoveryGuardrail` catches it and provides corrective feedback
-5. Agent retries and responds with plain text
+2. The sandbox provides `bash`, `readFile`, and `writeFile`, but no `tell_joke` tool
+3. If the model calls `tell_joke`, the provider may reject it with a tool-not-found error
+4. `errorRecoveryGuardrail` matches the error message and provides corrective feedback
+5. The agent retries and can respond with plain text or use a registered tool
 
 ## Setup
 
@@ -19,6 +22,7 @@ Create a context engine with a system prompt that references a non-existent tool
 
 ```typescript
 import { groq } from '@ai-sdk/groq';
+import { InMemoryFs } from 'just-bash';
 import { randomUUID } from 'node:crypto';
 
 import {
@@ -26,6 +30,8 @@ import {
   type ContextFragment,
   InMemoryContextStore,
   agent,
+  createBashTool,
+  createVirtualSandbox,
   errorRecoveryGuardrail,
   role,
   user,
@@ -47,7 +53,7 @@ const context = engine(
 );
 ```
 
-## Add a Custom Safety Guardrail
+## Add a custom safety guardrail
 
 You can stack multiple guardrails. Here's a content safety filter alongside the built-in error recovery:
 
@@ -59,8 +65,7 @@ const safetyGuardrail: Guardrail = {
   name: 'Safety Filter',
   handle: (part) => {
     if (part.type === 'text-delta') {
-      const delta = (part as { delta: string }).delta;
-      if (delta.toLowerCase().includes('hack')) {
+      if (part.delta.toLowerCase().includes('hack')) {
         return fail(
           'I should not provide hacking instructions. Let me suggest ethical alternatives instead.',
         );
@@ -71,13 +76,19 @@ const safetyGuardrail: Guardrail = {
 };
 ```
 
-## Create the Agent
+## Create the agent
 
-Wire both guardrails into the agent. Note that no tools are provided — this is intentional to trigger the error recovery flow:
+Create a virtual sandbox and pass it to the agent with both guardrails.
+The sandbox supplies the required tools; `tell_joke` remains unregistered:
 
 ```typescript
+const sandbox = await createBashTool({
+  sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+});
+
 const jokeAgent = agent({
   name: 'joke_agent',
+  sandbox,
   context,
   model: groq('gpt-oss-20b'),
   guardrails: [errorRecoveryGuardrail, safetyGuardrail],
@@ -85,16 +96,32 @@ const jokeAgent = agent({
 });
 ```
 
-## Stream and Consume
+## Stream and consume
 
-The guardrails apply when consuming via `toUIMessageStream()`:
+Consume `toUIMessageStream()` to apply the guardrails. Supply an error
+formatter that preserves the provider's message so `errorRecoveryGuardrail`
+can recognize it:
 
 ```typescript
-const stream = await jokeAgent.stream();
-const response = stream.toUIMessageStream();
+try {
+  const stream = await jokeAgent.stream();
+  const response = stream.toUIMessageStream({
+    onError: (error) =>
+      error instanceof Error ? error.message : String(error),
+  });
+
+  for await (const part of response) {
+    if (part.type === 'text-delta') process.stdout.write(part.delta);
+  }
+} finally {
+  await sandbox.sandbox.dispose();
+}
 ```
 
-## What Happens Under the Hood
+## What happens under the hood
+
+When the provider reports the unregistered tool, a successful recovery follows
+this sequence:
 
 ```
 1. Model receives system prompt mentioning "tell_joke" tool
@@ -107,14 +134,14 @@ const response = stream.toUIMessageStream();
 8. Response reaches the user
 ```
 
-## Key Takeaways
+## Key takeaways
 
 - **`errorRecoveryGuardrail`** handles common API errors (missing tools, malformed JSON, schema mismatches) automatically
 - **Guardrails compose** — stack multiple guardrails and they run sequentially on each stream part
-- **`maxGuardrailRetries`** controls how many self-correction attempts before giving up
+- **`maxGuardrailRetries: 3`** allows the initial attempt and up to two self-correction retries
 - **Guardrails only apply via `stream.toUIMessageStream()`** — reading `stream.result.stream` or `stream.result.textStream` bypasses them
 
-## Next Steps
+## Next steps
 
 - [Guardrails reference](/docs/context/guardrails) — full API docs for writing custom guardrails
 - [Agent Integration](/docs/context/recipes/agent-integration) — dynamic prompts with context
