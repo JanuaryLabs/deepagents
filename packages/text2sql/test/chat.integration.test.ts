@@ -90,7 +90,10 @@ async function setup(mockText?: string) {
   });
 
   const adapters = { main: adapter };
-  const cache = new FileIndexCache({ namespace: `test-${generateId()}` });
+  const cache = new FileIndexCache({
+    clock: globalThis,
+    namespace: `test-${generateId()}`,
+  });
 
   const owned = resources.move();
   return {
@@ -507,6 +510,7 @@ describe('Text2Sql user-constructed chat', () => {
     });
     const adapters = { main: adapter };
     const cache = new FileIndexCache({
+      clock: globalThis,
       namespace: `test-signal-${generateId()}`,
     });
 

@@ -1113,7 +1113,13 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
     environment: Environment,
     commandTimeout: number | undefined,
   ): Promise<DockerEngine> {
-    const docker = await Docker.connect({ environment }).catch(unavailable);
+    // The sandbox runs real containers, so the waits of the engine client and
+    // the time of the files that it writes come from the real clock; no
+    // caller has another clock to give.
+    const docker = await Docker.connect({
+      clock: globalThis,
+      environment,
+    }).catch(unavailable);
     return new DockerEngine(docker, commandTimeout);
   }
 

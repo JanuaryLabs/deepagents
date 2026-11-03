@@ -124,6 +124,7 @@ describe('Text2Sql client message allocation', () => {
       const model = createMockModel();
       const adapters = { main: adapter };
       const cache = new FileIndexCache({
+        clock: globalThis,
         namespace: `allocation-${generateId()}`,
       });
 

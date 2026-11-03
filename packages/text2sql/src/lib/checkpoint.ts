@@ -1,3 +1,4 @@
+import type { Clock } from '@zukhruf/async';
 import { durableWrite } from '@zukhruf/fs';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -9,6 +10,8 @@ export interface CheckpointOptions {
   path: string;
   /** Hash to detect config changes - if changed, checkpoint is invalidated */
   configHash?: string;
+  /** The clock of the waits of a save that retries a busy file. */
+  clock: Clock;
 }
 
 /**
@@ -55,6 +58,7 @@ export class Checkpoint {
   private points: Record<string, PointData>;
   private path: string;
   private configHash: string | undefined;
+  readonly #clock: Clock;
   readonly #writes = pLimit(1);
   #changes = 0;
   #writtenChanges = 0;
@@ -62,11 +66,13 @@ export class Checkpoint {
   private constructor(
     path: string,
     configHash: string | undefined,
+    clock: Clock,
     points: Record<string, PointData>,
   ) {
     this.points = points;
     this.path = path;
     this.configHash = configHash;
+    this.#clock = clock;
   }
 
   /**
@@ -74,7 +80,7 @@ export class Checkpoint {
    * Handles corrupted files and config changes gracefully.
    */
   static async load(options: CheckpointOptions): Promise<Checkpoint> {
-    const { path, configHash } = options;
+    const { path, configHash, clock } = options;
 
     if (existsSync(path)) {
       try {
@@ -84,7 +90,7 @@ export class Checkpoint {
         // Check if config changed
         if (configHash && file.configHash && file.configHash !== configHash) {
           console.log('⚠ Config changed, starting fresh');
-          return new Checkpoint(path, configHash, {});
+          return new Checkpoint(path, configHash, clock, {});
         }
 
         const points = file.points;
@@ -93,15 +99,15 @@ export class Checkpoint {
           0,
         );
         console.log(`✓ Resuming from checkpoint (${totalEntries} entries)`);
-        return new Checkpoint(path, configHash, points);
+        return new Checkpoint(path, configHash, clock, points);
       } catch {
         console.log('⚠ Checkpoint corrupted, starting fresh');
-        return new Checkpoint(path, configHash, {});
+        return new Checkpoint(path, configHash, clock, {});
       }
     }
 
     console.log('Starting new checkpoint');
-    return new Checkpoint(path, configHash, {});
+    return new Checkpoint(path, configHash, clock, {});
   }
 
   /**
@@ -198,7 +204,9 @@ export class Checkpoint {
         configHash: this.configHash,
         points: this.points,
       };
-      await durableWrite(this.path, JSON.stringify(file, null, 2));
+      await durableWrite(this.path, JSON.stringify(file, null, 2), {
+        clock: this.#clock,
+      });
       this.#writtenChanges = changes;
     });
   }

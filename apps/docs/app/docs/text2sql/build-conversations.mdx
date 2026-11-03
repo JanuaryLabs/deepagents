@@ -104,7 +104,7 @@ that adapter's configured connection name — the exact value the model passes t
 `sql validate <db>` and `sql run <db>`.
 
 For cross-run reuse, inject a cache — `new AdapterIndexer({ adapters, cache })`
-(or `new Text2Sql({ ..., cache })`). The shipped `FileIndexCache({ dir, namespace })`
+(or `new Text2Sql({ ..., cache })`). The shipped `FileIndexCache({ clock, dir, namespace })`
 is file-backed; `namespace` is the invalidation token (bump it when the schema
 changes), and `dir` defaults to the OS temp dir. Without a cache, indexing
 introspects fresh on every call. `index()` does not make concurrent callers

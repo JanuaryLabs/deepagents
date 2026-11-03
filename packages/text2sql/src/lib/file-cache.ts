@@ -1,3 +1,4 @@
+import type { Clock } from '@zukhruf/async';
 import { atomicWrite } from '@zukhruf/fs';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -5,15 +6,25 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+export interface FileCacheOptions {
+  /** The clock of the waits of a write that retries a busy file. */
+  clock: Clock;
+  /** Default: `.txt`. */
+  extension?: string;
+  /** Default: the OS temp directory. */
+  baseDir?: string;
+}
+
 export class FileCache {
   public path: string;
+  readonly #clock: Clock;
   constructor(
     watermark: string,
-    extension = '.txt',
-    baseDir: string = tmpdir(),
+    { clock, extension = '.txt', baseDir = tmpdir() }: FileCacheOptions,
   ) {
     const hash = createHash('md5').update(watermark).digest('hex');
     this.path = path.join(baseDir, `text2sql-${hash}${extension}`);
+    this.#clock = clock;
   }
 
   async get() {
@@ -25,7 +36,7 @@ export class FileCache {
 
   async set(content: string) {
     await mkdir(path.dirname(this.path), { recursive: true });
-    await atomicWrite(this.path, content);
+    await atomicWrite(this.path, content, { clock: this.#clock });
   }
 }
 
@@ -39,9 +50,9 @@ export class JsonCache<T> extends FileCache {
   constructor(
     watermark: string,
     isValid: (value: unknown) => value is T,
-    baseDir?: string,
+    { clock, baseDir }: Omit<FileCacheOptions, 'extension'>,
   ) {
-    super(watermark, '.json', baseDir);
+    super(watermark, { clock, extension: '.json', baseDir });
     this.#isValid = isValid;
   }
 

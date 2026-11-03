@@ -83,7 +83,7 @@ function resolveIndexCache(): FileIndexCache | undefined {
   if (!dir && !namespace) {
     return undefined;
   }
-  return new FileIndexCache({ dir, namespace });
+  return new FileIndexCache({ clock: globalThis, dir, namespace });
 }
 
 async function runCommand(

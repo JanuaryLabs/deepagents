@@ -51,7 +51,11 @@ export async function getLocalClaudeAuth(
   if (initial.value.claudeAiOauth.expiresAt > Date.now() + 60_000)
     return initial.value.claudeAiOauth.accessToken;
 
-  const mutex = new Mutex(new SqliteStore(join(home, '.deepagents-locks')));
+  // The waits of the lock store run on the real clock: the providers of this
+  // package are the only callers, and no caller has another clock to give.
+  const mutex = new Mutex(
+    new SqliteStore(join(home, '.deepagents-locks'), { clock: globalThis }),
+  );
   return mutex.acquire(
     'claude',
     async () => {

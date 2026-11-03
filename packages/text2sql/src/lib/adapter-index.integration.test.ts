@@ -48,7 +48,10 @@ describe('AdapterIndexer with a cache', () => {
 
     const introspections = countIntrospections(adapter);
     await using directory = await temporaryFiles.directory('text2sql-cache-');
-    const cache = new FileIndexCache({ dir: directory.path });
+    const cache = new FileIndexCache({
+      clock: globalThis,
+      dir: directory.path,
+    });
     const indexer = new AdapterIndexer({
       adapters: { main: adapter },
       cache,
@@ -128,11 +131,11 @@ describe('FileIndexCache shared across indexers', () => {
 
     const indexerA = new AdapterIndexer({
       adapters: { main: hostA },
-      cache: new FileIndexCache({ dir }),
+      cache: new FileIndexCache({ clock: globalThis, dir }),
     });
     const indexerB = new AdapterIndexer({
       adapters: { main: hostB },
-      cache: new FileIndexCache({ dir }),
+      cache: new FileIndexCache({ clock: globalThis, dir }),
     });
 
     const eventsA: Text2SqlIndexProgressEvent[] = [];
@@ -180,7 +183,7 @@ describe('FileIndexCache corrupt-file resilience', () => {
     const introspections = countIntrospections(adapter);
     const indexer = new AdapterIndexer({
       adapters: { main: adapter },
-      cache: new FileIndexCache({ dir }),
+      cache: new FileIndexCache({ clock: globalThis, dir }),
     });
 
     await indexer.index();
@@ -220,7 +223,7 @@ describe('AdapterIndexer.indexAdapter (single-adapter entry point)', () => {
     const introspections = countIntrospections(adapter);
     const indexer = new AdapterIndexer({
       adapters: { main: adapter },
-      cache: new FileIndexCache({ dir }),
+      cache: new FileIndexCache({ clock: globalThis, dir }),
     });
 
     const firstEvents: Text2SqlIndexProgressEvent[] = [];
@@ -262,7 +265,7 @@ describe('AdapterIndexer.indexAdapter (single-adapter entry point)', () => {
     const dir = directory.path;
     const indexer = new AdapterIndexer({
       adapters: { main: adapter },
-      cache: new FileIndexCache({ dir }),
+      cache: new FileIndexCache({ clock: globalThis, dir }),
     });
 
     const raw = await indexer.indexAdapter('main');

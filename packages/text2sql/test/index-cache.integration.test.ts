@@ -26,6 +26,7 @@ function indexTestAdapters(
 describe('AdapterIndexer — cache isolation', () => {
   it('does not re-introspect an adapter when a second adapter is added under the same version', async () => {
     const cache = new FileIndexCache({
+      clock: globalThis,
       namespace: `cache-iso-${generateId()}`,
     });
 

@@ -287,6 +287,7 @@ describe('Text2Sql index progress events', () => {
       const model = createMockModel();
       const adapters = { main: adapter };
       const cache = new FileIndexCache({
+        clock: globalThis,
         namespace: `progress-${generateId()}`,
       });
 
@@ -369,7 +370,10 @@ describe('Text2Sql index progress events', () => {
       });
       const model = createMockModel();
       const adapters = { main: adapter };
-      const cache = new FileIndexCache({ namespace: `cache-${generateId()}` });
+      const cache = new FileIndexCache({
+        clock: globalThis,
+        namespace: `cache-${generateId()}`,
+      });
 
       await engine.continue(userMessage('First question'));
       const first = await Array.fromAsync(

@@ -49,7 +49,11 @@ export async function getLocalCodexAuth(
   if (!isAccessTokenExpired(initial.tokens)) return auth(initial.tokens);
 
   // Coordinate refreshes across provider instances and worker processes.
-  const mutex = new Mutex(new SqliteStore(join(home, '.deepagents-locks')));
+  // The waits of the lock store run on the real clock: the providers of this
+  // package are the only callers, and no caller has another clock to give.
+  const mutex = new Mutex(
+    new SqliteStore(join(home, '.deepagents-locks'), { clock: globalThis }),
+  );
   return mutex.acquire(
     'chatgpt',
     async () => {

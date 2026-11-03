@@ -23,7 +23,7 @@ const cacheNamespace = process.env.TEXT2SQL_INDEX_VERSION;
 const text2Sql = new Text2Sql({
   adapters,
   cache: cacheNamespace
-    ? new FileIndexCache({ namespace: cacheNamespace })
+    ? new FileIndexCache({ clock: globalThis, namespace: cacheNamespace })
     : undefined,
 });
 const { command: sqlCommand } = createSqlCommand(text2Sql);

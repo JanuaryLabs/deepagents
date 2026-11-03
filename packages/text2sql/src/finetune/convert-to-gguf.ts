@@ -84,6 +84,7 @@ Examples:
   const { signal } = interrupt;
 
   await using docker = await Docker.connect({
+    clock: globalThis,
     environment: process.env,
     signal,
   });

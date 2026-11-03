@@ -36,7 +36,10 @@ export const execute_os_command = tool({
     { command, working_directory, environment_vars },
     { abortSignal },
   ) => {
+    // The tool is its own entry: the model calls it, and no caller has
+    // another clock to give the waits of the engine client.
     await using docker = await Docker.connect({
+      clock: globalThis,
       environment: process.env,
       signal: abortSignal,
     });

@@ -31,7 +31,11 @@ const text2Sql = new Text2Sql({
   adapters,
   cache:
     cacheDir || cacheNamespace
-      ? new FileIndexCache({ dir: cacheDir, namespace: cacheNamespace })
+      ? new FileIndexCache({
+          clock: globalThis,
+          dir: cacheDir,
+          namespace: cacheNamespace,
+        })
       : undefined,
 });
 

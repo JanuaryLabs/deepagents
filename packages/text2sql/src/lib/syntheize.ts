@@ -61,6 +61,7 @@ const adapter = new postgres.Postgres({
 
 const checkpoint = await Checkpoint.load({
   path: 'output.json',
+  clock: globalThis,
   configHash: hash(CONFIG),
 });
 

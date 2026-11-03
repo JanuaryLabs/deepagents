@@ -23,7 +23,7 @@ describe('Checkpoint — concurrent saves', () => {
     // time, so the run repeats, each time on a new file.
     for (let run = 0; run < 5; run += 1) {
       const file = path.join(directory.path, `checkpoint-${run}.json`);
-      const first = await Checkpoint.load({ path: file });
+      const first = await Checkpoint.load({ path: file, clock: globalThis });
       const point = first.point('step', codec);
       await Promise.all(
         inputs.map((input) =>
@@ -37,7 +37,7 @@ describe('Checkpoint — concurrent saves', () => {
         ),
       );
 
-      const resumed = await Checkpoint.load({ path: file });
+      const resumed = await Checkpoint.load({ path: file, clock: globalThis });
       const recomputed: number[] = [];
       const outputs = await Promise.all(
         inputs.map((input) =>

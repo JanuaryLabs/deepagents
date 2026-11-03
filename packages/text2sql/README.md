@@ -415,11 +415,12 @@ for await (const chunk of followUp) {
 
 `Checkpoint` from `@deepagents/text2sql` saves completed computations so a
 pipeline can resume without repeating them. Load a file with
-`Checkpoint.load({ path, configHash })`, then use `run()` for one computation
+`Checkpoint.load({ path, configHash, clock })`, then use `run()` for one computation
 or `each()` for a sequence of inputs. Both require a codec to encode outputs
 and validate them on resume; `jsonCodec(schema)` handles plain JSON values.
 When both the file and the caller supply a nonempty `configHash`, a mismatch
-starts a fresh checkpoint.
+starts a fresh checkpoint. `clock` runs the waits of a save that retries a busy
+file: give `globalThis` in an application.
 
 Writes from one `Checkpoint` instance run in order. Each write captures the
 latest state when it starts, so an earlier snapshot cannot overwrite a later
@@ -452,13 +453,18 @@ import { FileIndexCache, Text2Sql } from '@deepagents/text2sql';
 
 const text2sql = new Text2Sql({
   adapters: { main: adapter },
-  cache: new FileIndexCache({ dir: '/var/cache/text2sql', namespace: 'v1' }),
+  cache: new FileIndexCache({
+    clock: globalThis,
+    dir: '/var/cache/text2sql',
+    namespace: 'v1',
+  }),
 });
 ```
 
 `FileIndexCache` writes atomically (temp + rename). It treats a file that does
 not parse to context fragments as a miss, so a torn read causes a new
-introspection. `dir` defaults to the OS temp directory.
+introspection. `dir` defaults to the OS temp directory. `clock` runs the waits
+of a write that retries a busy file.
 
 ### Introspect once for concurrent callers
 
@@ -473,7 +479,9 @@ uses [`@zukhruf/mutex`](https://www.npmjs.com/package/@zukhruf/mutex):
 import { Mutex } from '@zukhruf/mutex';
 import { SqliteStore } from '@zukhruf/mutex/sqlite';
 
-const mutex = new Mutex(new SqliteStore('/var/lib/my-app/locks'));
+const mutex = new Mutex(
+  new SqliteStore('/var/lib/my-app/locks', { clock: globalThis }),
+);
 
 const fragments = await mutex.acquire('text2sql:main', () =>
   text2sql.index({ names: ['main'] }),

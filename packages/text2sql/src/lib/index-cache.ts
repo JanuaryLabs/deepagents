@@ -1,3 +1,5 @@
+import type { Clock } from '@zukhruf/async';
+
 import {
   type ContextFragment,
   isFragment,
@@ -25,6 +27,8 @@ export interface IndexCache {
 }
 
 export interface FileIndexCacheOptions {
+  /** The clock of the waits of a write that retries a busy file. */
+  clock: Clock;
   /** Directory the cache files live in. Defaults to the OS temp directory. */
   dir?: string;
   /**
@@ -41,10 +45,12 @@ export interface FileIndexCacheOptions {
  * horizontally-scaled processes share one cache.
  */
 export class FileIndexCache implements IndexCache {
+  readonly #clock: Clock;
   readonly #dir: string | undefined;
   readonly #namespace: string | undefined;
 
-  constructor(options: FileIndexCacheOptions = {}) {
+  constructor(options: FileIndexCacheOptions) {
+    this.#clock = options.clock;
     this.#dir = options.dir;
     this.#namespace = options.namespace;
   }
@@ -59,7 +65,10 @@ export class FileIndexCache implements IndexCache {
 
   #cacheFor(key: string): JsonCache<ContextFragment[]> {
     const watermark = this.#namespace ? `${this.#namespace}-${key}` : key;
-    return new JsonCache(watermark, isFragmentList, this.#dir);
+    return new JsonCache(watermark, isFragmentList, {
+      clock: this.#clock,
+      baseDir: this.#dir,
+    });
   }
 }
 
