@@ -1,5 +1,5 @@
 ---
-title: Build Conversations
+title: Build conversations
 description: Create multi-turn chat experiences with a persistent ContextEngine store
 ---
 
@@ -12,7 +12,7 @@ you want a durable thread. `toSql()` stays stateless and only uses the
 fragments you pass into that one call. Before each `chat()` call, append only
 the new incoming message for that turn with `context.continue(...)`.
 
-## Basic Usage
+## Basic usage
 
 ```typescript
 import {
@@ -48,7 +48,7 @@ for await (const chunk of stream) {
 That `context.continue(...)` call should contain only the current turn payload,
 not the full thread transcript.
 
-## Indexing Progress
+## Indexing progress
 
 Schema indexing can be expensive on large databases. `AdapterIndexer#index()` accepts
 an `onProgress` callback that emits typed progress events. Wrap indexing and
@@ -66,6 +66,8 @@ import {
 } from '@deepagents/text2sql';
 
 const indexer = new AdapterIndexer({ adapters });
+
+await context.continue(user('Show me top 10 customers'));
 
 const stream = createUIMessageStream({
   execute: async ({ writer }) => {
@@ -103,23 +105,45 @@ scope it. Each written schema fragment starts with a `<database>` leaf naming
 that adapter's configured connection name — the exact value the model passes to
 `sql validate <db>` and `sql run <db>`.
 
-For cross-run reuse, inject a cache — `new AdapterIndexer({ adapters, cache })`
-(or `new Text2Sql({ ..., cache })`). The shipped `FileIndexCache({ clock, dir, namespace })`
-is file-backed; `namespace` is the invalidation token (bump it when the schema
-changes), and `dir` defaults to the OS temp dir. Without a cache, indexing
-introspects fresh on every call. `index()` does not make concurrent callers
-wait for each other. To introspect only once when many instances start
-together, give them a shared cache `dir` and acquire a key around `index()`.
-The package README's "Schema index caching" section shows how. The sandbox CLI
-(`sql index`) wires a `FileIndexCache` from
-`TEXT2SQL_INDEX_CACHE_DIR` and the `TEXT2SQL_INDEX_VERSION` namespace.
-
 To live-tail progress from another process, set `TEXT2SQL_INDEX_EVENTS_PATH`
 to a fixed path. See
-[Getting Started — `sql index` options](/docs/text2sql/getting-started#sql-index-options)
+[Getting started — `sql index` options](/docs/text2sql/getting-started#sql-index-options)
 for the `mkfifo` setup.
 
-## Reusing the Same Thread
+## Schema index caching
+
+To reuse schema fragments across runs, pass a `cache` to `AdapterIndexer` or
+`Text2Sql`. `FileIndexCache` stores the fragments in files:
+
+```typescript
+import { AdapterIndexer, FileIndexCache } from '@deepagents/text2sql';
+
+const indexer = new AdapterIndexer({
+  adapters,
+  cache: new FileIndexCache({
+    clock: globalThis,
+    dir: '/var/cache/text2sql',
+    namespace: 'v1',
+  }),
+});
+```
+
+`clock` is required and controls file replacement retry delays; `globalThis`
+uses Node.js timers. `dir` defaults to the OS temp directory. The optional
+`namespace` separates cache generations; change it when the schema changes.
+Without a cache, every `index()` call introspects the database.
+
+Concurrent `index()` calls can each miss the cache and introspect the database.
+To introspect once, share the cache directory, namespace, and adapter names,
+and acquire the same lock key around `index()`. The package README's
+"Schema index caching" section shows how.
+
+The sandbox CLI (`sql index`) enables `FileIndexCache` when either
+`TEXT2SQL_INDEX_CACHE_DIR` or `TEXT2SQL_INDEX_VERSION` is set. The first selects
+the directory; the second supplies the namespace. With neither set, each run
+introspects the database. The CLI supplies `clock: globalThis` internally.
+
+## Reusing the same thread
 
 Reuse the same store plus the same `chatId` and `userId` whenever you want a
 follow-up request to see prior messages:
@@ -192,7 +216,7 @@ for await (const _ of await chat(followUp.ai)) {
 export is your adapter map. Mount, upload, or write that file before the first
 `chat()` call.
 
-## How It Works
+## How it works
 
 When you call `chat(ai)`:
 
@@ -201,7 +225,7 @@ When you call `chat(ai)`:
 3. **Run tools** - The agent can validate SQL, execute read-only queries, and inspect saved results.
 4. **Persist the turn** - `context.continue(...)` saves the incoming message and reserves the assistant slot before streaming starts, then the assistant reply plus chat metadata are finalized when the turn finishes.
 
-## Message Format
+## Message format
 
 `ContextEngine.continue()` accepts `ChatMessage` from `@deepagents/context`. In
 most apps, `user('...')` or `user(uiMessage)` is enough. When prior turns are
@@ -225,7 +249,10 @@ object. These options belong to that helper, not to `Text2Sql`:
 | `abortSignal`   | `AbortSignal` | Cancels title generation, repair attempts, and the active stream               |
 | `generateTitle` | `boolean`     | Uses the model to generate the first chat title instead of the static fallback |
 
-### Abort Signal
+See the [chat options reference](/docs/context/chat-function#chatoptions) for
+metadata, error formatting, stream callbacks, and lifecycle options.
+
+### Abort signal
 
 ```typescript
 const controller = new AbortController();
@@ -238,13 +265,13 @@ setTimeout(() => controller.abort(), 10_000);
 
 The same signal is forwarded to title generation and tool-call repair, so cancellation stops the full turn rather than only the visible stream.
 
-## Error Handling
+## Error handling
 
 Tool and validation errors are surfaced as user-facing stream messages. After a
 cancellation or failure, start a new `chat()` call. Reuse the same `chatId` to
 continue the thread, or use a new `chatId` to start a separate conversation.
 
-## Integration Example
+## Integration example
 
 ```typescript
 app.post('/api/chat', async (req, res) => {
@@ -267,9 +294,9 @@ app.post('/api/chat', async (req, res) => {
 
 `message` should be only the new turn payload for this request.
 
-## Best Practices
+## Best practices
 
 1. **Keep `chatId` stable per conversation** so follow-up turns can resolve the same history.
 2. **Keep `userId` stable per signed-in user** so related chats remain attributable.
-3. **Share one store across requests** if you want persistence between processes or server restarts.
+3. **Use a persistent store across requests** to retain history between processes or server restarts.
 4. **Create a fresh `chatId` for a new topic** instead of overloading an existing thread.

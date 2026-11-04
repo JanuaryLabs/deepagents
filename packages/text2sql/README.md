@@ -4,12 +4,12 @@ AI-powered natural language to SQL. Ask questions in plain English, get executab
 
 ## Features
 
-- **Natural Language to SQL** - Convert questions to validated, executable queries
-- **Multi-Database Support** - PostgreSQL, SQLite, DuckDB, SQL Server, MySQL/MariaDB, BigQuery, ClickHouse, and PostHog HogQL adapters
-- **Schema-Aware** - Automatic introspection of tables, relationships, indexes, and constraints
-- **Domain Knowledge** - Inject business terms, guardrails, and query patterns via fragments
+- **Natural language to SQL** - Convert questions to validated, executable queries
+- **Database adapters** - PostgreSQL, SQLite, DuckDB, SQL Server, MySQL/MariaDB, BigQuery, ClickHouse, and PostHog HogQL adapters
+- **Schema introspection** - Automatic introspection of tables, relationships, indexes, and constraints
+- **Domain knowledge** - Inject business terms, guardrails, and query patterns via fragments
 - **Conversational** - Multi-turn conversations with context persistence
-- **Safe by Default** - Read-only queries, validation, and configurable guardrails
+- **Safe by default** - Read-only queries, validation, and configurable guardrails
 
 ## Installation
 
@@ -29,7 +29,7 @@ npm install @clickhouse/client       # ClickHouse, or use your preferred client
 # PostHog uses native fetch and needs no additional client package
 ```
 
-The Spreadsheet adapter requires `xlsx` for Excel, CSV, and TSV files. It is
+The spreadsheet adapter requires `xlsx` for Excel, CSV, and TSV files. It is
 an optional peer dependency; install it only if you use
 `@deepagents/text2sql/spreadsheet`. With npm 12, add this to your project's
 `.npmrc` to allow directly declared URL dependencies:
@@ -243,11 +243,13 @@ changes). With neither set, every `sql index` introspects fresh. See
 [Schema index caching](#schema-index-caching) for
 the underlying injectable primitives.
 
-For in-process or virtual-sandbox usage (without installing the package CLI),
-wrap an existing `Text2Sql` instance as a just-bash custom command:
+For in-process or virtual-sandbox usage, install `just-bash` and wrap an existing
+`Text2Sql` instance as a custom command:
 
 ```typescript
-import { InMemoryFs, createVirtualSandbox } from '@deepagents/context';
+import { InMemoryFs } from 'just-bash';
+
+import { createVirtualSandbox } from '@deepagents/context';
 import {
   type CreateSqlCommandOptions,
   type CreateSqlCommandResult,
@@ -415,12 +417,14 @@ for await (const chunk of followUp) {
 
 `Checkpoint` from `@deepagents/text2sql` saves completed computations so a
 pipeline can resume without repeating them. Load a file with
-`Checkpoint.load({ path, configHash, clock })`, then use `run()` for one computation
-or `each()` for a sequence of inputs. Both require a codec to encode outputs
-and validate them on resume; `jsonCodec(schema)` handles plain JSON values.
-When both the file and the caller supply a nonempty `configHash`, a mismatch
-starts a fresh checkpoint. `clock` runs the waits of a save that retries a busy
-file: give `globalThis` in an application.
+`Checkpoint.load({ path, configHash, clock: globalThis })`, then use `run()` for
+one computation or `each()` for a sequence of inputs. Both require a codec to
+encode outputs and validate them on resume; `jsonCodec(schema)` handles plain
+JSON values. The optional `configHash` invalidates saved results when both the
+file and the caller supply nonempty hashes that differ.
+
+`clock` is required and controls the delay between file replacement retries
+when a file is busy. Pass `globalThis` to use Node.js timers.
 
 Writes from one `Checkpoint` instance run in order. Each write captures the
 latest state when it starts, so an earlier snapshot cannot overwrite a later
@@ -461,10 +465,12 @@ const text2sql = new Text2Sql({
 });
 ```
 
-`FileIndexCache` writes atomically (temp + rename). It treats a file that does
-not parse to context fragments as a miss, so a torn read causes a new
-introspection. `dir` defaults to the OS temp directory. `clock` runs the waits
-of a write that retries a busy file.
+`FileIndexCache` writes a temporary file and renames it over the cache file. A
+missing file, invalid JSON, or data that fails context-fragment validation is
+a cache miss, so the next `index()` call introspects again. `clock` is required
+and controls file replacement retry delays; pass `globalThis` to use Node.js
+timers. `dir` defaults to the OS temp directory. The optional `namespace`
+separates cache generations; change it when the schema changes.
 
 ### Introspect once for concurrent callers
 
@@ -488,9 +494,9 @@ const fragments = await mutex.acquire('text2sql:main', () =>
 );
 ```
 
-The first caller introspects the database and writes the cache. The other
-callers wait. When each waiter gets the key, its `index()` call reads the cache
-that the first caller wrote.
+Callers must share the cache directory, namespace, and adapter names. The first
+caller introspects the database and writes the cache. When each waiting caller
+acquires the same lock key, its `index()` call reads that cached schema.
 
 `SqliteStore` shares keys between the processes on one host. For a fleet of
 hosts, acquire the key from a service that all hosts share, for example a
@@ -576,11 +582,11 @@ console.log(result.sql);
 
 Full documentation available at [januarylabs.github.io/deepagents](https://januarylabs.github.io/deepagents/docs/text2sql):
 
-- [Getting Started](https://januarylabs.github.io/deepagents/docs/text2sql/getting-started)
+- [Getting started](https://januarylabs.github.io/deepagents/docs/text2sql/getting-started)
 - [Generate SQL](https://januarylabs.github.io/deepagents/docs/text2sql/to-sql)
-- [Agent + SQLite Store Recipe](https://januarylabs.github.io/deepagents/docs/text2sql/recipes/agent-sqlite-store)
-- [Teach the System](https://januarylabs.github.io/deepagents/docs/text2sql/teach-the-system)
-- [Build Conversations](https://januarylabs.github.io/deepagents/docs/text2sql/build-conversations)
+- [Agent + SQLite store recipe](https://januarylabs.github.io/deepagents/docs/text2sql/recipes/agent-sqlite-store)
+- [Teach the system](https://januarylabs.github.io/deepagents/docs/text2sql/teach-the-system)
+- [Build conversations](https://januarylabs.github.io/deepagents/docs/text2sql/build-conversations)
 - [Grounding](https://januarylabs.github.io/deepagents/docs/text2sql/grounding)
 - [PostgreSQL](https://januarylabs.github.io/deepagents/docs/text2sql/postgresql)
 - [SQLite](https://januarylabs.github.io/deepagents/docs/text2sql/sqlite)
