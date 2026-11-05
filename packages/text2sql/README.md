@@ -159,6 +159,7 @@ const backend = await createDockerSandbox({
   ],
   env: {
     TEXT2SQL_ADAPTERS: '/workspace/text2sql-adapters.ts',
+    TEXT2SQL_OUT_DIR: '/tmp/text2sql',
   },
 });
 const sandbox = await createBashTool({
@@ -194,7 +195,12 @@ for await (const chunk of stream) {
 
 The `/workspace/text2sql-adapters.ts` module must exist in the sandbox and
 default-export your adapter map. Mount your project into `/workspace` (as above)
-or upload/write that module before you call `sql index` or `chat()`.
+or upload or write that module before calling `sql index`. With a remote Docker
+daemon, the bind mount's `hostPath` must exist on the daemon's host.
+
+`TEXT2SQL_OUT_DIR` keeps schema and query artifacts in the sandbox's writable
+`/tmp/text2sql` directory. The default `./sql` would be inside the read-only
+`/workspace` mount.
 
 `instructions()` returns the SQL-flavored system fragments (policies, workflows,
 clarifications, style guides) — spread them into `context.set()` alongside the

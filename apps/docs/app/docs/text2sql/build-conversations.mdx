@@ -145,8 +145,12 @@ introspects the database. The CLI supplies `clock: globalThis` internally.
 
 ## Reusing the same thread
 
-Reuse the same store plus the same `chatId` and `userId` whenever you want a
-follow-up request to see prior messages:
+Reuse the same store, `chatId`, and `userId` for follow-up requests that need
+prior messages.
+
+Create `text2sql-adapters.ts` in the project directory with your adapter map as
+its default export. The example mounts that directory into the sandbox before
+indexing:
 
 ```typescript
 import { groq } from '@ai-sdk/groq';
@@ -169,8 +173,17 @@ const model = groq('openai/gpt-oss-20b');
 async function createThread(chatId: string, userId: string) {
   const backend = await createDockerSandbox({
     installers: [npm('@deepagents/text2sql', { ensureRuntime: true })],
+    volumes: [
+      {
+        type: 'bind',
+        hostPath: process.cwd(),
+        containerPath: '/workspace',
+        readOnly: true,
+      },
+    ],
     env: {
       TEXT2SQL_ADAPTERS: '/workspace/text2sql-adapters.ts',
+      TEXT2SQL_OUT_DIR: '/tmp/text2sql',
     },
   });
   const sandbox = await createBashTool({
@@ -212,9 +225,13 @@ for await (const _ of await chat(followUp.ai)) {
 }
 ```
 
-`TEXT2SQL_ADAPTERS` must resolve inside the sandbox to a module whose default
-export is your adapter map. Mount, upload, or write that file before the first
-`chat()` call.
+With a remote Docker daemon, the bind mount's `hostPath` must exist on the
+daemon's host. If you upload or write the adapter module instead of mounting
+it, do so before `sql index` runs inside `createThread()`.
+
+`TEXT2SQL_OUT_DIR` keeps schema and query artifacts in the sandbox's writable
+`/tmp/text2sql` directory. The default `./sql` would be inside the read-only
+`/workspace` mount.
 
 ## How it works
 
