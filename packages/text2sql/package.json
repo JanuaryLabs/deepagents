@@ -112,6 +112,7 @@
     "@zukhruf/docker": "^0.6.15",
     "@zukhruf/fs": "^0.6.15",
     "@zukhruf/sqlite-drift": "^0.6.15",
+    "@zukhruf/sqlite-open": "^0.7.0",
     "@zukhruf/sqlite-transaction": "^0.6.15",
     "ai": "^7.0.153",
     "cac": "7.0.0",

@@ -116,6 +116,7 @@
     "@zukhruf/async": "^0.6.15",
     "@zukhruf/mutex": "^0.6.15",
     "@zukhruf/sqlite-drift": "^0.6.15",
+    "@zukhruf/sqlite-open": "^0.7.0",
     "@zukhruf/sqlite-transaction": "^0.6.15",
     "ai": "^7.0.153",
     "atomically": "^2.1.1",
