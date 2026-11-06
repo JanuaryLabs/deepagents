@@ -4,9 +4,6 @@
 
 // Session-level PRAGMAs, run on each connection before the schema is applied.
 export const SETUP = `
-PRAGMA busy_timeout = 5000;
-PRAGMA page_size = 32768;
-PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 PRAGMA temp_store = MEMORY;
 PRAGMA cache_size = -131072; -- ~128 MiB page cache for faster repeated reads

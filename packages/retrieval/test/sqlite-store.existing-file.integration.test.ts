@@ -1,6 +1,11 @@
+import {
+  type OwnerOptions,
+  UnchangedJournal,
+  open,
+} from '@zukhruf/sqlite-open';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import * as sqliteVec from 'sqlite-vec';
 
@@ -85,8 +90,8 @@ function insertIndexedDocument(database: DatabaseSync) {
     );
 }
 
-function openWithVec(path: string) {
-  const database = new DatabaseSync(path, { allowExtension: true });
+function openWithVec(path: string, options: OwnerOptions = {}) {
+  const database = open(path, { ...options, allowExtension: true });
   database.loadExtension(sqliteVec.getLoadablePath());
   return database;
 }
@@ -107,7 +112,10 @@ describe('SQLiteStore on an existing file', () => {
   it('finds the documents of a file the previous release wrote, before any ingest', async () => {
     await using database = await sqlite.database();
     database.connection.close();
-    const previous = openWithVec(database.path);
+    // The previous release set its own journal and page size in its DDL.
+    const previous = openWithVec(database.path, {
+      journal: new UnchangedJournal(),
+    });
     previous.exec(PREVIOUS_RELEASE_DDL);
     insertIndexedDocument(previous);
     previous.close();
@@ -129,7 +137,10 @@ describe('SQLiteStore on an existing file', () => {
   it('embeds the documents again after the embedding size changes', async () => {
     await using database = await sqlite.database();
     database.connection.close();
-    const previous = openWithVec(database.path);
+    // The previous release set its own journal and page size in its DDL.
+    const previous = openWithVec(database.path, {
+      journal: new UnchangedJournal(),
+    });
     previous.exec(PREVIOUS_RELEASE_DDL);
     insertIndexedDocument(previous);
     previous.close();
@@ -161,7 +172,10 @@ describe('SQLiteStore on an existing file', () => {
   it('adds a column a table lacks and keeps its rows', async () => {
     await using database = await sqlite.database();
     database.connection.close();
-    const previous = openWithVec(database.path);
+    // The previous release set its own journal and page size in its DDL.
+    const previous = openWithVec(database.path, {
+      journal: new UnchangedJournal(),
+    });
     // No release made a sources table without expires_at. The short table is
     // the previous release's schema with that column and its index taken out,
     // to see the store bring a table up to its declaration.

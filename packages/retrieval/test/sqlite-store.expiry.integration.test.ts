@@ -1,6 +1,6 @@
+import { open } from '@zukhruf/sqlite-open';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import * as sqliteVec from 'sqlite-vec';
 
@@ -9,7 +9,7 @@ import { SQLiteStore, similaritySearch } from '@deepagents/retrieval';
 const sqlite = new Sqlite();
 
 function openWithVec(path: string) {
-  const database = new DatabaseSync(path, { allowExtension: true });
+  const database = open(path, { allowExtension: true });
   database.loadExtension(sqliteVec.getLoadablePath());
   return database;
 }

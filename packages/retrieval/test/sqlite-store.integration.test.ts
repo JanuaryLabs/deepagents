@@ -1,12 +1,12 @@
+import { open } from '@zukhruf/sqlite-open';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import * as sqliteVec from 'sqlite-vec';
 
-import { type Chunk, SQLiteStore } from '@deepagents/retrieval';
+import { type Chunk, SQLiteStore, nodeSQLite } from '@deepagents/retrieval';
 
 const sqlite = new Sqlite();
 
@@ -16,7 +16,7 @@ describe('SQLiteStore under a cross-process write lock', () => {
       'retrieval-lock-',
     );
     const path = join(directory.path, 'store.sqlite');
-    using database = new DatabaseSync(path, { allowExtension: true });
+    using database = open(path, { allowExtension: true });
     database.loadExtension(sqliteVec.getLoadablePath());
     const store = new SQLiteStore(database, 3);
     // The caller owns this connection; a short timeout keeps the wait brief.
@@ -45,7 +45,7 @@ describe('SQLiteStore under a cross-process write lock', () => {
       'retrieval-lock-',
     );
     const path = join(directory.path, 'store.sqlite');
-    using database = new DatabaseSync(path, { allowExtension: true });
+    using database = open(path, { allowExtension: true });
     database.loadExtension(sqliteVec.getLoadablePath());
     const store = new SQLiteStore(database, 3);
     const locks = new AsyncDisposableStack();
@@ -72,5 +72,19 @@ describe('SQLiteStore under a cross-process write lock', () => {
     } finally {
       await locks.disposeAsync();
     }
+  });
+});
+
+describe('a new vector store', () => {
+  it('has pages of 32 KiB, for its large vector rows', async () => {
+    await using directory = await new TemporaryFiles().directory(
+      'retrieval-pages-',
+    );
+    const path = join(directory.path, 'store.sqlite');
+
+    nodeSQLite(path, 3);
+
+    using reader = open(path, { readOnly: true });
+    assert.equal(reader.prepare('PRAGMA page_size').get()?.page_size, 32768);
   });
 });

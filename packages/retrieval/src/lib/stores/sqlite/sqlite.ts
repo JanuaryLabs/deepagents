@@ -12,7 +12,7 @@ import type {
   Store,
 } from '../store.ts';
 import { SETUP, statements, vectors } from './ddl.sqlite.ts';
-import { open } from './open.ts';
+import { openWithVectors } from './open.ts';
 
 const DEFAULT_TOP_N = 10;
 
@@ -25,7 +25,7 @@ export class SQLiteStore implements Store {
     this.#db.exec(SETUP);
     const chunks = new Declaration([vectors(dimension)], {
       rows: 'replace',
-      devDatabase: () => open(':memory:'),
+      devDatabase: () => openWithVectors(':memory:'),
     });
     transaction(
       this.#db,
