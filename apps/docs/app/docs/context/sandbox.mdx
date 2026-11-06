@@ -35,9 +35,9 @@ per-command file-change tracking, first decorate a real backend
 with `withStraceFileChanges(...)`, then pass that tracked backend into
 `createBashTool`.
 
-`uploadDirectory` accepts one source or an array of sources. Each source may
-set its own sandbox `destination`; otherwise it uploads under the Bash working
-directory.
+`uploadDirectory` accepts one `{ source, include? }` object. Set the top-level
+`destination` to choose where its files are uploaded and where bash commands run
+(default: `/workspace`). Use `include` to select files with a glob pattern.
 
 All backends expose the buffered command + file API (`executeCommand`,
 `readFile`, `writeFiles`, `dispose`). Backends that can stream real processes,
@@ -87,9 +87,9 @@ const backend = await createDockerSandbox({
 });
 const sandbox = await createBashTool({
   sandbox: backend,
+  destination: '/skills/deploy',
   uploadDirectory: {
     source: '/opt/agent-skills/deploy',
-    destination: '/skills/deploy',
   },
 });
 
@@ -184,9 +184,13 @@ const output = await useSandbox(
 Bridge specific host binaries into a just-bash virtual file system (no Docker needed):
 
 ```typescript
-import { Bash, ReadWriteFs } from 'just-bash';
+import { ReadWriteFs } from 'just-bash';
 
-import { createBashTool, createBinaryBridges } from '@deepagents/context';
+import {
+  createBashTool,
+  createBinaryBridges,
+  createVirtualSandbox,
+} from '@deepagents/context';
 
 const bridges = createBinaryBridges(
   'node',
@@ -194,12 +198,12 @@ const bridges = createBinaryBridges(
   { name: 'git', allowedArgs: /^(status|log|diff|show)/ },
 );
 
-const { bash } = await createBashTool({
-  sandbox: new Bash({
-    fs: new ReadWriteFs({ root: process.cwd() }),
-    customCommands: bridges,
-  }),
+await using backend = await createVirtualSandbox({
+  fs: new ReadWriteFs({ root: process.cwd() }),
+  customCommands: bridges,
 });
+
+const { bash } = await createBashTool({ sandbox: backend });
 ```
 
 Binary bridges resolve virtual paths to real host paths and use the host's `PATH` for binary resolution, while restricting access via optional `allowedArgs` regex.
@@ -234,7 +238,9 @@ When you want command groups such as `sql run`, `tool validate`, or
 
 ## Bash tool schema
 
-`createBashTool()` from `@deepagents/context` returns a bash tool whose input schema requires two fields: `command` and `reasoning`. The LLM must provide a brief reason on every call; the owned tool enforces it at the Zod schema level.
+`createBashTool()` from `@deepagents/context` returns a bash tool whose input
+schema requires `command` and a nonempty `reasoning` string. The AI SDK validates
+model tool calls against this schema before executing the command.
 
 ```typescript
 interface BashToolInput {
@@ -245,24 +251,36 @@ interface BashToolInput {
 type WrappedBashTool = Tool<BashToolInput, CommandResult>;
 ```
 
-The reasoning field is stripped before the command runs — it never influences execution. The AI SDK records it as part of the `tool-call` step input, so it remains visible in the response's content array for auditing. Calls missing `reasoning` fail schema validation before `execute` is invoked.
+The tool uses only `command` for execution. The AI SDK records `reasoning` in
+the `tool-call` input, so it remains visible for auditing. A model call missing
+`reasoning` produces a `tool-error` before the command runs.
+
+Calling `execute()` directly bypasses the AI SDK's runtime input validation.
+Supply the full `BashToolInput` when invoking the tool manually:
 
 ```typescript
+import { InMemoryFs } from 'just-bash';
+
+import {
+  type BashToolInput,
+  createBashTool,
+  createVirtualSandbox,
+} from '@deepagents/context';
+
+await using backend = await createVirtualSandbox({ fs: new InMemoryFs() });
 const sandbox = await createBashTool({
-  sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+  sandbox: backend,
 });
 
-// ✅ Accepted by the tool schema
-await sandbox.tools.bash.execute(
-  { command: 'ls /workspace', reasoning: 'List files to find the entry point' },
-  {} as never,
-);
+const input: BashToolInput = {
+  command: 'ls /workspace',
+  reasoning: 'List files to find the entry point',
+};
 
-// ❌ Rejected — AI SDK emits a tool-error with /reasoning/
-await sandbox.tools.bash.execute(
-  { command: 'ls /workspace' } as never,
-  {} as never,
-);
+await sandbox.tools.bash.execute!(input, {
+  toolCallId: 'list-workspace',
+  messages: [],
+});
 ```
 
 Type-safe consumers can import `WrappedBashTool` and `BashToolInput` directly from `@deepagents/context`.

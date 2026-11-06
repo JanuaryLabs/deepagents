@@ -3,61 +3,104 @@ title: Persistence
 description: ContextStore interface, database adapters, and schema design
 ---
 
-The persistence layer provides durable storage for conversation graphs. An abstract interface enables multiple backend implementations while maintaining consistent behavior.
+The persistence layer stores conversation graphs across SQLite, PostgreSQL, and
+SQL Server. Each adapter implements the `ContextStore` abstract class.
 
-## ContextStore Abstract Class
+## ContextStore abstract class
 
-### Interface Overview
+### Interface overview
 
-The `ContextStore` abstract class defines 30+ methods organized into 6 categories:
+`ContextStore` groups its methods into six categories:
 
 ```typescript
 abstract class ContextStore {
-  // Chat Operations (6 methods)
+  // Chat operations
   abstract createChat(chat: ChatData): Promise<StoredChatData>;
   abstract upsertChat(chat: ChatData): Promise<StoredChatData>;
   abstract getChat(chatId: string): Promise<StoredChatData | undefined>;
-  abstract updateChat(chatId: string, updates: Partial<...>): Promise<StoredChatData>;
+  abstract updateChat(
+    chatId: string,
+    update: ChatUpdater,
+  ): Promise<StoredChatData>;
   abstract listChats(options?: ListChatsOptions): Promise<ChatInfo[]>;
-  abstract deleteChat(chatId: string, options?: DeleteChatOptions): Promise<boolean>;
+  abstract deleteChat(
+    chatId: string,
+    options?: DeleteChatOptions,
+  ): Promise<boolean>;
 
-  // Message Operations (4 methods)
+  // Message operations
   abstract addMessage(message: MessageData): Promise<void>;
+  async addMessages(messages: MessageData[]): Promise<void> {
+    for (const message of messages) {
+      await this.addMessage(message);
+    }
+  }
   abstract getMessage(messageId: string): Promise<MessageData | undefined>;
   abstract getMessageChain(headId: string): Promise<MessageData[]>;
   abstract getMessages(chatId: string): Promise<MessageData[]>;
   abstract hasChildren(messageId: string): Promise<boolean>;
+  abstract setMessageParent(
+    messageId: string,
+    parentId: string | null,
+  ): Promise<void>;
 
-  // Branch Operations (6 methods)
+  // Branch operations
   abstract createBranch(branch: BranchData): Promise<void>;
-  abstract getBranch(chatId: string, name: string): Promise<BranchData | undefined>;
+  abstract getBranch(
+    chatId: string,
+    name: string,
+  ): Promise<BranchData | undefined>;
   abstract getActiveBranch(chatId: string): Promise<BranchData | undefined>;
   abstract setActiveBranch(chatId: string, branchId: string): Promise<void>;
-  abstract updateBranchHead(branchId: string, messageId: string | null): Promise<void>;
+  abstract updateBranchHead(
+    branchId: string,
+    messageId: string | null,
+    expectedHeadMessageId: string | null,
+  ): Promise<boolean>;
   abstract listBranches(chatId: string): Promise<BranchInfo[]>;
 
-  // Checkpoint Operations (4 methods)
+  // Checkpoint operations
   abstract createCheckpoint(checkpoint: CheckpointData): Promise<void>;
-  abstract getCheckpoint(chatId: string, name: string): Promise<CheckpointData | undefined>;
+  abstract getCheckpoint(
+    chatId: string,
+    name: string,
+  ): Promise<CheckpointData | undefined>;
   abstract listCheckpoints(chatId: string): Promise<CheckpointInfo[]>;
   abstract deleteCheckpoint(chatId: string, name: string): Promise<void>;
 
-  // Search Operations (1 method)
-  abstract searchMessages(chatId: string, query: string, options?: SearchOptions): Promise<SearchResult[]>;
+  // Search operations
+  abstract searchMessages(
+    chatId: string,
+    query: string,
+    options?: SearchOptions,
+  ): Promise<SearchResult[]>;
 
-  // Visualization Operations (1 method)
+  // Visualization operations
   abstract getGraph(chatId: string): Promise<GraphData>;
 }
 ```
 
-**Source:** `packages/context/src/lib/store/store.ts:229-404`
+`updateChat` calls an updater with the stored chat while holding the store's
+write lock. Return changes to `title` or `metadata`, or `undefined` to leave the
+chat unchanged.
 
-### Method Categories
+`updateBranchHead` compares the stored head with `expectedHeadMessageId` before
+advancing it. It returns `true` on success and `false` if another writer changed
+the head. Re-read and reconcile after a conflict. The save pipeline uses
+`setMessageParent` to graft a competing turn onto the current head before retrying.
+
+The default `addMessages` calls `addMessage` sequentially. The SQLite adapter
+overrides it to persist each batch in a transaction.
+
+**Source:** `packages/context/src/lib/store/store.ts` and
+`packages/context/src/lib/save/save-pipeline.ts`.
+
+### Method categories
 
 | Category      | Methods | Purpose                                                 |
 | ------------- | ------- | ------------------------------------------------------- |
 | Chat          | 6       | Container lifecycle: create, read, update, delete, list |
-| Message       | 5       | Graph nodes: add, retrieve, traverse chain              |
+| Message       | 7       | Graph nodes: add, batch, retrieve, traverse, re-parent  |
 | Branch        | 6       | Pointers: create, switch, update head                   |
 | Checkpoint    | 4       | Bookmarks: create, retrieve, delete                     |
 | Search        | 1       | Full-text search across messages                        |
@@ -114,7 +157,7 @@ directly.
 
 **Source:** `#insertMessage` and `searchMessages` in `packages/context/src/lib/store/sqlite.store.ts`.
 
-### Recursive CTE for Message Chain
+### Recursive CTE for message chain
 
 SQLite's recursive CTE walks the parent chain:
 
@@ -159,11 +202,13 @@ acquire the write lock before reading the current value.
 
 ## PostgreSQL adapter
 
-The `PostgresContextStore` uses the `pg` package for production-grade persistence.
+The `PostgresContextStore` uses the `pg` package for PostgreSQL persistence.
 
 ### Pool-based connections
 
-The store accepts a connection string, `PoolConfig` object, or an existing `pg.Pool` instance. You open it with `await PostgresContextStore.create(options)`. The constructor is private, so each store that your code gets already has its schema objects.
+Pass a connection string, `PoolConfig` object, or existing `pg.Pool` instance as
+`options.pool`. Open the store with `await PostgresContextStore.create(options)`;
+it initializes the schema before returning.
 
 ```typescript
 import type { Pool, PoolConfig } from 'pg';
@@ -211,7 +256,8 @@ class PostgresContextStore extends ContextStore {
 }
 ```
 
-The `schema` option (defaults to `'public'`) scopes all tables under a PostgreSQL schema, enabling multi-tenant isolation within a single database.
+The `schema` option scopes the store's tables and indexes to a PostgreSQL schema.
+It defaults to `'public'`.
 
 `lockSchemaDDL` prefixes the DDL with a transaction-scoped PostgreSQL advisory
 lock keyed by the schema. The store sends both as one parameterless query, so
@@ -222,9 +268,9 @@ When an existing `Pool` is passed, `close()` does not end the pool (the caller r
 
 **Source:** `#initialize` in `packages/context/src/lib/store/postgres.store.ts` and `packages/context/src/lib/store/postgres-schema-lock.ts`.
 
-### JSONB for Metadata
+### JSONB for metadata
 
-PostgreSQL uses JSONB for metadata, enabling indexed queries:
+PostgreSQL stores metadata as JSONB:
 
 ```sql
 CREATE TABLE chats (
@@ -237,7 +283,7 @@ CREATE TABLE chats (
 );
 ```
 
-### tsvector + GIN for Full-Text Search
+### tsvector + GIN for full-text search
 
 PostgreSQL uses `tsvector` columns with GIN indexes:
 
@@ -264,7 +310,7 @@ ORDER BY rank DESC
 LIMIT $3
 ```
 
-### Async Transaction Handling
+### Async transaction handling
 
 PostgreSQL uses client-based transactions.
 
@@ -287,31 +333,27 @@ async #useTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
 
 **Source:** `#useTransaction` in `packages/context/src/lib/store/postgres.store.ts`.
 
-## SQL Server Adapter
+## SQL Server adapter
 
-The `SqlServerContextStore` uses the `mssql` package with graceful FTS degradation.
+The `SqlServerContextStore` uses the `mssql` package. Its search queries use
+full-text search when installed and `LIKE` otherwise.
 
-### Graceful FTS Degradation
+### Graceful FTS degradation
 
-SQL Server requires full-text catalog setup. The adapter checks for availability:
+Each `searchMessages` call checks whether full-text search is installed:
 
-```typescript
-async #checkFtsSupport(): Promise<boolean> {
-  try {
-    const result = await this.#pool.request()
-      .query(`SELECT FULLTEXTSERVICEPROPERTY('IsFullTextInstalled') as installed`);
-    return result.recordset[0]?.installed === 1;
-  } catch {
-    return false;
-  }
-}
+```sql
+SELECT CAST(SERVERPROPERTY('IsFullTextInstalled') AS INT) as ftsInstalled
 ```
 
-If FTS isn't available, search falls back to `LIKE` queries.
+If the result is `1`, the store searches with `CONTAINSTABLE`; otherwise it uses
+`LIKE`. Errors from the check or search propagate to the caller.
 
-## Schema Design
+**Source:** `searchMessages` in `packages/context/src/lib/store/sqlserver.store.ts`.
 
-### TEXT IDs
+## Schema design
+
+### Text IDs
 
 All IDs use TEXT/VARCHAR instead of integers:
 
@@ -319,15 +361,16 @@ All IDs use TEXT/VARCHAR instead of integers:
 id TEXT PRIMARY KEY
 ```
 
-**Why TEXT IDs?**
+**Why text IDs?**
 
 - UUIDs generated client-side (no round-trip)
 - Distributed generation without coordination
 - Human-readable in debugging
 
-### BIGINT Timestamps
+### BIGINT timestamps
 
-Timestamps use BIGINT milliseconds since Unix epoch:
+Timestamps store milliseconds since the Unix epoch. SQLite uses `INTEGER`;
+PostgreSQL and SQL Server use `BIGINT`:
 
 ```sql
 createdAt INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
@@ -339,7 +382,7 @@ createdAt INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
 - No timezone issues
 - Consistent across databases
 
-### CASCADE Deletes
+### CASCADE deletes
 
 Foreign keys use CASCADE for cleanup:
 
@@ -451,7 +494,7 @@ CREATE VIRTUAL TABLE messages_fts USING fts5(
 );
 ```
 
-**Source:** `packages/context/src/lib/store/ddl.sqlite.ts` and `packages/context/src/lib/store/sqlite.store.ts:218-226`
+**Source:** `packages/context/src/lib/store/ddl.sqlite.ts` and `packages/context/src/lib/store/sqlite.store.ts`.
 
 ### Index strategy
 
@@ -464,7 +507,7 @@ CREATE VIRTUAL TABLE messages_fts USING fts5(
 | `idx_checkpoints_chatId`       | Fast checkpoint listing                   |
 | `idx_checkpoints_messageId`    | Foreign-key checks when deleting messages |
 
-## Adapter Comparison
+## Adapter comparison
 
 | Feature        | SQLite          | PostgreSQL                         | SQL Server                      |
 | -------------- | --------------- | ---------------------------------- | ------------------------------- |
@@ -477,7 +520,7 @@ CREATE VIRTUAL TABLE messages_fts USING fts5(
 | Opening        | Constructor     | `await create()`                   | `await create()`                |
 | Dependency     | `node:sqlite`   | `pg`                               | `mssql`                         |
 
-## Next Steps
+## Next steps
 
 - [Core Concepts](/docs/context/architecture-core-concepts) – Fragments, codecs, and engine orchestration
 - [State Management](/docs/context/architecture-state-management) – DAG model, branches, and checkpoints
