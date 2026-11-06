@@ -1,6 +1,6 @@
+import { open } from '@zukhruf/sqlite-open';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 
 import { createVirtualSandbox } from '@deepagents/context';
@@ -8,7 +8,7 @@ import { Text2Sql, createSqlCommand } from '@deepagents/text2sql';
 import { Sqlite, info, tables } from '@deepagents/text2sql/sqlite';
 
 function buildSandbox() {
-  const db = new DatabaseSync(':memory:');
+  const db = open(':memory:');
   db.exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);`);
   db.exec(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');`);
 
@@ -25,10 +25,10 @@ function buildSandbox() {
 }
 
 function buildMultiSandbox() {
-  const a = new DatabaseSync(':memory:');
+  const a = open(':memory:');
   a.exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);`);
   a.exec(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');`);
-  const b = new DatabaseSync(':memory:');
+  const b = open(':memory:');
   b.exec(`CREATE TABLE orders (id INTEGER PRIMARY KEY, total REAL);`);
 
   const mem = new Sqlite({

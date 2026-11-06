@@ -1,8 +1,8 @@
+import { open } from '@zukhruf/sqlite-open';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
 import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import XLSX from 'xlsx';
 
@@ -565,7 +565,7 @@ describe('Spreadsheet Adapter', () => {
       // count of the connection the adapter opens; the cap stands in for a
       // full disk, so SQLite ends the load transaction itself.
       const database = `file:sheet-${crypto.randomUUID()}?mode=memory&cache=shared`;
-      using holder = new DatabaseSync(database);
+      using holder = open(database);
       holder.exec('PRAGMA max_page_count = 3');
 
       assert.throws(
@@ -609,7 +609,7 @@ describe('Spreadsheet Adapter', () => {
         const file = write(directory.path);
         const database = `file:sheet-${crypto.randomUUID()}?mode=memory&cache=shared`;
         {
-          using holder = new DatabaseSync(database);
+          using holder = open(database);
           holder.exec(`PRAGMA max_page_count = ${maxPages}`);
           assert.throws(
             () => new Spreadsheet({ file, database, grounding: [] }),
@@ -620,7 +620,7 @@ describe('Spreadsheet Adapter', () => {
         // A shared-cache in-memory database lives only while a connection
         // holds it, so a fresh one finds it empty unless the adapter's
         // connection is still open.
-        using fresh = new DatabaseSync(database);
+        using fresh = open(database);
         assert.deepStrictEqual(
           fresh.prepare('SELECT name FROM sqlite_schema').all(),
           [],

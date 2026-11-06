@@ -1,5 +1,6 @@
+import { open } from '@zukhruf/sqlite-open';
 import { transaction } from '@zukhruf/sqlite-transaction';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 
 import type { GroundingFn } from '../adapter.ts';
 import { Sqlite } from '../sqlite/sqlite.ts';
@@ -59,7 +60,7 @@ export class Spreadsheet extends Sqlite {
     // the adapter takes it over.
     using pending = new DisposableStack();
     const dbPath = options.database ?? ':memory:';
-    const db = pending.use(new DatabaseSync(dbPath));
+    const db = pending.use(open(dbPath));
 
     // Create tables and load data
     for (const sheet of sheets) {

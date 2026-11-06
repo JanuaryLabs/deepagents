@@ -1,3 +1,4 @@
+import { open } from '@zukhruf/sqlite-open';
 import { StreamHarness } from '@zukhruf/testing/streams';
 import {
   type UIMessage,
@@ -8,7 +9,6 @@ import {
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
-import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 
 import {
@@ -162,7 +162,7 @@ function createAdapter(
     columnValues(),
   ],
 ) {
-  const db = new DatabaseSync(':memory:');
+  const db = open(':memory:');
   db.exec('PRAGMA foreign_keys = ON;');
   db.exec(`
     CREATE TABLE users (

@@ -1,8 +1,8 @@
-import { DatabaseSync } from 'node:sqlite';
+import { open } from '@zukhruf/sqlite-open';
 
 import { Sqlite, info, tables } from '@deepagents/text2sql/sqlite';
 
-const db = new DatabaseSync(':memory:');
+const db = open(':memory:');
 db.exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);`);
 db.exec(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');`);
 

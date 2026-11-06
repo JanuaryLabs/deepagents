@@ -1,4 +1,5 @@
 import { Declaration } from '@zukhruf/sqlite-drift';
+import { open } from '@zukhruf/sqlite-open';
 import { transaction } from '@zukhruf/sqlite-transaction';
 import type {
   BufferEncoding,
@@ -10,7 +11,7 @@ import type {
   RmOptions,
 } from 'just-bash';
 import * as path from 'node:path';
-import { DatabaseSync, type SQLTagStore } from 'node:sqlite';
+import type { DatabaseSync, SQLTagStore } from 'node:sqlite';
 import z from 'zod';
 
 import { entryType } from '../columns.ts';
@@ -112,7 +113,7 @@ export class SqliteFs implements IFileSystem {
     // Normalize root; if user passes '/', treat as empty (root-level storage)
     const normalizedRoot = this.#normalizeRoot(options.root);
     this.#root = normalizedRoot === '/' ? '' : normalizedRoot;
-    this.#db = new DatabaseSync(options.dbPath);
+    this.#db = open(options.dbPath);
     this.#db.exec(SETUP);
     tables.apply(this.#db);
     this.#sql = this.#db.createTagStore();

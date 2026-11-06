@@ -1,5 +1,5 @@
+import { open } from '@zukhruf/sqlite-open';
 import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 
 import { render } from '@deepagents/context';
@@ -7,7 +7,7 @@ import { Text2Sql } from '@deepagents/text2sql';
 import { Sqlite, info, tables } from '@deepagents/text2sql/sqlite';
 
 function sqliteAdapter(ddl: string) {
-  const db = new DatabaseSync(':memory:');
+  const db = open(':memory:');
   db.exec(ddl);
   return new Sqlite({
     execute: (sql: string) => db.prepare(sql).all(),

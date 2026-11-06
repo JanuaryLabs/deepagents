@@ -5,7 +5,6 @@
 // Performance PRAGMAs (session-level, run on each connection before the
 // schema is applied).
 export const SETUP = `
-PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 PRAGMA cache_size = -64000;
 PRAGMA temp_store = MEMORY;

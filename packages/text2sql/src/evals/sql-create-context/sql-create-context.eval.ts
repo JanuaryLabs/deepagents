@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
+import { open } from '@zukhruf/sqlite-open';
 import OpenAI from 'openai';
 import z from 'zod';
 
@@ -185,7 +185,7 @@ const run = evaluate({
   models: EVAL_MODELS.map((m) => ({ name: m.name, model: m.input.model })),
   dataset: evalDataset,
   task: async (item, variant) => {
-    const db = new DatabaseSync(':memory:');
+    const db = open(':memory:');
     db.exec(item.input.context);
 
     const adapter = new sqlite.Sqlite({
