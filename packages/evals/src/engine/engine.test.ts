@@ -1,5 +1,5 @@
+import { open } from '@zukhruf/sqlite-open';
 import assert from 'node:assert';
-import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import { setTimeout } from 'node:timers/promises';
 
@@ -20,7 +20,7 @@ const echoTask = async (item: Item) => ({
 
 describe('runEval', () => {
   it('basic run with 3 items computes correct summary', async () => {
-    const store = new RunStore(new DatabaseSync(':memory:'));
+    const store = new RunStore(open(':memory:'));
     const ds = dataset<Item>([
       { input: 'What is 1+1?', expected: '2' },
       { input: 'What is 2+2?', expected: '4' },
@@ -45,7 +45,7 @@ describe('runEval', () => {
   });
 
   it('task error continues execution and records score 0', async () => {
-    const store = new RunStore(new DatabaseSync(':memory:'));
+    const store = new RunStore(open(':memory:'));
     const emitter = new EvalEmitter();
     const errors: Array<{ index: number; error: string }> = [];
     emitter.on('case:error', (data) => errors.push(data));
@@ -86,7 +86,7 @@ describe('runEval', () => {
   });
 
   it('concurrency limit is respected', async () => {
-    const store = new RunStore(new DatabaseSync(':memory:'));
+    const store = new RunStore(open(':memory:'));
     let active = 0;
     let maxActive = 0;
 
@@ -124,7 +124,7 @@ describe('runEval', () => {
   });
 
   it('timeout records case as error with timeout exceeded message', async () => {
-    const store = new RunStore(new DatabaseSync(':memory:'));
+    const store = new RunStore(open(':memory:'));
     const emitter = new EvalEmitter();
     const errors: Array<{ index: number; error: string }> = [];
     emitter.on('case:error', (data) => errors.push(data));
@@ -157,7 +157,7 @@ describe('runEval', () => {
   });
 
   it('events are emitted in correct order with maxConcurrency=1', async () => {
-    const store = new RunStore(new DatabaseSync(':memory:'));
+    const store = new RunStore(open(':memory:'));
     const emitter = new EvalEmitter();
     const events: string[] = [];
 
@@ -193,7 +193,7 @@ describe('runEval', () => {
   });
 
   it('store persistence: cases and run status are persisted after completion', async () => {
-    const store = new RunStore(new DatabaseSync(':memory:'));
+    const store = new RunStore(open(':memory:'));
     const emitter = new EvalEmitter();
     let capturedRunId = '';
     emitter.on('run:start', (d) => {

@@ -1,4 +1,5 @@
 import { Declaration } from '@zukhruf/sqlite-drift';
+import { open } from '@zukhruf/sqlite-open';
 import { transaction } from '@zukhruf/sqlite-transaction';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -332,12 +333,10 @@ export class RunStore {
     } else {
       const dbPath = pathOrDb ?? '.evals/store.db';
       mkdirSync(dirname(dbPath), { recursive: true });
-      this.#db = new DatabaseSync(dbPath);
+      this.#db = open(dbPath);
     }
     this.#db.exec(`
-      PRAGMA journal_mode = WAL;
       PRAGMA synchronous = NORMAL;
-      PRAGMA busy_timeout = 5000;
     `);
     const runsTable = this.#get(
       { name: 'text' },

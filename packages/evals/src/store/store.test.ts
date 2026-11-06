@@ -1,8 +1,8 @@
+import { open } from '@zukhruf/sqlite-open';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import { setTimeout } from 'node:timers/promises';
 
@@ -56,7 +56,7 @@ describe('RunStore', () => {
       'evals-store-lock-',
     );
     const path = join(directory.path, 'store.db');
-    using db = new DatabaseSync(path);
+    using db = open(path);
     const store = new RunStore(db);
     // Another process, such as a CLI eval next to the web runner, writes for 200 ms.
     await using lock = await new Sqlite().writeLock(path, 200);
@@ -67,7 +67,7 @@ describe('RunStore', () => {
   });
 
   it('creates a suite and returns id and name', () => {
-    using db = new DatabaseSync(':memory:');
+    using db = open(':memory:');
     const store = new RunStore(db);
     const suite = store.createSuite('accuracy-suite');
 
@@ -80,7 +80,7 @@ describe('RunStore', () => {
   });
 
   it('creates a run linked to a suite and lists it', () => {
-    using db = new DatabaseSync(':memory:');
+    using db = open(':memory:');
     const store = new RunStore(db);
     const suite = store.createSuite('linked-suite');
     const runId = store.createRun({
@@ -102,7 +102,7 @@ describe('RunStore', () => {
   });
 
   it('creates a run and retrieves it via getRun', () => {
-    using db = new DatabaseSync(':memory:');
+    using db = open(':memory:');
     const store = new RunStore(db);
     const { suiteId, runId } = createRunInSuite(store, {
       name: 'run-with-suite',
@@ -123,7 +123,7 @@ describe('RunStore', () => {
   });
 
   it('saves cases in batch and retrieves them in idx order', () => {
-    using db = new DatabaseSync(':memory:');
+    using db = open(':memory:');
     const store = new RunStore(db);
     const { runId } = createRunInSuite(store, {
       name: 'batch-run',
@@ -144,7 +144,7 @@ describe('RunStore', () => {
   });
 
   it("throws SQLite's disk-full error when the database runs out of space while saving cases", () => {
-    using db = new DatabaseSync(':memory:');
+    using db = open(':memory:');
     const store = new RunStore(db);
     const { runId } = createRunInSuite(store, {
       name: 'full-disk-run',
@@ -164,7 +164,7 @@ describe('RunStore', () => {
   });
 
   it('getFailingCases returns cases with scores below threshold', () => {
-    using db = new DatabaseSync(':memory:');
+    using db = open(':memory:');
     const store = new RunStore(db);
     const { runId } = createRunInSuite(store, {
       name: 'failing-run',
@@ -197,7 +197,7 @@ describe('RunStore', () => {
   });
 
   it('getRunSummary computes correct aggregates', () => {
-    using db = new DatabaseSync(':memory:');
+    using db = open(':memory:');
     const store = new RunStore(db);
     const { runId } = createRunInSuite(store, {
       name: 'summary-run',
@@ -237,7 +237,7 @@ describe('RunStore', () => {
   });
 
   it('listSuites returns suites in descending creation order', async () => {
-    using db = new DatabaseSync(':memory:');
+    using db = open(':memory:');
     const store = new RunStore(db);
     store.createSuite('first');
     await setTimeout(5);
@@ -257,7 +257,7 @@ describe('RunStore', () => {
   });
 
   it('finishRun updates status and summary', () => {
-    using db = new DatabaseSync(':memory:');
+    using db = open(':memory:');
     const store = new RunStore(db);
     const { runId } = createRunInSuite(store, {
       name: 'finish-run',
@@ -284,7 +284,7 @@ describe('RunStore', () => {
   });
 
   it('getRun rejects a stored summary that is not a run summary', () => {
-    using db = new DatabaseSync(':memory:');
+    using db = open(':memory:');
     const store = new RunStore(db);
     const { runId } = createRunInSuite(store, {
       name: 'corrupt-summary-run',
@@ -302,7 +302,7 @@ describe('RunStore', () => {
   });
 
   it('creates a prompt and lists it', () => {
-    using db = new DatabaseSync(':memory:');
+    using db = open(':memory:');
     const store = new RunStore(db);
     const prompt = store.createPrompt(
       'test-prompt',
@@ -321,13 +321,13 @@ describe('RunStore', () => {
   });
 
   it('getPrompt returns undefined for missing id', () => {
-    using db = new DatabaseSync(':memory:');
+    using db = open(':memory:');
     const store = new RunStore(db);
     assert.strictEqual(store.getPrompt('nonexistent'), undefined);
   });
 
   it('deletePrompt removes the prompt', () => {
-    using db = new DatabaseSync(':memory:');
+    using db = open(':memory:');
     const store = new RunStore(db);
     const prompt = store.createPrompt('to-delete', 'content');
     store.deletePrompt(prompt.id);
@@ -336,7 +336,7 @@ describe('RunStore', () => {
   });
 
   it('saving the same prompt name creates a new version', () => {
-    using db = new DatabaseSync(':memory:');
+    using db = open(':memory:');
     const store = new RunStore(db);
     const v1 = store.createPrompt('unique-name', 'content 1');
     const v2 = store.createPrompt('unique-name', 'content 2');
@@ -351,7 +351,7 @@ describe('RunStore', () => {
   });
 
   it('migrates legacy prompts table and preserves prompt data', () => {
-    using db = new DatabaseSync(':memory:');
+    using db = open(':memory:');
     const legacyPromptId = crypto.randomUUID();
     db.exec(`
       CREATE TABLE prompts (
@@ -378,7 +378,7 @@ describe('RunStore', () => {
   });
 
   it('migrates runs to require suite_id, drops orphaned runs and keeps the cases and scores of kept runs', () => {
-    using db = new DatabaseSync(':memory:');
+    using db = open(':memory:');
     db.exec(`
       PRAGMA foreign_keys = ON;
       CREATE TABLE suites (
@@ -505,7 +505,7 @@ describe('RunStore', () => {
   });
 
   it('saves multiple scorers per case and retrieves all scores', () => {
-    using db = new DatabaseSync(':memory:');
+    using db = open(':memory:');
     const store = new RunStore(db);
     const { runId } = createRunInSuite(store, {
       name: 'multi-scorer-run',
