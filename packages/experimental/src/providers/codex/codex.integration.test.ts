@@ -1,5 +1,6 @@
 import { NoSuchModelError } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
+import { open } from '@zukhruf/sqlite-open';
 import { settleWithin } from '@zukhruf/testing/async';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
 import {
@@ -16,7 +17,6 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { type TestContext, test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { PgBoss, fromPglite } from 'pg-boss';
@@ -673,13 +673,9 @@ test('Zukhruf executes a host tool and persists history across queued turns', as
       pollingIntervalSeconds: 0.5,
       schema: 'pgboss',
     });
-    const streamStore = new SqliteStreamStore(
-      resources.use(new DatabaseSync(':memory:')),
-    );
+    const streamStore = new SqliteStreamStore(resources.use(open(':memory:')));
     return {
-      store: new SqliteContextStore(
-        resources.use(new DatabaseSync(':memory:')),
-      ),
+      store: new SqliteContextStore(resources.use(open(':memory:'))),
       streams: new StreamManager({
         store: streamStore,
         changeSource: new PollingChangeSource({ reads: streamStore }),

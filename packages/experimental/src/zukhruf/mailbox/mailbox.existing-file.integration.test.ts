@@ -1,6 +1,6 @@
+import { open } from '@zukhruf/sqlite-open';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 
 import {
@@ -45,7 +45,7 @@ describe('SqliteMailboxStore on an existing file', () => {
     // zukhruf_mailbox_activity loses its PRIMARY KEY, which the ON CONFLICT of
     // beginTurn needs.
     {
-      using connection = new DatabaseSync(database.path);
+      using connection = open(database.path);
       connection.exec(`
 ALTER TABLE zukhruf_mailbox_items ADD COLUMN note TEXT;
 ALTER TABLE zukhruf_mailbox_consumed_terminal_ids ADD COLUMN note TEXT;

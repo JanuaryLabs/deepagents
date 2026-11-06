@@ -1,10 +1,10 @@
 import { PGlite } from '@electric-sql/pglite';
+import { open } from '@zukhruf/sqlite-open';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { PgBoss, fromPglite } from 'pg-boss';
 
@@ -72,11 +72,9 @@ async function adapters(resources: AsyncDisposableStack) {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
   });
-  const streamStore = new SqliteStreamStore(
-    resources.use(new DatabaseSync(':memory:')),
-  );
+  const streamStore = new SqliteStreamStore(resources.use(open(':memory:')));
   return {
-    store: new SqliteContextStore(resources.use(new DatabaseSync(':memory:'))),
+    store: new SqliteContextStore(resources.use(open(':memory:'))),
     streams: new StreamManager({
       store: streamStore,
       changeSource: new PollingChangeSource({ reads: streamStore }),

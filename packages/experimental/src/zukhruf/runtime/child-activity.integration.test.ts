@@ -1,5 +1,6 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
+import { open } from '@zukhruf/sqlite-open';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
@@ -7,7 +8,6 @@ import { Hono } from 'hono';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { PgBoss, fromPglite } from 'pg-boss';
@@ -139,8 +139,8 @@ test(
       'child-activity-',
     );
     const contextPath = join(directory.path, 'context.sqlite');
-    using contextDb = new DatabaseSync(contextPath);
-    using observerDb = new DatabaseSync(contextPath);
+    using contextDb = open(contextPath);
+    using observerDb = open(contextPath);
     const store = new SqliteContextStore(contextDb);
     const observerStore = new SqliteContextStore(observerDb);
     const streamStore = new SqliteStreamStore(':memory:');
@@ -506,7 +506,7 @@ test(
             Object.keys(entry.activities).length <= 5,
         ),
       );
-      using freshDb = new DatabaseSync(contextPath);
+      using freshDb = open(contextPath);
       const freshStore = new SqliteContextStore(freshDb);
       const freshRuntimeSetup = new AgentRuntime(root);
       const freshRuntimeStack = defineStack(async () => ({

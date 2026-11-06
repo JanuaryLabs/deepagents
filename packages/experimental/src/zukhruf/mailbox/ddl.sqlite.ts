@@ -4,7 +4,6 @@
 
 // Session-level PRAGMAs, run on each connection before the schema is applied.
 export const SETUP = `
-PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 `;
 

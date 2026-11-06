@@ -1,6 +1,7 @@
 import { Declaration } from '@zukhruf/sqlite-drift';
+import { open } from '@zukhruf/sqlite-open';
 import { transaction } from '@zukhruf/sqlite-transaction';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 
 import { SETUP, statements } from './ddl.sqlite.ts';
@@ -16,8 +17,6 @@ import {
 } from './types.ts';
 
 const tables = new Declaration(statements, { rows: 'keep' });
-
-const BUSY_TIMEOUT_MS = 5_000;
 
 const conversationIdSchema = z.object({
   chatId: z.string(),
@@ -52,7 +51,7 @@ export class SqliteMailboxStore extends MailboxStore implements Disposable {
 
   constructor(path: string) {
     super();
-    this.#database = new DatabaseSync(path, { timeout: BUSY_TIMEOUT_MS });
+    this.#database = open(path);
     this.#database.exec(SETUP);
     tables.apply(this.#database);
   }

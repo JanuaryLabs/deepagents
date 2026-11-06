@@ -3,6 +3,7 @@ import type {
   LanguageModelV4StreamPart,
 } from '@ai-sdk/provider';
 import { Latch } from '@zukhruf/async';
+import { open } from '@zukhruf/sqlite-open';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { type UIMessage, isToolUIPart, simulateReadableStream } from 'ai';
@@ -10,7 +11,6 @@ import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { z } from 'zod';
 
@@ -2326,7 +2326,7 @@ test('a dynamic wake remains usable across a context-store restart', async () =>
     'zukhruf-dynamic-restart-',
   );
   const databasePath = join(directory.path, 'context.sqlite');
-  const firstDatabase = new DatabaseSync(databasePath);
+  const firstDatabase = open(databasePath);
   const firstStore = new SqliteContextStore(firstDatabase);
   const scheduler = new RecordingWakeScheduler();
   using h = disposableHarness(scheduler, firstStore);
@@ -2368,7 +2368,7 @@ test('a dynamic wake remains usable across a context-store restart', async () =>
   await firstWorker[Symbol.asyncDispose]();
   firstDatabase.close();
 
-  using secondDatabase = new DatabaseSync(databasePath);
+  using secondDatabase = open(databasePath);
   const restartedSetup = new AgentRuntime(declaration);
   const restartedStack2 = defineStack(async () => ({
     ...h,
@@ -2389,7 +2389,7 @@ test('a cron wake remains usable across a context-store restart', async () => {
     'zukhruf-scheduling-restart-',
   );
   const databasePath = join(directory.path, 'context.sqlite');
-  const firstDatabase = new DatabaseSync(databasePath);
+  const firstDatabase = open(databasePath);
   const firstStore = new SqliteContextStore(firstDatabase);
   const scheduler = new RecordingWakeScheduler();
   using h = disposableHarness(scheduler, firstStore);
@@ -2422,7 +2422,7 @@ test('a cron wake remains usable across a context-store restart', async () => {
   await firstWorker[Symbol.asyncDispose]();
   firstDatabase.close();
 
-  using restartedDatabase = new DatabaseSync(databasePath);
+  using restartedDatabase = open(databasePath);
   const restartedStore = new SqliteContextStore(restartedDatabase);
   const restartedSetup = new AgentRuntime(declaration);
   const restartedStack3 = defineStack(async () => ({

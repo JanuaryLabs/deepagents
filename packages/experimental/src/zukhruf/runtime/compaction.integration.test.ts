@@ -4,6 +4,7 @@ import type {
   LanguageModelV4Usage,
 } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
+import { open } from '@zukhruf/sqlite-open';
 import {
   type ModelMessage,
   type UIMessageChunk,
@@ -17,7 +18,6 @@ import { Hono } from 'hono';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
@@ -191,12 +191,8 @@ async function infrastructure(resources: AsyncDisposableStack) {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
   });
-  const store = new SqliteContextStore(
-    resources.use(new DatabaseSync(':memory:')),
-  );
-  const streamStore = new SqliteStreamStore(
-    resources.use(new DatabaseSync(':memory:')),
-  );
+  const store = new SqliteContextStore(resources.use(open(':memory:')));
+  const streamStore = new SqliteStreamStore(resources.use(open(':memory:')));
   const streams = new StreamManager({
     store: streamStore,
     changeSource: new PollingChangeSource({ reads: streamStore }),

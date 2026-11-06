@@ -1,9 +1,9 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import { open } from '@zukhruf/sqlite-open';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { z } from 'zod';
 
@@ -211,7 +211,7 @@ function cronDefinition(
 }
 
 test('one runtime neither discovers nor consumes another runtime cron', async () => {
-  const database = new DatabaseSync(':memory:');
+  const database = open(':memory:');
   const store = new SqliteContextStore(database);
   const schedulerA = new RecordingWakeScheduler();
   const schedulerB = new RecordingWakeScheduler();
