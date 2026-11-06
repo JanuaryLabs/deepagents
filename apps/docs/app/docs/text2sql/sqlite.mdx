@@ -11,15 +11,17 @@ Reuse the shared `model` setup from
 [Getting Started](/docs/text2sql/getting-started) in each example.
 
 <Tabs groupId="sqlite-driver" items={['node:sqlite', 'better-sqlite3', 'sql.js']}>
+
 <Tab value="node:sqlite">
+
 ```typescript
-import { DatabaseSync } from 'node:sqlite';
+import { open } from '@zukhruf/sqlite-open';
 
 import { Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
-const db = new DatabaseSync('./your-database.db', { readOnly: true });
+const db = open('./your-database.db', { readOnly: true });
 
 const text2sql = new Text2Sql({
   adapters: {
@@ -39,8 +41,11 @@ const text2sql = new Text2Sql({
   },
 });
 ```
+
 </Tab>
+
 <Tab value="better-sqlite3">
+
 ```typescript
 import Database from 'better-sqlite3';
 
@@ -68,8 +73,11 @@ const text2sql = new Text2Sql({
   },
 });
 ```
+
 </Tab>
+
 <Tab value="sql.js">
+
 ```typescript
 import initSqlJs from 'sql.js';
 
@@ -106,7 +114,9 @@ const text2sql = new Text2Sql({
   },
 });
 ```
+
 </Tab>
+
 </Tabs>
 
 ## Configuration Options
@@ -138,16 +148,16 @@ See [Grounding](/docs/text2sql/grounding) for the full list of available groundi
 
 The following grounding functions are available for SQLite. Import them from `@deepagents/text2sql/sqlite`:
 
-| Function | Description |
-|----------|-------------|
-| `tables()` | Discovers tables from `sqlite_master`, extracts columns using `PRAGMA table_info`, detects primary keys |
-| `views()` | Discovers database views |
-| `info()` | Collects SQLite version and database info |
-| `indexes()` | Identifies indexes using `PRAGMA index_list` and `PRAGMA index_info` |
-| `constraints()` | Maps foreign keys using `PRAGMA foreign_key_list` |
-| `rowCount()` | Counts rows and classifies tables by size |
-| `columnStats()` | Collects min, max, null fraction for columns |
-| `columnValues()` | Detects enum-like and low-cardinality columns |
+| Function         | Description                                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------------- |
+| `tables()`       | Discovers tables from `sqlite_master`, extracts columns using `PRAGMA table_info`, detects primary keys |
+| `views()`        | Discovers database views                                                                                |
+| `info()`         | Collects SQLite version and database info                                                               |
+| `indexes()`      | Identifies indexes using `PRAGMA index_list` and `PRAGMA index_info`                                    |
+| `constraints()`  | Maps foreign keys using `PRAGMA foreign_key_list`                                                       |
+| `rowCount()`     | Counts rows and classifies tables by size                                                               |
+| `columnStats()`  | Collects min, max, null fraction for columns                                                            |
+| `columnValues()` | Detects enum-like and low-cardinality columns                                                           |
 
 See [Grounding](/docs/text2sql/grounding) for detailed configuration options.
 
@@ -194,9 +204,9 @@ execute: (sql) => ({ rows: db.prepare(sql).all() });
 For testing or temporary data:
 
 ```typescript
-import { DatabaseSync } from 'node:sqlite';
+import { open } from '@zukhruf/sqlite-open';
 
-const db = new DatabaseSync(':memory:');
+const db = open(':memory:');
 db.exec(`
   CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
   INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob');

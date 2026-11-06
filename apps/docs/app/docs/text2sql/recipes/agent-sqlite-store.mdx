@@ -43,21 +43,26 @@ The adapter is the database the agent will query. Pick one. The adapter map
 key (`main` here) is the selector the CLI uses inside the sandbox.
 
 <Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'DuckDB', 'SQL Server', 'MySQL/MariaDB', 'BigQuery', 'ClickHouse']}>
+
 <Tab value="SQLite">
+
 ```typescript
-import { DatabaseSync } from 'node:sqlite';
+import { open } from '@zukhruf/sqlite-open';
 
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
-const db = new DatabaseSync('./your-database.db', { readOnly: true });
+const db = open('./your-database.db', { readOnly: true });
 const adapter = new Sqlite({
   execute: (sql) => db.prepare(sql).all(),
   grounding: [sqlite.tables(), sqlite.info()],
 });
 ```
+
 </Tab>
+
 <Tab value="PostgreSQL">
+
 ```typescript
 import pg from 'pg';
 
@@ -70,8 +75,11 @@ const adapter = new Postgres({
   grounding: [postgres.tables(), postgres.info()],
 });
 ```
+
 </Tab>
+
 <Tab value="DuckDB">
+
 ```typescript
 import { DuckDBInstance } from '@duckdb/node-api';
 
@@ -90,8 +98,11 @@ const adapter = new DuckDB({
   grounding: [duckdb.tables(), duckdb.info()],
 });
 ```
+
 </Tab>
+
 <Tab value="SQL Server">
+
 ```typescript
 import sql from 'mssql';
 
@@ -110,8 +121,11 @@ const adapter = new SqlServer({
   grounding: [sqlserver.tables(), sqlserver.info()],
 });
 ```
+
 </Tab>
+
 <Tab value="MySQL/MariaDB">
+
 ```typescript
 import mysql from 'mysql2/promise';
 
@@ -132,8 +146,11 @@ const adapter = new Mysql({
   grounding: [mysqlGrounding.tables(), mysqlGrounding.info()],
 });
 ```
+
 </Tab>
+
 <Tab value="BigQuery">
+
 ```typescript
 import { BigQuery as BigQueryClient } from '@google-cloud/bigquery';
 
@@ -151,13 +168,20 @@ const adapter = new BigQuery({
     return rows;
   },
   validate: async (sql) => {
-    await client.createQueryJob({ query: sql, dryRun: true, useQueryCache: false });
+    await client.createQueryJob({
+      query: sql,
+      dryRun: true,
+      useQueryCache: false,
+    });
   },
   grounding: [bigquery.tables(), bigquery.info()],
 });
 ```
+
 </Tab>
+
 <Tab value="ClickHouse">
+
 ```typescript
 import { createClient } from '@clickhouse/client';
 
@@ -180,7 +204,9 @@ const adapter = new ClickHouse({
   grounding: [clickhouse.tables(), clickhouse.info()],
 });
 ```
+
 </Tab>
+
 </Tabs>
 
 ## 4. Create the model
@@ -298,7 +324,11 @@ again.
 
 ```typescript
 const store = new SqliteContextStore('./agent.db');
-const context = new ContextEngine({ store, chatId: 'chat-123', userId: 'user-456' });
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-123',
+  userId: 'user-456',
+});
 context.set(...instructions(), ...(await indexer.index()));
 // ai = agent({ ... }) as before
 

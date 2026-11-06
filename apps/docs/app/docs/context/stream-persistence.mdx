@@ -44,9 +44,9 @@ store.close();
 You can also pass an existing `DatabaseSync` instance:
 
 ```typescript
-import { DatabaseSync } from 'node:sqlite';
+import { open } from '@zukhruf/sqlite-open';
 
-const db = new DatabaseSync('./app.db');
+const db = open('./app.db');
 const store = new SqliteStreamStore(db);
 ```
 
@@ -54,38 +54,38 @@ If you pass your own `DatabaseSync`, call `store.close()` only if this stream st
 
 ### StreamData
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | `string` | Unique stream identifier |
-| `status` | `StreamStatus` | Current status: `queued`, `running`, `completed`, `failed`, `cancelled` |
-| `createdAt` | `number` | Timestamp when the stream was created |
-| `startedAt` | `number \| null` | Timestamp when the stream started running |
-| `finishedAt` | `number \| null` | Timestamp when the stream reached a terminal status |
-| `cancelRequestedAt` | `number \| null` | Timestamp when cancellation was requested |
-| `error` | `string \| null` | Error message if the stream failed |
+| Field               | Type             | Description                                                             |
+| ------------------- | ---------------- | ----------------------------------------------------------------------- |
+| `id`                | `string`         | Unique stream identifier                                                |
+| `status`            | `StreamStatus`   | Current status: `queued`, `running`, `completed`, `failed`, `cancelled` |
+| `createdAt`         | `number`         | Timestamp when the stream was created                                   |
+| `startedAt`         | `number \| null` | Timestamp when the stream started running                               |
+| `finishedAt`        | `number \| null` | Timestamp when the stream reached a terminal status                     |
+| `cancelRequestedAt` | `number \| null` | Timestamp when cancellation was requested                               |
+| `error`             | `string \| null` | Error message if the stream failed                                      |
 
 ### StreamChunkData
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `streamId` | `string` | Parent stream ID |
-| `seq` | `number` | Monotonically increasing sequence number |
-| `data` | `StreamPart` | The AI SDK stream part (serialized as JSON in SQLite) |
-| `createdAt` | `number` | Timestamp when the chunk was persisted |
+| Field       | Type         | Description                                           |
+| ----------- | ------------ | ----------------------------------------------------- |
+| `streamId`  | `string`     | Parent stream ID                                      |
+| `seq`       | `number`     | Monotonically increasing sequence number              |
+| `data`      | `StreamPart` | The AI SDK stream part (serialized as JSON in SQLite) |
+| `createdAt` | `number`     | Timestamp when the chunk was persisted                |
 
 ### Methods
 
-| Method | Description |
-|--------|-------------|
-| `createStream(stream)` | Insert a new stream record |
-| `upsertStream(stream)` | Insert or return existing stream. Returns `{ stream, created }` |
-| `getStream(streamId)` | Fetch stream metadata, or `undefined` if not found |
-| `getStreamStatus(streamId)` | Fetch only the stream status, or `undefined` if not found |
+| Method                                        | Description                                                                                                                         |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `createStream(stream)`                        | Insert a new stream record                                                                                                          |
+| `upsertStream(stream)`                        | Insert or return existing stream. Returns `{ stream, created }`                                                                     |
+| `getStream(streamId)`                         | Fetch stream metadata, or `undefined` if not found                                                                                  |
+| `getStreamStatus(streamId)`                   | Fetch only the stream status, or `undefined` if not found                                                                           |
 | `updateStreamStatus(streamId, status, opts?)` | Transition stream status. Automatically sets `startedAt`, `finishedAt`, `cancelRequestedAt`, and `error` based on the target status |
-| `appendChunks(chunks)` | Batch-insert chunks (transactional in SQLite) |
-| `getChunks(streamId, fromSeq?, limit?)` | Fetch chunks ordered by `seq`, optionally starting from `fromSeq` |
-| `deleteStream(streamId)` | Delete stream and all its chunks (cascading) |
-| `reopenStream(streamId)` | Atomically delete a terminal stream and re-create it as `queued`. Throws if the stream is not found or not in a terminal status |
+| `appendChunks(chunks)`                        | Batch-insert chunks (transactional in SQLite)                                                                                       |
+| `getChunks(streamId, fromSeq?, limit?)`       | Fetch chunks ordered by `seq`, optionally starting from `fromSeq`                                                                   |
+| `deleteStream(streamId)`                      | Delete stream and all its chunks (cascading)                                                                                        |
+| `reopenStream(streamId)`                      | Atomically delete a terminal stream and re-create it as `queued`. Throws if the stream is not found or not in a terminal status     |
 
 ### SqliteStreamStore.close()
 
@@ -197,11 +197,11 @@ await manager.persist(uiStream, 'stream-abc', {
 });
 ```
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `strategy` | `'buffered' \| 'immediate'` | `'buffered'` | `buffered` batches chunks for throughput; `immediate` persists each chunk before forwarding |
-| `flushSize` | `number` | `20` | For buffered strategy: flush after this many chunks |
-| `onCancelDetected` | `({ streamId, latencyMs }) => void \| Promise<void>` | `undefined` | Optional callback when cancellation is detected |
+| Option             | Type                                                 | Default      | Description                                                                                 |
+| ------------------ | ---------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------- |
+| `strategy`         | `'buffered' \| 'immediate'`                          | `'buffered'` | `buffered` batches chunks for throughput; `immediate` persists each chunk before forwarding |
+| `flushSize`        | `number`                                             | `20`         | For buffered strategy: flush after this many chunks                                         |
+| `onCancelDetected` | `({ streamId, latencyMs }) => void \| Promise<void>` | `undefined`  | Optional callback when cancellation is detected                                             |
 
 If the stream is already in a terminal status (`completed`, `failed`, `cancelled`), `persist` returns immediately without re-running.
 
@@ -320,7 +320,8 @@ A lower-level API that wraps a `UIMessageStreamWriter` to intercept and persist 
 
 ```typescript
 import { createUIMessageStream } from 'ai';
-import { persistedWriter, SqliteStreamStore } from '@deepagents/context';
+
+import { SqliteStreamStore, persistedWriter } from '@deepagents/context';
 
 const store = new SqliteStreamStore('./streams.db');
 
@@ -335,7 +336,11 @@ const uiStream = createUIMessageStream({
     });
 
     await pw.writer.write({ type: 'text-delta', id: 'text-1', delta: 'Hello' });
-    await pw.writer.write({ type: 'text-delta', id: 'text-1', delta: ' world' });
+    await pw.writer.write({
+      type: 'text-delta',
+      id: 'text-1',
+      delta: ' world',
+    });
 
     await pw.complete();
   },
@@ -344,22 +349,22 @@ const uiStream = createUIMessageStream({
 
 ### Options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `writer` | `UIMessageStreamWriter` | required | The original writer to wrap |
-| `store` | `StreamStore` | required | Where to persist chunks |
-| `streamId` | `string` | required | Stream identifier |
-| `strategy` | `'buffered' \| 'immediate'` | `'buffered'` | Persistence strategy |
-| `flushSize` | `number` | `20` | Chunks to buffer before flushing (buffered strategy only) |
+| Option      | Type                        | Default      | Description                                               |
+| ----------- | --------------------------- | ------------ | --------------------------------------------------------- |
+| `writer`    | `UIMessageStreamWriter`     | required     | The original writer to wrap                               |
+| `store`     | `StreamStore`               | required     | Where to persist chunks                                   |
+| `streamId`  | `string`                    | required     | Stream identifier                                         |
+| `strategy`  | `'buffered' \| 'immediate'` | `'buffered'` | Persistence strategy                                      |
+| `flushSize` | `number`                    | `20`         | Chunks to buffer before flushing (buffered strategy only) |
 
 ### PersistedWriter Methods
 
-| Method | Description |
-|--------|-------------|
-| `flush()` | Force-flush the buffer to the store |
-| `complete()` | Flush remaining chunks and mark stream as `completed` (unless an `error` chunk already marked it `failed`) |
+| Method         | Description                                                                                                                        |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `flush()`      | Force-flush the buffer to the store                                                                                                |
+| `complete()`   | Flush remaining chunks and mark stream as `completed` (unless an `error` chunk already marked it `failed`)                         |
 | `fail(error?)` | Flush remaining chunks and mark stream as `failed` with optional error message (unless an `error` chunk already set failure state) |
-| `cleanup()` | Delete the stream and all chunks from the store |
+| `cleanup()`    | Delete the stream and all chunks from the store                                                                                    |
 
 The returned `writer` property is a drop-in replacement for `UIMessageStreamWriter`. Both `write()` and `merge()` are intercepted: chunks are persisted before being forwarded to the original writer.
 
@@ -368,13 +373,14 @@ The returned `writer` property is a drop-in replacement for `UIMessageStreamWrit
 Register the stream, start persisting on the server, and serve `watch()` to any client that connects (or reconnects).
 
 ```typescript
+import { groq } from '@ai-sdk/groq';
+import { streamText } from 'ai';
+
 import {
   PollingChangeSource,
   SqliteStreamStore,
   StreamManager,
 } from '@deepagents/context';
-import { streamText } from 'ai';
-import { groq } from '@ai-sdk/groq';
 
 const store = new SqliteStreamStore('./streams.db');
 const changeSource = new PollingChangeSource({ reads: store });
@@ -448,18 +454,50 @@ Implement the abstract `StreamStore` class to back stream persistence with any d
 
 ```typescript
 import { StreamStore } from '@deepagents/context';
-import type { StreamData, StreamChunkData, StreamStatus } from '@deepagents/context';
+import type {
+  StreamChunkData,
+  StreamData,
+  StreamStatus,
+} from '@deepagents/context';
 
 class PostgresStreamStore extends StreamStore {
-  async createStream(stream: StreamData): Promise<void> { /* ... */ }
-  async upsertStream(stream: StreamData): Promise<{ stream: StreamData; created: boolean }> { /* ... */ }
-  async getStream(streamId: string): Promise<StreamData | undefined> { /* ... */ }
-  async getStreamStatus(streamId: string): Promise<StreamStatus | undefined> { /* ... */ }
-  async updateStreamStatus(streamId: string, status: StreamStatus, options?: { error?: string }): Promise<void> { /* ... */ }
-  async appendChunks(chunks: StreamChunkData[]): Promise<void> { /* ... */ }
-  async getChunks(streamId: string, fromSeq?: number, limit?: number): Promise<StreamChunkData[]> { /* ... */ }
-  async deleteStream(streamId: string): Promise<void> { /* ... */ }
-  async reopenStream(streamId: string): Promise<StreamData> { /* ... */ }
+  async createStream(stream: StreamData): Promise<void> {
+    /* ... */
+  }
+  async upsertStream(
+    stream: StreamData,
+  ): Promise<{ stream: StreamData; created: boolean }> {
+    /* ... */
+  }
+  async getStream(streamId: string): Promise<StreamData | undefined> {
+    /* ... */
+  }
+  async getStreamStatus(streamId: string): Promise<StreamStatus | undefined> {
+    /* ... */
+  }
+  async updateStreamStatus(
+    streamId: string,
+    status: StreamStatus,
+    options?: { error?: string },
+  ): Promise<void> {
+    /* ... */
+  }
+  async appendChunks(chunks: StreamChunkData[]): Promise<void> {
+    /* ... */
+  }
+  async getChunks(
+    streamId: string,
+    fromSeq?: number,
+    limit?: number,
+  ): Promise<StreamChunkData[]> {
+    /* ... */
+  }
+  async deleteStream(streamId: string): Promise<void> {
+    /* ... */
+  }
+  async reopenStream(streamId: string): Promise<StreamData> {
+    /* ... */
+  }
 }
 ```
 
@@ -522,10 +560,7 @@ async function handleChatTurn(
 When you don't know whether it's the first turn, use `register()` first. If the stream already exists and is terminal, call `reopen()`.
 
 ```typescript
-async function handleChatRequest(
-  streamId: string,
-  chatStream: ReadableStream,
-) {
+async function handleChatRequest(streamId: string, chatStream: ReadableStream) {
   const { stream, created } = await manager.register(streamId);
 
   if (!created) {

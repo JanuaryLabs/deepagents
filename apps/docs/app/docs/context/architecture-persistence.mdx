@@ -115,7 +115,8 @@ or later for local persistence.
 
 ```typescript
 import { Declaration } from '@zukhruf/sqlite-drift';
-import { DatabaseSync, type SQLTagStore } from 'node:sqlite';
+import { open } from '@zukhruf/sqlite-open';
+import type { DatabaseSync, SQLTagStore } from 'node:sqlite';
 
 import { SETUP, searchStatements, statements } from './ddl.sqlite.ts';
 
@@ -128,8 +129,7 @@ class SqliteContextStore extends ContextStore {
 
   constructor(pathOrDb: string | DatabaseSync) {
     super();
-    this.#db =
-      typeof pathOrDb === 'string' ? new DatabaseSync(pathOrDb) : pathOrDb;
+    this.#db = typeof pathOrDb === 'string' ? open(pathOrDb) : pathOrDb;
     this.#db.exec(SETUP);
     tables.apply(this.#db);
     search.apply(this.#db);
@@ -412,14 +412,16 @@ APIs, but the store does not automatically repopulate the search table from them
 `node:sqlite` enables foreign keys by default, so the store does not set a
 foreign-key PRAGMA.
 
+`open` of `@zukhruf/sqlite-open` sets the write-ahead log and a 5 s busy
+timeout, so the PRAGMAs do not set them. A connection that you pass in gets
+the same settings when `open` made it.
+
 ```sql
 -- Performance PRAGMAs
-PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 PRAGMA cache_size = -64000;
 PRAGMA temp_store = MEMORY;
 PRAGMA mmap_size = 268435456;
-PRAGMA busy_timeout = 5000;
 
 -- Chats table
 CREATE TABLE chats (

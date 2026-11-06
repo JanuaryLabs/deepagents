@@ -67,16 +67,18 @@ agent instructions point the model at that label, so it never has to infer the
 name from the wrapper tag.
 
 <Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'DuckDB', 'SQL Server', 'MySQL/MariaDB', 'BigQuery', 'ClickHouse', 'PostHog']}>
+
 <Tab value="SQLite">
+
 ```typescript
-import { DatabaseSync } from 'node:sqlite';
+import { open } from '@zukhruf/sqlite-open';
 
 import { Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
 // Connect to your database
-const db = new DatabaseSync('./your-database.db', { readOnly: true });
+const db = open('./your-database.db', { readOnly: true });
 const adapter = new Sqlite({
   execute: (sql) => db.prepare(sql).all(),
   grounding: [sqlite.tables(), sqlite.info()],
@@ -87,8 +89,11 @@ const text2sql = new Text2Sql({
   adapters: { main: adapter },
 });
 ```
+
 </Tab>
+
 <Tab value="PostgreSQL">
+
 ```typescript
 import pg from 'pg';
 
@@ -113,7 +118,9 @@ const text2sql = new Text2Sql({
 ```
 
 </Tab>
+
 <Tab value="DuckDB">
+
 ```typescript
 import { DuckDBInstance } from '@duckdb/node-api';
 
@@ -139,7 +146,9 @@ const text2sql = new Text2Sql({
 ```
 
 </Tab>
+
 <Tab value="SQL Server">
+
 ```typescript
 import sql from 'mssql';
 
@@ -166,8 +175,11 @@ const text2sql = new Text2Sql({
   adapters: { main: adapter },
 });
 ```
+
 </Tab>
+
 <Tab value="MySQL/MariaDB">
+
 ```typescript
 import mysql from 'mysql2/promise';
 
@@ -195,7 +207,9 @@ const text2sql = new Text2Sql({
 ```
 
 </Tab>
+
 <Tab value="BigQuery">
+
 ```typescript
 import { BigQuery as BigQueryClient } from '@google-cloud/bigquery';
 
@@ -227,8 +241,11 @@ const text2sql = new Text2Sql({
   adapters: { main: adapter },
 });
 ```
+
 </Tab>
+
 <Tab value="ClickHouse">
+
 ```typescript
 import { createClient } from '@clickhouse/client';
 
@@ -256,8 +273,11 @@ const text2sql = new Text2Sql({
   adapters: { main: adapter },
 });
 ```
+
 </Tab>
+
 <Tab value="PostHog">
+
 ```typescript
 import { Text2Sql } from '@deepagents/text2sql';
 import {
@@ -282,7 +302,9 @@ const text2sql = new Text2Sql({
   adapters: { main: adapter },
 });
 ```
+
 </Tab>
+
 </Tabs>
 
 ## Your First Query

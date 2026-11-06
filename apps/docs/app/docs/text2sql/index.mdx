@@ -20,13 +20,13 @@ can stream user-facing answers grounded in validated query results.
 
 ```typescript
 import { groq } from '@ai-sdk/groq';
-import { DatabaseSync } from 'node:sqlite';
+import { open } from '@zukhruf/sqlite-open';
 
 import { Text2Sql, toSql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
-const db = new DatabaseSync('./chinook.db', { readOnly: true });
+const db = open('./chinook.db', { readOnly: true });
 const adapter = new Sqlite({
   execute: (sql) => db.prepare(sql).all(),
   grounding: [sqlite.tables(), sqlite.info()],
@@ -61,7 +61,7 @@ front with `isValidAdapterName(name)` or `validateAdapterNames(names)`.
 
 | API                                                                                     | Description                                                                                                                                                   |
 | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `toSql({ input, adapter, fragments, model })`                                           | Generate SQL without executing, from the schema fragments that `index()` returns                                                                             |
+| `toSql({ input, adapter, fragments, model })`                                           | Generate SQL without executing, from the schema fragments that `index()` returns                                                                              |
 | `Text2Sql#toPairs(adapterName, factory)`                                                | Generate training pairs from one configured adapter                                                                                                           |
 | `AdapterIndexer#index({ adapterNames?, onProgress? })`                                  | Introspect adapters and return schema fragments — each prefixed with a `<database>` connection-name label — with optional progress events                     |
 | `createSqlCommand(text2Sql, options?: CreateSqlCommandOptions): CreateSqlCommandResult` | Wrap a `Text2Sql` instance as a `customCommands` entry for just-bash (`sql run`, `sql validate`) in virtual sandboxes                                         |
