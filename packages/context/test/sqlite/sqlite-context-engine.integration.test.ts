@@ -1,3 +1,4 @@
+import { open } from '@zukhruf/sqlite-open';
 import { settleWithin } from '@zukhruf/testing/async';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { Sqlite } from '@zukhruf/testing/sqlite';
@@ -7,7 +8,7 @@ import assert from 'node:assert';
 import { execFile } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import { promisify } from 'node:util';
 import { z } from 'zod';
@@ -214,7 +215,7 @@ describe('Sqlite ContextEngine Integration', () => {
     database.connection.close();
     await writeFile(database.path, '');
 
-    using connection = new DatabaseSync(database.path);
+    using connection = open(database.path);
     const store = new SqliteContextStore(connection);
     const engine = new ContextEngine({
       store,
@@ -248,7 +249,7 @@ describe('Sqlite ContextEngine Integration', () => {
     await settleWithin(engine.save(), 'save dangling chain setup', 10_000);
 
     {
-      using db = new DatabaseSync(database.path);
+      using db = open(database.path);
       db.exec('PRAGMA foreign_keys = OFF');
       db.prepare('DELETE FROM messages WHERE id = ?').run('msg-2');
       db.prepare('DELETE FROM messages_fts WHERE messageId = ?').run('msg-2');
@@ -287,7 +288,7 @@ describe('Sqlite ContextEngine Integration', () => {
     await settleWithin(engine.save(), 'save branch setup', 10_000);
 
     {
-      using db = new DatabaseSync(database.path);
+      using db = open(database.path);
       db.prepare('DELETE FROM branches WHERE chatId = ?').run(
         'chat-branch-missing',
       );
@@ -328,7 +329,7 @@ describe('Sqlite ContextEngine Integration', () => {
     await settleWithin(engine.save(), 'save head setup', 10_000);
 
     {
-      using db = new DatabaseSync(database.path);
+      using db = open(database.path);
       db.exec('PRAGMA foreign_keys = OFF');
       db.prepare('UPDATE branches SET headMessageId = ? WHERE chatId = ?').run(
         'missing-message',
@@ -401,7 +402,7 @@ describe('Sqlite ContextEngine Integration', () => {
 
     await settleWithin(
       assert.rejects(async () => {
-        using connection = new DatabaseSync(database.path);
+        using connection = open(database.path);
         const store = new SqliteContextStore(connection);
         const engine = new ContextEngine({
           store,

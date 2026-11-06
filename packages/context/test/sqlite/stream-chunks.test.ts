@@ -1,10 +1,10 @@
 import { Latch } from '@zukhruf/async';
+import { open } from '@zukhruf/sqlite-open';
 import { settleWithin } from '@zukhruf/testing/async';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import { StreamHarness } from '@zukhruf/testing/streams';
 import { type UIMessageChunk, simulateReadableStream } from 'ai';
 import assert from 'node:assert';
-import { DatabaseSync } from 'node:sqlite';
 import { type TestContext, describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -337,7 +337,7 @@ describe('Stream Chunks', () => {
       const store = new SqliteStreamStore(database.connection);
       store.close();
 
-      using db = new DatabaseSync(database.path, { readOnly: true });
+      using db = open(database.path, { readOnly: true });
 
       const rows = db
         .prepare(
@@ -356,7 +356,7 @@ describe('Stream Chunks', () => {
 
   describe('Regression guards', () => {
     it('flushes custom progress data while the producer is still running', async (t) => {
-      using database = new DatabaseSync(':memory:');
+      using database = open(':memory:');
       const store = new SqliteStreamStore(database);
       const streams = makeManager(store);
       const streamId = crypto.randomUUID();
@@ -792,7 +792,7 @@ describe('Stream Chunks', () => {
     it('allows exactly one caller to transition a queued stream', async () => {
       await using database = await sqlite.database();
       const first = new SqliteStreamStore(database.connection);
-      using secondConnection = new DatabaseSync(database.path);
+      using secondConnection = open(database.path);
       const second = new SqliteStreamStore(secondConnection);
       const stream = createStream();
 
@@ -830,7 +830,9 @@ describe('Stream Chunks', () => {
 
     it("waits for another process's write transaction and then applies the update", async () => {
       await using database = await sqlite.database();
-      const store = new SqliteStreamStore(database.connection);
+      // The caller's connection sets the wait: open() gives it 5 s.
+      using connection = open(database.path);
+      const store = new SqliteStreamStore(connection);
       const stream = createStream();
       await store.createStream(stream);
 
@@ -865,7 +867,7 @@ describe('Stream Chunks', () => {
     });
 
     it("rejects with SQLite's disk-full error when the database runs out of space mid-append", async () => {
-      using connection = new DatabaseSync(':memory:');
+      using connection = open(':memory:');
       const store = new SqliteStreamStore(connection);
       const stream = createStream();
       await store.createStream(stream);
@@ -1487,7 +1489,7 @@ describe('Stream Chunks', () => {
     it('should support live tailing across separate sqlite connections', async () => {
       await using database = await sqlite.database();
       const writerStore = new SqliteStreamStore(database.connection);
-      using secondConnection = new DatabaseSync(database.path);
+      using secondConnection = open(database.path);
       const watcherStore = new SqliteStreamStore(secondConnection);
 
       const streams = makeManager(watcherStore);

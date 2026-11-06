@@ -1,6 +1,6 @@
+import { open } from '@zukhruf/sqlite-open';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert';
-import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 
 import { SqliteContextStore, SqliteStreamStore } from '@deepagents/context';
@@ -128,7 +128,7 @@ describe('SqliteContextStore on an existing file', () => {
     `);
     database.connection.close();
 
-    using connection = new DatabaseSync(database.path);
+    using connection = open(database.path);
     const store = new SqliteContextStore(connection);
 
     const chat = await store.getChat('chat-1');
@@ -181,7 +181,7 @@ describe('SqliteContextStore on an existing file', () => {
     `);
     database.connection.close();
 
-    using connection = new DatabaseSync(database.path);
+    using connection = open(database.path);
     const store = new SqliteContextStore(connection);
     await store.createChat({
       id: 'new-chat',
@@ -226,7 +226,7 @@ describe('SqliteStreamStore on an existing file', () => {
     `);
     database.connection.close();
 
-    using connection = new DatabaseSync(database.path);
+    using connection = open(database.path);
     const store = new SqliteStreamStore(connection);
     await store.createStream({
       id: 'new-stream',

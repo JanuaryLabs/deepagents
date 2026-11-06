@@ -1,7 +1,7 @@
+import { open } from '@zukhruf/sqlite-open';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import type { LanguageModelUsage } from 'ai';
 import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { z } from 'zod';
 
@@ -70,7 +70,7 @@ test('concurrent trackUsage calls accumulate both usages without losing one', as
 test('independent stores merging different metadata keys both survive', async () => {
   await using database = await sqlite.database();
   const first = new SqliteContextStore(database.connection);
-  using secondConnection = new DatabaseSync(database.path);
+  using secondConnection = open(database.path);
   const second = new SqliteContextStore(secondConnection);
   await first.createChat({ id: 'meta-chat', userId: 'user-1' });
   await Promise.all([

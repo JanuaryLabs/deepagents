@@ -1,10 +1,7 @@
 import { Declaration } from '@zukhruf/sqlite-drift';
+import { open } from '@zukhruf/sqlite-open';
 import { transaction } from '@zukhruf/sqlite-transaction';
-import {
-  DatabaseSync,
-  type SQLInputValue,
-  type SQLTagStore,
-} from 'node:sqlite';
+import type { DatabaseSync, SQLInputValue, SQLTagStore } from 'node:sqlite';
 import { z } from 'zod';
 
 import { parseJson, parseJsonObject } from './columns.ts';
@@ -217,8 +214,7 @@ export class SqliteContextStore extends ContextStore {
 
   constructor(pathOrDb: string | DatabaseSync) {
     super();
-    this.#db =
-      typeof pathOrDb === 'string' ? new DatabaseSync(pathOrDb) : pathOrDb;
+    this.#db = typeof pathOrDb === 'string' ? open(pathOrDb) : pathOrDb;
     this.#db.exec(SETUP);
     tables.apply(this.#db);
     search.apply(this.#db);

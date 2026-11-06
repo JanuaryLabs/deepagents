@@ -4,8 +4,6 @@
 
 // Session-level PRAGMAs, run on each connection before the schema is applied.
 export const SETUP = `
-PRAGMA busy_timeout = 5000;
-PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 `;
 
