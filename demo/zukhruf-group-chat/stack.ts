@@ -1,5 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
-import { DatabaseSync } from 'node:sqlite';
+import { open } from '@zukhruf/sqlite-open';
 import { PgBoss, fromPglite } from 'pg-boss';
 
 import {
@@ -28,9 +28,7 @@ export default defineStack(async (resources) => {
     schema: 'pgboss',
   });
 
-  const streamStore = new SqliteStreamStore(
-    resources.use(new DatabaseSync(':memory:')),
-  );
+  const streamStore = new SqliteStreamStore(resources.use(open(':memory:')));
   const streams = new StreamManager({
     store: streamStore,
     changeSource: new PollingChangeSource({ reads: streamStore }),

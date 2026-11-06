@@ -1,6 +1,6 @@
 import { PGlite } from '@electric-sql/pglite';
+import { open } from '@zukhruf/sqlite-open';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { PgBoss, fromPglite } from 'pg-boss';
 
 import {
@@ -31,14 +31,12 @@ export default defineStack(async (resources) => {
     schema: 'pgboss',
   });
   const streamStore = new SqliteStreamStore(
-    resources.use(new DatabaseSync(join(import.meta.dirname, 'simple.sqlite'))),
+    resources.use(open(join(import.meta.dirname, 'simple.sqlite'))),
   );
   const mailboxStore = resources.use(new SqliteMailboxStore(':memory:'));
   return {
     store: new SqliteContextStore(
-      resources.use(
-        new DatabaseSync(join(import.meta.dirname, 'simple.context.sqlite')),
-      ),
+      resources.use(open(join(import.meta.dirname, 'simple.context.sqlite'))),
     ),
     streams: new StreamManager({
       store: streamStore,

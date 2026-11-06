@@ -1,5 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
-import { DatabaseSync } from 'node:sqlite';
+import { open } from '@zukhruf/sqlite-open';
 import { PgBoss, fromPglite } from 'pg-boss';
 
 import {
@@ -33,7 +33,7 @@ export default defineStack(async (resources) => {
     new SqliteMailboxStore('./zukhruf-research.mailbox.sqlite'),
   );
   const streamStore = new SqliteStreamStore(
-    resources.use(new DatabaseSync('./zukhruf-research.streams.sqlite')),
+    resources.use(open('./zukhruf-research.streams.sqlite')),
   );
   const streams = new StreamManager({
     store: streamStore,
@@ -41,7 +41,7 @@ export default defineStack(async (resources) => {
   });
   return {
     store: new SqliteContextStore(
-      resources.use(new DatabaseSync('./zukhruf-research.sqlite')),
+      resources.use(open('./zukhruf-research.sqlite')),
     ),
     streams,
     queue,
