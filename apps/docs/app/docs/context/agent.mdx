@@ -491,14 +491,15 @@ const person = await extractor.generate();
 
 ### structuredOutput configuration
 
-| Option            | Type              | Default     | Description                                                                      |
-| ----------------- | ----------------- | ----------- | -------------------------------------------------------------------------------- |
-| `context`         | `ContextEngine`   | required    | Engine that resolves system prompt and messages                                  |
-| `model`           | `LanguageModelV4` | required    | AI SDK model                                                                     |
-| `schema`          | `z.ZodType`       | required    | Zod schema for the output type                                                   |
-| `providerOptions` | `object`          | `undefined` | Provider-specific options                                                        |
-| `telemetry`       | `object`          | `undefined` | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText` |
-| `tools`           | `ToolSet`         | `{}`        | Tools available during generation.                                               |
+| Option            | Type              | Default            | Description                                                                                        |
+| ----------------- | ----------------- | ------------------ | -------------------------------------------------------------------------------------------------- |
+| `context`         | `ContextEngine`   | required           | Engine that resolves system prompt and messages                                                    |
+| `model`           | `LanguageModelV4` | required           | AI SDK model                                                                                       |
+| `schema`          | `z.ZodType`       | required           | Zod schema for the output type                                                                     |
+| `providerOptions` | `object`          | `undefined`        | Provider-specific options                                                                          |
+| `telemetry`       | `object`          | `undefined`        | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText`                   |
+| `tools`           | `ToolSet`         | `{}`               | Tools available during generation.                                                                 |
+| `stopWhen`        | `StopCondition`   | `isStepCount(200)` | Ends tool-assisted generation, as in `agent()`. Lower it to bound the tool calls of one generation |
 
 ### structuredOutput methods
 

@@ -59,6 +59,9 @@ across workers and restarts that resume the same approval. A `toolApproval`
 map overrides `needsApproval` for the listed tools; unlisted tools keep their
 own rules. A callback controls every tool call, including tools added by the
 runtime. The runtime stores approvals and resumes turns after a decision.
+`defineAgent()` also accepts the AI SDK `stopWhen`, which ends the agent loop of
+a turn, for example `[hasToolCall('notify'), isStepCount(6)]`. Without it, a
+turn uses the default of `agent()` in `@deepagents/context`.
 
 If the provider interrupts a response, the runtime retains partial output
 and marks the turn `failed` without automatically retrying it. Compaction
