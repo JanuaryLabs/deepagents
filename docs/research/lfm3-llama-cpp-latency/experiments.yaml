@@ -408,7 +408,7 @@ experiments:
     hypothesis: With 4 server slots, interactive chat meets the limits up to about 4 concurrent conversations.
     combination: { engine: {}, client: {}, workload: chat-500-5turns }
     measure: 'guidellm --profile kind=goodput,initial_streams=1,max_streams=16,max_probes=8 --metrics kind=generative,slo.ttft_ms=1000,slo.tpot_ms=50, 45 s per probe; report streams, requests/s, out tok/s and attainment for each probe'
-    status: running
+    status: done
     attempts:
       - date: 2026-11-07
         tool: guidellm 0.8.1 goodput profile (initial_streams 1, max_streams 16, max_probes 8, 45 s per probe), ubatch 256
@@ -416,11 +416,16 @@ experiments:
           { experiment: X-capacity-chat-interactive, attempt: 1, ubatch: 256 }
         traffic: 'server proxied requests = GuideLLM requests (clean)'
         result: '1 stream: 100% meet (17 requests), 0.407 req/s, 81 out tok/s, TTFT p95 568 ms, ITL p95 18.3 ms. 2 streams: 92% (24 requests), 0.549 req/s, 110 out tok/s, TTFT p95 1,331 ms, ITL p95 22.0 ms. Best passing: 1 stream.'
+      - date: 2026-11-07
+        tool: guidellm 0.8.1 goodput profile, 120 s per probe, ubatch 256
+        labels:
+          experiment: X-capacity-chat-interactive
+          run: baseline-120s
+        traffic: clean
+        result: '1 stream: 97% (37), 0.314 req/s, 63 out tok/s, TTFT p95 305 ms, ITL p95 19.4 ms. 2: 97% (60), 0.507 req/s, 101 tok/s, 499 ms, 24.9 ms. 4: 96% (90, 95% CI 89-98%), 0.753 req/s, 151 tok/s, 695 ms, 32.3 ms. 5: 30%, 0.827 req/s, TTFT p95 3,061 ms. 6: 1%. 8: 0%. GuideLLM best passing streams: 4. Server proxied 506 = sent 506.'
     verdict:
-      {
-        result: unproven,
-        note: 'Capacity within TTFT <= 1 s / ITL <= 50 ms is 1 concurrent conversation (indicative: GuideLLM marks every probe resolved: false; the 1-stream attainment lower bound is 82%). Next: 120 s probes.',
-      }
+      result: yielded
+      note: 'Capacity is 4 concurrent conversations within TTFT <= 1 s and ITL <= 50 ms, at 0.75 req/s and 151 out tok/s. The limit is the parallel=4 slot count: a 5th conversation waits for a slot (see X-parallel-6-8). Attempt 1 (45 s probes) said 1; its samples were too small.'
 
   - id: X-capacity-chat-6k-doc
     name: 'throughput: goodput search (TTFT <= 4,000 ms, ITL <= 50 ms, 95%) on chat-6k-5turns'
@@ -433,18 +438,23 @@ experiments:
         workload: chat-6k-5turns-1user (streams set by the search),
       }
     measure: 'same goodput search with slo.ttft_ms=4000,slo.tpot_ms=50'
-    status: running
+    status: done
     attempts:
       - date: 2026-11-07
         tool: guidellm 0.8.1 goodput profile (initial_streams 1, max_streams 16, max_probes 8, 45 s per probe), ubatch 256
         labels: { experiment: X-capacity-chat-6k-doc, attempt: 1, ubatch: 256 }
         traffic: 'server proxied requests = GuideLLM requests (clean)'
         result: '1 stream: 91% meet (11 of 12 requests), TTFT p95 4,107 ms, ITL p95 17.8 ms, 0.257 req/s, 51 out tok/s. The search stopped: no stream count passes.'
+      - date: 2026-11-07
+        tool: guidellm 0.8.1 goodput profile, 120 s per probe, ubatch 256
+        labels:
+          experiment: X-capacity-chat-6k-doc
+          run: baseline-120s
+        traffic: clean
+        result: '1 stream: 97% (31), 0.263 req/s, TTFT p95 3,686 ms, ITL p95 18.6 ms. 2: 95% (41), 0.357 req/s, 71 out tok/s, 3,787 ms, 38.3 ms. 3: 80%, ITL p95 61.7 ms. 4: 74%, TTFT p95 9,425 ms, ITL p95 65.8 ms. Best passing streams: 2. Server proxied 181 = sent 181.'
     verdict:
-      {
-        result: unproven,
-        note: 'The 4 s TTFT limit fails even with one user, because the 6k first turn takes 3 to 4 s. Next: 120 s probes, or a limit that applies only to follow-up turns.',
-      }
+      result: yielded
+      note: 'Capacity is 2 concurrent document chats within TTFT <= 4 s and ITL <= 50 ms (0.36 req/s). ITL breaks first: the 6k prefill of other conversations delays decode steps.'
 
   - id: X-capacity-sob
     name: 'throughput: goodput search (TTFT <= 6,000 ms, ITL <= 50 ms, 95%) on sob-4k2'
@@ -457,18 +467,41 @@ experiments:
         workload: sob-4k2-4users (streams set by the search),
       }
     measure: 'same goodput search with slo.ttft_ms=6000,slo.tpot_ms=50'
-    status: running
+    status: done
     attempts:
       - date: 2026-11-07
         tool: guidellm 0.8.1 goodput profile (initial_streams 1, max_streams 16, max_probes 8, 45 s per probe), ubatch 256
         labels: { experiment: X-capacity-sob, attempt: 1, ubatch: 256 }
         traffic: 'server proxied requests = GuideLLM requests (clean)'
         result: '1 stream: 100% (6), 0.140 req/s, TTFT p95 3,752 ms, ITL p95 18.7 ms. 2 streams: 100% (7), 0.163 req/s, TTFT p95 4,821 ms, ITL p95 40.3 ms. 3 streams: 67% (9), ITL p95 57.6 ms. 4 streams: 56% (9), TTFT p95 8,852 ms, ITL p95 57.0 ms.'
+      - date: 2026-11-07
+        tool: guidellm 0.8.1 goodput profile, 120 s per probe, ubatch 256
+        labels:
+          experiment: X-capacity-sob
+          run: baseline-120s
+        traffic: clean
+        result: '1 stream: 100% (21), 0.176 req/s, 53 out tok/s, TTFT p95 2,762 ms, ITL p95 17.8 ms. 2: 100% (22), 0.188 req/s, 56 tok/s, 4,531 ms, 37.6 ms. 3: 57%, ITL p95 79.1 ms. 4: 46%, TTFT p95 11,249 ms, ITL p95 82.0 ms. Best passing streams: 2. Server proxied 100 = sent 100.'
     verdict:
-      {
-        result: unproven,
-        note: 'Capacity within TTFT <= 6 s / ITL <= 50 ms is 2 concurrent requests. ITL is the first limit to break: it increases from 18 to 57 ms as streams rise, because the prefill of other requests delays the decode steps (see X-batch-512-itl). Indicative: probes not resolved; next: 120 s probes.',
-      }
+      result: yielded
+      note: Capacity is 2 concurrent SOB-like requests within TTFT <= 6 s and ITL <= 50 ms (0.19 req/s). ITL breaks first at 3 streams.
+
+  - id: X-parallel-6-8
+    name: 'throughput: parallel=6 and parallel=8 (kv-unified, ctx-size 262144 kept) on chat-500-5turns + sob-4k2 goodput searches'
+    phase: throughput
+    hypothesis: 'The capacity of 4 conversations (X-capacity-chat-interactive, 120 s probes) is the parallel=4 slot count, not the hardware: at 5 streams throughput still rose (0.753 -> 0.827 req/s) while TTFT broke only because the 5th request waited for a slot; ITL p95 at 4 streams was 32 ms, under the 50 ms limit.'
+    combination:
+      { engine: { parallel: [6, 8] }, client: {}, workload: chat-500-5turns }
+    in_build_b11960: 'yes'
+    source:
+      [
+        'router args --parallel 4; models.user.ini comment (4 slots chosen so the 4 largest SOB audio prompts, 251,875 tokens, fit the shared 262,144-token pool)',
+      ]
+    expected: 'Capacity within TTFT <= 1 s / ITL <= 50 ms rises to the point where ITL or TTFT breaks from compute, not from queueing.'
+    risks: 'kv-unified: all slots share 262,144 tokens; SOB 57k audio prompts x 4 already need 251,875, so more slots can overflow the pool when SOB and long chats run together. Check the server log for failed KV allocation.'
+    measure: 'capacity-ab.zsh with parallel 6, then 8 (120 s probes): best passing streams, req/s and out tok/s at that load, ITL p95; same for sob-4k2.'
+    status: proposed
+    attempts: []
+    verdict: null
 
   - id: E16-ubatch-replication-reversed
     name: 'TTFT: ubatch-size=2048 vs 256, paired, traffic-checked, 2048 first (E15 in reverse order) on chat-6k-5turns-1user, sob-4k2-4users, long-32k, shared-prefix-2k'
@@ -898,9 +931,20 @@ experiments:
     expected: ITL p99 down during concurrent prefill; TTFT of the prefilling request up a little.
     risks: Long prompts span more steps.
     measure: GuideLLM chat-6k-5turns-4users ITL p95/p99, TTFT, out tok/s.
-    status: proposed
-    attempts: []
-    verdict: null
+    status: done
+    attempts:
+      - date: 2026-11-07
+        tool: guidellm 0.8.1 goodput searches (X-capacity-*), 120 s per probe, batch-size 512 + ubatch 256, against the baseline-120s run
+        labels:
+          run: batch512-120s
+        traffic: clean (416 / 155 / 30 proxied = sent)
+        result:
+          chat-500-5turns: 'best 4 streams (96%), 0.810 req/s, 162 out tok/s, TTFT p95 653 ms, ITL p95 30.3 ms; overloaded: 5 streams 0% (baseline 30%), 6-8 streams 0.48-0.69 req/s (baseline 0.80-0.82)'
+          chat-6k-5turns: best 2 streams (98%), 0.338 req/s (baseline 0.357)
+          sob-4k2: best 1 stream; 2 streams 69% with ITL p95 86.9 ms (baseline 2 streams 100%, 37.6 ms); 0.094-0.135 req/s (baseline 0.176-0.188)
+    verdict:
+      result: regression
+      note: Not used. Interactive chat at 4 streams is 8% faster, but SOB capacity falls from 2 to 1 and ITL gets worse, the opposite of the hypothesis, and throughput collapses when more than 4 conversations arrive. batch-size stays at the default (2048).
 
   - id: X-kv-q8-long
     name: 'TPOT: cache-type-k=q8_0 + cache-type-v=q8_0 + flash-attn=on on long-32k'
