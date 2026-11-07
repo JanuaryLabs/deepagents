@@ -11,7 +11,7 @@ baseline:
     batch-size: 2048
     spec-default: true # ngram-mod speculative decoding, no draft model
     fit-target: 1024
-    sleep-idle-seconds: 300 # never change (Ezz keeps auto-unload on purpose)
+    sleep-idle-seconds: 900 # the Llama.app setting sleepIdleTime; 300 before the 2026-11-07 17:37 +0300 restart. Never change it here (Ezz keeps auto-unload on purpose)
   build_defaults:
     reasoning-preserve: true # E12
     ctx-checkpoints: 32
@@ -751,7 +751,7 @@ experiments:
     expected: cached_tokens about equal to the shots length after the first wave.
     risks: Only useful if SOB shots repeat across items. Re-ordering must not change SOB scores.
     measure: GuideLLM concurrent streams=4 replaying SOB prompts; cached_tokens and TTFT p50/p95, dataset order vs grouped order.
-    status: running
+    status: done
     attempts:
       - date: 2026-11-07
         tool: guidellm 0.8.1, workload shared-prefix-2k (E13)
@@ -837,8 +837,17 @@ experiments:
     risks: KV pressure on the unified pool without a RAM copy.
     measure: GuideLLM chat-6k-5turns-4users follow-up TTFT p50/p95 and cached_tokens.
     status: proposed
-    attempts: []
-    verdict: null
+    attempts:
+      - date: 2026-11-07
+        tool: guidellm 0.8.1, chat-6k-5turns-4users, 40 requests per arm (seeds 52001, 52002), ubatch 256, parallel 4, baseline then no-cache-idle-slots (one run each)
+        labels:
+          experiment: X-no-cache-idle-slots-4users
+          run: baseline / noidle
+        traffic: clean on the router (40 proxied = 40 sent for each arm)
+        result: 'Not valid. The Mac went into lid-close sleep on battery at 13:01:54 UTC and fully woke at 14:36:24 UTC (pmset log), while the run was going on. The baseline ran normally for its first 30 requests (13:00:10-13:01:50 UTC; follow-up TTFT 640-930 ms). After that, requests stalled: ITL up to 7,337 ms, and two follow-up TTFTs of 341,239 and 857,542 ms. The noidle arm started at 14:01:54 UTC, during the sleep. Its first 14 requests stalled (TTFT up to 1,167,668 ms). Its last 26 requests (from 14:36:28 UTC) were normal: ITL 24-96 ms, follow-up TTFT 570-990 ms. One baseline request was still in flight when GuideLLM stopped (39 of 40). The trigger was also empty: the job ran because X-diag-parallel-load C matched A, but B matched A too, so there was no slowdown for the flag to remove.'
+    verdict:
+      result: unproven
+      note: Attempt 1 is not valid (pitfall A13). Run again on AC power with the lid open, interleave the arms (pitfall A12), and drop the trigger from X-diag-parallel-load.
 
   - id: X-ttfot-thinking-off
     name: 'TTFOT: chat_template_kwargs.enable_thinking=false for simple turns on natural-answers'
@@ -1272,3 +1281,7 @@ pitfalls:
     attempt: Compare two settings with one run each on this Mac
     happened: The same parallel-4 one-user chat gave ITL p95 19.4 ms in one run and 30.3 ms in another. The traffic check covers only LFM3 requests; other GPU users (Hex whisper, other sessions, swap) are not visible. A single-run difference of 10-50% can be noise.
     instead: Interleave repeats (A, B, A, B), compare effects larger than the A-to-A spread, and note what else ran on the GPU.
+  - id: A13
+    attempt: Run a long background benchmark and trust caffeinate to keep the Mac awake
+    happened: The lid was closed on battery during X-no-cache-idle-slots-4users attempt 1. Two caffeinate assertions were active, but the Mac went into clamshell sleep for 95 minutes. Requests stalled for up to 19 minutes, and the router traffic check was still clean.
+    instead: Start only on AC power. Before you compare an arm, read `pmset -g log` for its time window, and do not use the arm if a Sleep or DarkWake event is in the window. Also compare the wall-clock time of each arm with its expected time.

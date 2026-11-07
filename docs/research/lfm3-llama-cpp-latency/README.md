@@ -71,7 +71,7 @@ Two GuideLLM fields need care:
 
 The client must keep the model reasoning in the chat history: give `response.messages` from one call to the next call. The AI SDK then sends the reasoning back as `reasoning_content` (`@ai-sdk/openai-compatible` 3.0.78, `dist/index.js`, line 205).
 
-Do not change `sleep-idle-seconds`. Llama.app unloads the model after 300 s with no requests, and this is intentional. The first request after that loads the model again (4 to 9 s).
+Do not change `sleep-idle-seconds`. Llama.app unloads the model after 900 s with no requests (its `sleepIdleTime` setting; 300 s before 2026-11-07 17:37 +0300), and this is intentional. The first request after that loads the model again (4 to 9 s).
 
 ## Terms
 
