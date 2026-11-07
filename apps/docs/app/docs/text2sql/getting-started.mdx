@@ -1,5 +1,5 @@
 ---
-title: Getting Started
+title: Getting started
 description: Install Text2SQL and run your first natural language query
 ---
 
@@ -21,12 +21,15 @@ npm install mysql2                   # MySQL / MariaDB
 npm install @duckdb/node-api         # DuckDB
 npm install @google-cloud/bigquery   # BigQuery
 npm install @clickhouse/client       # ClickHouse, or use your preferred client
+npm install @zukhruf/sqlite-open      # Connection helper for the node:sqlite examples
 ```
 
-SQLite uses the built-in `node:sqlite` module and requires no additional driver.
+The SQLite examples use `node:sqlite` through `@zukhruf/sqlite-open`. Open an
+existing database with `readOnly: true` to leave its journal mode unchanged;
+the connection has a five-second busy timeout by default.
 PostHog uses native `fetch` and also requires no additional client package.
 
-## Basic Setup
+## Basic setup
 
 Text2SQL requires three components:
 
@@ -307,9 +310,9 @@ const text2sql = new Text2Sql({
 
 </Tabs>
 
-## Your First Query
+## Your first query
 
-### Generate SQL Only
+### Generate SQL only
 
 Use `index()` to get the schema fragments. Then use `toSql()` to generate SQL
 without executing it:
@@ -334,7 +337,7 @@ console.log(sql);
 // LIMIT 10
 ```
 
-### Chat with Streaming
+### Chat with streaming
 
 For streaming, build the chat agent yourself with primitives from
 `@deepagents/context` and feed it the Text2SQL index plus instructions:
@@ -372,6 +375,7 @@ const backend = await createDockerSandbox({
   ],
   env: {
     TEXT2SQL_ADAPTERS: '/workspace/text2sql-adapters.ts',
+    TEXT2SQL_OUT_DIR: '/tmp/text2sql',
   },
 });
 const sandbox = await createBashTool({
@@ -407,7 +411,11 @@ for await (const chunk of stream) {
 The `/workspace/text2sql-adapters.ts` module must exist inside the sandbox and
 default-export the adapter map the CLI should load. If you are mounting your
 app source into the container, point `TEXT2SQL_ADAPTERS` at that mounted module;
-otherwise upload or write the file before calling `chat()`.
+otherwise upload or write the file before running `sql index`.
+
+`TEXT2SQL_OUT_DIR` places generated index files in writable `/tmp` while the
+project mount stays read-only. Bind-mount paths refer to the Docker host;
+with a remote daemon, the project must exist on that host.
 
 `toSql()` is stateless. It uses only the fragments you give it, and it does not write
 messages, titles, or usage into your `ContextStore`. Use the `chat()` helper
@@ -459,7 +467,7 @@ If no reader is attached at startup, `sql index` prints
 `waiting for reader on FIFO <path>...` to `stderr` and then waits — so the
 symptom is recognizable rather than a silent hang.
 
-## Understanding the Response
+## Understanding the response
 
 When Text2SQL processes a query, it:
 
@@ -472,7 +480,7 @@ When Text2SQL processes a query, it:
 The `chat()` helper also injects Text2SQL's built-in SQL workflow guidance and
 any extra fragments you add to your `ContextEngine`.
 
-## Environment Variables
+## Environment variables
 
 The examples in this guide use Groq. If you follow them as written, set your
 API key:
@@ -481,7 +489,7 @@ API key:
 export GROQ_API_KEY=your-api-key
 ```
 
-## Next Steps
+## Next steps
 
 - [Grounding](/docs/text2sql/grounding) - Configure database introspection for richer context
 - [PostgreSQL Adapter](/docs/text2sql/postgresql) - PostgreSQL-specific features

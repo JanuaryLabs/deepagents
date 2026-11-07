@@ -412,9 +412,11 @@ APIs, but the store does not automatically repopulate the search table from them
 `node:sqlite` enables foreign keys by default, so the store does not set a
 foreign-key PRAGMA.
 
-`open` of `@zukhruf/sqlite-open` sets the write-ahead log and a 5 s busy
-timeout, so the PRAGMAs do not set them. A connection that you pass in gets
-the same settings when `open` made it.
+When given a file path, the store uses `open` from `@zukhruf/sqlite-open`
+to enable write-ahead logging (WAL) and a five-second busy timeout. In-memory
+databases use the same timeout without WAL. When you pass an existing connection,
+the store preserves its journal mode and busy timeout; configure those when
+opening the connection.
 
 ```sql
 -- Performance PRAGMAs

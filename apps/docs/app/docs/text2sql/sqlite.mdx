@@ -5,7 +5,7 @@ description: Configure Text2SQL with SQLite databases
 
 The SQLite adapter works with SQLite databases, supporting both file-based and in-memory databases. It uses PRAGMA commands for schema introspection.
 
-## Basic Setup
+## Basic setup
 
 Reuse the shared `model` setup from
 [Getting Started](/docs/text2sql/getting-started) in each example.
@@ -13,6 +13,17 @@ Reuse the shared `model` setup from
 <Tabs groupId="sqlite-driver" items={['node:sqlite', 'better-sqlite3', 'sql.js']}>
 
 <Tab value="node:sqlite">
+
+Install the connection helper used by these examples:
+
+```bash
+npm install @zukhruf/sqlite-open
+```
+
+`open(path, { readOnly: true })` requires an existing database and leaves its
+journal mode unchanged. The default busy timeout is five seconds. Without
+`readOnly`, `open` creates a missing file and enables write-ahead logging (WAL)
+for file databases. In-memory databases use the same timeout without WAL.
 
 ```typescript
 import { open } from '@zukhruf/sqlite-open';
@@ -119,7 +130,7 @@ const text2sql = new Text2Sql({
 
 </Tabs>
 
-## Configuration Options
+## Configuration options
 
 ```typescript
 import * as sqlite from '@deepagents/text2sql/sqlite';
@@ -144,7 +155,7 @@ new Sqlite({
 
 See [Grounding](/docs/text2sql/grounding) for the full list of available grounding functions and their configuration options.
 
-## Available Grounding Functions
+## Available grounding functions
 
 The following grounding functions are available for SQLite. Import them from `@deepagents/text2sql/sqlite`:
 
@@ -161,7 +172,7 @@ The following grounding functions are available for SQLite. Import them from `@d
 
 See [Grounding](/docs/text2sql/grounding) for detailed configuration options.
 
-## Error Handling
+## Error handling
 
 The adapter maps common SQLite errors to helpful suggestions:
 
@@ -173,7 +184,7 @@ The adapter maps common SQLite errors to helpful suggestions:
 | `near "X": syntax error`               | SYNTAX_ERROR     | Review the query structure and punctuation           |
 | `attempt to write a readonly database` | CONSTRAINT_ERROR | Read-only queries should not trigger this            |
 
-## Query Validation
+## Query validation
 
 By default, validation uses `EXPLAIN` to check query syntax without execution:
 
@@ -187,7 +198,7 @@ new Sqlite({
 });
 ```
 
-## Execute Function Return Types
+## Execute function return types
 
 The `execute` function can return either:
 
@@ -199,7 +210,7 @@ execute: (sql) => db.prepare(sql).all();
 execute: (sql) => ({ rows: db.prepare(sql).all() });
 ```
 
-## In-Memory Databases
+## In-memory databases
 
 For testing or temporary data:
 
@@ -217,7 +228,7 @@ new Sqlite({
 });
 ```
 
-## Size Hints
+## Size hints
 
 Tables are classified by row count:
 

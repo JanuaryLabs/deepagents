@@ -14,6 +14,11 @@ The storage system persists conversation history using a graph-based model. Mess
 
 File-based persistence using the built-in `node:sqlite` module in Node.js 24.9.0 or later.
 
+When given a file path, `SqliteContextStore` opens it through
+`@zukhruf/sqlite-open`, enabling write-ahead logging (WAL) and a five-second
+busy timeout. If you pass an existing connection, the store preserves its
+journal mode and busy timeout.
+
 ```typescript
 import { ContextEngine, SqliteContextStore } from '@deepagents/context';
 
@@ -671,10 +676,10 @@ const chat = await store.upsertChat({
 });
 
 // Update metadata
-await store.updateChat('chat-001', {
-  title: 'Python Help',
+await store.updateChat('chat-001', () => ({
+  title: 'Python help',
   metadata: { tags: ['python', 'learning'] },
-});
+}));
 
 // List user's chats
 const chats = await store.listChats({
@@ -804,7 +809,7 @@ await context.updateChat({
 });
 
 // Query by metadata
-const activeCahts = await store.listChats({
+const activeChats = await store.listChats({
   userId: 'user-001',
   metadata: { key: 'archived', value: false },
 });
@@ -821,11 +826,17 @@ class RedisContextStore extends ContextStore {
   // Implement all abstract methods:
   // createChat, upsertChat, getChat, updateChat, listChats, deleteChat
   // addMessage, getMessage, getMessageChain, hasChildren, getMessages
+  // setMessageParent
   // createBranch, getBranch, getActiveBranch, setActiveBranch, updateBranchHead, listBranches
   // createCheckpoint, getCheckpoint, listCheckpoints, deleteCheckpoint
   // searchMessages, getGraph
 }
 ```
+
+`addMessages` has a default implementation that calls `addMessage` sequentially.
+Override it if your store supports transactional batch writes. See
+[Persistence](/docs/context/architecture-persistence) for the full interface and
+the concurrency requirements of `updateChat` and `updateBranchHead`.
 
 See the built-in implementations for reference:
 

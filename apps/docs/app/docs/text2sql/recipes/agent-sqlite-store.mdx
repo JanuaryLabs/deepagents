@@ -1,11 +1,11 @@
 ---
-title: Build an Agent (SQLite Store)
+title: Build an agent (SQLite store)
 description: Step-by-step recipe for a streaming Text2SQL agent with a SQLite-backed context store
 ---
 
-A copy-paste recipe that wires `@deepagents/text2sql` into a streaming chat
-agent backed by a `SqliteContextStore`. Each step adds one piece. By the end
-you have a durable multi-turn agent in roughly fifty lines.
+Build a streaming Text2SQL chat agent with conversation history stored in
+SQLite. The query adapter connects to your data source; `SqliteContextStore`
+keeps the conversation in a separate database.
 
 ## 1. Install
 
@@ -13,7 +13,7 @@ you have a durable multi-turn agent in roughly fifty lines.
 npm install @deepagents/context @deepagents/text2sql @ai-sdk/groq
 ```
 
-Add the driver for the database you want to query:
+Add the driver or connection helper for the database you want to query:
 
 ```bash
 npm install pg          # PostgreSQL
@@ -22,14 +22,16 @@ npm install mysql2      # MySQL / MariaDB
 npm install @duckdb/node-api         # DuckDB
 npm install @google-cloud/bigquery   # BigQuery
 npm install @clickhouse/client       # ClickHouse, or use your preferred client
-# SQLite uses node:sqlite — no driver needed
+npm install @zukhruf/sqlite-open      # Connection helper for node:sqlite
 ```
 
 ## 2. Open the SQLite context store
 
-The context store persists every turn — messages, fragments, usage — to a
-single `.db` file. Pass a path; `SqliteContextStore` opens it via
-`node:sqlite` and runs the DDL on first use.
+The context store saves conversation messages and usage in a single `.db`
+file. When given a path, `SqliteContextStore` opens it through
+`@zukhruf/sqlite-open`, enabling write-ahead logging (WAL) and a five-second
+busy timeout, then applies its schema. Non-message fragments such as indexed
+schema and instructions must be added to each new `ContextEngine` instance.
 
 ```typescript
 import { SqliteContextStore } from '@deepagents/context';
@@ -273,6 +275,7 @@ const backend = await createDockerSandbox({
   ],
   env: {
     TEXT2SQL_ADAPTERS: '/workspace/text2sql-adapters.ts',
+    TEXT2SQL_OUT_DIR: '/tmp/text2sql',
   },
 });
 const sandbox = await createBashTool({
@@ -283,6 +286,10 @@ const sandbox = await createBashTool({
 
 If you are not mounting your project into `/workspace`, upload or write
 `/workspace/text2sql-adapters.ts` before the first `chat()` call.
+
+`TEXT2SQL_OUT_DIR` keeps generated SQL artifacts in writable `/tmp` while the
+project mount stays read-only. Bind-mount paths refer to the Docker host;
+with a remote daemon, the project must exist on that host.
 
 ## 8. Wire the agent
 
@@ -302,8 +309,10 @@ const ai = agent({
 ## 9. Run a turn
 
 `context.continue(...)` appends the new user message and reserves an empty
-assistant slot. `chat(ai)` streams into that slot and persists each chunk
-through the SQLite store.
+assistant slot. `chat(ai)` streams the response and saves completed assistant
+message segments and usage to the context store. To persist individual stream
+chunks for replay or reconnection, add
+[stream persistence](/docs/context/stream-persistence).
 
 ```typescript
 import { chat, user } from '@deepagents/context';

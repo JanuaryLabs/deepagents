@@ -7,7 +7,7 @@ Text2SQL converts natural language questions into SQL queries. It understands
 your database schema, carries conversation state through your context store, and
 can stream user-facing answers grounded in validated query results.
 
-## Key Features
+## Key features
 
 - **Natural Language to SQL**: Ask questions in plain English, get executable SQL
 - **Schema-Aware**: Automatically analyzes your database structure, relationships, and data patterns
@@ -16,7 +16,10 @@ can stream user-facing answers grounded in validated query results.
 - **Conversation Memory**: Multi-turn chat backed by your `ContextEngine` store
 - **Safe by Default**: Generates read-only queries with output limits
 
-## Quick Example
+## Quick example
+
+Follow [Getting started](/docs/text2sql/getting-started) to install the packages
+used below, including `@zukhruf/sqlite-open` for the SQLite connection.
 
 ```typescript
 import { groq } from '@ai-sdk/groq';
@@ -57,7 +60,7 @@ Adapter names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`, and `database` is a
 reserved name. If you build adapter maps dynamically, validate the keys up
 front with `isValidAdapterName(name)` or `validateAdapterNames(names)`.
 
-## Core Methods
+## Core methods
 
 | API                                                                                     | Description                                                                                                                                                   |
 | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -78,7 +81,7 @@ To run a streaming, multi-turn agent on top of `Text2Sql`, build the chat
 loop yourself with `agent` + `chat` from `@deepagents/context`. See
 [Build Conversations](/docs/text2sql/build-conversations).
 
-## When to Use Text2SQL
+## When to use Text2SQL
 
 - Building analytics dashboards with natural language queries
 - Creating chatbots that answer data questions
@@ -117,7 +120,7 @@ User Question
    Results
 ```
 
-## Next Steps
+## Next steps
 
 - [Getting Started](/docs/text2sql/getting-started) - Installation and first query
 - [PostgreSQL Adapter](/docs/text2sql/postgresql) - PostgreSQL-specific setup

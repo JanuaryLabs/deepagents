@@ -1,11 +1,11 @@
 ---
-title: Stream Persistence
+title: Stream persistence
 description: Durably store AI streaming responses for replay, reconnection, and multi-client watching
 ---
 
 Stream persistence saves AI streaming chunks to a durable store as they arrive. If a client disconnects mid-stream, another client can pick up where it left off or replay from the beginning. Multiple clients can watch the same stream simultaneously.
 
-## How It Works
+## How it works
 
 ```
 Client A starts stream:
@@ -41,7 +41,9 @@ const store = new SqliteStreamStore('./streams.db');
 store.close();
 ```
 
-You can also pass an existing `DatabaseSync` instance:
+The path constructor uses `@zukhruf/sqlite-open` to enable write-ahead logging
+(WAL) for file databases and a five-second busy timeout. To share a connection
+with other stores, install `@zukhruf/sqlite-open` and open it yourself:
 
 ```typescript
 import { open } from '@zukhruf/sqlite-open';
@@ -50,7 +52,9 @@ const db = open('./app.db');
 const store = new SqliteStreamStore(db);
 ```
 
-If you pass your own `DatabaseSync`, call `store.close()` only if this stream store owns the connection lifecycle in your app.
+The store preserves the supplied connection's journal mode and busy timeout.
+`store.close()` closes that connection, including one you supplied. Call it
+only when all users of a shared connection have finished.
 
 ### StreamData
 
@@ -81,11 +85,18 @@ If you pass your own `DatabaseSync`, call `store.close()` only if this stream st
 | `upsertStream(stream)`                        | Insert or return existing stream. Returns `{ stream, created }`                                                                     |
 | `getStream(streamId)`                         | Fetch stream metadata, or `undefined` if not found                                                                                  |
 | `getStreamStatus(streamId)`                   | Fetch only the stream status, or `undefined` if not found                                                                           |
+| `listStreamIds(options?)`                     | List stream IDs, optionally filtered by `options.status`                                                                            |
+| `listRunningStreamIds()`                      | List IDs with status `running`; delegates to `listStreamIds`                                                                        |
+| `updateStream(streamId, update)`              | Atomically read and update a stream under its write lock. Returns `{ stream, updated }`                                             |
 | `updateStreamStatus(streamId, status, opts?)` | Transition stream status. Automatically sets `startedAt`, `finishedAt`, `cancelRequestedAt`, and `error` based on the target status |
 | `appendChunks(chunks)`                        | Batch-insert chunks (transactional in SQLite)                                                                                       |
 | `getChunks(streamId, fromSeq?, limit?)`       | Fetch chunks ordered by `seq`, optionally starting from `fromSeq`                                                                   |
 | `deleteStream(streamId)`                      | Delete stream and all its chunks (cascading)                                                                                        |
 | `reopenStream(streamId)`                      | Atomically delete a terminal stream and re-create it as `queued`. Throws if the stream is not found or not in a terminal status     |
+
+The `updateStream` callback is synchronous and must have no side effects.
+Return changed fields, or `undefined` to leave the stream unchanged. Concurrent
+updates to the same stream must observe one another's committed changes.
 
 ### SqliteStreamStore.close()
 
@@ -357,7 +368,7 @@ const uiStream = createUIMessageStream({
 | `strategy`  | `'buffered' \| 'immediate'` | `'buffered'` | Persistence strategy                                      |
 | `flushSize` | `number`                    | `20`         | Chunks to buffer before flushing (buffered strategy only) |
 
-### PersistedWriter Methods
+### PersistedWriter methods
 
 | Method         | Description                                                                                                                        |
 | -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
@@ -366,9 +377,12 @@ const uiStream = createUIMessageStream({
 | `fail(error?)` | Flush remaining chunks and mark stream as `failed` with optional error message (unless an `error` chunk already set failure state) |
 | `cleanup()`    | Delete the stream and all chunks from the store                                                                                    |
 
-The returned `writer` property is a drop-in replacement for `UIMessageStreamWriter`. Both `write()` and `merge()` are intercepted: chunks are persisted before being forwarded to the original writer.
+The returned `writer` property wraps `UIMessageStreamWriter`. Both `write()`
+and `merge()` are intercepted. With `immediate`, each chunk is persisted before
+forwarding; with `buffered`, chunks are forwarded as they arrive and persisted
+when the buffer is flushed.
 
-## Reconnectable Stream Pattern
+## Reconnectable stream pattern
 
 Register the stream, start persisting on the server, and serve `watch()` to any client that connects (or reconnects).
 
@@ -408,7 +422,7 @@ function connectClient(streamId: string): ReadableStream {
 
 A client calling `connectClient` at any point receives all chunks produced so far, then continues to receive new ones in real time until the stream finishes.
 
-## Multi-Client Watching
+## Multi-client watching
 
 Multiple clients can watch the same stream. Each `watch()` call creates an independent `ReadableStream` that polls the store separately.
 
@@ -420,7 +434,7 @@ const client3 = manager.watch('stream-abc');
 
 Each client replays from the beginning and tails until the stream reaches a terminal status.
 
-## Stream Status Lifecycle
+## Stream status lifecycle
 
 ```
          register()
@@ -455,9 +469,12 @@ Implement the abstract `StreamStore` class to back stream persistence with any d
 ```typescript
 import { StreamStore } from '@deepagents/context';
 import type {
+  ListStreamIdsOptions,
   StreamChunkData,
   StreamData,
   StreamStatus,
+  StreamUpdateResult,
+  StreamUpdater,
 } from '@deepagents/context';
 
 class PostgresStreamStore extends StreamStore {
@@ -473,6 +490,15 @@ class PostgresStreamStore extends StreamStore {
     /* ... */
   }
   async getStreamStatus(streamId: string): Promise<StreamStatus | undefined> {
+    /* ... */
+  }
+  async listStreamIds(options?: ListStreamIdsOptions): Promise<string[]> {
+    /* ... */
+  }
+  async updateStream(
+    streamId: string,
+    update: StreamUpdater,
+  ): Promise<StreamUpdateResult> {
     /* ... */
   }
   async updateStreamStatus(
@@ -501,7 +527,7 @@ class PostgresStreamStore extends StreamStore {
 }
 ```
 
-## Multi-Turn Conversation Flow
+## Multi-turn conversation flow
 
 In a chat application, the agent may finish a turn by requesting user input — for example, asking the user to approve a SQL query before executing it. The stream completes, but the conversation continues. `reopen()` lets you reuse the same `streamId` for each turn without leaking old chunks.
 
@@ -521,7 +547,7 @@ Turn 2: User approves (conversation continues)
 Turn N: Same pattern...
 ```
 
-### Server Example
+### Server example
 
 ```typescript
 import {
@@ -555,7 +581,7 @@ async function handleChatTurn(
 }
 ```
 
-### With Idempotent Registration
+### With idempotent registration
 
 When you don't know whether it's the first turn, use `register()` first. If the stream already exists and is terminal, call `reopen()`.
 
@@ -575,7 +601,7 @@ async function handleChatRequest(streamId: string, chatStream: ReadableStream) {
 }
 ```
 
-## Best Practices
+## Best practices
 
 - Use `buffered` strategy (the default) for throughput-sensitive workloads. Switch to `immediate` when you cannot tolerate any chunk loss on crash.
 - Treat `type: 'error'` chunks as terminal failure signals. Emit them only for unrecoverable stream failures.
@@ -584,7 +610,7 @@ async function handleChatRequest(streamId: string, chatStream: ReadableStream) {
 - Use a shared `SqliteStreamStore` instance across your application to benefit from prepared statement caching.
 - Call `SqliteStreamStore.close()` during shutdown to release SQLite resources cleanly.
 
-## Next Steps
+## Next steps
 
 - [Storage](/docs/context/storage) - Store implementations for context persistence
 - [Checkpoints](/docs/context/checkpoints) - Named restore points for conversation branching
