@@ -520,8 +520,8 @@ experiments:
           chat-6k-5turns: no passing stream count; 1 stream 78%, TTFT p95 4,870 ms
           sob-4k2: best 1 stream (baseline 2); 2 streams 73%, ITL p95 68.7 ms
     verdict:
-      result: regression
-      note: 'Not used; parallel stays 4. More slots made every workload worse, even one user alone (ITL p95 19 -> 29-31 ms, 1-stream req/s 0.31 -> 0.27 / 0.20), so each request does more work. The cause is open: see X-diag-parallel-load.'
+      result: unproven
+      note: Not used; parallel stays 4. One goodput run per setting showed parallel 6 and 8 worse on every workload, but the one-user part of that result does not reproduce (X-diag-parallel-load), and run-to-run noise is as large as the effect. Repeat with interleaved runs (4, 8, 4, 8) before any decision.
   - id: X-diag-parallel-load
     name: 'diagnostic: why parallel 6/8 slow one user down (ITL p95 19 -> 29-31 ms) on chat-500-5turns'
     phase: throughput
@@ -533,7 +533,7 @@ experiments:
           - 8
       client: {}
       workload: load logs + single requests; then chat-500-5turns synchronous
-    status: running
+    status: done
     attempts:
       - date: 2026-11-07
         tool: Llama.app server log at parallel 4 and 8 (default verbosity)
@@ -541,9 +541,16 @@ experiments:
       - date: 2026-11-07
         tool: standalone llama-server on port 9950 with the Llama.app LFM3 args, parallel 4 and 8
         result: 'Full load logs: the only differing line is n_slots, so fit decisions, layers and buffer sizes are the same (fit-target hypothesis disproved). First request (no drafts): decode 32.7 tok/s at 4 vs 33.8 tok/s at 8, so no slowdown for a single request outside Llama.app. Requests 2 and 3 are not valid: their prompts were too similar, and n-gram drafts were accepted (99/115, 118/118).'
+      - date: 2026-11-07
+        tool: guidellm 0.8.1, chat-500-5turns synchronous, 30 requests per config (seeds 51001-51003), ubatch 256
+        labels:
+          experiment: X-diag-parallel-load
+          run: A-parallel4 / B-parallel8 / C-parallel8-noidle
+        traffic: clean (30 proxied = 30 sent for each config)
+        result: 'A parallel 4: ITL mean 22.6 ms, p95 30.3 ms, later-turn TTFT 391 ms. B parallel 8: 23.3 / 30.9 ms, 372 ms. C parallel 8 + no-cache-idle-slots: 24.6 / 30.5 ms, 394 ms.'
     verdict:
-      result: unproven
-      note: 'Next suspect: with kv-unified, each new task saves and clears every idle slot (cache-idle-slots, default on), so the work per request grows with the slot count. Test: parallel 8 with and without no-cache-idle-slots against parallel 4 (see X-no-cache-idle-slots-4users).'
+      result: no-gain
+      note: 'The one-user slowdown at parallel 8 does not reproduce: A, B and C are equal. There is nothing for the idle-slot hypothesis to explain. The same parallel-4 one-user load gave ITL p95 19.4 ms in X-capacity-chat-interactive (baseline-120s) and 30.3 ms here, so run-to-run noise on this Mac is as large as the X-parallel-6-8 effect (see pitfall A12).'
 
   - id: E16-ubatch-replication-reversed
     name: 'TTFT: ubatch-size=2048 vs 256, paired, traffic-checked, 2048 first (E15 in reverse order) on chat-6k-5turns-1user, sob-4k2-4users, long-32k, shared-prefix-2k'
@@ -1261,3 +1268,7 @@ pitfalls:
     attempt: Expect ubatch 128 to beat 256 for every client (E13)
     happened: Clients that remove the reasoning lost all prompt cache reuse.
     instead: A/B every engine change on all workloads, not only on the target workload.
+  - id: A12
+    attempt: Compare two settings with one run each on this Mac
+    happened: The same parallel-4 one-user chat gave ITL p95 19.4 ms in one run and 30.3 ms in another. The traffic check covers only LFM3 requests; other GPU users (Hex whisper, other sessions, swap) are not visible. A single-run difference of 10-50% can be noise.
+    instead: Interleave repeats (A, B, A, B), compare effects larger than the A-to-A spread, and note what else ran on the GPU.
