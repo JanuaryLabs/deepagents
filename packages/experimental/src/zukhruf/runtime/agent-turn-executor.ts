@@ -200,6 +200,7 @@ export class AgentTurnExecutor {
       reasoning: declaration.reasoning,
       maxOutputTokens: declaration.maxOutputTokens,
       timeout: declaration.timeout,
+      stopWhen: declaration.stopWhen,
       toolCallConcurrency: declaration.toolCallConcurrency,
       experimental_toolApprovalSecret:
         declaration.experimental_toolApprovalSecret,

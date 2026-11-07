@@ -738,6 +738,10 @@ export interface StructuredOutputOptions<
   providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
   telemetry?: Parameters<typeof generateText>[0]['telemetry'];
   tools?: TOOLS;
+  /** Bounds tool-assisted generation; the same native stop condition as agent(). */
+  stopWhen?: Parameters<
+    typeof generateText<PreparedTools<TOOLS>>
+  >[0]['stopWhen'];
 }
 
 /**
@@ -833,7 +837,7 @@ export function structuredOutput<
           ignoreIncompleteToolCalls: true,
           tools,
         }),
-        stopWhen: DEFAULT_STOP_WHEN,
+        stopWhen: options.stopWhen ?? DEFAULT_STOP_WHEN,
         repairToolCall: createRepairToolCall(
           options.model,
           callOptions?.abortSignal,
@@ -889,7 +893,7 @@ export function structuredOutput<
           ignoreIncompleteToolCalls: true,
           tools,
         }),
-        stopWhen: DEFAULT_STOP_WHEN,
+        stopWhen: options.stopWhen ?? DEFAULT_STOP_WHEN,
         experimental_transform: callOptions?.transform ?? smoothStream(),
         toolsContext: callOptions?.toolsContext,
         output: Output.object({ schema: options.schema }),

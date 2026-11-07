@@ -6,6 +6,7 @@ import type {
   AgentModel,
   AgentSandbox,
   ContextFragment,
+  CreateAgent,
 } from '@deepagents/context';
 
 import type { AgentPluginDefinition } from './runtime/agent-runtime.ts';
@@ -45,6 +46,8 @@ export interface AgentDeclaration extends AgentControls<ZukhrufToolSet> {
   description?: string;
   model: AgentModel;
   sandbox: (context: SandboxContext) => Promise<ZukhrufSandbox>;
+  /** Native agent-loop termination; omitted uses the context agent default. */
+  stopWhen?: CreateAgent['stopWhen'];
   instructions: ContextFragment[];
   tools?: ZukhrufToolSet;
   /** Names of plugin-provided skills installed for this agent. */
