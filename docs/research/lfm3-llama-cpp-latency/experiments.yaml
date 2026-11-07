@@ -499,9 +499,51 @@ experiments:
     expected: 'Capacity within TTFT <= 1 s / ITL <= 50 ms rises to the point where ITL or TTFT breaks from compute, not from queueing.'
     risks: 'kv-unified: all slots share 262,144 tokens; SOB 57k audio prompts x 4 already need 251,875, so more slots can overflow the pool when SOB and long chats run together. Check the server log for failed KV allocation.'
     measure: 'capacity-ab.zsh with parallel 6, then 8 (120 s probes): best passing streams, req/s and out tok/s at that load, ITL p95; same for sob-4k2.'
-    status: proposed
-    attempts: []
-    verdict: null
+    status: done
+    attempts:
+      - date: 2026-11-07
+        tool: guidellm 0.8.1 goodput searches (X-capacity-*), 120 s per probe, ubatch 256, against baseline-120s (parallel 4)
+        labels:
+          run: parallel6-120s
+        traffic: clean (202 / 17 / 28 proxied = sent)
+        result:
+          chat-500-5turns: best 2 streams (baseline 4); 1 stream 0.270 req/s, ITL p95 28.8 ms (baseline 0.314, 19.4 ms); 4 streams 87%, TTFT p95 2,163 ms
+          chat-6k-5turns: no passing stream count; 1 stream 75%, TTFT p95 5,239 ms (baseline 97%, 3,686 ms)
+          sob-4k2: best 1 stream (baseline 2); 2 streams 56%, ITL p95 60.3 ms
+      - date: 2026-11-07
+        tool: same, parallel 8
+        labels:
+          run: parallel8-120s
+        traffic: clean (62 / 19 / 28 proxied = sent)
+        result:
+          chat-500-5turns: best 1 stream (baseline 4); 1 stream 0.203 req/s, ITL p95 30.9 ms; 2 streams 94%, TTFT p95 1,108 ms
+          chat-6k-5turns: no passing stream count; 1 stream 78%, TTFT p95 4,870 ms
+          sob-4k2: best 1 stream (baseline 2); 2 streams 73%, ITL p95 68.7 ms
+    verdict:
+      result: regression
+      note: 'Not used; parallel stays 4. More slots made every workload worse, even one user alone (ITL p95 19 -> 29-31 ms, 1-stream req/s 0.31 -> 0.27 / 0.20), so each request does more work. The cause is open: see X-diag-parallel-load.'
+  - id: X-diag-parallel-load
+    name: 'diagnostic: why parallel 6/8 slow one user down (ITL p95 19 -> 29-31 ms) on chat-500-5turns'
+    phase: throughput
+    hypothesis: More slots change load-time decisions (fit-target, buffers), or per-request work grows with the number of slots.
+    combination:
+      engine:
+        parallel:
+          - 4
+          - 8
+      client: {}
+      workload: load logs + single requests; then chat-500-5turns synchronous
+    status: running
+    attempts:
+      - date: 2026-11-07
+        tool: Llama.app server log at parallel 4 and 8 (default verbosity)
+        result: 'Only one load line reaches the log: n_slots = 4 / 8, n_ctx_slot = 262144, kv_unified = true. Llama.app does not forward the model process load output.'
+      - date: 2026-11-07
+        tool: standalone llama-server on port 9950 with the Llama.app LFM3 args, parallel 4 and 8
+        result: 'Full load logs: the only differing line is n_slots, so fit decisions, layers and buffer sizes are the same (fit-target hypothesis disproved). First request (no drafts): decode 32.7 tok/s at 4 vs 33.8 tok/s at 8, so no slowdown for a single request outside Llama.app. Requests 2 and 3 are not valid: their prompts were too similar, and n-gram drafts were accepted (99/115, 118/118).'
+    verdict:
+      result: unproven
+      note: 'Next suspect: with kv-unified, each new task saves and clears every idle slot (cache-idle-slots, default on), so the work per request grows with the slot count. Test: parallel 8 with and without no-cache-idle-slots against parallel 4 (see X-no-cache-idle-slots-4users).'
 
   - id: E16-ubatch-replication-reversed
     name: 'TTFT: ubatch-size=2048 vs 256, paired, traffic-checked, 2048 first (E15 in reverse order) on chat-6k-5turns-1user, sob-4k2-4users, long-32k, shared-prefix-2k'
