@@ -14,6 +14,24 @@ export const ollama = createOpenAICompatible({
   supportsStructuredOutputs: true,
 });
 
+const llama = createOpenAICompatible({
+  name: 'llama',
+  baseURL: process.env.LLAMA_BASE_URL ?? 'http://127.0.0.1:9931/v1',
+  supportsStructuredOutputs: true,
+  includeUsage: true,
+});
+
+/**
+ * LFM3 as Llama.app serves it (the llama.cpp router on port 9931).
+ *
+ * The latency fixes are in the engine, in this model's section of
+ * `~/.config/llama/models.user.ini`. In a chat, pass `response.messages` to the
+ * next call: the provider then sends the model's reasoning back as
+ * `reasoning_content`, and the server can reuse more of its prompt cache.
+ * Measurements: docs/research/lfm3-llama-cpp-latency-2026-11-07.md
+ */
+export const lfm = (modelId: 'LiquidAI/LFM3-1.7B-GGUF:BF16') => llama(modelId);
+
 export const glm = createOpenAICompatible({
   name: 'z.ai',
   baseURL: 'https://api.z.ai/api/paas/v4/',
