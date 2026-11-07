@@ -28,7 +28,7 @@ const llama = createOpenAICompatible({
  * `~/.config/llama/models.user.ini`. In a chat, pass `response.messages` to the
  * next call: the provider then sends the model's reasoning back as
  * `reasoning_content`, and the server can reuse more of its prompt cache.
- * Measurements: docs/research/lfm3-llama-cpp-latency-2026-11-07.md
+ * Measurements: docs/research/lfm3-llama-cpp-latency/experiments.yaml
  */
 export const lfm = (modelId: 'LiquidAI/LFM3-1.7B-GGUF:BF16') => llama(modelId);
 

@@ -1,0 +1,1061 @@
+# Catalog of LFM3-on-llama.cpp latency experiments. Format: see README.md in this folder.
+# One entry = one named combination (engine + client + workload) against the baseline below.
+
+baseline:
+  since: 2026-11-07
+  engine:
+    ctx-size: 262144
+    parallel: 4
+    kv-unified: true
+    ubatch-size: 256 # E10, E13 (Llama.app selects 2048)
+    batch-size: 2048
+    spec-default: true # ngram-mod speculative decoding, no draft model
+    fit-target: 1024
+    sleep-idle-seconds: 300 # never change (Ezz keeps auto-unload on purpose)
+  build_defaults:
+    reasoning-preserve: true # E12
+    ctx-checkpoints: 32
+    checkpoint-min-step: 8192
+    cache-ram: 8192
+    cache-idle-slots: true
+  client: 'AI SDK through the deepagents `lfm` export; history = response.messages (reasoning sent back as reasoning_content)'
+
+workloads:
+  chat-6k-3turns-1user:
+    tool: guidellm
+    data: kind=synthetic_text,first_prompt_tokens=6000,prompt_tokens=30,output_tokens=200,turns=3
+    profile: kind=synchronous
+    requests: 9
+    note: GuideLLM history drops the reasoning (like a client that keeps only the visible answer).
+  chat-6k-5turns-1user:
+    tool: guidellm
+    data: kind=synthetic_text,first_prompt_tokens=6000,prompt_tokens=30,output_tokens=200,turns=5
+    profile: kind=synchronous
+    requests: 15
+  chat-6k-5turns-4users:
+    tool: guidellm
+    data: kind=synthetic_text,first_prompt_tokens=6000,prompt_tokens=30,output_tokens=200,turns=5
+    profile: kind=concurrent,streams=4
+    requests: 40
+  sob-4k2-4users:
+    tool: guidellm
+    data: kind=synthetic_text,prompt_tokens=4200,output_tokens=300
+    profile: kind=concurrent,streams=4
+    requests: 16
+    note: Like SOB text prompts (about 4.2k tokens, 4 at once), single turn.
+  long-32k:
+    tool: guidellm
+    data: kind=synthetic_text,prompt_tokens=32000,output_tokens=50
+    profile: kind=synchronous
+    requests: 2
+  shared-prefix-2k:
+    tool: guidellm
+    data: kind=synthetic_text,prefix_tokens=2000,prefix_count=1,prompt_tokens=2000,output_tokens=100
+    profile: kind=synchronous
+    requests: 6
+    note: GuideLLM sends the shared prefix as a separate system message (request_handlers.py, line 1030), like SOB few-shot shots before the last user message.
+  aisdk-chat:
+    tool: AI SDK probe
+    description: 3 conversations; turn 1 = 2,800 random words (about 6,150 tokens) + a question, maxOutputTokens 200, temperature 0; turn 2 = history from response.messages + one short question. Measure turn-2 TTFT (first reasoning or text delta) and usage.cachedInputTokens. Uses `lfm('LiquidAI/LFM3-1.7B-GGUF:BF16')` and `streamText`.
+  natural-answers:
+    tool: guidellm
+    status: not defined yet
+    description: Requests with no fixed output length, so that the model stops by itself and TTFOT has a value.
+
+experiments:
+  - id: E01-speed-baseline
+    name: 'baseline: ubatch-size=2048 + spec-default on mixed probes'
+    phase: TTFT
+    combination:
+      {
+        engine: { ubatch-size: 2048 },
+        client: {},
+        workload: hand streaming probe,
+      }
+    status: done
+    attempts:
+      - date: 2026-11-07
+        tool: hand streaming probe (fetch, SSE timings)
+        result: 'warm TTFT 116 ms (20-token prompt); prefill about 2,070 tok/s; decode 50 tok/s with no drafts; 4 concurrent requests: 41 tok/s each, 163 tok/s in total; cold start 8,785 ms'
+    verdict: { result: baseline }
+
+  - id: E02-bandwidth-ceiling
+    name: 'TPOT: decode limit = memory bandwidth / model size'
+    phase: TPOT
+    combination: { engine: {}, client: {}, workload: calculation }
+    status: done
+    attempts:
+      - date: 2026-11-07
+        tool: calculation + E01
+        result: '273 GB/s / 3.467 GB = 78.8 forward passes/s; measured 50 tok/s = 63%'
+    verdict:
+      {
+        result: baseline,
+        note: The limit is for forward passes. Batches and speculative drafts give more than one token for each pass.,
+      }
+
+  - id: E03-speculation-behavior
+    name: 'TPOT: spec-default (ngram-mod) on repeated vs new text'
+    phase: TPOT
+    combination:
+      {
+        engine: { spec-default: true },
+        client: {},
+        workload: hand probe,
+        same prompt sent again,
+      }
+    status: done
+    attempts:
+      - date: 2026-11-07
+        tool: hand probe, timings.draft_n / draft_n_accepted
+        result: 'repeated text: 192 to 409 tok/s (166 of 200 and 186 of 186 drafts accepted); new text: 3% accepted'
+    verdict:
+      {
+        result: baseline,
+        note: Use new text in benchmarks. Repeated prompts make decode seem faster.,
+      }
+
+  - id: E04-ttft-vs-prompt-length
+    name: 'TTFT: uncached prompt length 127 to 12,385 tokens'
+    phase: TTFT
+    combination:
+      {
+        engine: { ubatch-size: 2048 },
+        client: {},
+        workload: hand probe,
+        new random text,
+      }
+    status: done
+    attempts:
+      - date: 2026-11-07
+        tool: hand streaming probe
+        result: 'about 0.55 ms per prompt token: 674 tokens 360 ms, 1,556 tokens 883 ms, 3,102 tokens 1,603 ms, 6,149 tokens 3,384 ms, 12,385 tokens 7,702 ms'
+    verdict:
+      {
+        result: baseline,
+        note: Prefill time increases linearly with prompt length.,
+      }
+
+  - id: E05-cache-resend-vs-append
+    name: 'TTFT: prompt cache on a repeated prompt and on an appended turn, ubatch-size=2048'
+    phase: TTFT
+    combination:
+      {
+        engine: { ubatch-size: 2048 },
+        client: {},
+        workload: hand probe,
+        6,
+        149-token prompt,
+      }
+    status: done
+    attempts:
+      - date: 2026-11-07
+        tool: hand probe + server log
+        result: 'both reuse only prompt minus 2,048 tokens (1,145 ms and 1,328 ms against 3,384 ms cold)'
+    verdict:
+      {
+        result: baseline,
+        note: The hybrid model state restores only from a context checkpoint.,
+      }
+
+  - id: E06-history-format
+    name: 'TTFT: history format (reasoning removed / reasoning_content + preserve_thinking / enable_thinking=false), ubatch-size=2048'
+    phase: TTFT
+    combination:
+      {
+        engine: { ubatch-size: 2048 },
+        client:
+          {
+            variants:
+              [
+                default,
+                'reasoning_content + chat_template_kwargs.preserve_thinking=true',
+                'chat_template_kwargs.enable_thinking=false',
+              ],
+          },
+        workload: hand probe,
+        6,
+        190-token first turn,
+      }
+    status: done
+    attempts:
+      - date: 2026-11-07
+        tool: hand probe
+        result: 'follow-up TTFT: default 1,129 ms (4,146 cached); reasoning_content + preserve_thinking 497 ms (6,183 cached); enable_thinking=false 1,242 ms (4,135 cached)'
+    verdict:
+      {
+        result: yielded,
+        note: The history must be equal,
+        token for token,
+        to what the model made.,
+      }
+
+  - id: E07-guidellm-chat-baseline
+    name: 'TTFT: ubatch-size=2048 on chat-6k-3turns-1user'
+    phase: TTFT
+    combination:
+      {
+        engine: { ubatch-size: 2048 },
+        client: {},
+        workload: chat-6k-3turns-1user,
+      }
+    status: done
+    attempts:
+      - date: 2026-11-07
+        tool: guidellm 0.8.1
+        result: 'follow-up TTFT 1,109 to 1,294 ms; cached = prompt minus 2,048 (3,962 of 6,052)'
+    verdict: { result: baseline }
+
+  - id: E08-guidellm-inline-reasoning
+    name: 'TTFT: multiturn_reasoning=true + extras.body.chat_template_kwargs.preserve_thinking=true on chat-6k-3turns-1user'
+    phase: TTFT
+    combination:
+      {
+        engine: { ubatch-size: 2048 },
+        client: { multiturn_reasoning: true, preserve_thinking: true },
+        workload: chat-6k-3turns-1user,
+      }
+    status: done
+    attempts:
+      - date: 2026-11-07
+        tool: guidellm 0.8.1 (same seed as E07, so first turns were cached too)
+        result: 'follow-up TTFT 1,151 to 1,592 ms; 4,046 cached'
+    verdict:
+      {
+        result: no-gain,
+        note: GuideLLM puts the reasoning back as text in content. That text is not equal to the cached tokens.,
+      }
+
+  - id: E09-prefill-vs-ubatch
+    name: 'TTFT: llama-bench prefill at ubatch-size=256/512/1024/2048'
+    phase: TTFT
+    combination:
+      {
+        engine: { ubatch-size: [256, 512, 1024, 2048] },
+        client: {},
+        workload: llama-bench -p 4096 -n 0 -b 4096 -r 2,
+      }
+    status: done
+    attempts:
+      - date: 2026-11-07
+        tool: llama-bench
+        result: '2,118 / 2,159 / 2,182 / 2,182 tok/s'
+    verdict:
+      { result: yielded, note: A small ubatch makes prefill at most 3% slower. }
+
+  - id: E10-ubatch-sweep-chat
+    name: 'TTFT: ubatch-size=256/512/1024/2048 on chat-6k-3turns-1user'
+    phase: TTFT
+    combination:
+      {
+        engine: { ubatch-size: [256, 512, 1024, 2048] },
+        client: {},
+        workload: chat-6k-3turns-1user,
+      }
+    status: done
+    attempts:
+      - date: 2026-11-07
+        tool: guidellm 0.8.1, seeds 7256/7512/8024/9049
+        result: 'follow-up TTFT: 256 = 225 ms, 512 = 347 ms, 1024 = 606 ms, 2048 = 1,143 ms; cached 5,771 / 5,515 / 5,003 / 3,983 of 6,073'
+    verdict: { result: yielded, note: Applied ubatch-size=256. }
+
+  - id: E11-engine-preserve-thinking
+    name: 'TTFT: chat-template-kwargs={"preserve_thinking":true} at ubatch-size=256 on aisdk-chat'
+    phase: TTFT
+    combination:
+      {
+        engine:
+          {
+            ubatch-size: 256,
+            chat-template-kwargs: '{"preserve_thinking":true}',
+          },
+        client: {},
+        workload: aisdk-chat,
+      }
+    status: done
+    attempts:
+      - date: 2026-11-07
+        tool: AI SDK probe
+        result: 'turn-2 TTFT: (a) no setting 297 to 339 ms; (b) with setting 296 to 328 ms; about 5,900 of 6,400 tokens cached in both. A SOB-shaped prompt renders byte-identical with and without the setting (/apply-template).'
+    verdict: { result: no-gain, note: Not used. E12 shows why. }
+
+  - id: E12-reasoning-preserve-default
+    name: 'diagnostic: why the reasoning stays in the history with no preserve_thinking'
+    phase: TTFT
+    combination:
+      {
+        engine: {},
+        client: {},
+        workload: AI SDK request capture + /apply-template,
+      }
+    status: done
+    attempts:
+      - date: 2026-11-07
+        tool: AI SDK probe with a fetch wrapper; llama.cpp source at b11960
+        result: 'The AI SDK sends no chat_template_kwargs, and the server still keeps the reasoning. llama.cpp has --reasoning-preserve, enabled by default, for templates with supports_preserve_reasoning (server-context.cpp 1742-1760, common/chat.cpp 1077, common/jinja/caps.cpp 24).'
+    verdict:
+      {
+        result: yielded,
+        note: The engine already preserves reasoning. The client must only send it back.,
+      }
+
+  - id: E13-ubatch-realistic-ab
+    name: 'TTFT/TPOT: ubatch-size=128/256/2048 on chat-6k-5turns-1user, chat-6k-5turns-4users, sob-4k2-4users, long-32k, shared-prefix-2k, aisdk-chat'
+    phase: TTFT
+    combination:
+      {
+        engine: { ubatch-size: [128, 256, 2048] },
+        client: {},
+        workload: all six,
+      }
+    status: done
+    attempts:
+      - date: 2026-11-07
+        tool: guidellm 0.8.1 + AI SDK probe, seeds <ubatch>*100 + 1..5
+        labels: { ubatch: 256 }
+        result:
+          chat-6k-5turns-1user: 'turn-1 TTFT 3,891 ms, later 249 ms, ITL 17 ms, cached 4,563 of 6,088, 46 out tok/s'
+          chat-6k-5turns-4users: 'turn-1 7,951 ms, later 682 ms, ITL 34 ms, cached 4,650 of 6,094, 84 out tok/s'
+          sob-4k2-4users: 'TTFT 5,332 ms, ITL 42 ms, 65 out tok/s'
+          long-32k: 'TTFT 24,719 ms (about 1,300 tok/s prefill), ITL 20 ms'
+          shared-prefix-2k: 'TTFT 2,580 ms, cached 0 of 4,015'
+          aisdk-chat: 'turn-2 TTFT 332 to 343 ms'
+      - date: 2026-11-07
+        tool: guidellm 0.8.1 + AI SDK probe
+        labels: { ubatch: 128 }
+        result:
+          chat-6k-5turns-1user: 'turn-1 3,250 ms, later 3,263 ms, cached 1 of 6,094: no prompt cache reuse'
+          chat-6k-5turns-4users: 'turn-1 7,705 ms, later 4,785 ms, ITL 75 ms, cached 1 of 6,094, 39 out tok/s'
+          sob-4k2-4users: 'TTFT 4,164 ms, ITL 36 ms, 78 out tok/s'
+          long-32k: 'TTFT 24,653 ms, ITL 18 ms (1 of 2 requests completed)'
+          shared-prefix-2k: 'TTFT 2,481 ms, cached 0 of 4,015'
+          aisdk-chat: 'turn-2 TTFT 247 to 272 ms'
+      - date: 2026-11-07
+        tool: guidellm 0.8.1 + AI SDK probe
+        labels: { ubatch: 2048 }
+        traffic: '86 proxied requests in the server log = exactly this run (no other client)'
+        result:
+          chat-6k-5turns-1user: 'turn-1 3,003 ms, later 1,098 ms, ITL 14 ms, cached 3,220 of 6,094, 46 out tok/s'
+          chat-6k-5turns-4users: 'turn-1 5,882 ms, later 1,409 ms, ITL 42 ms, cached 3,220 of 6,094, 74 out tok/s'
+          sob-4k2-4users: 'TTFT 4,108 ms, ITL 35 ms, 80 out tok/s'
+          long-32k: 'TTFT 20,898 ms, ITL 17 ms'
+          shared-prefix-2k: 'TTFT 2,247 ms, cached 0 of 4,015'
+          aisdk-chat: 'turn-2 TTFT 1,334 to 1,341 ms'
+    verdict:
+      {
+        result: mixed,
+        note: 'Follow-ups: 256 is about 4x faster than 2048 (chat 249 vs 1,098 ms; AI SDK 332-343 vs 1,334-1,341 ms). Fresh prompts: 256 looked 12-30% slower than 2048 (SOB-like, 32k, first turns), but E14 shows only 1.6-3.2% from the engine, and the 256 and 128 attempts have no traffic check. See E15. ubatch 128 breaks prompt cache reuse for clients that remove the reasoning; see X-diag-followup-checkpoint-trace.',
+      }
+
+  - id: E14-prefill-at-depth-vs-ubatch
+    name: 'TTFT: llama-bench prefill pp1024 at depth 0/8192/24576, ubatch-size=256 vs 2048'
+    phase: TTFT
+    combination:
+      {
+        engine: { ubatch-size: [256, 2048] },
+        client: {},
+        workload: llama-bench -p 1024 -n 0 -b 2048 -d 0,
+        8192,
+        24576 -r 2,
+      }
+    status: done
+    attempts:
+      - date: 2026-11-07
+        tool: llama-bench (llama.cpp 0.8.0, no server)
+        result: 'ubatch 256 vs 2048: depth 0 = 2,183 vs 2,220 tok/s (-1.6%); depth 8192 = 1,837 vs 1,884 (-2.5%); depth 24576 = 1,377 vs 1,423 (-3.2%)'
+    verdict:
+      {
+        result: yielded,
+        note: 'The engine cost of ubatch 256 is small at every depth. A larger server-side gap must come from something else (other traffic, server scheduling).',
+      }
+
+  - id: E15-fresh-prefill-recheck
+    name: 'TTFT: ubatch-size=256 vs 2048, paired and traffic-checked, on chat-6k-5turns-1user, sob-4k2-4users, long-32k, shared-prefix-2k'
+    phase: TTFT
+    combination:
+      {
+        engine: { ubatch-size: [256, 2048] },
+        client: {},
+        workload: four fresh-prefill workloads,
+      }
+    status: done
+    attempts:
+      - date: 2026-11-07
+        tool: guidellm 0.8.1, seeds <ubatch>*100 + 51..55, 256 then 2048 back to back
+        traffic: '40 proxied requests in each server log = exactly this run (no other client)'
+        result:
+          chat-6k-5turns-1user: '256: turn-1 3,031 ms, later 223 ms, cached 4,650 of 6,094, 51 out tok/s. 2048: turn-1 2,943 ms, later 1,099 ms, cached 3,220, 46 out tok/s'
+          sob-4k2-4users: '256: TTFT 3,424 ms, ITL 33 ms, 87 out tok/s. 2048: TTFT 3,668 ms, ITL 37 ms, 76 out tok/s'
+          long-32k: '256: 20,383 ms. 2048: 24,418 ms. (E13 had 24,719 vs 20,898: with 2 requests this workload varies by about 2 s in both directions)'
+          shared-prefix-2k: '256: 2,197 ms. 2048: 2,249 ms. cached 0 of 4,015 in both'
+    verdict:
+      {
+        result: yielded,
+        note: 'With clean traffic, ubatch 256 is equal or faster on fresh prompts and 4.9x faster on chat follow-ups. The 12-30% fresh-prompt penalty in E13 does not reproduce; the E13 256 attempt probably had other clients on the server. Keep ubatch-size=256. Use more than 2 requests for long-32k.',
+      }
+
+  # Proposed by the 2026-11-07 research pass (primary sources: llama.cpp b11960 source, PRs, LiquidAI docs).
+  - id: X-diag-followup-checkpoint-trace
+    name: 'TTFT (diagnostic): LLAMA_SERVER_SLOTS_DEBUG=1 + verbose log on chat-6k-5turns-1user and aisdk-chat, ubatch 128 and 256'
+    phase: TTFT
+    hypothesis: The trace shows which context checkpoint each follow-up restores and why ubatch 128 loses all reuse when the client removes the reasoning.
+    combination:
+      {
+        engine: { verbose: true, env: LLAMA_SERVER_SLOTS_DEBUG=1 },
+        client: {},
+        workload: chat-6k-5turns-1user,
+      }
+    in_build_b11960: 'yes'
+    source:
+      [
+        'https://github.com/ggml-org/llama.cpp/blob/8642541b2/src/llama-memory-hybrid.cpp#L173',
+        'https://github.com/ggml-org/llama.cpp/blob/8642541b2/tools/server/server-context.cpp#L4250',
+        'https://github.com/ggml-org/llama.cpp/pull/24797',
+        'https://github.com/ggml-org/llama.cpp/pull/20288',
+      ]
+    evidence: Hybrid seq_pos_min = max(attention, recurrent), so every follow-up takes the checkpoint-restore path. ggerganov closed PR 24797 ("recurrent state is valid only for the latest position"). No checkpoint is made after generation.
+    expected: Facts, not a speedup.
+    risks: Verbose logging slows the server; never time with it on.
+    measure: Log lines "restored context checkpoint", "old … new …" at the divergence, and n_past per turn.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-ttfot-reasoning-budget-chat
+    name: 'TTFOT: reasoning_budget_tokens=256/512/1024 + reasoning_budget_message on aisdk-chat'
+    phase: TTFOT
+    hypothesis: A thinking cap bounds TTFOT at about TTFT + budget x ITL.
+    combination:
+      {
+        engine: {},
+        client:
+          {
+            reasoning_budget_tokens: 512,
+            reasoning_budget_message: "\nTime is up; answer now.\n",
+          },
+        workload: aisdk-chat,
+      }
+    in_build_b11960: 'yes'
+    source:
+      [
+        'https://github.com/ggml-org/llama.cpp/blob/8642541b2/tools/server/server-common.cpp#L1517',
+        'https://github.com/ggml-org/llama.cpp/pull/22323',
+      ]
+    evidence: The server reads reasoning_budget_tokens and reasoning_budget_message per request; at the budget the sampler forces the message plus </think>.
+    expected: TTFOT drops in proportion to the cut in reasoning tokens; TTFT and ITL do not change.
+    risks: Answer quality on hard prompts; SOB scores must be re-measured before any SOB use.
+    measure: Streaming probe with first reasoning token, first content token and token counts; budgets 256/512/1024 against -1.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-ttfot-reasoning-control-deadline
+    name: 'TTFOT: reasoning_control=true + /v1/chat/completions/control action=reasoning_end after 3 s on aisdk-chat'
+    phase: TTFOT
+    hypothesis: A wall-clock deadline on thinking caps TTFOT under any load.
+    combination:
+      {
+        engine: {},
+        client:
+          {
+            reasoning_control: true,
+            control: 'POST /v1/chat/completions/control {id, action: reasoning_end, model} at t=3s if no content yet',
+          },
+        workload: aisdk-chat,
+      }
+    in_build_b11960: 'yes'
+    source:
+      [
+        'https://github.com/ggml-org/llama.cpp/blob/8642541b2/tools/server/README.md',
+        'https://github.com/ggml-org/llama.cpp/blob/8642541b2/tools/server/server-context.cpp#L3114',
+      ]
+    evidence: reasoning_end calls common_sampler_reasoning_budget_force on the live slot; in router mode the request must name the model.
+    expected: TTFOT at or below deadline + 50 ms, also with 4 streams.
+    risks: Same quality risk as a budget; the AI SDK needs a fetch wrapper.
+    measure: TTFOT p95 and how often the deadline fires, on aisdk-chat and chat-6k-5turns-4users.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-quant-q8-0
+    name: 'TPOT/TTFOT: model=LFM3-1.7B-Q8_0.gguf (1,846,238,496 bytes) on sob-4k2-4users + natural-answers'
+    phase: TTFOT
+    hypothesis: Decode is memory-bound; 1.85 GB instead of 3.47 GB per pass gives about 1.5 to 1.8x decode, and TTFOT for long reasoning drops by the same factor.
+    combination:
+      {
+        engine:
+          {
+            model: 'LiquidAI/LFM3-1.7B-GGUF:Q8_0 (new section; copy ctx-size, parallel, kv-unified, ubatch-size)',
+          },
+        client: {},
+        workload: sob-4k2-4users,
+      }
+    in_build_b11960: 'yes'
+    source:
+      [
+        'https://github.com/ggml-org/llama.cpp/discussions/4167',
+        'https://huggingface.co/api/models/LiquidAI/LFM3-1.7B-GGUF/tree/main',
+      ]
+    evidence: 'Discussion 4167, M4 Pro, Llama 7B: tg F16 17.2 -> Q8_0 30.7 tok/s (1.79x), pp512 -3%. File size confirmed from the HF listing.'
+    expected: Single-stream decode about 75 to 90 tok/s; TTFOT -35 to -45%; prefill within -5%.
+    risks: SOB scores can change; re-score SOB before use.
+    measure: llama-bench pp4096/tg256 BF16 vs Q8_0; GuideLLM sob-4k2-4users ITL and out tok/s; SOB score diff.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-quant-qad-q4-0
+    name: 'TPOT/TTFOT: model=LFM3-1.7B-QAD-Q4_0.gguf (1,049,615,680 bytes) on sob-4k2-4users + natural-answers'
+    phase: TTFOT
+    hypothesis: LiquidAI's quantization-aware-distilled Q4_0 uses the fastest Metal decode kernel with less quality loss than a plain Q4.
+    combination:
+      {
+        engine: { model: 'LiquidAI/LFM3-1.7B-GGUF:QAD-Q4_0 (new section)' },
+        client: {},
+        workload: sob-4k2-4users,
+      }
+    in_build_b11960: 'yes'
+    source:
+      [
+        'https://huggingface.co/api/models/LiquidAI/LFM3-1.7B-GGUF/tree/main',
+        'https://docs.liquid.ai/docs/inference/llama-cpp',
+        'https://github.com/ggml-org/llama.cpp/discussions/4167',
+      ]
+    evidence: 'Discussion 4167, M4 Pro: Q4_0 tg 50.7 vs F16 17.2 (2.9x), pp -5%. LiquidAI uses a Q4_0 GGUF for its LFM3 edge benchmarks.'
+    expected: Single-stream decode about 110 to 150 tok/s; TTFOT -55 to -65%; prefill -5 to -10%.
+    risks: The largest quality risk; re-score SOB. Q4_K_M / Q5_K_M / Q6_K are the fallbacks.
+    measure: Same as X-quant-q8-0; report the decode gain per SOB-score point lost.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-sob-shared-shots-prefix
+    name: 'TTFT: SOB requests grouped by byte-identical few-shot block on sob-4k2-4users'
+    phase: TTFT
+    hypothesis: The server always checkpoints at the start of the last user message, so items that share the shots prefill only their last user turn.
+    combination:
+      {
+        engine: {},
+        client:
+          {
+            ordering: group items by shot set; keep shots and system byte-stable,
+            id_slot: optional pin of shot group g to slot g % 4,
+          },
+        workload: sob-4k2-4users,
+      }
+    in_build_b11960: 'yes'
+    source:
+      [
+        'https://github.com/ggml-org/llama.cpp/blob/8642541b2/tools/server/server-context.cpp#L4502',
+        'https://docs.liquid.ai/deployment/on-device/llama-cpp/chat.md',
+      ]
+    evidence: The batch breaks at last_user_pos and checkpoints there, whatever checkpoint-min-step is. LiquidAI advises byte-identical system prompts.
+    expected: cached_tokens about equal to the shots length after the first wave.
+    risks: Only useful if SOB shots repeat across items. Re-ordering must not change SOB scores.
+    measure: GuideLLM concurrent streams=4 replaying SOB prompts; cached_tokens and TTFT p50/p95, dataset order vs grouped order.
+    status: running
+    attempts:
+      - date: 2026-11-07
+        tool: guidellm 0.8.1, workload shared-prefix-2k (E13)
+        result: 'cached 0 of 4,015 on all 6 requests at ubatch 256 and 128: the shared 2k system prefix was not reused'
+    verdict:
+      {
+        result: unproven,
+        note: The expected reuse did not happen. Run X-diag-followup-checkpoint-trace on shared-prefix-2k first.,
+      }
+
+  - id: X-chat-prewarm-turn-end
+    name: 'TTFT: client pre-warm after each reply (history + empty user, max_tokens=1) on chat-6k-5turns-1user'
+    phase: TTFT
+    hypothesis: A background request after each reply leaves a checkpoint at the start of the next user message, so the real follow-up prefills only the new text.
+    combination:
+      {
+        engine: {},
+        client:
+          {
+            prewarm: 'on finish: same messages + {role: user, content: ""}, max_tokens 1, discard',
+          },
+        workload: chat-6k-5turns-1user,
+      }
+    in_build_b11960: 'yes'
+    source:
+      [
+        'https://github.com/ggml-org/llama.cpp/blob/8642541b2/tools/server/server-context.cpp#L4502',
+        'https://github.com/ggml-org/llama.cpp/pull/25592',
+        'https://github.com/ggml-org/llama.cpp/issues/24055',
+      ]
+    evidence: The last-user checkpoint is always made; upstream end-of-turn reuse for hybrids is still unmerged (PR 25592 open).
+    expected: Follow-up TTFT about 50 to 100 ms instead of 225 to 340 ms; more gain with long reasoning.
+    risks: One extra prefill per turn; it competes with other users. Only useful if X-diag shows the answer is prefilled again.
+    measure: Custom AI SDK harness (GuideLLM cannot do it); follow-up TTFT and cached_tokens, with and without pre-warm; cost on chat-6k-5turns-4users.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-system-prefix-prewarm
+    name: 'TTFT: pre-warm [system(+tools), user ""] max_tokens=1 at session open on shared-prefix-2k'
+    phase: TTFT
+    hypothesis: The first turn of a new chat with a stable 2k system prefix reuses the last-user checkpoint of the pre-warm.
+    combination:
+      {
+        engine: {},
+        client:
+          {
+            prewarm: 'at session start: system + tools + empty user, max_tokens 1',
+          },
+        workload: shared-prefix-2k,
+      }
+    in_build_b11960: 'yes'
+    source:
+      [
+        'https://github.com/ggml-org/llama.cpp/pull/16391',
+        'https://docs.liquid.ai/deployment/on-device/llama-cpp/chat.md',
+      ]
+    evidence: The --cache-ram prompt cache restores the best LCP match; PR 16391 reports 9.9 s cold to 0.97 s cached for an 11.7k prompt.
+    expected: First-turn TTFT -1.1 s for a 2k prefix.
+    risks: Tool order must be stable. Depends on why shared-prefix-2k got 0 cached (see X-sob-shared-shots-prefix).
+    measure: GuideLLM shared-prefix-2k TTFT and cached_tokens, with and without pre-warm.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-no-cache-idle-slots-4users
+    name: 'TTFT: no-cache-idle-slots (kv-unified kept) on chat-6k-5turns-4users'
+    phase: TTFT
+    hypothesis: With a unified KV, each new task saves and clears idle slots, so another user's follow-up must reload its state. Keeping idle slots resident removes that work.
+    combination:
+      {
+        engine: { no-cache-idle-slots: true },
+        client: {},
+        workload: chat-6k-5turns-4users,
+      }
+    in_build_b11960: 'yes'
+    source:
+      [
+        'https://github.com/ggml-org/llama.cpp/blob/8642541b2/tools/server/server-context.cpp#L3071',
+      ]
+    evidence: 'Code: if cache_idle_slots, then prompt_save() and, with kv_unified, prompt_clear() for each idle slot.'
+    expected: Follow-up TTFT p95 for 4 users moves toward the 1-user value.
+    risks: KV pressure on the unified pool without a RAM copy.
+    measure: GuideLLM chat-6k-5turns-4users follow-up TTFT p50/p95 and cached_tokens.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-ttfot-thinking-off
+    name: 'TTFOT: chat_template_kwargs.enable_thinking=false for simple turns on natural-answers'
+    phase: TTFOT
+    hypothesis: With no reasoning, TTFOT equals TTFT.
+    combination:
+      {
+        engine: {},
+        client: { chat_template_kwargs: { enable_thinking: false } },
+        workload: natural-answers,
+      }
+    in_build_b11960: 'yes'
+    source:
+      [
+        'https://huggingface.co/LiquidAI/LFM3-1.7B',
+        'https://github.com/ggml-org/llama.cpp/blob/8642541b2/tools/server/server-common.cpp#L1497',
+      ]
+    evidence: The model card calls enable_thinking=False inconsistent for reasoning-heavy tasks.
+    expected: TTFOT from seconds to about TTFT.
+    risks: Quality drops; mixing on and off across turns changes the history format and breaks reuse (E06). Never for SOB unless it is scored.
+    measure: Streaming probe TTFOT plus an answer-quality check, against thinking on.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-spec-off-novel
+    name: 'TPOT: spec-type=none (no spec-default) on natural-answers + sob-4k2-4users'
+    phase: TPOT
+    hypothesis: On LFM3 each ngram-mod draft saves a full checkpoint and a partial accept replays it; on new text (3% accepted) this can cost more than it saves.
+    combination:
+      { engine: { spec-type: none }, client: {}, workload: natural-answers }
+    in_build_b11960: 'yes'
+    source:
+      [
+        'https://github.com/ggml-org/llama.cpp/blob/8642541b2/common/arg.cpp#L4812',
+        'https://github.com/ggml-org/llama.cpp/blob/8642541b2/tools/server/server-context.cpp#L3935',
+      ]
+    evidence: '--spec-default = ngram-mod (n_match 24, n_min 48, n_max 64); need_n_rs_seq() is non-zero only for draft-mtp/eagle3/dflash/dspark.'
+    expected: Same or slightly better ITL on new text; worse on repeated text.
+    risks: Loses the bursts on repeated text. No quality risk.
+    measure: GuideLLM synchronous and concurrent=4, ITL p50 and out tok/s, draft stats from timings.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-spec-ngram-mod-plus-k4v
+    name: 'TPOT: spec-type=ngram-mod,ngram-map-k4v + k4v size-n=8 size-m=24 min-hits=2 on sob-4k2-4users'
+    phase: TPOT
+    hypothesis: Structured answers copy keys and values from the reasoning; 8-token keys find those copies more often than a 24-token match.
+    combination:
+      {
+        engine:
+          {
+            spec-type: 'ngram-mod,ngram-map-k4v',
+            spec-ngram-map-k4v-size-n: 8,
+            spec-ngram-map-k4v-size-m: 24,
+            spec-ngram-map-k4v-min-hits: 2,
+          },
+        client: {},
+        workload: sob-4k2-4users,
+      }
+    in_build_b11960: 'yes'
+    source:
+      [
+        'https://github.com/ggml-org/llama.cpp/blob/8642541b2/common/arg.cpp#L4820',
+      ]
+    evidence: The --spec-default code has this k4v config commented out ("not sure if this is a good config - explore more settings").
+    expected: ITL -10 to -30% on the JSON part of SOB answers.
+    risks: More rejected drafts = more checkpoint replays on LFM3.
+    measure: GuideLLM concurrent=4 on SOB-like prompts, ITL split by reasoning and content, draft acceptance.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-f16-vs-bf16
+    name: 'TTFT/TPOT: model=LFM3-1.7B-F16.gguf (same 3,466,626,336 bytes) on long-32k + sob-4k2-4users'
+    phase: TTFT
+    hypothesis: Metal F16 matmul kernels are the most tuned path and can prefill faster than BF16.
+    combination:
+      {
+        engine: { model: 'LiquidAI/LFM3-1.7B-GGUF:F16 (new section)' },
+        client: {},
+        workload: long-32k,
+      }
+    in_build_b11960: 'yes'
+    source:
+      [
+        'https://github.com/ggml-org/llama.cpp/pull/10218',
+        'https://github.com/ggml-org/llama.cpp/issues/7182',
+      ]
+    evidence: 'PR 10218 (Metal BF16): "BF16 does not seem to provide any benefits compared to F16".'
+    expected: Prefill 0 to 15% faster; decode about the same.
+    risks: Rare F16 overflow with BF16-trained weights; spot-check SOB.
+    measure: llama-bench pp4096/pp32768/tg256 BF16 vs F16; GuideLLM long-32k TTFT.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-ubatch-128
+    name: 'TTFT: ubatch-size=128 on chat-6k-5turns-1user + long-32k'
+    phase: TTFT
+    hypothesis: A smaller ubatch prefills fewer tail tokens again on a follow-up.
+    combination:
+      {
+        engine: { ubatch-size: 128 },
+        client: {},
+        workload: chat-6k-5turns-1user,
+      }
+    in_build_b11960: 'yes'
+    source: ['https://github.com/ggml-org/llama.cpp/pull/20288']
+    status: done
+    attempts:
+      - date: 2026-11-07
+        tool: see E13-ubatch-realistic-ab, attempt ubatch 128
+        result: 'chat follow-ups lost all reuse (cached 1, later TTFT 3,263 ms vs 249 ms at 256); aisdk-chat faster (247 to 272 ms vs 332 to 343 ms)'
+    verdict:
+      {
+        result: regression,
+        note: Not used. It breaks clients that remove the reasoning,
+        such as the Llama.app chat window and GuideLLM.,
+      }
+
+  - id: X-batch-512-itl
+    name: 'TPOT: batch-size=512 on chat-6k-5turns-4users'
+    phase: TPOT
+    hypothesis: With -b 2048 and -ub 256 one server step can hold 8 ubatches of a new prefill, so other streams wait; -b 512 caps that stall.
+    combination:
+      {
+        engine: { batch-size: 512 },
+        client: {},
+        workload: chat-6k-5turns-4users,
+      }
+    in_build_b11960: 'yes'
+    source:
+      [
+        'https://github.com/ggml-org/llama.cpp/blob/8642541b2/tools/server/server-context.cpp#L4480',
+      ]
+    evidence: The server fills one batch of up to n_batch tokens per step, decode tokens first, then prompt tokens.
+    expected: ITL p99 down during concurrent prefill; TTFT of the prefilling request up a little.
+    risks: Long prompts span more steps.
+    measure: GuideLLM chat-6k-5turns-4users ITL p95/p99, TTFT, out tok/s.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-kv-q8-long
+    name: 'TPOT: cache-type-k=q8_0 + cache-type-v=q8_0 + flash-attn=on on long-32k'
+    phase: TPOT
+    hypothesis: At 30k to 57k tokens the 6 full-attention layers read 350 to 700 MB of f16 KV per decode step; q8_0 halves that.
+    combination:
+      {
+        engine: { cache-type-k: q8_0, cache-type-v: q8_0, flash-attn: 'on' },
+        client: {},
+        workload: long-32k,
+      }
+    in_build_b11960: 'yes'
+    source:
+      [
+        'https://huggingface.co/LiquidAI/LFM3-1.7B/raw/main/config.json',
+        'https://github.com/ggml-org/llama.cpp/issues/21450',
+      ]
+    evidence: '6 full-attention layers x 4 KV heads x 128 = 12,288 bytes/token f16. Mixed K/V types fail on Metal; same-type pairs work.'
+    expected: Long-32k ITL -5 to -10%; prefill may slow.
+    risks: Small long-context quality drop; never mix K and V types.
+    measure: llama-bench -p 32768 -n 128 -ctk/-ctv f16 vs q8_0 -fa 1; GuideLLM long-32k ITL and TTFT.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-backend-sampling
+    name: 'TPOT: backend-sampling=true on sob-4k2-4users (temperature 0)'
+    phase: TPOT
+    hypothesis: GPU sampling removes the per-token copy of the 128k-vocabulary logits to the CPU.
+    combination:
+      {
+        engine: { backend-sampling: true },
+        client: {},
+        workload: sob-4k2-4users,
+      }
+    in_build_b11960: 'yes'
+    source: ['llama serve --help: -bs, --backend-sampling (experimental)']
+    evidence: Experimental, default disabled; no published numbers.
+    expected: ITL -1 to -5%.
+    risks: Experimental; greedy outputs must stay byte-identical.
+    measure: GuideLLM concurrent=4 ITL and out tok/s; output diff against baseline.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-metal-residency-keepalive
+    name: 'TTFT: env GGML_METAL_RESIDENCY_KEEP_ALIVE_S=300 on aisdk-chat after 200 s idle'
+    phase: TTFT
+    hypothesis: Metal keeps the weight residency set for 180 s; a request after 180 to 300 s idle may pay a re-residency cost.
+    combination:
+      {
+        engine:
+          {
+            env: 'GGML_METAL_RESIDENCY_KEEP_ALIVE_S=300 (needs Llama.app to pass env)',
+          },
+        client: {},
+        workload: 'new: idle-gap probe after 60/200/290 s',
+      }
+    in_build_b11960: unverified
+    source:
+      [
+        'https://github.com/ggml-org/llama.cpp/blob/8642541b2/ggml/src/ggml-metal/ggml-metal-device.m#L977',
+      ]
+    evidence: keep_alive_s = 3*60, overridable by the env var; the runtime ggml is Homebrew ggml 0.28.0, so unverified.
+    expected: TTFT after a 200 to 290 s gap equals warm TTFT.
+    risks: Llama.app may not forward env vars.
+    measure: TTFT after timed idle gaps, 5 repetitions, with and without the env var.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-reload-after-sleep
+    name: 'TTFT: no-warmup=true on the first request after sleep'
+    phase: TTFT
+    hypothesis: A reload after the 300 s sleep takes 4 to 9 s; skipping the warmup decode shortens it.
+    combination:
+      {
+        engine: { no-warmup: true },
+        client: {},
+        workload: 'new: cold-wake probe after more than 300 s idle',
+      }
+    in_build_b11960: 'yes'
+    source: ['llama serve --help: --warmup, --no-warmup']
+    evidence: Warmup runs an empty decode at load (default enabled).
+    expected: Cold TTFT -0.3 to -1 s; sleep-idle-seconds stays 300.
+    risks: The first real request may pay the shader init instead, for no net gain.
+    measure: Request to first token after more than 300 s idle, 5 repetitions per config.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-checkpoint-step-edits
+    name: 'TTFT: checkpoint-min-step=2048 on a long-32k 8-turn chat with an edit of turn 6'
+    phase: TTFT
+    hypothesis: With min-step 8192, editing an earlier turn of a 32k chat falls back up to 8k tokens.
+    combination:
+      {
+        engine: { checkpoint-min-step: 2048 },
+        client: {},
+        workload: 'new: long-32k conversation, then edit turn 6 and resend',
+      }
+    in_build_b11960: 'yes'
+    source:
+      [
+        'https://github.com/ggml-org/llama.cpp/blob/8642541b2/tools/server/server-context.cpp#L2724',
+        'https://github.com/ggml-org/llama.cpp/issues/24055',
+      ]
+    evidence: Checkpoints break at user-message starts more than min-step past the last one, up to 32 per slot.
+    expected: Edit/regenerate TTFT at 32k from up to about 4.5 s to 1.2 s or less.
+    risks: More checkpoint memory.
+    measure: Custom script TTFT and cached_tokens on the edited resend, 8192 vs 2048.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-mlx-comparison
+    name: 'TPOT/TTFT: engine=mlx_lm.server with LiquidAI/LFM3-1.7B-MLX-8bit vs llama.cpp Q8_0 on chat-6k-5turns-1user + sob-4k2-4users'
+    phase: TPOT
+    hypothesis: MLX often decodes small models faster on M-series; the gap tells whether the engine choice costs us.
+    combination:
+      {
+        engine: { engine: mlx-lm (comparison only) },
+        client: {},
+        workload: chat-6k-5turns-1user,
+      }
+    in_build_b11960: 'no'
+    source: ['https://huggingface.co/api/models?author=LiquidAI&search=LFM3']
+    evidence: LiquidAI publishes LFM3-1.7B MLX variants; blog reports (not rigorous) show MLX ahead on decode for small models.
+    expected: Decode may be faster; hybrid prompt caching and multi-slot batching in MLX are unknown.
+    risks: A different engine; out of scope unless the gap is large.
+    measure: The same GuideLLM workloads against an mlx_lm.server endpoint.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-rej-cache-reuse
+    name: 'TTFT: cache-reuse=256 on aisdk-chat'
+    phase: TTFT
+    combination:
+      { engine: { cache-reuse: 256 }, client: {}, workload: aisdk-chat }
+    source:
+      [
+        'https://docs.liquid.ai/deployment/on-device/llama-cpp/chat.md',
+        'https://github.com/ggml-org/llama.cpp/blob/8642541b2/tools/server/server-context.cpp#L4123',
+      ]
+    status: rejected
+    attempts: []
+    verdict:
+      {
+        result: rejected,
+        note: KV shifting cannot correct the convolution state after a divergence,
+        and the checkpoint restore resets n_past anyway.,
+      }
+
+  - id: X-rej-swa-full
+    name: 'TTFT: swa-full=true on chat-6k-5turns-1user'
+    phase: TTFT
+    combination:
+      { engine: { swa-full: true }, client: {}, workload: chat-6k-5turns-1user }
+    source:
+      [
+        'https://github.com/ggml-org/llama.cpp/blob/8642541b2/tools/server/server-context.cpp#L4401',
+        'https://github.com/ggml-org/llama.cpp/issues/24055',
+      ]
+    status: rejected
+    attempts: []
+    verdict:
+      {
+        result: rejected,
+        note: The 13 convolution layers still need checkpoints; swa-full only adds memory.,
+      }
+
+  - id: X-rej-draft-models
+    name: 'TPOT: spec-type=draft-simple|draft-eagle3|draft-dflash|draft-dspark|draft-mtp'
+    phase: TPOT
+    combination:
+      {
+        engine: { spec-type: draft-dspark },
+        client: {},
+        workload: natural-answers,
+      }
+    source:
+      [
+        'https://huggingface.co/api/models?author=LiquidAI&search=LFM3',
+        'https://huggingface.co/LiquidAI/LFM3-1.7B/raw/main/config.json',
+      ]
+    status: rejected
+    attempts: []
+    verdict:
+      {
+        result: rejected,
+        note: 'No LFM3 drafter or MTP heads exist, and LFM2.x drafters have a different vocabulary. Check again when LiquidAI publishes an LFM3 drafter.',
+      }
+
+  - id: X-rej-kv-unified-off
+    name: 'TTFT: kv-unified=false on chat-6k-5turns-4users'
+    phase: TTFT
+    combination:
+      {
+        engine: { kv-unified: false },
+        client: {},
+        workload: chat-6k-5turns-4users,
+      }
+    source:
+      [
+        'https://github.com/ggml-org/llama.cpp/blob/8642541b2/tools/server/server-context.cpp#L1663',
+      ]
+    status: rejected
+    attempts: []
+    verdict:
+      {
+        result: rejected,
+        note: 'Each slot would get 65,536 tokens; SOB audio prompts (57k) plus 16k thinking do not fit. X-no-cache-idle-slots-4users targets the same cost.',
+      }
+
+  - id: X-rej-cpu-threads-poll
+    name: 'TPOT: threads / threads-batch / poll / prio tuning'
+    phase: TPOT
+    combination:
+      { engine: { threads: 8, poll: 0 }, client: {}, workload: natural-answers }
+    source: ['https://docs.liquid.ai/docs/inference/llama-cpp']
+    status: rejected
+    attempts: []
+    verdict:
+      {
+        result: rejected,
+        note: With full Metal offload the CPU threads only drive the graph and the sampler; expected less than 1%.,
+      }
+
+pitfalls:
+  - id: A1
+    attempt: Stop speculative decoding for one request with speculative.n_max=0
+    happened: The server ignored it (186 of 186 drafts accepted).
+    instead: Change spec-type in the engine settings.
+  - id: A2
+    attempt: guidellm benchmark run
+    happened: GuideLLM 0.8.1 has no benchmark command.
+    instead: guidellm run
+  - id: A3
+    attempt: Run GuideLLM two times with the same seed
+    happened: The second run used the prompt cache of the first run.
+    instead: Use a new seed for each run.
+  - id: A4
+    attempt: Start Llama.app immediately after quit
+    happened: open failed with error -600 and the server was down for 40 s.
+    instead: Repeat open -g -a Llama until it succeeds.
+  - id: A5
+    attempt: Measure in the first minute after Llama.app starts
+    happened: Sometimes the app restarts its router about 40 s after it starts, and all requests in that time fail.
+    instead: Monitor the router process ID for about 60 s; check that the GuideLLM errored list is empty.
+  - id: A6
+    attempt: Use the bandwidth limit as a limit for tokens/s
+    happened: Speculative drafts gave 409 tok/s, more than the limit.
+    instead: The limit is for forward passes (E02).
+  - id: A7
+    attempt: Apply the chat history fix to the SOB runner
+    happened: The runner sends [...shots, user] and never sends model output back.
+    instead: For SOB, examine reuse of the shared few-shot prefix (X-sob-shared-shots-prefix).
+  - id: A8
+    attempt: Expect a small ubatch to make prefill much slower
+    happened: It was 3% slower (E09).
+    instead: Measure before you trade one value for another.
+  - id: A9
+    attempt: Expect a new chat turn to use the full prompt cache
+    happened: The default template removes earlier reasoning when the client does not send it (E06).
+    instead: Send response.messages (AI SDK).
+  - id: A10
+    attempt: Read GuideLLM time_per_output_token_ms as decode speed
+    happened: It divides the full request time by the output tokens, so it includes the TTFT (514 ms on long-32k).
+    instead: Use inter_token_latency_ms.
+  - id: A11
+    attempt: Expect ubatch 128 to beat 256 for every client (E13)
+    happened: Clients that remove the reasoning lost all prompt cache reuse.
+    instead: A/B every engine change on all workloads, not only on the target workload.
