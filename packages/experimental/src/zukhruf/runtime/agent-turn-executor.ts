@@ -162,6 +162,10 @@ export class AgentTurnExecutor {
       chatId: turn.chatId,
       userId: turn.userId,
     });
+    // The turn owns the handle it asked for. A named sandbox outlives it, but
+    // each open handle holds a client connection: a Microsandbox microVM
+    // refuses every connect after about 107 of them.
+    await using _turnSandbox = sandbox.sandbox;
     const agentSkills = await this.#skillsFor(
       turn,
       declaration.name,

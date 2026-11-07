@@ -230,3 +230,72 @@ test('a truncated tool input cannot park the next queued user turn', async (t) =
   assert.equal(model.doStreamCalls.length, 2);
   assert.equal(queryExecutions, 0, 'An incomplete call cannot execute');
 });
+
+test('a turn releases the sandbox it asked for when it ends, also when its model fails', async (t) => {
+  // How many sandboxes the turns asked for and did not release. A named
+  // microVM holds a client connection per handle, so each one left open
+  // leaks, and about 107 of them fail every later connect.
+  let open = 0;
+  const usage = {
+    inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+    outputTokens: { total: 1, text: 1, reasoning: 0 },
+  };
+  const model: MockLanguageModelV4 = new MockLanguageModelV4({
+    doStream: async () => {
+      if (model.doStreamCalls.length === 2)
+        throw new Error('The provider is down');
+      return {
+        stream: ReadableStream.from<LanguageModelV4StreamPart>([
+          { type: 'text-start' as const, id: 'text' },
+          { type: 'text-delta' as const, id: 'text', delta: 'Done.' },
+          { type: 'text-end' as const, id: 'text' },
+          {
+            type: 'finish' as const,
+            finishReason: { unified: 'stop' as const, raw: 'stop' },
+            usage,
+          },
+        ]),
+      };
+    },
+  });
+  const runtime = new AgentRuntime(
+    defineAgent({
+      name: 'released',
+      model,
+      instructions: [],
+      stopWhen: isStepCount(1),
+      sandbox: defineSandbox(async () => {
+        const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+        open++;
+        const dispose = async () => {
+          open--;
+          await backend.dispose();
+        };
+        return { ...backend, dispose, [Symbol.asyncDispose]: dispose };
+      }),
+    }),
+  );
+  await using host = await runtime.initialize(stack);
+  await host.work();
+  const conversation = { chatId: 'released', userId: 'owner' };
+  const send = (id: string) =>
+    host.enqueue(conversation, {
+      trigger: 'submit-message',
+      message: { id, role: 'user', parts: [{ type: 'text', text: id }] },
+    });
+
+  const completed = await send('first');
+  await Array.fromAsync(completed.stream);
+  const afterCompleted = open;
+  const failed = await send('second');
+  await Array.fromAsync(failed.stream).catch(() => {});
+  const view = host.observe(conversation);
+  await t.waitFor(
+    async () => assert.equal((await view.status(failed.id))?.status, 'failed'),
+    { interval: 50, timeout: 3000 },
+  );
+
+  assert.equal((await view.status(completed.id))?.status, 'completed');
+  assert.equal(afterCompleted, 0);
+  assert.equal(open, 0);
+});
