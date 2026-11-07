@@ -131,7 +131,24 @@ export async function chat<const TOOLS extends ToolSet>(
             ...responseMessage,
             parts: sanitizeAbortedParts(responseMessage.parts),
           }
-        : responseMessage;
+        : {
+            ...responseMessage,
+            // A provider can end at its token limit midway through arguments.
+            // That call failed; it is not waiting for client input or approval.
+            parts: responseMessage.parts.map((part) => {
+              if (!isToolUIPart(part) || part.state !== 'input-streaming')
+                return part;
+              const failed = {
+                ...part,
+                state: 'output-error' as const,
+                input: part.input,
+                errorText: 'Tool input ended before the call was complete.',
+              };
+              delete failed.rawInput;
+              delete failed.inputEncoding;
+              return failed;
+            }),
+          };
 
       const finalMetadata = await options?.finalAssistantMetadata?.(settled);
       const mergedMetadata = {

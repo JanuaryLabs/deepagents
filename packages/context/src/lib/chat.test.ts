@@ -708,6 +708,47 @@ describe('chat() abort handling', () => {
     );
   });
 
+  it('saves a tool call whose input ended at the token limit as a failed call, not one that waits', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'length-streaming-chat',
+      userId: 'test-user',
+    });
+    const mockAgent = createAbortMockAgent(context, [
+      { type: 'start', messageId: 'msg-1' },
+      { type: 'start-step' },
+      { type: 'tool-input-start', toolCallId: 'tc-1', toolName: 'search' },
+      { type: 'tool-input-delta', toolCallId: 'tc-1', inputTextDelta: '{"q' },
+      { type: 'finish-step' },
+      { type: 'finish' },
+    ]);
+
+    await context.continue(userMessage('search something'));
+    await drain(await chat(mockAgent));
+
+    const branch = await store.getActiveBranch('length-streaming-chat');
+    assert.ok(branch?.headMessageId);
+    const chain = await store.getMessageChain(branch.headMessageId);
+    const assistantEntry = chain.find(
+      (entry: { name: string }) => entry.name === 'assistant',
+    );
+    assert.ok(assistantEntry);
+    const toolParts = requireUIMessage(
+      assistantEntry.data,
+      'assistant entry',
+    ).parts.filter(isToolUIPart);
+    assert.deepStrictEqual(
+      toolParts.map(({ state, errorText }) => ({ state, errorText })),
+      [
+        {
+          state: 'output-error',
+          errorText: 'Tool input ended before the call was complete.',
+        },
+      ],
+    );
+  });
+
   it('converts approval-requested tool invocations to output-error on abort', async () => {
     const store = new InMemoryContextStore();
     const context = new ContextEngine({
