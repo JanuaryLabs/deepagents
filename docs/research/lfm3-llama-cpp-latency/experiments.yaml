@@ -21,6 +21,11 @@ baseline:
   client: 'AI SDK through the deepagents `lfm` export; history = response.messages (reasoning sent back as reasoning_content)'
 
 workloads:
+  chat-500-5turns:
+    tool: guidellm
+    data: kind=synthetic_text,first_prompt_tokens=500,prompt_tokens=50,output_tokens=200,turns=5
+    profile: set by the experiment (goodput search over streams)
+    note: Interactive chat with a short opening message.
   chat-6k-3turns-1user:
     tool: guidellm
     data: kind=synthetic_text,first_prompt_tokens=6000,prompt_tokens=30,output_tokens=200,turns=3
@@ -393,6 +398,117 @@ experiments:
         result: yielded,
         note: 'With clean traffic, ubatch 256 is equal or faster on fresh prompts and 4.9x faster on chat follow-ups. The 12-30% fresh-prompt penalty in E13 does not reproduce; the E13 256 attempt probably had other clients on the server. Keep ubatch-size=256. Use more than 2 requests for long-32k.',
       }
+
+  # Capacity: the highest load that still meets the latency limits (goodput, DistServe OSDI 2024).
+  # GuideLLM goodput profile: it searches the number of concurrent streams for the largest load at
+  # which 95% of requests meet every limit. slo.tpot_ms is compared with inter_token_latency_ms.
+  - id: X-capacity-chat-interactive
+    name: 'throughput: goodput search (TTFT <= 1,000 ms, ITL <= 50 ms, 95%) on chat-500-5turns'
+    phase: throughput
+    hypothesis: With 4 server slots, interactive chat meets the limits up to about 4 concurrent conversations.
+    combination: { engine: {}, client: {}, workload: chat-500-5turns }
+    measure: 'guidellm --profile kind=goodput,initial_streams=1,max_streams=16,max_probes=8 --metrics kind=generative,slo.ttft_ms=1000,slo.tpot_ms=50, 45 s per probe; report streams, requests/s, out tok/s and attainment for each probe'
+    status: running
+    attempts:
+      - date: 2026-11-07
+        tool: guidellm 0.8.1 goodput profile (initial_streams 1, max_streams 16, max_probes 8, 45 s per probe), ubatch 256
+        labels:
+          { experiment: X-capacity-chat-interactive, attempt: 1, ubatch: 256 }
+        traffic: 'server proxied requests = GuideLLM requests (clean)'
+        result: '1 stream: 100% meet (17 requests), 0.407 req/s, 81 out tok/s, TTFT p95 568 ms, ITL p95 18.3 ms. 2 streams: 92% (24 requests), 0.549 req/s, 110 out tok/s, TTFT p95 1,331 ms, ITL p95 22.0 ms. Best passing: 1 stream.'
+    verdict:
+      {
+        result: unproven,
+        note: 'Capacity within TTFT <= 1 s / ITL <= 50 ms is 1 concurrent conversation (indicative: GuideLLM marks every probe resolved: false; the 1-stream attainment lower bound is 82%). Next: 120 s probes.',
+      }
+
+  - id: X-capacity-chat-6k-doc
+    name: 'throughput: goodput search (TTFT <= 4,000 ms, ITL <= 50 ms, 95%) on chat-6k-5turns'
+    phase: throughput
+    hypothesis: The 6k first turn takes about 3 s at 1 stream, so the 4 s limit is met only at low load.
+    combination:
+      {
+        engine: {},
+        client: {},
+        workload: chat-6k-5turns-1user (streams set by the search),
+      }
+    measure: 'same goodput search with slo.ttft_ms=4000,slo.tpot_ms=50'
+    status: running
+    attempts:
+      - date: 2026-11-07
+        tool: guidellm 0.8.1 goodput profile (initial_streams 1, max_streams 16, max_probes 8, 45 s per probe), ubatch 256
+        labels: { experiment: X-capacity-chat-6k-doc, attempt: 1, ubatch: 256 }
+        traffic: 'server proxied requests = GuideLLM requests (clean)'
+        result: '1 stream: 91% meet (11 of 12 requests), TTFT p95 4,107 ms, ITL p95 17.8 ms, 0.257 req/s, 51 out tok/s. The search stopped: no stream count passes.'
+    verdict:
+      {
+        result: unproven,
+        note: 'The 4 s TTFT limit fails even with one user, because the 6k first turn takes 3 to 4 s. Next: 120 s probes, or a limit that applies only to follow-up turns.',
+      }
+
+  - id: X-capacity-sob
+    name: 'throughput: goodput search (TTFT <= 6,000 ms, ITL <= 50 ms, 95%) on sob-4k2'
+    phase: throughput
+    hypothesis: SOB-like 4.2k prompts meet a 6 s TTFT up to about 4 concurrent requests.
+    combination:
+      {
+        engine: {},
+        client: {},
+        workload: sob-4k2-4users (streams set by the search),
+      }
+    measure: 'same goodput search with slo.ttft_ms=6000,slo.tpot_ms=50'
+    status: running
+    attempts:
+      - date: 2026-11-07
+        tool: guidellm 0.8.1 goodput profile (initial_streams 1, max_streams 16, max_probes 8, 45 s per probe), ubatch 256
+        labels: { experiment: X-capacity-sob, attempt: 1, ubatch: 256 }
+        traffic: 'server proxied requests = GuideLLM requests (clean)'
+        result: '1 stream: 100% (6), 0.140 req/s, TTFT p95 3,752 ms, ITL p95 18.7 ms. 2 streams: 100% (7), 0.163 req/s, TTFT p95 4,821 ms, ITL p95 40.3 ms. 3 streams: 67% (9), ITL p95 57.6 ms. 4 streams: 56% (9), TTFT p95 8,852 ms, ITL p95 57.0 ms.'
+    verdict:
+      {
+        result: unproven,
+        note: 'Capacity within TTFT <= 6 s / ITL <= 50 ms is 2 concurrent requests. ITL is the first limit to break: it increases from 18 to 57 ms as streams rise, because the prefill of other requests delays the decode steps (see X-batch-512-itl). Indicative: probes not resolved; next: 120 s probes.',
+      }
+
+  - id: E16-ubatch-replication-reversed
+    name: 'TTFT: ubatch-size=2048 vs 256, paired, traffic-checked, 2048 first (E15 in reverse order) on chat-6k-5turns-1user, sob-4k2-4users, long-32k, shared-prefix-2k'
+    phase: TTFT
+    hypothesis: 'E15 (n = 1 for each setting) holds: 256 is equal or better on fresh prompts and much better on follow-ups. Reversed order removes a drift bias.'
+    combination:
+      {
+        engine: { ubatch-size: [2048, 256] },
+        client: {},
+        workload: four fresh-prefill workloads,
+      }
+    measure: 'campaign-recheck script, 2048 then 256, new seeds; long-32k with 6 requests instead of 2'
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-vllm-metal-comparison
+    name: 'throughput: engine=vllm-metal 0.1.0 (MLX backend) with LiquidAI/LFM3-1.7B-MLX-bf16 vs llama.cpp on chat-500-5turns + sob-4k2 goodput searches'
+    phase: throughput
+    hypothesis: 'vLLM schedules many concurrent requests well on NVIDIA GPUs (PagedAttention, continuous batching). On this Mac, vllm-metal could serve more concurrent requests within the limits than llama.cpp with 4 slots.'
+    combination:
+      {
+        engine: { engine: 'vllm-metal (comparison only)' },
+        client: {},
+        workload: chat-500-5turns,
+      }
+    in_build_b11960: 'no'
+    source:
+      [
+        'https://pypi.org/project/vllm-metal/',
+        'https://www.docker.com/blog/docker-model-runner-vllm-metal-macos/',
+        'https://huggingface.co/LiquidAI/LFM3-1.7B',
+      ]
+    evidence: 'vllm-metal is a community plugin under the vLLM organization, contributed by Docker; it runs MLX models. Docker measured llama.cpp about 1.2x faster than vLLM-Metal at all output lengths. The LFM3 model card lists vLLM for BF16 on GPUs; LFM3 support in vllm-metal is not confirmed.'
+    expected: 'Unknown at high concurrency; likely slower for a single stream (Docker benchmark).'
+    risks: 'Version 0.1.0; the LFM3 architecture may not run on the MLX path; a different reasoning parser and prompt cache behavior (hybrid model state); it is a second engine to maintain.'
+    measure: 'Install vllm-metal in its own venv; serve LFM3 MLX bf16; run the same goodput searches (X-capacity-*) and chat-6k-5turns-1user against it; compare capacity (streams, req/s within limits), follow-up TTFT and ITL.'
+    status: proposed
+    attempts: []
+    verdict: null
 
   # Proposed by the 2026-11-07 research pass (primary sources: llama.cpp b11960 source, PRs, LiquidAI docs).
   - id: X-diag-followup-checkpoint-trace
