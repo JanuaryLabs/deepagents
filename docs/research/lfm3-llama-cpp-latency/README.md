@@ -67,7 +67,7 @@ Two GuideLLM fields need care:
 
 ## Current engine settings
 
-`ubatch-size = 256` (Llama.app selects 2048). See `E10`, `E13` and `E15` in `experiments.yaml`: chat follow-ups are 4.9 times faster, and fresh prompts are equal or faster. All other values are Llama.app or llama.cpp defaults: `ctx-size 262144`, `parallel 4`, `kv-unified true`, `--spec-default`, `--reasoning-preserve`.
+`ubatch-size = 256` (Llama.app selects 2048). See `E10`, `E13` and `E15` in `experiments.yaml`: chat follow-ups are 4.9 times faster, and fresh prompts are equal or faster. Do not set `ubatch-size` below 250. The server uses a checkpoint only when it is 254 or more tokens before the first token that differs, and the follow-up checkpoint is `4 + ubatch` tokens before the end of the previous prompt (`X-diag-followup-checkpoint-trace`). All other values are Llama.app or llama.cpp defaults: `ctx-size 262144`, `parallel 4`, `kv-unified true`, `--spec-default`, `--reasoning-preserve`.
 
 The client must keep the model reasoning in the chat history: give `response.messages` from one call to the next call. The AI SDK then sends the reasoning back as `reasoning_content` (`@ai-sdk/openai-compatible` 3.0.78, `dist/index.js`, line 205).
 

@@ -615,9 +615,24 @@ experiments:
     expected: Facts, not a speedup.
     risks: Verbose logging slows the server; never time with it on.
     measure: Log lines "restored context checkpoint", "old … new …" at the divergence, and n_past per turn.
-    status: proposed
-    attempts: []
-    verdict: null
+    status: done
+    attempts:
+      - date: 2026-11-07
+        tool: standalone llama-server b11960 on port 9950 with the Llama.app LFM3 args (parallel 4, kv-unified, spec-default, fit-target 1024) + -v + LLAMA_SERVER_SLOTS_DEBUG=1; guidellm 0.8.1 synchronous, shared-prefix-2k (6 requests) then chat-6k-5turns-1user (15 requests), ubatch 256 then 128 (seeds 53001-53004)
+        labels:
+          experiment: X-diag-followup-checkpoint-trace
+          attempt: 1
+          ubatch: 256 / 128
+          workload: shared-prefix-2k / chat-6k-5turns-1user
+        traffic: own server, no other clients
+        result: |
+          The restore rule (server-context.cpp:4252-4265): a checkpoint is used only if pos_min < pos_eval - n_swa + 2 (n_swa = 256), or pos_min = 0. Hybrid seq_pos_min = max(attention, recurrent) (llama-memory-hybrid.cpp:173), so every checkpoint records pos_min = pos_max ("created context checkpoint ... pos_min = 2005, pos_max = 2005"). A checkpoint is therefore usable only when it is 254 or more tokens before the first token that differs.
+          Checkpoints are made only at user-message starts (the first, the last, and others more than checkpoint-min-step apart), at 4 + n_ubatch and at 4 tokens before the end of the prompt (server-context.cpp:4503-4518). None is made after generation.
+          shared-prefix-2k, ubatch 256 and 128: the cached prompt matched 2,011 tokens (lcp 2011). The checkpoints were at 2,005 (start of the user message), 3,754 or 3,882, and 4,010. The threshold was 1,757, so none was usable: "forcing full prompt re-processing", 4,015 of 4,015 tokens evaluated on all 5 repeats.
+          chat-6k-5turns-1user (GuideLLM drops the reasoning, so the divergence is at the end of the previous prompt, 6,010): ubatch 256 restored the 4 + 256 checkpoint at 5,750 (threshold 5,756, 6 tokens of margin) and evaluated 302 tokens on all 12 follow-ups. ubatch 128 had its 4 + 128 checkpoint at 5,878, above the threshold, so it restored the checkpoint at position 1 and evaluated 6,051-6,177 tokens (all) on all 12 follow-ups.
+    verdict:
+      result: baseline
+      note: 'Facts. ubatch 256 keeps follow-up reuse with 6 tokens of margin: any ubatch below 250 loses it for clients that drop the reasoning (this explains X-ubatch-128). A shared prefix that ends at the start of the last user message is never reused (this explains X-sob-shared-shots-prefix). Upstream marks the pos_min of checkpoints as wrong for SWA models ([TAG_CHECKPOINTS_FIX_POS_MIN], server-context.cpp:2773, a TODO in b11960). Trace files: ~/.claude/scratch/lfm3-latency/checkpoint-trace/.'
 
   - id: X-ttfot-reasoning-budget-chat
     name: 'TTFOT: reasoning_budget_tokens=256/512/1024 + reasoning_budget_message on aisdk-chat'
@@ -759,7 +774,7 @@ experiments:
     verdict:
       {
         result: unproven,
-        note: The expected reuse did not happen. Run X-diag-followup-checkpoint-trace on shared-prefix-2k first.,
+        note: 'The expected reuse did not happen. X-diag-followup-checkpoint-trace found why: the checkpoint at the start of the last user message is 5 tokens before the first differing token, and a hybrid checkpoint needs 254 tokens of margin. Grouping by shot set cannot help while that rule holds. For SOB few-shot prompts, see X-checkpoint-min-step-0-shots.',
       }
 
   - id: X-chat-prewarm-turn-end
@@ -1090,6 +1105,29 @@ experiments:
     expected: Cold TTFT -0.3 to -1 s; sleep-idle-seconds stays 300.
     risks: The first real request may pay the shader init instead, for no net gain.
     measure: Request to first token after more than 300 s idle, 5 repetitions per config.
+    status: proposed
+    attempts: []
+    verdict: null
+
+  - id: X-checkpoint-min-step-0-shots
+    name: 'TTFT: checkpoint-min-step=0 on SOB few-shot prompts (system + 2 shot pairs + user)'
+    phase: TTFT
+    hypothesis: With min-step 8192, a 4k SOB prompt gets checkpoints only at the first and the last user message. The last is too close to the first differing token, so each item prefills both shots again. With min-step 0, the second shot's user message gets a checkpoint too, and it is more than 254 tokens before the difference.
+    combination:
+      {
+        engine: { checkpoint-min-step: 0 },
+        client: {},
+        workload: 'new: SOB budget-8k-question-twice-few-shot messages (sob/runner run.ts:128-130, 215), same shots, different records',
+      }
+    in_build_b11960: 'yes'
+    source:
+      [
+        'https://github.com/ggml-org/llama.cpp/blob/8642541b2/tools/server/server-context.cpp#L4503',
+      ]
+    evidence: X-diag-followup-checkpoint-trace (restore rule and checkpoint placement).
+    expected: Prompt tokens evaluated per item drop by the size of the first shot pair. The second shot pair and the last user message are still evaluated.
+    risks: More checkpoints per slot (3.1 MiB each, at most 32). Only the few-shot variant has shots.
+    measure: 'Untimed first: timings.prompt_n and cache_n per request, min-step 8192 vs 0 (llama-server response). Then TTFT p50/p95 on AC power, interleaved (pitfalls A12, A13).'
     status: proposed
     attempts: []
     verdict: null
