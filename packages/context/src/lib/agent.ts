@@ -29,7 +29,7 @@ import {
   toUIMessageStream,
   tool,
 } from 'ai';
-import chalk from 'chalk';
+import { styleText } from 'node:util';
 import z from 'zod';
 
 import {
@@ -499,7 +499,8 @@ class Agent<TOOLS extends ToolSet> {
                 failureFeedback = checkResult.feedback;
 
                 console.log(
-                  chalk.yellow(
+                  styleText(
+                    'yellow',
                     `[${this.#options.name}] Guardrail triggered (attempt ${attempt}/${maxRetries}): ${failureFeedback.slice(0, 50)}...`,
                   ),
                 );
@@ -509,7 +510,8 @@ class Agent<TOOLS extends ToolSet> {
 
               if (checkResult.type === 'stop') {
                 console.log(
-                  chalk.red(
+                  styleText(
+                    'red',
                     `[${this.#options.name}] Guardrail stopped - unrecoverable error, no retry`,
                   ),
                 );
@@ -528,7 +530,8 @@ class Agent<TOOLS extends ToolSet> {
 
             if (attempt >= maxRetries) {
               console.error(
-                chalk.red(
+                styleText(
+                  'red',
                   `[${this.#options.name}] Guardrail retry limit (${maxRetries}) exceeded.`,
                 ),
               );

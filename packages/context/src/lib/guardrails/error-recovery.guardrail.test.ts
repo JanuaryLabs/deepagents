@@ -1,5 +1,7 @@
 import assert from 'node:assert';
+import { execFile } from 'node:child_process';
 import { describe, it } from 'node:test';
+import { promisify } from 'node:util';
 
 import {
   type Guardrail,
@@ -11,6 +13,36 @@ import {
 } from '@deepagents/context';
 
 describe('Guardrail System', () => {
+  it('prints the styled recovery diagnostic without changing its text', async () => {
+    const { stdout } = await promisify(execFile)(
+      process.execPath,
+      [
+        '--no-warnings',
+        '--input-type=module',
+        '-e',
+        `
+        import { errorRecoveryGuardrail, runGuardrailChain } from '@deepagents/context';
+        runGuardrailChain({ type: 'error', errorText: 'Tool choice is none' },
+          [errorRecoveryGuardrail], { availableTools: [], availableSkills: [] });
+      `,
+      ],
+      {
+        cwd: new URL('../../..', import.meta.url),
+        env: { ...process.env, FORCE_COLOR: '1' },
+      },
+    );
+    const prefix = '\u001b[1m\u001b[35m[ErrorRecovery]\u001b[39m\u001b[22m';
+    assert.strictEqual(
+      stdout,
+      [
+        `${prefix} \u001b[31mCaught error:\u001b[39m \u001b[2mTool choice is none\u001b[22m`,
+        `${prefix} \u001b[33mPattern:\u001b[39m \u001b[36mTool choice is none (no tools)\u001b[39m`,
+        `${prefix} \u001b[32mFeedback:\u001b[39m \u001b[2mI tried to call a tool, but no tools are available. Let me respond with plain te\u001b[22m...`,
+        '',
+      ].join('\n'),
+    );
+  });
+
   describe('runGuardrailChain', () => {
     it('should pass through non-error parts unchanged', () => {
       const textDeltaPart = {

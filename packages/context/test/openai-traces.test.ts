@@ -1040,6 +1040,44 @@ describe('OpenAI Traces Integration', () => {
   });
 
   describe('OpenAITracesExporter', () => {
+    for (const outcome of ['recovers', 'exhausts retries'] as const) {
+      it(`${outcome} after waiting to resend the trace payload`, async (t) => {
+        const bodies: unknown[] = [];
+        const arrivals: number[] = [];
+        using interception = msw.intercept(
+          http.post(
+            'https://api.openai.com/v1/traces/ingest',
+            async ({ request }) => {
+              bodies.push(await request.json());
+              arrivals.push(performance.now());
+              return new HttpResponse(null, {
+                status:
+                  outcome === 'recovers' && bodies.length === 2 ? 200 : 503,
+              });
+            },
+          ),
+        );
+        t.mock.method(Math, 'random', () => 0.5);
+        const exporter = new OpenAITracesExporter({
+          apiKey: 'test',
+          maxRetries: 2,
+          baseDelayMs: 100,
+          maxDelayMs: 100,
+        });
+        const items: TraceItem[] = [
+          { object: 'trace', id: 'trace_retry', workflow_name: 'retry-test' },
+        ];
+        const exported = exporter.export(items);
+        if (outcome === 'recovers') await exported;
+        else await assert.rejects(exported, /Server error 503/);
+        assert.deepStrictEqual(bodies, [{ data: items }, { data: items }]);
+        assert.ok(
+          arrivals[1] - arrivals[0] >= 90,
+          'retry must wait for its backoff',
+        );
+      });
+    }
+
     it('throws on missing API key', async () => {
       const exporter = new OpenAITracesExporter({ apiKey: '' });
       await assert.rejects(

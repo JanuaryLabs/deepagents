@@ -43,7 +43,7 @@ export function attachment(
         type: 'file',
         data: {
           type: 'data',
-          data: Buffer.from(input.bytes).toString('base64'),
+          data: input.bytes.toBase64(),
         },
         mediaType,
         filename: path.posix.basename(input.path),

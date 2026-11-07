@@ -1,5 +1,5 @@
 import { groq } from '@ai-sdk/groq';
-import chalk from 'chalk';
+import { styleText } from 'node:util';
 
 import { printer } from '@deepagents/agent';
 
@@ -602,12 +602,13 @@ async function createSkillAwareAgent() {
   const skillSandbox = await createBashTool({
     sandbox: await createDockerSandbox({ installers: [pkg(['strace'])] }),
     onBeforeBashCall: ({ command }) => {
-      console.log(chalk.blue(`[Bash Tool] Executing: ${command}`));
+      console.log(styleText('blue', `[Bash Tool] Executing: ${command}`));
       return { command };
     },
     onAfterBashCall: ({ command, result }) => {
       console.log(
-        chalk.blue(
+        styleText(
+          'blue',
           `[Bash Tool] Command "${command}" exited with code ${JSON.stringify(result)}`,
         ),
       );
@@ -719,12 +720,14 @@ async function demonstrateDockerSandbox() {
   } = await createBashTool({
     sandbox: agentBackend,
     onBeforeBashCall: ({ command }) => {
-      console.log(chalk.cyan(`[Container] Running: ${command}`));
+      console.log(styleText('cyan', `[Container] Running: ${command}`));
       return { command };
     },
     onAfterBashCall: ({ result }) => {
       if (result.exitCode !== 0) {
-        console.log(chalk.yellow(`[Container] Exit code: ${result.exitCode}`));
+        console.log(
+          styleText('yellow', `[Container] Exit code: ${result.exitCode}`),
+        );
       }
       return { result };
     },
@@ -775,7 +778,7 @@ async function createDockerSkillAgent() {
   const dockerSandbox = await createBashTool({
     sandbox: dockerBackend,
     onBeforeBashCall: ({ command }) => {
-      console.log(chalk.blue(`[Docker Agent] ${command}`));
+      console.log(styleText('blue', `[Docker Agent] ${command}`));
       return { command };
     },
   });

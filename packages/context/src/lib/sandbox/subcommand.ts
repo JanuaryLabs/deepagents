@@ -64,10 +64,6 @@ export function defineSubcommandGroup(
   });
 }
 
-function escapeRegExp(s: string) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /**
  * Strips a single layer of matching outer `"` or `'` quotes from a string,
  * trimming surrounding whitespace. If the input is not wrapped in a matching
@@ -104,9 +100,9 @@ export function buildSubcommandRepair(
   name: string,
   subcommands: Record<string, SubcommandDefinition>,
 ) {
-  const subNames = Object.keys(subcommands).map(escapeRegExp).join('|');
+  const subNames = Object.keys(subcommands).map(RegExp.escape).join('|');
   const pattern = new RegExp(
-    `^(\\s*${escapeRegExp(name)}\\s+(?:${subNames}))\\s+([\\s\\S]+)$`,
+    `^(\\s*${RegExp.escape(name)}\\s+(?:${subNames}))\\s+([\\s\\S]+)$`,
   );
 
   return function repair(raw: string): string {

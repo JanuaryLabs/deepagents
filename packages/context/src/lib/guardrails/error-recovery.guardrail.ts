@@ -23,7 +23,7 @@
  * });
  * ```
  */
-import chalk from 'chalk';
+import { styleText } from 'node:util';
 
 import type { Guardrail } from '../guardrail.ts';
 import { fail, pass, stop } from '../guardrail.ts';
@@ -38,19 +38,19 @@ export const errorRecoveryGuardrail: Guardrail = {
     }
 
     const errorText = part.errorText || '';
-    const prefix = chalk.bold.magenta('[ErrorRecovery]');
+    const prefix = styleText(['bold', 'magenta'], '[ErrorRecovery]');
 
     console.log(
-      `${prefix} ${chalk.red('Caught error:')} ${chalk.dim(errorText.slice(0, 150))}`,
+      `${prefix} ${styleText('red', 'Caught error:')} ${styleText('dim', errorText.slice(0, 150))}`,
     );
 
     // Helper to log and return fail
     const logAndFail = (pattern: string, feedback: string) => {
       console.log(
-        `${prefix} ${chalk.yellow('Pattern:')} ${chalk.cyan(pattern)}`,
+        `${prefix} ${styleText('yellow', 'Pattern:')} ${styleText('cyan', pattern)}`,
       );
       console.log(
-        `${prefix} ${chalk.green('Feedback:')} ${chalk.dim(feedback.slice(0, 80))}...`,
+        `${prefix} ${styleText('green', 'Feedback:')} ${styleText('dim', feedback.slice(0, 80))}...`,
       );
       return fail(feedback);
     };
@@ -156,7 +156,7 @@ export const errorRecoveryGuardrail: Guardrail = {
 
     // Unknown error - don't retry, let it propagate
     console.log(
-      `${prefix} ${chalk.yellow('Unknown error - stopping without retry')}`,
+      `${prefix} ${styleText('yellow', 'Unknown error - stopping without retry')}`,
     );
     return stop(part);
   },

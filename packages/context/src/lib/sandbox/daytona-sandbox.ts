@@ -5,6 +5,7 @@ import type {
   Sandbox,
 } from '@daytona/sdk';
 import { randomUUID } from 'node:crypto';
+import { setTimeout } from 'node:timers/promises';
 
 import { readFileContent } from './read-file.ts';
 import { shellQuote } from './shell-quote.ts';
@@ -13,7 +14,6 @@ import type {
   DisposableSandbox,
   ExecuteCommandOptions,
   ExitInfo,
-  SandboxProcess,
   SandboxReadinessOptions,
   SpawnOptions,
 } from './types.ts';
@@ -376,10 +376,109 @@ function createDaytonaSandboxMethods(args: {
     executeCommand,
 
     async spawn(command, options) {
-      return spawnDaytonaProcess(sandbox, command, {
-        ...options,
-        commandTimeout,
-      });
+      const sessionId = `deepagents-spawn-${randomUUID()}`;
+      const stdout = createTextReadable();
+      const stderr = createTextReadable();
+      const signal = options?.signal;
+      const sessionCommand = buildSessionCommand(command, { ...options });
+      const exit = (async (): Promise<ExitInfo> => {
+        let sessionCreated = false;
+        let aborted = signal?.aborted === true;
+        const { promise: abortPromise, resolve: resolveAbort } =
+          Promise.withResolvers<'aborted'>();
+        const abort = () => {
+          aborted = true;
+          resolveAbort('aborted');
+          if (sessionCreated) {
+            sandbox.process.deleteSession(sessionId).catch(() => {});
+          }
+        };
+
+        if (signal) {
+          if (signal.aborted) abort();
+          else signal.addEventListener('abort', abort, { once: true });
+        }
+
+        try {
+          await sandbox.process.createSession(sessionId);
+          sessionCreated = true;
+          if (aborted) return abortedExitInfo();
+
+          const response = await sandbox.process.executeSessionCommand(
+            sessionId,
+            {
+              command: sessionCommand,
+              runAsync: true,
+              suppressInputEcho: true,
+            },
+            commandTimeout,
+          );
+          const commandId = response.cmdId;
+          if (!commandId) {
+            throw new DaytonaCommandError(
+              'Daytona did not return a command id for the spawned session command.',
+            );
+          }
+          if (aborted) return abortedExitInfo();
+
+          const logsTask = sandbox.process.getSessionCommandLogs(
+            sessionId,
+            commandId,
+            stdout.enqueue,
+            stderr.enqueue,
+          );
+          logsTask.catch(() => {});
+
+          const winner = await Promise.race([logsTask, abortPromise]);
+          if (winner === 'aborted') {
+            await sandbox.process.deleteSession(sessionId).catch(() => {});
+            return abortedExitInfo();
+          }
+
+          const timeoutMs =
+            commandTimeout === undefined
+              ? DAYTONA_EXIT_POLL_TIMEOUT_MS
+              : Math.max(commandTimeout * 1000, DAYTONA_EXIT_POLL_TIMEOUT_MS);
+          const deadline = Date.now() + timeoutMs;
+          while (true) {
+            if (aborted)
+              throw new DaytonaCommandError('Daytona command aborted.');
+            const info = await sandbox.process.getSessionCommand(
+              sessionId,
+              commandId,
+            );
+            if (typeof info.exitCode === 'number') {
+              return {
+                code: info.exitCode,
+                signal: null,
+                success: info.exitCode === 0,
+              };
+            }
+            if (Date.now() >= deadline) {
+              throw new DaytonaCommandError(
+                `Daytona session command "${commandId}" logs closed before an exit code became available.`,
+              );
+            }
+            await setTimeout(DAYTONA_EXIT_POLL_INTERVAL_MS);
+          }
+        } catch (error) {
+          if (aborted) return abortedExitInfo();
+          const err = toError(error);
+          stdout.error(err);
+          stderr.error(err);
+          throw err;
+        } finally {
+          if (signal) {
+            signal.removeEventListener('abort', abort);
+          }
+          stdout.close();
+          stderr.close();
+          if (sessionCreated) {
+            await sandbox.process.deleteSession(sessionId).catch(() => {});
+          }
+        }
+      })();
+      return { stdout: stdout.stream, stderr: stderr.stream, exit };
     },
 
     async readFile(path, options) {
@@ -442,174 +541,6 @@ function createDaytonaSandboxMethods(args: {
       return this.dispose();
     },
   };
-}
-
-function spawnDaytonaProcess(
-  sandbox: Sandbox,
-  command: string,
-  options: SpawnOptions & { commandTimeout?: number } = {},
-): SandboxProcess {
-  const sessionId = createSessionId('spawn');
-  const stdout = createTextReadable();
-  const stderr = createTextReadable();
-
-  const exit = runSpawnedSession({
-    sandbox,
-    sessionId,
-    command: buildSessionCommand(command, options),
-    signal: options.signal,
-    commandTimeout: options.commandTimeout,
-    stdout,
-    stderr,
-  });
-
-  return {
-    stdout: stdout.stream,
-    stderr: stderr.stream,
-    exit,
-  };
-}
-
-async function runSpawnedSession(args: {
-  sandbox: Sandbox;
-  sessionId: string;
-  command: string;
-  signal?: AbortSignal;
-  commandTimeout?: number;
-  stdout: TextReadable;
-  stderr: TextReadable;
-}): Promise<ExitInfo> {
-  const {
-    sandbox,
-    sessionId,
-    command,
-    signal,
-    commandTimeout,
-    stdout,
-    stderr,
-  } = args;
-  let sessionCreated = false;
-  let aborted = signal?.aborted ?? false;
-  let resolveAbort: (() => void) | undefined;
-  const abortPromise = new Promise<'aborted'>((resolve) => {
-    resolveAbort = () => resolve('aborted');
-  });
-  const abort = () => {
-    aborted = true;
-    resolveAbort?.();
-    if (sessionCreated) {
-      sandbox.process.deleteSession(sessionId).catch(() => {});
-    }
-  };
-
-  if (signal) {
-    if (signal.aborted) abort();
-    else signal.addEventListener('abort', abort, { once: true });
-  }
-
-  try {
-    await sandbox.process.createSession(sessionId);
-    sessionCreated = true;
-    if (aborted) return abortedExitInfo();
-
-    const response = await sandbox.process.executeSessionCommand(
-      sessionId,
-      {
-        command,
-        runAsync: true,
-        suppressInputEcho: true,
-      },
-      commandTimeout,
-    );
-    const commandId = response.cmdId;
-    if (!commandId) {
-      throw new DaytonaCommandError(
-        'Daytona did not return a command id for the spawned session command.',
-      );
-    }
-    if (aborted) return abortedExitInfo();
-
-    const logsTask = sandbox.process.getSessionCommandLogs(
-      sessionId,
-      commandId,
-      (chunk) => stdout.enqueue(chunk),
-      (chunk) => stderr.enqueue(chunk),
-    );
-    logsTask.catch(() => {});
-
-    const winner = await Promise.race([
-      logsTask.then(() => 'logs' as const),
-      abortPromise,
-    ]);
-    if (winner === 'aborted') {
-      await sandbox.process.deleteSession(sessionId).catch(() => {});
-      return abortedExitInfo();
-    }
-
-    await logsTask;
-    const code = await waitForSessionCommandExitCode({
-      sandbox,
-      sessionId,
-      commandId,
-      timeoutMs: sessionExitPollTimeoutMs(commandTimeout),
-      isAborted: () => aborted,
-    });
-    return { code, signal: null, success: code === 0 };
-  } catch (error) {
-    if (aborted) return abortedExitInfo();
-    const err = toError(error);
-    stdout.error(err);
-    stderr.error(err);
-    throw err;
-  } finally {
-    if (signal) {
-      signal.removeEventListener('abort', abort);
-    }
-    stdout.close();
-    stderr.close();
-    if (sessionCreated) {
-      await sandbox.process.deleteSession(sessionId).catch(() => {});
-    }
-  }
-}
-
-async function waitForSessionCommandExitCode(args: {
-  sandbox: Sandbox;
-  sessionId: string;
-  commandId: string;
-  timeoutMs: number;
-  isAborted: () => boolean;
-}): Promise<number> {
-  const { sandbox, sessionId, commandId, timeoutMs, isAborted } = args;
-  const deadline = Date.now() + timeoutMs;
-
-  while (true) {
-    if (isAborted()) throw new DaytonaCommandError('Daytona command aborted.');
-
-    const info = await sandbox.process.getSessionCommand(sessionId, commandId);
-    if (typeof info.exitCode === 'number') {
-      return info.exitCode;
-    }
-
-    if (Date.now() >= deadline) {
-      throw new DaytonaCommandError(
-        `Daytona session command "${commandId}" logs closed before an exit code became available.`,
-      );
-    }
-
-    await delay(DAYTONA_EXIT_POLL_INTERVAL_MS);
-  }
-}
-
-function sessionExitPollTimeoutMs(commandTimeout: number | undefined): number {
-  if (commandTimeout === undefined || commandTimeout === 0) {
-    return DAYTONA_EXIT_POLL_TIMEOUT_MS;
-  }
-  return Math.max(commandTimeout * 1000, DAYTONA_EXIT_POLL_TIMEOUT_MS);
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 interface TextReadable {
@@ -677,10 +608,6 @@ function validateEnvKey(key: string): void {
       `Invalid environment variable key: "${key}". Use shell-compatible environment variable names.`,
     );
   }
-}
-
-function createSessionId(kind: 'exec' | 'spawn'): string {
-  return `deepagents-${kind}-${randomUUID()}`;
 }
 
 function abortedCommandResult(): CommandResult {

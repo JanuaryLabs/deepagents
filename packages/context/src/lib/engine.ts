@@ -1297,7 +1297,7 @@ export class ContextEngine {
         session.terminalToolParts,
       ),
       sandbox,
-      firedOnceIds: new Set([...chain.firedOnceIds, ...session.firedOnceIds]),
+      firedOnceIds: chain.firedOnceIds.union(session.firedOnceIds),
     };
   }
 
@@ -1321,10 +1321,7 @@ export class ContextEngine {
       const whenCtx = this.#buildWhenCtx(chain, currentMessage);
       whenCtx.sandbox = sandbox;
       whenCtx.toolOutcome = outcome;
-      whenCtx.firedOnceIds = new Set([
-        ...chain.firedOnceIds,
-        ...session.firedOnceIds,
-      ]);
+      whenCtx.firedOnceIds = chain.firedOnceIds.union(session.firedOnceIds);
       const matched = await evaluateFiredReminders(configs, whenCtx);
       texts.push(...matched.map((item) => item.resolved.text));
       for (const id of matched.flatMap((item) => item.onceIds)) {

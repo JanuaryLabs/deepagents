@@ -1,9 +1,6 @@
 import { writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { z } from 'zod';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** The part of https://models.dev/api.json this script reads: provider id → model id. */
 const modelsDevResponse = z.record(
@@ -37,7 +34,10 @@ ${modelIds.map((id) => `  | '${id}'`).join('\n')};
 export type Models = KnownModels | (string & {});
 `;
 
-  const outputPath = join(__dirname, '../src/lib/models.generated.ts');
+  const outputPath = join(
+    import.meta.dirname,
+    '../src/lib/models.generated.ts',
+  );
   writeFileSync(outputPath, typeContent);
 
   console.log(`Generated ${modelIds.length} model IDs`);

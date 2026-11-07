@@ -982,7 +982,7 @@ export class ToonRenderer extends ContextRenderer {
     let intersection = new Set<string>(Object.keys(objects[0]));
     for (const obj of objects) {
       const keys = new Set(Object.keys(obj));
-      intersection = new Set([...intersection].filter((k) => keys.has(k)));
+      intersection = intersection.intersection(keys);
 
       for (const value of Object.values(obj)) {
         if (value == null) continue;

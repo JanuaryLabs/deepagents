@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
+import { setTimeout } from 'node:timers/promises';
 
 import type {
   CommonSandboxOptions,
@@ -161,7 +162,7 @@ export abstract class ContainerSandboxStrategy<
       const container = await this.engine.attach(name, image);
       if (container) return { container, attached: true };
       if (Date.now() >= timeoutAt) return undefined;
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await setTimeout(10);
     }
   }
 

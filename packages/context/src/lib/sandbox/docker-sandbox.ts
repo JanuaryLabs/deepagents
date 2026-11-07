@@ -16,7 +16,7 @@ import {
 } from '@zukhruf/docker';
 import spawn, { SubprocessError } from 'nano-spawn';
 import { type StdioOptions, spawn as childSpawn } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { hash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { posix } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -1346,13 +1346,7 @@ export class ComposeStrategy extends ContainerSandboxStrategy<DockerCommonOption
     this.dockerEngine = engine;
     this.composeFile = args.compose;
     this.service = args.service;
-    this.projectName = this.computeProjectName();
-  }
-
-  private computeProjectName(): string {
-    const content = readFileSync(this.composeFile, 'utf-8');
-    const hash = createHash('sha256').update(content).digest('hex').slice(0, 8);
-    return `sandbox-${hash}`;
+    this.projectName = `sandbox-${hash('sha256', readFileSync(this.composeFile, 'utf-8')).slice(0, 8)}`;
   }
 
   private compose(command: string[]): Promise<unknown> {

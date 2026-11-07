@@ -1,3 +1,5 @@
+import { setTimeout } from 'node:timers/promises';
+
 import type { TracingExporter } from './processor.ts';
 import type {
   FunctionSpanData,
@@ -173,7 +175,7 @@ export class OpenAITracesExporter implements TracingExporter {
           this.#maxDelayMs,
         );
         const jitter = delay * (0.9 + Math.random() * 0.2);
-        await new Promise((r) => setTimeout(r, jitter));
+        await setTimeout(jitter);
       }
     }
     throw lastError;
