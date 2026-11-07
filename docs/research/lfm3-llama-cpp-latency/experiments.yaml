@@ -1129,8 +1129,13 @@ experiments:
     risks: More checkpoints per slot (3.1 MiB each, at most 32). Only the few-shot variant has shots.
     measure: 'Untimed first: timings.prompt_n and cache_n per request, min-step 8192 vs 0 (llama-server response). Then TTFT p50/p95 on AC power, interleaved (pitfalls A12, A13).'
     status: proposed
-    attempts: []
-    verdict: null
+    attempts:
+      - date: 2026-11-07
+        tool: standalone llama-server b11960 on port 9950 with the Llama.app LFM3 args, ubatch 256; ~/.claude/scratch/lfm3-latency/shots-probe.mjs (SOB prompt.ts imported, examples.json shots, max_tokens 1, thinking on), the first 9 records of sob-bench response_gemini-3-flash.jsonl in order, one at a time; a fresh server per setting
+        result: 'Untimed. min-step 8192: items 2-9 reused 165 tokens (the system prompt) and evaluated 3,297-4,189. min-step 0: items 2-9 reused 1,616 tokens (system + first shot pair) and evaluated 1,846-2,738, which is 1,451 tokens (35-44%) less for each item.'
+    verdict:
+      result: unproven
+      note: The prompt-token cut is as expected. Not applied yet. A TTFT A/B on AC power is still to do, and also an A/B of min-step 0 on all the other workloads (pitfall A11), because every user message then gets a checkpoint (up to 32 of 3.1 MiB per slot) and the prefill batch breaks there.
 
   - id: X-checkpoint-step-edits
     name: 'TTFT: checkpoint-min-step=2048 on a long-32k 8-turn chat with an edit of turn 6'
