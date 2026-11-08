@@ -1172,9 +1172,17 @@ experiments:
           SOB few-shot items: evaluated 2,375 tokens, reused 1,616 (default 3,826 and 165); prefill p50 1,166 ms vs 1,837 / 1,883 ms (-37%, A-to-A spread 2.5%); p95 1,505 vs 2,109 / 2,256 ms.
           P1 chat, 1 user: follow-up TTFT p50 260.5 ms vs 226.7 / 235.5 ms (+13%, spread 3.9%); first-turn TTFT p50 2,970 vs 3,047 / 3,339 ms.
           P3 SOB-like, 4 users: TTFT p50 2,468 vs 2,725 / 2,467 ms. P5 shared prefix: 2,203 vs 2,672 / 2,368 ms.
+      - date: 2026-11-08
+        tool: timed-queue.zsh minstep with the load gate (1-minute load below 8 before each arm) and the CPU guard (pitfall A14); the same seeds and records as attempt 2
+        labels:
+          experiment: X-checkpoint-min-step-0-shots
+          attempt: 3
+          arm: a1-default (b1, a2, b2 did not run)
+        traffic: 'not clean: the router proxied 19 for 17 sent (SOB probe), 18 for 16 (P3) and 13 for 6 (P5)'
+        result: 'Stopped after arm a1 (12:48-12:56 +0300). From 12:53, a Codex job (life-pilot/label.ts) sent LFM3 requests to Llama.app, and each arm restart would have broken them. Ezz stopped the run with kill -9, so no restore restart happened; the router stayed on the recorded config. a1 SOB probe: 3,826 tokens evaluated per item (the same as attempt 2), prefill p50 2,009 ms (attempt 2 defaults 1,837 / 1,883). No B arm, so no comparison.'
     verdict:
       result: unproven
-      note: 'SOB few-shot items prefill 37% faster, far above the spread. But one clean B arm also showed chat follow-ups 13% slower (spread 3.9%). That fits the mechanism: with min-step 0 every user message gets a checkpoint, and the prefill batch breaks there. Not applied. Run the four arms again with the CPU guard (pitfall A14) before you decide. If the chat cost holds, compare a separate preset for SOB.'
+      note: 'SOB few-shot items prefill 37% faster in attempt 2, far above the spread. But its one clean B arm also showed chat follow-ups 13% slower (spread 3.9%). That fits the mechanism: with min-step 0 every user message gets a checkpoint, and the prefill batch breaks there. Not applied. Run the four arms again when Llama.app has no other client (pitfall A15), with the load gate and the CPU guard. If the chat cost holds, compare a separate preset for SOB.'
 
   - id: X-checkpoint-step-edits
     name: 'TTFT: checkpoint-min-step=2048 on a long-32k 8-turn chat with an edit of turn 6'
@@ -1370,3 +1378,7 @@ pitfalls:
     attempt: Trust the router traffic check and the sleep check to show a clean arm
     happened: During X-checkpoint-min-step-0-shots attempt 2, arm b2-step0, another session (a Codex eval) started a CPU-only llama-server that took about 7 cores. The 1-minute load reached 133, and ITL rose 45%. Both checks still passed, because that server is not Llama.app and the Mac did not sleep.
     instead: Sample the processes outside Llama.app during each arm (guard_cpu_start and guard_cpu_stop in ~/.claude/scratch/lfm3-latency/guard.zsh). Do not use an arm in which another process held 3 or more cores in 2 or more samples, 15 s apart.
+  - id: A15
+    attempt: Run a timed queue on Llama.app while another client uses LFM3
+    happened: During X-checkpoint-min-step-0-shots attempt 3, a Codex labeling job sent LFM3 requests to the same router. The traffic check caught them (13 proxied for 6 sent), but the timings were not clean, and the restart before each arm would have broken the other job's requests.
+    instead: Before an arm restarts Llama.app, wait until no process other than Llama.app holds a connection to port 9931 for 30 s (guard_clients_wait in guard.zsh). Stop a run with kill -9 when the router is already on the recorded config, so that the exit trap does not restart it again.
