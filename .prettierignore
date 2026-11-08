@@ -5,3 +5,6 @@
 /.nx/workspace-data
 .venv
 .nx/self-healing
+
+# Generated route types of React Router (react-router typegen)
+.react-router

@@ -15,9 +15,6 @@
       "options": {
         "args": "--test-timeout=10000 \"src/**/*.test.ts\""
       }
-    },
-    "format": {
-      "command": "prettier --write {projectRoot}"
     }
   }
 }

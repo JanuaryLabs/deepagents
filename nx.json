@@ -78,7 +78,8 @@
       "options": {
         "flags": ["--experimental-test-module-mocks"]
       }
-    }
+    },
+    "@zukhruf/nx/format"
   ],
   "workspaceLayout": {
     "appsDir": "apps",
