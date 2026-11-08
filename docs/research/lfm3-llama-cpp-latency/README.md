@@ -11,6 +11,8 @@ The `lfm` export in [`packages/agent/src/lib/models.ts`](../../../packages/agent
 
 The first goal is to reduce time to first token for chat, then for long prompts. The next goal is faster decoding. Prefer engine settings in `~/.config/llama/models.user.ini`; change the `lfm` client only when the engine cannot address the issue.
 
+The model file stays `LiquidAI/LFM3-1.7B-GGUF:BF16`. Do not try another quantization or precision of it (Ezz, 2026-11-08: "we need to stick to current model"). `X-quant-q8-0`, `X-quant-qad-q4-0` and `X-f16-vs-bf16` are rejected for this reason.
+
 ## Setup
 
 | Item             | Value                                                                                           |

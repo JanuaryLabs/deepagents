@@ -718,9 +718,13 @@ experiments:
     expected: Single-stream decode about 75 to 90 tok/s; TTFOT -35 to -45%; prefill within -5%.
     risks: SOB scores can change; re-score SOB before use.
     measure: llama-bench pp4096/tg256 BF16 vs Q8_0; GuideLLM sob-4k2-4users ITL and out tok/s; SOB score diff.
-    status: proposed
+    status: rejected
     attempts: []
-    verdict: null
+    verdict:
+      {
+        result: rejected,
+        note: 'Ezz, 2026-11-08: "do not run this experiment \"Q8_0 model file\" we need to stick to current model". The model stays LiquidAI/LFM3-1.7B-GGUF:BF16, so no other model file (quantization or precision) is in scope.',
+      }
 
   - id: X-quant-qad-q4-0
     name: 'TPOT/TTFOT: model=LFM3-1.7B-QAD-Q4_0.gguf (1,049,615,680 bytes) on sob-4k2-4users + natural-answers'
@@ -743,9 +747,13 @@ experiments:
     expected: Single-stream decode about 110 to 150 tok/s; TTFOT -55 to -65%; prefill -5 to -10%.
     risks: The largest quality risk; re-score SOB. Q4_K_M / Q5_K_M / Q6_K are the fallbacks.
     measure: Same as X-quant-q8-0; report the decode gain per SOB-score point lost.
-    status: proposed
+    status: rejected
     attempts: []
-    verdict: null
+    verdict:
+      {
+        result: rejected,
+        note: 'Ezz, 2026-11-08: "do not run this experiment \"Q8_0 model file\" we need to stick to current model". The model stays LiquidAI/LFM3-1.7B-GGUF:BF16, so no other model file (quantization or precision) is in scope.',
+      }
 
   - id: X-sob-shared-shots-prefix
     name: 'TTFT: SOB requests grouped by byte-identical few-shot block on sob-4k2-4users'
@@ -971,9 +979,13 @@ experiments:
     expected: Prefill 0 to 15% faster; decode about the same.
     risks: Rare F16 overflow with BF16-trained weights; spot-check SOB.
     measure: llama-bench pp4096/pp32768/tg256 BF16 vs F16; GuideLLM long-32k TTFT.
-    status: proposed
+    status: rejected
     attempts: []
-    verdict: null
+    verdict:
+      {
+        result: rejected,
+        note: 'Ezz, 2026-11-08: "do not run this experiment \"Q8_0 model file\" we need to stick to current model". The model stays LiquidAI/LFM3-1.7B-GGUF:BF16, so no other model file (quantization or precision) is in scope.',
+      }
 
   - id: X-ubatch-128
     name: 'TTFT: ubatch-size=128 on chat-6k-5turns-1user + long-32k'
