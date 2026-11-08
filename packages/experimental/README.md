@@ -30,9 +30,8 @@ for the public API and lifecycle mapping.
 
 ## `@deepagents/experimental/zukhruf`
 
-Zukhruf is an internal DSL for **declaring** an agent, plus a **runtime** that
-executes that declaration as a **durable background agent** — built on
-`@deepagents/context` primitives (`agent()`, `ContextEngine`, `AgentSandbox`,
+Zukhruf provides a declaration API and a runtime for durable background agents,
+built on `@deepagents/context` primitives (`agent()`, `ContextEngine`, `AgentSandbox`,
 fragments, the stream subsystem).
 
 ```ts
@@ -59,14 +58,24 @@ across workers and restarts that resume the same approval. A `toolApproval`
 map overrides `needsApproval` for the listed tools; unlisted tools keep their
 own rules. A callback controls every tool call, including tools added by the
 runtime. The runtime stores approvals and resumes turns after a decision.
-`defineAgent()` also accepts the AI SDK `stopWhen`, which ends the agent loop of
-a turn, for example `[hasToolCall('notify'), isStepCount(6)]`. Without it, a
-turn uses the default of `agent()` in `@deepagents/context`.
+
+`defineAgent()` also accepts the AI SDK's `stopWhen`: one condition or an array
+of conditions imported from `ai`. For example,
+`[hasToolCall('notify'), isStepCount(6)]` stops after a step calls `notify` or
+after six completed steps, whichever happens first. A step can execute several
+tool calls before the condition is checked. The default is `isStepCount(200)`,
+inherited from `agent()` in `@deepagents/context`.
 
 If the provider interrupts a response, the runtime retains partial output
 and marks the turn `failed` without automatically retrying it. Compaction
 keeps the input token and prompt cache measurements from the last successful
 step.
+
+If a response ends midway through a tool's arguments, chat persistence records
+that call as `output-error` with the message
+`Tool input ended before the call was complete.` The incomplete call does not
+execute or leave the conversation waiting for client input, so the next queued
+user turn can proceed.
 
 The `AgentHost` returned by `AgentRuntime.initialize()` exposes enqueue, host
 mailbox delivery, observation, approval, denial, worker lifecycle, and
@@ -106,6 +115,13 @@ Every host initializes from a `defineStack` recipe. A recipe can return shared
 adapters without registering them with `resources`; those adapters remain
 caller-owned. Host and worker disposal always wait for active work. Only
 registered adapters are released by host disposal.
+
+The runtime also owns each sandbox handle returned by the agent's `sandbox`
+factory. It acquires a handle for a turn and disposes it when execution ends,
+including on failure. Return a handle that can be disposed independently on
+each call. A backend's disposal policy determines whether the underlying
+sandbox is retained; a named Microsandbox microVM can outlive its turn's
+client handle.
 
 Zukhruf discovers immediate `skills/<name>/SKILL.md` children from each
 configured sandbox once per conversation. It persists only the ordered catalog

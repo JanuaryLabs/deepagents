@@ -106,8 +106,7 @@ experiments:
       {
         engine: { spec-default: true },
         client: {},
-        workload: hand probe,
-        same prompt sent again,
+        workload: 'hand probe, same prompt sent again',
       }
     status: done
     attempts:
@@ -127,8 +126,7 @@ experiments:
       {
         engine: { ubatch-size: 2048 },
         client: {},
-        workload: hand probe,
-        new random text,
+        workload: 'hand probe, new random text',
       }
     status: done
     attempts:
@@ -148,9 +146,7 @@ experiments:
       {
         engine: { ubatch-size: 2048 },
         client: {},
-        workload: hand probe,
-        6,
-        149-token prompt,
+        workload: 'hand probe, 6,149-token prompt',
       }
     status: done
     attempts:
@@ -178,9 +174,7 @@ experiments:
                 'chat_template_kwargs.enable_thinking=false',
               ],
           },
-        workload: hand probe,
-        6,
-        190-token first turn,
+        workload: 'hand probe, 6,190-token first turn',
       }
     status: done
     attempts:
@@ -190,9 +184,7 @@ experiments:
     verdict:
       {
         result: yielded,
-        note: The history must be equal,
-        token for token,
-        to what the model made.,
+        note: 'The history must be equal, token for token, to what the model made.',
       }
 
   - id: E07-guidellm-chat-baseline
@@ -359,9 +351,7 @@ experiments:
       {
         engine: { ubatch-size: [256, 2048] },
         client: {},
-        workload: llama-bench -p 1024 -n 0 -b 2048 -d 0,
-        8192,
-        24576 -r 2,
+        workload: 'llama-bench -p 1024 -n 0 -b 2048 -d 0,8192,24576 -r 2',
       }
     status: done
     attempts:
@@ -981,8 +971,7 @@ experiments:
     verdict:
       {
         result: regression,
-        note: Not used. It breaks clients that remove the reasoning,
-        such as the Llama.app chat window and GuideLLM.,
+        note: 'Not used. It breaks clients that remove the reasoning, such as the Llama.app chat window and GuideLLM.',
       }
 
   - id: X-batch-512-itl
@@ -1196,8 +1185,7 @@ experiments:
     verdict:
       {
         result: rejected,
-        note: KV shifting cannot correct the convolution state after a divergence,
-        and the checkpoint restore resets n_past anyway.,
+        note: 'KV shifting cannot correct the convolution state after a divergence, and the checkpoint restore resets n_past anyway.',
       }
 
   - id: X-rej-swa-full

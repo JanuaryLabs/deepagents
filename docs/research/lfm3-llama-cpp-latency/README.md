@@ -1,15 +1,15 @@
 # LFM3 on llama.cpp: latency experiments
 
-Research started 2026-11-07. This folder is a living record of each try to make LFM3 faster on this machine. Read it before you start an experiment, so that you do not repeat one.
+Research started 2026-11-07. This folder records experiments to reduce LFM3 latency on the MacBook Pro described below. Review the catalog before running an experiment to avoid repeating completed work.
 
-- `experiments.yaml` is the catalog. It holds every experiment: done, running, proposed and rejected.
-- This file gives the context, the format, the workloads and the current engine settings.
+- [`experiments.yaml`](./experiments.yaml) is the catalog of completed, running, proposed, and rejected experiments.
+- This file describes the setup, catalog format, workloads, and recorded engine settings.
 
 ## Context
 
-The `lfm` export in `packages/agent/src/lib/models.ts` calls LFM3-1.7B. Llama.app serves the model on this Mac. Llama.app runs the llama.cpp server in router mode on `http://127.0.0.1:9931/v1`.
+The `lfm` export in [`packages/agent/src/lib/models.ts`](../../../packages/agent/src/lib/models.ts) creates an AI SDK model for `LiquidAI/LFM3-1.7B-GGUF:BF16`. It defaults to Llama.app's llama.cpp router at `http://127.0.0.1:9931/v1`; set `LLAMA_BASE_URL` to use another endpoint. The helper connects to an existing server; it does not start Llama.app or install the model.
 
-The goal is a short wait for the first token, first for chat and then for long prompts. After that, the goal is a fast decode. A fix goes into the inference engine (`~/.config/llama/models.user.ini`) when the engine can do it. A fix goes into the client (the `lfm` export) only when the engine cannot do it.
+The first goal is to reduce time to first token for chat, then for long prompts. The next goal is faster decoding. Prefer engine settings in `~/.config/llama/models.user.ini`; change the `lfm` client only when the engine cannot address the issue.
 
 ## Setup
 
@@ -25,18 +25,18 @@ The goal is a short wait for the first token, first for chat and then for long p
 
 One experiment is one named combination of changes, compared with the baseline in `experiments.yaml`:
 
-| Field                             | Meaning                                                                                             |
-| --------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `id`                              | A stable name, for example `X-quant-q8-0`. The ids `E01` to `E13` are the first experiments.        |
-| `name`                            | The combination in words: `"<phase>: <knob=value> + <knob=value> on <workload>"`                    |
-| `phase`                           | `TTFT`, `TTFOT`, `TPOT` or `throughput`                                                             |
-| `combination`                     | `engine` (llama.cpp server options), `client` (request fields), `workload` (an id from `workloads`) |
-| `hypothesis`, `expected`, `risks` | What should change, how much, and what can go wrong                                                 |
-| `source`, `evidence`              | Where the idea comes from                                                                           |
-| `measure`                         | The workloads and the metrics to compare, and the baseline for the comparison                       |
-| `status`                          | `proposed`, `running`, `done` or `rejected`                                                         |
-| `attempts`                        | One entry for each run: date, tool, GuideLLM labels and seeds, and the numbers                      |
-| `verdict`                         | `yielded`, `no-gain`, `regression`, `mixed`, `baseline` or `unproven`, with one sentence            |
+| Field                             | Meaning                                                                                                                                                     |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                              | A stable name, for example `X-quant-q8-0`. Early experiments use numbered `E` identifiers.                                                                  |
+| `name`                            | The combination in words: `"<phase>: <knob=value> + <knob=value> on <workload>"`                                                                            |
+| `phase`                           | `TTFT`, `TTFOT`, `TPOT` or `throughput`                                                                                                                     |
+| `combination`                     | `engine` (llama.cpp server options), `client` (request fields), and `workload` (an id from `workloads` or a probe description)                              |
+| `hypothesis`, `expected`, `risks` | What should change, how much, and what can go wrong                                                                                                         |
+| `source`, `evidence`              | Where the idea comes from                                                                                                                                   |
+| `measure`                         | The workloads and the metrics to compare, and the baseline for the comparison                                                                               |
+| `status`                          | `proposed`, `running`, `done` or `rejected`                                                                                                                 |
+| `attempts`                        | One entry for each run: date, tool, GuideLLM labels and seeds, and the numbers                                                                              |
+| `verdict`                         | A `result` (`yielded`, `no-gain`, `regression`, `mixed`, `baseline`, `unproven`, or `rejected`) with an optional `note`; `null` when no verdict is recorded |
 
 Rules:
 
@@ -44,6 +44,7 @@ Rules:
 - Give each GuideLLM run the labels `--label experiment=<id> --label attempt=<n>`, and one label for each value that you change, for example `--label ubatch=256`.
 - Use a new seed for each GuideLLM run. The same seed sends the same documents, and the server then uses its prompt cache from the earlier run.
 - Do not change old attempts. If a later result disproves one, add a new attempt or a new experiment that says so.
+- Quote strings containing commas inside YAML flow collections (`{ ... }` or `[ ... ]`). An unquoted comma separates entries and can turn part of a description into a stray key.
 
 ## Workloads
 
@@ -67,7 +68,13 @@ Two GuideLLM fields need care:
 
 ## Current engine settings
 
-`ubatch-size = 256` (Llama.app selects 2048). See `E10`, `E13` and `E15` in `experiments.yaml`: chat follow-ups are 4.9 times faster, and fresh prompts are equal or faster. Do not set `ubatch-size` below 250. The server uses a checkpoint only when it is 254 or more tokens before the first token that differs, and the follow-up checkpoint is `4 + ubatch` tokens before the end of the previous prompt (`X-diag-followup-checkpoint-trace`). All other values are Llama.app or llama.cpp defaults: `ctx-size 262144`, `parallel 4`, `kv-unified true`, `--spec-default`, `--reasoning-preserve`.
+The baseline recorded on 2026-11-07 uses `ubatch-size = 256` (Llama.app selects 2048), with `ctx-size 262144`, `parallel 4`, `batch-size 2048`, `kv-unified true`, `--spec-default`, and `--reasoning-preserve`. The catalog's `baseline` section records the remaining settings.
+
+In the traffic-checked `E15` comparison, chat follow-ups were 4.9 times faster at ubatch 256 than at 2048, and fresh prompts were equal or faster. This result applies to that run and setup; `E16-ubatch-replication-reversed` remains proposed. The parallel 6/8 results remain unproven, and the first `X-no-cache-idle-slots-4users` attempt is invalid because the Mac slept during it.
+
+For this recorded build and workload, keep `ubatch-size` at least 250 when clients drop reasoning from history. The diagnostic trace found that a nonzero checkpoint needs at least 254 tokens of margin before the first differing token, while the follow-up checkpoint sits `4 + ubatch` tokens before the previous prompt ends (`X-diag-followup-checkpoint-trace`).
+
+`X-checkpoint-min-step-0-shots` reduced evaluated prompt tokens by 1,451 per repeated-shot item in an untimed probe. It has not established a latency improvement or been applied to the baseline; TTFT comparisons and checks on the other workloads remain pending.
 
 The client must keep the model reasoning in the chat history: give `response.messages` from one call to the next call. The AI SDK then sends the reasoning back as `reasoning_content` (`@ai-sdk/openai-compatible` 3.0.78, `dist/index.js`, line 205).
 
@@ -78,8 +85,8 @@ Do not change `sleep-idle-seconds`. Llama.app unloads the model after 900 s with
 - **TTFT** (time to first token): the time from sending a request to receiving the first token, reasoning or answer.
 - **TTFOT** (time to first output token): the time to the first answer token, after the reasoning.
 - **Prefill**: the step that reads all prompt tokens in parallel. Prefill time sets most of the TTFT.
-- **Decode**: the step that makes one token for each forward pass.
+- **Decode**: generating tokens after prefill. Without speculative decoding, a forward pass produces one token per sequence; accepted speculative drafts can produce more.
 - **ITL** (inter-token latency): the time between two output tokens. It measures decode speed.
 - **Prompt cache**: the state of an earlier prompt that the server keeps. A new prompt that starts with the same tokens does not need prefill for those tokens.
 - **Context checkpoint**: a saved copy of the model state at one position. LFM3 is a hybrid model: 13 of its 24 layers are short-convolution layers, 6 are full-attention layers and 5 are 256-token sliding-window attention layers. The server cannot move this state back to any position. It can only restore a context checkpoint.
-- **ubatch** (`ubatch-size`): the maximum number of prompt tokens in one forward pass. llama.cpp makes a context checkpoint at `4 + ubatch` tokens and at 4 tokens before the end of the prompt, and one at the start of the last user message (`tools/server/server-context.cpp`, about lines 4502 to 4518).
+- **ubatch** (`ubatch-size`): the maximum number of prompt tokens in one forward pass. In the recorded build, llama.cpp makes checkpoints `4 + ubatch` tokens before the end of the prompt, 4 tokens before the end, and at selected user-message starts (`tools/server/server-context.cpp`, about lines 4502 to 4518).
