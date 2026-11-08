@@ -553,9 +553,24 @@ experiments:
         workload: four fresh-prefill workloads,
       }
     measure: 'campaign-recheck script, 2048 then 256, new seeds; long-32k with 6 requests instead of 2'
-    status: proposed
-    attempts: []
-    verdict: null
+    status: done
+    attempts:
+      - date: 2026-11-08
+        tool: guidellm 0.8.1 through ~/.claude/scratch/lfm3-latency/timed-queue.zsh; arms a1-ub2048, b1-ub256, a2-ub2048, b2-ub256 (11:30-11:58 +0300), each on a freshly restarted Llama.app with the router args checked; the same seeds in every arm (61001, 61003, 61004, 61005), paired, because each restart empties the prompt cache; on AC power with no Sleep/DarkWake event in any arm (pitfall A13); 1-minute load 5.9-14.8 (other sessions)
+        labels:
+          experiment: E16-ubatch-replication-reversed
+          attempt: 1
+          arm: a1-ub2048 / b1-ub256 / a2-ub2048 / b2-ub256
+          ubatch: 2048 / 256
+        traffic: clean (proxied = sent in every arm and workload)
+        result: |
+          chat-6k-5turns-1user (P1): follow-up TTFT p50 222.9 / 222.3 ms at 256 vs 1,116.0 / 1,193.6 ms at 2048 (-80.7%, A-to-A spread 6.9%); first-turn TTFT p50 +1.8% at 256 (spread 0.1%); output tok/s +26.8%.
+          sob-4k2-4users (P3): TTFT p50 2,759 / 3,723 ms at 256 vs 2,977 / 2,527 ms at 2048 (+17.8%, spread 15.1%); output tok/s +5.6% at 256 (spread 2.7%).
+          long-32k (P4): TTFT p50 28,369 / 24,295 ms at 256 vs 26,227 / 24,283 ms at 2048 (+4.3%, spread 7.4%). One b2 request was still in flight when GuideLLM stopped (5 of 6 counted).
+          shared-prefix-2k (P5): TTFT p50 2,790 / 2,270 ms at 256 vs 2,390 / 2,072 ms at 2048 (+13.4%, spread 13.3%).
+    verdict:
+      result: yielded
+      note: 'E15 holds. The follow-up gain (-81%) is 12 times the A-to-A spread, and X-diag-followup-checkpoint-trace explains it. The first-turn chat cost (+1.8%) is real and small, as E14 measured. The fresh-prompt differences on P3, P4 and P5 are no larger than the spread between two runs of the same setting, so this Mac cannot show them. ubatch-size stays 256.'
 
   - id: X-vllm-metal-comparison
     name: 'throughput: engine=vllm-metal 0.1.0 (MLX backend) with LiquidAI/LFM3-1.7B-MLX-bf16 vs llama.cpp on chat-500-5turns + sob-4k2 goodput searches'
