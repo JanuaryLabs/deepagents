@@ -1208,6 +1208,37 @@ experiments:
       result: mixed
       note: 'Proven twice each, in clean B arms of separate attempts: SOB few-shot items prefill 36-37% faster (attempts 2 and 4), and chat follow-ups start 13-19% slower, about 35-45 ms (attempts 2 and 5; A-to-A spread 1.7-3.9%). With min-step 0 every user message gets a checkpoint and the prefill batch breaks there, which costs a chat follow-up time and saves a few-shot prompt its shots. Not applied as the global setting. For SOB, see X-sob-preset-min-step-0.'
 
+  - id: X-uzu-comparison
+    name: 'engine: uzu (Mirai, Apple Silicon) with LFM3 BF16 converted by lalamo, against llama.cpp, on chat-500-5turns and sob-4k2-4users'
+    phase: TPOT
+    hypothesis: uzu runs its own model format with Metal kernels and reports high decode speed for LFM2.5; with an LFM3 port, it may decode faster than llama.cpp on the same BF16 weights.
+    combination:
+      {
+        engine:
+          {
+            engine: 'uzu 0.6.17 with a local LFM3 port of lalamo 0.17.0 (comparison only)',
+          },
+        client: {},
+        workload: chat-500-5turns,
+      }
+    source:
+      [
+        'https://github.com/trymirai/uzu',
+        'https://github.com/trymirai/lalamo',
+        'https://trymirai.com/local-models',
+        'https://github.com/trymirai/lalamo/issues/402',
+      ]
+    evidence: 'Mirai lists LFM2.5 models only (quantized Medium and Large checkpoints). lalamo 0.17.0 converts LFM2 and LFM2.5 (conv and full_attention layers, sliding_window_size None), not LFM3. Issue trymirai/lalamo#402 (open, third party) reports the same LFM3 mapping with no code.'
+    expected: Unknown until a matched benchmark; a sanity run gave 67.4 tok/s (llama.cpp about 60 tok/s for one user).
+    risks: 'The LFM3 port is local and unreviewed (about 200 lines in ~/.claude/scratch/uzu/lfm3-lalamo-0.17.0.patch), and its outputs are not yet compared with the reference implementation, so it may not compute the same model. A custom encoding.json (chat template without {% generation %} tags). uzu 0.6.17 reads only the lalamo 0.17.0 format. Its server API honors temperature, top_p, top_k, max_tokens and seed only (no chat_template_kwargs), so thinking control may differ.'
+    measure: 'First compare greedy outputs or logits of the converted model with the HF reference (the same prompts, temperature 0). Then serve it (uzu server, port other than 9931) and run the same workloads as llama.cpp with every guard (pitfalls A12-A15).'
+    status: proposed
+    attempts:
+      - date: 2026-11-08
+        tool: 'feasibility only, not a benchmark: ~/.claude/scratch/uzu/: lalamo 0.17.0 (PyPI sdist, git 37df2f9, the version uzu pins in scripts/benchmarks/compare/uzu_mldrift.py:50) plus a local LFM3 config (lalamo/model_import/model_configs/huggingface/lfm3.py, weight remap from line 176), lalamo convert LiquidAI/LFM3-1.7B (26 s, bf16, no quantization, 3.55 GB); uzu CLI 0.6.17 (GitHub release) with --reasoning-effort disabled'
+        result: 'Works with a change. Stock lalamo: "Model LiquidAI/LFM3-1.7B not found". The port maps LFM3 onto modules lalamo already has: per-layer sliding window and RoPE (as for Gemma3), sandwich norms, the per-head sigmoid output gate (each gate row repeated 128 times), the zero-tail partial RoPE of the full-attention layers (q/k channels reordered, base theta^(64/128)), conv width 7, renamed norm weights. Three snags fixed: lalamo main writes a config format uzu 0.6.17 cannot read (so lalamo 0.17.0); a custom encoding.json; suffix_repetition_length 1024. Sanity runs: a correct answer at 67.4 tok/s, 0.14 s to the first token, 3.38 GB memory; a 770-token prompt (longer than the 256-token window) recalled a code from its start, at 56 tok/s. No logit comparison with the reference yet.'
+    verdict: null
+
   - id: X-sob-preset-min-step-0
     name: 'TTFT: a second Llama.app preset of the same BF16 file with checkpoint-min-step 0, used only by the SOB eval'
     phase: TTFT
