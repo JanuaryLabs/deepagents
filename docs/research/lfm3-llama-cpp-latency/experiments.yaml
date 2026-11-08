@@ -1153,7 +1153,7 @@ experiments:
     expected: Prompt tokens evaluated per item drop by the size of the first shot pair. The second shot pair and the last user message are still evaluated.
     risks: More checkpoints per slot (3.1 MiB each, at most 32). Only the few-shot variant has shots.
     measure: 'Untimed first: timings.prompt_n and cache_n per request, min-step 8192 vs 0 (llama-server response). Then TTFT p50/p95 on AC power, interleaved (pitfalls A12, A13).'
-    status: proposed
+    status: done
     attempts:
       - date: 2026-11-07
         tool: standalone llama-server b11960 on port 9950 with the Llama.app LFM3 args, ubatch 256; ~/.claude/scratch/lfm3-latency/shots-probe.mjs (SOB prompt.ts imported, examples.json shots, max_tokens 1, thinking on), the first 9 records of sob-bench response_gemini-3-flash.jsonl in order, one at a time; a fresh server per setting
@@ -1191,9 +1191,43 @@ experiments:
         result: |
           From 15:11:07, another session's test gate (context-compiler, nx run-many for what-is-going-on and four other projects) embedded through the same router with ggml-org/embeddinggemma-2-GGUF:Q8_0. Llama.app runs the router with --models-max 1, so each embedding request evicted LFM3 and each LFM3 request evicted embeddinggemma (router log: "evicting idle LRU name=ggml-org/embeddinggemma-2-GGUF:Q8_0 for a queued request", then a respawn of about 1.5 s). The client guard passed a1 and b1 before that run started, and a2 in a gap between its requests. Ezz stopped the run with kill -9 in a2 (recorded config, no restore restart), so the other session's tests were not slowed any further.
           Clean data: SOB few-shot items, a1-default vs b1-step0: evaluated 3,826 vs 2,375 tokens, reused 165 vs 1,616; prefill p50 1,853 vs 1,177 ms (-36%), p95 2,052 vs 1,363 ms. This repeats attempt 2 (1,837 / 1,883 vs 1,166 ms, -37%). The chat, P3 and P5 results of b1 and a2 are not clean.
+      - date: 2026-11-08
+        tool: timed-queue.zsh minstep_chat, P1 chat-6k-5turns-1user only (seed 63001), arms a1-default, b1-step0, a2-default, b2-step0 (15:24-15:43 +0300), every guard on; another session held its Llama.app tests for the window, then ran what-is-going-on:test from 15:33 (handed over after b1)
+        labels:
+          experiment: X-checkpoint-min-step-0-shots
+          attempt: 5
+          arm: a1-default / b1-step0 / a2-default / b2-step0
+          checkpoint-min-step: 8192 / 0
+        traffic: "a1 and b1 clean (15 = 15); a2 not clean (19 for 15) and b2 not clean (24 for 15): the other session's test paused for more than 30 s between embeddings, so the client guard let a2 and b2 start, and model swaps followed (a2 follow-up p95 5,187 ms, b2 follow-up p50 4,616 ms)"
+        result: 'Clean pair: chat follow-up TTFT p50 228.3 ms by default (a1) vs 272.2 ms at min-step 0 (b1), +19%; p95 232.0 vs 296.5 ms. The void a2 still had a follow-up p50 of 224.4 ms (A-to-A spread 1.7%). First-turn TTFT p50 2,994 vs 2,984 ms, ITL p50 16.3 vs 17.2 ms.'
     verdict:
-      result: unproven
-      note: 'The SOB few-shot gain is proven twice: prefill 36-37% faster in two clean B arms of separate attempts. Still open is the chat cost: attempt 2 showed chat follow-ups 13% slower in its one clean B arm (spread 3.9%), and no clean run has repeated it. That fits the mechanism: with min-step 0 every user message gets a checkpoint, and the prefill batch breaks there. Not applied. Next: the chat workload alone (P1), four interleaved arms, when no other session uses Llama.app; if the cost holds, compare a separate preset for SOB.'
+      result: mixed
+      note: 'Proven twice each, in clean B arms of separate attempts: SOB few-shot items prefill 36-37% faster (attempts 2 and 4), and chat follow-ups start 13-19% slower, about 35-45 ms (attempts 2 and 5; A-to-A spread 1.7-3.9%). With min-step 0 every user message gets a checkpoint and the prefill batch breaks there, which costs a chat follow-up time and saves a few-shot prompt its shots. Not applied as the global setting. For SOB, see X-sob-preset-min-step-0.'
+
+  - id: X-sob-preset-min-step-0
+    name: 'TTFT: a second Llama.app preset of the same BF16 file with checkpoint-min-step 0, used only by the SOB eval'
+    phase: TTFT
+    hypothesis: X-checkpoint-min-step-0-shots is a trade (SOB few-shot prefill -37%, chat follow-ups +13-19%). A separate preset gives SOB the gain and leaves chat on the default.
+    combination:
+      {
+        engine:
+          {
+            preset: 'a second [section] of LiquidAI/LFM3-1.7B-GGUF:BF16 with checkpoint-min-step = 0',
+          },
+        client:
+          {
+            model: 'the SOB eval (apps/sob in offers-evals) asks for the second preset',
+          },
+        workload: SOB budget-8k-question-twice-few-shot items,
+        and chat to the first preset at the same time,
+      }
+    evidence: X-checkpoint-min-step-0-shots attempts 2, 4 and 5.
+    expected: SOB few-shot prefill -37% while chat follow-ups stay at the default.
+    risks: 'With --models-max 1, the two presets evict each other like two models (X-models-max-2). Unknown yet: whether Llama.app accepts two sections for one model file and how it names them. The model file stays BF16 (Ezz, 2026-11-08).'
+    measure: SOB probe prefill and P1 follow-up TTFT, each on its own preset; router log for evictions.
+    status: proposed
+    attempts: []
+    verdict: null
 
   - id: X-models-max-2
     name: 'TTFT: router --models-max 2 (LFM3 and embeddinggemma loaded together) on a mixed workload of embeddings and LFM3 chat'
