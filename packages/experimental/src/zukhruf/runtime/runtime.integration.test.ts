@@ -1134,13 +1134,13 @@ Missing a timezone.
 });
 
 describe('zukhruf runtime — setup failure durability', () => {
-  it('records a later turn before sandbox setup fails', async () => {
+  it('records a turn before sandbox setup fails, and the next turn sets the sandbox up again', async () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     const model = scriptedModel(track);
     const agentDeclaration = declaration(model);
     let sandboxCalls = 0;
     agentDeclaration.sandbox = async (): Promise<AgentSandbox> => {
-      if (++sandboxCalls === 2) throw new Error('sandbox setup failed');
+      if (++sandboxCalls === 1) throw new Error('sandbox setup failed');
       return createBashTool({
         sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
       });
@@ -1152,10 +1152,7 @@ describe('zukhruf runtime — setup failure durability', () => {
     await using worker = await h.runtime.work();
     void worker;
     const conversation = { chatId: 'sandbox-setup-failure', userId: 'u1' };
-    const first = await h.runtime.enqueue(conversation, turn('first'));
-    assert.equal(await collectText(first.stream), 'reply:first');
-
-    const failed = await h.runtime.enqueue(conversation, turn('second'));
+    const failed = await h.runtime.enqueue(conversation, turn('first'));
     await waitForStatus(h.streamStore, failed.id, ['failed']);
 
     const observer = h.runtime.observe(conversation);
@@ -1169,8 +1166,12 @@ describe('zukhruf runtime — setup failure durability', () => {
       id: failed.id,
       name: 'assistant',
     });
-    assert.ok(messages.some((message) => messageText(message) === 'second'));
-    assert.deepEqual(track.calls, ['first']);
+    assert.ok(messages.some((message) => messageText(message) === 'first'));
+    assert.deepEqual(track.calls, []);
+
+    const next = await h.runtime.enqueue(conversation, turn('second'));
+    assert.equal(await collectText(next.stream), 'reply:second');
+    assert.equal(sandboxCalls, 2);
   });
 
   it('records a turn before sandbox skill discovery fails', async () => {
@@ -1569,7 +1570,8 @@ describe('zukhruf runtime — background executor', () => {
       assert.match(prompt, /Forecast sales from historical data/);
       assert.match(prompt, /skills\/forecast-sales\/SKILL\.md/);
     }
-    assert.equal(backends.length, 2);
+    // The turns of one conversation share one sandbox.
+    assert.equal(backends.length, 1);
     for (const backend of backends) {
       assert.equal(
         await backend.readFile(
@@ -1641,7 +1643,7 @@ describe('zukhruf runtime — background executor', () => {
     }
   });
 
-  it('resolves sandbox-bound instruction fragments with the agent sandbox', async () => {
+  it('resolves sandbox-bound instruction fragments with the sandbox that the turns of one chat share', async () => {
     const modelPrompts: string[] = [];
     let sandboxCount = 0;
     const model = new MockLanguageModelV4({
@@ -1685,7 +1687,8 @@ describe('zukhruf runtime — background executor', () => {
     );
     assert.equal(await collectText(second.stream), 'ok');
     assert.match(modelPrompts[0], /sandbox-1/);
-    assert.match(modelPrompts[1], /sandbox-2/);
+    assert.match(modelPrompts[1], /sandbox-1/);
+    assert.equal(sandboxCount, 1);
   });
 
   it('folds a declaration user reminder into the first model prompt only', async () => {
@@ -3306,12 +3309,8 @@ describe('zukhruf runtime — conversation status', () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     const model = scriptedModel(track);
     const agentDeclaration = declaration(model);
-    let sandboxCalls = 0;
     agentDeclaration.sandbox = async (): Promise<AgentSandbox> => {
-      if (++sandboxCalls === 2) throw new Error('sandbox setup failed');
-      return createBashTool({
-        sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      });
+      throw new Error('sandbox setup failed');
     };
     await using h = await harness(model, {
       declaration: agentDeclaration,
@@ -3326,26 +3325,19 @@ describe('zukhruf runtime — conversation status', () => {
       abort.signal,
     );
     try {
-      const first = await h.runtime.enqueue(conversation, turn('first'));
-      assert.equal(await collectText(first.stream), 'reply:first');
-      await t.waitFor(
-        () => assert.deepStrictEqual(seen.at(-1), idle),
-        STATUS_WAIT,
-      );
-
-      const failed = await h.runtime.enqueue(conversation, turn('second'));
+      const failed = await h.runtime.enqueue(conversation, turn('first'));
       await waitForStatus(h.streamStore, failed.id, ['failed']);
       await t.waitFor(
         () => assert.deepStrictEqual(seen.at(-1), systemError),
         STATUS_WAIT,
       );
 
-      assert.deepStrictEqual(seen, [active(), idle, active(), systemError]);
+      assert.deepStrictEqual(seen, [active(), systemError]);
       assert.deepStrictEqual(
         await h.runtime.observe(conversation).conversationStatus(),
         systemError,
       );
-      assert.deepEqual(track.calls, ['first']);
+      assert.deepEqual(track.calls, []);
     } finally {
       abort.abort();
       await done;

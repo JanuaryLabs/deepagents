@@ -30,6 +30,7 @@ import type { TurnQueue, TurnRef, TurnRequest } from '../queue/turn-queue.ts';
 import type { ZukhrufToolSet } from '../tool.ts';
 import { AgentTurnExecutor } from './agent-turn-executor.ts';
 import { ApprovalController } from './approval-controller.ts';
+import { ConversationSandboxes } from './conversation-sandboxes.ts';
 import type { ConversationStatusChangeSource } from './conversation-status/change-source.ts';
 import type { ChildProgress } from './conversation-status/child-progress.ts';
 import {
@@ -438,6 +439,8 @@ class RuntimeHost implements AsyncDisposable {
         subagents: (declaration.subagents ?? []).map(({ name }) => name),
       })),
     };
+    // Registered before the workers, so it is disposed after they stop.
+    const sandboxes = resources.use(new ConversationSandboxes());
     this.#executor = new AgentTurnExecutor({
       store: options.store,
       streams,
@@ -446,6 +449,7 @@ class RuntimeHost implements AsyncDisposable {
       approvals,
       multiAgent,
       plugins,
+      sandboxes,
       publishConversationStatus: (conversation) =>
         conversationStatus.publish(conversation),
     });
@@ -464,10 +468,10 @@ class RuntimeHost implements AsyncDisposable {
       observe: (conversation) => this.observe(conversation),
       subscribeConversationStatus: (signal) =>
         this.subscribeConversationStatus(signal),
-      // Attaches through the declaration directly: resolving the conversation
-      // through the control plane would create its root thread.
+      // Borrows the root declaration's sandbox directly: resolving the
+      // conversation through the control plane would create its root thread.
       sandbox: (conversation) =>
-        this.#root.sandbox({
+        sandboxes.acquire(this.#root, {
           chatId: conversation.chatId,
           userId: conversation.userId,
         }),

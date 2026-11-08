@@ -294,7 +294,7 @@ work (long-running executor process):
     → resolve chat metadata → selected declaration
     → user message turns drain the leading queue-only FIFO prefix; mailbox turns drain all
     → engine.set(user(input), assistant placeholder id=streamId); save()
-    → sandbox = declaration.sandbox({chatId, userId}) // per-chat, attach-or-create; never disposed here
+    → sandbox = sandboxes.acquire(declaration, {chatId, userId}) // per-chat: the first turn attaches or creates; later turns borrow
     → terminal stream? project/skip                // closes cancel-during-setup race
     → atomically claim stream queued → running     // orders execution against cancellation
     → monitor cancellation → chat({ toolsContext }) → AWAIT persist(preclaimed)
@@ -360,7 +360,11 @@ turn cancelled while queued never enters the chain at all.
   `createDockerSandbox({name: chatId})` — attach-or-create already existed in the context package
   (`container-sandbox.ts` probes `sandbox-<name>`, attaches/restarts/creates, TOCTOU-safe). The
   container engine is the registry (zero in-memory state); the workspace FS survives across turns,
-  workers, and restarts. The runtime NEVER disposes it.
+  workers, and restarts. A turn never disposes it: the host holds one handle per declaration and
+  conversation (`ConversationSandboxes`), turns and `host.sandbox()` borrow it, a failed acquisition
+  is forgotten so the next turn tries again, and the host disposes each held handle when it ends.
+  A handle can hold a connection (a Microsandbox microVM refuses every connect after about 107
+  open ones), and disposing one can end the environment (a container sandbox stops its container).
 - The host selects the `StreamStore` and `ChangeSource` when constructing the borrowed
   `StreamManager`; the ready host neither initializes nor disposes borrowed adapters.
 

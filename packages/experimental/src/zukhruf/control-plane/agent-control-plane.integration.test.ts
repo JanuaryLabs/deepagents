@@ -1010,7 +1010,7 @@ test('a failed approval continuation reports failure instead of remaining paused
     mailboxStore,
     queue,
   }));
-  const runtime = await runtimeSetup.initialize(runtimeStack6);
+  const paused = await runtimeSetup.initialize(runtimeStack6);
   await createAgentChats(store, [
     {
       id: 'root-chat',
@@ -1030,13 +1030,22 @@ test('a failed approval continuation reports failure instead of remaining paused
     chatId: 'failed-continuation-child',
     userId: 'user-1',
   };
-  const initial = await runtime.enqueue(
+  const initial = await paused.enqueue(
     childConversation,
     userTurn('failed-continuation-turn', 'Research and publish'),
   );
+  {
+    await using _pausedWorker = await paused.work();
+    void _pausedWorker;
+    await queue.runNext();
+  }
+  // The approval reaches a new host, as after a restart. The host that ran the
+  // paused turn held its sandbox; the new one holds none, so the continuation
+  // acquires one.
+  await paused[Symbol.asyncDispose]();
+  const runtime = await runtimeSetup.initialize(runtimeStack6);
   await using _worker = await runtime.work();
   void _worker;
-  await queue.runNext();
   await submitApprovals(
     runtime,
     childConversation,
@@ -1137,15 +1146,24 @@ test('a cancelled approval continuation clears the gate and revives parked turns
     mailboxStore,
     queue,
   }));
-  const runtime = await runtimeSetup.initialize(runtimeStack7);
+  const paused = await runtimeSetup.initialize(runtimeStack7);
   const conversation = { chatId: 'cancelled-continuation', userId: 'user-1' };
-  const initial = await runtime.enqueue(
+  const initial = await paused.enqueue(
     conversation,
     userTurn('cancelled-continuation-turn', 'publish after approval'),
   );
+  {
+    await using _pausedWorker = await paused.work();
+    void _pausedWorker;
+    await queue.runNext();
+  }
+  // The approval reaches a new host, as after a restart. The host that ran the
+  // paused turn held its sandbox; the new one holds none, so the continuation
+  // acquires one.
+  await paused[Symbol.asyncDispose]();
+  const runtime = await runtimeSetup.initialize(runtimeStack7);
   await using _worker = await runtime.work();
   void _worker;
-  await queue.runNext();
   await submitApprovals(
     runtime,
     conversation,
@@ -1244,15 +1262,24 @@ test('failed continuation preserves denied sibling semantics', async () => {
     mailboxStore,
     queue,
   }));
-  const runtime = await runtimeSetup.initialize(runtimeStack8);
+  const paused = await runtimeSetup.initialize(runtimeStack8);
   const conversation = { chatId: 'failed-siblings', userId: 'user-1' };
-  const initial = await runtime.enqueue(
+  const initial = await paused.enqueue(
     conversation,
     userTurn('failed-sibling-turn', 'run both tools'),
   );
+  {
+    await using _pausedWorker = await paused.work();
+    void _pausedWorker;
+    await queue.runNext();
+  }
+  // The approval reaches a new host, as after a restart. The host that ran the
+  // paused turn held its sandbox; the new one holds none, so the continuation
+  // acquires one.
+  await paused[Symbol.asyncDispose]();
+  const runtime = await runtimeSetup.initialize(runtimeStack8);
   await using _worker = await runtime.work();
   void _worker;
-  await queue.runNext();
   await submitApprovals(
     runtime,
     conversation,

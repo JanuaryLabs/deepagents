@@ -38,6 +38,7 @@ import type { ConsumeContext, TurnRef } from '../queue/turn-queue.ts';
 import type { AgentPluginToolContext } from './agent-runtime.ts';
 import type { ApprovalController } from './approval-controller.ts';
 import { createCompaction } from './compaction.ts';
+import type { ConversationSandboxes } from './conversation-sandboxes.ts';
 import {
   type AgentSkills,
   createAgentSkills,
@@ -62,6 +63,8 @@ export interface AgentTurnExecutorOptions {
   approvals: ApprovalController;
   multiAgent: ResolvedMultiAgentHostConfig;
   plugins: TurnPlugins;
+  /** The sandbox of each conversation, which a turn borrows. */
+  sandboxes: ConversationSandboxes;
   /** Signals that the conversation's status may have changed. Never rejects. */
   publishConversationStatus: (conversation: ConversationId) => Promise<void>;
 }
@@ -79,6 +82,7 @@ export class AgentTurnExecutor {
   readonly #approvals: ApprovalController;
   readonly #multiAgent: ResolvedMultiAgentHostConfig;
   readonly #plugins: TurnPlugins;
+  readonly #sandboxes: ConversationSandboxes;
   readonly #publishConversationStatus: AgentTurnExecutorOptions['publishConversationStatus'];
 
   constructor(options: AgentTurnExecutorOptions) {
@@ -89,6 +93,7 @@ export class AgentTurnExecutor {
     this.#approvals = options.approvals;
     this.#multiAgent = options.multiAgent;
     this.#plugins = options.plugins;
+    this.#sandboxes = options.sandboxes;
     this.#publishConversationStatus = options.publishConversationStatus;
   }
 
@@ -158,14 +163,10 @@ export class AgentTurnExecutor {
     await this.#controlPlane.recordLatestTurn(turn, turn.streamId);
     await this.#prepareChain(turn, engine, communications);
 
-    const sandbox = await declaration.sandbox({
+    const sandbox = await this.#sandboxes.acquire(declaration, {
       chatId: turn.chatId,
       userId: turn.userId,
     });
-    // The turn owns the handle it asked for. A named sandbox outlives it, but
-    // each open handle holds a client connection: a Microsandbox microVM
-    // refuses every connect after about 107 of them.
-    await using _turnSandbox = sandbox.sandbox;
     const agentSkills = await this.#skillsFor(
       turn,
       declaration.name,
