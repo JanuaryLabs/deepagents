@@ -1146,9 +1146,23 @@ experiments:
       - date: 2026-11-07
         tool: standalone llama-server b11960 on port 9950 with the Llama.app LFM3 args, ubatch 256; ~/.claude/scratch/lfm3-latency/shots-probe.mjs (SOB prompt.ts imported, examples.json shots, max_tokens 1, thinking on), the first 9 records of sob-bench response_gemini-3-flash.jsonl in order, one at a time; a fresh server per setting
         result: 'Untimed. min-step 8192: items 2-9 reused 165 tokens (the system prompt) and evaluated 3,297-4,189. min-step 0: items 2-9 reused 1,616 tokens (system + first shot pair) and evaluated 1,846-2,738, which is 1,451 tokens (35-44%) less for each item.'
+      - date: 2026-11-08
+        tool: ~/.claude/scratch/lfm3-latency/timed-queue.zsh on Llama.app; arms a1-default, b1-step0, a2-default, b2-step0 (12:08-12:30 +0300), each on a freshly restarted router with its args checked (--checkpoint-min-step 0 reaches the router from the ini); per arm the SOB few-shot probe (shots-probe.mjs, 17 records, item 1 excluded, server timings.prompt_ms), then guidellm P1 chat-6k-5turns-1user (seed 63001), P3 sob-4k2-4users (63003), P5 shared-prefix-2k (63005); on AC power, no Sleep/DarkWake event in any arm
+        labels:
+          experiment: X-checkpoint-min-step-0-shots
+          attempt: 2
+          arm: a1-default / b1-step0 / a2-default / b2-step0
+          checkpoint-min-step: 8192 / 0
+        traffic: clean (proxied = sent in every arm and workload)
+        result: |
+          Arm b2-step0 is void (pitfall A14): from 12:23:23, 52 s after it started, a Codex session's eval (reader-eval.js, llama-server -ngl 0 on port 19489) took about 7 CPU cores, and the 1-minute load reached 133. Its P1 ITL p50 was 24.9 ms against 16.2-17.6 ms in the other arms.
+          From a1, b1 and a2 (one B arm, so no B-to-B spread):
+          SOB few-shot items: evaluated 2,375 tokens, reused 1,616 (default 3,826 and 165); prefill p50 1,166 ms vs 1,837 / 1,883 ms (-37%, A-to-A spread 2.5%); p95 1,505 vs 2,109 / 2,256 ms.
+          P1 chat, 1 user: follow-up TTFT p50 260.5 ms vs 226.7 / 235.5 ms (+13%, spread 3.9%); first-turn TTFT p50 2,970 vs 3,047 / 3,339 ms.
+          P3 SOB-like, 4 users: TTFT p50 2,468 vs 2,725 / 2,467 ms. P5 shared prefix: 2,203 vs 2,672 / 2,368 ms.
     verdict:
       result: unproven
-      note: The prompt-token cut is as expected. Not applied yet. A TTFT A/B on AC power is still to do, and also an A/B of min-step 0 on all the other workloads (pitfall A11), because every user message then gets a checkpoint (up to 32 of 3.1 MiB per slot) and the prefill batch breaks there.
+      note: 'SOB few-shot items prefill 37% faster, far above the spread. But one clean B arm also showed chat follow-ups 13% slower (spread 3.9%). That fits the mechanism: with min-step 0 every user message gets a checkpoint, and the prefill batch breaks there. Not applied. Run the four arms again with the CPU guard (pitfall A14) before you decide. If the chat cost holds, compare a separate preset for SOB.'
 
   - id: X-checkpoint-step-edits
     name: 'TTFT: checkpoint-min-step=2048 on a long-32k 8-turn chat with an edit of turn 6'
@@ -1340,3 +1354,7 @@ pitfalls:
     attempt: Run a long background benchmark and trust caffeinate to keep the Mac awake
     happened: The lid was closed on battery during X-no-cache-idle-slots-4users attempt 1. Two caffeinate assertions were active, but the Mac went into clamshell sleep for 95 minutes. Requests stalled for up to 19 minutes, and the router traffic check was still clean.
     instead: Start only on AC power. Before you compare an arm, read `pmset -g log` for its time window, and do not use the arm if a Sleep or DarkWake event is in the window. Also compare the wall-clock time of each arm with its expected time.
+  - id: A14
+    attempt: Trust the router traffic check and the sleep check to show a clean arm
+    happened: During X-checkpoint-min-step-0-shots attempt 2, arm b2-step0, another session (a Codex eval) started a CPU-only llama-server that took about 7 cores. The 1-minute load reached 133, and ITL rose 45%. Both checks still passed, because that server is not Llama.app and the Mac did not sleep.
+    instead: Sample the processes outside Llama.app during each arm (guard_cpu_start and guard_cpu_stop in ~/.claude/scratch/lfm3-latency/guard.zsh). Do not use an arm in which another process held 3 or more cores in 2 or more samples, 15 s apart.
