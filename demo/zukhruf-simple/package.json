@@ -28,7 +28,7 @@
     "@deepagents/devtool": "*",
     "@deepagents/experimental": "*",
     "@electric-sql/pglite": "^0.5.4",
-    "@zukhruf/sqlite-open": "^0.7.0",
+    "@zukhruf/sqlite-open": "^0.8.10",
     "chrome-devtools-mcp": "1.8.0",
     "microsandbox": "^0.7.8",
     "pg-boss": "^12.29.0",
