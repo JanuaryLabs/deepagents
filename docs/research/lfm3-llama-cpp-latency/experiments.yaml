@@ -1180,9 +1180,42 @@ experiments:
           arm: a1-default (b1, a2, b2 did not run)
         traffic: 'not clean: the router proxied 19 for 17 sent (SOB probe), 18 for 16 (P3) and 13 for 6 (P5)'
         result: 'Stopped after arm a1 (12:48-12:56 +0300). From 12:53, a Codex job (life-pilot/label.ts) sent LFM3 requests to Llama.app, and each arm restart would have broken them. Ezz stopped the run with kill -9, so no restore restart happened; the router stayed on the recorded config. a1 SOB probe: 3,826 tokens evaluated per item (the same as attempt 2), prefill p50 2,009 ms (attempt 2 defaults 1,837 / 1,883). No B arm, so no comparison.'
+      - date: 2026-11-08
+        tool: timed-queue.zsh minstep with the load gate, the CPU guard and the client guard (pitfall A15); the same seeds and records as attempt 2; arms a1-default, b1-step0, a2-default (15:03-15:20 +0300); b2-step0 did not run
+        labels:
+          experiment: X-checkpoint-min-step-0-shots
+          attempt: 4
+          arm: a1-default / b1-step0 / a2-default
+          checkpoint-min-step: 8192 / 0
+        traffic: 'a1 clean; b1 SOB probe clean (17 = 17), then from 15:11:07 not clean (P1 24 for 15, P3 18 for 16, P5 12 for 6); a2 not clean (SOB probe 24 for 17, P1 18 for 15)'
+        result: |
+          From 15:11:07, another session's test gate (context-compiler, nx run-many for what-is-going-on and four other projects) embedded through the same router with ggml-org/embeddinggemma-2-GGUF:Q8_0. Llama.app runs the router with --models-max 1, so each embedding request evicted LFM3 and each LFM3 request evicted embeddinggemma (router log: "evicting idle LRU name=ggml-org/embeddinggemma-2-GGUF:Q8_0 for a queued request", then a respawn of about 1.5 s). The client guard passed a1 and b1 before that run started, and a2 in a gap between its requests. Ezz stopped the run with kill -9 in a2 (recorded config, no restore restart), so the other session's tests were not slowed any further.
+          Clean data: SOB few-shot items, a1-default vs b1-step0: evaluated 3,826 vs 2,375 tokens, reused 165 vs 1,616; prefill p50 1,853 vs 1,177 ms (-36%), p95 2,052 vs 1,363 ms. This repeats attempt 2 (1,837 / 1,883 vs 1,166 ms, -37%). The chat, P3 and P5 results of b1 and a2 are not clean.
     verdict:
       result: unproven
-      note: 'SOB few-shot items prefill 37% faster in attempt 2, far above the spread. But its one clean B arm also showed chat follow-ups 13% slower (spread 3.9%). That fits the mechanism: with min-step 0 every user message gets a checkpoint, and the prefill batch breaks there. Not applied. Run the four arms again when Llama.app has no other client (pitfall A15), with the load gate and the CPU guard. If the chat cost holds, compare a separate preset for SOB.'
+      note: 'The SOB few-shot gain is proven twice: prefill 36-37% faster in two clean B arms of separate attempts. Still open is the chat cost: attempt 2 showed chat follow-ups 13% slower in its one clean B arm (spread 3.9%), and no clean run has repeated it. That fits the mechanism: with min-step 0 every user message gets a checkpoint, and the prefill batch breaks there. Not applied. Next: the chat workload alone (P1), four interleaved arms, when no other session uses Llama.app; if the cost holds, compare a separate preset for SOB.'
+
+  - id: X-models-max-2
+    name: 'TTFT: router --models-max 2 (LFM3 and embeddinggemma loaded together) on a mixed workload of embeddings and LFM3 chat'
+    phase: TTFT
+    hypothesis: Llama.app runs the router with --models-max 1. An app that embeds with embeddinggemma and chats with LFM3 on the same Llama.app (for example context-compiler's what-is-going-on) makes the router evict one model for the other, so a request after a switch waits for a model load. With 2 models allowed, both stay loaded.
+    combination:
+      {
+        engine: { models-max: 2 },
+        client: {},
+        workload: 'new: embeddings to ggml-org/embeddinggemma-2-GGUF:Q8_0 alternating with LFM3 chat requests',
+      }
+    source:
+      [
+        'router log ~/Library/Logs/Llama/llama-server.log, 2026-11-08 15:11-15:20 +0300',
+      ]
+    evidence: 'X-checkpoint-min-step-0-shots attempt 4: "evicting idle LRU name=ggml-org/embeddinggemma-2-GGUF:Q8_0 for a queued request", then LFM3 respawned (load_model initializing about 1.7 s after the spawn); each switch the other way respawned embeddinggemma (about 1.4 s).'
+    expected: No load wait after a model switch; TTFT of the first request after a switch drops by about the load time (1.5-9 s with warm-up).
+    risks: More memory (LFM3 BF16 3.5 GB plus its KV, embeddinggemma Q8_0 small); the router flag comes from Llama.app, and the Llama.app setting that sets it is not known yet; fit-target 1024 may pick other offloads with two models.
+    measure: Custom script, TTFT of LFM3 chat requests that follow an embedding request, and of embedding requests that follow a chat request, models-max 1 vs 2; router log for evictions.
+    status: proposed
+    attempts: []
+    verdict: null
 
   - id: X-checkpoint-step-edits
     name: 'TTFT: checkpoint-min-step=2048 on a long-32k 8-turn chat with an edit of turn 6'
