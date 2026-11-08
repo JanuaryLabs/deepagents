@@ -18,7 +18,9 @@ import { instructions } from '@deepagents/text2sql';
 const indexResult = await sandbox.sandbox.executeCommand('sql index');
 if (indexResult.exitCode !== 0) throw new Error(indexResult.stderr);
 const manifest = JSON.parse(indexResult.stdout) as { fragmentsPath: string };
-const fragments = JSON.parse(await sandbox.sandbox.readFile(manifest.fragmentsPath));
+const fragments = JSON.parse(
+  await sandbox.sandbox.readFile(manifest.fragmentsPath),
+);
 context.set(...instructions(), ...fragments);
 
 const ai = agent({ name: 'sql-assistant', sandbox, model, context });
@@ -87,11 +89,11 @@ console.log(result.text);
 
 ## When to Use Each Pattern
 
-| Need | Recommended approach |
-| ---- | -------------------- |
-| Explain a live query result to the end user | `chat()` helper with a Text2SQL-configured agent |
-| Explain saved SQL in an audit screen or admin tool | Custom explainer agent |
-| Review generated SQL before execution | `toSql()` plus your own explainer step |
+| Need                                               | Recommended approach                             |
+| -------------------------------------------------- | ------------------------------------------------ |
+| Explain a live query result to the end user        | `chat()` helper with a Text2SQL-configured agent |
+| Explain saved SQL in an audit screen or admin tool | Custom explainer agent                           |
+| Review generated SQL before execution              | `toSql()` plus your own explainer step           |
 
 ## Good Explanation Style
 

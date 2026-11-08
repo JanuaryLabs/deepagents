@@ -22,8 +22,8 @@ npm install @deepagents/retrieval
 ## Complete Implementation
 
 ```typescript
-import { ingest, fastembed, nodeSQLite } from '@deepagents/retrieval';
-import { local, rss, github, pdf } from '@deepagents/retrieval/connectors';
+import { fastembed, ingest, nodeSQLite } from '@deepagents/retrieval';
+import { github, local, pdf, rss } from '@deepagents/retrieval/connectors';
 import type { Connector } from '@deepagents/retrieval/connectors';
 
 // Set up retrieval infrastructure
@@ -168,12 +168,14 @@ async function ingestSource(source: SourceConfig): Promise<boolean> {
 }
 
 // Run the full pipeline
-async function runPipeline(options: { force?: boolean; parallel?: boolean } = {}) {
+async function runPipeline(
+  options: { force?: boolean; parallel?: boolean } = {},
+) {
   console.log('Starting indexing pipeline...\n');
   const pipelineStart = Date.now();
 
   // Filter sources that should run
-  const toRun = sources.filter(s => options.force || shouldRun(s));
+  const toRun = sources.filter((s) => options.force || shouldRun(s));
 
   if (toRun.length === 0) {
     console.log('No sources need updating.\n');
@@ -192,9 +194,9 @@ async function runPipeline(options: { force?: boolean; parallel?: boolean } = {}
   if (options.parallel) {
     // Run in parallel (grouped by priority)
     const grouped = {
-      high: toRun.filter(s => s.priority === 'high'),
-      medium: toRun.filter(s => s.priority === 'medium'),
-      low: toRun.filter(s => s.priority === 'low'),
+      high: toRun.filter((s) => s.priority === 'high'),
+      medium: toRun.filter((s) => s.priority === 'medium'),
+      low: toRun.filter((s) => s.priority === 'low'),
     };
 
     for (const priority of ['high', 'medium', 'low'] as const) {
@@ -205,7 +207,7 @@ async function runPipeline(options: { force?: boolean; parallel?: boolean } = {}
       const results = await Promise.all(group.map(ingestSource));
 
       succeeded += results.filter(Boolean).length;
-      failed += results.filter(r => !r).length;
+      failed += results.filter((r) => !r).length;
     }
   } else {
     // Run sequentially
@@ -217,7 +219,9 @@ async function runPipeline(options: { force?: boolean; parallel?: boolean } = {}
   }
 
   const duration = Date.now() - pipelineStart;
-  console.log(`\nPipeline complete: ${succeeded} succeeded, ${failed} failed (${duration}ms)\n`);
+  console.log(
+    `\nPipeline complete: ${succeeded} succeeded, ${failed} failed (${duration}ms)\n`,
+  );
 }
 
 // Get pipeline status
@@ -270,12 +274,12 @@ async function main() {
 
     case 'single':
       const sourceName = args[1];
-      const source = sources.find(s => s.name === sourceName);
+      const source = sources.find((s) => s.name === sourceName);
       if (source) {
         await ingestSource(source);
       } else {
         console.log(`Unknown source: ${sourceName}`);
-        console.log(`Available: ${sources.map(s => s.name).join(', ')}`);
+        console.log(`Available: ${sources.map((s) => s.name).join(', ')}`);
       }
       break;
 
@@ -321,8 +325,10 @@ function shouldRun(source: SourceConfig): boolean {
   const elapsed = Date.now() - state.lastRun[source.name].getTime();
 
   switch (source.schedule) {
-    case 'hourly': return elapsed >= 60 * 60 * 1000;
-    case 'daily': return elapsed >= 24 * 60 * 60 * 1000;
+    case 'hourly':
+      return elapsed >= 60 * 60 * 1000;
+    case 'daily':
+      return elapsed >= 24 * 60 * 60 * 1000;
     // ...
   }
 }
@@ -347,7 +353,7 @@ import cron from 'node-cron';
 
 // Run high priority every 5 minutes
 cron.schedule('*/5 * * * *', async () => {
-  const highPriority = sources.filter(s => s.priority === 'high');
+  const highPriority = sources.filter((s) => s.priority === 'high');
   for (const source of highPriority) {
     await ingestSource(source);
   }
@@ -370,7 +376,7 @@ const app = express();
 
 app.post('/webhook/content-updated', async (req, res) => {
   const { sourceName } = req.body;
-  const source = sources.find(s => s.name === sourceName);
+  const source = sources.find((s) => s.name === sourceName);
 
   if (source) {
     await ingestSource(source);
@@ -397,7 +403,11 @@ interface Metrics {
 
 const metrics: Record<string, Metrics> = {};
 
-function updateMetrics(source: SourceConfig, success: boolean, duration: number) {
+function updateMetrics(
+  source: SourceConfig,
+  success: boolean,
+  duration: number,
+) {
   if (!metrics[source.name]) {
     metrics[source.name] = {
       totalRuns: 0,
@@ -414,7 +424,8 @@ function updateMetrics(source: SourceConfig, success: boolean, duration: number)
   if (success) m.successfulRuns++;
   else m.failedRuns++;
 
-  m.averageDuration = (m.averageDuration * (m.totalRuns - 1) + duration) / m.totalRuns;
+  m.averageDuration =
+    (m.averageDuration * (m.totalRuns - 1) + duration) / m.totalRuns;
 }
 ```
 
@@ -425,7 +436,7 @@ Add retry with exponential backoff:
 ```typescript
 async function ingestWithRetry(
   source: SourceConfig,
-  maxRetries = 3
+  maxRetries = 3,
 ): Promise<boolean> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -440,7 +451,7 @@ async function ingestWithRetry(
 
       if (attempt < maxRetries) {
         const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
   }
@@ -463,8 +474,10 @@ function getHealthStatus(): {
 
   for (const source of sources) {
     const hasError = !!state.errors[source.name];
-    const isStale = !state.lastRun[source.name] ||
-      (source.schedule === 'hourly' && Date.now() - state.lastRun[source.name].getTime() > 2 * 60 * 60 * 1000);
+    const isStale =
+      !state.lastRun[source.name] ||
+      (source.schedule === 'hourly' &&
+        Date.now() - state.lastRun[source.name].getTime() > 2 * 60 * 60 * 1000);
 
     sourceHealth[source.name] = !hasError && !isStale;
   }

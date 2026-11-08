@@ -17,7 +17,9 @@ const existingPairs = [
   { question: 'Monthly revenue', sql: 'SELECT ...', success: true },
 ];
 
-const expanded = await new BreadthEvolver(existingPairs, { count: 3 }).toPairs();
+const expanded = await new BreadthEvolver(existingPairs, {
+  count: 3,
+}).toPairs();
 
 // Original: "Show top customers"
 // Variations:
@@ -76,13 +78,14 @@ import { BreadthEvolver } from '@deepagents/text2sql/synthesis';
 
 const persona = {
   role: 'Sales Manager',
-  perspective: 'Focus on revenue metrics and customer relationships. Use business terminology.',
+  perspective:
+    'Focus on revenue metrics and customer relationships. Use business terminology.',
 };
 
 const expanded = await new BreadthEvolver(existingPairs, {
-    count: 3,
-    persona
-  }).toPairs();
+  count: 3,
+  persona,
+}).toPairs();
 
 // Original: "Show customer orders"
 // With persona:
@@ -114,9 +117,9 @@ Override the default model:
 import { groq } from '@ai-sdk/groq';
 
 const pairs = await new BreadthEvolver(existingPairs, {
-    count: 3,
-    model: groq('openai/gpt-oss-20b')
-  }).toPairs();
+  count: 3,
+  model: groq('openai/gpt-oss-20b'),
+}).toPairs();
 ```
 
 ## Example: Augment Extracted Data
@@ -125,8 +128,8 @@ Expand pairs extracted from chat history:
 
 ```typescript
 import {
-  MessageExtractor,
   BreadthEvolver,
+  MessageExtractor,
 } from '@deepagents/text2sql/synthesis';
 
 // Extract from history
@@ -142,10 +145,10 @@ console.log(`Augmented to ${augmented.length} pairs`);
 
 ```typescript
 import {
-  MessageExtractor,
   BreadthEvolver,
-  ValidatedProducer,
   DeduplicatedProducer,
+  MessageExtractor,
+  ValidatedProducer,
 } from '@deepagents/text2sql/synthesis';
 
 // 1. Extract from history
@@ -156,12 +159,16 @@ const variations = await new BreadthEvolver(extracted, { count: 3 }).toPairs();
 
 // 3. Validate and deduplicate
 const final = await new DeduplicatedProducer(
-    new ValidatedProducer(
-      { produce: async function*() { yield variations; } },
-      adapter
-    ),
-    { strategy: 'exact' }
-  ).toPairs();
+  new ValidatedProducer(
+    {
+      produce: async function* () {
+        yield variations;
+      },
+    },
+    adapter,
+  ),
+  { strategy: 'exact' },
+).toPairs();
 ```
 
 ## Example: With Persona-Based Variations
@@ -180,7 +187,10 @@ const personas = [
 const allVariations = [];
 
 for (const persona of personas) {
-  const variations = await new BreadthEvolver(basePairs, { count: 2, persona }).toPairs();
+  const variations = await new BreadthEvolver(basePairs, {
+    count: 2,
+    persona,
+  }).toPairs();
   allVariations.push(...variations);
 }
 
@@ -191,17 +201,18 @@ console.log(`Generated ${allVariations.length} persona-specific variations`);
 
 Generated variations maintain semantic equivalence while varying phrasing:
 
-| Original | Variation 1 | Variation 2 | Variation 3 |
-|----------|-------------|-------------|-------------|
+| Original                      | Variation 1                                | Variation 2                                    | Variation 3                          |
+| ----------------------------- | ------------------------------------------ | ---------------------------------------------- | ------------------------------------ |
 | "How many orders last month?" | "What was our order count for last month?" | "Show me total orders from the previous month" | "Orders from last month - how many?" |
-| "Show revenue by product" | "Break down our revenue by product" | "What's the revenue split across products?" | "Product revenue breakdown" |
-| "List active customers" | "Who are our current active customers?" | "Show me all customers with active status" | "Display the active customer list" |
+| "Show revenue by product"     | "Break down our revenue by product"        | "What's the revenue split across products?"    | "Product revenue breakdown"          |
+| "List active customers"       | "Who are our current active customers?"    | "Show me all customers with active status"     | "Display the active customer list"   |
 
 ## BreadthEvolver vs DepthEvolver
 
 Understanding the difference:
 
 ### BreadthEvolver (This Page)
+
 - **Same SQL, different phrasings**
 - Generates paraphrased questions
 - SQL remains identical
@@ -211,9 +222,15 @@ Understanding the difference:
 ```typescript
 // Example: Breadth evolution
 const breadth = await new BreadthEvolver(
-    [{ question: 'Show customers', sql: 'SELECT * FROM customers', success: true }],
-    { count: 3 }
-  ).toPairs();
+  [
+    {
+      question: 'Show customers',
+      sql: 'SELECT * FROM customers',
+      success: true,
+    },
+  ],
+  { count: 3 },
+).toPairs();
 
 // Results:
 // - "Display all customers" → SELECT * FROM customers
@@ -222,6 +239,7 @@ const breadth = await new BreadthEvolver(
 ```
 
 ### DepthEvolver
+
 - **Different SQL, more complex questions**
 - Evolves questions to be more sophisticated
 - SQL becomes more complex
@@ -231,10 +249,16 @@ const breadth = await new BreadthEvolver(
 ```typescript
 // Example: Depth evolution
 const depth = await new DepthEvolver(
-    [{ question: 'Show customers', sql: 'SELECT * FROM customers', success: true }],
-    adapter,
-    { count: 2, techniques: ['add-aggregation', 'add-filter'] }
-  ).toPairs();
+  [
+    {
+      question: 'Show customers',
+      sql: 'SELECT * FROM customers',
+      success: true,
+    },
+  ],
+  adapter,
+  { count: 2, techniques: ['add-aggregation', 'add-filter'] },
+).toPairs();
 
 // Results:
 // - "How many customers per region?" → SELECT region, COUNT(*) FROM customers GROUP BY region
@@ -247,10 +271,10 @@ Build a comprehensive training set:
 
 ```typescript
 import {
-  MessageExtractor,
-  SqlExtractor,
-  SchemaSynthesizer,
   BreadthEvolver,
+  MessageExtractor,
+  SchemaSynthesizer,
+  SqlExtractor,
 } from '@deepagents/text2sql/synthesis';
 
 // From multiple sources

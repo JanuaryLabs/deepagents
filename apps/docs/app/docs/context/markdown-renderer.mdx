@@ -8,14 +8,11 @@ The `MarkdownRenderer` produces human-readable Markdown output. It's ideal for d
 ## Basic Usage
 
 ```typescript
-import { MarkdownRenderer, role, hint } from '@deepagents/context';
+import { MarkdownRenderer, hint, role } from '@deepagents/context';
 
 const renderer = new MarkdownRenderer();
 
-const fragments = [
-  role('You are a helpful assistant.'),
-  hint('Be concise.'),
-];
+const fragments = [role('You are a helpful assistant.'), hint('Be concise.')];
 
 const output = renderer.render(fragments);
 ```
@@ -24,9 +21,11 @@ const output = renderer.render(fragments);
 
 ```markdown
 ## Role
+
 You are a helpful assistant.
 
 ## Hint
+
 Be concise.
 ```
 
@@ -44,6 +43,7 @@ Top-level primitives become H2 headers with content below:
 
 ```markdown
 ## Role
+
 You are a SQL expert.
 ```
 
@@ -67,6 +67,7 @@ Object properties become bold key-value pairs:
 
 ```markdown
 ## Config
+
 - **maxTokens**: 1000
 - **temperature**: 0.7
 ```
@@ -86,6 +87,7 @@ Array items render as nested bullet lists:
 
 ```markdown
 ## Rules
+
 - Be helpful
 - Be concise
 - Be accurate
@@ -96,16 +98,18 @@ Array items render as nested bullet lists:
 Nested fragments use indented bullet points with bold names:
 
 ```typescript
-fragment('guidelines',
+fragment(
+  'guidelines',
   hint('Use CTEs for complex queries'),
   hint('Always include LIMIT clause'),
-)
+);
 ```
 
 **Output:**
 
 ```markdown
 ## Guidelines
+
 - **hint**: Use CTEs for complex queries
 - **hint**: Always include LIMIT clause
 ```
@@ -115,21 +119,18 @@ fragment('guidelines',
 Multi-level nesting uses increased indentation:
 
 ```typescript
-fragment('domain',
-  fragment('sql_rules',
-    hint('Use CTEs'),
-    hint('Avoid SELECT *'),
-  ),
-  fragment('formatting',
-    hint('Use snake_case'),
-  ),
-)
+fragment(
+  'domain',
+  fragment('sql_rules', hint('Use CTEs'), hint('Avoid SELECT *')),
+  fragment('formatting', hint('Use snake_case')),
+);
 ```
 
 **Output:**
 
 ```markdown
 ## Domain
+
 - **sql_rules**:
   - **hint**: Use CTEs
   - **hint**: Avoid SELECT *
@@ -144,10 +145,7 @@ Enable `groupFragments` to collect same-named fragments:
 ```typescript
 const renderer = new MarkdownRenderer({ groupFragments: true });
 
-const fragments = [
-  hint('Be helpful'),
-  hint('Be concise'),
-];
+const fragments = [hint('Be helpful'), hint('Be concise')];
 
 renderer.render(fragments);
 ```
@@ -156,9 +154,11 @@ renderer.render(fragments);
 
 ```markdown
 ## Hint
+
 Be helpful
 
 ## Hint
+
 Be concise
 ```
 
@@ -166,6 +166,7 @@ Be concise
 
 ```markdown
 ## Hints
+
 - **hint**: Be helpful
 - **hint**: Be concise
 ```
@@ -173,12 +174,14 @@ Be concise
 ## When to Use Markdown
 
 **Advantages:**
+
 - Most human-readable format
 - Great for debugging prompts
 - Familiar formatting for documentation-trained models
 - Easy to copy-paste and share
 
 **Trade-offs:**
+
 - Headers add some token overhead
 - Less structured than XML for parsing
 - May confuse models expecting XML
@@ -190,16 +193,15 @@ import {
   ContextEngine,
   InMemoryContextStore,
   MarkdownRenderer,
-  role,
   hint,
+  role,
 } from '@deepagents/context';
 
-const context = new ContextEngine({ store: new InMemoryContextStore() })
-  .set(
-    role('You are a documentation writer.'),
-    hint('Use clear language.'),
-    hint('Include examples.'),
-  );
+const context = new ContextEngine({ store: new InMemoryContextStore() }).set(
+  role('You are a documentation writer.'),
+  hint('Use clear language.'),
+  hint('Include examples.'),
+);
 
 const { systemPrompt } = await context.resolve({
   renderer: new MarkdownRenderer(),

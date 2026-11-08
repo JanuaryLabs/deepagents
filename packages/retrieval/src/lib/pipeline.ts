@@ -1,5 +1,3 @@
-
-
 // think about this.
 // const pipeline = new Pipeline()
 //   .source(new DatabaseAdapter('users'))

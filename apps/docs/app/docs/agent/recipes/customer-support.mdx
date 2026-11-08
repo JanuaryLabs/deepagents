@@ -27,8 +27,9 @@ Build a support system where a triage agent analyzes customer inquiries and rout
 ## Quick Start
 
 ```typescript
-import { agent, instructions, swarm } from '@deepagents/agent';
 import { groq } from '@ai-sdk/groq';
+
+import { agent, instructions, swarm } from '@deepagents/agent';
 
 // Billing specialist handles payment and subscription issues
 const billingSpecialist = agent({
@@ -46,7 +47,8 @@ const billingSpecialist = agent({
       'Offer to escalate to a human if unable to resolve',
     ],
   }),
-  handoffDescription: 'Handles billing, payments, invoices, refunds, subscriptions, and pricing questions',
+  handoffDescription:
+    'Handles billing, payments, invoices, refunds, subscriptions, and pricing questions',
 });
 
 // Technical specialist handles product and technical issues
@@ -65,7 +67,8 @@ const technicalSpecialist = agent({
       'Suggest workarounds if the issue cannot be resolved immediately',
     ],
   }),
-  handoffDescription: 'Handles technical issues, bugs, errors, setup problems, and product feature questions',
+  handoffDescription:
+    'Handles technical issues, bugs, errors, setup problems, and product feature questions',
 });
 
 // General specialist handles everything else
@@ -83,7 +86,8 @@ const generalSpecialist = agent({
       'Direct to appropriate resources if needed',
     ],
   }),
-  handoffDescription: 'Handles general inquiries, account questions, company info, and anything not billing or technical',
+  handoffDescription:
+    'Handles general inquiries, account questions, company info, and anything not billing or technical',
 });
 
 // Triage agent routes to the appropriate specialist
@@ -108,7 +112,7 @@ const triageAgent = agent({
 const stream = swarm(
   triageAgent,
   'I was charged twice for my subscription last month',
-  {}
+  {},
 );
 
 for await (const part of stream) {
@@ -133,6 +137,7 @@ const triageAgent = agent({
 ```
 
 **Key aspects:**
+
 - Has `handoffs` array with all specialists
 - System prompt includes a table of available specialists
 - Can call `transfer_to_billing_specialist`, `transfer_to_technical_specialist`, or `transfer_to_general_specialist`
@@ -142,16 +147,16 @@ const triageAgent = agent({
 Each specialist has a focused `handoffDescription` that helps the triage agent decide when to route:
 
 ```typescript
-handoffDescription: 'Handles billing, payments, invoices, refunds...'
+handoffDescription: 'Handles billing, payments, invoices, refunds...';
 ```
 
 The triage agent's system prompt automatically includes:
 
-| Agent Name | Agent Description |
-| --- | --- |
-| billing_specialist | Handles billing, payments, invoices, refunds... |
-| technical_specialist | Handles technical issues, bugs, errors... |
-| general_specialist | Handles general inquiries, account questions... |
+| Agent Name           | Agent Description                               |
+| -------------------- | ----------------------------------------------- |
+| billing_specialist   | Handles billing, payments, invoices, refunds... |
+| technical_specialist | Handles technical issues, bugs, errors...       |
+| general_specialist   | Handles general inquiries, account questions... |
 
 ## How It Works
 
@@ -176,19 +181,20 @@ type SupportContext = {
 const triageAgent = agent<unknown, SupportContext>({
   name: 'TriageAgent',
   model: groq('gpt-oss-20b'),
-  prompt: (ctx) => instructions({
-    purpose: [
-      'You are the first point of contact for customer support.',
-      ctx.customerTier === 'enterprise'
-        ? 'This is an enterprise customer - prioritize their issue.'
-        : 'Route to the appropriate specialist.',
-    ],
-    routine: [
-      'Greet the customer warmly',
-      'Analyze their message to understand the issue type',
-      'Transfer to the appropriate specialist immediately',
-    ],
-  }),
+  prompt: (ctx) =>
+    instructions({
+      purpose: [
+        'You are the first point of contact for customer support.',
+        ctx.customerTier === 'enterprise'
+          ? 'This is an enterprise customer - prioritize their issue.'
+          : 'Route to the appropriate specialist.',
+      ],
+      routine: [
+        'Greet the customer warmly',
+        'Analyze their message to understand the issue type',
+        'Transfer to the appropriate specialist immediately',
+      ],
+    }),
   handoffs: [billingSpecialist, technicalSpecialist, generalSpecialist],
 });
 
@@ -215,7 +221,7 @@ const triageAgent = agent({
   handoffs: [
     billingSpecialist,
     technicalSpecialist,
-    shippingSpecialist,  // Added
+    shippingSpecialist, // Added
     generalSpecialist,
   ],
 });

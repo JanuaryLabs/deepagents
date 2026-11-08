@@ -22,7 +22,7 @@ export LINEAR_API_KEY=lin_api_xxxxxxxxxxxxx
 ## Basic Usage
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { linear } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./linear.db', 384);
@@ -73,7 +73,7 @@ This can be passed to an LLM to provide context about the knowledge source.
 Find issues related to a specific topic:
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { linear } from '@deepagents/retrieval/connectors';
 
 async function searchIssues(query: string) {
@@ -85,7 +85,7 @@ async function searchIssues(query: string) {
     embedder: fastembed(),
   });
 
-  return results.map(r => ({
+  return results.map((r) => ({
     content: r.content,
     similarity: r.similarity,
   }));
@@ -100,12 +100,13 @@ const results = await searchIssues('payment processing integration');
 Build an assistant that can answer questions about your current work:
 
 ```typescript
-import { agent, instructions, execute } from '@deepagents/agent';
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
-import { linear } from '@deepagents/retrieval/connectors';
 import { groq } from '@ai-sdk/groq';
 import { tool } from 'ai';
 import z from 'zod';
+
+import { agent, execute, instructions } from '@deepagents/agent';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
+import { linear } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./linear.db', 384);
 const linearConnector = linear(process.env.LINEAR_API_KEY!);
@@ -122,7 +123,7 @@ const searchIssuesTool = tool({
       embedder: fastembed(),
     });
 
-    return results.slice(0, 5).map(r => r.content);
+    return results.slice(0, 5).map((r) => r.content);
   },
 });
 
@@ -152,7 +153,7 @@ for await (const chunk of stream.textStream) {
 Generate a summary of issues for standup or sprint planning:
 
 ```typescript
-import { ingest, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, ingest, nodeSQLite } from '@deepagents/retrieval';
 import { linear } from '@deepagents/retrieval/connectors';
 
 async function indexIssues() {
@@ -177,7 +178,7 @@ await indexIssues();
 Build context for code review or planning:
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { linear } from '@deepagents/retrieval/connectors';
 
 async function getProjectContext(feature: string) {
@@ -190,7 +191,7 @@ async function getProjectContext(feature: string) {
   });
 
   // Extract relevant issues
-  const issues = results.slice(0, 3).map(r => {
+  const issues = results.slice(0, 3).map((r) => {
     const match = r.content.match(/Issue: (.+)\n/);
     return {
       title: match?.[1] || 'Unknown',
@@ -212,7 +213,7 @@ console.log('Related issues:', context);
 The connector uses a fixed source ID:
 
 ```typescript
-linear(apiKey)
+linear(apiKey);
 // sourceId: "linear:workspace"
 ```
 

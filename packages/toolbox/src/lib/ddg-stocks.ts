@@ -43,7 +43,8 @@ const toQuote = (r: any): Quote => ({
 });
 
 export const duckStocks = tool({
-  description: 'A tool for fetching stock market quotes. Useful for when you need to get the latest stock price and related information for one or more stock symbols.',
+  description:
+    'A tool for fetching stock market quotes. Useful for when you need to get the latest stock price and related information for one or more stock symbols.',
   inputSchema: z.object({
     symbols: z
       .union([z.string().min(1), z.array(z.string().min(1)).min(1)])

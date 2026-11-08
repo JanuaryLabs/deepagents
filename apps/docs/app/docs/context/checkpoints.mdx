@@ -26,9 +26,9 @@ import {
   ContextEngine,
   SqliteContextStore,
   XmlRenderer,
+  assistantText,
   role,
   user,
-  assistantText,
 } from '@deepagents/context';
 
 const store = new SqliteContextStore('./chat.db');
@@ -79,6 +79,7 @@ await context.save();
 ```
 
 Both branches are preserved:
+
 - `main`: Python learning path
 - `main-v2`: JavaScript learning path
 
@@ -100,19 +101,21 @@ await store.deleteCheckpoint(context.chatId, 'before-choice');
 
 ## Checkpoints vs Rewind
 
-| Feature | `checkpoint()` + `restore()` | `rewind()` |
-|---------|------------------------------|------------|
-| Target | Named pointer | Message ID directly |
-| Requires ID | No (uses name) | Yes |
-| Persistence | Stored in database | N/A |
-| Use case | Save decision points | Quick retry from known message |
+| Feature     | `checkpoint()` + `restore()` | `rewind()`                     |
+| ----------- | ---------------------------- | ------------------------------ |
+| Target      | Named pointer                | Message ID directly            |
+| Requires ID | No (uses name)               | Yes                            |
+| Persistence | Stored in database           | N/A                            |
+| Use case    | Save decision points         | Quick retry from known message |
 
 Use checkpoints when:
+
 - You want to name restore points semantically
 - You might restore from a different session
 - You're building undo/redo UI
 
 Use `rewind()` when:
+
 - You have the message ID already
 - You want a quick one-off branch
 - You're retrying immediately
@@ -122,8 +125,8 @@ Use `rewind()` when:
 Use checkpoints to retry until successful:
 
 ```typescript
-import { generateText } from 'ai';
 import { groq } from '@ai-sdk/groq';
+import { generateText } from 'ai';
 
 async function askWithRetry(
   context: ContextEngine,

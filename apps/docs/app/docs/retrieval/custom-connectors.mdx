@@ -22,9 +22,9 @@ type Connector = {
    */
   sources: () => AsyncGenerator<
     {
-      id: string;                              // Unique document identifier
-      content: () => Promise<string>;          // Lazy content loader
-      metadata?: Record<string, unknown>;      // Optional metadata
+      id: string; // Unique document identifier
+      content: () => Promise<string>; // Lazy content loader
+      metadata?: Record<string, unknown>; // Optional metadata
     },
     void,
     unknown
@@ -72,8 +72,11 @@ function myConnector(content: string): Connector {
 Index records from a database:
 
 ```typescript
-import type { Connector } from '@deepagents/retrieval/connectors';
 import { Pool } from 'pg';
+
+// Usage
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
+import type { Connector } from '@deepagents/retrieval/connectors';
 
 function postgresConnector(pool: Pool, table: string): Connector {
   const sourceId = `postgres:${table}`;
@@ -99,9 +102,6 @@ function postgresConnector(pool: Pool, table: string): Connector {
   };
 }
 
-// Usage
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
-
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const store = nodeSQLite('./db.db', 384);
 
@@ -117,6 +117,8 @@ const results = await similaritySearch('user preferences', {
 Index content from a REST API:
 
 ```typescript
+// Usage
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import type { Connector } from '@deepagents/retrieval/connectors';
 
 interface Article {
@@ -140,7 +142,8 @@ function apiConnector(baseUrl: string): Connector {
 
       while (hasMore) {
         const response = await fetch(`${baseUrl}/articles?page=${page}`);
-        const data: { articles: Article[]; has_more: boolean } = await response.json();
+        const data: { articles: Article[]; has_more: boolean } =
+          await response.json();
 
         for (const article of data.articles) {
           yield {
@@ -167,9 +170,6 @@ function apiConnector(baseUrl: string): Connector {
   };
 }
 
-// Usage
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
-
 const results = await similaritySearch('product launch', {
   connector: apiConnector('https://api.company.com'),
   store: nodeSQLite('./api.db', 384),
@@ -182,8 +182,13 @@ const results = await similaritySearch('product launch', {
 Index files from Amazon S3:
 
 ```typescript
+import {
+  GetObjectCommand,
+  ListObjectsV2Command,
+  S3Client,
+} from '@aws-sdk/client-s3';
+
 import type { Connector } from '@deepagents/retrieval/connectors';
-import { S3Client, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3';
 
 function s3Connector(bucket: string, prefix: string): Connector {
   const s3 = new S3Client({});
@@ -245,8 +250,9 @@ const results = await similaritySearch('deployment guide', {
 Index pages from Notion:
 
 ```typescript
-import type { Connector } from '@deepagents/retrieval/connectors';
 import { Client } from '@notionhq/client';
+
+import type { Connector } from '@deepagents/retrieval/connectors';
 
 function notionConnector(apiKey: string, databaseId: string): Connector {
   const notion = new Client({ auth: apiKey });
@@ -308,8 +314,9 @@ function notionConnector(apiKey: string, databaseId: string): Connector {
 Index messages from Slack channels:
 
 ```typescript
-import type { Connector } from '@deepagents/retrieval/connectors';
 import { WebClient } from '@slack/web-api';
+
+import type { Connector } from '@deepagents/retrieval/connectors';
 
 function slackConnector(token: string, channelId: string): Connector {
   const slack = new WebClient(token);
@@ -346,7 +353,7 @@ function slackConnector(token: string, channelId: string): Connector {
 
                 const replyTexts = (replies.messages || [])
                   .slice(1) // Skip parent message
-                  .map(r => r.text)
+                  .map((r) => r.text)
                   .filter(Boolean);
 
                 if (replyTexts.length > 0) {

@@ -28,10 +28,7 @@ fragment(
   'database',
   hint('PostgreSQL 15'),
   hint('Tables: users, orders'),
-  fragment(
-    'constraints',
-    hint('No DELETE without audit'),
-  ),
+  fragment('constraints', hint('No DELETE without audit')),
 );
 ```
 
@@ -41,11 +38,11 @@ That lets you build hierarchical context without writing prompt strings by hand.
 
 The package provides runtime guards for fragment inspection:
 
-| Guard | Purpose |
-|-------|---------|
-| `isFragment(value)` | Check if a value is a `ContextFragment` |
-| `isFragmentObject(value)` | Check if a value is a plain object (not array/fragment/primitive) |
-| `isMessageFragment(fragment)` | Check if fragment has `type: 'message'` |
+| Guard                         | Purpose                                                           |
+| ----------------------------- | ----------------------------------------------------------------- |
+| `isFragment(value)`           | Check if a value is a `ContextFragment`                           |
+| `isFragmentObject(value)`     | Check if a value is a plain object (not array/fragment/primitive) |
+| `isMessageFragment(fragment)` | Check if fragment has `type: 'message'`                           |
 
 ## Codec System
 

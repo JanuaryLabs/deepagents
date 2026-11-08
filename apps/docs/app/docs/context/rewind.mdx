@@ -21,16 +21,17 @@ After rewind('msg-2'):
 ## Basic Usage
 
 ```typescript
+import { groq } from '@ai-sdk/groq';
+import { generateText } from 'ai';
+
 import {
   ContextEngine,
   SqliteContextStore,
   XmlRenderer,
+  assistant,
   role,
   user,
-  assistant,
 } from '@deepagents/context';
-import { generateText } from 'ai';
-import { groq } from '@ai-sdk/groq';
 
 const store = new SqliteContextStore('./chat.db');
 const context = new ContextEngine({
@@ -115,12 +116,12 @@ user('Hello', { id: `msg-${Date.now()}` });
 
 ```typescript
 interface BranchInfo {
-  id: string;           // Branch UUID
-  name: string;         // e.g., 'main-v2'
+  id: string; // Branch UUID
+  name: string; // e.g., 'main-v2'
   headMessageId: string; // Message this branch points to
-  isActive: boolean;    // Always true after rewind
+  isActive: boolean; // Always true after rewind
   messageCount: number; // Messages in this branch
-  createdAt: number;    // Timestamp
+  createdAt: number; // Timestamp
 }
 ```
 
@@ -196,7 +197,7 @@ async function editQuestion(
 ): Promise<void> {
   // Find the message before the original question
   const graph = await store.getGraph(context.chatId);
-  const original = graph.nodes.find(n => n.id === originalId);
+  const original = graph.nodes.find((n) => n.id === originalId);
 
   if (original?.parentId) {
     // Rewind to parent (message before the question)
@@ -250,14 +251,15 @@ async function retryUntilGood(
 
 ## Rewind vs Checkpoint
 
-| Scenario | Use |
-|----------|-----|
-| Have message ID | `rewind(messageId)` |
+| Scenario                 | Use                          |
+| ------------------------ | ---------------------------- |
+| Have message ID          | `rewind(messageId)`          |
 | Want named restore point | `checkpoint()` + `restore()` |
-| Quick retry | `rewind()` |
-| Cross-session restore | `checkpoint()` |
+| Quick retry              | `rewind()`                   |
+| Cross-session restore    | `checkpoint()`               |
 
 Both create new branches. The difference:
+
 - `rewind()` takes a message ID directly
 - `restore()` looks up a named checkpoint first
 
@@ -277,11 +279,13 @@ This preserves the original message on the original branch.
 ## Best Practices
 
 1. **Always use custom IDs** for messages you might rewind to:
+
    ```typescript
-   user('Question', { id: 'q1' })
+   user('Question', { id: 'q1' });
    ```
 
 2. **Track message IDs** if building UI:
+
    ```typescript
    const messageIds: string[] = [];
    const id = `msg-${Date.now()}`;
@@ -290,6 +294,7 @@ This preserves the original message on the original branch.
    ```
 
 3. **Save before rewind** - pending messages are cleared:
+
    ```typescript
    await context.save();
    await context.rewind('q1');
@@ -297,9 +302,9 @@ This preserves the original message on the original branch.
 
 4. **Use switchBranch()** to return to original:
    ```typescript
-   await context.rewind('q1');      // Creates main-v2
+   await context.rewind('q1'); // Creates main-v2
    // ... do work on main-v2 ...
-   await context.switchBranch('main');  // Back to original
+   await context.switchBranch('main'); // Back to original
    ```
 
 ## Next Steps

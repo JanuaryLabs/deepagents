@@ -59,7 +59,7 @@ The first run will download the model (~30MB). Subsequent runs use the cached ve
 Bring it all together with `similaritySearch`:
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { local } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./docs.db', 384);
@@ -87,7 +87,7 @@ for (const result of results) {
 Here's a production-ready script that creates a searchable knowledge base:
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { local } from '@deepagents/retrieval/connectors';
 
 async function searchDocs(query: string) {
@@ -117,7 +117,9 @@ console.log(`\nSearch: "${query}"\n`);
 console.log(`Found ${results.length} results:\n`);
 
 for (const [i, result] of results.entries()) {
-  console.log(`${i + 1}. [${result.similarity.toFixed(2)}] ${result.document_id}`);
+  console.log(
+    `${i + 1}. [${result.similarity.toFixed(2)}] ${result.document_id}`,
+  );
   console.log(`   ${result.content.slice(0, 150).replace(/\n/g, ' ')}...\n`);
 }
 ```
@@ -132,13 +134,13 @@ node search.ts "authentication setup"
 
 Each result contains:
 
-| Field | Description |
-|-------|-------------|
-| `content` | The chunk of text that matched |
-| `similarity` | Score from 0-1 (higher = more relevant) |
-| `distance` | Cosine distance (lower = more similar) |
+| Field         | Description                               |
+| ------------- | ----------------------------------------- |
+| `content`     | The chunk of text that matched            |
+| `similarity`  | Score from 0-1 (higher = more relevant)   |
+| `distance`    | Cosine distance (lower = more similar)    |
 | `document_id` | Path or identifier of the source document |
-| `metadata` | Custom metadata attached to the document |
+| `metadata`    | Custom metadata attached to the document  |
 
 ## How Ingestion Works
 

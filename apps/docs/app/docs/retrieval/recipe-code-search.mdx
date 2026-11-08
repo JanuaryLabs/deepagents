@@ -19,6 +19,7 @@ npm install @deepagents/retrieval
 ```
 
 For GitHub repo indexing via gitingest:
+
 ```bash
 pip install uv  # Required for uvx command
 ```
@@ -26,8 +27,13 @@ pip install uv  # Required for uvx command
 ## Complete Implementation
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite, ingest } from '@deepagents/retrieval';
-import { repo, github } from '@deepagents/retrieval/connectors';
+import {
+  fastembed,
+  ingest,
+  nodeSQLite,
+  similaritySearch,
+} from '@deepagents/retrieval';
+import { github, repo } from '@deepagents/retrieval/connectors';
 
 // Set up retrieval infrastructure
 const store = nodeSQLite('./code-search.db', 384);
@@ -94,7 +100,7 @@ async function searchCode(query: string, limit = 10) {
     embedder,
   });
 
-  return results.slice(0, limit).map(r => ({
+  return results.slice(0, limit).map((r) => ({
     file: r.document_id,
     content: r.content,
     similarity: r.similarity,
@@ -237,11 +243,11 @@ async function getReviewContext(changedFile: string, changedContent: string) {
   const similarCode = await searchCode(changedContent, 5);
 
   // Filter out the file being reviewed
-  const relatedFiles = similarCode.filter(r => r.file !== changedFile);
+  const relatedFiles = similarCode.filter((r) => r.file !== changedFile);
 
   return {
     changedFile,
-    relatedFiles: relatedFiles.map(r => ({
+    relatedFiles: relatedFiles.map((r) => ({
       file: r.file,
       similarity: r.similarity,
       snippet: r.content.slice(0, 200),
@@ -261,12 +267,15 @@ async function discoverPatterns(patterns: string[]) {
   for (const pattern of patterns) {
     const results = await searchCode(pattern, 10);
 
-    const byProject = results.reduce((acc, r) => {
-      const project = r.file.split('/')[0];
-      acc[project] = acc[project] || [];
-      acc[project].push(r);
-      return acc;
-    }, {} as Record<string, any[]>);
+    const byProject = results.reduce(
+      (acc, r) => {
+        const project = r.file.split('/')[0];
+        acc[project] = acc[project] || [];
+        acc[project].push(r);
+        return acc;
+      },
+      {} as Record<string, any[]>,
+    );
 
     discoveries.push({
       pattern,

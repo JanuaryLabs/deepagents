@@ -15,17 +15,18 @@ commits to an approach (and again before it declares done), it consults a
 **reviewer** advisor backed by a stronger model.
 
 ```typescript
-import {
-  agent,
-  ContextEngine,
-  InMemoryContextStore,
-  role,
-  user,
-} from '@deepagents/context';
 import { groq } from '@ai-sdk/groq';
 import { openai } from '@ai-sdk/openai';
 import { tool } from 'ai';
 import z from 'zod';
+
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  agent,
+  role,
+  user,
+} from '@deepagents/context';
 
 // -- Reviewer agent (the advisor) --------------------------------------------
 
@@ -152,25 +153,25 @@ sources.
 
 ## asAdvisor() Options
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `maxUses` | `number` | unlimited | Hard cap on total invocations for this advisor instance |
+| Option                | Type     | Default   | Description                                                             |
+| --------------------- | -------- | --------- | ----------------------------------------------------------------------- |
+| `maxUses`             | `number` | unlimited | Hard cap on total invocations for this advisor instance                 |
 | `maxConversationUses` | `number` | unlimited | Cap on successful responses before the tool returns `max_uses_exceeded` |
-| `maxOutputTokens` | `number` | `1024` | Maximum output tokens per advisor response |
+| `maxOutputTokens`     | `number` | `1024`    | Maximum output tokens per advisor response                              |
 
 ## Error Codes
 
 When the advisor cannot complete a request, the tool returns a short status code
 instead of throwing:
 
-| Code | Meaning |
-| --- | --- |
-| `max_uses_exceeded` | Call cap reached |
-| `too_many_requests` | Provider rate limit (429) |
-| `overloaded` | Provider overloaded (503/529) |
-| `prompt_too_long` | Context exceeds model limit |
-| `execution_time_exceeded` | Request timed out |
-| `unavailable` | Provider unreachable |
+| Code                      | Meaning                       |
+| ------------------------- | ----------------------------- |
+| `max_uses_exceeded`       | Call cap reached              |
+| `too_many_requests`       | Provider rate limit (429)     |
+| `overloaded`              | Provider overloaded (503/529) |
+| `prompt_too_long`         | Context exceeds model limit   |
+| `execution_time_exceeded` | Request timed out             |
+| `unavailable`             | Provider unreachable          |
 
 The executor can decide whether to proceed without advice or surface the error.
 

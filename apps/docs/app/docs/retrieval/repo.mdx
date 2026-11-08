@@ -14,7 +14,7 @@ import { repo } from '@deepagents/retrieval/connectors';
 ## Basic Usage
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { repo } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./code.db', 384);
@@ -38,11 +38,11 @@ repo(
 
 ### Parameters
 
-| Parameter | Description |
-|-----------|-------------|
-| `dir` | Path to the repository root |
+| Parameter    | Description                                     |
+| ------------ | ----------------------------------------------- |
+| `dir`        | Path to the repository root                     |
 | `extensions` | Array of file extensions (with or without dots) |
-| `ingestWhen` | Controls re-indexing behavior |
+| `ingestWhen` | Controls re-indexing behavior                   |
 
 ## File Filtering
 
@@ -78,7 +78,7 @@ The connector respects `.gitignore` patterns from the repository root.
 Index and search a TypeScript project:
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { repo } from '@deepagents/retrieval/connectors';
 
 async function searchCode(query: string) {
@@ -90,7 +90,7 @@ async function searchCode(query: string) {
     embedder: fastembed(),
   });
 
-  return results.map(r => ({
+  return results.map((r) => ({
     file: r.document_id,
     content: r.content.slice(0, 200),
     similarity: r.similarity,
@@ -106,7 +106,12 @@ const results = await searchCode('JWT token validation middleware');
 Index a project with multiple languages:
 
 ```typescript
-import { ingest, similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import {
+  fastembed,
+  ingest,
+  nodeSQLite,
+  similaritySearch,
+} from '@deepagents/retrieval';
 import { repo } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./fullstack.db', 384);
@@ -152,7 +157,12 @@ const results = await searchFullstack('error handling retry logic');
 Index multiple packages in a monorepo:
 
 ```typescript
-import { ingest, similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import {
+  fastembed,
+  ingest,
+  nodeSQLite,
+  similaritySearch,
+} from '@deepagents/retrieval';
 import { repo } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./monorepo.db', 384);
@@ -189,7 +199,7 @@ const results = await searchMonorepo('database connection pool');
 Build context for code review:
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { repo } from '@deepagents/retrieval/connectors';
 
 async function getRelatedCode(changedFile: string, content: string) {
@@ -203,15 +213,13 @@ async function getRelatedCode(changedFile: string, content: string) {
   });
 
   // Filter out the file being reviewed
-  return results
-    .filter(r => r.document_id !== changedFile)
-    .slice(0, 5);
+  return results.filter((r) => r.document_id !== changedFile).slice(0, 5);
 }
 
 // Find code related to a PR change
 const relatedCode = await getRelatedCode(
   'src/auth/login.ts',
-  'async function validateCredentials(email: string, password: string)'
+  'async function validateCredentials(email: string, password: string)',
 );
 ```
 
@@ -235,7 +243,7 @@ This skips common non-project directories like `node_modules`, `Library`, `Downl
 The connector generates a source ID based on the directory:
 
 ```typescript
-repo('./src', ['.ts'], 'contentChanged')
+repo('./src', ['.ts'], 'contentChanged');
 // sourceId: "repo:./src"
 ```
 

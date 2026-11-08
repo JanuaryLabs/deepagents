@@ -1,6 +1,6 @@
+import type { Config } from '@react-router/dev/config';
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Config } from '@react-router/dev/config';
 
 function getDocUrls(dir: string, baseUrl = '/docs'): string[] {
   const urls: string[] = [];

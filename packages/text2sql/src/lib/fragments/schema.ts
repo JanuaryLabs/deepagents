@@ -214,12 +214,7 @@ export function index(input: {
 export function constraint(input: {
   name: string;
   type:
-    | 'CHECK'
-    | 'UNIQUE'
-    | 'NOT_NULL'
-    | 'DEFAULT'
-    | 'PRIMARY_KEY'
-    | 'FOREIGN_KEY';
+    'CHECK' | 'UNIQUE' | 'NOT_NULL' | 'DEFAULT' | 'PRIMARY_KEY' | 'FOREIGN_KEY';
   columns?: string[];
   definition?: string;
   defaultValue?: string;

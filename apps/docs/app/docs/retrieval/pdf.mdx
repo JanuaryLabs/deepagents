@@ -13,17 +13,17 @@ import { pdf, pdfFile } from '@deepagents/retrieval/connectors';
 
 ## Available Connectors
 
-| Connector | Description |
-|-----------|-------------|
-| `pdf()` | Multiple PDF files via glob pattern |
-| `pdfFile()` | Single PDF file or URL |
+| Connector   | Description                         |
+| ----------- | ----------------------------------- |
+| `pdf()`     | Multiple PDF files via glob pattern |
+| `pdfFile()` | Single PDF file or URL              |
 
 ## pdf()
 
 Index multiple PDF files matching a glob pattern:
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { pdf } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./documents.db', 384);
@@ -45,18 +45,19 @@ The pattern supports glob syntax:
 
 ```typescript
 // All PDFs in a directory
-pdf('documents/*.pdf')
+pdf('documents/*.pdf');
 
 // Recursive search
-pdf('**/*.pdf')
+pdf('**/*.pdf');
 
 // Specific directory
-pdf('contracts/2024/**/*.pdf')
+pdf('contracts/2024/**/*.pdf');
 ```
 
 ### Automatic Exclusions
 
 The connector excludes:
+
 - `node_modules/`
 - `.git/`
 
@@ -99,7 +100,12 @@ pdfFile(source: string)
 Build a searchable research paper library:
 
 ```typescript
-import { ingest, similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import {
+  fastembed,
+  ingest,
+  nodeSQLite,
+  similaritySearch,
+} from '@deepagents/retrieval';
 import { pdfFile } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./research.db', 384);
@@ -140,7 +146,7 @@ const results = await searchPapers('self-attention mechanism');
 Index and search legal contracts:
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { pdf } from '@deepagents/retrieval/connectors';
 
 async function searchContracts(query: string) {
@@ -152,7 +158,7 @@ async function searchContracts(query: string) {
     embedder: fastembed(),
   });
 
-  return results.map(r => ({
+  return results.map((r) => ({
     file: r.document_id,
     content: r.content.slice(0, 300),
     similarity: r.similarity,
@@ -168,15 +174,13 @@ const results = await searchContracts('termination clause conditions');
 Index quarterly and annual financial reports:
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { pdf } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./financials.db', 384);
 
 async function searchFinancials(query: string, year?: string) {
-  const pattern = year
-    ? `financials/${year}/**/*.pdf`
-    : 'financials/**/*.pdf';
+  const pattern = year ? `financials/${year}/**/*.pdf` : 'financials/**/*.pdf';
 
   const results = await similaritySearch(query, {
     connector: pdf(pattern),
@@ -196,7 +200,12 @@ const results = await searchFinancials('quarterly revenue growth', '2024');
 Index product manuals and technical documentation:
 
 ```typescript
-import { ingest, similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import {
+  fastembed,
+  ingest,
+  nodeSQLite,
+  similaritySearch,
+} from '@deepagents/retrieval';
 import { pdf } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./manuals.db', 384);
@@ -228,7 +237,12 @@ const results = await searchManuals('installation requirements');
 Combine PDF search with other document types:
 
 ```typescript
-import { ingest, similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import {
+  fastembed,
+  ingest,
+  nodeSQLite,
+  similaritySearch,
+} from '@deepagents/retrieval';
 import { pdf } from '@deepagents/retrieval/connectors';
 import { local } from '@deepagents/retrieval/connectors';
 
@@ -266,9 +280,9 @@ async function searchLibrary(query: string) {
 Each connector generates a unique source ID:
 
 ```typescript
-pdf('reports/**/*.pdf')                    // sourceId: "pdf:reports/**/*.pdf"
-pdfFile('./document.pdf')                  // sourceId: "pdf:file:./document.pdf"
-pdfFile('https://example.com/doc.pdf')     // sourceId: "pdf:url:https://example.com/doc.pdf"
+pdf('reports/**/*.pdf'); // sourceId: "pdf:reports/**/*.pdf"
+pdfFile('./document.pdf'); // sourceId: "pdf:file:./document.pdf"
+pdfFile('https://example.com/doc.pdf'); // sourceId: "pdf:url:https://example.com/doc.pdf"
 ```
 
 ## Text Extraction

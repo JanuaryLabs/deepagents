@@ -100,10 +100,10 @@ When an agent has handoffs, the `<specialized_agents_placeholder>` is replaced w
 ```markdown
 ## Specialized Agents
 
-| Agent Name | Agent Description |
-| --- | --- |
+| Agent Name | Agent Description                           |
+| ---------- | ------------------------------------------- |
 | researcher | Use for researching topics using web search |
-| writer | Use for writing and drafting content |
+| writer     | Use for writing and drafting content        |
 ```
 
 This helps the model understand which specialists are available.
@@ -229,13 +229,13 @@ Three domain presets with appropriate examples:
 
 ```typescript
 // For physics, chemistry, math questions
-stepBackPrompt('stem')
+stepBackPrompt('stem');
 
 // For historical facts, knowledge questions
-stepBackPrompt('knowledge')
+stepBackPrompt('knowledge');
 
 // For coding, general reasoning (default)
-stepBackPrompt('general')
+stepBackPrompt('general');
 ```
 
 #### Custom Examples
@@ -248,8 +248,10 @@ stepBackPrompt('general', {
     {
       originalQuestion: 'Why is my API returning 500 errors?',
       stepBackQuestion: 'What are common causes of 500 errors in APIs?',
-      stepBackAnswer: 'Server errors (500) typically come from: unhandled exceptions, database connection issues, timeout errors, memory exhaustion, or configuration problems.',
-      finalAnswer: 'Check server logs for the specific exception. Common culprits are database connection pools exhausted or unhandled null references.',
+      stepBackAnswer:
+        'Server errors (500) typically come from: unhandled exceptions, database connection issues, timeout errors, memory exhaustion, or configuration problems.',
+      finalAnswer:
+        'Check server logs for the specific exception. Common culprits are database connection pools exhausted or unhandled null references.',
     },
   ],
 });
@@ -261,21 +263,22 @@ Build complex prompts by combining helpers:
 
 ```typescript
 const sophisticatedAgent = agent({
-  prompt: (ctx) => [
-    instructions.swarm({
-      purpose: [`You research ${ctx.topic} thoroughly.`],
-      routine: [
-        'Identify key questions to answer',
-        'Search for authoritative sources',
-        'Cross-reference findings',
-        'Synthesize a comprehensive answer',
-      ],
-    }),
-    '',
-    stepBackPrompt('knowledge'),
-    '',
-    `Focus areas: ${ctx.focusAreas.join(', ')}`,
-  ].join('\n'),
+  prompt: (ctx) =>
+    [
+      instructions.swarm({
+        purpose: [`You research ${ctx.topic} thoroughly.`],
+        routine: [
+          'Identify key questions to answer',
+          'Search for authoritative sources',
+          'Cross-reference findings',
+          'Synthesize a comprehensive answer',
+        ],
+      }),
+      '',
+      stepBackPrompt('knowledge'),
+      '',
+      `Focus areas: ${ctx.focusAreas.join(', ')}`,
+    ].join('\n'),
 });
 ```
 
@@ -292,6 +295,7 @@ import { RECOMMENDED_PROMPT_PREFIX } from '@deepagents/agent';
 ```
 
 Contains:
+
 - Multi-agent system explanation
 - Handoff mechanism description
 - Guidance on seamless transfers
@@ -305,6 +309,7 @@ import { SUPERVISOR_PROMPT_PREFIX } from '@deepagents/agent';
 ```
 
 Contains:
+
 - Supervisor role definition
 - Checklist approach
 - Thoroughness requirements
@@ -349,7 +354,7 @@ const riskAgent = agent({
   output: AnalysisSummarySchema,
   prompt: instructions({
     purpose: [
-      "You are a risk analyst looking for potential red flags.",
+      'You are a risk analyst looking for potential red flags.',
       'Given background research, produce a short analysis of risks.',
     ],
     routine: ['Keep it under 2 paragraphs.'],
@@ -361,20 +366,21 @@ const riskAgent = agent({
 
 ```typescript
 const personalizedAgent = agent<unknown, UserContext>({
-  prompt: (ctx) => instructions({
-    purpose: [
-      `You are a personal assistant for ${ctx.user.name}.`,
-      `Their expertise level: ${ctx.user.expertiseLevel}`,
-      ctx.user.expertiseLevel === 'beginner'
-        ? 'Explain concepts simply.'
-        : 'You can use technical terminology.',
-    ],
-    routine: [
-      'Understand the request',
-      'Provide helpful information',
-      `Communicate in ${ctx.preferences.language}`,
-    ],
-  }),
+  prompt: (ctx) =>
+    instructions({
+      purpose: [
+        `You are a personal assistant for ${ctx.user.name}.`,
+        `Their expertise level: ${ctx.user.expertiseLevel}`,
+        ctx.user.expertiseLevel === 'beginner'
+          ? 'Explain concepts simply.'
+          : 'You can use technical terminology.',
+      ],
+      routine: [
+        'Understand the request',
+        'Provide helpful information',
+        `Communicate in ${ctx.preferences.language}`,
+      ],
+    }),
 });
 ```
 

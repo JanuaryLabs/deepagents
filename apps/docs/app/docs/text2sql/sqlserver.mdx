@@ -3,7 +3,6 @@ title: SQL Server
 description: Configure Text2SQL with Microsoft SQL Server databases
 ---
 
-
 The SQL Server adapter supports Microsoft SQL Server databases with automatic schema introspection using INFORMATION_SCHEMA and sys catalog views.
 
 ## Installation
@@ -29,37 +28,38 @@ import { SqlServer } from '@deepagents/text2sql/sqlserver';
 import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
 const pool = await sql.connect({
-  server: process.env.DB_HOST,
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  options: {
-    encrypt: true,
-    trustServerCertificate: true,
-  },
+server: process.env.DB_HOST,
+database: process.env.DB_NAME,
+user: process.env.DB_USER,
+password: process.env.DB_PASSWORD,
+options: {
+encrypt: true,
+trustServerCertificate: true,
+},
 });
 
 const text2sql = new Text2Sql({
-  adapters: {
-    main: new SqlServer({
-      execute: async (query) => {
-        const result = await pool.request().query(query);
-        return result.recordset;
-      },
-      grounding: [
-        sqlserver.tables(),
-        sqlserver.views(),
-        sqlserver.info(),
-        sqlserver.indexes(),
-        sqlserver.constraints(),
-        sqlserver.rowCount(),
-        sqlserver.columnStats(),
-        sqlserver.columnValues(),
-      ],
-    }),
-  },
+adapters: {
+main: new SqlServer({
+execute: async (query) => {
+const result = await pool.request().query(query);
+return result.recordset;
+},
+grounding: [
+sqlserver.tables(),
+sqlserver.views(),
+sqlserver.info(),
+sqlserver.indexes(),
+sqlserver.constraints(),
+sqlserver.rowCount(),
+sqlserver.columnStats(),
+sqlserver.columnValues(),
+],
+}),
+},
 });
-```
+
+````
 </Tab>
 <Tab value="tedious">
 ```typescript
@@ -102,7 +102,8 @@ const text2sql = new Text2Sql({
     }),
   },
 });
-```
+````
+
 </Tab>
 </Tabs>
 
@@ -113,7 +114,11 @@ import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
 new SqlServer({
   // Required: Execute SQL queries
-  execute: async (sql) => pool.request().query(sql).then(r => r.recordset),
+  execute: async (sql) =>
+    pool
+      .request()
+      .query(sql)
+      .then((r) => r.recordset),
 
   // Required: Grounding functions for schema introspection
   grounding: [
@@ -140,7 +145,11 @@ By default, the adapter excludes system schemas (`INFORMATION_SCHEMA`, `sys`). T
 
 ```typescript
 new SqlServer({
-  execute: async (sql) => pool.request().query(sql).then(r => r.recordset),
+  execute: async (sql) =>
+    pool
+      .request()
+      .query(sql)
+      .then((r) => r.recordset),
   grounding: [tables(), views()],
   schemas: ['dbo', 'sales', 'inventory'],
 });
@@ -150,16 +159,16 @@ new SqlServer({
 
 The following grounding functions are available for SQL Server. Import them from `@deepagents/text2sql/sqlserver`:
 
-| Function | Description |
-|----------|-------------|
-| `tables()` | Discovers tables and columns using INFORMATION_SCHEMA, identifies primary keys |
-| `views()` | Discovers database views |
-| `info()` | Collects SQL Server version and database info |
-| `indexes()` | Queries sys.indexes for clustered/nonclustered types, detects included columns |
-| `constraints()` | Maps foreign key relationships between tables |
-| `rowCount()` | Counts rows and classifies tables by size |
-| `columnStats()` | Collects min, max, null fraction using CONVERT for type-safe aggregation |
-| `columnValues()` | Detects enum-like and low-cardinality columns using `SELECT DISTINCT TOP` |
+| Function         | Description                                                                    |
+| ---------------- | ------------------------------------------------------------------------------ |
+| `tables()`       | Discovers tables and columns using INFORMATION_SCHEMA, identifies primary keys |
+| `views()`        | Discovers database views                                                       |
+| `info()`         | Collects SQL Server version and database info                                  |
+| `indexes()`      | Queries sys.indexes for clustered/nonclustered types, detects included columns |
+| `constraints()`  | Maps foreign key relationships between tables                                  |
+| `rowCount()`     | Counts rows and classifies tables by size                                      |
+| `columnStats()`  | Collects min, max, null fraction using CONVERT for type-safe aggregation       |
+| `columnValues()` | Detects enum-like and low-cardinality columns using `SELECT DISTINCT TOP`      |
 
 See [Grounding](/docs/text2sql/grounding) for detailed configuration options.
 
@@ -167,13 +176,13 @@ See [Grounding](/docs/text2sql/grounding) for detailed configuration options.
 
 The adapter maps SQL Server error codes to helpful suggestions:
 
-| Error Code | Type | Suggestion |
-|------------|------|------------|
-| 208 | MISSING_TABLE | Check that the table exists and include schema prefix (e.g., dbo.TableName) |
-| 207 | INVALID_COLUMN | Verify the column exists and aliases are referenced correctly |
-| 156 | SYNTAX_ERROR | Review keywords, punctuation, and clauses like GROUP BY |
-| 4104 | INVALID_COLUMN | Qualify columns with table aliases when ambiguous |
-| 1934 | CONSTRAINT_ERROR | Re-check join logic and filtering |
+| Error Code | Type             | Suggestion                                                                  |
+| ---------- | ---------------- | --------------------------------------------------------------------------- |
+| 208        | MISSING_TABLE    | Check that the table exists and include schema prefix (e.g., dbo.TableName) |
+| 207        | INVALID_COLUMN   | Verify the column exists and aliases are referenced correctly               |
+| 156        | SYNTAX_ERROR     | Review keywords, punctuation, and clauses like GROUP BY                     |
+| 4104       | INVALID_COLUMN   | Qualify columns with table aliases when ambiguous                           |
+| 1934       | CONSTRAINT_ERROR | Re-check join logic and filtering                                           |
 
 ## Execute Function Return Types
 
@@ -208,7 +217,11 @@ By default, validation uses `SET PARSEONLY` to check syntax without execution:
 
 ```typescript
 new SqlServer({
-  execute: async (sql) => pool.request().query(sql).then(r => r.recordset),
+  execute: async (sql) =>
+    pool
+      .request()
+      .query(sql)
+      .then((r) => r.recordset),
   // Default validation
   validate: async (sql) => {
     await pool.request().query(`SET PARSEONLY ON; ${sql}; SET PARSEONLY OFF;`);
@@ -232,10 +245,10 @@ The adapter automatically handles bracket quoting: `[dbo].[Users]`
 
 Tables are classified by row count:
 
-| Size Hint | Row Count |
-|-----------|-----------|
-| tiny | < 100 |
-| small | 100 - 999 |
-| medium | 1,000 - 9,999 |
-| large | 10,000 - 99,999 |
-| huge | >= 100,000 |
+| Size Hint | Row Count       |
+| --------- | --------------- |
+| tiny      | < 100           |
+| small     | 100 - 999       |
+| medium    | 1,000 - 9,999   |
+| large     | 10,000 - 99,999 |
+| huge      | >= 100,000      |

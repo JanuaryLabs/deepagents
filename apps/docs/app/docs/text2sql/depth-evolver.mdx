@@ -13,13 +13,13 @@ Based on Microsoft's Evol-Instruct methodology for in-depth evolution, this synt
 import { DepthEvolver } from '@deepagents/text2sql/synthesis';
 
 const seedPairs = [
-  { question: 'Show all orders', sql: 'SELECT * FROM orders', success: true }
+  { question: 'Show all orders', sql: 'SELECT * FROM orders', success: true },
 ];
 
 const evolved = await new DepthEvolver(seedPairs, adapter, {
-    count: 3,
-    techniques: ['add-aggregation', 'add-filter'],
-  }).toPairs();
+  count: 3,
+  techniques: ['add-aggregation', 'add-filter'],
+}).toPairs();
 
 // Input:  "Show all orders"
 //         SELECT * FROM orders
@@ -52,8 +52,8 @@ Adds GROUP BY, COUNT, SUM, AVG, MIN, MAX operations:
 
 ```typescript
 const evolved = await new DepthEvolver(seedPairs, adapter, {
-    techniques: ['add-aggregation'],
-  }).toPairs();
+  techniques: ['add-aggregation'],
+}).toPairs();
 
 // "Show orders"
 //   → "Show total order count by customer"
@@ -69,8 +69,8 @@ Adds WHERE clauses with specific conditions:
 
 ```typescript
 const evolved = await new DepthEvolver(seedPairs, adapter, {
-    techniques: ['add-filter'],
-  }).toPairs();
+  techniques: ['add-filter'],
+}).toPairs();
 
 // "Show orders"
 //   → "Show orders from the last 30 days"
@@ -86,8 +86,8 @@ Requires data from related tables (JOIN operations):
 
 ```typescript
 const evolved = await new DepthEvolver(seedPairs, adapter, {
-    techniques: ['add-join'],
-  }).toPairs();
+  techniques: ['add-join'],
+}).toPairs();
 
 // "Show orders"
 //   → "Show orders with customer names and addresses"
@@ -103,8 +103,8 @@ Adds multi-step reasoning, comparisons, or derived calculations:
 
 ```typescript
 const evolved = await new DepthEvolver(seedPairs, adapter, {
-    techniques: ['add-reasoning'],
-  }).toPairs();
+  techniques: ['add-reasoning'],
+}).toPairs();
 
 // "Show orders"
 //   → "Which customers have orders above the average order value?"
@@ -120,8 +120,8 @@ Adds speculative scenarios and projections:
 
 ```typescript
 const evolved = await new DepthEvolver(seedPairs, adapter, {
-    techniques: ['hypothetical'],
-  }).toPairs();
+  techniques: ['hypothetical'],
+}).toPairs();
 
 // "Show revenue"
 //   → "What would revenue be if we increased all prices by 15%?"
@@ -160,8 +160,8 @@ Generate multiple evolved versions from each seed:
 ```typescript
 // Generate 3 evolved versions per seed pair
 const evolved = await new DepthEvolver(seedPairs, adapter, {
-    count: 3,
-  }).toPairs();
+  count: 3,
+}).toPairs();
 
 // 10 seed pairs → 30 evolved pairs (3 per seed)
 ```
@@ -173,9 +173,9 @@ Use specific techniques only:
 ```typescript
 // Only aggregation and filtering
 const evolved = await new DepthEvolver(seedPairs, adapter, {
-    techniques: ['add-aggregation', 'add-filter'],
-    count: 5,
-  }).toPairs();
+  techniques: ['add-aggregation', 'add-filter'],
+  count: 5,
+}).toPairs();
 
 // Each seed gets 5 evolutions alternating between the two techniques
 ```
@@ -187,9 +187,9 @@ Adjust parallel processing:
 ```typescript
 // Process 10 evolutions concurrently
 const evolved = await new DepthEvolver(seedPairs, adapter, {
-    count: 20,
-    concurrency: 10,
-  }).toPairs();
+  count: 20,
+  concurrency: 10,
+}).toPairs();
 ```
 
 ## Example: Multi-Stage Pipeline
@@ -198,29 +198,29 @@ Combine schema synthesis, depth evolution, and breadth evolution:
 
 ```typescript
 import {
-  SchemaSynthesizer,
-  DepthEvolver,
   BreadthEvolver,
+  DepthEvolver,
+  SchemaSynthesizer,
 } from '@deepagents/text2sql/synthesis';
 
 // Stage 1: Generate simple baseline pairs from schema
 const baseline = await new SchemaSynthesizer(adapter, {
-    count: 20,
-    complexity: 'simple',
-  }).toPairs();
+  count: 20,
+  complexity: 'simple',
+}).toPairs();
 console.log(`Baseline: ${baseline.length} simple pairs`);
 
 // Stage 2: Evolve into complex versions (depth)
 const complex = await new DepthEvolver(baseline, adapter, {
-    count: 2,
-    techniques: ['add-aggregation', 'add-join', 'add-reasoning'],
-  }).toPairs();
+  count: 2,
+  techniques: ['add-aggregation', 'add-join', 'add-reasoning'],
+}).toPairs();
 console.log(`After depth: ${complex.length} complex pairs`);
 
 // Stage 3: Generate variations of each (breadth)
 const final = await new BreadthEvolver(complex, {
-    count: 3,
-  }).toPairs();
+  count: 3,
+}).toPairs();
 console.log(`Final dataset: ${final.length} total pairs`);
 
 // 20 baseline → 40 complex → 120 final (with variations)
@@ -240,23 +240,23 @@ const seeds = [
 
 // Level 1: Add basic filtering
 const level1 = await new DepthEvolver(seeds, adapter, {
-    techniques: ['add-filter'],
-  }).toPairs();
+  techniques: ['add-filter'],
+}).toPairs();
 
 // Level 2: Add aggregations to filtered queries
 const level2 = await new DepthEvolver(level1, adapter, {
-    techniques: ['add-aggregation'],
-  }).toPairs();
+  techniques: ['add-aggregation'],
+}).toPairs();
 
 // Level 3: Add joins to aggregated queries
 const level3 = await new DepthEvolver(level2, adapter, {
-    techniques: ['add-join'],
-  }).toPairs();
+  techniques: ['add-join'],
+}).toPairs();
 
 // Level 4: Add reasoning on top
 const level4 = await new DepthEvolver(level3, adapter, {
-    techniques: ['add-reasoning'],
-  }).toPairs();
+  techniques: ['add-reasoning'],
+}).toPairs();
 
 // Progressive complexity: simple → filtered → aggregated → joined → reasoned
 ```
@@ -265,12 +265,12 @@ const level4 = await new DepthEvolver(level3, adapter, {
 
 Understanding the difference:
 
-| Aspect | DepthEvolver | BreadthEvolver |
-|--------|--------------|----------------|
-| **Question** | Changes (more complex) | Changes (paraphrased) |
-| **SQL** | Changes (more complex) | **Stays the same** |
-| **Purpose** | Increase query sophistication | Add phrasing variety |
-| **Use case** | Cover advanced SQL patterns | Improve robustness to different wordings |
+| Aspect       | DepthEvolver                  | BreadthEvolver                           |
+| ------------ | ----------------------------- | ---------------------------------------- |
+| **Question** | Changes (more complex)        | Changes (paraphrased)                    |
+| **SQL**      | Changes (more complex)        | **Stays the same**                       |
+| **Purpose**  | Increase query sophistication | Add phrasing variety                     |
+| **Use case** | Cover advanced SQL patterns   | Improve robustness to different wordings |
 
 ### Example Comparison
 
@@ -306,7 +306,7 @@ const breadth = await new BreadthEvolver([seed], { count: 3 }).toPairs();
 Use together for comprehensive training data:
 
 ```typescript
-import { DepthEvolver, BreadthEvolver } from '@deepagents/text2sql/synthesis';
+import { BreadthEvolver, DepthEvolver } from '@deepagents/text2sql/synthesis';
 
 const seeds = [
   { question: 'Show orders', sql: 'SELECT * FROM orders', success: true },

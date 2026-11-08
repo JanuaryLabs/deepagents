@@ -19,10 +19,10 @@ Every producer outputs the same structure:
 
 ```typescript
 interface ExtractedPair {
-  question: string;    // Natural language question
-  sql: string;         // SQL query that answers the question
-  context?: string[];  // Preceding messages (for multi-turn)
-  success: boolean;    // Whether the query is valid/executed successfully
+  question: string; // Natural language question
+  sql: string; // SQL query that answers the question
+  context?: string[]; // Preceding messages (for multi-turn)
+  success: boolean; // Whether the query is valid/executed successfully
 }
 ```
 
@@ -66,11 +66,11 @@ The `.toPairs()` method delegates to the helper above, so you can use the method
 
 ## Extractors vs Synthesizers vs Generators
 
-| Type | Input | Output | Use Case |
-|------|-------|--------|----------|
-| **Extractors** | Chat history, SQL logs | Pairs harvested from real usage | Production data mining |
-| **Synthesizers** | Schema or seed pairs | Newly generated pairs | Bootstrapping, augmentation |
-| **Generators** | Schema | Personas or Teachings | Pipeline setup |
+| Type             | Input                  | Output                          | Use Case                    |
+| ---------------- | ---------------------- | ------------------------------- | --------------------------- |
+| **Extractors**   | Chat history, SQL logs | Pairs harvested from real usage | Production data mining      |
+| **Synthesizers** | Schema or seed pairs   | Newly generated pairs           | Bootstrapping, augmentation |
+| **Generators**   | Schema                 | Personas or Teachings           | Pipeline setup              |
 
 ### Extractors
 
@@ -114,12 +114,15 @@ Decorators wrap producers to add functionality:
 Validate SQL and optionally execute queries:
 
 ```typescript
-import { ValidatedProducer, MessageExtractor } from '@deepagents/text2sql/synthesis';
+import {
+  MessageExtractor,
+  ValidatedProducer,
+} from '@deepagents/text2sql/synthesis';
 
 const validated = new ValidatedProducer(
   new MessageExtractor(messages),
   adapter,
-  { execute: true }
+  { execute: true },
 );
 
 const pairs = await validated.toPairs();
@@ -133,43 +136,40 @@ Filter pairs by criteria:
 ```typescript
 import { FilteredProducer, SqlExtractor } from '@deepagents/text2sql/synthesis';
 
-const filtered = new FilteredProducer(
-  new SqlExtractor(sqls, adapter),
-  {
-    successOnly: true,
-    tables: ['orders', 'customers'], // Only pairs using these tables
-    dialect: 'postgresql',           // SQL dialect for table extraction via node-sql-parser
-  }
-);
+const filtered = new FilteredProducer(new SqlExtractor(sqls, adapter), {
+  successOnly: true,
+  tables: ['orders', 'customers'], // Only pairs using these tables
+  dialect: 'postgresql', // SQL dialect for table extraction via node-sql-parser
+});
 ```
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `successOnly` | `boolean` | `undefined` | Only include pairs where `success` is `true` |
-| `tables` | `string[]` | `undefined` | Only include pairs whose SQL references these tables |
-| `dialect` | `string` | `undefined` | SQL dialect passed to node-sql-parser for table extraction (e.g. `'postgresql'`, `'mysql'`, `'transactsql'`) |
-| `filter` | `(pair: ExtractedPair) => boolean` | `undefined` | Custom filter predicate |
+| Option        | Type                               | Default     | Description                                                                                                  |
+| ------------- | ---------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------ |
+| `successOnly` | `boolean`                          | `undefined` | Only include pairs where `success` is `true`                                                                 |
+| `tables`      | `string[]`                         | `undefined` | Only include pairs whose SQL references these tables                                                         |
+| `dialect`     | `string`                           | `undefined` | SQL dialect passed to node-sql-parser for table extraction (e.g. `'postgresql'`, `'mysql'`, `'transactsql'`) |
+| `filter`      | `(pair: ExtractedPair) => boolean` | `undefined` | Custom filter predicate                                                                                      |
 
 ### DeduplicatedProducer
 
 Remove duplicate pairs:
 
 ```typescript
-import { DeduplicatedProducer, MessageExtractor } from '@deepagents/text2sql/synthesis';
+import {
+  DeduplicatedProducer,
+  MessageExtractor,
+} from '@deepagents/text2sql/synthesis';
 
-const deduped = new DeduplicatedProducer(
-  new MessageExtractor(messages),
-  {
-    strategy: 'sql-only', // Dedupe by SQL only (ignore question variations)
-    dialect: 'postgresql', // SQL dialect for node-sql-parser normalization
-  }
-);
+const deduped = new DeduplicatedProducer(new MessageExtractor(messages), {
+  strategy: 'sql-only', // Dedupe by SQL only (ignore question variations)
+  dialect: 'postgresql', // SQL dialect for node-sql-parser normalization
+});
 ```
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `strategy` | `'exact' \| 'sql-only' \| 'question-only'` | `'exact'` | Deduplication strategy: `'exact'` compares both question and SQL, `'sql-only'` compares SQL only, `'question-only'` compares question only |
-| `dialect` | `string` | `undefined` | SQL dialect passed to node-sql-parser for SQL normalization during deduplication (e.g. `'postgresql'`, `'mysql'`, `'transactsql'`) |
+| Option     | Type                                       | Default     | Description                                                                                                                                |
+| ---------- | ------------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `strategy` | `'exact' \| 'sql-only' \| 'question-only'` | `'exact'`   | Deduplication strategy: `'exact'` compares both question and SQL, `'sql-only'` compares SQL only, `'question-only'` compares question only |
+| `dialect`  | `string`                                   | `undefined` | SQL dialect passed to node-sql-parser for SQL normalization during deduplication (e.g. `'postgresql'`, `'mysql'`, `'transactsql'`)         |
 
 ## Composing Producers
 
@@ -178,13 +178,10 @@ Decorators can be chained:
 ```typescript
 const producer = new DeduplicatedProducer(
   new FilteredProducer(
-    new ValidatedProducer(
-      new MessageExtractor(messages),
-      adapter
-    ),
-    { successOnly: true }
+    new ValidatedProducer(new MessageExtractor(messages), adapter),
+    { successOnly: true },
   ),
-  { strategy: 'exact' }
+  { strategy: 'exact' },
 );
 
 const pairs = await producer.toPairs();
@@ -199,17 +196,17 @@ const pairs = await new SqlExtractor(sqls, adapter).toPairs();
 
 // JSONL format (common for fine-tuning)
 const jsonl = pairs
-  .filter(p => p.success)
-  .map(p => JSON.stringify({
-    question: p.question,
-    sql: p.sql
-  }))
+  .filter((p) => p.success)
+  .map((p) =>
+    JSON.stringify({
+      question: p.question,
+      sql: p.sql,
+    }),
+  )
   .join('\n');
 
 // CSV format
-const csv = pairs
-  .map(p => `"${p.question}","${p.sql}"`)
-  .join('\n');
+const csv = pairs.map((p) => `"${p.question}","${p.sql}"`).join('\n');
 ```
 
 ## Next Steps

@@ -49,8 +49,8 @@ interface WhenContext {
 | `elapsed`               | Milliseconds since the last persisted user message                                                                  |
 | `messageCount`          | Total message count across all roles                                                                                |
 | `lastAssistantMessage`  | The current assistant **segment** — only the parts produced since the last reminder fired (see below)               |
-| `lastAssistantMessages` | Every assistant **segment** in the chain; read this for any history-derived counter (e.g. a tool-failure streak)     |
-| `lastAssistantReplies`  | One entry per assistant **reply**, with its carved segments merged back; what the window combinators count           |
+| `lastAssistantMessages` | Every assistant **segment** in the chain; read this for any history-derived counter (e.g. a tool-failure streak)    |
+| `lastAssistantReplies`  | One entry per assistant **reply**, with its carved segments merged back; what the window combinators count          |
 | `toolOutcome`           | The terminal outcome currently being evaluated for a `tool-output` reminder; undefined for user and steer reminders |
 | `firedOnceIds`          | Ids already latched by `once()` this conversation across all reminder targets                                       |
 | `onceCollector`         | Per-evaluation buffer `once()` appends to; the engine commits it only if the reminder fires                         |
@@ -60,12 +60,12 @@ interface WhenContext {
 Predicates are evaluated against the chain as it stands **at each boundary**, so a `steer` or `tool-output` predicate sees what the model did earlier in the same turn.
 
 <Callout type="warn">
-  When a `steer` or `tool-output` reminder fires, the engine carves the assistant
-  message at that boundary to preserve the prompt prefix. `lastAssistantMessage`
-  therefore holds only the parts produced *since the last fire* — a counter derived
-  from it silently resets to 1 every time the reminder fires. Derive counters from
-  `lastAssistantMessages`, which keeps every segment. `toolFailureStreak()` below
-  does exactly this.
+  When a `steer` or `tool-output` reminder fires, the engine carves the
+  assistant message at that boundary to preserve the prompt prefix.
+  `lastAssistantMessage` therefore holds only the parts produced *since the last
+  fire* — a counter derived from it silently resets to 1 every time the reminder
+  fires. Derive counters from `lastAssistantMessages`, which keeps every
+  segment. `toolFailureStreak()` below does exactly this.
 </Callout>
 
 ## Turn-Based Predicates
@@ -337,7 +337,11 @@ engine.set(
 The number behind `toolFailedStreak` — call it from a text factory to escalate the wording as the run grows. Both walk `lastAssistantMessages`, so they keep counting across the segments a firing reminder creates.
 
 ```ts
-import { reminder, toolFailedStreak, toolFailureStreak } from '@deepagents/context';
+import {
+  reminder,
+  toolFailedStreak,
+  toolFailureStreak,
+} from '@deepagents/context';
 
 engine.set(
   reminder(

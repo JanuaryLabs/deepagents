@@ -11,7 +11,9 @@ async function main() {
 
   console.log('\n===== RESEARCH PLAN =====');
   console.log('💭 Reasoning:', researchResult.plan.reasoning);
-  researchResult.plan.plan.steps.forEach((s, i) => console.log(`${i + 1}. ${s}`));
+  researchResult.plan.plan.steps.forEach((s, i) =>
+    console.log(`${i + 1}. ${s}`),
+  );
 
   console.log('\n===== RESEARCH EXECUTION HISTORY =====');
   for (const h of researchResult.history) {
@@ -32,7 +34,9 @@ async function main() {
 
   console.log('\n===== ANALYSIS PLAN =====');
   console.log('💭 Reasoning:', analysisResult.plan.reasoning);
-  analysisResult.plan.plan.steps.forEach((s, i) => console.log(`${i + 1}. ${s}`));
+  analysisResult.plan.plan.steps.forEach((s, i) =>
+    console.log(`${i + 1}. ${s}`),
+  );
 
   console.log('\n===== ANALYSIS EXECUTION HISTORY =====');
   for (const h of analysisResult.history) {
@@ -48,13 +52,19 @@ async function main() {
   // Save detailed results
   await writeFile(
     'plan_and_act_examples.json',
-    JSON.stringify({ 
-      research: researchResult, 
-      analysis: analysisResult 
-    }, null, 2),
+    JSON.stringify(
+      {
+        research: researchResult,
+        analysis: analysisResult,
+      },
+      null,
+      2,
+    ),
   );
 
-  console.log('\n✅ Examples completed! Results saved to plan_and_act_examples.json');
+  console.log(
+    '\n✅ Examples completed! Results saved to plan_and_act_examples.json',
+  );
 }
 
 if (import.meta.main) {

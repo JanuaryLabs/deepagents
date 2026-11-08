@@ -22,8 +22,8 @@ import {
   ContextEngine,
   InMemoryContextStore,
   assistantText,
-  role,
   hint,
+  role,
   user,
 } from '@deepagents/context';
 
@@ -51,6 +51,7 @@ context.set(user('How do I read a file in Node.js?'));
 ```
 
 Each helper creates a typed fragment:
+
 - `role()` - System instructions
 - `hint()` - Guidelines and preferences
 - `user()` - User messages (auto-persisted)
@@ -79,11 +80,12 @@ console.log(messages);
 Here's a full working example using the Vercel AI SDK:
 
 ```typescript
-import { generateText } from 'ai';
 import { groq } from '@ai-sdk/groq';
+import { generateText } from 'ai';
+
 import {
-  InMemoryContextStore,
   ContextEngine,
+  InMemoryContextStore,
   assistantText,
   hint,
   role,

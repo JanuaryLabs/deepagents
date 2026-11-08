@@ -12,13 +12,13 @@ instructions through its file tools.
 
 The application owns both provisioning and discovery:
 
-| Responsibility | Owner |
-| --- | --- |
-| Put skill files in a filesystem the agent can read | Application |
-| Discover skills or read a catalog/manifest | Application |
-| Construct `AvailableSkill[]` | Application |
-| Render the explicit catalog into context | `skills()` fragment |
-| Read a selected `SKILL.md` at runtime | Model through its file tools |
+| Responsibility                                     | Owner                        |
+| -------------------------------------------------- | ---------------------------- |
+| Put skill files in a filesystem the agent can read | Application                  |
+| Discover skills or read a catalog/manifest         | Application                  |
+| Construct `AvailableSkill[]`                       | Application                  |
+| Render the explicit catalog into context           | `skills()` fragment          |
+| Read a selected `SKILL.md` at runtime              | Model through its file tools |
 
 `createBashTool()` does not upload, mount, discover, or expose skills. The
 `skills()` fragment does not inspect a sandbox or filesystem. This keeps the
@@ -104,10 +104,7 @@ const context = new ContextEngine({
   store: new InMemoryContextStore(),
   chatId: 'chat-001',
   userId: 'user-001',
-}).set(
-  role('You are a helpful assistant.'),
-  skills(availableSkills),
-);
+}).set(role('You are a helpful assistant.'), skills(availableSkills));
 ```
 
 The fragment renders:

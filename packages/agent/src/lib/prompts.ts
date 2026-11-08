@@ -122,7 +122,8 @@ export const STEM_STEP_BACK_EXAMPLES: StepBackExample[] = [
  */
 export const KNOWLEDGE_QA_STEP_BACK_EXAMPLES: StepBackExample[] = [
   {
-    originalQuestion: 'Which school did Estella Leopold attend between August 1954 and November 1954?',
+    originalQuestion:
+      'Which school did Estella Leopold attend between August 1954 and November 1954?',
     stepBackQuestion: "What is Estella Leopold's education history?",
     stepBackAnswer:
       'Estella Leopold studied at the University of Wisconsin-Madison (B.S. in Botany, 1948-1952) and later at Yale University (M.S. 1955, Ph.D. 1958). During 1954, she was transitioning between these institutions.',
@@ -130,7 +131,8 @@ export const KNOWLEDGE_QA_STEP_BACK_EXAMPLES: StepBackExample[] = [
       'Based on her education timeline, between August and November 1954, she was at Yale University, having completed her undergraduate degree at Wisconsin in 1952.',
   },
   {
-    originalQuestion: 'What was the capital of the country that colonized Brazil in the 16th century?',
+    originalQuestion:
+      'What was the capital of the country that colonized Brazil in the 16th century?',
     stepBackQuestion: 'Which country colonized Brazil and when?',
     stepBackAnswer:
       'Portugal colonized Brazil starting in 1500 when Pedro Álvares Cabral arrived. Brazil remained a Portuguese colony until independence in 1822.',
@@ -144,15 +146,18 @@ export const KNOWLEDGE_QA_STEP_BACK_EXAMPLES: StepBackExample[] = [
  */
 export const GENERAL_STEP_BACK_EXAMPLES: StepBackExample[] = [
   {
-    originalQuestion: 'How should I optimize this specific database query that joins 5 tables?',
-    stepBackQuestion: 'What are the general principles of database query optimization?',
+    originalQuestion:
+      'How should I optimize this specific database query that joins 5 tables?',
+    stepBackQuestion:
+      'What are the general principles of database query optimization?',
     stepBackAnswer:
       'Database query optimization involves: 1) Minimizing data retrieval through proper indexing, 2) Reducing join complexity by ordering joins efficiently, 3) Using query execution plans to identify bottlenecks, 4) Ensuring statistics are up-to-date, 5) Considering denormalization when appropriate.',
     finalAnswer:
       'Apply these principles: Check if all foreign keys are indexed, analyze the execution plan to see which joins are most expensive, ensure statistics are current, and consider if the join order can be optimized based on table sizes.',
   },
   {
-    originalQuestion: 'Why is my React component re-rendering 10 times on each state update?',
+    originalQuestion:
+      'Why is my React component re-rendering 10 times on each state update?',
     stepBackQuestion: 'What causes excessive re-renders in React?',
     stepBackAnswer:
       'React re-renders occur when: 1) State changes trigger parent components to re-render all children, 2) Props change (including new object/function references), 3) Context values change, 4) Missing memoization (React.memo, useMemo, useCallback).',

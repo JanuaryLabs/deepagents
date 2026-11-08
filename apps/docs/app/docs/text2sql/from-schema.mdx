@@ -108,7 +108,10 @@ const pairs = await new SchemaSynthesizer(adapter, {
 Personas guide question generation to match different user perspectives:
 
 ```typescript
-import { SchemaSynthesizer, PersonaGenerator } from '@deepagents/text2sql/synthesis';
+import {
+  PersonaGenerator,
+  SchemaSynthesizer,
+} from '@deepagents/text2sql/synthesis';
 
 // Generate personas first
 const personaGen = new PersonaGenerator(adapter, { count: 5 });
@@ -126,9 +129,18 @@ You can also define personas manually:
 
 ```typescript
 const customPersonas = [
-  { role: 'Sales Manager', perspective: 'Focus on revenue, sales trends, and customer acquisition' },
-  { role: 'Data Analyst', perspective: 'Focus on data quality, statistical analysis, and patterns' },
-  { role: 'Product Manager', perspective: 'Focus on product performance, user engagement, and features' },
+  {
+    role: 'Sales Manager',
+    perspective: 'Focus on revenue, sales trends, and customer acquisition',
+  },
+  {
+    role: 'Data Analyst',
+    perspective: 'Focus on data quality, statistical analysis, and patterns',
+  },
+  {
+    role: 'Product Manager',
+    perspective: 'Focus on product performance, user engagement, and features',
+  },
 ];
 
 const pairs = await new SchemaSynthesizer(adapter, {
@@ -157,6 +169,7 @@ const pairs = await new SchemaSynthesizer(adapter, {
 ```
 
 Teachings help the synthesizer understand:
+
 - Business logic and domain terminology
 - Common patterns and workflows
 - Important metrics and KPIs
@@ -190,8 +203,8 @@ const slowPairs = await new SchemaSynthesizer(adapter, {
 Specify a custom model for generation:
 
 ```typescript
-import { SchemaSynthesizer } from '@deepagents/text2sql/synthesis';
 import { groq } from '@deepagents/agent';
+import { SchemaSynthesizer } from '@deepagents/text2sql/synthesis';
 
 const pairs = await new SchemaSynthesizer(adapter, {
   count: 50,
@@ -213,8 +226,8 @@ const pairs = await new SchemaSynthesizer(adapter, {
 
 // Export as JSONL for fine-tuning
 const jsonl = pairs
-  .filter(p => p.success)
-  .map(p => JSON.stringify({ question: p.question, sql: p.sql }))
+  .filter((p) => p.success)
+  .map((p) => JSON.stringify({ question: p.question, sql: p.sql }))
   .join('\n');
 
 await fs.writeFile('training-data.jsonl', jsonl);
@@ -225,7 +238,10 @@ await fs.writeFile('training-data.jsonl', jsonl);
 Generate questions from different user perspectives:
 
 ```typescript
-import { SchemaSynthesizer, PersonaGenerator } from '@deepagents/text2sql/synthesis';
+import {
+  PersonaGenerator,
+  SchemaSynthesizer,
+} from '@deepagents/text2sql/synthesis';
 
 // Generate personas
 const personaGen = new PersonaGenerator(adapter, { count: 3 });
@@ -248,11 +264,11 @@ const pairs = await new SchemaSynthesizer(adapter, {
 Incorporate domain knowledge:
 
 ```typescript
-import {
-  SchemaSynthesizer,
-  PersonaGenerator,
-} from '@deepagents/text2sql/synthesis';
 import { hint, term } from '@deepagents/context';
+import {
+  PersonaGenerator,
+  SchemaSynthesizer,
+} from '@deepagents/text2sql/synthesis';
 
 // Define domain knowledge and personas
 const teachings = [
@@ -277,7 +293,10 @@ const pairs = await new SchemaSynthesizer(adapter, {
 Expand synthetic data with paraphrases:
 
 ```typescript
-import { SchemaSynthesizer, BreadthEvolver } from '@deepagents/text2sql/synthesis';
+import {
+  BreadthEvolver,
+  SchemaSynthesizer,
+} from '@deepagents/text2sql/synthesis';
 
 // Generate base pairs
 const basePairs = await new SchemaSynthesizer(adapter, {

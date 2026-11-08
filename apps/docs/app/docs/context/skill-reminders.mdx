@@ -10,7 +10,7 @@ Skill reminders match user message content against a catalog of skills and injec
 Creates an always-on user reminder that runs BM25 matching against the user's message content. Returns a `ContextFragment` you declare on the engine with `engine.set()`. The engine folds it into the last user message at `save()` time, so it re-classifies the message every turn.
 
 ```ts
-import { user, skillsReminder } from '@deepagents/context';
+import { skillsReminder, user } from '@deepagents/context';
 
 const skills = [
   {
@@ -25,7 +25,10 @@ const skills = [
   },
 ];
 
-engine.set(skillsReminder(skills, { topN: 3 }), user('deploy my app to production'));
+engine.set(
+  skillsReminder(skills, { topN: 3 }),
+  user('deploy my app to production'),
+);
 
 await engine.save();
 ```
@@ -42,11 +45,11 @@ The reminder self-gates: when no skills match (score below threshold or unrelate
 
 ### Parameters
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `skillsOrClassifier` | `AvailableSkill[] \| IClassifier<AvailableSkill>` | Array of skills or a custom classifier |
-| `options.topN` | `number` | Max results to return (default: `5`) |
-| `options.threshold` | `number` | Minimum score to include (default: `0`) |
+| Parameter            | Type                                              | Description                             |
+| -------------------- | ------------------------------------------------- | --------------------------------------- |
+| `skillsOrClassifier` | `AvailableSkill[] \| IClassifier<AvailableSkill>` | Array of skills or a custom classifier  |
+| `options.topN`       | `number`                                          | Max results to return (default: `5`)    |
+| `options.threshold`  | `number`                                          | Minimum score to include (default: `0`) |
 
 ## AvailableSkill
 
@@ -54,9 +57,9 @@ Each skill needs three model-facing fields:
 
 ```ts
 interface AvailableSkill {
-  name: string;        // Skill name shown to the model
+  name: string; // Skill name shown to the model
   description: string; // Description used for matching
-  path: string;        // Model-visible path to SKILL.md
+  path: string; // Model-visible path to SKILL.md
 }
 ```
 
@@ -69,14 +72,18 @@ ownership boundary.
 The classifier system is generic. `skillsReminder` accepts any `IClassifier<AvailableSkill>`, so you can replace BM25 with embeddings, an LLM call, or any other matching strategy.
 
 ```ts
-import { user, skillsReminder, type IClassifier, type ClassifierMatch, type AvailableSkill } from '@deepagents/context';
+import {
+  type AvailableSkill,
+  type ClassifierMatch,
+  type IClassifier,
+  skillsReminder,
+  user,
+} from '@deepagents/context';
 
 const classifier: IClassifier<AvailableSkill> = {
   match(query, options) {
     // Your matching logic — embeddings, LLM-based, regex, etc.
-    return [
-      { item: mySkill, score: 0.99 },
-    ];
+    return [{ item: mySkill, score: 0.99 }];
   },
 };
 
@@ -127,7 +134,7 @@ Two predicates from the classifier module work with `when`-based conditional rem
 Fires when the user's message matches any of the given topics via BM25 scoring.
 
 ```ts
-import { reminder, contentMatches } from '@deepagents/context';
+import { contentMatches, reminder } from '@deepagents/context';
 
 engine.set(
   reminder('Consider using the deploy skill', {
@@ -141,7 +148,7 @@ engine.set(
 Fires when a classifier returns any results for the user's message. Works with any `IClassifier<T>`.
 
 ```ts
-import { reminder, classifies, BM25Classifier } from '@deepagents/context';
+import { BM25Classifier, classifies, reminder } from '@deepagents/context';
 
 const classifier = new BM25Classifier(skills);
 

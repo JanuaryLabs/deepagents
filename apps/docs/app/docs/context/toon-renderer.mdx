@@ -8,14 +8,11 @@ The `ToonRenderer` produces TOON (Token-Oriented Object Notation) output - a com
 ## Basic Usage
 
 ```typescript
-import { ToonRenderer, role, hint } from '@deepagents/context';
+import { ToonRenderer, hint, role } from '@deepagents/context';
 
 const renderer = new ToonRenderer();
 
-const fragments = [
-  role('You are a helpful assistant.'),
-  hint('Be concise.'),
-];
+const fragments = [role('You are a helpful assistant.'), hint('Be concise.')];
 
 const output = renderer.render(fragments);
 ```
@@ -31,12 +28,12 @@ hint: Be concise.
 
 TOON is optimized for token efficiency:
 
-| Format | Approximate Tokens | Overhead |
-| --- | --- | --- |
-| XML | 100 (baseline) | Closing tags, angle brackets |
-| Markdown | ~85 | Headers, formatting |
-| TOML | ~75 | Quotes, brackets |
-| TOON | ~60-70 | Minimal punctuation |
+| Format   | Approximate Tokens | Overhead                     |
+| -------- | ------------------ | ---------------------------- |
+| XML      | 100 (baseline)     | Closing tags, angle brackets |
+| Markdown | ~85                | Headers, formatting          |
+| TOML     | ~75                | Quotes, brackets             |
+| TOON     | ~60-70             | Minimal punctuation          |
 
 For large contexts, TOON can save 30-40% tokens compared to XML.
 
@@ -173,12 +170,7 @@ items[3]:
 Fragments nest with proper indentation:
 
 ```typescript
-fragment('domain',
-  fragment('rules',
-    hint('Use CTEs'),
-    hint('Avoid SELECT *'),
-  ),
-)
+fragment('domain', fragment('rules', hint('Use CTEs'), hint('Avoid SELECT *')));
 ```
 
 **Output:**
@@ -194,16 +186,16 @@ domain:
 
 TOON only quotes strings when necessary:
 
-| Content | Needs Quotes | Reason |
-| --- | --- | --- |
-| `hello` | No | Simple string |
-| `hello world` | No | Spaces allowed |
-| `123` | Yes | Looks like number |
-| `true` | Yes | Reserved word |
-| `a:b` | Yes | Contains colon |
-| `"quoted"` | Yes | Contains quotes |
-| (empty) | Yes | Empty string |
-| ` spaces ` | Yes | Leading/trailing whitespace |
+| Content       | Needs Quotes | Reason                      |
+| ------------- | ------------ | --------------------------- |
+| `hello`       | No           | Simple string               |
+| `hello world` | No           | Spaces allowed              |
+| `123`         | Yes          | Looks like number           |
+| `true`        | Yes          | Reserved word               |
+| `a:b`         | Yes          | Contains colon              |
+| `"quoted"`    | Yes          | Contains quotes             |
+| (empty)       | Yes          | Empty string                |
+| `spaces`      | Yes          | Leading/trailing whitespace |
 
 ```typescript
 { name: 'a', data: 'hello' }    // a: hello
@@ -216,23 +208,25 @@ TOON only quotes strings when necessary:
 
 When quotes are needed, special characters are escaped:
 
-| Character | Escaped |
-| --- | --- |
-| `\` | `\\` |
-| `"` | `\"` |
-| newline | `\n` |
-| tab | `\t` |
-| carriage return | `\r` |
+| Character       | Escaped |
+| --------------- | ------- |
+| `\`             | `\\`    |
+| `"`             | `\"`    |
+| newline         | `\n`    |
+| tab             | `\t`    |
+| carriage return | `\r`    |
 
 ## When to Use TOON
 
 **Advantages:**
+
 - Most token-efficient format
 - Excellent for tabular data
 - YAML-like readability
 - Minimal overhead
 
 **Trade-offs:**
+
 - Less familiar to some LLMs
 - Custom format (not a standard)
 - May need explanation in system prompt
@@ -243,7 +237,8 @@ When quotes are needed, special characters are escaped:
 import { ToonRenderer, fragment, hint } from '@deepagents/context';
 
 // Database schema representation
-const schema = fragment('schema',
+const schema = fragment(
+  'schema',
   {
     name: 'tables',
     data: [
@@ -252,7 +247,8 @@ const schema = fragment('schema',
       { name: 'products', columns: 'id,name,price,stock' },
     ],
   },
-  fragment('relationships',
+  fragment(
+    'relationships',
     hint('orders.user_id → users.id'),
     hint('order_items.product_id → products.id'),
   ),
@@ -281,16 +277,15 @@ import {
   ContextEngine,
   InMemoryContextStore,
   ToonRenderer,
-  role,
   hint,
+  role,
 } from '@deepagents/context';
 
-const context = new ContextEngine({ store: new InMemoryContextStore() })
-  .set(
-    role('You are a data analyst.'),
-    hint('Optimize for readability.'),
-    hint('Include sample data.'),
-  );
+const context = new ContextEngine({ store: new InMemoryContextStore() }).set(
+  role('You are a data analyst.'),
+  hint('Optimize for readability.'),
+  hint('Include sample data.'),
+);
 
 const { systemPrompt } = await context.resolve({
   renderer: new ToonRenderer(),
@@ -304,7 +299,9 @@ const toonEstimate = await context.estimate('openai:gpt-4o', {
 
 console.log(`XML tokens: ${xmlEstimate.tokens}`);
 console.log(`TOON tokens: ${toonEstimate.tokens}`);
-console.log(`Savings: ${((1 - toonEstimate.tokens / xmlEstimate.tokens) * 100).toFixed(1)}%`);
+console.log(
+  `Savings: ${((1 - toonEstimate.tokens / xmlEstimate.tokens) * 100).toFixed(1)}%`,
+);
 ```
 
 ## Next Steps

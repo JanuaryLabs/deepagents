@@ -120,16 +120,16 @@ new Mysql({
 
 The following grounding functions are available for MySQL/MariaDB. Import them from `@deepagents/text2sql/mysql`:
 
-| Function | Description |
-|----------|-------------|
-| `tables()` | Discovers tables and columns across databases, detects primary keys |
-| `views()` | Discovers database views |
-| `info()` | Collects MySQL/MariaDB version and auto-detects the dialect |
-| `indexes()` | Identifies indexes from `INFORMATION_SCHEMA.STATISTICS` |
-| `constraints()` | Maps foreign keys, CHECK, UNIQUE, NOT NULL, and DEFAULT constraints |
-| `rowCount()` | Counts rows and classifies tables by size (tiny, small, medium, large, huge) |
-| `columnStats()` | Collects min, max, null fraction for numeric/date columns |
-| `columnValues()` | Detects native ENUM types and low cardinality columns |
+| Function         | Description                                                                  |
+| ---------------- | ---------------------------------------------------------------------------- |
+| `tables()`       | Discovers tables and columns across databases, detects primary keys          |
+| `views()`        | Discovers database views                                                     |
+| `info()`         | Collects MySQL/MariaDB version and auto-detects the dialect                  |
+| `indexes()`      | Identifies indexes from `INFORMATION_SCHEMA.STATISTICS`                      |
+| `constraints()`  | Maps foreign keys, CHECK, UNIQUE, NOT NULL, and DEFAULT constraints          |
+| `rowCount()`     | Counts rows and classifies tables by size (tiny, small, medium, large, huge) |
+| `columnStats()`  | Collects min, max, null fraction for numeric/date columns                    |
+| `columnValues()` | Detects native ENUM types and low cardinality columns                        |
 
 See [Grounding](/docs/text2sql/grounding) for detailed configuration options.
 
@@ -137,15 +137,15 @@ See [Grounding](/docs/text2sql/grounding) for detailed configuration options.
 
 The adapter maps MySQL/MariaDB error codes to helpful suggestions:
 
-| Error Code | Type             | Suggestion                                           |
-| ---------- | ---------------- | ---------------------------------------------------- |
+| Error Code | Type             | Suggestion                                                                               |
+| ---------- | ---------------- | ---------------------------------------------------------------------------------------- |
 | 1146       | MISSING_TABLE    | Check the database for the correct table name. Include the database prefix if necessary. |
-| 1054       | INVALID_COLUMN   | Verify the column exists and use table aliases to disambiguate |
-| 1064       | SYNTAX_ERROR     | Review keywords, punctuation, and the overall query shape |
-| 1630       | INVALID_FUNCTION | The function does not exist or the arguments are invalid |
-| 1305       | INVALID_FUNCTION | Function or procedure not recognized. Confirm name and argument types. |
-| 1109       | MISSING_TABLE    | Unknown table in query. Verify table name and database. |
-| 1051       | MISSING_TABLE    | Table does not exist in the current database |
+| 1054       | INVALID_COLUMN   | Verify the column exists and use table aliases to disambiguate                           |
+| 1064       | SYNTAX_ERROR     | Review keywords, punctuation, and the overall query shape                                |
+| 1630       | INVALID_FUNCTION | The function does not exist or the arguments are invalid                                 |
+| 1305       | INVALID_FUNCTION | Function or procedure not recognized. Confirm name and argument types.                   |
+| 1109       | MISSING_TABLE    | Unknown table in query. Verify table name and database.                                  |
+| 1051       | MISSING_TABLE    | Table does not exist in the current database                                             |
 
 ## Execute Function Return Types
 

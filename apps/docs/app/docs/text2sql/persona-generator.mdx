@@ -75,7 +75,7 @@ import { groq } from '@ai-sdk/groq';
 
 const personas = await new PersonaGenerator(adapter, {
   count: 5,
-  model: groq('llama-3.3-70b-versatile')
+  model: groq('llama-3.3-70b-versatile'),
 }).generate();
 ```
 
@@ -84,7 +84,10 @@ const personas = await new PersonaGenerator(adapter, {
 Generate questions from different perspectives:
 
 ```typescript
-import { PersonaGenerator, SchemaSynthesizer } from '@deepagents/text2sql/synthesis';
+import {
+  PersonaGenerator,
+  SchemaSynthesizer,
+} from '@deepagents/text2sql/synthesis';
 
 // Generate personas
 const generator = new PersonaGenerator(adapter, { count: 5 });
@@ -92,9 +95,9 @@ const personas = await generator.generate();
 
 // Use personas for question generation
 const pairs = await new SchemaSynthesizer(adapter, {
-  count: 10,           // 10 questions per persona
+  count: 10, // 10 questions per persona
   complexity: 'medium',
-  personas: personas   // Each persona gets their own questions
+  personas: personas, // Each persona gets their own questions
 }).toPairs();
 // Result: 50 pairs (5 personas × 10 questions each)
 ```
@@ -104,29 +107,32 @@ const pairs = await new SchemaSynthesizer(adapter, {
 Paraphrase questions from different perspectives:
 
 ```typescript
-import { PersonaGenerator, BreadthEvolver } from '@deepagents/text2sql/synthesis';
+import {
+  BreadthEvolver,
+  PersonaGenerator,
+} from '@deepagents/text2sql/synthesis';
 
 const generator = new PersonaGenerator(adapter, { count: 3 });
 const personas = await generator.generate();
 
 const existingPairs = [
-  { question: 'Show revenue by product', sql: 'SELECT ...', success: true }
+  { question: 'Show revenue by product', sql: 'SELECT ...', success: true },
 ];
 
 // Generate variations from analyst perspective
 const analystVariations = await new BreadthEvolver(existingPairs, {
-    count: 3,
-    persona: personas[0] // Financial Analyst
-  }).toPairs();
+  count: 3,
+  persona: personas[0], // Financial Analyst
+}).toPairs();
 // "What is the revenue breakdown by product?"
 // "Display product-level revenue analysis"
 // "Break down revenue by product category"
 
 // Generate variations from support perspective
 const supportVariations = await new BreadthEvolver(existingPairs, {
-    count: 3,
-    persona: personas[1] // Customer Support Rep
-  }).toPairs();
+  count: 3,
+  persona: personas[1], // Customer Support Rep
+}).toPairs();
 // "Show me which products are bringing in money"
 // "What's each product earning?"
 // "List products and their sales"
@@ -139,51 +145,51 @@ For an e-commerce database with orders, customers, and products tables:
 ```typescript
 [
   {
-    role: "Customer Support Rep",
+    role: 'Customer Support Rep',
     perspective: `As customer support, I care about:
 - Quick lookups by order ID or customer email
 - Order status and shipping tracking
 - Return and refund history
 - Customer contact details and order history
-- I need fast answers, not complex analysis`
+- I need fast answers, not complex analysis`,
   },
   {
-    role: "Inventory Manager",
+    role: 'Inventory Manager',
     perspective: `As inventory manager, I care about:
 - Current stock levels and reorder points
 - Product availability across warehouses
 - Slow-moving inventory identification
 - Supplier lead times and pending orders
-- I need accurate counts, often aggregated by location`
+- I need accurate counts, often aggregated by location`,
   },
   {
-    role: "Marketing Analyst",
+    role: 'Marketing Analyst',
     perspective: `As marketing analyst, I care about:
 - Customer acquisition and retention metrics
 - Product performance and category trends
 - Customer segmentation and lifetime value
 - Campaign effectiveness and conversion rates
-- I need historical trends and comparative analysis`
+- I need historical trends and comparative analysis`,
   },
   {
-    role: "Finance Controller",
+    role: 'Finance Controller',
     perspective: `As finance controller, I care about:
 - Revenue recognition and billing accuracy
 - Payment status and accounts receivable aging
 - Refund and chargeback tracking
 - Period-over-period financial metrics
-- I need precise numbers with audit trails`
+- I need precise numbers with audit trails`,
   },
   {
-    role: "Executive",
+    role: 'Executive',
     perspective: `As executive, I care about:
 - High-level KPIs and business health metrics
 - Growth rates and market trends
 - Performance against targets and forecasts
 - Strategic insights, not operational details
-- I need clear summaries with context`
-  }
-]
+- I need clear summaries with context`,
+  },
+];
 ```
 
 ## Full Pipeline Example
@@ -193,9 +199,9 @@ Generate comprehensive, diverse training data:
 ```typescript
 import { hint, term } from '@deepagents/context';
 import {
+  BreadthEvolver,
   PersonaGenerator,
   SchemaSynthesizer,
-  BreadthEvolver,
 } from '@deepagents/text2sql/synthesis';
 
 // 1. Generate personas
@@ -213,17 +219,19 @@ const basePairs = await new SchemaSynthesizer(adapter, {
   count: 5,
   complexity: ['low', 'medium', 'hard'],
   personas: personas,
-  teachings: teachings
+  teachings: teachings,
 }).toPairs();
 // 150 pairs (10 personas × 3 complexities × 5 questions)
 
 // 4. Evolve with persona-specific paraphrases
 const evolvedPairs = [];
-for (const persona of personas.slice(0, 3)) { // Use top 3 personas
-  const variations = await new BreadthEvolver(basePairs.slice(0, 20), { // Evolve 20 pairs
-      count: 2,
-      persona: persona
-    }).toPairs();
+for (const persona of personas.slice(0, 3)) {
+  // Use top 3 personas
+  const variations = await new BreadthEvolver(basePairs.slice(0, 20), {
+    // Evolve 20 pairs
+    count: 2,
+    persona: persona,
+  }).toPairs();
   evolvedPairs.push(...variations);
 }
 
@@ -241,16 +249,19 @@ console.log(`Total: ${basePairs.length + evolvedPairs.length} pairs`);
 ## Schema-Specific Examples
 
 ### Healthcare Database
+
 ```typescript
 // Generates: Doctor, Nurse, Administrator, Billing Specialist, Quality Analyst
 ```
 
 ### Financial Database
+
 ```typescript
 // Generates: Trader, Risk Manager, Compliance Officer, Portfolio Manager, Analyst
 ```
 
 ### SaaS/Product Database
+
 ```typescript
 // Generates: Product Manager, Engineer, Customer Success, Sales, Growth Analyst
 ```

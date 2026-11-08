@@ -13,9 +13,16 @@ import '../styles.css';
 
 export const meta: MetaFunction = () => [
   { title: 'Text2SQL - Natural Language to SQL | DeepAgents' },
-  { name: 'description', content: 'AI-powered SQL generation that learns your business. Convert natural language questions to accurate SQL queries with domain knowledge.' },
+  {
+    name: 'description',
+    content:
+      'AI-powered SQL generation that learns your business. Convert natural language questions to accurate SQL queries with domain knowledge.',
+  },
   { property: 'og:title', content: 'Text2SQL - Ask Questions. Get Queries.' },
-  { property: 'og:description', content: 'AI-powered SQL generation with teachables for domain knowledge' },
+  {
+    property: 'og:description',
+    content: 'AI-powered SQL generation with teachables for domain knowledge',
+  },
   { name: 'twitter:card', content: 'summary_large_image' },
 ];
 

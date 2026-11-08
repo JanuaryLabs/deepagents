@@ -95,16 +95,16 @@ new Postgres({
 
 The following grounding functions are available for PostgreSQL. Import them from `@deepagents/text2sql/postgres`:
 
-| Function | Description |
-|----------|-------------|
-| `tables()` | Discovers tables and columns, detects primary keys from table constraints |
-| `views()` | Discovers database views |
-| `info()` | Collects PostgreSQL version and database info |
-| `indexes()` | Identifies indexes including unique, clustered, and B-tree types |
-| `constraints()` | Maps foreign key relationships and other constraints |
-| `rowCount()` | Counts rows and classifies tables by size (tiny, small, medium, large, huge) |
-| `columnStats()` | Collects min, max, null fraction for numeric/date columns |
-| `columnValues()` | Detects native ENUM types and low-cardinality columns |
+| Function         | Description                                                                  |
+| ---------------- | ---------------------------------------------------------------------------- |
+| `tables()`       | Discovers tables and columns, detects primary keys from table constraints    |
+| `views()`        | Discovers database views                                                     |
+| `info()`         | Collects PostgreSQL version and database info                                |
+| `indexes()`      | Identifies indexes including unique, clustered, and B-tree types             |
+| `constraints()`  | Maps foreign key relationships and other constraints                         |
+| `rowCount()`     | Counts rows and classifies tables by size (tiny, small, medium, large, huge) |
+| `columnStats()`  | Collects min, max, null fraction for numeric/date columns                    |
+| `columnValues()` | Detects native ENUM types and low-cardinality columns                        |
 
 See [Grounding](/docs/text2sql/grounding) for detailed configuration options.
 

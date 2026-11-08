@@ -13,18 +13,18 @@ import { github } from '@deepagents/retrieval/connectors';
 
 ## Available Connectors
 
-| Connector | Description |
-|-----------|-------------|
-| `github.file()` | Single file from a repository |
-| `github.release()` | Release notes with pagination |
-| `github.repo()` | Entire repository via gitingest |
+| Connector          | Description                     |
+| ------------------ | ------------------------------- |
+| `github.file()`    | Single file from a repository   |
+| `github.release()` | Release notes with pagination   |
+| `github.repo()`    | Entire repository via gitingest |
 
 ## github.file()
 
 Index a single file from a GitHub repository:
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { github } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./github.db', 384);
@@ -47,13 +47,13 @@ github.file(filePath: string)
 
 ```typescript
 // README from a repo
-github.file('vercel/next.js/README.md')
+github.file('vercel/next.js/README.md');
 
 // Specific documentation file
-github.file('anthropics/anthropic-sdk-python/docs/getting-started.md')
+github.file('anthropics/anthropic-sdk-python/docs/getting-started.md');
 
 // Configuration file
-github.file('prettier/prettier/prettier.config.js')
+github.file('prettier/prettier/prettier.config.js');
 ```
 
 ## github.release()
@@ -61,7 +61,7 @@ github.file('prettier/prettier/prettier.config.js')
 Index release notes from a repository with pagination and filtering:
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { github } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./releases.db', 384);
@@ -89,24 +89,24 @@ github.release(repo: string, options?: {
 
 ```typescript
 // All stable releases
-github.release('facebook/react')
+github.release('facebook/react');
 
 // Releases since v18.0.0
 github.release('facebook/react', {
   untilTag: 'v18.0.0',
   inclusive: false,
-})
+});
 
 // Include prereleases (canary, beta, rc)
 github.release('facebook/react', {
   includePrerelease: true,
-})
+});
 
 // Everything including drafts
 github.release('facebook/react', {
   includeDrafts: true,
   includePrerelease: true,
-})
+});
 ```
 
 ### Release Content Format
@@ -132,7 +132,7 @@ Index an entire repository using [gitingest](https://github.com/cyclotruc/giting
 **Requires**: `uvx` (install via `pip install uv`)
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { github } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./repos.db', 384);
@@ -177,25 +177,25 @@ The connector excludes common non-essential paths by default:
 github.repo('https://github.com/trpc/trpc', {
   includes: ['packages/**/*.ts'],
   excludes: ['**/*.test.ts', '**/*.spec.ts'],
-})
+});
 
 // Index documentation only
 github.repo('https://github.com/vitejs/vite', {
   includes: ['docs/**/*.md'],
   branch: 'main',
-})
+});
 
 // Private repository
 github.repo('https://github.com/myorg/private-repo', {
   includes: ['src/**/*.ts'],
   githubToken: process.env.GITHUB_TOKEN,
-})
+});
 
 // Specific branch
 github.repo('https://github.com/facebook/react/tree/canary', {
   includes: ['packages/react/**/*.js'],
   branch: 'canary',
-})
+});
 ```
 
 ## Real-World Examples
@@ -205,7 +205,7 @@ github.repo('https://github.com/facebook/react/tree/canary', {
 Build a searchable changelog from release notes:
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { github } from '@deepagents/retrieval/connectors';
 
 async function searchChangelog(repo: string, query: string) {
@@ -219,7 +219,7 @@ async function searchChangelog(repo: string, query: string) {
     embedder: fastembed(),
   });
 
-  return results.map(r => ({
+  return results.map((r) => ({
     content: r.content,
     similarity: r.similarity,
   }));
@@ -228,7 +228,7 @@ async function searchChangelog(repo: string, query: string) {
 // Find breaking changes in Next.js
 const results = await searchChangelog(
   'vercel/next.js',
-  'breaking changes migration guide'
+  'breaking changes migration guide',
 );
 ```
 
@@ -237,7 +237,12 @@ const results = await searchChangelog(
 Index multiple repositories for cross-project search:
 
 ```typescript
-import { ingest, similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import {
+  fastembed,
+  ingest,
+  nodeSQLite,
+  similaritySearch,
+} from '@deepagents/retrieval';
 import { github } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./ecosystem.db', 384);
@@ -274,7 +279,7 @@ const results = await similaritySearch('streaming responses', {
 Index a library's README and documentation:
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { github } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./zod-docs.db', 384);
@@ -294,9 +299,9 @@ const results = await similaritySearch('optional fields with default', {
 Each connector generates a unique source ID:
 
 ```typescript
-github.file('owner/repo/file.md')    // sourceId: "github:file:owner/repo/file.md"
-github.release('owner/repo')          // sourceId: "github:releases:owner/repo"
-github.repo('https://github.com/...')  // sourceId: "github:repo:https://github.com/..."
+github.file('owner/repo/file.md'); // sourceId: "github:file:owner/repo/file.md"
+github.release('owner/repo'); // sourceId: "github:releases:owner/repo"
+github.repo('https://github.com/...'); // sourceId: "github:repo:https://github.com/..."
 ```
 
 ## Next Steps

@@ -14,6 +14,7 @@ Assuming `sandbox` and `context` have already been constructed (see
 
 ```typescript
 import { groq } from '@ai-sdk/groq';
+
 import { agent } from '@deepagents/context';
 import { createOpenAITracesIntegration } from '@deepagents/context/tracing';
 
@@ -42,20 +43,20 @@ stable `telemetry` integration option. It listens for `onStart`,
 `onStepStart`, `onStepEnd`, `onToolExecutionStart`, `onToolExecutionEnd`, and
 `onEnd` events and emits one trace per run with nested spans.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `apiKey` | `string \| (() => string \| Promise<string>)` | `process.env.OPENAI_API_KEY` | API key or resolver. Resolver is called on each export — useful for rotated credentials. Required: the exporter throws on export if both the option and env var are empty |
-| `baseURL` | `string` | `https://api.openai.com` | Override the base URL (Azure, local proxy) |
-| `endpoint` | `string` | `<baseURL>/v1/traces/ingest` | Full override of the ingest endpoint |
-| `organization` | `string` | — | Sent as `OpenAI-Organization` header |
-| `project` | `string` | — | Sent as `OpenAI-Project` header |
-| `workflowName` | `string` | `event.functionId \| 'ai-sdk-workflow'` | Name that appears on the root trace |
-| `groupId` | `string` | — | Group traces together in the UI |
-| `metadata` | `Record<string, unknown>` | — | Extra metadata merged into every trace. Non-string values are JSON-stringified on export; `null` and `undefined` entries are dropped |
-| `exporter` | `OpenAITracesExporter` | constructed from the other options | Fully custom exporter (useful for tests or alternative sinks) |
-| `processor` | `TracingProcessor \| TracingProcessor[]` | `BatchTraceProcessor(exporter)` | Replace the default batch processor or chain your own |
-| `batch` | `BatchTraceProcessorOptions` | see below | Tune the default batch processor |
-| `includeSensitiveData` | `boolean` | `env OPENAI_AGENTS_TRACE_INCLUDE_SENSITIVE_DATA !== '0'` | Include inputs/outputs on generation and function spans |
+| Option                 | Type                                          | Default                                                  | Description                                                                                                                                                               |
+| ---------------------- | --------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apiKey`               | `string \| (() => string \| Promise<string>)` | `process.env.OPENAI_API_KEY`                             | API key or resolver. Resolver is called on each export — useful for rotated credentials. Required: the exporter throws on export if both the option and env var are empty |
+| `baseURL`              | `string`                                      | `https://api.openai.com`                                 | Override the base URL (Azure, local proxy)                                                                                                                                |
+| `endpoint`             | `string`                                      | `<baseURL>/v1/traces/ingest`                             | Full override of the ingest endpoint                                                                                                                                      |
+| `organization`         | `string`                                      | —                                                        | Sent as `OpenAI-Organization` header                                                                                                                                      |
+| `project`              | `string`                                      | —                                                        | Sent as `OpenAI-Project` header                                                                                                                                           |
+| `workflowName`         | `string`                                      | `event.functionId \| 'ai-sdk-workflow'`                  | Name that appears on the root trace                                                                                                                                       |
+| `groupId`              | `string`                                      | —                                                        | Group traces together in the UI                                                                                                                                           |
+| `metadata`             | `Record<string, unknown>`                     | —                                                        | Extra metadata merged into every trace. Non-string values are JSON-stringified on export; `null` and `undefined` entries are dropped                                      |
+| `exporter`             | `OpenAITracesExporter`                        | constructed from the other options                       | Fully custom exporter (useful for tests or alternative sinks)                                                                                                             |
+| `processor`            | `TracingProcessor \| TracingProcessor[]`      | `BatchTraceProcessor(exporter)`                          | Replace the default batch processor or chain your own                                                                                                                     |
+| `batch`                | `BatchTraceProcessorOptions`                  | see below                                                | Tune the default batch processor                                                                                                                                          |
+| `includeSensitiveData` | `boolean`                                     | `env OPENAI_AGENTS_TRACE_INCLUDE_SENSITIVE_DATA !== '0'` | Include inputs/outputs on generation and function spans                                                                                                                   |
 
 Set the env var `OPENAI_AGENTS_DISABLE_TRACING=1` to return an empty
 integration — handy for disabling tracing in tests without changing call
@@ -66,14 +67,14 @@ sites.
 Each run produces one trace with one root `agent` span and zero or more nested
 spans:
 
-| Event | Span type | Notes |
-| --- | --- | --- |
-| `onStart` | `agent` (root) | Workflow name, available tools, output type |
-| `onStepStart` | `generation` | Model id, provider, tool choice, messages (if sensitive data is enabled) |
-| `onStepEnd` | closes the generation span | Usage tokens, response messages |
-| `onToolExecutionStart` | `function` | Tool name + JSON-stringified input |
-| `onToolExecutionEnd` | closes the function span | JSON-stringified output, or error |
-| `onEnd` | closes the root span | Total usage, step count, finish reason |
+| Event                  | Span type                  | Notes                                                                    |
+| ---------------------- | -------------------------- | ------------------------------------------------------------------------ |
+| `onStart`              | `agent` (root)             | Workflow name, available tools, output type                              |
+| `onStepStart`          | `generation`               | Model id, provider, tool choice, messages (if sensitive data is enabled) |
+| `onStepEnd`            | closes the generation span | Usage tokens, response messages                                          |
+| `onToolExecutionStart` | `function`                 | Tool name + JSON-stringified input                                       |
+| `onToolExecutionEnd`   | closes the function span   | JSON-stringified output, or error                                        |
+| `onEnd`                | closes the root span       | Total usage, step count, finish reason                                   |
 
 When multiple runs are open concurrently (nested agents, `asAdvisor`),
 events are routed to the correct run by the AI SDK v7 `callId`, then by
@@ -86,12 +87,12 @@ the event is dropped rather than attached to the wrong trace.
 The ingest endpoint is strict about input/output shapes. Before shipping,
 the exporter rewrites each span to match:
 
-| Span type | `input` shape | `output` shape |
-| --- | --- | --- |
-| `generation` | Array of message records | Array of message records |
-| `function` | JSON string | JSON string |
-| `transcription` | JSON string | JSON string |
-| everything else | Unchanged | Unchanged |
+| Span type       | `input` shape            | `output` shape           |
+| --------------- | ------------------------ | ------------------------ |
+| `generation`    | Array of message records | Array of message records |
+| `function`      | JSON string              | JSON string              |
+| `transcription` | JSON string              | JSON string              |
+| everything else | Unchanged                | Unchanged                |
 
 `FunctionSpanData` and `TranscriptionSpanData` get their `input` / `output`
 `JSON.stringify`ed on the way out — sending them as objects or arrays causes
@@ -122,15 +123,15 @@ const exporter = new OpenAITracesExporter({
 await exporter.export(items, abortSignal);
 ```
 
-| Option | Default | Description |
-| --- | --- | --- |
-| `apiKey` | `process.env.OPENAI_API_KEY` | String or async resolver |
-| `baseURL` | `https://api.openai.com` | — |
-| `endpoint` | `<baseURL>/v1/traces/ingest` | — |
-| `organization`, `project` | — | Headers |
-| `maxRetries` | `3` | Only 5xx and network errors retry; 4xx throws `OpenAIExportError` immediately |
-| `baseDelayMs` | `1000` | Initial backoff |
-| `maxDelayMs` | `30000` | Upper bound on backoff |
+| Option                    | Default                      | Description                                                                   |
+| ------------------------- | ---------------------------- | ----------------------------------------------------------------------------- |
+| `apiKey`                  | `process.env.OPENAI_API_KEY` | String or async resolver                                                      |
+| `baseURL`                 | `https://api.openai.com`     | —                                                                             |
+| `endpoint`                | `<baseURL>/v1/traces/ingest` | —                                                                             |
+| `organization`, `project` | —                            | Headers                                                                       |
+| `maxRetries`              | `3`                          | Only 5xx and network errors retry; 4xx throws `OpenAIExportError` immediately |
+| `baseDelayMs`             | `1000`                       | Initial backoff                                                               |
+| `maxDelayMs`              | `30000`                      | Upper bound on backoff                                                        |
 
 Retries use exponential backoff with 10% jitter. `OpenAIExportError` carries
 both the HTTP status code and the raw response body for debugging.
@@ -140,13 +141,13 @@ both the HTTP status code and the raw response body for debugging.
 The default processor queues spans in memory, flushes on a timer or when the
 queue hits a threshold, and calls `exporter.export(batch)`.
 
-| Option | Default | Description |
-| --- | --- | --- |
-| `maxQueueSize` | `8192` | Total span + trace items buffered |
-| `maxBatchSize` | `128` | Max items shipped per export |
-| `scheduleDelayMs` | `5000` | Timer interval between flushes |
-| `exportTriggerRatio` | `0.7` | Proportion of `maxQueueSize` that triggers an immediate flush |
-| `exportTimeoutMs` | `30000` | Abort signal deadline for each export call |
+| Option               | Default | Description                                                   |
+| -------------------- | ------- | ------------------------------------------------------------- |
+| `maxQueueSize`       | `8192`  | Total span + trace items buffered                             |
+| `maxBatchSize`       | `128`   | Max items shipped per export                                  |
+| `scheduleDelayMs`    | `5000`  | Timer interval between flushes                                |
+| `exportTriggerRatio` | `0.7`   | Proportion of `maxQueueSize` that triggers an immediate flush |
+| `exportTimeoutMs`    | `30000` | Abort signal deadline for each export call                    |
 
 Pass custom `batch` options on the integration to tune it:
 

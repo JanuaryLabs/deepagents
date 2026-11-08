@@ -96,14 +96,14 @@ BigQuery nested STRUCT paths are flattened into dot-delimited column names (e.g.
 
 Import these from `@deepagents/text2sql/bigquery`:
 
-| Function | Description |
-|----------|-------------|
-| `tables()` | Discovers tables in configured datasets, flattens nested field paths |
-| `views()` | Discovers views and materialized views (includes definitions) |
-| `info()` | Emits dialect metadata (`bigquery`) and identifier/parameter hints |
-| `constraints()` | Best-effort PK/FK + NOT NULL/DEFAULT from metadata |
-| `rowCount()` | Metadata-only row counts (no `COUNT(*)`) + size hints. Falls back to `__TABLES__` when `TABLE_STORAGE` is inaccessible (e.g. cross-project public datasets) |
-| `indexes()` | Maps partitioning/clustering metadata into index-like hints (marks indexed columns) |
+| Function        | Description                                                                                                                                                 |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tables()`      | Discovers tables in configured datasets, flattens nested field paths                                                                                        |
+| `views()`       | Discovers views and materialized views (includes definitions)                                                                                               |
+| `info()`        | Emits dialect metadata (`bigquery`) and identifier/parameter hints                                                                                          |
+| `constraints()` | Best-effort PK/FK + NOT NULL/DEFAULT from metadata                                                                                                          |
+| `rowCount()`    | Metadata-only row counts (no `COUNT(*)`) + size hints. Falls back to `__TABLES__` when `TABLE_STORAGE` is inaccessible (e.g. cross-project public datasets) |
+| `indexes()`     | Maps partitioning/clustering metadata into index-like hints (marks indexed columns)                                                                         |
 
 ### Not Included In V1
 

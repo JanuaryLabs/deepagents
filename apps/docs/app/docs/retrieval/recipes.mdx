@@ -12,6 +12,7 @@ Complete, production-ready examples showing how to build real-world RAG applicat
 Build an AI assistant that answers questions about your documentation using semantic search. Combines the retrieval package with `@deepagents/agent` to create a conversational interface with source citations.
 
 **Key features:**
+
 - RAG-powered Q&A
 - Source citations
 - Streaming responses
@@ -23,6 +24,7 @@ Build an AI assistant that answers questions about your documentation using sema
 Aggregate content from multiple RSS feeds and generate AI-powered daily digests. Demonstrates multi-source ingestion with TTL-based refresh and structured output generation.
 
 **Key features:**
+
 - Multi-feed aggregation
 - Automatic refresh with TTL
 - AI-generated summaries
@@ -34,6 +36,7 @@ Aggregate content from multiple RSS feeds and generate AI-powered daily digests.
 Search and summarize research papers from arXiv or local PDFs. Shows how to build a research tool that indexes academic papers and answers questions about them.
 
 **Key features:**
+
 - PDF indexing
 - Paper summarization
 - Research Q&A
@@ -45,6 +48,7 @@ Search and summarize research papers from arXiv or local PDFs. Shows how to buil
 Build a semantic code search system across multiple local and GitHub repositories. Useful for understanding large codebases and finding relevant implementations.
 
 **Key features:**
+
 - Local + GitHub repos
 - Language-aware filtering
 - Cross-project search
@@ -56,6 +60,7 @@ Build a semantic code search system across multiple local and GitHub repositorie
 Create a knowledge base that combines multiple source types (docs, releases, news) and provides answers with proper source attribution.
 
 **Key features:**
+
 - Multi-source ingestion
 - Source tracking
 - Citation formatting
@@ -67,20 +72,21 @@ Create a knowledge base that combines multiple source types (docs, releases, new
 Build a production indexing pipeline with different refresh strategies for different content types. Shows how to efficiently manage large-scale content ingestion.
 
 **Key features:**
+
 - Mixed ingestion modes
 - Scheduled updates
 - Pipeline orchestration
 
 ## Choosing a Recipe
 
-| Use Case | Recipe |
-|----------|--------|
-| Customer support bot | [Documentation Chatbot](/docs/retrieval/recipe-docs-chatbot) |
-| Content monitoring | [News Aggregator](/docs/retrieval/recipe-news-aggregator) |
-| Academic research | [Research Assistant](/docs/retrieval/recipe-research-assistant) |
-| Code understanding | [Code Search](/docs/retrieval/recipe-code-search) |
-| Enterprise knowledge | [Knowledge Base](/docs/retrieval/recipe-knowledge-base) |
-| Large-scale indexing | [Indexing Pipeline](/docs/retrieval/recipe-indexing-pipeline) |
+| Use Case             | Recipe                                                          |
+| -------------------- | --------------------------------------------------------------- |
+| Customer support bot | [Documentation Chatbot](/docs/retrieval/recipe-docs-chatbot)    |
+| Content monitoring   | [News Aggregator](/docs/retrieval/recipe-news-aggregator)       |
+| Academic research    | [Research Assistant](/docs/retrieval/recipe-research-assistant) |
+| Code understanding   | [Code Search](/docs/retrieval/recipe-code-search)               |
+| Enterprise knowledge | [Knowledge Base](/docs/retrieval/recipe-knowledge-base)         |
+| Large-scale indexing | [Indexing Pipeline](/docs/retrieval/recipe-indexing-pipeline)   |
 
 ## Common Patterns
 
@@ -93,7 +99,7 @@ All recipes follow these patterns:
 
 ```typescript
 // Common setup across all recipes
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 
 const store = nodeSQLite('./knowledge.db', 384);
 const embedder = fastembed();

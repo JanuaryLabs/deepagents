@@ -18,12 +18,11 @@
  *   --num-layers <n>    Number of LoRA layers (default: 16)
  *   --no-gguf           Disable GGUF export
  */
-
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -80,11 +79,9 @@ async function installDeps(): Promise<void> {
   console.log('(This may take a while on first run)');
   console.log();
   return new Promise((resolve, reject) => {
-    const proc = spawn(
-      VENV_PIP,
-      ['install', '-r', REQUIREMENTS_FILE],
-      { stdio: 'inherit' }
-    );
+    const proc = spawn(VENV_PIP, ['install', '-r', REQUIREMENTS_FILE], {
+      stdio: 'inherit',
+    });
     proc.on('close', (code) => {
       if (code === 0) {
         console.log('Dependencies installed.');
@@ -255,14 +252,22 @@ After Training - Using the Model:
 
   const options: MlxOptions = {
     iters: values.iters ? parseInt(values.iters, 10) : undefined,
-    batchSize: values['batch-size'] ? parseInt(values['batch-size'], 10) : undefined,
+    batchSize: values['batch-size']
+      ? parseInt(values['batch-size'], 10)
+      : undefined,
     lr: values.lr ? parseFloat(values.lr) : undefined,
     outputDir: values['output-dir'],
-    maxSamples: values['max-samples'] ? parseInt(values['max-samples'], 10) : undefined,
+    maxSamples: values['max-samples']
+      ? parseInt(values['max-samples'], 10)
+      : undefined,
     useHf: values['use-hf'],
     model: values.model,
-    numLayers: values['num-layers'] ? parseInt(values['num-layers'], 10) : undefined,
-    evalSplit: values['eval-split'] ? parseFloat(values['eval-split']) : undefined,
+    numLayers: values['num-layers']
+      ? parseInt(values['num-layers'], 10)
+      : undefined,
+    evalSplit: values['eval-split']
+      ? parseFloat(values['eval-split'])
+      : undefined,
     noGguf: values['no-gguf'],
   };
 

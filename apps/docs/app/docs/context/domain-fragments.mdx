@@ -8,14 +8,13 @@ Domain fragments encode domain-specific knowledge as structured context. They le
 All builders return a `ContextFragment` and are used with `context.set()`.
 
 ```typescript
-import { term, hint, guardrail, glossary } from '@deepagents/context';
+import { glossary, guardrail, hint, term } from '@deepagents/context';
 
-const context = new ContextEngine({ store, chatId, userId })
-  .set(
-    term('NPL', 'non-performing loan - loan past due 90+ days'),
-    hint('Always filter by status'),
-    guardrail({ rule: 'Never expose PII' }),
-  );
+const context = new ContextEngine({ store, chatId, userId }).set(
+  term('NPL', 'non-performing loan - loan past due 90+ days'),
+  hint('Always filter by status'),
+  guardrail({ rule: 'Never expose PII' }),
+);
 ```
 
 ## Vocabulary
@@ -28,13 +27,19 @@ Maps a business term or acronym to its meaning. The system uses these definition
 import { term } from '@deepagents/context';
 
 term('deadhead miles', 'distance driven with empty truck between deliveries');
-term('DFW rate', 'percentage of students receiving D, F, or Withdrawal in a course');
-term('AUM', 'assets under management - total market value of client investments');
+term(
+  'DFW rate',
+  'percentage of students receiving D, F, or Withdrawal in a course',
+);
+term(
+  'AUM',
+  'assets under management - total market value of client investments',
+);
 ```
 
-| Parameter | Type | Description |
-| --------- | ---- | ----------- |
-| `name` | `string` | The business term or acronym |
+| Parameter    | Type     | Description                        |
+| ------------ | -------- | ---------------------------------- |
+| `name`       | `string` | The business term or acronym       |
 | `definition` | `string` | What the term means in your domain |
 
 ### glossary(entries)
@@ -45,15 +50,15 @@ Maps business terms to computable expressions. Where `term` defines what somethi
 import { glossary } from '@deepagents/context';
 
 glossary({
-  'revenue': 'SUM(orders.total_amount)',
+  revenue: 'SUM(orders.total_amount)',
   'average order value': 'AVG(orders.total_amount)',
   'active user': "last_login > NOW() - INTERVAL '30 days'",
   'net revenue': 'SUM(orders.total_amount) - SUM(refunds.amount)',
 });
 ```
 
-| Parameter | Type | Description |
-| --------- | ---- | ----------- |
+| Parameter | Type                     | Description                         |
+| --------- | ------------------------ | ----------------------------------- |
 | `entries` | `Record<string, string>` | Business term to expression mapping |
 
 The output fragment contains an array of `\{ term, expression \}` objects, one per entry.
@@ -70,8 +75,8 @@ import { role } from '@deepagents/context';
 role('You are a senior data analyst specializing in e-commerce metrics.');
 ```
 
-| Parameter | Type | Description |
-| --------- | ---- | ----------- |
+| Parameter | Type     | Description          |
+| --------- | -------- | -------------------- |
 | `content` | `string` | The role instruction |
 
 ### hint(text)
@@ -81,14 +86,20 @@ Defines a behavioral rule or query preference that should be applied automatical
 ```typescript
 import { hint } from '@deepagents/context';
 
-hint("Always exclude work orders with status = 'simulation' from production metrics");
-hint('Engagement metrics should exclude bot accounts identified by is_verified_human = false');
-hint("Default content filters to published_status = 'public' unless analyzing drafts");
+hint(
+  "Always exclude work orders with status = 'simulation' from production metrics",
+);
+hint(
+  'Engagement metrics should exclude bot accounts identified by is_verified_human = false',
+);
+hint(
+  "Default content filters to published_status = 'public' unless analyzing drafts",
+);
 ```
 
-| Parameter | Type | Description |
-| --------- | ---- | ----------- |
-| `text` | `string` | The rule or constraint (use imperative language) |
+| Parameter | Type     | Description                                      |
+| --------- | -------- | ------------------------------------------------ |
+| `text`    | `string` | The rule or constraint (use imperative language) |
 
 ### guardrail(input)
 
@@ -110,11 +121,11 @@ guardrail({
 });
 ```
 
-| Parameter | Type | Required | Description |
-| --------- | ---- | -------- | ----------- |
-| `rule` | `string` | Yes | The restriction to enforce |
-| `reason` | `string` | No | Why this guardrail exists |
-| `action` | `string` | No | What to do when triggered |
+| Parameter | Type     | Required | Description                |
+| --------- | -------- | -------- | -------------------------- |
+| `rule`    | `string` | Yes      | The restriction to enforce |
+| `reason`  | `string` | No       | Why this guardrail exists  |
+| `action`  | `string` | No       | What to do when triggered  |
 
 ### styleGuide(input)
 
@@ -124,22 +135,27 @@ Defines formatting, naming, and consistency preferences for generated output.
 import { styleGuide } from '@deepagents/context';
 
 styleGuide({
-  prefer: "Use donor-centric language in column aliases: 'donor_name' not 'customer_name'",
-  never: 'Never expose internal donor IDs in external reports - use public gift IDs',
-  always: 'Always include fiscal year in date-based aggregations (FY starts July 1)',
+  prefer:
+    "Use donor-centric language in column aliases: 'donor_name' not 'customer_name'",
+  never:
+    'Never expose internal donor IDs in external reports - use public gift IDs',
+  always:
+    'Always include fiscal year in date-based aggregations (FY starts July 1)',
 });
 
 styleGuide({
-  prefer: 'Use location_id in joins rather than location_name (duplicates exist across warehouses)',
-  always: 'Always use inventory_on_hand - inventory_reserved for available stock calculations',
+  prefer:
+    'Use location_id in joins rather than location_name (duplicates exist across warehouses)',
+  always:
+    'Always use inventory_on_hand - inventory_reserved for available stock calculations',
 });
 ```
 
-| Parameter | Type | Required | Description |
-| --------- | ---- | -------- | ----------- |
-| `prefer` | `string` | Yes | Preferred style or pattern |
-| `never` | `string` | No | Anti-pattern to avoid |
-| `always` | `string` | No | Rule that must always be followed |
+| Parameter | Type     | Required | Description                       |
+| --------- | -------- | -------- | --------------------------------- |
+| `prefer`  | `string` | Yes      | Preferred style or pattern        |
+| `never`   | `string` | No       | Anti-pattern to avoid             |
+| `always`  | `string` | No       | Rule that must always be followed |
 
 ## Teaching
 
@@ -152,22 +168,26 @@ import { explain } from '@deepagents/context';
 
 explain({
   concept: 'daily active users to monthly active users ratio',
-  explanation: 'Like measuring how many club members visit daily vs just once a month - shows stickiness',
-  therefore: 'Calculate as DAU / MAU, where higher ratio (closer to 1) means more engaged user base',
+  explanation:
+    'Like measuring how many club members visit daily vs just once a month - shows stickiness',
+  therefore:
+    'Calculate as DAU / MAU, where higher ratio (closer to 1) means more engaged user base',
 });
 
 explain({
   concept: 'time to fill',
-  explanation: 'Like measuring how long a house sits on the market - from posting job to accepting offer',
-  therefore: 'Calculate as days between job_posted_date and offer_accepted_date, exclude cancelled requisitions',
+  explanation:
+    'Like measuring how long a house sits on the market - from posting job to accepting offer',
+  therefore:
+    'Calculate as days between job_posted_date and offer_accepted_date, exclude cancelled requisitions',
 });
 ```
 
-| Parameter | Type | Required | Description |
-| --------- | ---- | -------- | ----------- |
-| `concept` | `string` | Yes | The concept being explained |
-| `explanation` | `string` | Yes | Metaphor or detailed explanation |
-| `therefore` | `string` | No | Actionable instruction based on this understanding |
+| Parameter     | Type     | Required | Description                                        |
+| ------------- | -------- | -------- | -------------------------------------------------- |
+| `concept`     | `string` | Yes      | The concept being explained                        |
+| `explanation` | `string` | Yes      | Metaphor or detailed explanation                   |
+| `therefore`   | `string` | No       | Actionable instruction based on this understanding |
 
 ### example(input)
 
@@ -194,11 +214,11 @@ GROUP BY hotel_id, hotel_name ORDER BY occupancy_rate DESC`,
 });
 ```
 
-| Parameter | Type | Required | Description |
-| --------- | ---- | -------- | ----------- |
-| `question` | `string` | Yes | The natural language question |
-| `answer` | `string` | Yes | The correct answer |
-| `note` | `string` | No | Explanation about the example |
+| Parameter  | Type     | Required | Description                   |
+| ---------- | -------- | -------- | ----------------------------- |
+| `question` | `string` | Yes      | The natural language question |
+| `answer`   | `string` | Yes      | The correct answer            |
+| `note`     | `string` | No       | Explanation about the example |
 
 ### analogy(input)
 
@@ -209,26 +229,32 @@ import { analogy } from '@deepagents/context';
 
 analogy({
   concepts: ['cart abandonment', 'browse abandonment'],
-  relationship: 'Cart abandonment is like leaving items at a checkout counter, browse abandonment is like window shopping without picking anything up',
-  insight: 'Cart abandonment shows purchase intent, browse abandonment shows only interest',
-  therefore: 'Prioritize cart abandonment recovery campaigns - higher conversion potential',
-  pitfall: "Don't combine both into generic 'abandonment rate' - they need different strategies",
+  relationship:
+    'Cart abandonment is like leaving items at a checkout counter, browse abandonment is like window shopping without picking anything up',
+  insight:
+    'Cart abandonment shows purchase intent, browse abandonment shows only interest',
+  therefore:
+    'Prioritize cart abandonment recovery campaigns - higher conversion potential',
+  pitfall:
+    "Don't combine both into generic 'abandonment rate' - they need different strategies",
 });
 
 analogy({
   concepts: ['incidence', 'prevalence'],
-  relationship: 'Incidence is like new house sales this month, prevalence is total houses currently occupied',
-  therefore: 'For tracking outbreaks use incidence rate, for resource planning use prevalence',
+  relationship:
+    'Incidence is like new house sales this month, prevalence is total houses currently occupied',
+  therefore:
+    'For tracking outbreaks use incidence rate, for resource planning use prevalence',
 });
 ```
 
-| Parameter | Type | Required | Description |
-| --------- | ---- | -------- | ----------- |
-| `concepts` | `string[]` | Yes | Related concepts to compare |
-| `relationship` | `string` | Yes | The comparison using real-world examples |
-| `insight` | `string` | No | Key insight the analogy reveals |
-| `therefore` | `string` | No | Actionable instruction |
-| `pitfall` | `string` | No | Common mistake to avoid |
+| Parameter      | Type       | Required | Description                              |
+| -------------- | ---------- | -------- | ---------------------------------------- |
+| `concepts`     | `string[]` | Yes      | Related concepts to compare              |
+| `relationship` | `string`   | Yes      | The comparison using real-world examples |
+| `insight`      | `string`   | No       | Key insight the analogy reveals          |
+| `therefore`    | `string`   | No       | Actionable instruction                   |
+| `pitfall`      | `string`   | No       | Common mistake to avoid                  |
 
 ### clarification(input)
 
@@ -246,15 +272,16 @@ clarification({
 clarification({
   when: "user mentions 'active members'",
   ask: 'Do you mean paid memberships or members who actually visited in last 30 days?',
-  reason: "Many paid members don't use facilities - different metrics for revenue vs utilization",
+  reason:
+    "Many paid members don't use facilities - different metrics for revenue vs utilization",
 });
 ```
 
-| Parameter | Type | Required | Description |
-| --------- | ---- | -------- | ----------- |
-| `when` | `string` | Yes | Condition that should trigger clarification |
-| `ask` | `string` | Yes | The question to ask |
-| `reason` | `string` | Yes | Why this clarification is necessary |
+| Parameter | Type     | Required | Description                                 |
+| --------- | -------- | -------- | ------------------------------------------- |
+| `when`    | `string` | Yes      | Condition that should trigger clarification |
+| `ask`     | `string` | Yes      | The question to ask                         |
+| `reason`  | `string` | Yes      | Why this clarification is necessary         |
 
 ## Processes
 
@@ -276,16 +303,17 @@ workflow({
     'Identify policies with loss ratio > 100% (losing money)',
     'Calculate trend over time using rolling 12-month windows',
   ],
-  notes: 'Use incurred date for claims, not paid date. Exclude reinsurance recoveries.',
+  notes:
+    'Use incurred date for claims, not paid date. Exclude reinsurance recoveries.',
 });
 ```
 
-| Parameter | Type | Required | Description |
-| --------- | ---- | -------- | ----------- |
-| `task` | `string` | Yes | Name of the analytical task |
-| `steps` | `string[]` | Yes | Sequential steps to execute |
-| `triggers` | `string[]` | No | Phrases that should activate this workflow |
-| `notes` | `string` | No | Additional context or warnings |
+| Parameter  | Type       | Required | Description                                |
+| ---------- | ---------- | -------- | ------------------------------------------ |
+| `task`     | `string`   | Yes      | Name of the analytical task                |
+| `steps`    | `string[]` | Yes      | Sequential steps to execute                |
+| `triggers` | `string[]` | No       | Phrases that should activate this workflow |
+| `notes`    | `string`   | No       | Additional context or warnings             |
 
 ### quirk(input)
 
@@ -295,20 +323,24 @@ Documents a data edge case or database-specific issue and how to handle it. Quir
 import { quirk } from '@deepagents/context';
 
 quirk({
-  issue: 'Citizen IDs contain leading zeros but are stored as integers, losing the zeros',
-  workaround: "Always cast to VARCHAR and use LPAD(citizen_id::VARCHAR, 10, '0') to restore leading zeros",
+  issue:
+    'Citizen IDs contain leading zeros but are stored as integers, losing the zeros',
+  workaround:
+    "Always cast to VARCHAR and use LPAD(citizen_id::VARCHAR, 10, '0') to restore leading zeros",
 });
 
 quirk({
-  issue: 'Flight times crossing midnight show as negative duration (landing before takeoff)',
-  workaround: "Add 24 hours when calculated duration < 0: CASE WHEN duration < 0 THEN duration + INTERVAL '24 hours' ELSE duration END",
+  issue:
+    'Flight times crossing midnight show as negative duration (landing before takeoff)',
+  workaround:
+    "Add 24 hours when calculated duration < 0: CASE WHEN duration < 0 THEN duration + INTERVAL '24 hours' ELSE duration END",
 });
 ```
 
-| Parameter | Type | Required | Description |
-| --------- | ---- | -------- | ----------- |
-| `issue` | `string` | Yes | Description of the quirk or edge case |
-| `workaround` | `string` | Yes | How to handle the issue |
+| Parameter    | Type     | Required | Description                           |
+| ------------ | -------- | -------- | ------------------------------------- |
+| `issue`      | `string` | Yes      | Description of the quirk or edge case |
+| `workaround` | `string` | Yes      | How to handle the issue               |
 
 ## Structure
 
@@ -339,11 +371,11 @@ principle({
 });
 ```
 
-| Parameter | Type | Required | Description |
-| --------- | ---- | -------- | ----------- |
-| `title` | `string` | Yes | Name of the principle |
-| `description` | `string` | Yes | What it means and why it matters |
-| `policies` | `FragmentData[]` | No | Specific rules that implement this principle |
+| Parameter     | Type             | Required | Description                                  |
+| ------------- | ---------------- | -------- | -------------------------------------------- |
+| `title`       | `string`         | Yes      | Name of the principle                        |
+| `description` | `string`         | Yes      | What it means and why it matters             |
+| `policies`    | `FragmentData[]` | No       | Specific rules that implement this principle |
 
 ### policy(input)
 
@@ -366,12 +398,12 @@ policy({
 });
 ```
 
-| Parameter | Type | Required | Description |
-| --------- | ---- | -------- | ----------- |
-| `rule` | `string` | Yes | The policy rule to enforce |
-| `before` | `string` | No | What action this is a prerequisite for |
-| `reason` | `string` | No | Why this rule matters |
-| `policies` | `FragmentData[]` | No | Nested sub-policies |
+| Parameter  | Type             | Required | Description                            |
+| ---------- | ---------------- | -------- | -------------------------------------- |
+| `rule`     | `string`         | Yes      | The policy rule to enforce             |
+| `before`   | `string`         | No       | What action this is a prerequisite for |
+| `reason`   | `string`         | No       | Why this rule matters                  |
+| `policies` | `FragmentData[]` | No       | Nested sub-policies                    |
 
 ## Combined Example
 
@@ -382,18 +414,18 @@ import {
   ContextEngine,
   SqliteContextStore,
   XmlRenderer,
-  role,
-  term,
-  hint,
-  guardrail,
-  glossary,
-  explain,
-  example,
   clarification,
-  workflow,
+  example,
+  explain,
+  glossary,
+  guardrail,
+  hint,
   quirk,
+  role,
   styleGuide,
+  term,
   user,
+  workflow,
 } from '@deepagents/context';
 
 const store = new SqliteContextStore('./analytics.db');
@@ -409,13 +441,15 @@ const context = new ContextEngine({
   term('logo churn', 'percentage of customers lost in a period'),
 
   glossary({
-    'revenue': 'SUM(subscriptions.amount)',
+    revenue: 'SUM(subscriptions.amount)',
     'active user': "last_login > NOW() - INTERVAL '30 days'",
-    'churned': "status = 'churned'",
+    churned: "status = 'churned'",
   }),
 
   hint('Always exclude trial accounts from revenue calculations'),
-  hint('Use subscription start date, not account creation date, for cohort analysis'),
+  hint(
+    'Use subscription start date, not account creation date, for cohort analysis',
+  ),
 
   guardrail({
     rule: 'Never expose individual customer payment amounts',
@@ -425,14 +459,17 @@ const context = new ContextEngine({
 
   explain({
     concept: 'net revenue retention',
-    explanation: 'Measures if existing customers are spending more or less over time, ignoring new sales',
-    therefore: 'Calculate as (MRR from existing customers this month / MRR from same customers last month) * 100',
+    explanation:
+      'Measures if existing customers are spending more or less over time, ignoring new sales',
+    therefore:
+      'Calculate as (MRR from existing customers this month / MRR from same customers last month) * 100',
   }),
 
   clarification({
     when: "user asks about 'churn'",
     ask: 'Do you mean logo churn (customer count) or revenue churn (dollar amount)?',
-    reason: 'Losing 10 small customers differs from losing 1 enterprise customer',
+    reason:
+      'Losing 10 small customers differs from losing 1 enterprise customer',
   }),
 
   quirk({
@@ -452,7 +489,8 @@ const context = new ContextEngine({
   }),
 
   styleGuide({
-    prefer: 'Use plan_tier names (Basic, Pro, Enterprise) in output, not internal plan_id codes',
+    prefer:
+      'Use plan_tier names (Basic, Pro, Enterprise) in output, not internal plan_id codes',
     always: 'Include the date range in every aggregation result',
   }),
 );

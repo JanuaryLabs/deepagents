@@ -80,12 +80,12 @@ interface SubcommandDefinition {
 }
 ```
 
-| Field | Description |
-| --- | --- |
-| `usage` | Usage text shown in the generated help, for example `run <db> "SELECT ..."` |
-| `description` | One-line help text shown beside the usage |
-| `repair` | Optional pre-parse repair for malformed LLM output |
-| `handler` | Command implementation. Receives the remaining args after the subcommand name |
+| Field         | Description                                                                   |
+| ------------- | ----------------------------------------------------------------------------- |
+| `usage`       | Usage text shown in the generated help, for example `run <db> "SELECT ..."`   |
+| `description` | One-line help text shown beside the usage                                     |
+| `repair`      | Optional pre-parse repair for malformed LLM output                            |
+| `handler`     | Command implementation. Receives the remaining args after the subcommand name |
 
 ## `defineSubcommandGroup(name, subcommands)`
 

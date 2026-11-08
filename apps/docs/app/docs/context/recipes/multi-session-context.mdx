@@ -10,16 +10,17 @@ This recipe shows patterns for maintaining conversation context across sessions,
 Use `SqliteContextStore` to persist conversations:
 
 ```typescript
+import { groq } from '@ai-sdk/groq';
+import { generateText } from 'ai';
+
 import {
   ContextEngine,
   SqliteContextStore,
-  role,
-  hint,
-  user,
   assistant,
+  hint,
+  role,
+  user,
 } from '@deepagents/context';
-import { generateText } from 'ai';
-import { groq } from '@ai-sdk/groq';
 
 class ChatSession {
   private context: ContextEngine;
@@ -27,11 +28,10 @@ class ChatSession {
   constructor(sessionId: string) {
     const store = new SqliteContextStore(`./data/sessions/${sessionId}.db`);
 
-    this.context = new ContextEngine({ store })
-      .set(
-        role('You are a helpful assistant with memory of our conversation.'),
-        hint('Reference previous messages when relevant.'),
-      );
+    this.context = new ContextEngine({ store }).set(
+      role('You are a helpful assistant with memory of our conversation.'),
+      hint('Reference previous messages when relevant.'),
+    );
   }
 
   async chat(message: string): Promise<string> {
@@ -87,8 +87,9 @@ class UserConversation {
 
   private constructor(userId: string) {
     this.store = new SqliteContextStore(`./data/users/${userId}/context.db`);
-    this.context = new ContextEngine({ store: this.store })
-      .set(role('You are a helpful assistant.'));
+    this.context = new ContextEngine({ store: this.store }).set(
+      role('You are a helpful assistant.'),
+    );
   }
 
   async chat(message: string): Promise<string> {
@@ -137,11 +138,12 @@ class ConversationManager {
 
   getConversation(conversationId: string): ContextEngine {
     const store = new SqliteContextStore(
-      `${this.dataDir}/${conversationId}.db`
+      `${this.dataDir}/${conversationId}.db`,
     );
 
-    return new ContextEngine({ store })
-      .set(role('You are a helpful assistant.'));
+    return new ContextEngine({ store }).set(
+      role('You are a helpful assistant.'),
+    );
   }
 
   async listConversations(): Promise<string[]> {
@@ -164,7 +166,7 @@ await manager.init();
 
 // Start new conversation
 const conv1 = manager.getConversation('work-project');
-conv1.set(user('Let\'s discuss the API design.'));
+conv1.set(user("Let's discuss the API design."));
 
 // Different conversation
 const conv2 = manager.getConversation('personal-notes');
@@ -239,8 +241,9 @@ class ManagedChatSession {
 
   constructor(sessionId: string) {
     const store = new SqliteContextStore(`./data/${sessionId}.db`);
-    this.context = new ContextEngine({ store })
-      .set(role('You are a helpful assistant.'));
+    this.context = new ContextEngine({ store }).set(
+      role('You are a helpful assistant.'),
+    );
   }
 
   async chat(message: string): Promise<string> {
@@ -250,11 +253,15 @@ class ManagedChatSession {
 
     // Check message count
     if (messages.length > this.maxMessages) {
-      console.warn(`Conversation has ${messages.length} messages, consider summarizing.`);
+      console.warn(
+        `Conversation has ${messages.length} messages, consider summarizing.`,
+      );
     }
 
     // Check token count
-    const estimate = await this.context.estimate('groq:llama-3.3-70b-versatile');
+    const estimate = await this.context.estimate(
+      'groq:llama-3.3-70b-versatile',
+    );
     if (estimate.limits.exceedsContext) {
       throw new Error('Conversation too long. Please start a new session.');
     }
@@ -285,8 +292,9 @@ class SummarizingSession {
 
   constructor(sessionId: string) {
     this.store = new SqliteContextStore(`./data/${sessionId}.db`);
-    this.context = new ContextEngine({ store: this.store })
-      .set(role('You are a helpful assistant with conversation history.'));
+    this.context = new ContextEngine({ store: this.store }).set(
+      role('You are a helpful assistant with conversation history.'),
+    );
   }
 
   async chat(message: string): Promise<string> {
@@ -319,7 +327,8 @@ class SummarizingSession {
     // Generate summary
     const summaryResponse = await generateText({
       model: groq('gpt-oss-20b'),
-      instructions: 'Summarize this conversation briefly, keeping key facts and context.',
+      instructions:
+        'Summarize this conversation briefly, keeping key facts and context.',
       messages: toSummarize.map((m) => ({
         role: m.role,
         content: m.content,
@@ -329,11 +338,10 @@ class SummarizingSession {
     // Clear and rebuild context
     await this.store.delete('fragments');
 
-    this.context = new ContextEngine({ store: this.store })
-      .set(
-        role('You are a helpful assistant with conversation history.'),
-        hint(`Previous conversation summary: ${summaryResponse.text}`),
-      );
+    this.context = new ContextEngine({ store: this.store }).set(
+      role('You are a helpful assistant with conversation history.'),
+      hint(`Previous conversation summary: ${summaryResponse.text}`),
+    );
 
     // Re-add recent messages
     for (const msg of toKeep) {
@@ -367,8 +375,9 @@ class MetadataSession {
 
   constructor(sessionId: string) {
     this.store = new SqliteContextStore(`./data/${sessionId}.db`);
-    this.context = new ContextEngine({ store: this.store })
-      .set(role('You are a helpful assistant.'));
+    this.context = new ContextEngine({ store: this.store }).set(
+      role('You are a helpful assistant.'),
+    );
   }
 
   async getMetadata(): Promise<ConversationMetadata | undefined> {
@@ -390,7 +399,7 @@ class MetadataSession {
     await this.context.save();
 
     // Update metadata
-    const metadata = await this.getMetadata() ?? {
+    const metadata = (await this.getMetadata()) ?? {
       title: message.slice(0, 50),
       createdAt: Date.now(),
       lastMessageAt: 0,

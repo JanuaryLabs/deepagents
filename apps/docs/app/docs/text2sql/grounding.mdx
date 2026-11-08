@@ -29,23 +29,24 @@ import { Postgres } from '@deepagents/text2sql/postgres';
 import * as postgres from '@deepagents/text2sql/postgres';
 
 const text2sql = new Text2Sql({
-  adapters: {
-    main: new Postgres({
-      execute: async (sql) => pool.query(sql).then(r => r.rows),
-      grounding: [
-        postgres.tables(),
-        postgres.views(),
-        postgres.info(),
-        postgres.indexes(),
-        postgres.constraints(),
-        postgres.rowCount(),
-        postgres.columnStats(),
-        postgres.columnValues(),
-      ],
-    }),
-  },
+adapters: {
+main: new Postgres({
+execute: async (sql) => pool.query(sql).then(r => r.rows),
+grounding: [
+postgres.tables(),
+postgres.views(),
+postgres.info(),
+postgres.indexes(),
+postgres.constraints(),
+postgres.rowCount(),
+postgres.columnStats(),
+postgres.columnValues(),
+],
+}),
+},
 });
-```
+
+````
 </Tab>
 <Tab value="SQLite">
 ```typescript
@@ -70,7 +71,8 @@ const text2sql = new Text2Sql({
     }),
   },
 });
-```
+````
+
 </Tab>
 <Tab value="DuckDB">
 ```typescript
@@ -81,31 +83,32 @@ import { DuckDB } from '@deepagents/text2sql/duckdb';
 import * as duckdb from '@deepagents/text2sql/duckdb';
 
 const instance = await DuckDBInstance.create('./analytics.duckdb', {
-  access_mode: 'READ_ONLY',
+access_mode: 'READ_ONLY',
 });
 const connection = await instance.connect();
 
 const text2sql = new Text2Sql({
-  adapters: {
-    main: new DuckDB({
-      execute: async (sql) => {
-        const reader = await connection.runAndReadAll(sql);
-        return reader.getRowObjectsJson();
-      },
-      grounding: [
-        duckdb.tables(),
-        duckdb.views(),
-        duckdb.info(),
-        duckdb.indexes(),
-        duckdb.constraints(),
-        duckdb.rowCount(),
-        duckdb.columnStats(),
-        duckdb.columnValues(),
-      ],
-    }),
-  },
+adapters: {
+main: new DuckDB({
+execute: async (sql) => {
+const reader = await connection.runAndReadAll(sql);
+return reader.getRowObjectsJson();
+},
+grounding: [
+duckdb.tables(),
+duckdb.views(),
+duckdb.info(),
+duckdb.indexes(),
+duckdb.constraints(),
+duckdb.rowCount(),
+duckdb.columnStats(),
+duckdb.columnValues(),
+],
+}),
+},
 });
-```
+
+````
 </Tab>
 <Tab value="SQL Server">
 ```typescript
@@ -133,7 +136,8 @@ const text2sql = new Text2Sql({
     }),
   },
 });
-```
+````
+
 </Tab>
 <Tab value="MySQL/MariaDB">
 ```typescript
@@ -142,26 +146,27 @@ import { Mysql } from '@deepagents/text2sql/mysql';
 import * as mysqlGrounding from '@deepagents/text2sql/mysql';
 
 const text2sql = new Text2Sql({
-  adapters: {
-    main: new Mysql({
-      execute: async (sql) => {
-        const [rows] = await pool.query(sql);
-        return rows;
-      },
-      grounding: [
-        mysqlGrounding.tables(),
-        mysqlGrounding.views(),
-        mysqlGrounding.info(),
-        mysqlGrounding.indexes(),
-        mysqlGrounding.constraints(),
-        mysqlGrounding.rowCount(),
-        mysqlGrounding.columnStats(),
-        mysqlGrounding.columnValues(),
-      ],
-    }),
-  },
+adapters: {
+main: new Mysql({
+execute: async (sql) => {
+const [rows] = await pool.query(sql);
+return rows;
+},
+grounding: [
+mysqlGrounding.tables(),
+mysqlGrounding.views(),
+mysqlGrounding.info(),
+mysqlGrounding.indexes(),
+mysqlGrounding.constraints(),
+mysqlGrounding.rowCount(),
+mysqlGrounding.columnStats(),
+mysqlGrounding.columnValues(),
+],
+}),
+},
 });
-```
+
+````
 </Tab>
 <Tab value="BigQuery">
 ```typescript
@@ -197,7 +202,8 @@ const text2sql = new Text2Sql({
     }),
   },
 });
-```
+````
+
 </Tab>
 <Tab value="ClickHouse">
 ```typescript
@@ -206,23 +212,24 @@ import { ClickHouse } from '@deepagents/text2sql/clickhouse';
 import * as clickhouse from '@deepagents/text2sql/clickhouse';
 
 const text2sql = new Text2Sql({
-  adapters: {
-    main: new ClickHouse({
-      defaultDatabase: 'analytics',
-      execute: query,
-      validate: async () => undefined,
-      grounding: [
-        clickhouse.tables(),
-        clickhouse.views(),
-        clickhouse.info(),
-        clickhouse.indexes(),
-        clickhouse.constraints(),
-        clickhouse.rowCount(),
-      ],
-    }),
-  },
+adapters: {
+main: new ClickHouse({
+defaultDatabase: 'analytics',
+execute: query,
+validate: async () => undefined,
+grounding: [
+clickhouse.tables(),
+clickhouse.views(),
+clickhouse.info(),
+clickhouse.indexes(),
+clickhouse.constraints(),
+clickhouse.rowCount(),
+],
+}),
+},
 });
-```
+
+````
 </Tab>
 </Tabs>
 
@@ -252,13 +259,13 @@ tables({
   // Traverse backward (parent → child) finding referencing tables
   backward: 1,
 })
-```
+````
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `filter` | `string[]` \| `RegExp` \| `(name: string) => boolean` | Select which tables to include |
-| `forward` | `boolean` \| `number` | Follow FKs from child to parent tables |
-| `backward` | `boolean` \| `number` | Find tables that reference these tables |
+| Option     | Type                                                  | Description                             |
+| ---------- | ----------------------------------------------------- | --------------------------------------- |
+| `filter`   | `string[]` \| `RegExp` \| `(name: string) => boolean` | Select which tables to include          |
+| `forward`  | `boolean` \| `number`                                 | Follow FKs from child to parent tables  |
+| `backward` | `boolean` \| `number`                                 | Find tables that reference these tables |
 
 #### `views(config?)`
 
@@ -268,7 +275,7 @@ Discovers database views and their columns.
 views({
   // Same filter options as tables()
   filter: ['active_users', 'sales_summary'],
-})
+});
 ```
 
 #### `info()`
@@ -276,7 +283,7 @@ views({
 Collects database dialect, version, and connection info. Helps the AI understand database-specific SQL syntax.
 
 ```typescript
-info()
+info();
 // Returns: { dialect: 'postgresql', version: '15.0', database: 'mydb' }
 ```
 
@@ -289,7 +296,7 @@ These groundings enhance the schema with performance-relevant metadata. They run
 Marks which columns have indexes. Helps the AI generate queries that use indexed columns for filtering and sorting.
 
 ```typescript
-indexes()
+indexes();
 // Annotates columns with isIndexed: true
 ```
 
@@ -298,7 +305,7 @@ indexes()
 Collects CHECK, UNIQUE, NOT NULL, DEFAULT, PRIMARY KEY, and FOREIGN KEY constraints.
 
 ```typescript
-constraints()
+constraints();
 // Annotates tables with constraint information
 ```
 
@@ -307,26 +314,26 @@ constraints()
 Counts rows per table and classifies by size. Helps the AI avoid expensive full table scans on large tables.
 
 ```typescript
-rowCount()
+rowCount();
 // Annotates tables with rowCount and sizeHint
 ```
 
 Size classifications:
 
-| Size Hint | Row Count |
-|-----------|-----------|
-| tiny | < 100 |
-| small | 100 - 999 |
-| medium | 1,000 - 9,999 |
-| large | 10,000 - 99,999 |
-| huge | >= 100,000 |
+| Size Hint | Row Count       |
+| --------- | --------------- |
+| tiny      | < 100           |
+| small     | 100 - 999       |
+| medium    | 1,000 - 9,999   |
+| large     | 10,000 - 99,999 |
+| huge      | >= 100,000      |
 
 #### `columnStats()`
 
 Collects min/max values and null fraction for numeric and date columns.
 
 ```typescript
-columnStats()
+columnStats();
 // Annotates columns with stats: { min, max, nullFraction }
 ```
 
@@ -335,7 +342,7 @@ columnStats()
 Detects enum-like and low-cardinality columns (like status, type, or category columns) and caches their values.
 
 ```typescript
-columnValues()
+columnValues();
 // Annotates columns with kind: 'LowCardinality' and values: ['active', 'inactive', ...]
 ```
 
@@ -361,13 +368,13 @@ All filter options work the same way across `tables()` and `views()`:
 
 ```typescript
 // Include specific tables by name
-tables({ filter: ['users', 'orders', 'products'] })
+tables({ filter: ['users', 'orders', 'products'] });
 
 // Include tables matching a pattern
-tables({ filter: /^public\./ })
+tables({ filter: /^public\./ });
 
 // Custom predicate
-tables({ filter: (name) => !name.includes('_archive') })
+tables({ filter: (name) => !name.includes('_archive') });
 ```
 
 ## Relationship Traversal
@@ -378,21 +385,21 @@ The `forward` and `backward` options control how `tables()` discovers related ta
 // Start with 'orders' and follow FKs to find 'users', 'products', etc.
 tables({
   filter: ['orders'],
-  forward: 2,  // Follow FKs up to 2 levels deep
-})
+  forward: 2, // Follow FKs up to 2 levels deep
+});
 
 // Start with 'users' and find all tables that reference it
 tables({
   filter: ['users'],
-  backward: 1,  // Find immediate children only
-})
+  backward: 1, // Find immediate children only
+});
 
 // Both directions
 tables({
   filter: ['orders'],
-  forward: true,   // Unlimited forward traversal
-  backward: true,  // Unlimited backward traversal
-})
+  forward: true, // Unlimited forward traversal
+  backward: true, // Unlimited backward traversal
+});
 ```
 
 ## Minimal Configuration
@@ -405,10 +412,11 @@ For simple use cases, you can use a minimal grounding setup:
 import * as postgres from '@deepagents/text2sql/postgres';
 
 grounding: [
-  postgres.tables(),
-  postgres.info(),
+postgres.tables(),
+postgres.info(),
 ]
-```
+
+````
 </Tab>
 <Tab value="SQLite">
 ```typescript
@@ -418,17 +426,19 @@ grounding: [
   sqlite.tables(),
   sqlite.info(),
 ]
-```
+````
+
 </Tab>
 <Tab value="DuckDB">
 ```typescript
 import * as duckdb from '@deepagents/text2sql/duckdb';
 
 grounding: [
-  duckdb.tables(),
-  duckdb.info(),
+duckdb.tables(),
+duckdb.info(),
 ]
-```
+
+````
 </Tab>
 <Tab value="SQL Server">
 ```typescript
@@ -438,17 +448,19 @@ grounding: [
   sqlserver.tables(),
   sqlserver.info(),
 ]
-```
+````
+
 </Tab>
 <Tab value="MySQL/MariaDB">
 ```typescript
 import * as mysqlGrounding from '@deepagents/text2sql/mysql';
 
 grounding: [
-  mysqlGrounding.tables(),
-  mysqlGrounding.info(),
+mysqlGrounding.tables(),
+mysqlGrounding.info(),
 ]
-```
+
+````
 </Tab>
 <Tab value="BigQuery">
 ```typescript
@@ -458,17 +470,19 @@ grounding: [
   bigquery.tables(),
   bigquery.info(),
 ]
-```
+````
+
 </Tab>
 <Tab value="ClickHouse">
 ```typescript
 import * as clickhouse from '@deepagents/text2sql/clickhouse';
 
 grounding: [
-  clickhouse.tables(),
-  clickhouse.info(),
+clickhouse.tables(),
+clickhouse.info(),
 ]
-```
+
+````
 </Tab>
 </Tabs>
 
@@ -478,7 +492,7 @@ Pass an empty array to disable all automatic introspection:
 
 ```typescript
 grounding: []
-```
+````
 
 This is useful when providing custom introspection via the adapter's `introspect` option.
 

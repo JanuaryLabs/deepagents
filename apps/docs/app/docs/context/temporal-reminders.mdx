@@ -105,10 +105,10 @@ localeReminder(); // defaults: English (US), UTC
 localeReminder({ language: 'Arabic (SA)', timeZone: 'Asia/Riyadh' });
 ```
 
-| Parameter  | Type     | Default        | Description              |
-| ---------- | -------- | -------------- | ------------------------ |
-| `language` | `string` | `English (US)` | User's language          |
-| `timeZone` | `string` | `UTC`          | User's timezone          |
+| Parameter  | Type     | Default        | Description     |
+| ---------- | -------- | -------------- | --------------- |
+| `language` | `string` | `English (US)` | User's language |
+| `timeZone` | `string` | `UTC`          | User's timezone |
 
 Fires on the first turn (no previous locale) or when the config changes. Skips if unchanged.
 
@@ -157,7 +157,7 @@ engine.set(
 Convenience wrapper that returns all 5 temporal atoms as a `ContextFragment[]`. Does not include `localeReminder` — add it separately if needed.
 
 ```typescript
-import { temporalReminder, localeReminder } from '@deepagents/context';
+import { localeReminder, temporalReminder } from '@deepagents/context';
 
 // Temporal only
 engine.set(...temporalReminder({ tz: 'UTC' }), user('hello'));
@@ -170,9 +170,9 @@ engine.set(
 );
 ```
 
-| Parameter | Type     | Default | Description                        |
-| --------- | -------- | ------- | ---------------------------------- |
-| `tz`      | `string` | `UTC`   | Timezone passed to all 5 atoms     |
+| Parameter | Type     | Default | Description                    |
+| --------- | -------- | ------- | ------------------------------ |
+| `tz`      | `string` | `UTC`   | Timezone passed to all 5 atoms |
 
 ## Predicates and Custom Reminders
 

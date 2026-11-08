@@ -6,8 +6,7 @@ import {
   type BaseContextualExtractorOptions,
 } from './base-contextual-extractor.ts';
 
-export interface WindowedContextExtractorOptions
-  extends BaseContextualExtractorOptions {
+export interface WindowedContextExtractorOptions extends BaseContextualExtractorOptions {
   windowSize: number;
 }
 

@@ -7,23 +7,24 @@ Renderers transform context fragments into formatted strings. The package includ
 
 ## Available Renderers
 
-| Renderer | Format | Best For |
-| --- | --- | --- |
-| `XmlRenderer` | `<tag>content</tag>` | Claude, GPT-4, structured prompts (default) |
-| `MarkdownRenderer` | `## Header`, `- item` | Human-readable prompts, debugging |
-| `TomlRenderer` | `[section]`, `key = "value"` | Configuration-like contexts |
-| `ToonRenderer` | `key: value`, compact arrays | Token-efficient prompts, large contexts |
+| Renderer           | Format                       | Best For                                    |
+| ------------------ | ---------------------------- | ------------------------------------------- |
+| `XmlRenderer`      | `<tag>content</tag>`         | Claude, GPT-4, structured prompts (default) |
+| `MarkdownRenderer` | `## Header`, `- item`        | Human-readable prompts, debugging           |
+| `TomlRenderer`     | `[section]`, `key = "value"` | Configuration-like contexts                 |
+| `ToonRenderer`     | `key: value`, compact arrays | Token-efficient prompts, large contexts     |
 
 ## Side-by-Side Comparison
 
 Given these fragments:
 
 ```typescript
-import { role, hint, fragment } from '@deepagents/context';
+import { fragment, hint, role } from '@deepagents/context';
 
 const fragments = [
   role('You are a SQL expert.'),
-  fragment('guidelines',
+  fragment(
+    'guidelines',
     hint('Use CTEs for complex queries'),
     hint('Always include LIMIT'),
   ),
@@ -44,9 +45,11 @@ const fragments = [
 
 ```markdown
 ## Role
+
 You are a SQL expert.
 
 ## Guidelines
+
 - **hint**: Use CTEs for complex queries
 - **hint**: Always include LIMIT
 ```
@@ -73,23 +76,27 @@ guidelines:
 ## Choosing a Renderer
 
 ### Use XML (Default) When:
+
 - Working with Claude or GPT models that handle XML well
 - You need clear structural boundaries
 - Fragment names should be semantic tags
 - You're building production prompts
 
 ### Use Markdown When:
+
 - Debugging prompts (most human-readable)
 - Models trained on documentation
 - You want familiar formatting
 - Logging or displaying prompts to users
 
 ### Use TOML When:
+
 - Context resembles configuration
 - You have key-value structured data
 - Models understand TOML syntax
 
 ### Use TOON When:
+
 - Token count is critical
 - Large contexts that need compression
 - Tabular data (TOON has special array handling)
@@ -100,14 +107,13 @@ guidelines:
 ```typescript
 import {
   ContextEngine,
-  XmlRenderer,
   MarkdownRenderer,
   TomlRenderer,
   ToonRenderer,
+  XmlRenderer,
 } from '@deepagents/context';
 
-const context = new ContextEngine({ store })
-  .set(role('You are helpful.'));
+const context = new ContextEngine({ store }).set(role('You are helpful.'));
 
 // XML (default)
 const { systemPrompt: xml } = await context.resolve();
@@ -168,14 +174,15 @@ new XmlRenderer({ groupFragments: true }).render(fragments);
 
 Approximate token comparison for the same content:
 
-| Renderer | Relative Tokens | Notes |
-| --- | --- | --- |
-| XML | 100% (baseline) | Most verbose |
-| Markdown | ~85% | Headers add overhead |
-| TOML | ~75% | Compact for flat data |
-| TOON | ~60-70% | Most compact, especially for arrays |
+| Renderer | Relative Tokens | Notes                               |
+| -------- | --------------- | ----------------------------------- |
+| XML      | 100% (baseline) | Most verbose                        |
+| Markdown | ~85%            | Headers add overhead                |
+| TOML     | ~75%            | Compact for flat data               |
+| TOON     | ~60-70%         | Most compact, especially for arrays |
 
 TOON's efficiency comes from:
+
 - No closing tags
 - Minimal punctuation
 - Tabular array format (CSV-like headers)
@@ -185,26 +192,41 @@ TOON's efficiency comes from:
 Extend `ContextRenderer` for custom formats:
 
 ```typescript
-import { ContextRenderer, ContextFragment } from '@deepagents/context';
+import { ContextFragment, ContextRenderer } from '@deepagents/context';
 
 class JsonRenderer extends ContextRenderer {
   render(fragments: ContextFragment[]): string {
     return JSON.stringify(fragments, null, 2);
   }
 
-  protected renderFragment(fragment: ContextFragment, ctx: RenderContext): string {
+  protected renderFragment(
+    fragment: ContextFragment,
+    ctx: RenderContext,
+  ): string {
     return JSON.stringify(fragment);
   }
 
-  protected renderPrimitive(key: string, value: string, ctx: RenderContext): string {
+  protected renderPrimitive(
+    key: string,
+    value: string,
+    ctx: RenderContext,
+  ): string {
     return `"${key}": "${value}"`;
   }
 
-  protected renderArray(key: string, items: FragmentData[], ctx: RenderContext): string {
+  protected renderArray(
+    key: string,
+    items: FragmentData[],
+    ctx: RenderContext,
+  ): string {
     return `"${key}": ${JSON.stringify(items)}`;
   }
 
-  protected renderObject(key: string, obj: FragmentObject, ctx: RenderContext): string {
+  protected renderObject(
+    key: string,
+    obj: FragmentObject,
+    ctx: RenderContext,
+  ): string {
     return `"${key}": ${JSON.stringify(obj)}`;
   }
 }

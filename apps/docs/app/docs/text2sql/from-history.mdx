@@ -19,7 +19,6 @@ console.log(pairs);
 // ]
 ```
 
-
 ## How It Works
 
 `MessageExtractor` scans chat messages for `db_query` tool calls:
@@ -51,10 +50,12 @@ By default, only successful queries are extracted:
 const pairs = await new MessageExtractor(messages).toPairs();
 
 // Include failures for error analysis
-const allPairs = await new MessageExtractor(messages, { includeFailures: true }).toPairs();
+const allPairs = await new MessageExtractor(messages, {
+  includeFailures: true,
+}).toPairs();
 
 // Filter later
-const failed = allPairs.filter(p => !p.success);
+const failed = allPairs.filter((p) => !p.success);
 ```
 
 ### Custom Tool Name
@@ -62,7 +63,9 @@ const failed = allPairs.filter(p => !p.success);
 If you use a different tool name for queries:
 
 ```typescript
-const pairs = await new MessageExtractor(messages, { toolName: 'execute_sql' }).toPairs();
+const pairs = await new MessageExtractor(messages, {
+  toolName: 'execute_sql',
+}).toPairs();
 ```
 
 ## Message Format
@@ -170,7 +173,7 @@ import { MessageExtractor } from '@deepagents/text2sql/synthesis';
 
 // Load chat history
 const chat = await history.getChat('chat-123');
-const messages = chat.messages.map(m => m.content);
+const messages = chat.messages.map((m) => m.content);
 
 // Extract pairs
 const pairs = await new MessageExtractor(messages).toPairs();
@@ -197,7 +200,7 @@ const chats = await history.listChats('user-456');
 
 for (const chatSummary of chats) {
   const chat = await history.getChat(chatSummary.id);
-  const messages = chat.messages.map(m => m.content);
+  const messages = chat.messages.map((m) => m.content);
 
   const pairs = await new MessageExtractor(messages).toPairs();
   allPairs.push(...pairs);
@@ -217,10 +220,10 @@ import {
 } from '@deepagents/text2sql/synthesis';
 
 const pairs = await new ValidatedProducer(
-    new MessageExtractor(messages),
-    adapter,
-    { execute: false } // Just validate syntax
-  ).toPairs();
+  new MessageExtractor(messages),
+  adapter,
+  { execute: false }, // Just validate syntax
+).toPairs();
 ```
 
 ## Best Practices

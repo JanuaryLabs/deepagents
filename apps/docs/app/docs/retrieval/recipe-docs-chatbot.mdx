@@ -21,12 +21,13 @@ npm install @deepagents/retrieval @deepagents/agent @ai-sdk/groq ai zod
 ## Complete Implementation
 
 ```typescript
-import { agent, instructions, execute } from '@deepagents/agent';
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
-import { local } from '@deepagents/retrieval/connectors';
 import { groq } from '@ai-sdk/groq';
 import { tool } from 'ai';
 import z from 'zod';
+
+import { agent, execute, instructions } from '@deepagents/agent';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
 
 // Set up retrieval infrastructure
 const store = nodeSQLite('./docs.db', 384);
@@ -35,7 +36,8 @@ const connector = local('docs/**/*.{md,mdx}');
 
 // Create a search tool for the agent
 const searchDocsTool = tool({
-  description: 'Search documentation for relevant information. Use this to find answers to user questions.',
+  description:
+    'Search documentation for relevant information. Use this to find answers to user questions.',
   parameters: z.object({
     query: z.string().describe('The search query based on the user question'),
   }),
@@ -47,7 +49,7 @@ const searchDocsTool = tool({
     });
 
     // Return top 5 results with metadata
-    return results.slice(0, 5).map(r => ({
+    return results.slice(0, 5).map((r) => ({
       source: r.document_id,
       content: r.content,
       relevance: r.similarity.toFixed(2),
@@ -107,9 +109,9 @@ await chat('How do I deploy to production?');
 The retrieval infrastructure indexes your documentation files:
 
 ```typescript
-const store = nodeSQLite('./docs.db', 384);      // Vector database
-const embedder = fastembed();                     // Embedding model
-const connector = local('docs/**/*.{md,mdx}');   // Documentation files
+const store = nodeSQLite('./docs.db', 384); // Vector database
+const embedder = fastembed(); // Embedding model
+const connector = local('docs/**/*.{md,mdx}'); // Documentation files
 ```
 
 ### 2. Search Tool
@@ -123,7 +125,11 @@ const searchDocsTool = tool({
     query: z.string(),
   }),
   execute: async ({ query }) => {
-    const results = await similaritySearch(query, { connector, store, embedder });
+    const results = await similaritySearch(query, {
+      connector,
+      store,
+      embedder,
+    });
     return results.slice(0, 5);
   },
 });
@@ -184,9 +190,7 @@ Add memory for multi-turn conversations:
 import { swarm } from '@deepagents/agent';
 
 // Use swarm() for UI frameworks with message history
-const messages = [
-  { role: 'user', content: 'How do I authenticate?' },
-];
+const messages = [{ role: 'user', content: 'How do I authenticate?' }];
 
 const stream = swarm(docsBot, messages, {});
 ```
@@ -223,10 +227,12 @@ Return structured data for UI integration:
 ```typescript
 const ResponseSchema = z.object({
   answer: z.string(),
-  sources: z.array(z.object({
-    file: z.string(),
-    relevance: z.number(),
-  })),
+  sources: z.array(
+    z.object({
+      file: z.string(),
+      relevance: z.number(),
+    }),
+  ),
   followUpQuestions: z.array(z.string()),
 });
 

@@ -8,7 +8,7 @@ The `TomlRenderer` produces TOML (Tom's Obvious Minimal Language) output. It's u
 ## Basic Usage
 
 ```typescript
-import { TomlRenderer, role, hint } from '@deepagents/context';
+import { TomlRenderer, hint, role } from '@deepagents/context';
 
 const renderer = new TomlRenderer();
 
@@ -118,10 +118,7 @@ tags = ["sql", "database", "query"]
 Fragment arrays render as sections:
 
 ```typescript
-fragment('guidelines',
-  hint('Use CTEs'),
-  hint('Avoid SELECT *'),
-)
+fragment('guidelines', hint('Use CTEs'), hint('Avoid SELECT *'));
 ```
 
 **Output:**
@@ -136,13 +133,13 @@ hint = "Avoid SELECT *"
 
 TOML preserves JavaScript types:
 
-| JavaScript | TOML |
-| --- | --- |
+| JavaScript | TOML       |
+| ---------- | ---------- |
 | `'string'` | `"string"` |
-| `42` | `42` |
-| `3.14` | `3.14` |
-| `true` | `true` |
-| `false` | `false` |
+| `42`       | `42`       |
+| `3.14`     | `3.14`     |
+| `true`     | `true`     |
+| `false`    | `false`    |
 
 ```typescript
 {
@@ -171,9 +168,9 @@ streaming = true
 Special characters in strings are escaped:
 
 | Character | Escaped |
-| --- | --- |
-| `\` | `\\` |
-| `"` | `\"` |
+| --------- | ------- |
+| `\`       | `\\`    |
+| `"`       | `\"`    |
 
 ```typescript
 { name: 'path', data: 'C:\\Users\\admin' }
@@ -183,12 +180,14 @@ Special characters in strings are escaped:
 ## When to Use TOML
 
 **Advantages:**
+
 - Clean, minimal syntax
 - Familiar to developers
 - Good for configuration-like data
 - Type-preserving
 
 **Trade-offs:**
+
 - Less common in LLM training data than XML/Markdown
 - Complex nesting can become verbose
 - Multiple values with same key may behave unexpectedly
@@ -200,19 +199,19 @@ import {
   ContextEngine,
   InMemoryContextStore,
   TomlRenderer,
-  role,
   fragment,
+  role,
 } from '@deepagents/context';
 
-const context = new ContextEngine({ store: new InMemoryContextStore() })
-  .set(
-    role('You are a DevOps assistant.'),
-    fragment('defaults',
-      { name: 'region', data: 'us-east-1' },
-      { name: 'timeout', data: 30 },
-      { name: 'retries', data: 3 },
-    ),
-  );
+const context = new ContextEngine({ store: new InMemoryContextStore() }).set(
+  role('You are a DevOps assistant.'),
+  fragment(
+    'defaults',
+    { name: 'region', data: 'us-east-1' },
+    { name: 'timeout', data: 30 },
+    { name: 'retries', data: 3 },
+  ),
+);
 
 const { systemPrompt } = await context.resolve({
   renderer: new TomlRenderer(),

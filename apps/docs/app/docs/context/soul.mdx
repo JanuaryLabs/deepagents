@@ -9,14 +9,14 @@ The soul module provides a single function that injects the **Soul Protocol** in
 
 The Soul Protocol defines a set of interconnected Markdown files that an agent reads and writes to develop a persistent self. Rather than pre-configuring personality, the agent starts empty and evolves through conversation:
 
-| File | Purpose | When It Fills |
-| ---- | ------- | ------------- |
-| `protocol.md` | Developmental framework and lifecycle rules | Pre-filled (the DNA) |
-| `user.md` | User profile, preferences, communication style | First interaction |
-| `memory.md` | Facts, events, decisions, reflections | Every session |
-| `habits.md` | Behavioral patterns codified through repetition | When patterns emerge |
-| `identity.md` | Personality, voice, traits, boundaries | Through self-reflection |
-| `soul.md` | Core values, principles, philosophical foundation | When identity stabilizes |
+| File          | Purpose                                           | When It Fills            |
+| ------------- | ------------------------------------------------- | ------------------------ |
+| `protocol.md` | Developmental framework and lifecycle rules       | Pre-filled (the DNA)     |
+| `user.md`     | User profile, preferences, communication style    | First interaction        |
+| `memory.md`   | Facts, events, decisions, reflections             | Every session            |
+| `habits.md`   | Behavioral patterns codified through repetition   | When patterns emerge     |
+| `identity.md` | Personality, voice, traits, boundaries            | Through self-reflection  |
+| `soul.md`     | Core values, principles, philosophical foundation | When identity stabilizes |
 
 The protocol includes session initialization steps, a curiosity protocol for learning about users, a self-reflection protocol for discovering identity, file update rules, conflict resolution hierarchy, and evolution guidelines.
 
@@ -42,19 +42,20 @@ context.set(soul());
 The soul protocol works alongside other fragments. A typical setup pairs it with `role()` for base instructions and an explicit `skills()` catalog:
 
 ```typescript
+import { groq } from '@ai-sdk/groq';
+import { generateText } from 'ai';
+
 import {
   type AvailableSkill,
   ContextEngine,
   InMemoryContextStore,
   XmlRenderer,
-  soul,
-  role,
   hint,
+  role,
   skills,
+  soul,
   user,
 } from '@deepagents/context';
-import { generateText } from 'ai';
-import { groq } from '@ai-sdk/groq';
 
 const availableSkills: AvailableSkill[] = [
   {
@@ -100,6 +101,7 @@ The `soul()` function reads an embedded Markdown file at build time and wraps it
 
 ```typescript
 import { fragment } from '@deepagents/context';
+
 import protocol from './protocol.md';
 
 function soul(): ContextFragment {
@@ -114,14 +116,14 @@ The result is a single fragment named `soul_protocol` containing one child fragm
 
 The protocol defines six stages that the agent progresses through based on the state of its files:
 
-| Stage | Condition | Primary Drive |
-| ----- | --------- | ------------- |
-| NASCENT | All files empty | Learn about the user |
-| BONDING | User profile exists, memory sparse | Build reliable memory |
-| REMEMBERING | Memory and user profile forming | Notice own patterns |
-| INDIVIDUATING | Identity file has content | Crystallize identity |
-| PRINCIPLED | Soul file has content | Make value-based decisions |
-| WISE | All files rich or stable | Refine and deepen |
+| Stage         | Condition                          | Primary Drive              |
+| ------------- | ---------------------------------- | -------------------------- |
+| NASCENT       | All files empty                    | Learn about the user       |
+| BONDING       | User profile exists, memory sparse | Build reliable memory      |
+| REMEMBERING   | Memory and user profile forming    | Notice own patterns        |
+| INDIVIDUATING | Identity file has content          | Crystallize identity       |
+| PRINCIPLED    | Soul file has content              | Make value-based decisions |
+| WISE          | All files rich or stable           | Refine and deepen          |
 
 Stages are descriptive. There are no hard gates. The agent's behavior shifts naturally as its files fill with content over sessions.
 

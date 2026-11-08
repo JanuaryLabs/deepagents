@@ -112,14 +112,14 @@ multiple statements, and out-of-scope relations fail closed.
 
 Import these from `@deepagents/text2sql/clickhouse`:
 
-| Function | Description |
-|----------|-------------|
-| `tables()` | Discovers tables and columns from access-filtered ClickHouse metadata |
-| `views()` | Discovers views and their definitions |
-| `info()` | Emits ClickHouse dialect, version, and identifier guidance |
-| `constraints()` | Reports nullability, default expressions, and primary-key columns |
-| `indexes()` | Reports primary-key and data-skipping indexes |
-| `rowCount()` | Executes `count()` for each grounded table |
+| Function        | Description                                                           |
+| --------------- | --------------------------------------------------------------------- |
+| `tables()`      | Discovers tables and columns from access-filtered ClickHouse metadata |
+| `views()`       | Discovers views and their definitions                                 |
+| `info()`        | Emits ClickHouse dialect, version, and identifier guidance            |
+| `constraints()` | Reports nullability, default expressions, and primary-key columns     |
+| `indexes()`     | Reports primary-key and data-skipping indexes                         |
+| `rowCount()`    | Executes `count()` for each grounded table                            |
 
 ClickHouse primary keys organize data and do not imply uniqueness. ClickHouse
 does not expose conventional foreign-key relationships, so grounding does not

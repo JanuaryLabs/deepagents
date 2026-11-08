@@ -9,12 +9,12 @@ rules, and query patterns for that domain.
 
 ## Available Recipes
 
-| Recipe | Domain | Key Focus |
-|--------|--------|-----------|
-| [Build an Agent (SQLite Store)](/docs/text2sql/recipes/agent-sqlite-store) | Setup | Streaming chat agent with `SqliteContextStore` for durable threads |
-| [E-Commerce](/docs/text2sql/recipes/e-commerce) | Retail, Orders, Customers | Revenue metrics, customer analytics, cart abandonment |
-| [Finance](/docs/text2sql/recipes/finance) | Banking, Investments | Loan analysis, portfolio metrics, compliance |
-| [Healthcare](/docs/text2sql/recipes/healthcare) | Clinical, Patient Data | HIPAA compliance, patient cohorts, clinical metrics |
+| Recipe                                                                     | Domain                    | Key Focus                                                          |
+| -------------------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------ |
+| [Build an Agent (SQLite Store)](/docs/text2sql/recipes/agent-sqlite-store) | Setup                     | Streaming chat agent with `SqliteContextStore` for durable threads |
+| [E-Commerce](/docs/text2sql/recipes/e-commerce)                            | Retail, Orders, Customers | Revenue metrics, customer analytics, cart abandonment              |
+| [Finance](/docs/text2sql/recipes/finance)                                  | Banking, Investments      | Loan analysis, portfolio metrics, compliance                       |
+| [Healthcare](/docs/text2sql/recipes/healthcare)                            | Clinical, Patient Data    | HIPAA compliance, patient cohorts, clinical metrics                |
 
 ## How Recipes Work
 
@@ -35,12 +35,15 @@ import {
   clarification,
   example,
   guardrail,
-  term,
   hint,
+  term,
 } from '@deepagents/context';
 
 const recipe = [
-  term('AOV', 'Average Order Value - total revenue divided by number of orders'),
+  term(
+    'AOV',
+    'Average Order Value - total revenue divided by number of orders',
+  ),
   hint('Active customer = ordered in last 90 days unless specified'),
   // ... more fragments from the recipe
 ];

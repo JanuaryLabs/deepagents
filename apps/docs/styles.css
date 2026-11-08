@@ -1,6 +1,6 @@
-@import 'tailwindcss';
-@import 'fumadocs-ui/css/neutral.css';
-@import 'fumadocs-ui/css/preset.css';
+@import "tailwindcss";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
 
 /* ═══════════════════════════════════════════════════════════════════════════
    BRUTALIST TERMINAL EDITORIAL DESIGN SYSTEM
@@ -13,9 +13,9 @@
   --cyan: #00d9ff;
 
   /* Font families */
-  --font-display: 'Fraunces', Georgia, serif;
-  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
-  --font-mono: 'IBM Plex Mono', 'Consolas', monospace;
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "Consolas", monospace;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -65,7 +65,7 @@
 }
 
 .section-title::before {
-  content: '◇ ';
+  content: "◇ ";
   color: var(--coral);
 }
 
@@ -181,7 +181,7 @@
 }
 
 .terminal-prompt::before {
-  content: '$ ';
+  content: "$ ";
   color: var(--coral);
 }
 
@@ -196,7 +196,7 @@
 
 /* Scanlines effect */
 .terminal-scanlines::after {
-  content: '';
+  content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -320,12 +320,12 @@
    HOMEPAGE TABS
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.brutalist-page [role='tablist'] {
+.brutalist-page [role="tablist"] {
   border-bottom: 1px solid var(--color-fd-border);
   gap: 0;
 }
 
-.brutalist-page [role='tablist'] button {
+.brutalist-page [role="tablist"] button {
   font-family: var(--font-mono);
   text-transform: lowercase;
   letter-spacing: 0.05em;
@@ -336,22 +336,22 @@
   margin-bottom: -1px;
 }
 
-.brutalist-page [role='tablist'] button[data-state='active'] {
+.brutalist-page [role="tablist"] button[data-state="active"] {
   border-bottom-color: var(--coral);
   color: var(--coral);
 }
 
-.brutalist-page [role='tablist'] button:hover:not([data-state='active']) {
+.brutalist-page [role="tablist"] button:hover:not([data-state="active"]) {
   color: var(--color-fd-foreground);
 }
 
 /* Tab content padding adjustment */
-.brutalist-page [role='tabpanel'] {
+.brutalist-page [role="tabpanel"] {
   padding-top: 0;
 }
 
 /* Remove double borders when code block is inside tab */
-.brutalist-page [role='tabpanel'] figure[data-rehype-pretty-code-figure] {
+.brutalist-page [role="tabpanel"] figure[data-rehype-pretty-code-figure] {
   margin: 0;
   border-top: none;
   border-top-left-radius: 0;

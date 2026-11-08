@@ -7,14 +7,14 @@ These recipes show practical patterns for using `@deepagents/context` with other
 
 ## Available Recipes
 
-| Recipe | Use Case |
-| --- | --- |
-| [Agent as Tool](/docs/context/recipes/as-tool) | Delegate bounded sub-tasks to a specialist agent exposed as a tool |
-| [Agent as Advisor](/docs/context/recipes/as-advisor) | Attach a stronger reviewer model for strategic guidance |
-| [Agent Integration](/docs/context/recipes/agent-integration) | Using context with `@deepagents/agent` for dynamic prompts |
-| [Text2SQL Integration](/docs/context/recipes/text2sql-integration) | Domain knowledge and schema context for SQL generation |
-| [Multi-Session Context](/docs/context/recipes/multi-session-context) | Persisting conversations across browser sessions |
-| [Error Recovery](/docs/context/recipes/error-recovery) | Intercepting API errors and triggering self-correction retries |
+| Recipe                                                               | Use Case                                                                                    |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [Agent as Tool](/docs/context/recipes/as-tool)                       | Delegate bounded sub-tasks to a specialist agent exposed as a tool                          |
+| [Agent as Advisor](/docs/context/recipes/as-advisor)                 | Attach a stronger reviewer model for strategic guidance                                     |
+| [Agent Integration](/docs/context/recipes/agent-integration)         | Using context with `@deepagents/agent` for dynamic prompts                                  |
+| [Text2SQL Integration](/docs/context/recipes/text2sql-integration)   | Domain knowledge and schema context for SQL generation                                      |
+| [Multi-Session Context](/docs/context/recipes/multi-session-context) | Persisting conversations across browser sessions                                            |
+| [Error Recovery](/docs/context/recipes/error-recovery)               | Intercepting API errors and triggering self-correction retries                              |
 | [GCS Cloud Storage Volumes](/docs/context/recipes/gcs-cloud-storage) | Persist sandbox files to Google Cloud Storage from a remote daemon or same-host Linux mount |
 
 ## Integration Philosophy
@@ -60,11 +60,10 @@ const myAgent = agent({
   name: 'Assistant',
   model: groq('gpt-oss-20b'),
   prompt: async (ctx) => {
-    const context = new ContextEngine({ store })
-      .set(
-        role('You are helpful.'),
-        hint(ctx.userPreference), // Dynamic based on agent context
-      );
+    const context = new ContextEngine({ store }).set(
+      role('You are helpful.'),
+      hint(ctx.userPreference), // Dynamic based on agent context
+    );
     return (await context.resolve()).systemPrompt;
   },
 });
@@ -76,25 +75,28 @@ Reuse domain context across multiple agents or tools:
 
 ```typescript
 // Shared domain context
-const domainContext = new ContextEngine({ store })
-  .set(
-    fragment('terminology',
-      hint('LTV = Lifetime Value'),
-      hint('MRR = Monthly Recurring Revenue'),
-    ),
-    fragment('rules',
-      hint('Never expose PII'),
-      hint('Limit results to 1000 rows'),
-    ),
-  );
+const domainContext = new ContextEngine({ store }).set(
+  fragment(
+    'terminology',
+    hint('LTV = Lifetime Value'),
+    hint('MRR = Monthly Recurring Revenue'),
+  ),
+  fragment(
+    'rules',
+    hint('Never expose PII'),
+    hint('Limit results to 1000 rows'),
+  ),
+);
 
 // Use in SQL generation
 const sqlPrompt = (await domainContext.resolve()).systemPrompt;
 
 // Use in report generation
-const reportPrompt = (await domainContext.resolve({
-  renderer: new MarkdownRenderer(),
-})).systemPrompt;
+const reportPrompt = (
+  await domainContext.resolve({
+    renderer: new MarkdownRenderer(),
+  })
+).systemPrompt;
 ```
 
 ### Pattern 3: Cost-Aware Processing
@@ -137,13 +139,15 @@ Compose context from multiple sources:
 
 ```typescript
 // Base context (always present)
-const baseContext = new ContextEngine({ store: new InMemoryContextStore() })
-  .set(role('You are a helpful assistant.'));
+const baseContext = new ContextEngine({
+  store: new InMemoryContextStore(),
+}).set(role('You are a helpful assistant.'));
 
 // Feature-specific context
 function withCodeReview(context: ContextEngine) {
   return context.set(
-    fragment('code_review_guidelines',
+    fragment(
+      'code_review_guidelines',
       hint('Check for security vulnerabilities'),
       hint('Verify error handling'),
       hint('Review naming conventions'),
@@ -153,7 +157,8 @@ function withCodeReview(context: ContextEngine) {
 
 function withDocumentation(context: ContextEngine) {
   return context.set(
-    fragment('documentation_guidelines',
+    fragment(
+      'documentation_guidelines',
       hint('Use JSDoc format'),
       hint('Include examples'),
       hint('Document edge cases'),

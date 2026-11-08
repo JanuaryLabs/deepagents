@@ -14,7 +14,7 @@ import { local } from '@deepagents/retrieval/connectors';
 ## Basic Usage
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { local } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./docs.db', 384);
@@ -33,16 +33,16 @@ The connector uses [fast-glob](https://github.com/mrmlnc/fast-glob) for pattern 
 
 ```typescript
 // Single extension
-local('**/*.md')
+local('**/*.md');
 
 // Multiple extensions
-local('**/*.{md,txt,mdx}')
+local('**/*.{md,txt,mdx}');
 
 // Specific directory
-local('docs/**/*.md')
+local('docs/**/*.md');
 
 // Exclude patterns (use cwd + pattern)
-local('src/**/*.ts', { cwd: './packages/api' })
+local('src/**/*.ts', { cwd: './packages/api' });
 ```
 
 ## Options
@@ -103,7 +103,7 @@ It also respects all `.gitignore` files from the root directory down to each fil
 Index your project's documentation for semantic search:
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { local } from '@deepagents/retrieval/connectors';
 
 async function searchDocs(query: string) {
@@ -127,7 +127,7 @@ const results = await searchDocs('API authentication bearer token');
 Index source code for semantic code search:
 
 ```typescript
-import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import { local } from '@deepagents/retrieval/connectors';
 
 async function searchCode(query: string) {
@@ -154,7 +154,7 @@ const results = await searchCode('user login validation');
 Index multiple projects into a single knowledge base:
 
 ```typescript
-import { ingest, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { fastembed, ingest, nodeSQLite } from '@deepagents/retrieval';
 import { local } from '@deepagents/retrieval/connectors';
 
 const store = nodeSQLite('./multi-project.db', 384);
@@ -182,8 +182,8 @@ for (const project of projects) {
 The connector generates a source ID based on the pattern:
 
 ```typescript
-local('**/*.md')        // sourceId: "glob:**/*.md"
-local('docs/**/*.mdx')  // sourceId: "glob:docs/**/*.mdx"
+local('**/*.md'); // sourceId: "glob:**/*.md"
+local('docs/**/*.mdx'); // sourceId: "glob:docs/**/*.mdx"
 ```
 
 This ID is used for caching and deduplication. Documents from the same pattern share a source ID.

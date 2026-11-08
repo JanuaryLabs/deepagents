@@ -8,14 +8,19 @@ The cost estimation system helps you predict API spending before making calls. I
 ## Basic Usage
 
 ```typescript
-import { ContextEngine, InMemoryContextStore, role, hint, user } from '@deepagents/context';
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  hint,
+  role,
+  user,
+} from '@deepagents/context';
 
-const context = new ContextEngine({ store: new InMemoryContextStore() })
-  .set(
-    role('You are a helpful assistant.'),
-    hint('Be concise.'),
-    user('What is TypeScript?'),
-  );
+const context = new ContextEngine({ store: new InMemoryContextStore() }).set(
+  role('You are a helpful assistant.'),
+  hint('Be concise.'),
+  user('What is TypeScript?'),
+);
 
 const estimate = await context.estimate('openai:gpt-4o');
 
@@ -31,14 +36,14 @@ console.log(`Exceeds limit: ${estimate.limits.exceedsContext}`);
 
 ```typescript
 interface EstimateResult {
-  model: string;      // Model name (e.g., 'gpt-4o')
-  provider: string;   // Provider (e.g., 'openai')
-  tokens: number;     // Estimated input token count
-  cost: number;       // Estimated cost in USD
+  model: string; // Model name (e.g., 'gpt-4o')
+  provider: string; // Provider (e.g., 'openai')
+  tokens: number; // Estimated input token count
+  cost: number; // Estimated cost in USD
   limits: {
-    context: number;      // Model's context window size
-    output: number;       // Model's max output tokens
-    exceedsContext: boolean;  // True if tokens > context limit
+    context: number; // Model's context window size
+    output: number; // Model's max output tokens
+    exceedsContext: boolean; // True if tokens > context limit
   };
 }
 ```
@@ -76,7 +81,7 @@ const estimate = await context.estimate('openai:gpt-4o');
 
 if (estimate.limits.exceedsContext) {
   throw new Error(
-    `Context (${estimate.tokens} tokens) exceeds model limit (${estimate.limits.context})`
+    `Context (${estimate.tokens} tokens) exceeds model limit (${estimate.limits.context})`,
   );
 }
 
@@ -96,7 +101,9 @@ const estimate = await context.estimate('openai:gpt-4o');
 if (estimate.cost > MAX_COST_PER_REQUEST) {
   // Use a cheaper model
   const cheaperEstimate = await context.estimate('openai:gpt-4o-mini');
-  console.log(`Switching to gpt-4o-mini (${cheaperEstimate.cost.toFixed(6)} vs ${estimate.cost.toFixed(6)})`);
+  console.log(
+    `Switching to gpt-4o-mini (${cheaperEstimate.cost.toFixed(6)} vs ${estimate.cost.toFixed(6)})`,
+  );
 }
 ```
 
@@ -113,7 +120,7 @@ async function selectCheapestModel(
     candidates.map(async (model) => ({
       model,
       estimate: await context.estimate(model as any),
-    }))
+    })),
   );
 
   // Filter out models that exceed context limit
@@ -141,7 +148,7 @@ const model = await selectCheapestModel(context, [
 The `ModelsRegistry` class manages model information and tokenization:
 
 ```typescript
-import { getModelsRegistry, ModelsRegistry } from '@deepagents/context';
+import { ModelsRegistry, getModelsRegistry } from '@deepagents/context';
 
 // Get singleton instance
 const registry = getModelsRegistry();
@@ -173,7 +180,7 @@ const allModels = registry.list(); // ['openai:gpt-4o', 'anthropic:claude-3-5-so
 The default tokenizer uses `gpt-tokenizer`, which works well for GPT models with ~5-10% variance for others. Register custom tokenizers for better accuracy:
 
 ```typescript
-import { getModelsRegistry, type Tokenizer } from '@deepagents/context';
+import { type Tokenizer, getModelsRegistry } from '@deepagents/context';
 
 // Custom tokenizer for a model family
 const llamaTokenizer: Tokenizer = {
@@ -208,7 +215,7 @@ interface Tokenizer {
 Different renderers produce different token counts:
 
 ```typescript
-import { XmlRenderer, ToonRenderer } from '@deepagents/context';
+import { ToonRenderer, XmlRenderer } from '@deepagents/context';
 
 // XML (default) - more tokens
 const xmlEstimate = await context.estimate('openai:gpt-4o');
@@ -218,9 +225,15 @@ const toonEstimate = await context.estimate('openai:gpt-4o', {
   renderer: new ToonRenderer(),
 });
 
-console.log(`XML: ${xmlEstimate.tokens} tokens, $${xmlEstimate.cost.toFixed(6)}`);
-console.log(`TOON: ${toonEstimate.tokens} tokens, $${toonEstimate.cost.toFixed(6)}`);
-console.log(`Savings: ${((1 - toonEstimate.tokens / xmlEstimate.tokens) * 100).toFixed(1)}%`);
+console.log(
+  `XML: ${xmlEstimate.tokens} tokens, $${xmlEstimate.cost.toFixed(6)}`,
+);
+console.log(
+  `TOON: ${toonEstimate.tokens} tokens, $${toonEstimate.cost.toFixed(6)}`,
+);
+console.log(
+  `Savings: ${((1 - toonEstimate.tokens / xmlEstimate.tokens) * 100).toFixed(1)}%`,
+);
 ```
 
 ## Convenience Function
@@ -242,11 +255,11 @@ Pricing comes from [models.dev](https://models.dev), which aggregates pricing fr
 
 ```typescript
 interface ModelCost {
-  input: number;       // USD per 1M input tokens
-  output: number;      // USD per 1M output tokens
+  input: number; // USD per 1M input tokens
+  output: number; // USD per 1M output tokens
   cache_read?: number; // USD per 1M cached read tokens
-  cache_write?: number;// USD per 1M cached write tokens
-  reasoning?: number;  // USD per 1M reasoning tokens
+  cache_write?: number; // USD per 1M cached write tokens
+  reasoning?: number; // USD per 1M reasoning tokens
 }
 ```
 
@@ -260,8 +273,8 @@ interface ModelInfo {
   provider: string;
   cost: ModelCost;
   limit: {
-    context: number;  // Max input tokens
-    output: number;   // Max output tokens
+    context: number; // Max input tokens
+    output: number; // Max output tokens
   };
 }
 ```

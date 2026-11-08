@@ -30,11 +30,7 @@ const transport = createPostHogTransport({
 
 const adapter = new PostHog({
   transport,
-  grounding: [
-    info(),
-    schema(),
-    definitions(),
-  ],
+  grounding: [info(), schema(), definitions()],
 });
 
 const text2sql = new Text2Sql({

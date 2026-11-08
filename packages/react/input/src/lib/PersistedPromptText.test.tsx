@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { PersistedPromptText } from '@deepagents/react-input/browser';
 import { describe, expect, it, vi } from 'vitest';
+
+import { PersistedPromptText } from '@deepagents/react-input/browser';
 
 describe('PersistedPromptText', () => {
   it('renders only the supported prompt markup', () => {

@@ -18,7 +18,11 @@ abstract class ContextRenderer {
   abstract render(fragments: ContextFragment[]): string;
 
   // Template method - dispatches to type-specific handlers
-  protected renderValue(key: string, value: unknown, ctx: RenderContext): string {
+  protected renderValue(
+    key: string,
+    value: unknown,
+    ctx: RenderContext,
+  ): string {
     if (value == null) return '';
     if (isFragment(value)) return this.renderFragment(value, ctx);
     if (Array.isArray(value)) return this.renderArray(key, value, ctx);
@@ -27,10 +31,25 @@ abstract class ContextRenderer {
   }
 
   // Hooks - subclasses implement these
-  protected abstract renderFragment(fragment: ContextFragment, ctx: RenderContext): string;
-  protected abstract renderPrimitive(key: string, value: string, ctx: RenderContext): string;
-  protected abstract renderArray(key: string, items: FragmentData[], ctx: RenderContext): string;
-  protected abstract renderObject(key: string, obj: FragmentObject, ctx: RenderContext): string;
+  protected abstract renderFragment(
+    fragment: ContextFragment,
+    ctx: RenderContext,
+  ): string;
+  protected abstract renderPrimitive(
+    key: string,
+    value: string,
+    ctx: RenderContext,
+  ): string;
+  protected abstract renderArray(
+    key: string,
+    items: FragmentData[],
+    ctx: RenderContext,
+  ): string;
+  protected abstract renderObject(
+    key: string,
+    obj: FragmentObject,
+    ctx: RenderContext,
+  ): string;
 }
 ```
 
@@ -68,8 +87,8 @@ Context passed through rendering for state tracking:
 
 ```typescript
 interface RenderContext {
-  depth: number;   // Current nesting level (for indentation)
-  path: string[];  // Current path (for TOML sections)
+  depth: number; // Current nesting level (for indentation)
+  path: string[]; // Current path (for TOML sections)
 }
 ```
 
@@ -119,6 +138,7 @@ protected sanitizeData(data: FragmentData, seen: WeakSet<object>): FragmentData 
 ```
 
 **Why WeakSet?**
+
 - Doesn't prevent garbage collection of seen objects
 - O(1) lookup for cycle detection
 - Automatically cleared when objects go out of scope
@@ -202,9 +222,11 @@ Markdown output using headers and bullet lists.
 
 ```markdown
 ## Role
+
 You are a SQL expert.
 
 ## Hints
+
 - **hint**: Use CTEs for complex queries
 - **hint**: Prefer explicit JOINs
 ```
@@ -260,6 +282,7 @@ protected renderObject(key: string, obj: FragmentObject, ctx: RenderContext): st
 ```
 
 **Example path progression:**
+
 - `[database]`
 - `[database.connection]`
 - `[database.connection.pool]`
@@ -378,19 +401,20 @@ TOON only quotes strings when necessary:
 
 ## Renderer Comparison
 
-| Aspect | XML | Markdown | TOML | TOON |
-|--------|-----|----------|------|------|
-| Token efficiency | Medium | Medium | Medium | High |
-| Human readability | Medium | High | High | Medium |
-| Model preference | Claude/GPT | General | Config-heavy | Token-constrained |
-| Nested structures | Tags | Bullets | Sections | Indentation |
-| Arrays | `<items>` | `- item` | `[values]` | `[n]:` or CSV |
+| Aspect            | XML        | Markdown | TOML         | TOON              |
+| ----------------- | ---------- | -------- | ------------ | ----------------- |
+| Token efficiency  | Medium     | Medium   | Medium       | High              |
+| Human readability | Medium     | High     | High         | Medium            |
+| Model preference  | Claude/GPT | General  | Config-heavy | Token-constrained |
+| Nested structures | Tags       | Bullets  | Sections     | Indentation       |
+| Arrays            | `<items>`  | `- item` | `[values]`   | `[n]:` or CSV     |
 
 ### Same Input, Different Outputs
 
 ```typescript
 const fragments = [
-  fragment('config',
+  fragment(
+    'config',
     { debug: true, timeout: 30 },
     fragment('database', { host: 'localhost', port: 5432 }),
   ),
@@ -398,6 +422,7 @@ const fragments = [
 ```
 
 **XmlRenderer:**
+
 ```xml
 <config>
   <debug>true</debug>
@@ -410,8 +435,10 @@ const fragments = [
 ```
 
 **MarkdownRenderer:**
+
 ```markdown
 ## Config
+
 - **debug**: true
 - **timeout**: 30
 - **database**:
@@ -420,6 +447,7 @@ const fragments = [
 ```
 
 **ToonRenderer:**
+
 ```
 config:
   debug: true

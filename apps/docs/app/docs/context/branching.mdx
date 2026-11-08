@@ -37,16 +37,17 @@ Key insight: **Nothing is deleted.** Branching creates new pointers; original me
 Create a new branch from a specific message and switch to it.
 
 ```typescript
+import { groq } from '@ai-sdk/groq';
+import { generateText } from 'ai';
+
 import {
   ContextEngine,
   SqliteContextStore,
   XmlRenderer,
+  assistant,
   role,
   user,
-  assistant,
 } from '@deepagents/context';
-import { generateText } from 'ai';
-import { groq } from '@ai-sdk/groq';
 
 const store = new SqliteContextStore('./chat.db');
 const context = new ContextEngine({
@@ -307,22 +308,24 @@ const snapshot = await context.inspect({
 
 ## When to Use What
 
-| Need | Method |
-|------|--------|
-| Retry bad response | `rewind()` to question |
-| Compare approaches | `rewind()` + generate multiple |
-| Fork without switching | `btw()` |
-| Return to previous branch | `switchBranch()` |
-| Save position for later | `checkpoint()` |
+| Need                      | Method                         |
+| ------------------------- | ------------------------------ |
+| Retry bad response        | `rewind()` to question         |
+| Compare approaches        | `rewind()` + generate multiple |
+| Fork without switching    | `btw()`                        |
+| Return to previous branch | `switchBranch()`               |
+| Save position for later   | `checkpoint()`                 |
 
 ## Best Practices
 
 1. **Use custom message IDs** for rewind targets:
+
    ```typescript
-   user('Question', { id: 'turn-1-question' })
+   user('Question', { id: 'turn-1-question' });
    ```
 
 2. **List branches** to understand the graph:
+
    ```typescript
    const branches = await store.listBranches(chatId);
    ```

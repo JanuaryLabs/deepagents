@@ -20,6 +20,7 @@ maps dynamically, validate the keys before constructing `Text2Sql` with
 
 ```typescript
 import { groq } from '@ai-sdk/groq';
+
 import { toSql } from '@deepagents/text2sql';
 
 const fragments = await text2sql.index({ names: ['main'] });
@@ -48,7 +49,12 @@ If you plan to execute the returned SQL outside the chat agent loop, validate
 it again in your own execution pipeline:
 
 ```typescript
-const { sql } = await toSql({ input: 'Show me sales data', adapter, fragments, model });
+const { sql } = await toSql({
+  input: 'Show me sales data',
+  adapter,
+  fragments,
+  model,
+});
 
 const error = await adapter.validate(sql);
 if (error) {
@@ -96,14 +102,14 @@ The streaming chat agent is built by the caller using `agent` + `chat` from
 `AdapterIndexer` or `sql index` — see
 [Build Conversations](/docs/text2sql/build-conversations).
 
-| Feature | `toSql()` | Chat agent (`chat(ai)`) |
-| ------- | --------- | ----------------------- |
-| Returns | SQL string | Streamed user-facing answer |
-| Execution | No execution | Executes via the sandbox-installed `sql validate <db> "..."` and `sql run <db> "..."` CLI |
-| Persistent context | Schema cache only | Full conversation thread from your context store |
-| Extra fragments | Add them to `fragments` | Set fragments on your `ContextEngine` |
-| Streaming | No | Yes |
-| Best for | Previews, review flows, offline execution | Interactive data assistants |
+| Feature            | `toSql()`                                 | Chat agent (`chat(ai)`)                                                                   |
+| ------------------ | ----------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Returns            | SQL string                                | Streamed user-facing answer                                                               |
+| Execution          | No execution                              | Executes via the sandbox-installed `sql validate <db> "..."` and `sql run <db> "..."` CLI |
+| Persistent context | Schema cache only                         | Full conversation thread from your context store                                          |
+| Extra fragments    | Add them to `fragments`                   | Set fragments on your `ContextEngine`                                                     |
+| Streaming          | No                                        | Yes                                                                                       |
+| Best for           | Previews, review flows, offline execution | Interactive data assistants                                                               |
 
 ### Use toSql() when you need to:
 
@@ -124,7 +130,12 @@ The streaming chat agent is built by the caller using `agent` + `chat` from
 ### Simple Query
 
 ```typescript
-const { sql } = await toSql({ input: 'Count total orders', adapter, fragments, model });
+const { sql } = await toSql({
+  input: 'Count total orders',
+  adapter,
+  fragments,
+  model,
+});
 // SELECT COUNT(*) AS total_orders FROM orders
 ```
 

@@ -21,12 +21,18 @@ npm install @deepagents/retrieval @deepagents/agent @ai-sdk/groq ai zod
 ## Complete Implementation
 
 ```typescript
-import { agent, instructions, execute } from '@deepagents/agent';
-import { similaritySearch, fastembed, nodeSQLite, ingest } from '@deepagents/retrieval';
-import { local, rss, github } from '@deepagents/retrieval/connectors';
 import { groq } from '@ai-sdk/groq';
 import { tool } from 'ai';
 import z from 'zod';
+
+import { agent, execute, instructions } from '@deepagents/agent';
+import {
+  fastembed,
+  ingest,
+  nodeSQLite,
+  similaritySearch,
+} from '@deepagents/retrieval';
+import { github, local, rss } from '@deepagents/retrieval/connectors';
 
 // Set up retrieval infrastructure
 const store = nodeSQLite('./knowledge.db', 384);
@@ -76,10 +82,12 @@ async function buildKnowledgeBase() {
 
 // Search tool with source type filtering
 const searchKnowledgeTool = tool({
-  description: 'Search the knowledge base for information. Can filter by source type.',
+  description:
+    'Search the knowledge base for information. Can filter by source type.',
   parameters: z.object({
     query: z.string().describe('The search query'),
-    sourceType: z.enum(['all', 'docs', 'releases', 'news'])
+    sourceType: z
+      .enum(['all', 'docs', 'releases', 'news'])
       .optional()
       .describe('Filter by source type'),
   }),
@@ -98,7 +106,7 @@ const searchKnowledgeTool = tool({
       // This is a simplified example
     }
 
-    return filtered.slice(0, 8).map(r => ({
+    return filtered.slice(0, 8).map((r) => ({
       source: r.document_id,
       sourceType: detectSourceType(r.document_id),
       content: r.content,
@@ -110,7 +118,8 @@ const searchKnowledgeTool = tool({
 
 // Detect source type from document ID
 function detectSourceType(docId: string): string {
-  if (docId.includes('github.com') || docId.includes('release')) return 'releases';
+  if (docId.includes('github.com') || docId.includes('release'))
+    return 'releases';
   if (docId.includes('rss:') || docId.includes('http')) return 'news';
   return 'docs';
 }
@@ -176,7 +185,9 @@ async function main() {
   await ask('What new features were added in Next.js 14?');
   await ask('How do we handle authentication in our API?');
   await ask('What are the latest trends in AI development?');
-  await ask('Compare our documentation approach to industry news about documentation tools.');
+  await ask(
+    'Compare our documentation approach to industry news about documentation tools.',
+  );
 }
 
 await main();
@@ -229,14 +240,14 @@ Weight sources differently:
 
 ```typescript
 const SOURCE_WEIGHTS = {
-  docs: 1.0,      // Internal docs are authoritative
-  releases: 0.9,  // Release notes are official
-  news: 0.7,      // News is less authoritative
+  docs: 1.0, // Internal docs are authoritative
+  releases: 0.9, // Release notes are official
+  news: 0.7, // News is less authoritative
 };
 
 function weightedResults(results: any[]) {
   return results
-    .map(r => ({
+    .map((r) => ({
       ...r,
       weightedScore: r.similarity * SOURCE_WEIGHTS[detectSourceType(r.source)],
     }))
@@ -250,15 +261,15 @@ Prioritize recent content:
 
 ```typescript
 const MAX_AGE = {
-  docs: Infinity,        // Docs don't expire
-  releases: 365,         // Releases relevant for a year
-  news: 7,               // News relevant for a week
+  docs: Infinity, // Docs don't expire
+  releases: 365, // Releases relevant for a year
+  news: 7, // News relevant for a week
 };
 
 function filterByFreshness(results: any[]) {
   const now = Date.now();
 
-  return results.filter(r => {
+  return results.filter((r) => {
     const type = detectSourceType(r.source);
     const maxAgeDays = MAX_AGE[type];
 
@@ -267,7 +278,8 @@ function filterByFreshness(results: any[]) {
     const timestamp = r.metadata?.timestamp || r.metadata?.published_at;
     if (!timestamp) return true;
 
-    const ageInDays = (now - new Date(timestamp).getTime()) / (1000 * 60 * 60 * 24);
+    const ageInDays =
+      (now - new Date(timestamp).getTime()) / (1000 * 60 * 60 * 24);
     return ageInDays <= maxAgeDays;
   });
 }
@@ -289,7 +301,7 @@ async function searchWithAccess(query: string, userRole: string) {
 
   const allowedTypes = USER_ACCESS[userRole] || [];
 
-  return results.filter(r => {
+  return results.filter((r) => {
     const type = detectSourceType(r.source);
     return allowedTypes.includes(type);
   });
@@ -304,12 +316,14 @@ Return structured answers with sources:
 const AnswerSchema = z.object({
   answer: z.string(),
   confidence: z.enum(['high', 'medium', 'low']),
-  sources: z.array(z.object({
-    type: z.string(),
-    path: z.string(),
-    relevance: z.number(),
-    excerpt: z.string(),
-  })),
+  sources: z.array(
+    z.object({
+      type: z.string(),
+      path: z.string(),
+      relevance: z.number(),
+      excerpt: z.string(),
+    }),
+  ),
   relatedTopics: z.array(z.string()),
 });
 
@@ -349,10 +363,10 @@ function recordFeedback(queryId: string, sourceId: string, helpful: boolean) {
 }
 
 function getSourceReliability(sourceId: string): number {
-  const feedback = feedbackStore.filter(f => f.sourceId === sourceId);
+  const feedback = feedbackStore.filter((f) => f.sourceId === sourceId);
   if (feedback.length === 0) return 0.5; // Neutral
 
-  const helpful = feedback.filter(f => f.helpful).length;
+  const helpful = feedback.filter((f) => f.helpful).length;
   return helpful / feedback.length;
 }
 ```

@@ -239,14 +239,14 @@ interface ReminderContext {
 ```
 
 <Callout type="warn">
-  Derive counters from `lastAssistantMessages`, not `lastAssistantMessage`. When a
-  `steer` or `tool-output` reminder fires, the engine carves the assistant message
-  at that boundary (this is what preserves the prompt prefix — see [Reminder
-  Targets](#reminder-targets)), so `lastAssistantMessage` afterwards holds only the
-  parts produced *since the last fire*. A "this tool failed N times in a row"
-  counter read from it silently resets to 1 on every fire. `lastAssistantMessages`
-  keeps every segment, so it counts correctly — that is what
-  [`toolFailureStreak()`](/docs/context/predicates) reads.
+  Derive counters from `lastAssistantMessages`, not `lastAssistantMessage`. When
+  a `steer` or `tool-output` reminder fires, the engine carves the assistant
+  message at that boundary (this is what preserves the prompt prefix — see
+  [Reminder Targets](#reminder-targets)), so `lastAssistantMessage` afterwards
+  holds only the parts produced *since the last fire*. A "this tool failed N
+  times in a row" counter read from it silently resets to 1 on every fire.
+  `lastAssistantMessages` keeps every segment, so it counts correctly — that is
+  what [`toolFailureStreak()`](/docs/context/predicates) reads.
 </Callout>
 
 The engine populates these fields when it resolves reminder text. During tool-output evaluation, both the predicate and a dynamic text factory can read `toolOutcome`. A reminder gated by a `when` predicate receives the richer `WhenContext` (see [Predicates](/docs/context/predicates)); a plain `(ctx) => string` factory on a user reminder receives at least `content`.

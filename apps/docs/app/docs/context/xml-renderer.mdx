@@ -8,14 +8,11 @@ The `XmlRenderer` is the default renderer, producing well-formed XML output that
 ## Basic Usage
 
 ```typescript
-import { XmlRenderer, role, hint, fragment } from '@deepagents/context';
+import { XmlRenderer, fragment, hint, role } from '@deepagents/context';
 
 const renderer = new XmlRenderer();
 
-const fragments = [
-  role('You are a helpful assistant.'),
-  hint('Be concise.'),
-];
+const fragments = [role('You are a helpful assistant.'), hint('Be concise.')];
 
 const output = renderer.render(fragments);
 ```
@@ -90,15 +87,15 @@ Array items use singularized tag names:
 Fragments within fragments maintain hierarchy:
 
 ```typescript
-fragment('domain',
-  fragment('terminology',
+fragment(
+  'domain',
+  fragment(
+    'terminology',
     hint('LTV = Lifetime Value'),
     hint('MRR = Monthly Recurring Revenue'),
   ),
-  fragment('constraints',
-    hint('Never expose PII'),
-  ),
-)
+  fragment('constraints', hint('Never expose PII')),
+);
 ```
 
 **Output:**
@@ -120,12 +117,12 @@ fragment('domain',
 Special characters are automatically escaped:
 
 | Character | Escaped As |
-| --- | --- |
-| `&` | `&amp;` |
-| `<` | `&lt;` |
-| `>` | `&gt;` |
-| `"` | `&quot;` |
-| `'` | `&apos;` |
+| --------- | ---------- |
+| `&`       | `&amp;`    |
+| `<`       | `&lt;`     |
+| `>`       | `&gt;`     |
+| `"`       | `&quot;`   |
+| `'`       | `&apos;`   |
 
 ```typescript
 { name: 'query', data: 'SELECT * FROM users WHERE age > 18' }
@@ -214,12 +211,14 @@ Null and undefined values are filtered out:
 ## When to Use XML
 
 **Advantages:**
+
 - Clear structural boundaries
 - Well-understood by modern LLMs
 - Familiar to developers
 - Easy to parse programmatically
 
 **Trade-offs:**
+
 - Most verbose format (highest token count)
 - Closing tags add overhead
 
@@ -230,16 +229,15 @@ import {
   ContextEngine,
   InMemoryContextStore,
   XmlRenderer,
-  role,
   hint,
+  role,
 } from '@deepagents/context';
 
-const context = new ContextEngine({ store: new InMemoryContextStore() })
-  .set(
-    role('You are a code reviewer.'),
-    hint('Focus on security issues.'),
-    hint('Check for performance problems.'),
-  );
+const context = new ContextEngine({ store: new InMemoryContextStore() }).set(
+  role('You are a code reviewer.'),
+  hint('Focus on security issues.'),
+  hint('Check for performance problems.'),
+);
 
 // XML is the default
 const { systemPrompt } = await context.resolve();
