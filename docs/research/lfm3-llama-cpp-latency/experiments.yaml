@@ -1387,6 +1387,23 @@ experiments:
         result: rejected,
         note: With full Metal offload the CPU threads only drive the graph and the sampler; expected less than 1%.,
       }
+  - id: X-rej-splash-engine
+    name: 'engine: Splash (Inco AI, Apple Silicon) instead of llama.cpp'
+    phase: TPOT
+    combination:
+      { engine: { engine: splash }, client: {}, workload: chat-500-5turns }
+    source:
+      [
+        'https://github.com/incoai/splash',
+        'https://lmstudio.ai/blog/splash-engine',
+      ]
+    status: rejected
+    attempts: []
+    verdict:
+      {
+        result: rejected,
+        note: 'Splash ships its own kernels and a trained DFlash2 draft for each supported model: Qwen3.8-27B, Qwen3.6-35B-A3B, Ornith-1.5-122B, Qwen3.8-Flash-Next and Flint. Its README says "Whole-BF16 and F16 models are not supported" and does not mention LFM3 or hybrid conv models, so it cannot run this model (Ezz, 2026-11-08: "skip"). Check again if Splash adds LFM3.',
+      }
 
 pitfalls:
   - id: A1
