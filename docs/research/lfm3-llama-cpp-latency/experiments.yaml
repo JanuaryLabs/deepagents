@@ -856,7 +856,7 @@ experiments:
     expected: Follow-up TTFT p95 for 4 users moves toward the 1-user value.
     risks: KV pressure on the unified pool without a RAM copy.
     measure: GuideLLM chat-6k-5turns-4users follow-up TTFT p50/p95 and cached_tokens.
-    status: proposed
+    status: done
     attempts:
       - date: 2026-11-07
         tool: guidellm 0.8.1, chat-6k-5turns-4users, 40 requests per arm (seeds 52001, 52002), ubatch 256, parallel 4, baseline then no-cache-idle-slots (one run each)
@@ -865,9 +865,18 @@ experiments:
           run: baseline / noidle
         traffic: clean on the router (40 proxied = 40 sent for each arm)
         result: 'Not valid. The Mac went into lid-close sleep on battery at 13:01:54 UTC and fully woke at 14:36:24 UTC (pmset log), while the run was going on. The baseline ran normally for its first 30 requests (13:00:10-13:01:50 UTC; follow-up TTFT 640-930 ms). After that, requests stalled: ITL up to 7,337 ms, and two follow-up TTFTs of 341,239 and 857,542 ms. The noidle arm started at 14:01:54 UTC, during the sleep. Its first 14 requests stalled (TTFT up to 1,167,668 ms). Its last 26 requests (from 14:36:28 UTC) were normal: ITL 24-96 ms, follow-up TTFT 570-990 ms. One baseline request was still in flight when GuideLLM stopped (39 of 40). The trigger was also empty: the job ran because X-diag-parallel-load C matched A, but B matched A too, so there was no slowdown for the flag to remove.'
+      - date: 2026-11-08
+        tool: guidellm 0.8.1 through ~/.claude/scratch/lfm3-latency/timed-queue.zsh; chat-6k-5turns-4users (concurrent streams 4, 40 requests, seed 62001 in every arm, paired); arms a1-default, b1-noidle, a2-default, b2-noidle (11:58-12:08 +0300), each on a freshly restarted Llama.app with the router args checked; ubatch 256, parallel 4; on AC power, no Sleep/DarkWake event in any arm (pitfall A13); 1-minute load 4.1-9.5
+        labels:
+          experiment: X-no-cache-idle-slots-4users
+          attempt: 2
+          arm: a1-default / b1-noidle / a2-default / b2-noidle
+          idle: default / noidle
+        traffic: clean (40 proxied = 40 sent in every arm; GuideLLM counted 39 in a1 and b2, one request still in flight at its stop)
+        result: 'Follow-up TTFT p50 350.1 / 347.2 ms with no-cache-idle-slots vs 355.5 / 348.7 ms by default (-1.0%, A-to-A spread 1.9%); p95 495.6 / 727.5 vs 663.8 / 550.8 ms (+0.7%, spread 17.0%); ITL p50 -1.1% (spread 1.7%); output tok/s -1.6% (spread 0.0%); cached tokens equal. First-turn TTFT p50 4,214 / 4,595 ms vs 5,449 / 6,478 ms (-26.1%, spread 18.9%), from 8 first turns per arm.'
     verdict:
-      result: unproven
-      note: Attempt 1 is not valid (pitfall A13). Run again on AC power with the lid open, interleave the arms (pitfall A12), and drop the trigger from X-diag-parallel-load.
+      result: no-gain
+      note: 'Follow-ups do not change, so the hypothesis fails and the flag stays off. A lead, not a result: first-turn TTFT was lower in both noidle arms than in both default arms (-26%, spread 19%). That order happens 1 time in 6 by chance, with 8 first turns per arm. It fits the code (by default each new task first saves the idle slots to the RAM cache). To test it, run an attempt with many more new conversations.'
 
   - id: X-ttfot-thinking-off
     name: 'TTFOT: chat_template_kwargs.enable_thinking=false for simple turns on natural-answers'
