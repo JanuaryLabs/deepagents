@@ -8,7 +8,7 @@
     "start": "node run.ts"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^4.0.102",
+    "@ai-sdk/openai": "^4.0.111",
     "@deepagents/context": "*",
     "@deepagents/devtool": "*",
     "@deepagents/experimental": "*",
@@ -16,6 +16,6 @@
     "@zukhruf/sqlite-open": "^0.8.10",
     "microsandbox": "^0.7.8",
     "pg-boss": "^12.29.0",
-    "ai": "^7.0.153"
+    "ai": "^7.0.165"
   }
 }

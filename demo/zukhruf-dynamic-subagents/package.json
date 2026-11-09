@@ -21,12 +21,12 @@
     }
   },
   "dependencies": {
-    "@ai-sdk/openai": "^4.0.102",
+    "@ai-sdk/openai": "^4.0.111",
     "@deepagents/context": "*",
     "@deepagents/experimental": "*",
     "@electric-sql/pglite": "^0.5.4",
     "@zukhruf/sqlite-open": "^0.8.10",
     "pg-boss": "^12.29.0",
-    "ai": "^7.0.153"
+    "ai": "^7.0.165"
   }
 }

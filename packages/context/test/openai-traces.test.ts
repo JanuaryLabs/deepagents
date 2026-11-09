@@ -91,9 +91,9 @@ type IngestBody = z.infer<typeof ingestBodySchema>;
 type WireTrace = z.infer<typeof wireTraceSchema>;
 type WireSpan = z.infer<typeof wireSpanSchema>;
 
-type TelemetryEvent<K extends keyof Telemetry> = Parameters<
-  NonNullable<Telemetry[K]>
->[0];
+type TelemetryEvent<
+  K extends 'onStart' | 'onStepStart' | 'onStepEnd' | 'onEnd',
+> = Parameters<NonNullable<Telemetry[K]>>[0];
 
 function captureTelemetryEvents() {
   const events: {

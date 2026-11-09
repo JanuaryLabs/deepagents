@@ -12,16 +12,16 @@
     "@sdk-it/hono": "^0.46.7",
     "hono": "^4.12.30",
     "mssql": "^12.7.0",
-    "zod": "^4.4.3",
+    "zod": "^4.6.7",
     "@sdk-it/core": "^0.46.7",
     "@sdk-it/generic": "^0.46.7",
     "@deepagents/context": "*",
-    "@ai-sdk/anthropic": "^4.0.88",
-    "@ai-sdk/google": "^4.0.105",
-    "@ai-sdk/groq": "^4.0.70",
-    "@ai-sdk/openai": "^4.0.102",
-    "@ai-sdk/openai-compatible": "^3.0.78",
-    "@ai-sdk/provider": "^4.0.34",
+    "@ai-sdk/anthropic": "^4.0.99",
+    "@ai-sdk/google": "^4.0.114",
+    "@ai-sdk/groq": "^4.0.78",
+    "@ai-sdk/openai": "^4.0.111",
+    "@ai-sdk/openai-compatible": "^3.0.87",
+    "@ai-sdk/provider": "^4.0.37",
     "p-memoize": "^8.0.0"
   }
 }

@@ -116,13 +116,13 @@
     "demo/zukhruf-event-reels"
   ],
   "dependencies": {
-    "@ai-sdk/anthropic": "^4.0.88",
-    "@ai-sdk/google": "^4.0.105",
-    "@ai-sdk/groq": "^4.0.70",
-    "@ai-sdk/openai": "^4.0.102",
-    "@ai-sdk/openai-compatible": "^3.0.78",
-    "@ai-sdk/provider": "^4.0.34",
-    "@ai-sdk/provider-utils": "^5.0.68",
+    "@ai-sdk/anthropic": "^4.0.99",
+    "@ai-sdk/google": "^4.0.114",
+    "@ai-sdk/groq": "^4.0.78",
+    "@ai-sdk/openai": "^4.0.111",
+    "@ai-sdk/openai-compatible": "^3.0.87",
+    "@ai-sdk/provider": "^4.0.37",
+    "@ai-sdk/provider-utils": "^5.0.76",
     "@electric-sql/pglite": "^0.5.4",
     "@huggingface/transformers": "^4.2.0",
     "@langchain/core": "^1.2.3",
@@ -133,7 +133,7 @@
     "@tavily/core": "^0.7.6",
     "@types/jsdom": "^28.0.3",
     "@types/mdx": "^2.0.14",
-    "ai": "^7.0.153",
+    "ai": "^7.0.165",
     "babel-plugin-react-compiler": "^1.0.0",
     "chrome-devtools-mcp": "^1.9.0",
     "conf": "^15.1.0",
@@ -153,7 +153,7 @@
     "graphql": "^17.0.2",
     "ignore": "^7.0.6",
     "isbot": "^5.2.1",
-    "just-bash": "^3.2.0",
+    "just-bash": "^3.6.0",
     "langchain": "^1.5.3",
     "lodash-es": "^4.18.1",
     "motion": "^12.42.2",
@@ -176,7 +176,7 @@
     "unpdf": "^1.6.2",
     "uuid": "^14.0.1",
     "yaml": "^2.9.0",
-    "zod": "^4.4.3"
+    "zod": "^4.6.7"
   },
   "overrides": {
     "tar": "7.5.20"

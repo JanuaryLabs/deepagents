@@ -40,14 +40,14 @@
   },
   "dependencies": {
     "@zukhruf/docker": "^0.8.10",
-    "ai": "^7.0.153",
+    "ai": "^7.0.165",
     "duck-duck-scrape": "^2.2.7",
     "nano-spawn": "^2.1.0",
-    "zod": "^4.4.3",
+    "zod": "^4.6.7",
     "fast-glob": "^3.3.3",
     "@deepagents/retrieval": "7.5.2",
-    "@ai-sdk/provider-utils": "^5.0.68",
-    "@ai-sdk/provider": "^4.0.34"
+    "@ai-sdk/provider-utils": "^5.0.76",
+    "@ai-sdk/provider": "^4.0.37"
   },
   "devDependencies": {
     "@types/debug": "^4.1.13"

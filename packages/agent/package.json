@@ -34,20 +34,20 @@
     "access": "public"
   },
   "dependencies": {
-    "@ai-sdk/groq": "^4.0.70",
-    "@ai-sdk/openai": "^4.0.102",
-    "@ai-sdk/openai-compatible": "^3.0.78",
-    "ai": "^7.0.153",
+    "@ai-sdk/groq": "^4.0.78",
+    "@ai-sdk/openai": "^4.0.111",
+    "@ai-sdk/openai-compatible": "^3.0.87",
+    "ai": "^7.0.165",
     "chalk": "^5.6.2",
     "dedent": "1.7.2",
     "listr2": "^10.2.2",
     "lodash-es": "^4.18.1",
     "stringcase": "^4.3.1",
-    "@ai-sdk/provider": "^4.0.34",
-    "@ai-sdk/provider-utils": "^5.0.68"
+    "@ai-sdk/provider": "^4.0.37",
+    "@ai-sdk/provider-utils": "^5.0.76"
   },
   "peerDependencies": {
-    "zod": "^4.4.3"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/debug": "^4.1.13"
