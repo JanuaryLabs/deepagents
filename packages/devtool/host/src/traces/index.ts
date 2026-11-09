@@ -46,7 +46,7 @@ export interface FileTelemetryInstance {
 
 /** AI SDK OpenTelemetry spans persisted in Halo's flat JSONL format. */
 export function fileTelemetry(
-  options: FileTelemetryOptions,
+  options: Pick<FileTelemetryOptions, 'path' | 'onWriteError'>,
 ): AgentPluginDefinition<FileTelemetryInstance> {
   const path = resolve(options.path);
   return {
