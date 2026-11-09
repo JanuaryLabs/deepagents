@@ -101,6 +101,9 @@
     },
     {
       "path": "./demo/minio"
+    },
+    {
+      "path": "./tools"
     }
   ]
 }

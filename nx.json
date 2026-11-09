@@ -177,11 +177,6 @@
     "projects": ["tag:npm:public"],
     "conventionalCommits": {
       "types": {
-        "chore": {
-          "changelog": {
-            "hidden": true
-          }
-        },
         "refactor": {
           "semverBump": "patch"
         }
