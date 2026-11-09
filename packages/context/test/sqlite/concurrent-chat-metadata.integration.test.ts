@@ -67,6 +67,36 @@ test('concurrent trackUsage calls accumulate both usages without losing one', as
   assert.equal(stored?.outputTokens, 30);
 });
 
+test('trackUsage keeps a usage detail undefined when no call reported it', async () => {
+  const store = new InMemoryContextStore();
+  const engine = new ContextEngine({
+    store,
+    chatId: 'usage-details',
+    userId: 'user-1',
+  });
+  engine.set(user('turn 1'), assistantText('reply'));
+  await engine.save();
+
+  await engine.trackUsage(usage(100, 10));
+  await engine.trackUsage(usage(200, 20));
+
+  const chat = await store.getChat('usage-details');
+  const stored = z
+    .object({
+      inputTokens: z.number(),
+      inputTokenDetails: z.object({
+        cacheReadTokens: z.number().optional(),
+      }),
+      outputTokenDetails: z.object({
+        reasoningTokens: z.number().optional(),
+      }),
+    })
+    .parse(chat?.metadata?.usage);
+  assert.equal(stored.inputTokens, 300);
+  assert.equal(stored.inputTokenDetails.cacheReadTokens, undefined);
+  assert.equal(stored.outputTokenDetails.reasoningTokens, undefined);
+});
+
 test('independent stores merging different metadata keys both survive', async () => {
   await using database = await sqlite.database();
   const first = new SqliteContextStore(database.connection);

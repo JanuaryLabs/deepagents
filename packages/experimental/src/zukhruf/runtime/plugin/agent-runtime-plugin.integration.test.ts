@@ -31,7 +31,6 @@ import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
 import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 import { UnusedTurnQueue } from '../../../testing/unused-turn-queue.fixture.ts';
 
-/** Turns are never scheduled by runtimes that are only initialized. */
 /** In-memory adapters for runtimes that are initialized but never worked. */
 function adapters(resources: AsyncDisposableStack) {
   const streamStore = new SqliteStreamStore(':memory:');

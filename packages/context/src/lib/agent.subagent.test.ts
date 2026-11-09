@@ -636,6 +636,14 @@ describe('asAdvisor', () => {
     assert.strictEqual(usage.calls, 3);
     assert.strictEqual(usage.totalUsage.inputTokens, 30);
     assert.strictEqual(usage.totalUsage.outputTokens, 15);
+    assert.strictEqual(
+      usage.totalUsage.inputTokenDetails.cacheReadTokens,
+      undefined,
+    );
+    assert.strictEqual(
+      usage.totalUsage.outputTokenDetails.reasoningTokens,
+      undefined,
+    );
   });
 
   it('propagates abort signal to the advisor model', async () => {
