@@ -390,7 +390,7 @@ describe('session-backed toolkit', () => {
         sandbox: await createVirtualSandbox({ fs }),
         workingDirectory: '/readonly/work',
       }),
-      /Failed to create working directory \/readonly\/work: .*(EROFS|read-only)/s,
+      /Could not set up working directory \/readonly\/work: .*(EROFS|read-only)/s,
     );
   });
 

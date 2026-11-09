@@ -428,7 +428,9 @@ export function containerSession(
         return container.exec(['bash', '-lc', command], scope(options));
       }
       const { process } = await start(options);
-      return collectOutput(process);
+      return collectOutput(process).finally(() =>
+        abortSignal?.throwIfAborted(),
+      );
     },
     spawn,
     readBinaryFile,

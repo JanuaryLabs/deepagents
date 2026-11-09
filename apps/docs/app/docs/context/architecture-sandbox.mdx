@@ -196,6 +196,18 @@ runs. Microsandbox and Daytona still use the older contract, and `createBashTool
 adapts them. The bash tool forwards the AI SDK's `executionOptions.abortSignal`
 to `run` as `abortSignal`.
 
+An abort is not the same on every backend. Docker and Apple Container reject `run`
+with the abort reason after the process group is gone, as `wait()` does, so the
+bash tool call fails. The virtual sandbox resolves with exit code `124`.
+Microsandbox and Daytona resolve with a non-zero exit code until they move to the
+session. On those backends the bash tool returns that result.
+
+When the agent's tool timeout (`toolMs` or `tools.bashMs`) stops a command that
+rejected, the bash tool returns a result that the model can read:
+`{ stdout: '', stderr: 'Command timed out after N ms', exitCode: 124 }`. N is the
+measured time, and the output that the command wrote before the timeout is lost.
+Every other rejection fails the tool call, and an aborted turn stays aborted.
+
 ### File operations
 
 Docker moves files through the archive requests of the Engine API

@@ -54,15 +54,17 @@ deletes the underlying Daytona sandbox.
 ### File-change tracking
 
 `withStraceFileChanges()` decorates a real sandbox backend so each command,
-spawn, or file write reports the mutations it caused as a `FileChange[]`
+spawn, file write, or file delete reports the mutations it caused as a `FileChange[]`
 (`{ op: 'write' | 'delete' | 'rename'; path; from?; timestamp }`).
-Consume changes via the `onFileChanges` callback (fires per command, spawn, or
-file write). Bash tool calls also receive
+Consume changes via the `onFileChanges` callback (fires per command, spawn, file
+write, or `deleteFile` that removed a file). Bash tool calls also receive
 `tool-result.output.meta.fileChanges` as hidden host-only metadata.
 
 Scope which paths are reported with `include` glob patterns (required — a path
 must match at least one); drop noise such as uploaded skills with optional
 `exclude` patterns. Both match absolute paths via Node's `path.matchesGlob`.
+`createBashTool()` creates its working directory and uploads its files through the
+decorator, so a callback that must not see that setup excludes those paths.
 
 ```ts
 const backend = await createDockerSandbox({ image: 'my-image-with-strace' });

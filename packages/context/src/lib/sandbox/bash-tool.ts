@@ -25,6 +25,7 @@ const DEFAULT_MAX_FILES = 1_000;
 const DEFAULT_MAX_OUTPUT_LENGTH = 30_000;
 const TEE_OUTPUT_DIR = '/tmp/bash-tool';
 const MAX_CONCURRENT_WRITES = 20;
+const COMMAND_TIMEOUT_EXIT_CODE = 124;
 
 const REASONING_INSTRUCTION =
   'Every bash tool call must include a brief non-empty "reasoning" input explaining why the command is needed.';
@@ -45,6 +46,19 @@ function makeTeeScriptPortable(script: string): string {
     (_match, negated: string | undefined) => (negated ? '; test $? -ne 0' : ''),
   );
   return `set -o pipefail; ${withoutStatusAssignments}`;
+}
+
+/**
+ * A `timeout` of the AI SDK reaches the tool as a `TimeoutError` abort reason. The
+ * tool timeout and the total timeout give the same reason, but after a total
+ * timeout the turn has ended, so the result reaches nobody.
+ */
+function isTimeoutOf(signal: AbortSignal | undefined, error: unknown): boolean {
+  return (
+    error === signal?.reason &&
+    error instanceof DOMException &&
+    error.name === 'TimeoutError'
+  );
 }
 
 type InitialFile =
@@ -154,7 +168,7 @@ export async function createBashTool(
     });
     if (created.exitCode !== 0) {
       throw new Error(
-        `Failed to create working directory ${workingDirectory}: ${created.stderr}`,
+        `Could not set up working directory ${workingDirectory}: ${created.stderr}`,
       );
     }
   }
@@ -201,16 +215,27 @@ export async function createBashTool(
         );
       }
 
+      const { abortSignal } = executionOptions;
+      const startedAt = performance.now();
       let result: CommandResult;
       try {
         result = await sandbox.run({
           command: script,
           ...(workingDirectory !== undefined ? { workingDirectory } : {}),
-          abortSignal: executionOptions.abortSignal,
+          abortSignal,
         });
       } catch (error) {
-        if (!(error instanceof BashException)) throw error;
-        result = error.format();
+        if (error instanceof BashException) {
+          result = error.format();
+        } else if (isTimeoutOf(abortSignal, error)) {
+          result = {
+            stdout: '',
+            stderr: `Command timed out after ${Math.round(performance.now() - startedAt)} ms`,
+            exitCode: COMMAND_TIMEOUT_EXIT_CODE,
+          };
+        } else {
+          throw error;
+        }
       }
       const maxOutputLength =
         options.maxOutputLength ?? DEFAULT_MAX_OUTPUT_LENGTH;

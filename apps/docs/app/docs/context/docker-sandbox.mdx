@@ -123,8 +123,8 @@ const sandbox = await createDockerSandbox({ commandTimeout: 300_000 });
 A deadline terminates the command's process group inside the container before
 `run` returns exit code `124` or `(await spawn()).wait()` resolves with
 `{ exitCode: 124 }`. A per-call `abortSignal` remains separate caller
-cancellation: `wait()` rejects with the abort reason, while `run` returns a
-non-zero exit code. Neither is reported as a timeout.
+cancellation: `run` and `wait()` reject with the abort reason once the process
+group is gone. An abort is not reported as a timeout.
 
 ## Stable container names
 
@@ -406,7 +406,7 @@ const pending = sandbox.run({
 });
 
 setTimeout(() => controller.abort(), 1_000);
-await pending;
+await pending; // Rejects with the abort reason after the command stops.
 ```
 
 For live byte streams, use `spawn`:

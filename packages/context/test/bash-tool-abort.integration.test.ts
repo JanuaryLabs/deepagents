@@ -42,4 +42,30 @@ describe('createBashTool abort handling', () => {
 
     assert.equal(await sandbox.readTextFile({ path: '/marker.txt' }), null);
   });
+
+  it('propagates a TimeoutError that its own signal did not raise', async () => {
+    const failure = new DOMException('transport timeout', 'TimeoutError');
+    const { bash } = await createBashTool({
+      sandbox: {
+        ...(await createVirtualSandbox({ fs: new InMemoryFs() })),
+        run: () => Promise.reject(failure),
+      },
+    });
+    assert.ok(bash.execute);
+
+    await assert.rejects(
+      Promise.resolve(
+        bash.execute(
+          { command: 'true', reasoning: 'a transport failure' },
+          {
+            abortSignal: new AbortController().signal,
+            context: {},
+            messages: [],
+            toolCallId: 'call-1',
+          },
+        ),
+      ),
+      (error) => error === failure,
+    );
+  });
 });

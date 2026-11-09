@@ -50,6 +50,10 @@ export interface WithStraceFileChangesOptions {
    * Glob patterns subtracted from `include` — a path matching any of these is
    * dropped even if it also matches `include`. Use to keep framework-written
    * files (e.g. an uploaded skills directory) out of the change stream.
+   *
+   * `createBashTool` creates its working directory and uploads its files through
+   * this decorator, so `onFileChanges` sees that setup and a throw fails it. A
+   * callback that must not see the setup excludes those paths.
    */
   exclude?: string[];
   onFileChanges?: (changes: FileChange[]) => void | Promise<void>;
@@ -90,8 +94,9 @@ function warnOnFileChangesError(error: unknown): void {
  * Reads, `stat` and `listDirectory` pass through unchanged. `writeFile`,
  * `writeBinaryFile` and `writeTextFile` are observed directly (they mutate
  * outside strace's view) — a written file matching the `include`/`exclude` globs
- * becomes a `write` change fed to onFileChanges. `deleteFile` passes through
- * unobserved. `dispose` also sweeps the trace dir. `spawn` is traced the same way
+ * becomes a `write` change fed to onFileChanges. `deleteFile` is observed the same
+ * way: a `delete` change when it returns true, and nothing when it returns false
+ * or rejects. `dispose` also sweeps the trace dir. `spawn` is traced the same way
  * as `run` — its trace is read when the process exits (strace is the top process,
  * so the trace is fully flushed by then). `spawn` has no command result, so its
  * changes go to `onFileChanges` only.
@@ -155,16 +160,19 @@ export async function withStraceFileChanges(
     return posix.resolve(await baseDirectory, path);
   };
 
-  // The write methods mutate the filesystem outside strace's view, so observe
-  // them directly: synthesize a `write` change (under the observation root) and
+  // The write methods and deleteFile mutate the filesystem outside strace's view,
+  // so observe them directly: synthesize a change (under the observation root) and
   // run it through onFileChanges. A throw propagates to the writeFile tool's
   // execute (which rejects), the same gate as the bash path — except there's no
   // CommandResult here, so throw a plain Error to reject; BashException.format()
   // is meaningful only for bash commands.
-  const observeWrite = async (filePath: string): Promise<void> => {
+  const observe = async (
+    op: 'write' | 'delete',
+    filePath: string,
+  ): Promise<void> => {
     const path = await absolutePath(filePath);
     if (!matchesGlobs(path, include, exclude)) return;
-    await onFileChanges?.([{ op: 'write', path, timestamp: Date.now() }]);
+    await onFileChanges?.([{ op, path, timestamp: Date.now() }]);
   };
 
   function spawn(
@@ -270,18 +278,22 @@ export async function withStraceFileChanges(
     readTextFile: (readOptions) => inner.readTextFile(readOptions),
     stat: (statOptions) => inner.stat(statOptions),
     listDirectory: (listOptions) => inner.listDirectory(listOptions),
-    deleteFile: (deleteOptions) => inner.deleteFile(deleteOptions),
+    deleteFile: async (deleteOptions) => {
+      const deleted = await inner.deleteFile(deleteOptions);
+      if (deleted) await observe('delete', deleteOptions.path);
+      return deleted;
+    },
     writeFile: async (writeOptions) => {
       await inner.writeFile(writeOptions);
-      await observeWrite(writeOptions.path);
+      await observe('write', writeOptions.path);
     },
     writeBinaryFile: async (writeOptions) => {
       await inner.writeBinaryFile(writeOptions);
-      await observeWrite(writeOptions.path);
+      await observe('write', writeOptions.path);
     },
     writeTextFile: async (writeOptions) => {
       await inner.writeTextFile(writeOptions);
-      await observeWrite(writeOptions.path);
+      await observe('write', writeOptions.path);
     },
     dispose,
     [Symbol.asyncDispose]: dispose,

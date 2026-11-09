@@ -26,6 +26,11 @@ interface Backend {
   /** Why this host cannot run the backend. */
   skip?: string;
   writableStdin: boolean;
+  /**
+   * What `run` does on abort. The official virtual adapter resolves with exit
+   * 124; the session contract only says that `wait()` rejects.
+   */
+  runAbort: 'rejects' | 'resolves';
   open: (sandboxName?: string) => Promise<DisposableSandbox>;
   /** Whether the engine holds the named sandbox. Absent when a backend holds nothing. */
   holds?: (sandboxName: string) => Promise<boolean>;
@@ -47,11 +52,13 @@ const backends: Backend[] = [
   {
     name: 'virtual',
     writableStdin: false,
+    runAbort: 'resolves',
     open: () => createVirtualSandbox({ fs: new InMemoryFs() }),
   },
   {
     name: 'docker',
     writableStdin: true,
+    runAbort: 'rejects',
     open: (name) => createDockerSandbox({ ...dockerDefaults, name }),
     holds: async (name) => {
       const client = await testbed.client();
@@ -62,6 +69,7 @@ const backends: Backend[] = [
     name: 'apple',
     skip: await appleContainerUnavailable(),
     writableStdin: true,
+    runAbort: 'rejects',
     open: (name) => createAppleContainerSandbox({ name }),
     holds: async (name) => {
       try {
@@ -90,19 +98,20 @@ const STOPPABLE_COMMAND =
   'echo started > started.txt; sleep 10; echo late > late.txt';
 const STOP_WINDOW_MS = 10_500;
 
-for (const { name, skip, open, writableStdin, holds } of backends) {
+for (const { name, skip, open, writableStdin, runAbort, holds } of backends) {
   describe(`sandbox session contract: ${name}`, { skip }, () => {
     describe('failure modes', () => {
-      it('stops a running command when run is aborted', async (t: TestContext) => {
+      it(`stops a running command and ${runAbort === 'rejects' ? 'rejects with the abort reason' : 'resolves with exit 124'} when run is aborted`, async (t: TestContext) => {
         await using sandbox = await open();
         const controller = new AbortController();
+        const reason = new Error('stop');
 
         const running = Promise.resolve(
           sandbox.run({
             command: STOPPABLE_COMMAND,
             abortSignal: controller.signal,
           }),
-        ).catch(() => undefined);
+        );
         await t.waitFor(
           async () =>
             assert.equal(
@@ -111,8 +120,12 @@ for (const { name, skip, open, writableStdin, holds } of backends) {
             ),
           STARTED,
         );
-        controller.abort(new Error('stop'));
-        await running;
+        controller.abort(reason);
+        if (runAbort === 'rejects') {
+          await assert.rejects(running, (error) => error === reason);
+        } else {
+          assert.equal((await running).exitCode, 124);
+        }
         await sleep(STOP_WINDOW_MS);
 
         assert.equal(await sandbox.readTextFile({ path: 'late.txt' }), null);

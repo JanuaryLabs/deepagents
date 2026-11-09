@@ -1,15 +1,56 @@
 import { DockerTestbed } from '@zukhruf/testing/docker';
+import { type UIMessage, generateId, isToolUIPart } from 'ai';
+import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert';
 import { text as streamText } from 'node:stream/consumers';
 import { describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import { createBashTool, createDockerSandbox } from '@deepagents/context';
+import {
+  type CommandResult,
+  ContextEngine,
+  InMemoryContextStore,
+  agent,
+  chat,
+  createBashTool,
+  createDockerSandbox,
+} from '@deepagents/context';
 
 import { dockerSandboxDefaults } from './helpers/docker-sandbox-defaults.ts';
+import { textResult, toolCallResult } from './helpers/stream-results.ts';
 
 const testbed = new DockerTestbed({ environment: process.env });
 const defaults = dockerSandboxDefaults(testbed.defaults);
+
+function userMessage(text: string): UIMessage {
+  return { id: generateId(), role: 'user', parts: [{ type: 'text', text }] };
+}
+
+/** Calls `bash` with `command` first, and answers in text from then on. */
+function bashThenText(command: string) {
+  const model: MockLanguageModelV4 = new MockLanguageModelV4({
+    doStream: async () =>
+      model.doStreamCalls.length === 1
+        ? toolCallResult({
+            toolCallId: 'call-1',
+            toolName: 'bash',
+            input: JSON.stringify({ command, reasoning: 'run it' }),
+          })
+        : textResult('done'),
+  });
+  return model;
+}
+
+async function storedBashPart(store: InMemoryContextStore, chatId: string) {
+  const branch = await store.getActiveBranch(chatId);
+  assert.ok(branch?.headMessageId);
+  const chain = await store.getMessageChain(branch.headMessageId);
+  const part = chain
+    .flatMap((entry) => (entry.data as UIMessage).parts)
+    .find(isToolUIPart);
+  assert.ok(part);
+  return part;
+}
 
 async function readFirstChunk(
   stream: ReadableStream<Uint8Array>,
@@ -152,11 +193,9 @@ describe('Docker Sandbox — spawn', () => {
         abortSignal: controller.signal,
       });
       setTimeout(() => controller.abort(), 50);
-      const result = await exec;
-      assert.notStrictEqual(
-        result.exitCode,
-        0,
-        'aborted sleep must not return a 0 exit code',
+      await assert.rejects(
+        Promise.resolve(exec),
+        (error) => error === controller.signal.reason,
       );
       await sleep(10_500);
       assert.strictEqual(
@@ -232,6 +271,182 @@ describe('Docker Sandbox — spawn', () => {
   });
 
   describe('through createBashTool', () => {
+    it('records a cancelled bash call when the turn aborts, ends the turn, and lets the next turn replay it', async (t) => {
+      await using backend = await createDockerSandbox(defaults);
+      const store = new InMemoryContextStore();
+      const context = new ContextEngine({
+        store,
+        chatId: 'aborted-turn',
+        userId: 'user',
+      });
+      const model = bashThenText('touch started; sleep 10; touch late');
+      const chatAgent = agent({
+        sandbox: await createBashTool({
+          sandbox: backend,
+          workingDirectory: '/workspace',
+        }),
+        name: 'aborted-turn',
+        context,
+        model,
+      });
+      await context.continue(userMessage('go'));
+      const controller = new AbortController();
+      const reason = new Error('stop');
+
+      const stream = await chat(chatAgent, { abortSignal: controller.signal });
+      const consumed = Array.fromAsync(stream);
+      await t.waitFor(
+        async () =>
+          assert.ok(await backend.stat({ path: '/workspace/started' })),
+        { interval: 50, timeout: 30_000 },
+      );
+      controller.abort(reason);
+      await assert.rejects(consumed, (error) => error === reason);
+
+      await t.waitFor(
+        async () =>
+          assert.deepStrictEqual(
+            await storedBashPart(store, 'aborted-turn').then(
+              ({ state, errorText }) => ({ state, errorText }),
+            ),
+            { state: 'output-error', errorText: 'Cancelled by user' },
+          ),
+        { interval: 50, timeout: 10_000 },
+      );
+      assert.strictEqual(model.doStreamCalls.length, 1);
+
+      await context.continue(userMessage('again'));
+      await Array.fromAsync(await chat(chatAgent));
+      await sleep(10_500);
+
+      assert.deepStrictEqual(
+        model.doStreamCalls[1]?.prompt
+          .filter((message) => message.role === 'tool')
+          .flatMap((message) => message.content)
+          .map((part) => part.type === 'tool-result' && part.output),
+        [{ type: 'error-text', value: 'Cancelled by user' }],
+      );
+      assert.strictEqual(await backend.stat({ path: '/workspace/late' }), null);
+    });
+
+    it('returns a timed-out result the model reads when a bash call passes its tool timeout, and stops the command', async () => {
+      await using backend = await createDockerSandbox(defaults);
+      const store = new InMemoryContextStore();
+      const context = new ContextEngine({
+        store,
+        chatId: 'tool-timeout',
+        userId: 'user',
+      });
+      const model = bashThenText('echo partial; sleep 10; touch late');
+      const chatAgent = agent({
+        sandbox: await createBashTool({
+          sandbox: backend,
+          workingDirectory: '/workspace',
+        }),
+        name: 'tool-timeout',
+        context,
+        model,
+        timeout: { tools: { bashMs: 1_500 } },
+      });
+      await context.continue(userMessage('go'));
+
+      await Array.fromAsync(await chat(chatAgent));
+      await sleep(10_500);
+
+      const part = await storedBashPart(store, 'tool-timeout');
+      assert.strictEqual(part.state, 'output-available');
+      const { stdout, stderr, exitCode } = part.output as CommandResult;
+      assert.deepStrictEqual(
+        { stdout, exitCode },
+        { stdout: '', exitCode: 124 },
+      );
+      const [, elapsed] =
+        /^Command timed out after (\d+) ms$/.exec(stderr) ?? [];
+      assert.ok(Number(elapsed) >= 1_500, stderr);
+      assert.deepStrictEqual(
+        model.doStreamCalls[1]?.prompt
+          .filter((message) => message.role === 'tool')
+          .flatMap((message) => message.content)
+          .map((part) => part.type === 'tool-result' && part.output.type),
+        ['json'],
+      );
+      assert.strictEqual(await backend.stat({ path: '/workspace/late' }), null);
+    });
+
+    it('ends the turn when the total timeout fires during a bash call, and stops the command', async () => {
+      await using backend = await createDockerSandbox(defaults);
+      const store = new InMemoryContextStore();
+      const context = new ContextEngine({
+        store,
+        chatId: 'total-timeout',
+        userId: 'user',
+      });
+      const model = bashThenText('sleep 10; touch late');
+      const chatAgent = agent({
+        sandbox: await createBashTool({
+          sandbox: backend,
+          workingDirectory: '/workspace',
+        }),
+        name: 'total-timeout',
+        context,
+        model,
+        timeout: { totalMs: 1_500 },
+      });
+      await context.continue(userMessage('go'));
+
+      await Array.fromAsync(await chat(chatAgent)).catch(() => undefined);
+      await sleep(10_500);
+
+      const { state, errorText } = await storedBashPart(store, 'total-timeout');
+      assert.deepStrictEqual(
+        { state, errorText },
+        { state: 'output-error', errorText: 'Cancelled by user' },
+      );
+      assert.strictEqual(model.doStreamCalls.length, 1);
+      assert.strictEqual(await backend.stat({ path: '/workspace/late' }), null);
+    });
+
+    it('fails an aborted bash call with the abort reason, stops the command, and skips onAfterBashCall', async (t) => {
+      await using sandbox = await createDockerSandbox(defaults);
+      const afterCalls: string[] = [];
+      const { bash } = await createBashTool({
+        sandbox,
+        workingDirectory: '/workspace',
+        onAfterBashCall: ({ command }) => {
+          afterCalls.push(command);
+        },
+      });
+      assert.ok(bash.execute);
+      const controller = new AbortController();
+      const reason = new Error('stop');
+
+      const call = Promise.resolve(
+        bash.execute(
+          {
+            command: 'touch started; sleep 10; touch late',
+            reasoning: 'an aborted call',
+          },
+          {
+            abortSignal: controller.signal,
+            context: {},
+            messages: [],
+            toolCallId: 'aborted-call',
+          },
+        ),
+      );
+      await t.waitFor(
+        async () =>
+          assert.ok(await sandbox.stat({ path: '/workspace/started' })),
+        { interval: 50, timeout: 30_000 },
+      );
+      controller.abort(reason);
+
+      await assert.rejects(call, (error) => error === reason);
+      await sleep(10_500);
+      assert.strictEqual(await sandbox.stat({ path: '/workspace/late' }), null);
+      assert.deepStrictEqual(afterCalls, []);
+    });
+
     it('exposes spawn on the wrapped sandbox', async () => {
       await using sandbox = await createDockerSandbox(defaults);
       const agent = await createBashTool({

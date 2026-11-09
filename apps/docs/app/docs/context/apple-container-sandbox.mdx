@@ -208,7 +208,7 @@ const pending = sandbox.run({
   abortSignal: controller.signal,
 });
 setTimeout(() => controller.abort(), 1_000);
-await pending;
+await pending; // Rejects with the abort reason after the command stops.
 ```
 
 For live byte streams, use `spawn` (accepts `workingDirectory`, `env`, `abortSignal`):

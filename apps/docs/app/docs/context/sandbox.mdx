@@ -35,6 +35,26 @@ per-command file-change tracking, first decorate a real backend
 with `withStraceFileChanges(...)`, then pass that tracked backend into
 `createBashTool`.
 
+`createBashTool` creates its working directory and uploads `files` and
+`uploadDirectory` through the sandbox that you give it. With a tracked backend,
+`onFileChanges` sees that setup, and a callback that throws makes `createBashTool`
+reject. A callback that must not see the setup adds those paths to `exclude`, for
+example the working directory itself:
+
+```typescript
+const tracked = await withStraceFileChanges(backend, {
+  include: ['/workspace', '/workspace/**'],
+  exclude: ['/workspace'],
+  onFileChanges: rejectForbiddenChanges,
+});
+```
+
+Uploaded files need their own `exclude` patterns, because `/workspace` matches only
+the directory.
+
+`deleteFile` reports a `delete` change when it returns `true`. It reports nothing
+when it returns `false` or rejects.
+
 `uploadDirectory` accepts one `{ source, include? }` object. Set the top-level
 `workingDirectory` to choose where its files are uploaded and where bash commands run.
 Without it, commands run in the sandbox's default working directory, and relative

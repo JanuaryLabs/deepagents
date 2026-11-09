@@ -290,6 +290,59 @@ describe('strace file-change tracking (docker backend)', () => {
     });
   });
 
+  it('reports nothing for a deleteFile that returns false, rejects, or falls outside include', async () => {
+    await withSandbox(async (s, rec) => {
+      await s.sandbox.run({
+        command: `mkdir -p ${ROOT}/dir; touch /tmp/outside.txt`,
+      });
+      rec.drain();
+
+      const missing = await s.sandbox.deleteFile({
+        path: `${ROOT}/missing.txt`,
+      });
+      await assert.rejects(
+        Promise.resolve(s.sandbox.deleteFile({ path: `${ROOT}/dir` })),
+        /directory/i,
+      );
+      const outside = await s.sandbox.deleteFile({ path: '/tmp/outside.txt' });
+
+      assert.strictEqual(missing, false);
+      assert.strictEqual(outside, true);
+      assert.deepStrictEqual(rec.drain(), []);
+    });
+  });
+
+  it('reports delete for a deleteFile that removed a file, at absolute and relative paths', async () => {
+    const seen: FileChange[] = [];
+    const backend = await createDockerSandbox({
+      ...defaults,
+      dockerfile: STRACE_IMAGE,
+    });
+    const tracked = await withStraceFileChanges(backend, {
+      include: ['/**'],
+      exclude: ['/tmp/**'],
+      onFileChanges: (changes) => {
+        seen.push(...changes);
+      },
+    });
+    try {
+      const base = (await tracked.run({ command: 'pwd' })).stdout.trimEnd();
+      await backend.run({ command: 'touch relative.txt /absolute.txt' });
+
+      const absolute = await tracked.deleteFile({ path: '/absolute.txt' });
+      const relative = await tracked.deleteFile({ path: 'relative.txt' });
+
+      assert.strictEqual(absolute, true);
+      assert.strictEqual(relative, true);
+      assert.deepStrictEqual(ops(seen), [
+        { op: 'delete', path: '/absolute.txt' },
+        { op: 'delete', path: `${base}/relative.txt` },
+      ]);
+    } finally {
+      await tracked.dispose();
+    }
+  });
+
   it('reports a relative write at the session base directory', async () => {
     const seen: FileChange[] = [];
     const backend = await createDockerSandbox({
@@ -560,6 +613,43 @@ describe('strace file-change tracking (docker backend)', () => {
     });
   });
 
+  it('rejects an aborted traced run with the abort reason, reports nothing, and sweeps its trace', async (t) => {
+    await withSandbox(async (s, rec) => {
+      const controller = new AbortController();
+      const reason = new Error('stop');
+
+      const running = Promise.resolve(
+        s.sandbox.run({
+          command: `echo started > ${ROOT}/run-started; sleep 10; echo late > ${ROOT}/run-late`,
+          abortSignal: controller.signal,
+        }),
+      );
+      await t.waitFor(
+        async () =>
+          assert.ok(await s.sandbox.stat({ path: `${ROOT}/run-started` })),
+        { interval: 50, timeout: 30_000 },
+      );
+      controller.abort(reason);
+
+      await assert.rejects(running, (error) => error === reason);
+      await sleep(10_500);
+      assert.strictEqual(
+        await s.sandbox.stat({ path: `${ROOT}/run-late` }),
+        null,
+      );
+      assert.deepStrictEqual(rec.drain(), []);
+      // The sweep is fire-and-forget, so absorb it with a wait.
+      await t.waitFor(
+        async () =>
+          assert.deepStrictEqual(
+            await s.sandbox.listDirectory({ path: '/tmp/dat-trace' }),
+            [],
+          ),
+        { interval: 50, timeout: 10_000 },
+      );
+    });
+  });
+
   it('stops a traced spawn on kill and on abort, and still sweeps its traces', async (t) => {
     await withSandbox(async (s) => {
       const controller = new AbortController();
@@ -710,6 +800,64 @@ describe('onFileChanges failure handling (docker backend)', () => {
       assert.match(read.stdout, /hi/);
     } finally {
       await s.sandbox.dispose();
+    }
+  });
+
+  it('rejects createBashTool with the veto, not a claim that the directory was not created, when onFileChanges vetoes its mkdir', async () => {
+    const backend = await createDockerSandbox({
+      ...defaults,
+      dockerfile: STRACE_IMAGE,
+    });
+    try {
+      const tracked = await withStraceFileChanges(backend, {
+        include: [ROOT, `${ROOT}/**`],
+        onFileChanges: () => {
+          throw new RejectChange('no writes');
+        },
+      });
+
+      await assert.rejects(
+        createBashTool({ sandbox: tracked, workingDirectory: ROOT }),
+        (error: Error) => {
+          assert.match(error.message, /rejected: no writes/);
+          assert.doesNotMatch(error.message, /create/i);
+          return true;
+        },
+      );
+      assert.strictEqual(
+        (await backend.stat({ path: ROOT }))?.type,
+        'directory',
+      );
+    } finally {
+      await backend.dispose();
+    }
+  });
+
+  it('keeps the tool setup from onFileChanges when it excludes the working directory', async () => {
+    const seen: FileChange[] = [];
+    const backend = await createDockerSandbox({
+      ...defaults,
+      dockerfile: STRACE_IMAGE,
+    });
+    try {
+      const tracked = await withStraceFileChanges(backend, {
+        include: [ROOT, `${ROOT}/**`],
+        exclude: [ROOT],
+        onFileChanges: (changes) => {
+          seen.push(...changes);
+          throw new RejectChange('no writes');
+        },
+      });
+
+      await createBashTool({ sandbox: tracked, workingDirectory: ROOT });
+
+      assert.deepStrictEqual(seen, []);
+      assert.strictEqual(
+        (await backend.stat({ path: ROOT }))?.type,
+        'directory',
+      );
+    } finally {
+      await backend.dispose();
     }
   });
 
