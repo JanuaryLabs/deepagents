@@ -10,7 +10,7 @@
     "@deepagents/context": "*",
     "@deepagents/experimental": "*",
     "@electric-sql/pglite": "^0.5.4",
-    "@zukhruf/sqlite-open": "^0.8.10",
+    "@zukhruf/sqlite-open": "^0.8.12",
     "just-bash": "^3.6.0",
     "pg-boss": "^12.29.0"
   }

@@ -23,26 +23,15 @@ chat flows, local retrieval, and Text2SQL assistants.
 | `@deepagents/react-formatters` | Format dates, durations, bytes, numbers, booleans, and generic display values for React UIs.                                   |
 | `@deepagents/react-genai`      | Render AI SDK chat flows, trajectories, tools, citations, dynamic UI, and interactive responses.                               |
 
-`@deepagents/react-genai` uses `@zukhruf/shadcn` primitives and `TheButton`
-from `@zukhruf/ui`. In your app's Tailwind CSS v4 stylesheet, import both
-packages' styles after Tailwind with plain `@import` statements, without
-`layer()`:
-
-```css
-@import 'tailwindcss';
-@import '@zukhruf/shadcn/styles.css';
-@import '@zukhruf/ui/styles.css';
-```
-
-Import `TheButton` directly from `@zukhruf/ui`; `@deepagents/react-genai`
-no longer re-exports it.
+`@deepagents/react-genai` needs the host to import stylesheets and give a
+`ClockProvider`. See [its README](./packages/react/genai/README.md).
 
 ## React and AI SDK compatibility
 
 `@deepagents/react-genai`, `@deepagents/react-input`, and
 `@deepagents/devtool-history` declare React `^19.2.8` as a peer dependency:
 19.2.8 or later within React 19. `@deepagents/react-genai` also requires
-`react-dom` in the same range.
+`react-dom` in the same range, and `@zukhruf/ui` as a peer dependency.
 
 `@deepagents/react-genai` declares `ai@^7.0.153` and
 `@ai-sdk/react@^4.0.157` as dependencies. DevTool declares
