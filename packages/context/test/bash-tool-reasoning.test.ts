@@ -6,25 +6,13 @@ import { describe, it } from 'node:test';
 
 import { createBashTool, createVirtualSandbox } from '@deepagents/context';
 
-const testUsage = {
-  inputTokens: {
-    total: 3,
-    noCache: 3,
-    cacheRead: undefined,
-    cacheWrite: undefined,
-  },
-  outputTokens: {
-    total: 10,
-    text: 10,
-    reasoning: undefined,
-  },
-} as const;
+import { usage } from './helpers/usage.ts';
 
 function createBashToolCallModel(input: string) {
   return new MockLanguageModelV4({
     doGenerate: {
       finishReason: { unified: 'tool-calls', raw: undefined },
-      usage: testUsage,
+      usage,
       warnings: [],
       content: [
         {

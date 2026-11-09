@@ -25,17 +25,9 @@ import {
   readFileContent,
 } from '@deepagents/context';
 
-const temporaryFiles = new TemporaryFiles();
+import { usage } from './helpers/usage.ts';
 
-const testUsage = {
-  inputTokens: {
-    total: 1,
-    noCache: 1,
-    cacheRead: undefined,
-    cacheWrite: undefined,
-  },
-  outputTokens: { total: 1, text: 1, reasoning: undefined },
-} as const;
+const temporaryFiles = new TemporaryFiles();
 
 class RecordingSandbox {
   readonly commands: string[] = [];
@@ -319,7 +311,7 @@ describe('bash toolkit', () => {
         return model.doGenerateCalls.length === 1
           ? {
               finishReason: { unified: 'tool-calls' as const, raw: undefined },
-              usage: testUsage,
+              usage,
               content: [
                 {
                   type: 'tool-call' as const,
@@ -335,7 +327,7 @@ describe('bash toolkit', () => {
             }
           : {
               finishReason: { unified: 'stop' as const, raw: undefined },
-              usage: testUsage,
+              usage,
               content: [{ type: 'text' as const, text: 'done' }],
               warnings: [],
             };
@@ -692,7 +684,7 @@ describe('readFile tool', () => {
         model.doGenerateCalls.length === 1
           ? {
               finishReason: { unified: 'tool-calls' as const, raw: undefined },
-              usage: testUsage,
+              usage,
               content: [
                 {
                   type: 'tool-call' as const,
@@ -705,7 +697,7 @@ describe('readFile tool', () => {
             }
           : {
               finishReason: { unified: 'stop' as const, raw: undefined },
-              usage: testUsage,
+              usage,
               content: [{ type: 'text' as const, text: 'a single pixel' }],
               warnings: [],
             },

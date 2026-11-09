@@ -35,6 +35,7 @@ import {
   type TurnConsumer,
 } from '../../testing/controlled-turn-queue.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
+import { usage } from '../../testing/usage.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 /** Conversation metadata as `AgentThread.toMetadata` and the history forker write it. */
@@ -322,16 +323,6 @@ class WaitObservedMailboxStore extends SqliteMailboxStore {
     return super.hasPending(recipient);
   }
 }
-
-const usage = {
-  inputTokens: {
-    total: 1,
-    noCache: 1,
-    cacheRead: undefined,
-    cacheWrite: undefined,
-  },
-  outputTokens: { total: 1, text: 1, reasoning: undefined },
-} as const;
 
 function textModel(text: string, calls: unknown[]) {
   return new MockLanguageModelV4({

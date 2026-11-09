@@ -14,6 +14,11 @@ import {
   swarm,
 } from '@deepagents/agent';
 
+const usage = {
+  inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+  outputTokens: { total: 1, text: 1, reasoning: 0 },
+};
+
 for (const mode of ['generate', 'execute'] as const) {
   for (const decisions of [
     [true, true],
@@ -22,10 +27,6 @@ for (const mode of ['generate', 'execute'] as const) {
   ]) {
     it(`${mode} handles duplicate or conflicting UI approvals ${decisions.join('/')} without repeating execution`, async () => {
       let runs = 0;
-      const usage = {
-        inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-        outputTokens: { total: 1, text: 1, reasoning: 0 },
-      };
       const finishReason = { unified: 'stop' as const, raw: undefined };
       const model = new MockLanguageModelV4({
         doGenerate: async () => ({
@@ -84,11 +85,6 @@ for (const mode of ['generate', 'execute'] as const) {
     });
   }
 }
-
-const usage = {
-  inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-  outputTokens: { total: 1, text: 1, reasoning: 0 },
-};
 
 /**
  * A model whose first step calls the given tools and whose second step answers
@@ -375,10 +371,7 @@ it('swarm stops prepareEnd continuation after an interrupted model response', as
         {
           type: 'finish',
           finishReason: { unified: 'interrupted', raw: undefined },
-          usage: {
-            inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-            outputTokens: { total: 1, text: 1, reasoning: 0 },
-          },
+          usage,
         },
       ]),
     }),

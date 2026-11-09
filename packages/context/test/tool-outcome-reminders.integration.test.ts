@@ -26,11 +26,7 @@ import {
 } from '@deepagents/context';
 
 import { buildSandbox } from './helpers/build-sandbox.ts';
-
-const USAGE = {
-  inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
-  outputTokens: { total: 5, text: 5, reasoning: 0 },
-} as const;
+import { usage } from './helpers/usage.ts';
 
 const NUDGE = 'VALIDATE-FIRST-NUDGE';
 
@@ -52,7 +48,7 @@ function bashThenStop(command: string) {
               {
                 type: 'finish',
                 finishReason: { unified: 'tool-calls', raw: '' },
-                usage: USAGE,
+                usage,
               },
             ]
           : [
@@ -62,7 +58,7 @@ function bashThenStop(command: string) {
               {
                 type: 'finish',
                 finishReason: { unified: 'stop', raw: '' },
-                usage: USAGE,
+                usage,
               },
             ];
       return {

@@ -36,6 +36,7 @@ import {
 } from '@deepagents/text2sql/sqlite';
 
 import { buildSandbox } from './helpers/build-sandbox.ts';
+import { usage } from './helpers/usage.ts';
 
 const sandbox = await buildSandbox();
 
@@ -50,15 +51,7 @@ function createMockModel(text = 'SELECT COUNT(*) FROM users') {
           {
             type: 'finish',
             finishReason: { unified: 'stop', raw: '' },
-            usage: {
-              inputTokens: {
-                total: 10,
-                noCache: 10,
-                cacheRead: 0,
-                cacheWrite: 0,
-              },
-              outputTokens: { total: 5, text: 5, reasoning: 0 },
-            },
+            usage,
           },
         ],
       }),

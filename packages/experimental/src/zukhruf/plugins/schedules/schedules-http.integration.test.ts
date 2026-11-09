@@ -41,6 +41,7 @@ import {
   type TurnConsumer,
 } from '../../../testing/controlled-turn-queue.fixture.ts';
 import { streamsFor } from '../../../testing/streams-for.fixture.ts';
+import { usage } from '../../../testing/usage.fixture.ts';
 
 const MOUNT = '/zukhruf/v1';
 const SCHEDULES = `${MOUNT}/schedules`;
@@ -79,10 +80,7 @@ function completingModel() {
         {
           type: 'finish',
           finishReason: { unified: 'stop', raw: 'stop' },
-          usage: {
-            inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-            outputTokens: { total: 1, text: 1, reasoning: 0 },
-          },
+          usage,
         },
       ];
       return { stream: simulateReadableStream({ chunks }) };

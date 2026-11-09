@@ -13,11 +13,8 @@ import {
 } from '@deepagents/context';
 
 import { buildSandbox } from './helpers/build-sandbox.ts';
+import { usage } from './helpers/usage.ts';
 
-const usage = {
-  inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-  outputTokens: { total: 1, text: 1, reasoning: 0 },
-};
 const toolCalls = { unified: 'tool-calls' as const, raw: undefined };
 const stop = { unified: 'stop' as const, raw: undefined };
 

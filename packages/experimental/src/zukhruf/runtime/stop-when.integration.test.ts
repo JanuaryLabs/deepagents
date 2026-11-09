@@ -24,6 +24,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
+import { usage } from '../../testing/usage.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 const stack = defineStack(async (resources) => {
@@ -75,15 +76,7 @@ for (const stopWhen of [
                 unified: 'tool-calls' as const,
                 raw: undefined,
               },
-              usage: {
-                inputTokens: {
-                  total: 1,
-                  noCache: 1,
-                  cacheRead: 0,
-                  cacheWrite: 0,
-                },
-                outputTokens: { total: 1, text: 1, reasoning: 0 },
-              },
+              usage,
             },
           ]),
         };
@@ -128,10 +121,6 @@ for (const stopWhen of [
 
 test('a truncated tool input cannot park the next queued user turn', async (t) => {
   let queryExecutions = 0;
-  const usage = {
-    inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-    outputTokens: { total: 1, text: 1, reasoning: 0 },
-  };
   const model: MockLanguageModelV4 = new MockLanguageModelV4({
     doStream: async () => ({
       stream: ReadableStream.from<LanguageModelV4StreamPart>(
@@ -223,10 +212,6 @@ test('the turns of one chat borrow one sandbox, which stays open between turns, 
   // container sandbox stops its container), so the chat keeps one.
   let created = 0;
   let open = 0;
-  const usage = {
-    inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-    outputTokens: { total: 1, text: 1, reasoning: 0 },
-  };
   const model: MockLanguageModelV4 = new MockLanguageModelV4({
     doStream: async () => {
       if (model.doStreamCalls.length === 2)

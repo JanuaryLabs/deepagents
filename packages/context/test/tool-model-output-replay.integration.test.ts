@@ -28,20 +28,11 @@ import {
 } from '@deepagents/context';
 
 import { buildSandbox } from './helpers/build-sandbox.ts';
-
-const testUsage = {
-  inputTokens: {
-    total: 3,
-    noCache: 3,
-    cacheRead: undefined,
-    cacheWrite: undefined,
-  },
-  outputTokens: { total: 4, text: 4, reasoning: undefined },
-} as const;
+import { usage } from './helpers/usage.ts';
 
 const stopResponse = {
   finishReason: { unified: 'stop' as const, raw: undefined },
-  usage: testUsage,
+  usage,
   content: [{ type: 'text' as const, text: 'There are two users.' }],
   warnings: [],
 };
@@ -120,7 +111,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
     const model = new MockLanguageModelV4({
       doGenerate: {
         finishReason: { unified: 'stop', raw: undefined },
-        usage: testUsage,
+        usage,
         content: [{ type: 'text', text: 'There are no admins.' }],
         warnings: [],
       },
@@ -157,7 +148,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
         if (call === 1) {
           return {
             finishReason: { unified: 'tool-calls' as const, raw: undefined },
-            usage: testUsage,
+            usage,
             content: [
               {
                 type: 'tool-call' as const,
@@ -218,7 +209,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
                 {
                   type: 'finish',
                   finishReason: { unified: 'tool-calls', raw: undefined },
-                  usage: testUsage,
+                  usage,
                 },
               ]
             : [
@@ -228,7 +219,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
                 {
                   type: 'finish',
                   finishReason: { unified: 'stop', raw: undefined },
-                  usage: testUsage,
+                  usage,
                 },
               ];
         return {
@@ -287,7 +278,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
                 {
                   type: 'finish',
                   finishReason: { unified: 'tool-calls', raw: undefined },
-                  usage: testUsage,
+                  usage,
                 },
               ]
             : [
@@ -297,7 +288,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
                 {
                   type: 'finish',
                   finishReason: { unified: 'stop', raw: undefined },
-                  usage: testUsage,
+                  usage,
                 },
               ];
         return {
@@ -358,7 +349,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
         if (call === 1) {
           return {
             finishReason: { unified: 'tool-calls' as const, raw: undefined },
-            usage: testUsage,
+            usage,
             content: [
               {
                 type: 'tool-call' as const,
@@ -424,7 +415,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
         if (call === 1) {
           return {
             finishReason: { unified: 'tool-calls' as const, raw: undefined },
-            usage: testUsage,
+            usage,
             content: [
               {
                 type: 'tool-call' as const,
@@ -438,7 +429,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
         }
         return {
           finishReason: { unified: 'stop' as const, raw: undefined },
-          usage: testUsage,
+          usage,
           content: [{ type: 'text' as const, text: '{"count":2}' }],
           warnings: [],
         };
@@ -480,7 +471,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
                 {
                   type: 'finish',
                   finishReason: { unified: 'tool-calls', raw: undefined },
-                  usage: testUsage,
+                  usage,
                 },
               ]
             : [
@@ -494,7 +485,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
                 {
                   type: 'finish',
                   finishReason: { unified: 'stop', raw: undefined },
-                  usage: testUsage,
+                  usage,
                 },
               ];
         return {

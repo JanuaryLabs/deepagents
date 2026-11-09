@@ -22,11 +22,7 @@ import {
 } from '@deepagents/context';
 
 import { buildSandbox } from '../../test/helpers/build-sandbox.ts';
-
-const testUsage = {
-  inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
-  outputTokens: { total: 5, text: 5, reasoning: 0 },
-} as const;
+import { usage } from '../../test/helpers/usage.ts';
 
 /** Always calls `noop`, so only `stopWhen` can end the loop. */
 function alwaysToolCallingModel(): MockLanguageModelV4 {
@@ -43,7 +39,7 @@ function alwaysToolCallingModel(): MockLanguageModelV4 {
         {
           type: 'finish',
           finishReason: { unified: 'tool-calls', raw: '' },
-          usage: testUsage,
+          usage,
         },
       ];
       return { stream: simulateReadableStream({ chunks }) };

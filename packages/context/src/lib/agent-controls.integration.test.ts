@@ -19,6 +19,7 @@ import {
 } from '@deepagents/context';
 
 import { buildSandbox } from '../../test/helpers/build-sandbox.ts';
+import { usage } from '../../test/helpers/usage.ts';
 
 for (const mode of ['generate', 'stream'] as const) {
   it(`${mode} rejects forbidden tool calls before execution or actionable output`, async () => {
@@ -28,10 +29,6 @@ for (const mode of ['generate', 'stream'] as const) {
       toolCallId: 'forbidden',
       toolName: 'record',
       input: '{}',
-    };
-    const usage = {
-      inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-      outputTokens: { total: 1, text: 1, reasoning: 0 },
     };
     const finishReason = { unified: 'tool-calls' as const, raw: undefined };
     const model = new MockLanguageModelV4({
@@ -147,10 +144,6 @@ for (const mode of [
   'asTool',
 ] as const) {
   it(`${mode} applies native model controls, sequential tools, and approval policy`, async () => {
-    const usage = {
-      inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-      outputTokens: { total: 1, text: 1, reasoning: 0 },
-    };
     let active = 0;
     let maxActive = 0;
     let blockedRuns = 0;
@@ -291,10 +284,6 @@ for (const mode of [
 it('native total timeout also cancels a tool-call repair request', async () => {
   let repairSignal: AbortSignal | undefined;
   let toolRuns = 0;
-  const usage = {
-    inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-    outputTokens: { total: 1, text: 1, reasoning: 0 },
-  };
   const model: MockLanguageModelV4 = new MockLanguageModelV4({
     doGenerate: async ({ abortSignal }) => {
       if (model.doGenerateCalls.length === 1)
@@ -347,10 +336,6 @@ it('native total timeout also cancels a tool-call repair request', async () => {
 
 it('native tool timeout aborts execution and returns a tool error to the next model step', async () => {
   let toolAborted = false;
-  const usage = {
-    inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-    outputTokens: { total: 1, text: 1, reasoning: 0 },
-  };
   const model: MockLanguageModelV4 = new MockLanguageModelV4({
     doGenerate: async () => ({
       content:

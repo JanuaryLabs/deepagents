@@ -23,6 +23,8 @@ import {
   schema,
 } from '@deepagents/text2sql/posthog';
 
+import { usage } from '../../../../test/helpers/usage.ts';
+
 const namedDefinitions = z.array(z.object({ name: z.string() }));
 const queryRequestBody = z.object({ query: z.object({ kind: z.string() }) });
 const scopeErrorPayload = z.object({
@@ -759,15 +761,7 @@ function schemaFixture() {
 function mockModel(sql: string) {
   const response: LanguageModelV4GenerateResult = {
     finishReason: { unified: 'stop', raw: '' },
-    usage: {
-      inputTokens: {
-        total: 1,
-        noCache: 1,
-        cacheRead: undefined,
-        cacheWrite: undefined,
-      },
-      outputTokens: { total: 1, text: 1, reasoning: undefined },
-    },
+    usage,
     content: [
       {
         type: 'text',

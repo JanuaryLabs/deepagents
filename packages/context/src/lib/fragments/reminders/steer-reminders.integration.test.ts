@@ -46,6 +46,7 @@ import {
 } from '@deepagents/context';
 
 import { buildSandbox } from '../../../../test/helpers/build-sandbox.ts';
+import { usage } from '../../../../test/helpers/usage.ts';
 import { isUIMessage, requireUIMessage } from '../../ui-message-guards.ts';
 
 function messageOf(entry: MessageData): UIMessage {
@@ -55,11 +56,6 @@ function messageOf(entry: MessageData): UIMessage {
 function isSyntheticEntry(entry: MessageData): boolean {
   return isUIMessage(entry.data) && isSyntheticReminderMessage(entry.data);
 }
-
-const testUsage = {
-  inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
-  outputTokens: { total: 5, text: 5, reasoning: 0 },
-} as const;
 
 type StepSpec =
   | { tool: string }
@@ -114,7 +110,7 @@ function scriptedModel(steps: StepSpec[]) {
           unified: 'tool' in spec ? 'tool-calls' : 'stop',
           raw: '',
         },
-        usage: testUsage,
+        usage,
       });
       return {
         stream: simulateReadableStream({ chunks }),

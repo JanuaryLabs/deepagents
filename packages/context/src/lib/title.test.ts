@@ -11,19 +11,16 @@ import {
   user,
 } from '@deepagents/context';
 
-const EXISTING_TITLE = 'Existing Title';
+import { usage } from '../../test/helpers/usage.ts';
 
-const testUsage = {
-  inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
-  outputTokens: { total: 5, text: 5, reasoning: 0 },
-} as const;
+const EXISTING_TITLE = 'Existing Title';
 
 function modelReturningTitle(title: string) {
   return new MockLanguageModelV4({
     doGenerate: {
       content: [{ type: 'text' as const, text: JSON.stringify({ title }) }],
       finishReason: { unified: 'stop' as const, raw: '' },
-      usage: testUsage,
+      usage,
       warnings: [],
     },
   });
@@ -67,7 +64,7 @@ describe('TitleGenerator.ensure()', () => {
       doGenerate: {
         content: [{ type: 'text', text: JSON.stringify({ title: 'Wrong' }) }],
         finishReason: { unified: 'stop' as const, raw: '' },
-        usage: testUsage,
+        usage,
         warnings: [],
       },
     });
@@ -135,7 +132,7 @@ describe('TitleGenerator.ensure()', () => {
         return {
           content: [{ type: 'text', text: JSON.stringify({ title: 'Wrong' }) }],
           finishReason: { unified: 'stop' as const, raw: '' },
-          usage: testUsage,
+          usage,
           warnings: [],
         };
       },

@@ -12,28 +12,15 @@ import {
 } from '@deepagents/context';
 
 import { buildSandbox } from '../../test/helpers/build-sandbox.ts';
+import { usage } from '../../test/helpers/usage.ts';
 
 const sandbox = await buildSandbox();
-
-const testUsage = {
-  inputTokens: {
-    total: 3,
-    noCache: 3,
-    cacheRead: undefined,
-    cacheWrite: undefined,
-  },
-  outputTokens: {
-    total: 10,
-    text: 10,
-    reasoning: undefined,
-  },
-} as const;
 
 function createRepairStreamingModel() {
   const model = new MockLanguageModelV4({
     doGenerate: {
       finishReason: { unified: 'stop', raw: '' },
-      usage: testUsage,
+      usage,
       warnings: [],
       content: [
         {
@@ -56,7 +43,7 @@ function createRepairStreamingModel() {
               {
                 type: 'finish' as const,
                 finishReason: { unified: 'tool-calls', raw: '' },
-                usage: testUsage,
+                usage,
               },
             ],
           }),
@@ -72,7 +59,7 @@ function createRepairStreamingModel() {
             {
               type: 'finish' as const,
               finishReason: { unified: 'stop', raw: '' },
-              usage: testUsage,
+              usage,
             },
           ],
         }),

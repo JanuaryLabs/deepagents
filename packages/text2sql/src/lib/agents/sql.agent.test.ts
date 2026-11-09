@@ -17,6 +17,8 @@ import { fragment } from '@deepagents/context';
 import { Adapter, SQLValidationError, toSql } from '@deepagents/text2sql';
 import { Sqlite, tables } from '@deepagents/text2sql/sqlite';
 
+import { usage } from '../../../test/helpers/usage.ts';
+
 const testSqlite = new TestSqlite();
 
 // The SQLScopeError fields a scope test compares; absent fields read as undefined.
@@ -30,25 +32,12 @@ type MockModelResponse =
   | { result: { sql: string; reasoning: string } }
   | { result: { error: string } }
   | { sql: string; reasoning: string };
-const testUsage = {
-  inputTokens: {
-    total: 3,
-    noCache: 3,
-    cacheRead: undefined,
-    cacheWrite: undefined,
-  },
-  outputTokens: {
-    total: 10,
-    text: 10,
-    reasoning: undefined,
-  },
-} as const;
 /** Helper to create a MockLanguageModelV4 that returns a structured response */
 function createMockModel(response: MockModelResponse) {
   return new MockLanguageModelV4({
     doGenerate: {
       finishReason: { unified: 'stop', raw: '' },
-      usage: testUsage,
+      usage,
       content: [{ type: 'text', text: JSON.stringify(response) }],
       warnings: [],
     },
@@ -75,7 +64,7 @@ function createCapturingModel(responses: Array<MockModelResponse | Error>) {
       }
       return {
         finishReason: { unified: 'stop', raw: '' },
-        usage: testUsage,
+        usage,
         content: [{ type: 'text' as const, text: JSON.stringify(response) }],
         warnings: [],
       };
@@ -248,7 +237,7 @@ describe('toSql', () => {
         }
         return {
           finishReason: { unified: 'stop', raw: '' },
-          usage: testUsage,
+          usage,
           content: [
             {
               type: 'text',
@@ -494,7 +483,7 @@ describe('toSql', () => {
         }
         return {
           finishReason: { unified: 'stop', raw: '' },
-          usage: testUsage,
+          usage,
           content: [
             {
               type: 'text',

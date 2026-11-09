@@ -26,6 +26,7 @@ import {
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
+import { usage } from '../../testing/usage.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 const model = new MockLanguageModelV4({
@@ -38,15 +39,7 @@ const model = new MockLanguageModelV4({
         {
           type: 'finish',
           finishReason: { unified: 'stop', raw: undefined },
-          usage: {
-            inputTokens: {
-              total: 1,
-              noCache: 1,
-              cacheRead: undefined,
-              cacheWrite: undefined,
-            },
-            outputTokens: { total: 1, text: 1, reasoning: undefined },
-          },
+          usage,
         },
       ],
     }),

@@ -18,20 +18,11 @@ import {
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
+import { usage } from '../../testing/usage.fixture.ts';
 
 const connectionString = process.argv[2];
 if (!connectionString)
   throw new Error('usage: crash-worker.fixture.ts <connection-string>');
-
-const usage = {
-  inputTokens: {
-    total: 1,
-    noCache: 1,
-    cacheRead: undefined,
-    cacheWrite: undefined,
-  },
-  outputTokens: { total: 2, text: 2, reasoning: undefined },
-} as const;
 
 const glacialModel = new MockLanguageModelV4({
   doStream: {

@@ -11,14 +11,12 @@ import {
   user,
 } from '@deepagents/context';
 
+import { usage } from '../../test/helpers/usage.ts';
+
 for (const mode of ['generate', 'stream'] as const) {
   test(`structured ${mode} respects the caller's retrieval budget`, async () => {
     let requests = 0;
     let lookups = 0;
-    const usage = {
-      inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-      outputTokens: { total: 1, text: 1, reasoning: 0 },
-    };
     const model = new MockLanguageModelV4({
       doGenerate: async () => ({
         content:

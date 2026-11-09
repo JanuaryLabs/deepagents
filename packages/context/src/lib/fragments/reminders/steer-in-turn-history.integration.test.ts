@@ -22,6 +22,7 @@ import {
 import { createFileTelemetry } from '@deepagents/context/telemetry/file';
 
 import { buildSandbox } from '../../../../test/helpers/build-sandbox.ts';
+import { usage } from '../../../../test/helpers/usage.ts';
 
 const temporaryFiles = new TemporaryFiles();
 
@@ -31,11 +32,6 @@ const telemetryRecord = z.object({
   event: z.string(),
   data: z.unknown(),
 });
-
-const testUsage = {
-  inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
-  outputTokens: { total: 5, text: 5, reasoning: 0 },
-} as const;
 
 const STEER = 'YOU-HAVE-CALLED-BASH-REPEATEDLY';
 
@@ -67,7 +63,7 @@ function scriptedModel(): MockLanguageModelV4 {
           unified: spec === 'done' ? 'stop' : 'tool-calls',
           raw: '',
         },
-        usage: testUsage,
+        usage,
       });
       return { stream: simulateReadableStream({ chunks }) };
     },

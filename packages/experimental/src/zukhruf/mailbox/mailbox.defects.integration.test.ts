@@ -28,6 +28,7 @@ import {
   type TurnConsumer,
 } from '../../testing/controlled-turn-queue.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
+import { usage } from '../../testing/usage.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 /** Message metadata the turn executor writes for delivered mail. */
@@ -67,16 +68,6 @@ async function submitApproval(
 
 const root = { chatId: 'root', userId: 'user-1' };
 const researcher = { chatId: 'researcher', userId: 'user-1' };
-
-const usage = {
-  inputTokens: {
-    total: 1,
-    noCache: 1,
-    cacheRead: undefined,
-    cacheWrite: undefined,
-  },
-  outputTokens: { total: 1, text: 1, reasoning: undefined },
-} as const;
 
 function mail(content: string) {
   return createInterAgentCommunication({

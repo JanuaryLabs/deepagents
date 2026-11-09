@@ -19,11 +19,7 @@ import {
 } from '@deepagents/context';
 
 import { buildSandbox } from '../../test/helpers/build-sandbox.ts';
-
-const testUsage = {
-  inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
-  outputTokens: { total: 5, text: 5, reasoning: 0 },
-} as const;
+import { usage } from '../../test/helpers/usage.ts';
 
 type StepSpec = { tool: string } | { text: string };
 
@@ -54,7 +50,7 @@ function scriptedModel(steps: StepSpec[]): MockLanguageModelV4 {
           unified: 'tool' in spec ? 'tool-calls' : 'stop',
           raw: '',
         },
-        usage: testUsage,
+        usage,
       });
       return { stream: simulateReadableStream({ chunks }) };
     },

@@ -32,10 +32,7 @@ import {
 } from '@deepagents/text2sql';
 import { Sqlite, info, tables } from '@deepagents/text2sql/sqlite';
 
-const USAGE = {
-  inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
-  outputTokens: { total: 5, text: 5, reasoning: 0 },
-} as const;
+import { usage } from './helpers/usage.ts';
 
 function sqlCommand() {
   const db = open(':memory:');
@@ -73,7 +70,7 @@ function scriptedBash(commands: string[]) {
               {
                 type: 'finish',
                 finishReason: { unified: 'tool-calls', raw: '' },
-                usage: USAGE,
+                usage,
               },
             ]
           : [
@@ -83,7 +80,7 @@ function scriptedBash(commands: string[]) {
               {
                 type: 'finish',
                 finishReason: { unified: 'stop', raw: '' },
-                usage: USAGE,
+                usage,
               },
             ];
       return {

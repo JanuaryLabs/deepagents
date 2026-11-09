@@ -37,6 +37,7 @@ import {
 } from '@deepagents/experimental/zukhruf/http';
 
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
+import { usage } from '../../testing/usage.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 const childActivitySchema = z.looseObject({
@@ -91,10 +92,6 @@ const historySchema = z.array(
   }),
 );
 
-const usage = {
-  inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-  outputTokens: { total: 1, text: 1, reasoning: 0 },
-};
 const finish = {
   type: 'finish',
   finishReason: { unified: 'stop', raw: 'stop' },

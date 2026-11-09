@@ -36,12 +36,8 @@ import {
 } from '@deepagents/context';
 
 import { buildSandbox } from '../../../../test/helpers/build-sandbox.ts';
+import { usage } from '../../../../test/helpers/usage.ts';
 import { isUIMessage, requireUIMessage } from '../../ui-message-guards.ts';
-
-const testUsage = {
-  inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
-  outputTokens: { total: 5, text: 5, reasoning: 0 },
-} as const;
 
 type StepSpec = { tool: string; input?: string } | { text: string };
 
@@ -73,7 +69,7 @@ function scriptedModel(steps: StepSpec[]) {
           unified: 'tool' in spec ? 'tool-calls' : 'stop',
           raw: '',
         },
-        usage: testUsage,
+        usage,
       });
       return {
         stream: simulateReadableStream({ chunks }),
@@ -90,7 +86,7 @@ function scriptedGenerateModel() {
       return call === 1
         ? {
             finishReason: { unified: 'tool-calls' as const, raw: '' },
-            usage: testUsage,
+            usage,
             warnings: [],
             content: [
               {
@@ -103,7 +99,7 @@ function scriptedGenerateModel() {
           }
         : {
             finishReason: { unified: 'stop' as const, raw: '' },
-            usage: testUsage,
+            usage,
             warnings: [],
             content: [{ type: 'text' as const, text: 'done' }],
           };
@@ -156,7 +152,7 @@ function providerExecutedModel() {
           unified: call === 1 ? 'tool-calls' : 'stop',
           raw: '',
         },
-        usage: testUsage,
+        usage,
       });
       return { stream: simulateReadableStream({ chunks }) };
     },
@@ -181,7 +177,7 @@ function failingAfterToolModel() {
               {
                 type: 'finish',
                 finishReason: { unified: 'stop', raw: '' },
-                usage: testUsage,
+                usage,
               },
             ],
           }),
@@ -199,7 +195,7 @@ function failingAfterToolModel() {
             {
               type: 'finish',
               finishReason: { unified: 'tool-calls', raw: '' },
-              usage: testUsage,
+              usage,
             },
           ],
         }),
@@ -230,7 +226,7 @@ function failingAfterTwoToolsModel() {
               {
                 type: 'finish',
                 finishReason: { unified: 'stop', raw: '' },
-                usage: testUsage,
+                usage,
               },
             ],
           }),
@@ -250,7 +246,7 @@ function failingAfterTwoToolsModel() {
             {
               type: 'finish',
               finishReason: { unified: 'tool-calls', raw: '' },
-              usage: testUsage,
+              usage,
             },
           ],
         }),
@@ -291,7 +287,7 @@ function parallelToolsModel() {
           unified: call === 1 ? 'tool-calls' : 'stop',
           raw: '',
         },
-        usage: testUsage,
+        usage,
       });
       return {
         stream: simulateReadableStream({ chunks }),

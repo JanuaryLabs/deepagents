@@ -24,12 +24,8 @@ import {
   socraticPrompting,
 } from '@deepagents/context';
 
+import { usage } from '../../../test/helpers/usage.ts';
 import { isUIMessage } from '../ui-message-guards.ts';
-
-const testUsage = {
-  inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
-  outputTokens: { total: 5, text: 5, reasoning: 0 },
-} as const;
 
 type StepSpec =
   { tool: string; input?: Record<string, unknown> } | { text: string };
@@ -61,7 +57,7 @@ function scriptedModel(steps: StepSpec[]) {
           unified: 'text' in spec ? 'stop' : 'tool-calls',
           raw: '',
         },
-        usage: testUsage,
+        usage,
       });
       return { stream: simulateReadableStream({ chunks }) };
     },

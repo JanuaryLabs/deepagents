@@ -24,19 +24,10 @@ import {
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
+import { usage } from '../../testing/usage.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 const testPostgres = new Postgres({ environment: process.env });
-
-const usage = {
-  inputTokens: {
-    total: 1,
-    noCache: 1,
-    cacheRead: undefined,
-    cacheWrite: undefined,
-  },
-  outputTokens: { total: 2, text: 2, reasoning: undefined },
-} as const;
 
 const fixture = join(import.meta.dirname, 'crash-worker.fixture.ts');
 
