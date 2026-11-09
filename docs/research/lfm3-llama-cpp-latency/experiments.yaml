@@ -570,10 +570,10 @@ experiments:
           shared-prefix-2k (P5): TTFT p50 2,790 / 2,270 ms at 256 vs 2,390 / 2,072 ms at 2048 (+13.4%, spread 13.3%).
     verdict:
       result: yielded
-      note: 'E15 holds. The follow-up gain (-81%) is 12 times the A-to-A spread, and X-diag-followup-checkpoint-trace explains it. The first-turn chat cost (+1.8%) is real and small, as E14 measured. The fresh-prompt differences on P3, P4 and P5 are no larger than the spread between two runs of the same setting, so this Mac cannot show them. ubatch-size stays 256.'
+      note: 'E15 holds. The follow-up gain (-81%) is 12 times the A-to-A spread, and X-diag-followup-checkpoint-trace explains it. The first-turn chat cost (+1.8%) is real and small, as E14 measured. Fresh-prompt median TTFT rose 17.8% on P3 (A-to-A spread 15.1%), 4.3% on P4 (spread 7.4%), and 13.4% on P5 (spread 13.3%). These smaller differences need more replication to separate the setting from run-to-run variation. ubatch-size stays 256.'
 
   - id: X-vllm-metal-comparison
-    name: 'throughput: engine=vllm-metal 0.1.0 (MLX backend) with LiquidAI/LFM3-1.7B-MLX-bf16 vs llama.cpp on chat-500-5turns + sob-4k2 goodput searches'
+    name: 'throughput: engine=vllm-metal 0.33.0 (MLX backend) with cached LiquidAI/LFM3-1.7B BF16 weights vs llama.cpp on chat-500-5turns + sob-4k2 workloads'
     phase: throughput
     hypothesis: 'vLLM schedules many concurrent requests well on NVIDIA GPUs (PagedAttention, continuous batching). On this Mac, vllm-metal could serve more concurrent requests within the limits than llama.cpp with 4 slots.'
     combination:
@@ -589,7 +589,7 @@ experiments:
         'https://www.docker.com/blog/docker-model-runner-vllm-metal-macos/',
         'https://huggingface.co/LiquidAI/LFM3-1.7B',
       ]
-    evidence: 'vllm-metal is a community plugin under the vLLM organization, contributed by Docker; it runs MLX models. Docker measured llama.cpp about 1.2x faster than vLLM-Metal at all output lengths. The LFM3 model card lists vLLM for BF16 on GPUs; LFM3 support in vllm-metal is not confirmed.'
+    evidence: 'Initial rationale: vllm-metal is a community plugin under the vLLM organization, contributed by Docker; it runs MLX models. Docker measured llama.cpp about 1.2x faster than vLLM-Metal at all output lengths. The LFM3 model card lists vLLM for BF16 on GPUs. Attempt 1 below confirmed local LFM3 support in vllm-metal 0.33.0; attempt 2 records the matched comparison.'
     expected: 'Unknown at high concurrency; likely slower for a single stream (Docker benchmark).'
     risks: 'LFM3 support in vllm-metal is marked experimental; a different reasoning parser and prompt cache behavior (hybrid model state); it is a second engine to maintain.'
     measure: 'Install vllm-metal in its own venv; serve LFM3 MLX bf16; run the same goodput searches (X-capacity-*) and chat-6k-5turns-1user against it; compare capacity (streams, req/s within limits), follow-up TTFT and ITL.'
@@ -616,7 +616,7 @@ experiments:
     verdict:
       result: mixed
       note: "vLLM-Metal serves many users and reuses cached prompts better: chat follow-ups twice as fast, 8 concurrent chats with 42% more throughput and no slot queue, a shared prefix reused. llama.cpp decodes 15-24% faster and prefills fresh prompts much faster under load (SOB-like TTFT 2.4 s vs 6.1 s). One vLLM arm only, so vLLM's own run-to-run spread is not measured; the effects named here are far larger than the llama.cpp spread. Not applied. Next: a second vLLM arm on AC power; then a vLLM prefill setting (for example --max-num-batched-tokens) for the SOB-like case."
-    next: 'Benchmark on the same workloads with every guard of timed-queue.zsh (pitfalls A12-A15), when LFM3 in Llama.app is unloaded (it shares the GPU and memory). Serve the snapshot ac2586a34f1a1c03329dbdcdefabd8b6478ddaa7 by path: on 2026-11-08 the repo main moved to 0dc4268b, which has the same weights blob (135922ca) and the same config.json, but no configuration_lfm3.py, so --trust-remote-code fails on it. Use --reasoning-parser qwen3: checked on 2026-11-08, it puts the reasoning in reasoning_content and the JSON answer in content with enable_thinking true, and an empty reasoning with enable_thinking false (the LFM3 template prefills <think> or <think></think>). Also match sampling (--generation-config vllm, or explicit request fields), cap memory (--gpu-memory-utilization, --max-model-len 32768 was used), warm up before measuring, and keep prefix caching on, as llama.cpp has it.'
+    next: 'Complete a second vLLM-Metal arm on AC power, matching attempt 2 and using every guard of timed-queue.zsh (pitfalls A12-A15). Unload LFM3 in Llama.app first (it shares the GPU and memory). Serve the snapshot ac2586a34f1a1c03329dbdcdefabd8b6478ddaa7 by path: on 2026-11-08 the repo main moved to 0dc4268b, which has the same weights blob (135922ca) and the same config.json, but no configuration_lfm3.py, so --trust-remote-code fails on it. Use --reasoning-parser qwen3: checked on 2026-11-08, it puts the reasoning in reasoning_content and the JSON answer in content with enable_thinking true, and an empty reasoning with enable_thinking false (the LFM3 template prefills <think> or <think></think>). Also match sampling (--generation-config vllm, or explicit request fields), cap memory (--gpu-memory-utilization, --max-model-len 40960 as in attempt 2), warm up before measuring, and keep prefix caching on, as llama.cpp has it.'
 
   # Proposed by the 2026-11-07 research pass (primary sources: llama.cpp b11960 source, PRs, LiquidAI docs).
   - id: X-diag-followup-checkpoint-trace
@@ -1270,8 +1270,7 @@ experiments:
           {
             model: 'the SOB eval (apps/sob in offers-evals) asks for the second preset',
           },
-        workload: SOB budget-8k-question-twice-few-shot items,
-        and chat to the first preset at the same time,
+        workload: 'SOB budget-8k-question-twice-few-shot items, and chat to the first preset at the same time',
       }
     evidence: X-checkpoint-min-step-0-shots attempts 2, 4 and 5.
     expected: SOB few-shot prefill -37% while chat follow-ups stay at the default.

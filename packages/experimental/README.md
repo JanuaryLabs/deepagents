@@ -116,12 +116,13 @@ adapters without registering them with `resources`; those adapters remain
 caller-owned. Host and worker disposal always wait for active work. Only
 registered adapters are released by host disposal.
 
-The runtime also owns each sandbox handle returned by the agent's `sandbox`
-factory. It acquires a handle for a turn and disposes it when execution ends,
-including on failure. Return a handle that can be disposed independently on
-each call. A backend's disposal policy determines whether the underlying
-sandbox is retained; a named Microsandbox microVM can outlive its turn's
-client handle.
+The host lazily acquires one sandbox handle per agent declaration and
+conversation from the agent's `sandbox` factory. Later turns and plugins borrow
+the same handle; they must leave disposal to the host. A failed acquisition is
+retried on the next request. Host disposal releases the held handles after its
+workers stop. The backend's disposal policy determines whether the underlying
+environment stops, is removed, or remains available; a named Microsandbox
+microVM can outlive its host's client handle.
 
 Zukhruf discovers immediate `skills/<name>/SKILL.md` children from each
 configured sandbox once per conversation. It persists only the ordered catalog

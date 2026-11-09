@@ -1082,8 +1082,9 @@ work({concurrency?}) → AsyncDisposable }`.
 - **Multi-agent capacity / residency** — there is no per-tree agent cap or Codex-style LRU unloading
   for idle terminal/interrupted children. Worker concurrency limits execution but does not bound
   persisted tree growth or loaded resources.
-- **Per-chat sandbox GC** — sandboxes are per-chat, named by chatId, and never disposed by the
-  runtime. Nothing reclaims a dead chat's container yet (chat deletion hook? idle TTL? host policy?).
+- **Per-chat sandbox GC** — the host releases its per-chat sandbox handles when it ends, following
+  each backend's disposal policy. Reclaiming retained environments for deleted or idle chats still
+  needs a policy (chat deletion hook, idle TTL, or host policy).
 - **Queued-turn visibility** — `resume()` only sees executing/executed turns (the chain mutates at
   execution time). `conversationStatus()` reports a queued turn as `active`, but a reconnecting
   client still can't stream a turn that is queued but unstarted; folds into the observe/reconnect
@@ -1103,9 +1104,9 @@ only needed once containers are reclaimed).\_
 - **Strict contracts over lenient fallbacks.** The store is required; no silent in-memory default.
 - **No in-memory continuation state.** Anything needed to resume a turn must round-trip the store —
   the same discipline that makes it durable also makes it portable.
-- **The runtime never disposes the sandbox.** Sandboxes are per-chat named resources
-  (attach-or-create by chatId); their lifetime belongs to the chat, and reclamation is host policy
-  (Open). This revises the earlier "sandbox disposes itself per handle" principle, which fit the
-  fused per-conversation handle the executor replaced.
+- **The host owns sandbox handles; turns and plugins borrow them.** The host lazily acquires one
+  handle per declaration and conversation, shares it across turns, and disposes it after workers
+  stop. Backend policy determines whether disposal stops, removes, or retains the underlying
+  environment. Reclaiming retained environments for deleted or idle chats remains open.
 - **Scaffold one primitive at a time**, even erroring, where the error is diagnostic (it pins the
   exact missing dependency).
