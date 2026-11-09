@@ -8,10 +8,7 @@ import { z } from 'zod';
 import {
   InMemoryContextStore,
   type MessageData,
-  PollingChangeSource,
   SqliteStreamStore,
-  StreamManager,
-  type StreamStore,
 } from '@deepagents/context';
 import {
   type AgentDeclaration,
@@ -29,6 +26,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import { streamsFor } from '../../testing/streams-for.fixture.ts';
 
 /** Message metadata the turn executor writes for delivered mail. */
 const communicationMessageMetadataSchema = z.object({
@@ -71,13 +69,6 @@ async function submitApproval(
   await runtime.enqueue(conversation, {
     message,
     trigger: 'submit-message',
-  });
-}
-
-function streamsFor(store: StreamStore): StreamManager {
-  return new StreamManager({
-    store,
-    changeSource: new PollingChangeSource({ reads: store }),
   });
 }
 

@@ -14,10 +14,8 @@ import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
 
 import {
-  PollingChangeSource,
   SqliteContextStore,
   SqliteStreamStore,
-  StreamManager,
   createVirtualSandbox,
 } from '@deepagents/context';
 import {
@@ -37,6 +35,8 @@ import {
   type OwnerEvent,
   http,
 } from '@deepagents/experimental/zukhruf/http';
+
+import { streamsFor } from '../../testing/streams-for.fixture.ts';
 
 const childActivitySchema = z.looseObject({
   id: z.string(),
@@ -145,10 +145,7 @@ test(
     const observerStore = new SqliteContextStore(observerDb);
     const streamStore = new SqliteStreamStore(':memory:');
     const mailboxStore = new SqliteMailboxStore(':memory:');
-    const streams = new StreamManager({
-      store: streamStore,
-      changeSource: new PollingChangeSource({ reads: streamStore }),
-    });
+    const streams = streamsFor(streamStore);
     const abort = new AbortController();
     const readers: ReadableStreamDefaultReader<string>[] = [];
     const consumers: Promise<void>[] = [];

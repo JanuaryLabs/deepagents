@@ -23,10 +23,8 @@ import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
 
 import {
-  PollingChangeSource,
   SqliteContextStore,
   SqliteStreamStore,
-  StreamManager,
   createVirtualSandbox,
 } from '@deepagents/context';
 import { codex, createCodex } from '@deepagents/experimental/providers/codex';
@@ -38,6 +36,8 @@ import {
   defineSandbox,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
+
+import { streamsFor } from '../../testing/streams-for.fixture.ts';
 
 /** Responses API `input` items; message items may omit `type`. */
 const responsesInput = z.array(z.looseObject({ type: z.string().optional() }));
@@ -676,10 +676,7 @@ test('Zukhruf executes a host tool and persists history across queued turns', as
     const streamStore = new SqliteStreamStore(resources.use(open(':memory:')));
     return {
       store: new SqliteContextStore(resources.use(open(':memory:'))),
-      streams: new StreamManager({
-        store: streamStore,
-        changeSource: new PollingChangeSource({ reads: streamStore }),
-      }),
+      streams: streamsFor(streamStore),
       queue,
       mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
     };

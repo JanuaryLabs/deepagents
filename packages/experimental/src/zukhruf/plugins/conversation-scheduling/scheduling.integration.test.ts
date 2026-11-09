@@ -17,12 +17,10 @@ import {
   type ChatUpdater,
   type ContextStore,
   InMemoryContextStore,
-  PollingChangeSource,
   PostgresContextStore,
   SqliteContextStore,
   SqliteStreamStore,
   type StoredChatData,
-  StreamManager,
   isRecord,
 } from '@deepagents/context';
 import {
@@ -46,6 +44,7 @@ import {
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
 
 import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
+import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 
 const testPostgres = new Postgres({ environment: process.env });
 
@@ -353,10 +352,7 @@ function disposableHarness(
 ) {
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
-  const streams = new StreamManager({
-    store: streamStore,
-    changeSource: new PollingChangeSource({ reads: streamStore }),
-  });
+  const streams = streamsFor(streamStore);
   const queue = new ControlledTurnQueue();
   return {
     store,

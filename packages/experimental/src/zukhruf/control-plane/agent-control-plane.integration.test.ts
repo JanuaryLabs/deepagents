@@ -8,10 +8,7 @@ import { z } from 'zod';
 
 import {
   InMemoryContextStore,
-  PollingChangeSource,
   SqliteStreamStore,
-  StreamManager,
-  type StreamStore,
   isRecord,
 } from '@deepagents/context';
 import {
@@ -33,6 +30,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import { streamsFor } from '../../testing/streams-for.fixture.ts';
 
 /** Conversation metadata as `AgentThread.toMetadata` and the history forker write it. */
 const threadMetadataSchema = z.looseObject({
@@ -95,13 +93,6 @@ async function submitApprovals(
   return runtime.enqueue(conversation, {
     message,
     trigger: 'submit-message',
-  });
-}
-
-function streamsFor(store: StreamStore): StreamManager {
-  return new StreamManager({
-    store,
-    changeSource: new PollingChangeSource({ reads: store }),
   });
 }
 

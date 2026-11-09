@@ -10,10 +10,8 @@ import { describe, it } from 'node:test';
 import { PgBoss } from 'pg-boss';
 
 import {
-  PollingChangeSource,
   PostgresContextStore,
   PostgresStreamStore,
-  StreamManager,
   type StreamPart,
 } from '@deepagents/context';
 import {
@@ -25,6 +23,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import { streamsFor } from '../../testing/streams-for.fixture.ts';
 
 const testPostgres = new Postgres({ environment: process.env });
 
@@ -210,10 +209,7 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
 
     const calls: string[] = [];
     const mailboxStore = new SqliteMailboxStore(':memory:');
-    const streams = new StreamManager({
-      store: streamStore,
-      changeSource: new PollingChangeSource({ reads: streamStore }),
-    });
+    const streams = streamsFor(streamStore);
     const runtimeSetup = new AgentRuntime(declaration(fastModel(calls)));
     const stack = defineStack(async () => ({
       store,

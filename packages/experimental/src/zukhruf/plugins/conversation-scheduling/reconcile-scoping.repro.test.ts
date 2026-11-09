@@ -6,12 +6,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { z } from 'zod';
 
-import {
-  PollingChangeSource,
-  SqliteContextStore,
-  SqliteStreamStore,
-  StreamManager,
-} from '@deepagents/context';
+import { SqliteContextStore, SqliteStreamStore } from '@deepagents/context';
 import {
   AgentRuntime,
   type ConsumeContext,
@@ -31,6 +26,7 @@ import {
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
 
 import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
+import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 
 const usage = {
   inputTokens: {
@@ -232,10 +228,7 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
   );
   const runtimeAStack = defineStack(async () => ({
     store,
-    streams: new StreamManager({
-      store: streamStoreA,
-      changeSource: new PollingChangeSource({ reads: streamStoreA }),
-    }),
+    streams: streamsFor(streamStoreA),
     queue: queueA,
     mailboxStore: mailboxStoreA,
     bindings: [
@@ -255,10 +248,7 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
   );
   const runtimeBStack = defineStack(async () => ({
     store,
-    streams: new StreamManager({
-      store: streamStoreB,
-      changeSource: new PollingChangeSource({ reads: streamStoreB }),
-    }),
+    streams: streamsFor(streamStoreB),
     queue: queueB,
     mailboxStore: mailboxStoreB,
     bindings: [

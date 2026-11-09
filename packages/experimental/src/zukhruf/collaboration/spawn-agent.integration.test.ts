@@ -3,13 +3,7 @@ import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {
-  InMemoryContextStore,
-  PollingChangeSource,
-  SqliteStreamStore,
-  StreamManager,
-  type StreamStore,
-} from '@deepagents/context';
+import { InMemoryContextStore, SqliteStreamStore } from '@deepagents/context';
 import {
   AgentRuntime,
   type ConsumeContext,
@@ -22,6 +16,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import { streamsFor } from '../../testing/streams-for.fixture.ts';
 
 const userTurn = (id: string, text: string) => ({
   message: {
@@ -31,13 +26,6 @@ const userTurn = (id: string, text: string) => ({
   },
   trigger: 'submit-message' as const,
 });
-
-function streamsFor(store: StreamStore): StreamManager {
-  return new StreamManager({
-    store,
-    changeSource: new PollingChangeSource({ reads: store }),
-  });
-}
 
 class ControlledTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];

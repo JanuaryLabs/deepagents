@@ -11,9 +11,7 @@ import { z } from 'zod';
 
 import {
   InMemoryContextStore,
-  PollingChangeSource,
   SqliteStreamStore,
-  StreamManager,
   createVirtualSandbox,
 } from '@deepagents/context';
 import {
@@ -39,6 +37,8 @@ import {
   type UploadReceipt,
   uploadsHttp,
 } from '@deepagents/experimental/zukhruf/uploads/http';
+
+import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 
 /** Error bodies the HTTP plugin's error handler writes as `{ cause, error }`. */
 const errorBodySchema = z.looseObject({
@@ -241,10 +241,7 @@ async function harness(
   );
   const stack = defineStack(async () => ({
     store: new InMemoryContextStore(),
-    streams: new StreamManager({
-      store: streamStore,
-      changeSource: new PollingChangeSource({ reads: streamStore }),
-    }),
+    streams: streamsFor(streamStore),
     queue,
     mailboxStore,
   }));

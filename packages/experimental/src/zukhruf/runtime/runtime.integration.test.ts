@@ -31,9 +31,7 @@ import {
   type AgentSandbox,
   type DisposableSandbox,
   InMemoryContextStore,
-  PollingChangeSource,
   SqliteStreamStore,
-  StreamManager,
   createBashTool,
   createVirtualSandbox,
   fragment,
@@ -69,6 +67,7 @@ import {
 } from '@deepagents/experimental/zukhruf/schedules';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import { streamsFor } from '../../testing/streams-for.fixture.ts';
 
 const usage = {
   inputTokens: {
@@ -592,10 +591,7 @@ async function harness(
     new SqliteStreamStore(':memory:'),
     (value) => value.close(),
   );
-  const streams = new StreamManager({
-    store: streamStore,
-    changeSource: new PollingChangeSource({ reads: streamStore }),
-  });
+  const streams = streamsFor(streamStore);
   const mailboxStore = resources.use(new SqliteMailboxStore(':memory:'));
   const composition = options?.composition?.({ boss, database: pglite });
   const root = options?.declaration ?? declaration(model);

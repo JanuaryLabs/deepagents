@@ -10,12 +10,7 @@ import test, { type TestContext } from 'node:test';
 import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
 
-import {
-  InMemoryContextStore,
-  PollingChangeSource,
-  SqliteStreamStore,
-  StreamManager,
-} from '@deepagents/context';
+import { InMemoryContextStore, SqliteStreamStore } from '@deepagents/context';
 import {
   type AgentHost,
   AgentRuntime,
@@ -45,6 +40,7 @@ import {
 } from '@deepagents/experimental/zukhruf/schedules/http';
 
 import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
+import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 
 const MOUNT = '/zukhruf/v1';
 const SCHEDULES = `${MOUNT}/schedules`;
@@ -185,10 +181,7 @@ async function harness(options: { withSchedules?: boolean } = {}) {
   );
   const stack = defineStack(async () => ({
     store: new InMemoryContextStore(),
-    streams: new StreamManager({
-      store: streamStore,
-      changeSource: new PollingChangeSource({ reads: streamStore }),
-    }),
+    streams: streamsFor(streamStore),
     queue,
     mailboxStore,
     bindings: [

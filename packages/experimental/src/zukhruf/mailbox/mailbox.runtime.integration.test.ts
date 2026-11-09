@@ -8,13 +8,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
 
-import {
-  InMemoryContextStore,
-  PollingChangeSource,
-  SqliteStreamStore,
-  StreamManager,
-  type StreamStore,
-} from '@deepagents/context';
+import { InMemoryContextStore, SqliteStreamStore } from '@deepagents/context';
 import {
   type AgentDeclaration,
   AgentRuntime,
@@ -28,6 +22,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import { streamsFor } from '../../testing/streams-for.fixture.ts';
 
 /** The addressing every queued `TurnRef` payload carries. */
 const queuedTurnSchema = z.looseObject({
@@ -41,13 +36,6 @@ const queuedTurnSchema = z.looseObject({
 const communicationMessageMetadataSchema = z.object({
   interAgentCommunication: z.looseObject({ content: z.string() }),
 });
-
-function streamsFor(store: StreamStore): StreamManager {
-  return new StreamManager({
-    store,
-    changeSource: new PollingChangeSource({ reads: store }),
-  });
-}
 
 const root = { chatId: 'root', userId: 'user-1' };
 const researcher = { chatId: 'researcher', userId: 'user-1' };

@@ -10,10 +10,8 @@ import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
 
 import {
-  PollingChangeSource,
   SqliteContextStore,
   SqliteStreamStore,
-  StreamManager,
   createVirtualSandbox,
 } from '@deepagents/context';
 import {
@@ -24,6 +22,8 @@ import {
   defineSandbox,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
+
+import { streamsFor } from '../../testing/streams-for.fixture.ts';
 
 const stack = defineStack(async (resources) => {
   const database = resources.use(new PGlite());
@@ -42,10 +42,7 @@ const stack = defineStack(async (resources) => {
       schema: 'pgboss',
     }),
     store: new SqliteContextStore(resources.use(open(':memory:'))),
-    streams: new StreamManager({
-      store,
-      changeSource: new PollingChangeSource({ reads: store }),
-    }),
+    streams: streamsFor(store),
     mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
   };
 });

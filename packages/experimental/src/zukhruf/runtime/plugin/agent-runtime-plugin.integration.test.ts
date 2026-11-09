@@ -11,9 +11,7 @@ import { z } from 'zod';
 
 import {
   InMemoryContextStore,
-  PollingChangeSource,
   SqliteStreamStore,
-  StreamManager,
   createVirtualSandbox,
 } from '@deepagents/context';
 import {
@@ -33,6 +31,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
+import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 
 /** Turns are never scheduled by runtimes that are only initialized. */
 class UnusedTurnQueue extends TurnQueue {
@@ -71,10 +70,7 @@ function adapters(resources: AsyncDisposableStack) {
   resources.defer(() => streamStore.close());
   return {
     store: new InMemoryContextStore(),
-    streams: new StreamManager({
-      store: streamStore,
-      changeSource: new PollingChangeSource({ reads: streamStore }),
-    }),
+    streams: streamsFor(streamStore),
     queue: new UnusedTurnQueue(),
     mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
   };

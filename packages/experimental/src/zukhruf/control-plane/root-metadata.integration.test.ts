@@ -5,10 +5,7 @@ import test from 'node:test';
 
 import {
   InMemoryContextStore,
-  PollingChangeSource,
   SqliteStreamStore,
-  StreamManager,
-  type StreamStore,
   type StreamUpdater,
 } from '@deepagents/context';
 import {
@@ -25,6 +22,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import { streamsFor } from '../../testing/streams-for.fixture.ts';
 
 const userTurn = (id: string, text: string) => ({
   message: {
@@ -34,13 +32,6 @@ const userTurn = (id: string, text: string) => ({
   },
   trigger: 'submit-message' as const,
 });
-
-function streamsFor(store: StreamStore): StreamManager {
-  return new StreamManager({
-    store,
-    changeSource: new PollingChangeSource({ reads: store }),
-  });
-}
 
 class RecordingTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];

@@ -29,10 +29,8 @@ import {
   tokensExceed,
 } from '@deepagents/compaction';
 import {
-  PollingChangeSource,
   SqliteContextStore,
   SqliteStreamStore,
-  StreamManager,
   createVirtualSandbox,
   role,
 } from '@deepagents/context';
@@ -49,6 +47,8 @@ import {
   defineTool,
 } from '@deepagents/experimental/zukhruf';
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
+
+import { streamsFor } from '../../testing/streams-for.fixture.ts';
 
 const tokenScopeSchema = z.literal('request').optional();
 
@@ -193,10 +193,7 @@ async function infrastructure(resources: AsyncDisposableStack) {
   });
   const store = new SqliteContextStore(resources.use(open(':memory:')));
   const streamStore = new SqliteStreamStore(resources.use(open(':memory:')));
-  const streams = new StreamManager({
-    store: streamStore,
-    changeSource: new PollingChangeSource({ reads: streamStore }),
-  });
+  const streams = streamsFor(streamStore);
   const mailboxStore = resources.use(new SqliteMailboxStore(':memory:'));
   return {
     store,

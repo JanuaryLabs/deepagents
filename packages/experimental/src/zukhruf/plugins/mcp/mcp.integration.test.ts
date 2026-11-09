@@ -5,12 +5,7 @@ import assert from 'node:assert/strict';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import test from 'node:test';
 
-import {
-  InMemoryContextStore,
-  PollingChangeSource,
-  SqliteStreamStore,
-  StreamManager,
-} from '@deepagents/context';
+import { InMemoryContextStore, SqliteStreamStore } from '@deepagents/context';
 import {
   AgentRuntime,
   SqliteMailboxStore,
@@ -21,6 +16,8 @@ import {
   defineStack,
 } from '@deepagents/experimental/zukhruf';
 import { mcp } from '@deepagents/experimental/zukhruf/mcp';
+
+import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 
 /** Turns are never scheduled by runtimes that are only initialized. */
 class UnusedTurnQueue extends TurnQueue {
@@ -59,10 +56,7 @@ function adapters(resources: AsyncDisposableStack) {
   resources.defer(() => streamStore.close());
   return {
     store: new InMemoryContextStore(),
-    streams: new StreamManager({
-      store: streamStore,
-      changeSource: new PollingChangeSource({ reads: streamStore }),
-    }),
+    streams: streamsFor(streamStore),
     queue: new UnusedTurnQueue(),
     mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
   };

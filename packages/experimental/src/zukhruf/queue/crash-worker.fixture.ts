@@ -7,12 +7,7 @@ import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { PgBoss } from 'pg-boss';
 
-import {
-  PollingChangeSource,
-  PostgresContextStore,
-  PostgresStreamStore,
-  StreamManager,
-} from '@deepagents/context';
+import { PostgresContextStore, PostgresStreamStore } from '@deepagents/context';
 import {
   type AgentDeclaration,
   AgentRuntime,
@@ -22,6 +17,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import { streamsFor } from '../../testing/streams-for.fixture.ts';
 
 const connectionString = process.argv[2];
 if (!connectionString)
@@ -75,10 +71,7 @@ const streamStore = await PostgresStreamStore.create({
   pool: connectionString,
 });
 const store = await PostgresContextStore.create({ pool: connectionString });
-const streams = new StreamManager({
-  store: streamStore,
-  changeSource: new PollingChangeSource({ reads: streamStore }),
-});
+const streams = streamsFor(streamStore);
 
 const runtime = new AgentRuntime(declaration);
 const stack = defineStack(async () => ({

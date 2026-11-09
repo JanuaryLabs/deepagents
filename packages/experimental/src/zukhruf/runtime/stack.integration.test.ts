@@ -9,10 +9,8 @@ import test from 'node:test';
 import { PgBoss, fromPglite } from 'pg-boss';
 
 import {
-  PollingChangeSource,
   SqliteContextStore,
   SqliteStreamStore,
-  StreamManager,
   createVirtualSandbox,
 } from '@deepagents/context';
 import {
@@ -26,6 +24,8 @@ import {
   defineStack,
 } from '@deepagents/experimental/zukhruf';
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
+
+import { streamsFor } from '../../testing/streams-for.fixture.ts';
 
 const model = new MockLanguageModelV4({
   doStream: async () => ({
@@ -75,10 +75,7 @@ async function adapters(resources: AsyncDisposableStack) {
   const streamStore = new SqliteStreamStore(resources.use(open(':memory:')));
   return {
     store: new SqliteContextStore(resources.use(open(':memory:'))),
-    streams: new StreamManager({
-      store: streamStore,
-      changeSource: new PollingChangeSource({ reads: streamStore }),
-    }),
+    streams: streamsFor(streamStore),
     queue,
     mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
   };
