@@ -1,3 +1,4 @@
+import { createClock } from '@sinonjs/fake-timers';
 import { open } from '@zukhruf/sqlite-open';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert/strict';
@@ -68,6 +69,7 @@ describe('SQLiteStore source expiry', () => {
       connector: {
         sourceId: 'docs',
         ingestWhen: 'expired' as const,
+        clock: createClock(Date.parse('2026-01-01T00:00:00.000Z')),
         sources: async function* () {
           listed++;
           yield { id: 'readme', content: async () => 'hello world' };
@@ -86,11 +88,12 @@ describe('SQLiteStore source expiry', () => {
     assert.equal(listed, 2);
   });
 
-  it("ingests a source again in the 'expired' mode once its expiresAfter has passed, and not again until the new expiry", async (t) => {
+  it("ingests a source again in the 'expired' mode once its expiresAfter has passed, and not again until the new expiry", async () => {
     await using database = await sqlite.database();
     database.connection.close();
     using connection = openWithVec(database.path);
     const store = new SQLiteStore(connection, 3);
+    const clock = createClock(Date.parse('2026-01-01T00:00:00.000Z'));
     let listed = 0;
     const config = {
       store,
@@ -99,6 +102,7 @@ describe('SQLiteStore source expiry', () => {
         sourceId: 'docs',
         ingestWhen: 'expired' as const,
         expiresAfter: 60 * 60 * 1000,
+        clock,
         sources: async function* () {
           listed++;
           yield { id: 'readme', content: async () => 'hello world' };
@@ -106,16 +110,8 @@ describe('SQLiteStore source expiry', () => {
       },
     };
 
-    // The first ingest runs a day ago, so its hour-long expiry has passed.
-    t.mock.timers.enable({
-      apis: ['Date'],
-      now: Date.now() - 24 * 60 * 60 * 1000,
-    });
-    try {
-      await similaritySearch('greeting', config);
-    } finally {
-      t.mock.timers.reset();
-    }
+    await similaritySearch('greeting', config);
+    await clock.tickAsync(60 * 60 * 1000);
     await similaritySearch('greeting', config);
     const listedAfterExpiry = listed;
     await similaritySearch('greeting', config);
@@ -129,6 +125,7 @@ describe('SQLiteStore source expiry', () => {
     database.connection.close();
     using connection = openWithVec(database.path);
     const store = new SQLiteStore(connection, 3);
+    const clock = createClock(Date.parse('2026-01-01T00:00:00.000Z'));
     let listed = 0;
     const config = {
       store,
@@ -137,6 +134,7 @@ describe('SQLiteStore source expiry', () => {
         sourceId: 'docs',
         ingestWhen: 'expired' as const,
         expiresAfter: 60 * 60 * 1000,
+        clock,
         sources: async function* () {
           listed++;
           yield { id: 'readme', content: async () => 'hello world' };
@@ -145,6 +143,7 @@ describe('SQLiteStore source expiry', () => {
     };
 
     await similaritySearch('greeting', config);
+    await clock.tickAsync(60 * 60 * 1000 - 1);
     await similaritySearch('greeting', config);
 
     assert.equal(listed, 1);

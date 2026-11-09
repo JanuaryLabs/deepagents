@@ -7,7 +7,7 @@ import type { Connector } from './connector.ts';
 export function repo(
   dir: string,
   extensions: string[],
-  ingestWhen: Connector['ingestWhen'],
+  ingestWhen: 'never' | 'contentChanged' | undefined,
 ): Connector {
   const sourceId = `repo:${dir}`;
   return {

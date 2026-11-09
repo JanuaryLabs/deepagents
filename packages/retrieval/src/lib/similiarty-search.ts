@@ -7,23 +7,26 @@ export async function similaritySearch(
   config: Omit<IngestionConfig, 'splitter'>,
 ) {
   // Ingest if needed, then perform vector similarity search via the configured store
-  const mode = config.connector.ingestWhen ?? 'contentChanged';
+  const { connector } = config;
   let shouldIngest = true;
 
-  if (mode === 'never') {
+  if (connector.ingestWhen === 'never') {
     if (await config.store.sourceExists(config.connector.sourceId)) {
       console.log(
         `Skipping ingestion for source ${config.connector.sourceId} (ingestWhen=never and source exists)`,
       );
       shouldIngest = false;
     }
-  } else if (mode === 'expired') {
+  } else if (connector.ingestWhen === 'expired') {
     const sourceExists = await config.store.sourceExists(
       config.connector.sourceId,
     );
     if (
       sourceExists &&
-      !(await config.store.sourceExpired(config.connector.sourceId))
+      !(await config.store.sourceExpired(
+        config.connector.sourceId,
+        new Date(connector.clock.Date.now()),
+      ))
     ) {
       console.log(
         `Skipping ingestion for source ${config.connector.sourceId} (ingestWhen=expired and source not expired)`,

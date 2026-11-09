@@ -22,11 +22,7 @@ export async function ingest(
   const splitter = config.splitter ?? split;
   const embedder = config.embedder;
   const corpuses = config.connector.sources();
-  const { expiresAfter } = config.connector;
-  const expiryDate =
-    expiresAfter === undefined
-      ? undefined
-      : new Date(Date.now() + expiresAfter);
+  const expiryDate = expiry(config.connector);
 
   for await (const it of corpuses) {
     callback?.(it.id);
@@ -60,6 +56,12 @@ export async function ingest(
       expiryDate,
     );
   }
+}
+
+function expiry(connector: Connector) {
+  if (connector.ingestWhen !== 'expired') return undefined;
+  if (connector.expiresAfter === undefined) return undefined;
+  return new Date(connector.clock.Date.now() + connector.expiresAfter);
 }
 
 function split(id: string, content: string) {

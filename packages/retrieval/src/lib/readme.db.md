@@ -23,7 +23,7 @@ The public entry point is [`src/index.ts`](../index.ts). The [store guide](../..
 
 #### Sources table
 
-`sources` records `source_id`, `updated_at`, and optional `expires_at`. Ingestion refreshes the expiry from the connector's `expiresAfter` duration in milliseconds when it indexes a nonempty document.
+`sources` records `source_id`, `updated_at`, and optional `expires_at`. In the `'expired'` mode, ingestion refreshes the expiry from the connector's `clock` and its `expiresAfter` duration in milliseconds when it indexes a nonempty document.
 
 #### Documents table
 
@@ -101,7 +101,7 @@ For direct searches, `store.search(query, options, embedder)` accepts `sourceId`
 
 `index()` upserts the source and its expiry before comparing the document's hash. An unchanged hash skips chunk generation and embedding. It still refreshes a supplied expiry. A changed hash updates document metadata, removes the old chunks, and inserts new chunks.
 
-With `ingestWhen: 'expired'`, `similaritySearch()` ingests missing or expired sources and skips existing sources whose expiry has not passed. A source without an expiry time is not expired.
+With `ingestWhen: 'expired'`, the connector takes a required `clock`: an entry gives `globalThis`, and a test gives `createClock()` of `@sinonjs/fake-timers`. `similaritySearch()` ingests missing or expired sources and skips existing sources whose expiry has not passed at the time of that clock. A source without an expiry time is not expired.
 
 ### Transaction management
 

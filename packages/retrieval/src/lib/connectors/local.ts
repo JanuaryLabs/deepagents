@@ -3,7 +3,7 @@ import ignore from 'ignore';
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 
-import type { Connector } from './connector.ts';
+import type { Connector, IngestPolicy } from './connector.ts';
 
 /**
  * Cache for gitignore patterns to avoid repeated file reads
@@ -120,22 +120,15 @@ async function getFilteredFiles(
 
 export function local(
   pattern: string,
-  options?: {
-    ingestWhen?: 'never' | 'contentChanged' | 'expired';
-    expiresAfter?: number;
-    cwd?: string;
-  },
+  options: IngestPolicy & { cwd?: string } = {},
 ): Connector {
+  const { cwd, ...policy } = options;
   const sourceId = `glob:${pattern}`;
   return {
+    ...policy,
     sourceId,
-    ingestWhen: options?.ingestWhen,
-    expiresAfter: options?.expiresAfter,
     sources: async function* () {
-      const paths = await getFilteredFiles(
-        options?.cwd ?? process.cwd(),
-        pattern,
-      );
+      const paths = await getFilteredFiles(cwd ?? process.cwd(), pattern);
       for (const filePath of paths) {
         yield {
           id: filePath,

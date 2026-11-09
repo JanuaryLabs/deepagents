@@ -37,7 +37,7 @@ export interface Store {
     embedder: Embedder,
   ) => Promise<SearchResult[]>;
   sourceExists: (sourceId: string) => Promise<boolean> | boolean;
-  sourceExpired: (sourceId: string) => Promise<boolean> | boolean;
+  sourceExpired: (sourceId: string, now: Date) => Promise<boolean> | boolean;
   setSourceExpiry: (sourceId: string, expiryDate: Date) => Promise<void> | void;
   index: (sourceId: string, corpus: Corpus, expiryDate?: Date) => Promise<void>;
 }

@@ -172,15 +172,15 @@ export class SQLiteStore implements Store {
     const row = stmt.get(sourceId);
     return Boolean(row);
   }
-  sourceExpired(sourceId: string) {
+  sourceExpired(sourceId: string, now: Date) {
     const stmt = this.#db.prepare(dedent`
 				SELECT 1 FROM sources
 				WHERE source_id = ?
 					AND expires_at IS NOT NULL
-					AND expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ','now')
+					AND expires_at <= ?
 				LIMIT 1
 			`);
-    const row = stmt.get(sourceId);
+    const row = stmt.get(sourceId, now.toISOString());
     return Boolean(row);
   }
   setSourceExpiry(sourceId: string, expiryDate: Date) {
