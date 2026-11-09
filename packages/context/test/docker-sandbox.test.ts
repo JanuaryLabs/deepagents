@@ -358,6 +358,42 @@ describe('Docker Sandbox', () => {
         );
       });
 
+      it('writes through a symbolic link to a directory as a non-root user, and keeps the link', async () => {
+        await using sandbox = await createDockerSandbox({
+          ...defaults,
+          security: { user: '1000:1000' },
+        });
+        await sandbox.run({
+          command: 'mkdir /tmp/real && ln -s /tmp/real /tmp/link',
+        });
+
+        await sandbox.writeTextFile({
+          path: '/tmp/link/direct.txt',
+          content: 'direct',
+        });
+        await sandbox.writeTextFile({
+          path: '/tmp/link/new/deep/nested.txt',
+          content: 'nested',
+        });
+        await Promise.all(
+          ['a', 'b', 'c'].map((name) =>
+            sandbox.writeTextFile({
+              path: `/tmp/link/shared/${name}.txt`,
+              content: name,
+            }),
+          ),
+        );
+
+        const seen = await sandbox.run({
+          command:
+            'test -L /tmp/link && touch /tmp/real/new/deep/sibling && cat /tmp/real/direct.txt /tmp/real/new/deep/nested.txt /tmp/real/shared/a.txt /tmp/real/shared/b.txt /tmp/real/shared/c.txt',
+        });
+        assert.deepStrictEqual(
+          { exitCode: seen.exitCode, stdout: seen.stdout },
+          { exitCode: 0, stdout: 'directnestedabc' },
+        );
+      });
+
       it('writes files and directories that a named image user can modify', async () => {
         await using sandbox = await createDockerSandbox({
           ...defaults,

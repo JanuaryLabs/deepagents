@@ -848,18 +848,6 @@ class DockerContainer implements EngineContainer {
       return writeFileOverExec(this, target, content, signal);
     }
     try {
-      // The engine extracts a file over a directory by deleting the tree, and
-      // the client has no way to send `noOverwriteDirNonDir`, so trying is
-      // not harmless.
-      const existing = await this.#container
-        .stat(target, { signal })
-        .catch((error: unknown) => {
-          if (isUnexplainedFailure(error)) return undefined;
-          throw error;
-        });
-      if (existing && fileType(existing.mode) === 'directory') {
-        throw new Error('it is a directory');
-      }
       const owner = this.#owner;
       // The engine creates implied parent directories as root, so a non-root
       // user gets its new directories as explicit entries.

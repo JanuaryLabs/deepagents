@@ -13,7 +13,7 @@
     "@deepagents/devtool": "*",
     "@deepagents/experimental": "*",
     "@electric-sql/pglite": "^0.5.4",
-    "@zukhruf/sqlite-open": "^0.8.12",
+    "@zukhruf/sqlite-open": "^0.8.13",
     "microsandbox": "^0.7.8",
     "pg-boss": "^12.29.0",
     "ai": "^7.0.166"
