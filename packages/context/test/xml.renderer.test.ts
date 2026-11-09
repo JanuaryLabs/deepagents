@@ -1,22 +1,13 @@
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import {
   type ContextFragment,
   XmlRenderer,
-  createBashTool,
-  createVirtualSandbox,
   fragment,
   glossary,
   hint,
 } from '@deepagents/context';
-
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
 
 describe('XmlRenderer', () => {
   describe('primitive data', () => {

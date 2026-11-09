@@ -1,5 +1,4 @@
 import { Msw } from '@zukhruf/testing/msw';
-import { InMemoryFs } from 'just-bash';
 import { HttpResponse, http } from 'msw';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -8,18 +7,12 @@ import {
   ContextEngine,
   InMemoryContextStore,
   XmlRenderer,
-  createBashTool,
-  createVirtualSandbox,
   fragment,
   hint,
   role,
 } from '@deepagents/context';
 
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+import { buildSandbox } from '../../../test/helpers/build-sandbox.ts';
 
 const newEngine = () =>
   new ContextEngine({
@@ -64,7 +57,7 @@ describe('engine + resolver chain integration', () => {
 
     const { systemPrompt } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     assert.ok(systemPrompt.includes('project documentation'));
@@ -72,7 +65,7 @@ describe('engine + resolver chain integration', () => {
 
   it('caches resolved values across resolve() calls', async (t) => {
     const engine = newEngine();
-    const sandbox = await createVirtualAgentSandbox();
+    const sandbox = await buildSandbox();
     const loader = t.mock.fn(async () => 'loaded-once');
     engine.set(fragment('cached', loader));
 
@@ -84,7 +77,7 @@ describe('engine + resolver chain integration', () => {
 
   it('passes the sandbox through to the loader', async () => {
     const engine = newEngine();
-    const sandbox = await createVirtualAgentSandbox();
+    const sandbox = await buildSandbox();
     let capturedSandbox: unknown = null;
     engine.set(
       fragment('probe', async (ctx) => {
@@ -102,8 +95,8 @@ describe('engine + resolver chain integration', () => {
   });
 
   it('resolves a shared lazy fragment independently in each engine', async () => {
-    const firstSandbox = await createVirtualAgentSandbox();
-    const secondSandbox = await createVirtualAgentSandbox();
+    const firstSandbox = await buildSandbox();
+    const secondSandbox = await buildSandbox();
     const shared = fragment('sandbox', async ({ sandbox }) =>
       sandbox === firstSandbox ? 'first' : 'second',
     );
@@ -138,7 +131,7 @@ describe('engine + resolver chain integration', () => {
       }),
     );
 
-    const sandbox = await createVirtualAgentSandbox();
+    const sandbox = await buildSandbox();
     await assert.rejects(
       () =>
         engine.resolve({
@@ -178,7 +171,7 @@ describe('engine + resolver chain integration', () => {
 
     const { systemPrompt } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     assert.strictEqual(customClaims, 1);
@@ -210,7 +203,7 @@ describe('engine + resolver chain integration', () => {
 
     const { systemPrompt } = await engine.fork().resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     assert.strictEqual(customClaims, 1);
@@ -227,7 +220,7 @@ describe('engine + resolver chain integration', () => {
 
     const { systemPrompt } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     assert.ok(systemPrompt.includes('Be brief.'));
@@ -237,7 +230,7 @@ describe('engine + resolver chain integration', () => {
   it('estimate() materializes loaders before counting tokens', async () => {
     using _modelsDev = stubModelsDev();
     const engine = newEngine();
-    const sandbox = await createVirtualAgentSandbox();
+    const sandbox = await buildSandbox();
     const longString = 'x'.repeat(2000);
     engine.set(fragment('big', async () => longString));
 
@@ -254,7 +247,7 @@ describe('engine + resolver chain integration', () => {
   it('estimate() invokes a loader exactly once (caching)', async (t) => {
     using _modelsDev = stubModelsDev();
     const engine = newEngine();
-    const sandbox = await createVirtualAgentSandbox();
+    const sandbox = await buildSandbox();
     const loader = t.mock.fn(async () => 'estimate-content');
     engine.set(fragment('once', loader));
 
@@ -267,7 +260,7 @@ describe('engine + resolver chain integration', () => {
   it('inspect() materializes loaders before rendering', async () => {
     using _modelsDev = stubModelsDev();
     const engine = newEngine();
-    const sandbox = await createVirtualAgentSandbox();
+    const sandbox = await buildSandbox();
     engine.set(fragment('readme', async () => 'inspected-content'));
 
     const result = await engine.inspect({

@@ -9,7 +9,6 @@ import {
   MockLanguageModelV4,
   convertReadableStreamToArray as drain,
 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import z from 'zod';
@@ -19,8 +18,6 @@ import {
   InMemoryContextStore,
   agent,
   chat,
-  createBashTool,
-  createVirtualSandbox,
   errorRecoveryGuardrail,
   reminder,
   user,
@@ -33,11 +30,11 @@ import {
 } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 
+import { buildSandbox } from './helpers/build-sandbox.ts';
+
 const sqlite = new TestSqlite();
 
-const sandbox = await createBashTool({
-  sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-});
+const sandbox = await buildSandbox();
 
 const testUsage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },

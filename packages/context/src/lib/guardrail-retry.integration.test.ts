@@ -4,7 +4,6 @@ import {
   MockLanguageModelV4,
   convertReadableStreamToArray as drain,
 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import { z } from 'zod';
@@ -15,11 +14,11 @@ import {
   InMemoryContextStore,
   agent,
   chat,
-  createBashTool,
-  createVirtualSandbox,
   fail,
   pass,
 } from '@deepagents/context';
+
+import { buildSandbox } from '../../test/helpers/build-sandbox.ts';
 
 const testUsage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -93,9 +92,7 @@ describe('guardrail retry persistence', () => {
       name: 'guardrail-parts',
       context,
       model,
-      sandbox: await createBashTool({
-        sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      }),
+      sandbox: await buildSandbox(),
       tools: {
         noop: tool({
           description: 'noop',

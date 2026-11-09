@@ -1,5 +1,4 @@
 import { type UIMessage, convertToModelMessages } from 'ai';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -9,16 +8,10 @@ import {
   InMemoryContextStore,
   XmlRenderer,
   assistant,
-  createBashTool,
-  createVirtualSandbox,
   user,
 } from '@deepagents/context';
 
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+import { buildSandbox } from './helpers/build-sandbox.ts';
 
 function newRequest(store: ContextStore) {
   return new ContextEngine({
@@ -103,7 +96,7 @@ describe('reasoning that spans a client-tool round-trip', () => {
     const reader = newRequest(store);
     const { messages } = await reader.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     const modelMessages = await convertToModelMessages(messages, {

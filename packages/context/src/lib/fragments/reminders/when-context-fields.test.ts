@@ -1,5 +1,4 @@
 import type { UIMessage } from 'ai';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -10,19 +9,12 @@ import {
   type WhenContext,
   XmlRenderer,
   assistantText,
-  createBashTool,
-  createVirtualSandbox,
   reminder,
   user,
 } from '@deepagents/context';
 
+import { buildSandbox } from '../../../../test/helpers/build-sandbox.ts';
 import { getTextParts } from '../../text.ts';
-
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
 
 describe('WhenContext: chat', () => {
   it('exposes chat metadata set via engine constructor', async () => {
@@ -44,7 +36,7 @@ describe('WhenContext: chat', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const text = getTextParts(messages[0]).join('');
     assert.ok(
@@ -112,7 +104,7 @@ describe('WhenContext: usage', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const lastMsg = messages[messages.length - 1];
     const text = getTextParts(lastMsg).join('');
@@ -147,7 +139,7 @@ describe('WhenContext: branch', () => {
     assert.strictEqual(capturedBranch, 'main');
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const text = getTextParts(messages[0]).join('');
     assert.ok(
@@ -270,7 +262,7 @@ describe('WhenContext: content.length', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const text = getTextParts(messages[0]).join('');
     assert.ok(
@@ -297,7 +289,7 @@ describe('WhenContext: content.length', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const text = getTextParts(messages[0]).join('');
     assert.ok(!text.includes('nope'), `Expected skip. Got: ${text}`);
@@ -331,7 +323,7 @@ describe('WhenContext: lastAssistantMessage', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const lastMsg = messages[messages.length - 1];
     const text = getTextParts(lastMsg).join('');

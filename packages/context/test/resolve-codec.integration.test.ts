@@ -1,5 +1,4 @@
 import { type UIMessage } from 'ai';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -8,15 +7,9 @@ import {
   InMemoryContextStore,
   type MessageFragment,
   XmlRenderer,
-  createBashTool,
-  createVirtualSandbox,
 } from '@deepagents/context';
 
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+import { buildSandbox } from './helpers/build-sandbox.ts';
 
 function encodedMessage(
   text: string,
@@ -63,7 +56,7 @@ describe('ContextEngine resolve/save with codec-backed messages', () => {
 
     const result = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     assert.deepStrictEqual(result.messages, [message]);
@@ -92,7 +85,7 @@ describe('ContextEngine resolve/save with codec-backed messages', () => {
 
     const resolved = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     assert.deepStrictEqual(resolved.messages, [message]);
   });
@@ -107,7 +100,7 @@ describe('ContextEngine resolve/save with codec-backed messages', () => {
 
     await writer.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     const branch = await store.getActiveBranch('codec-chat-invalid');
@@ -134,7 +127,7 @@ describe('ContextEngine resolve/save with codec-backed messages', () => {
       userId: 'codec-user',
     });
 
-    const sandbox = await createVirtualAgentSandbox();
+    const sandbox = await buildSandbox();
     await assert.rejects(
       reader.resolve({ renderer: new XmlRenderer(), sandbox }),
       /Stored message "invalid-msg-1" is not a UIMessage/,

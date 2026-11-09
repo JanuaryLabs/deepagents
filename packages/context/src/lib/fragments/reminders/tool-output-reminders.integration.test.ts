@@ -18,7 +18,6 @@ import {
   MockLanguageModelV4,
   convertReadableStreamToArray as drain,
 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import { z } from 'zod';
@@ -30,14 +29,13 @@ import {
   agent,
   and,
   chat,
-  createBashTool,
-  createVirtualSandbox,
   isSyntheticReminderMessage,
   once,
   reminder,
   toolOutput,
 } from '@deepagents/context';
 
+import { buildSandbox } from '../../../../test/helpers/build-sandbox.ts';
 import { isUIMessage, requireUIMessage } from '../../ui-message-guards.ts';
 
 const testUsage = {
@@ -431,9 +429,7 @@ async function makeAgent(
   name: string,
   tools: ToolSet = { noop: noopTool },
 ) {
-  const sandbox = await createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
+  const sandbox = await buildSandbox();
   return agent({ sandbox, name, context, model, tools });
 }
 

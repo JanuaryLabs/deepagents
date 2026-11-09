@@ -4,7 +4,6 @@ import { StreamHarness } from '@zukhruf/testing/streams';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test, { type TestContext } from 'node:test';
@@ -12,13 +11,10 @@ import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
 
 import {
-  type AgentSandbox,
   InMemoryContextStore,
   PollingChangeSource,
   SqliteStreamStore,
   StreamManager,
-  createBashTool,
-  createVirtualSandbox,
 } from '@deepagents/context';
 import {
   type AgentHost,
@@ -48,11 +44,7 @@ import {
   schedulesHttp,
 } from '@deepagents/experimental/zukhruf/schedules/http';
 
-async function virtualSandbox(): Promise<AgentSandbox> {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
 
 const MOUNT = '/zukhruf/v1';
 const SCHEDULES = `${MOUNT}/schedules`;
@@ -186,7 +178,7 @@ async function harness(options: { withSchedules?: boolean } = {}) {
     defineAgent({
       name: 'scheduled-agent',
       model: completingModel(),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [scheduled],
     }),

@@ -1,5 +1,4 @@
 import { Msw } from '@zukhruf/testing/msw';
-import { InMemoryFs } from 'just-bash';
 import { HttpResponse, http } from 'msw';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -10,13 +9,13 @@ import {
   InMemoryContextStore,
   XmlRenderer,
   assistantText,
-  createBashTool,
-  createVirtualSandbox,
   hint,
   reminder,
   role,
   user,
 } from '@deepagents/context';
+
+import { buildSandbox } from './helpers/build-sandbox.ts';
 
 /** A persisted user UIMessage carrying the reminder metadata its save folded in. */
 const persistedUserMessageSchema = z.object({
@@ -34,12 +33,6 @@ const inspectResultJsonSchema = z.object({
   estimate: z.looseObject({ model: z.string() }),
   meta: z.looseObject({ chatId: z.string() }),
 });
-
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
 
 const modelsDevResponse = {
   openai: {
@@ -80,7 +73,7 @@ describe('ContextEngine.inspect()', () => {
     const result = await engine.inspect({
       modelId: 'openai:gpt-4o',
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     // Verify structure
@@ -120,7 +113,7 @@ describe('ContextEngine.inspect()', () => {
     const result = await engine.inspect({
       modelId: 'openai:gpt-4o',
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     // Verify context fragments
@@ -152,7 +145,7 @@ describe('ContextEngine.inspect()', () => {
     const result = await engine.inspect({
       modelId: 'openai:gpt-4o',
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     // Pending messages (not yet saved)
@@ -180,7 +173,7 @@ describe('ContextEngine.inspect()', () => {
     const result = await engine.inspect({
       modelId: 'openai:gpt-4o',
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     // After save, pending should be empty
@@ -215,7 +208,7 @@ describe('ContextEngine.inspect()', () => {
     const result = await engine.inspect({
       modelId: 'openai:gpt-4o',
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     const persistedUser = result.fragments.persisted.find(
@@ -259,7 +252,7 @@ describe('ContextEngine.inspect()', () => {
     const result = await engine.inspect({
       modelId: 'openai:gpt-4o',
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     // Verify estimate structure
@@ -289,7 +282,7 @@ describe('ContextEngine.inspect()', () => {
     const result = await engine.inspect({
       modelId: 'openai:gpt-4o',
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     // Verify graph structure
@@ -316,7 +309,7 @@ describe('ContextEngine.inspect()', () => {
       await engine.inspect({
         modelId: 'invalid:nonexistent-model',
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
     }, /not found/i);
   });
@@ -337,7 +330,7 @@ describe('ContextEngine.inspect()', () => {
     const result = await engine.inspect({
       modelId: 'openai:gpt-4o',
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     // Should not throw

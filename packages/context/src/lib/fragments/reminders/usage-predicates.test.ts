@@ -1,5 +1,4 @@
 import type { LanguageModelUsage } from 'ai';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -8,20 +7,13 @@ import {
   InMemoryContextStore,
   XmlRenderer,
   assistantText,
-  createBashTool,
-  createVirtualSandbox,
   reminder,
   usageExceeds,
   user,
 } from '@deepagents/context';
 
+import { buildSandbox } from '../../../../test/helpers/build-sandbox.ts';
 import { getTextParts } from '../../text.ts';
-
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
 
 function usage(input: number, output: number): LanguageModelUsage {
   return {
@@ -43,7 +35,7 @@ function usage(input: number, output: number): LanguageModelUsage {
 async function lastUserText(engine: ContextEngine): Promise<string> {
   const { messages } = await engine.resolve({
     renderer: new XmlRenderer(),
-    sandbox: await createVirtualAgentSandbox(),
+    sandbox: await buildSandbox(),
   });
   return getTextParts(messages[messages.length - 1]).join('');
 }

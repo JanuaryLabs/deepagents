@@ -10,12 +10,10 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
 import {
-  type AgentSandbox,
   InMemoryContextStore,
   PollingChangeSource,
   SqliteStreamStore,
   StreamManager,
-  createBashTool,
   createVirtualSandbox,
 } from '@deepagents/context';
 import {
@@ -33,6 +31,8 @@ import {
   defineStack,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
+
+import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
 
 /** Turns are never scheduled by runtimes that are only initialized. */
 class UnusedTurnQueue extends TurnQueue {
@@ -80,12 +80,6 @@ function adapters(resources: AsyncDisposableStack) {
   };
 }
 
-async function virtualSandbox(): Promise<AgentSandbox> {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
-
 const tool = defineTool({
   description: 'Test tool.',
   inputSchema: z.object({}).strict(),
@@ -108,7 +102,7 @@ function declaration(
   return defineAgent({
     name: 'root',
     model: new MockLanguageModelV4(),
-    sandbox: virtualSandbox,
+    sandbox: buildSandbox,
     instructions: [],
     tools,
     plugins,
@@ -623,7 +617,7 @@ test('AgentRuntime rejects context collisions and subagent plugins', async () =>
   const child = defineAgent({
     name: 'child',
     model: new MockLanguageModelV4(),
-    sandbox: virtualSandbox,
+    sandbox: buildSandbox,
     instructions: [],
     plugins: [plugin('child-plugin', () => ({}))],
   });
@@ -631,7 +625,7 @@ test('AgentRuntime rejects context collisions and subagent plugins', async () =>
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4(),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       subagents: [child],
     }),

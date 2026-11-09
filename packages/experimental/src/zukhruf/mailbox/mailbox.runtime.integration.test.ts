@@ -2,7 +2,6 @@ import { PGlite } from '@electric-sql/pglite';
 import { timebox } from '@zukhruf/testing/async';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -10,14 +9,11 @@ import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
 
 import {
-  type AgentSandbox,
   InMemoryContextStore,
   PollingChangeSource,
   SqliteStreamStore,
   StreamManager,
   type StreamStore,
-  createBashTool,
-  createVirtualSandbox,
 } from '@deepagents/context';
 import {
   type AgentDeclaration,
@@ -30,6 +26,8 @@ import {
   createInterAgentCommunication,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
+
+import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 
 /** The addressing every queued `TurnRef` payload carries. */
 const queuedTurnSchema = z.looseObject({
@@ -78,10 +76,7 @@ async function runtimeHarness(
   const declaration: AgentDeclaration = {
     name: 'researcher',
     model,
-    sandbox: async (): Promise<AgentSandbox> =>
-      createBashTool({
-        sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      }),
+    sandbox: buildSandbox,
     instructions: [],
   };
   const pglite = new PGlite();

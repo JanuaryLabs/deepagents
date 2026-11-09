@@ -5,17 +5,13 @@
  */
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import { PgBoss } from 'pg-boss';
 
 import {
-  type AgentSandbox,
   PollingChangeSource,
   PostgresContextStore,
   PostgresStreamStore,
   StreamManager,
-  createBashTool,
-  createVirtualSandbox,
 } from '@deepagents/context';
 import {
   type AgentDeclaration,
@@ -24,6 +20,8 @@ import {
   SqliteMailboxStore,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
+
+import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 
 const connectionString = process.argv[2];
 if (!connectionString)
@@ -61,10 +59,7 @@ const glacialModel = new MockLanguageModelV4({
 const declaration: AgentDeclaration = {
   name: 'crash-agent',
   model: glacialModel,
-  sandbox: async (): Promise<AgentSandbox> =>
-    createBashTool({
-      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    }),
+  sandbox: buildSandbox,
   instructions: [],
 };
 

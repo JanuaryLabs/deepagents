@@ -2,7 +2,6 @@ import type { LanguageModelV4FunctionTool } from '@ai-sdk/provider';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -16,8 +15,6 @@ import {
   SqliteStreamStore,
   StreamManager,
   type StreamStore,
-  createBashTool,
-  createVirtualSandbox,
 } from '@deepagents/context';
 import {
   type AgentHost,
@@ -33,11 +30,7 @@ import {
   defineStack,
 } from '@deepagents/experimental/zukhruf';
 
-async function virtualSandbox(): Promise<AgentSandbox> {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 
 const userTurn = (id: string, text: string) => ({
   message: {
@@ -240,20 +233,20 @@ test('host config injects root guidance, spawn guidance, namespace, and wait bou
     defineAgent({
       name: 'root',
       model,
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       subagents: [
         defineAgent({
           name: 'reviewer',
           description: 'Reviews the current change.',
           model,
-          sandbox: virtualSandbox,
+          sandbox: buildSandbox,
           instructions: [],
         }),
         defineAgent({
           name: 'worker',
           model,
-          sandbox: virtualSandbox,
+          sandbox: buildSandbox,
           instructions: [],
         }),
       ],
@@ -354,7 +347,7 @@ test('wait_agent clamps a below-minimum timeout and reports it to the model', as
       defineAgent({
         name: 'root',
         model,
-        sandbox: virtualSandbox,
+        sandbox: buildSandbox,
         instructions: [],
       }),
     );
@@ -405,7 +398,7 @@ test('subagent guidance replaces root guidance on a child turn', async () => {
         return textResponse('done');
       },
     }),
-    sandbox: virtualSandbox,
+    sandbox: buildSandbox,
     instructions: [],
   });
   const runtimeSetup = new AgentRuntime(
@@ -483,7 +476,7 @@ test('spawn output is the canonical task name without agent_path', async () => {
   const child = defineAgent({
     name: 'worker',
     model,
-    sandbox: virtualSandbox,
+    sandbox: buildSandbox,
     instructions: [],
   });
   const runtimeSetup = new AgentRuntime(
@@ -541,7 +534,7 @@ test('plugin-contributed subagent uses AI SDK code mode collaboration', async ()
     defineAgent({
       name: 'root',
       model,
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [
         {
@@ -607,7 +600,7 @@ test('interrupt_agent reports not_found for a missing target', async () => {
     defineAgent({
       name: 'root',
       model,
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
     }),
   );
@@ -625,7 +618,7 @@ test('interrupt_agent reports not_found for a missing target', async () => {
 });
 
 test('host config rejects invalid namespaces and wait bounds', async () => {
-  const sandbox = virtualSandbox;
+  const sandbox = buildSandbox;
   const declaration = defineAgent({
     name: 'root',
     model: new MockLanguageModelV4({
@@ -701,7 +694,7 @@ test('default guidance tells root and child agents the Codex concurrency slots',
   const child = defineAgent({
     name: 'worker',
     model: capturing('worker'),
-    sandbox: virtualSandbox,
+    sandbox: buildSandbox,
     instructions: [],
   });
   const runtimeSetup = new AgentRuntime(

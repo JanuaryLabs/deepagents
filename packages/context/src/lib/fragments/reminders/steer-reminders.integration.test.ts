@@ -45,6 +45,7 @@ import {
   toolOutput,
 } from '@deepagents/context';
 
+import { buildSandbox } from '../../../../test/helpers/build-sandbox.ts';
 import { isUIMessage, requireUIMessage } from '../../ui-message-guards.ts';
 
 function messageOf(entry: MessageData): UIMessage {
@@ -151,11 +152,7 @@ async function makeAgent(
   name: string,
   suppliedSandbox?: AgentSandbox,
 ) {
-  const sandbox =
-    suppliedSandbox ??
-    (await createBashTool({
-      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    }));
+  const sandbox = suppliedSandbox ?? (await buildSandbox());
   return agent({ sandbox, name, context, model, tools: { noop: noopTool } });
 }
 
@@ -396,9 +393,7 @@ describe('steer reminders integration (chat flow)', () => {
       { tool: 'noop' },
       { text: 'done' },
     ]);
-    const sandbox = await createBashTool({
-      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    });
+    const sandbox = await buildSandbox();
     await sandbox.sandbox.writeTextFile({
       path: plan.path,
       content: planFile([
@@ -493,9 +488,7 @@ describe('steer reminders integration (chat flow)', () => {
       { tool: 'noop' },
       { text: 'done' },
     ]);
-    const sandbox = await createBashTool({
-      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    });
+    const sandbox = await buildSandbox();
     await sandbox.sandbox.writeTextFile({
       path: plan.path,
       content: planFile([
@@ -979,9 +972,7 @@ describe('steer reminders integration (chat flow)', () => {
         return pass(part);
       },
     };
-    const sandbox = await createBashTool({
-      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    });
+    const sandbox = await buildSandbox();
     const chatAgent = agent({
       sandbox,
       name: 'gr',
@@ -1054,9 +1045,7 @@ describe('steer reminders integration (chat flow)', () => {
         return pass(part);
       },
     };
-    const sandbox = await createBashTool({
-      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    });
+    const sandbox = await buildSandbox();
     const chatAgent = agent({
       sandbox,
       name: 'guardrail-tool-reminders',
@@ -1146,9 +1135,7 @@ describe('steer reminders integration (chat flow)', () => {
         return { ok: true };
       },
     });
-    const sandbox = await createBashTool({
-      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    });
+    const sandbox = await buildSandbox();
     const chatAgent = agent({
       sandbox,
       name: 'recur',

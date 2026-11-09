@@ -1,6 +1,5 @@
 import { SqlServer } from '@zukhruf/testing/sqlserver';
 import { validateUIMessages } from 'ai';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -9,18 +8,12 @@ import {
   SqlServerContextStore,
   XmlRenderer,
   assistantText,
-  createBashTool,
-  createVirtualSandbox,
   user,
 } from '@deepagents/context';
 
-const testSqlServer = new SqlServer({ environment: process.env });
+import { buildSandbox } from '../helpers/build-sandbox.ts';
 
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+const testSqlServer = new SqlServer({ environment: process.env });
 
 const renderer = new XmlRenderer();
 
@@ -41,7 +34,7 @@ describe('Branching', () => {
 
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         const branches = await store.listBranches('test-branch-1');
@@ -197,7 +190,7 @@ describe('Branching', () => {
 
         const { messages } = await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         assert.strictEqual(messages.length, 3);
@@ -425,7 +418,7 @@ describe('Branching', () => {
 
         const { messages } = await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
         assert.strictEqual(messages.length, 1);
       } finally {
@@ -524,7 +517,7 @@ describe('Branching', () => {
 
         const { messages: forkedMessages } = await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
         assert.strictEqual(forkedMessages.length, 2);
         const forkedPart = forkedMessages[1].parts[0];
@@ -534,7 +527,7 @@ describe('Branching', () => {
         await engine.switchBranch('main');
         const { messages: mainMessages } = await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
         assert.strictEqual(mainMessages.length, 2);
         const mainPart = mainMessages[1].parts[0];
@@ -560,7 +553,7 @@ describe('Branching', () => {
 
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         await assert.rejects(async () => {
@@ -601,7 +594,7 @@ describe('Branching', () => {
 
         const { messages } = await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
         assert.strictEqual(messages.length, 1);
       } finally {
@@ -773,7 +766,7 @@ describe('Branching', () => {
 
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         await assert.rejects(
@@ -807,7 +800,7 @@ describe('Branching', () => {
 
         const { messages } = await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
         assert.strictEqual(messages.length, 2);
       } finally {

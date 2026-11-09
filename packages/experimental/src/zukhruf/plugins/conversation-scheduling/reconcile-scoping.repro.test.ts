@@ -2,19 +2,15 @@ import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { open } from '@zukhruf/sqlite-open';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { z } from 'zod';
 
 import {
-  type AgentSandbox,
   PollingChangeSource,
   SqliteContextStore,
   SqliteStreamStore,
   StreamManager,
-  createBashTool,
-  createVirtualSandbox,
 } from '@deepagents/context';
 import {
   AgentRuntime,
@@ -34,11 +30,7 @@ import {
   conversationSchedulingCapabilities,
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
 
-async function virtualSandbox(): Promise<AgentSandbox> {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
 
 const usage = {
   inputTokens: {
@@ -233,7 +225,7 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4({}),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -256,7 +248,7 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
     defineAgent({
       name: 'root',
       model: cronCreatingModel(),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),

@@ -1,6 +1,5 @@
 import { simulateReadableStream, tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import z from 'zod';
@@ -9,14 +8,12 @@ import {
   ContextEngine,
   InMemoryContextStore,
   agent,
-  createBashTool,
-  createVirtualSandbox,
   user,
 } from '@deepagents/context';
 
-const sandbox = await createBashTool({
-  sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-});
+import { buildSandbox } from '../../test/helpers/build-sandbox.ts';
+
+const sandbox = await buildSandbox();
 
 const testUsage = {
   inputTokens: {

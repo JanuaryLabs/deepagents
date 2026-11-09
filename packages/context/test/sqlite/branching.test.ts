@@ -1,6 +1,5 @@
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import { validateUIMessages } from 'ai';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -9,18 +8,12 @@ import {
   SqliteContextStore,
   XmlRenderer,
   assistantText,
-  createBashTool,
-  createVirtualSandbox,
   user,
 } from '@deepagents/context';
 
-const sqlite = new Sqlite();
+import { buildSandbox } from '../helpers/build-sandbox.ts';
 
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+const sqlite = new Sqlite();
 
 const renderer = new XmlRenderer();
 
@@ -38,7 +31,7 @@ describe('Branching', () => {
       // Trigger initialization
       await engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
 
       // Verify branch was created
@@ -161,7 +154,7 @@ describe('Branching', () => {
 
       const { messages } = await engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
 
       assert.strictEqual(messages.length, 3);
@@ -361,7 +354,7 @@ describe('Branching', () => {
 
       const { messages } = await engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       assert.strictEqual(messages.length, 1); // Only msg-1
     });
@@ -427,7 +420,7 @@ describe('Branching', () => {
       // Get messages from forked branch
       const { messages: forkedMessages } = await engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       assert.strictEqual(forkedMessages.length, 2);
       const forkedPart = forkedMessages[1].parts[0];
@@ -438,7 +431,7 @@ describe('Branching', () => {
       await engine.switchBranch('main');
       const { messages: mainMessages } = await engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       assert.strictEqual(mainMessages.length, 2);
       const mainPart = mainMessages[1].parts[0];
@@ -457,7 +450,7 @@ describe('Branching', () => {
 
       await engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       }); // Initialize
 
       await assert.rejects(async () => {
@@ -606,7 +599,7 @@ describe('Branching', () => {
       // Initialize but don't add messages
       await engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
 
       // btw should fail - no messages to branch from
@@ -638,7 +631,7 @@ describe('Branching', () => {
       // Resolve should still include the pending message
       const { messages } = await engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       assert.strictEqual(messages.length, 2);
     });

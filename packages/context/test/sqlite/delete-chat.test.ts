@@ -1,5 +1,4 @@
 import { Sqlite } from '@zukhruf/testing/sqlite';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -8,18 +7,12 @@ import {
   SqliteContextStore,
   XmlRenderer,
   assistantText,
-  createBashTool,
-  createVirtualSandbox,
   user,
 } from '@deepagents/context';
 
-const sqlite = new Sqlite();
+import { buildSandbox } from '../helpers/build-sandbox.ts';
 
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+const sqlite = new Sqlite();
 
 const renderer = new XmlRenderer();
 
@@ -35,7 +28,7 @@ describe('Delete Chat', () => {
       });
       await engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
 
       const result = await store.deleteChat('chat-to-delete');
@@ -63,7 +56,7 @@ describe('Delete Chat', () => {
       });
       await engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
 
       // First delete
@@ -290,7 +283,7 @@ describe('Delete Chat', () => {
       });
       await engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
 
       const result = await store.deleteChat('alice-chat', {
@@ -312,7 +305,7 @@ describe('Delete Chat', () => {
       });
       await engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
 
       // Bob tries to delete Alice's chat
@@ -338,7 +331,7 @@ describe('Delete Chat', () => {
       });
       await engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
 
       // Delete without userId (admin mode)
@@ -394,7 +387,7 @@ describe('Delete Chat', () => {
       });
       await engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
 
       // Try with lowercase 'alice' - should fail
@@ -486,7 +479,7 @@ describe('Delete Chat', () => {
       });
       await engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       }); // Initialize but don't add messages
 
       const result = await store.deleteChat('empty-chat');

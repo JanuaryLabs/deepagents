@@ -1,4 +1,3 @@
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -13,23 +12,17 @@ import {
   IterableResolver,
   type LoadContext,
   XmlRenderer,
-  createBashTool,
-  createVirtualSandbox,
   defaultResolvers,
   fragment,
   isFragment,
   isFragmentData,
 } from '@deepagents/context';
 
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+import { buildSandbox } from '../../../test/helpers/build-sandbox.ts';
 
 async function ctx(signal?: AbortSignal): Promise<LoadContext> {
   return {
-    sandbox: await createVirtualAgentSandbox(),
+    sandbox: await buildSandbox(),
     context: new ContextEngine({
       store: new InMemoryContextStore(),
       chatId: crypto.randomUUID(),

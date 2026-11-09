@@ -1,4 +1,3 @@
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -10,20 +9,14 @@ import {
   InMemoryContextStore,
   IterableResolver,
   type LoadContext,
-  createBashTool,
-  createVirtualSandbox,
   fragment,
 } from '@deepagents/context';
 
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+import { buildSandbox } from '../../../test/helpers/build-sandbox.ts';
 
 async function ctx(): Promise<LoadContext> {
   return {
-    sandbox: await createVirtualAgentSandbox(),
+    sandbox: await buildSandbox(),
     context: new ContextEngine({
       store: new InMemoryContextStore(),
       chatId: crypto.randomUUID(),

@@ -1,7 +1,6 @@
 import type { LanguageModelV4Prompt } from '@ai-sdk/provider';
 import { APICallError, tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import z from 'zod';
@@ -11,23 +10,15 @@ import {
   InMemoryContextStore,
   XmlRenderer,
   agent,
-  createBashTool,
-  createVirtualSandbox,
   hint,
   mapGenerateErrorToCode,
   role,
   user,
 } from '@deepagents/context';
 
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+import { buildSandbox } from '../../test/helpers/build-sandbox.ts';
 
-const sandbox = await createBashTool({
-  sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-});
+const sandbox = await buildSandbox();
 
 const testUsage = {
   inputTokens: {
@@ -169,11 +160,11 @@ describe('ContextEngine.fork', () => {
     const renderer = new XmlRenderer();
     const original = await ctx.resolve({
       renderer,
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const forkedResult = await forked.resolve({
       renderer,
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     assert.strictEqual(original.systemPrompt, forkedResult.systemPrompt);
@@ -191,11 +182,11 @@ describe('ContextEngine.fork', () => {
     const renderer = new XmlRenderer();
     const original = await ctx.resolve({
       renderer,
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const forkedResult = await forked.resolve({
       renderer,
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     assert.ok(original.systemPrompt.includes('data analyst'));
@@ -212,11 +203,11 @@ describe('ContextEngine.fork', () => {
     const renderer = new XmlRenderer();
     const parentResult = await ctx.resolve({
       renderer,
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const forkedResult = await forked.resolve({
       renderer,
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     assert.strictEqual(parentResult.messages.length, 1);
@@ -535,7 +526,7 @@ describe('asTool', () => {
 
     const parentResult = await ctx.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     assert.strictEqual(
       parentResult.messages.length,

@@ -68,6 +68,8 @@ import {
   schedulesCapabilities,
 } from '@deepagents/experimental/zukhruf/schedules';
 
+import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+
 const usage = {
   inputTokens: {
     total: 1,
@@ -510,10 +512,7 @@ function declaration(
   return {
     name: 'test-agent',
     model,
-    sandbox: async (): Promise<AgentSandbox> =>
-      createBashTool({
-        sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      }),
+    sandbox: buildSandbox,
     instructions: [],
     tools,
   };
@@ -1141,9 +1140,7 @@ describe('zukhruf runtime — setup failure durability', () => {
     let sandboxCalls = 0;
     agentDeclaration.sandbox = async (): Promise<AgentSandbox> => {
       if (++sandboxCalls === 1) throw new Error('sandbox setup failed');
-      return createBashTool({
-        sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      });
+      return buildSandbox();
     };
 
     await using h = await harness(model, {

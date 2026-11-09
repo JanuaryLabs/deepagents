@@ -10,7 +10,6 @@ import {
   MockLanguageModelV4,
   convertReadableStreamToArray as drain,
 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -22,19 +21,16 @@ import {
   agent,
   assistant,
   chat,
-  createBashTool,
-  createVirtualSandbox,
   errorRecoveryGuardrail,
   fail,
   pass,
   user,
 } from '@deepagents/context';
 
+import { buildSandbox } from '../../test/helpers/build-sandbox.ts';
 import { requireUIMessage } from './ui-message-guards.ts';
 
-const sandbox = await createBashTool({
-  sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-});
+const sandbox = await buildSandbox();
 
 const testUsage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },

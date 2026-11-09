@@ -5,25 +5,18 @@
  * Run with: node --test --no-warnings  packages/context/test/sqlite/benchmark.test.ts
  */
 import { Sqlite } from '@zukhruf/testing/sqlite';
-import { InMemoryFs } from 'just-bash';
 import { describe, it } from 'node:test';
 
 import {
   ContextEngine,
   SqliteContextStore,
   XmlRenderer,
-  createBashTool,
-  createVirtualSandbox,
   user,
 } from '@deepagents/context';
 
-const sqlite = new Sqlite();
+import { buildSandbox } from '../helpers/build-sandbox.ts';
 
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+const sqlite = new Sqlite();
 
 const renderer = new XmlRenderer();
 
@@ -88,7 +81,7 @@ describe('SQLite Performance Benchmark', () => {
       const start = performance.now();
       const result = await engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const elapsed = performance.now() - start;
 

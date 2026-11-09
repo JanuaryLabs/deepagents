@@ -8,14 +8,12 @@ import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { type UIMessage, isToolUIPart, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import test from 'node:test';
 import { z } from 'zod';
 
 import {
-  type AgentSandbox,
   type ChatUpdater,
   type ContextStore,
   InMemoryContextStore,
@@ -25,8 +23,6 @@ import {
   SqliteStreamStore,
   type StoredChatData,
   StreamManager,
-  createBashTool,
-  createVirtualSandbox,
   isRecord,
 } from '@deepagents/context';
 import {
@@ -49,11 +45,7 @@ import {
   conversationSchedulingCapabilities,
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
 
-async function virtualSandbox(): Promise<AgentSandbox> {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
 
 const testPostgres = new Postgres({ environment: process.env });
 
@@ -507,7 +499,7 @@ test('configured runtime injects top-level Claude-compatible scheduling tools', 
     defineAgent({
       name: 'root',
       model,
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -562,7 +554,7 @@ test('CronCreate, CronList, and CronDelete run through the model loop in one con
     defineAgent({
       name: 'root',
       model: toolModel(commands, seenUserText),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -643,7 +635,7 @@ test('CronCreate reports the exact next run and timezone for a one-shot cron', a
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -744,7 +736,7 @@ test('parallel model tool calls preserve concurrent cron creates and deletes', a
     defineAgent({
       name: 'root',
       model,
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -792,7 +784,7 @@ test('ScheduleWakeup fires an ask and persists scheduled provenance', async () =
     defineAgent({
       name: 'root',
       model: toolModel(commands, seenUserText),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -870,7 +862,7 @@ test('ScheduleWakeup rejects delays outside its supported window', async () => {
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -937,7 +929,7 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
     defineAgent({
       name: 'root',
       model,
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1068,7 +1060,7 @@ test('unconfigured runtime exposes no scheduling tools', async () => {
           };
         },
       }),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
     }),
   );
@@ -1097,7 +1089,7 @@ test('runtime rejects an invalid scheduling timezone during initialization', asy
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4({}),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1122,7 +1114,7 @@ test('one conversation-scheduling definition creates a fresh instance per runtim
   const declaration = defineAgent({
     name: 'root',
     model: new MockLanguageModelV4({}),
-    sandbox: virtualSandbox,
+    sandbox: buildSandbox,
     instructions: [],
     plugins: [plugin],
   });
@@ -1150,7 +1142,7 @@ test('conversation availability reaches every plugin before reporting failures',
     defineAgent({
       name: 'root',
       model: toolModel(new Map(), []),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [
         {
@@ -1202,7 +1194,7 @@ test('failed wake insertion does not commit a cron definition', async () => {
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1244,7 +1236,7 @@ test('retrying a completed CronCreate tool call reuses its definition and wake',
     defineAgent({
       name: 'root',
       model,
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     });
@@ -1302,7 +1294,7 @@ test('retry after enqueue-before-dispatch-clear executes one scheduled turn', as
     defineAgent({
       name: 'root',
       model: toolModel(commands, seenUserText),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1381,7 +1373,7 @@ test('retry after claim-before-enqueue executes one scheduled turn', async () =>
     defineAgent({
       name: 'root',
       model: toolModel(commands, seenUserText),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1429,7 +1421,7 @@ test('deleting a claimed cron before materialization prevents its scheduled ask'
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1484,7 +1476,7 @@ test('deleting a claimed cron during successor insertion prevents its scheduled 
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1544,7 +1536,7 @@ test('failed successor insertion leaves the current cron retryable', async () =>
     defineAgent({
       name: 'root',
       model: toolModel(commands, seenUserText),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1605,7 +1597,7 @@ test('pg-boss can retry successor insertion through a prolonged outage', async (
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1677,7 +1669,7 @@ test('ScheduleWakeup replacement and stop leave cron definitions active', async 
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1745,7 +1737,7 @@ test('a queued scheduled turn can be cancelled through AgentObservation', async 
     defineAgent({
       name: 'root',
       model: toolModel(commands, seenUserText),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1790,7 +1782,7 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1847,7 +1839,7 @@ test('an overdue occurrence waits for approval before materializing', async (t) 
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       toolApproval: { publish: 'user-approval' },
       tools: {
@@ -1909,7 +1901,7 @@ test('a non-recurring cron fires once and removes its definition', async () => {
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -1955,7 +1947,7 @@ test('recurrence keeps the timezone persisted at creation across runtime restart
   const declaration = defineAgent({
     name: 'root',
     model: toolModel(commands, []),
-    sandbox: virtualSandbox,
+    sandbox: buildSandbox,
     instructions: [],
     plugins: [conversationScheduling()],
   });
@@ -2005,7 +1997,7 @@ test('cron definitions are isolated by conversation and user across runtimes', a
   const declaration = defineAgent({
     name: 'root',
     model: toolModel(commands, []),
-    sandbox: virtualSandbox,
+    sandbox: buildSandbox,
     instructions: [],
     plugins: [conversationScheduling()],
   });
@@ -2079,7 +2071,7 @@ test('scheduling tools bind to the current root, child, and sibling conversation
     ['list root cron', { name: 'CronList', input: {} }],
   ]);
   const model = toolModel(commands, []);
-  const sandbox = virtualSandbox;
+  const sandbox = buildSandbox;
   const worker = defineAgent({
     name: 'worker',
     model,
@@ -2160,7 +2152,7 @@ test('resume ignores scheduling metadata while scheduling tools fail closed', as
         new Map([['list malformed', { name: 'CronList', input: {} }]]),
         [],
       ),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -2223,7 +2215,7 @@ test('CronCreate rejects six-field and unreachable expressions', async () => {
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -2265,7 +2257,7 @@ test('CronCreate enforces the 50-definition conversation cap', async () => {
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -2347,7 +2339,7 @@ test('a dynamic wake remains usable across a context-store restart', async () =>
   const declaration = defineAgent({
     name: 'root',
     model: toolModel(commands, seenUserText),
-    sandbox: virtualSandbox,
+    sandbox: buildSandbox,
     instructions: [],
     plugins: [conversationScheduling()],
   });
@@ -2406,7 +2398,7 @@ test('a cron wake remains usable across a context-store restart', async () => {
   const declaration = defineAgent({
     name: 'root',
     model: toolModel(commands, seenUserText),
-    sandbox: virtualSandbox,
+    sandbox: buildSandbox,
     instructions: [],
     plugins: [conversationScheduling()],
   });
@@ -2466,7 +2458,7 @@ test('a recurring cron does not fire when its first occurrence is beyond its sev
     defineAgent({
       name: 'root',
       model: toolModel(commands, []),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -2525,7 +2517,7 @@ test('duplicate wake delivery across runtimes advances PostgreSQL state once', a
   const declaration = defineAgent({
     name: 'root',
     model: toolModel(commands, seenUserText),
-    sandbox: virtualSandbox,
+    sandbox: buildSandbox,
     instructions: [],
     plugins: [conversationScheduling()],
   });

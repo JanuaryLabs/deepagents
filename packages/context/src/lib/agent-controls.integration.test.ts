@@ -5,7 +5,6 @@ import type {
 } from '@ai-sdk/provider';
 import { ToolChoiceViolationError, tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { setImmediate, setTimeout } from 'node:timers/promises';
@@ -15,11 +14,11 @@ import {
   ContextEngine,
   InMemoryContextStore,
   agent,
-  createBashTool,
-  createVirtualSandbox,
   structuredOutput,
   user,
 } from '@deepagents/context';
+
+import { buildSandbox } from '../../test/helpers/build-sandbox.ts';
 
 for (const mode of ['generate', 'stream'] as const) {
   it(`${mode} rejects forbidden tool calls before execution or actionable output`, async () => {
@@ -61,9 +60,7 @@ for (const mode of ['generate', 'stream'] as const) {
         chatId: `no-tools-${mode}`,
         userId: 'user',
       }).set(user('Answer without tools.')),
-      sandbox: await createBashTool({
-        sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      }),
+      sandbox: await buildSandbox(),
       tools: {
         record: tool({
           inputSchema: z.object({}),
@@ -220,9 +217,7 @@ for (const mode of [
       chatId: mode,
       userId: 'user',
     }).set(user('Run the tools.'));
-    const sandbox = await createBashTool({
-      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    });
+    const sandbox = await buildSandbox();
     const options = {
       name: 'controls',
       context,
@@ -335,9 +330,7 @@ it('native total timeout also cancels a tool-call repair request', async () => {
       chatId: 'repair-timeout',
       userId: 'user',
     }).set(user('Lookup.')),
-    sandbox: await createBashTool({
-      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    }),
+    sandbox: await buildSandbox(),
     tools: {
       lookup: tool({
         inputSchema: z.object({ id: z.string() }),
@@ -387,9 +380,7 @@ it('native tool timeout aborts execution and returns a tool error to the next mo
       chatId: 'timeout',
       userId: 'user',
     }).set(user('Run slow.')),
-    sandbox: await createBashTool({
-      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    }),
+    sandbox: await buildSandbox(),
     timeout: { tools: { slowMs: 20 } },
     tools: {
       slow: tool({

@@ -13,7 +13,6 @@ import {
   MockLanguageModelV4,
   convertReadableStreamToArray as drain,
 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import z from 'zod';
@@ -24,11 +23,11 @@ import {
   agent,
   assistant,
   chat,
-  createBashTool,
-  createVirtualSandbox,
   structuredOutput,
   user,
 } from '@deepagents/context';
+
+import { buildSandbox } from './helpers/build-sandbox.ts';
 
 const testUsage = {
   inputTokens: {
@@ -46,12 +45,6 @@ const stopResponse = {
   content: [{ type: 'text' as const, text: 'There are two users.' }],
   warnings: [],
 };
-
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
 
 const sqlTool = tool({
   description: 'Run a SQL query',
@@ -135,7 +128,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
 
     const sut = agent({
       name: 'sql-agent',
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
       context: engine,
       model,
       tools: { runSql: sqlTool },
@@ -182,7 +175,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
 
     const sut = agent({
       name: 'sql-agent',
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
       context: engine,
       model,
       tools: { runSql: sqlTool },
@@ -246,7 +239,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
 
     const sut = agent({
       name: 'sql-agent',
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
       context: engine,
       model,
       tools: { runSql: sqlTool },
@@ -314,7 +307,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
     });
     const sut = agent({
       name: 'persisted-meta-agent',
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
       context,
       model,
       tools: { runSql: sqlTool },
@@ -389,7 +382,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
 
     const sut = agent({
       name: 'inspection-agent',
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
       context: engine,
       model,
       tools: { inspect: inspectTool },

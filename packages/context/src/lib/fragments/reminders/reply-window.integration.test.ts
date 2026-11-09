@@ -5,7 +5,6 @@ import {
   MockLanguageModelV4,
   convertReadableStreamToArray as drain,
 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -17,14 +16,14 @@ import {
   InMemoryContextStore,
   agent,
   chat,
-  createBashTool,
-  createVirtualSandbox,
   everyOfLastN,
   reminder,
   toolFailed,
   toolOutput,
 } from '@deepagents/context';
 import { createFileTelemetry } from '@deepagents/context/telemetry/file';
+
+import { buildSandbox } from '../../../../test/helpers/build-sandbox.ts';
 
 const temporaryFiles = new TemporaryFiles();
 
@@ -98,9 +97,7 @@ async function streakFired(
     name: 'reply',
     context,
     model: scriptedModel(),
-    sandbox: await createBashTool({
-      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    }),
+    sandbox: await buildSandbox(),
     tools: {
       bash: tool({
         description: 'run a shell command',

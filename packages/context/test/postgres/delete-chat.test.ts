@@ -1,5 +1,4 @@
 import { Postgres } from '@zukhruf/testing/postgres';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -8,18 +7,12 @@ import {
   PostgresContextStore,
   XmlRenderer,
   assistantText,
-  createBashTool,
-  createVirtualSandbox,
   user,
 } from '@deepagents/context';
 
-const testPostgres = new Postgres({ environment: process.env });
+import { buildSandbox } from '../helpers/build-sandbox.ts';
 
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+const testPostgres = new Postgres({ environment: process.env });
 
 const renderer = new XmlRenderer();
 
@@ -39,7 +32,7 @@ describe('Delete Chat', () => {
         });
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         const result = await store.deleteChat('chat-to-delete');
@@ -81,7 +74,7 @@ describe('Delete Chat', () => {
         });
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         const firstResult = await store.deleteChat('chat-double-delete');
@@ -328,7 +321,7 @@ describe('Delete Chat', () => {
         });
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         const result = await store.deleteChat('alice-chat-auth', {
@@ -357,7 +350,7 @@ describe('Delete Chat', () => {
         });
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         const result = await store.deleteChat('alice-only-chat', {
@@ -388,7 +381,7 @@ describe('Delete Chat', () => {
         });
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         const result = await store.deleteChat('any-user-chat');
@@ -453,7 +446,7 @@ describe('Delete Chat', () => {
         });
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         const result1 = await store.deleteChat('case-sensitive-chat', {
@@ -491,7 +484,7 @@ describe('Delete Chat', () => {
         });
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         const result = await store.deleteChat('empty-chat');

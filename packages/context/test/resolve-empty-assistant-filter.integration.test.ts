@@ -1,5 +1,4 @@
 import { type UIMessage } from 'ai';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -8,16 +7,10 @@ import {
   InMemoryContextStore,
   XmlRenderer,
   assistant,
-  createBashTool,
-  createVirtualSandbox,
   user,
 } from '@deepagents/context';
 
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+import { buildSandbox } from './helpers/build-sandbox.ts';
 
 function makeEngine() {
   return new ContextEngine({
@@ -37,7 +30,7 @@ describe('ContextEngine.getMessages filters empty assistant placeholders', () =>
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     assert.deepStrictEqual(
@@ -60,7 +53,7 @@ describe('ContextEngine.getMessages filters empty assistant placeholders', () =>
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     assert.strictEqual(messages.length, 2);
@@ -80,7 +73,7 @@ describe('ContextEngine.getMessages filters empty assistant placeholders', () =>
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     assert.deepStrictEqual(

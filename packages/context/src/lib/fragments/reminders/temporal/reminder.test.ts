@@ -1,5 +1,4 @@
 import type { UIMessage } from 'ai';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { type TestContext, describe, it } from 'node:test';
 
@@ -8,8 +7,6 @@ import {
   InMemoryContextStore,
   XmlRenderer,
   assistantText,
-  createBashTool,
-  createVirtualSandbox,
   dateReminder,
   isRecord,
   localeReminder,
@@ -21,14 +18,9 @@ import {
   yearReminder,
 } from '@deepagents/context';
 
+import { buildSandbox } from '../../../../../test/helpers/build-sandbox.ts';
 import { getTextParts } from '../../../text.ts';
 import { requireUIMessage } from '../../../ui-message-guards.ts';
-
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
 
 function getLastUserMessage(messages: UIMessage[]): UIMessage {
   const lastUser = [...messages]
@@ -67,7 +59,7 @@ describe('dateReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const parts = getTextParts(getLastUserMessage(messages));
 
@@ -104,7 +96,7 @@ describe('dateReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const lastUser = getLastUserMessage(messages);
       const allText = getTextParts(lastUser).join('');
@@ -138,7 +130,7 @@ describe('dateReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const lastUser = getLastUserMessage(messages);
       const allText = getTextParts(lastUser).join('');
@@ -168,7 +160,7 @@ describe('dateReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const parts = getTextParts(getLastUserMessage(messages));
       const datePart = parts.find((p) => p.includes('Date:'));
@@ -212,7 +204,7 @@ describe('dateReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const lastUser = getLastUserMessage(messages);
       const allText = getTextParts(lastUser).join(' ');
@@ -248,7 +240,7 @@ describe('dateReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const allText = getTextParts(getLastUserMessage(messages)).join(' ');
 
@@ -298,7 +290,7 @@ describe('dateReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const allText = getTextParts(getLastUserMessage(messages)).join(' ');
 
@@ -333,7 +325,7 @@ describe('dateReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const persisted = getLastUserMessage(messages);
 
@@ -377,7 +369,7 @@ describe('dateReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const allText = getTextParts(getLastUserMessage(messages)).join(' ');
 
@@ -404,7 +396,7 @@ describe('timeReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const parts = getTextParts(getLastUserMessage(messages));
       const timePart = parts.find((p) => p.includes('Time:'));
@@ -436,7 +428,7 @@ describe('timeReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const lastUser = getLastUserMessage(messages);
       const allText = getTextParts(lastUser).join('');
@@ -470,7 +462,7 @@ describe('timeReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const lastUser = getLastUserMessage(messages);
       const allText = getTextParts(lastUser).join('');
@@ -498,7 +490,7 @@ describe('monthReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const parts = getTextParts(getLastUserMessage(messages));
       const monthPart = parts.find((p) => p.includes('Month:'));
@@ -530,7 +522,7 @@ describe('monthReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const lastUser = getLastUserMessage(messages);
       const allText = getTextParts(lastUser).join('');
@@ -558,7 +550,7 @@ describe('yearReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const parts = getTextParts(getLastUserMessage(messages));
       const yearPart = parts.find((p) => p.includes('Year:'));
@@ -590,7 +582,7 @@ describe('yearReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const lastUser = getLastUserMessage(messages);
       const allText = getTextParts(lastUser).join('');
@@ -618,7 +610,7 @@ describe('seasonReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const parts = getTextParts(getLastUserMessage(messages));
       const seasonPart = parts.find((p) => p.includes('Season:'));
@@ -650,7 +642,7 @@ describe('seasonReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const lastUser = getLastUserMessage(messages);
       const allText = getTextParts(lastUser).join('');
@@ -685,7 +677,7 @@ describe('seasonReminder', () => {
 
         const { messages } = await engine.resolve({
           renderer: new XmlRenderer(),
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
         const allText = getTextParts(getLastUserMessage(messages)).join('');
 
@@ -722,7 +714,7 @@ describe('localeReminder', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const parts = getTextParts(getLastUserMessage(messages));
     const localePart = parts.find((p) => p.includes('Language:'));
@@ -749,7 +741,7 @@ describe('localeReminder', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const allText = getTextParts(getLastUserMessage(messages)).join('');
 
@@ -778,7 +770,7 @@ describe('localeReminder', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const lastUser = getLastUserMessage(messages);
     const allText = getTextParts(lastUser).join('');
@@ -826,7 +818,7 @@ describe('localeReminder', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const lastUser = getLastUserMessage(messages);
     const allText = getTextParts(lastUser).join('');
@@ -914,7 +906,7 @@ describe('localeReminder', () => {
 
     const { messages } = await engine2.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const lastUser = getLastUserMessage(messages);
     const allText = getTextParts(lastUser).join('');
@@ -951,7 +943,7 @@ describe('temporalReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const allText = getTextParts(getLastUserMessage(messages)).join(' ');
 
@@ -990,7 +982,7 @@ describe('temporalReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const lastUser = getLastUserMessage(messages);
       const allText = getTextParts(lastUser).join(' ');
@@ -1035,7 +1027,7 @@ describe('temporalReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const allText = getTextParts(getLastUserMessage(messages)).join(' ');
 
@@ -1065,7 +1057,7 @@ describe('temporalReminder', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const parts = getTextParts(getLastUserMessage(messages));
 
@@ -1121,7 +1113,7 @@ describe('temporalReminder', () => {
 
       const { messages } = await engine2.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const lastUser = getLastUserMessage(messages);
       const allText = getTextParts(lastUser).join(' ');
@@ -1148,11 +1140,11 @@ describe('temporalReminder', () => {
       const renderer = new XmlRenderer();
       const result1 = await engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const result2 = await engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
 
       const text1 = getTextParts(getLastUserMessage(result1.messages)).join('');

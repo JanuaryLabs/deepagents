@@ -3,7 +3,6 @@ import { settleWithin } from '@zukhruf/testing/async';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import { validateUIMessages } from 'ai';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { execFile } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -18,22 +17,16 @@ import {
   SqliteContextStore,
   XmlRenderer,
   assistantText,
-  createBashTool,
-  createVirtualSandbox,
   isRecord,
   reminder,
   user,
 } from '@deepagents/context';
 
+import { buildSandbox } from '../helpers/build-sandbox.ts';
+
 const temporaryFiles = new TemporaryFiles();
 
 const sqlite = new Sqlite();
-
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
 
 const renderer = new XmlRenderer();
 
@@ -191,7 +184,7 @@ describe('Sqlite ContextEngine Integration', () => {
     const result = await settleWithin(
       engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       }),
       'resolve empty chat',
       10_000,
@@ -226,7 +219,7 @@ describe('Sqlite ContextEngine Integration', () => {
     const result = await settleWithin(
       engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       }),
       'resolve empty sqlite file',
       10_000,
@@ -260,7 +253,7 @@ describe('Sqlite ContextEngine Integration', () => {
         try {
           return await engine.resolve({
             renderer,
-            sandbox: await createVirtualAgentSandbox(),
+            sandbox: await buildSandbox(),
           });
         } catch (error) {
           return { error };
@@ -305,7 +298,7 @@ describe('Sqlite ContextEngine Integration', () => {
         try {
           await nextEngine.resolve({
             renderer,
-            sandbox: await createVirtualAgentSandbox(),
+            sandbox: await buildSandbox(),
           });
         } catch {
           // No hang is the requirement for this edge case.
@@ -346,7 +339,7 @@ describe('Sqlite ContextEngine Integration', () => {
     const result = await settleWithin(
       nextEngine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       }),
       'resolve missing head',
       10_000,
@@ -387,7 +380,7 @@ describe('Sqlite ContextEngine Integration', () => {
     const result = await settleWithin(
       engine.resolve({
         renderer,
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       }),
       'resolve after rejection',
       10_000,
@@ -411,7 +404,7 @@ describe('Sqlite ContextEngine Integration', () => {
         });
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
       }, /database|file/i),
       'corrupt db open',
@@ -435,7 +428,7 @@ describe('Sqlite ContextEngine Integration', () => {
 
           await engine.resolve({
             renderer,
-            sandbox: await createVirtualAgentSandbox(),
+            sandbox: await buildSandbox(),
           });
 
           let failure: unknown;
@@ -510,7 +503,7 @@ describe('Sqlite ContextEngine Integration', () => {
       const result = await settleWithin(
         engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         }),
         'resolve large chain',
         120_000,
@@ -598,7 +591,7 @@ describe('Sqlite ContextEngine Integration', () => {
     // 5. Verify main-v2 chain: user → new_assistant (2 messages)
     const result = await engine.resolve({
       renderer,
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     assert.strictEqual(result.messages.length, 2);
 
@@ -606,7 +599,7 @@ describe('Sqlite ContextEngine Integration', () => {
     await engine.switchBranch('main');
     const mainResult = await engine.resolve({
       renderer,
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     assert.strictEqual(mainResult.messages.length, 2);
     const mainAssistant = mainResult.messages[1];
@@ -632,7 +625,7 @@ describe('Sqlite ContextEngine Integration', () => {
 
     const afterSave = await engine.resolve({
       renderer,
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const message = afterSave.messages[0];
 
@@ -648,7 +641,7 @@ describe('Sqlite ContextEngine Integration', () => {
 
     const roundtrip = await engine.resolve({
       renderer,
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const messageAgain = roundtrip.messages[0];
 

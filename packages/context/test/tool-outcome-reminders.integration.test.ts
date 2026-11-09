@@ -13,7 +13,6 @@ import {
   MockLanguageModelV4,
   convertReadableStreamToArray as drain,
 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -22,11 +21,11 @@ import {
   InMemoryContextStore,
   agent,
   chat,
-  createBashTool,
-  createVirtualSandbox,
   isRecord,
   reminder,
 } from '@deepagents/context';
+
+import { buildSandbox } from './helpers/build-sandbox.ts';
 
 const USAGE = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -105,9 +104,7 @@ async function runBash(chatId: string, command: string) {
   const store = new InMemoryContextStore();
   const context = new ContextEngine({ store, chatId, userId: 'u1' });
   const model = bashThenStop(command);
-  const sandbox = await createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
+  const sandbox = await buildSandbox();
   const chatAgent = agent({ sandbox, name: chatId, context, model });
 
   context.set(

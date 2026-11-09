@@ -1,7 +1,6 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { z } from 'zod';
@@ -10,10 +9,10 @@ import {
   ContextEngine,
   InMemoryContextStore,
   agent,
-  createBashTool,
-  createVirtualSandbox,
   user,
 } from '@deepagents/context';
+
+import { buildSandbox } from './helpers/build-sandbox.ts';
 
 const usage = {
   inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
@@ -24,9 +23,7 @@ const stop = { unified: 'stop' as const, raw: undefined };
 
 for (const mode of ['generate', 'stream'] as const) {
   it(`${mode} hands the agent's sandbox to user tools`, async () => {
-    const toolkit = await createBashTool({
-      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    });
+    const toolkit = await buildSandbox();
     await toolkit.sandbox.writeTextFile({
       path: '/tmp/marker.txt',
       content: 'from the agent sandbox',

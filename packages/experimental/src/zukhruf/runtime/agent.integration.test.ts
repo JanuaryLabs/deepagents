@@ -1,26 +1,16 @@
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {
-  type AgentSandbox,
-  createBashTool,
-  createVirtualSandbox,
-} from '@deepagents/context';
 import * as zukhruf from '@deepagents/experimental/zukhruf';
 import * as conversationSchedulingPlugin from '@deepagents/experimental/zukhruf/conversation-scheduling';
 
-async function virtualSandbox(): Promise<AgentSandbox> {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 
 const { defineAgent } = zukhruf;
 
 const model = new MockLanguageModelV4();
-const sandbox = virtualSandbox;
+const sandbox = buildSandbox;
 
 test('defineAgent declares the subagents an agent may spawn', () => {
   const researcher = defineAgent({

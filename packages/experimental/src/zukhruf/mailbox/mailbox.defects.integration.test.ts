@@ -1,21 +1,17 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { type UIMessage, isToolUIPart, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { z } from 'zod';
 
 import {
-  type AgentSandbox,
   InMemoryContextStore,
   type MessageData,
   PollingChangeSource,
   SqliteStreamStore,
   StreamManager,
   type StreamStore,
-  createBashTool,
-  createVirtualSandbox,
 } from '@deepagents/context';
 import {
   type AgentDeclaration,
@@ -31,6 +27,8 @@ import {
   defineStack,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
+
+import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 
 /** Message metadata the turn executor writes for delivered mail. */
 const communicationMessageMetadataSchema = z.object({
@@ -127,10 +125,7 @@ function declaration(model: AgentDeclaration['model']): AgentDeclaration {
   return {
     name: 'researcher',
     model,
-    sandbox: async (): Promise<AgentSandbox> =>
-      createBashTool({
-        sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      }),
+    sandbox: buildSandbox,
     instructions: [],
   };
 }

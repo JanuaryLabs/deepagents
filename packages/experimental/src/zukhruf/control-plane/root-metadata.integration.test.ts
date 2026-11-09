@@ -1,20 +1,16 @@
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
-  type AgentSandbox,
   InMemoryContextStore,
   PollingChangeSource,
   SqliteStreamStore,
   StreamManager,
   type StreamStore,
   type StreamUpdater,
-  createBashTool,
-  createVirtualSandbox,
 } from '@deepagents/context';
 import {
   AgentRuntime,
@@ -29,11 +25,7 @@ import {
   defineStack,
 } from '@deepagents/experimental/zukhruf';
 
-async function virtualSandbox(): Promise<AgentSandbox> {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 
 const userTurn = (id: string, text: string) => ({
   message: {
@@ -203,7 +195,7 @@ test('enqueue only queues; worker execution initializes root metadata', async ()
           }),
         }),
       }),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
     }),
   );
@@ -269,7 +261,7 @@ test('an existing chat can only be used by its stored owner', async () => {
           }),
         }),
       }),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
     }),
   );
@@ -309,7 +301,7 @@ test('caller turn ids are scoped to their owning conversation', async () => {
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4(),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
     }),
   );
@@ -348,7 +340,7 @@ test('explicit cancellation rejects a stream owned by another conversation', asy
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4(),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
     }),
   );
@@ -397,7 +389,7 @@ test('reserved but malformed agent metadata fails closed at enqueue', async () =
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4(),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
     }),
   );
@@ -434,7 +426,7 @@ test('enqueue rejects an empty conversation before registering a stream', async 
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4(),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
     }),
   );
@@ -488,7 +480,7 @@ test('root initialization preserves a concurrent host metadata write', async () 
           }),
         }),
       }),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
     }),
   );
@@ -553,7 +545,7 @@ test('a child must point to the immediate ancestor of its canonical path', async
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4(),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
     }),
   );
@@ -591,7 +583,7 @@ test('host delivery rejects a recipient that does not own the stored chat', asyn
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4(),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
     }),
   );
@@ -635,7 +627,7 @@ test('explicit cancellation rejects a conversation that does not own the stored 
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4(),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
     }),
   );
@@ -696,7 +688,7 @@ test('cancelling during sandbox setup prevents model sampling', async () => {
       sandbox: async () => {
         sandboxStarted.resolve();
         await releaseSandbox.promise;
-        return virtualSandbox();
+        return buildSandbox();
       },
       instructions: [],
     }),
@@ -760,7 +752,7 @@ test('cancellation that wins the execution claim prevents model sampling', async
       }),
       sandbox: async () => {
         streamStore.arm();
-        return virtualSandbox();
+        return buildSandbox();
       },
       instructions: [],
     }),
@@ -821,7 +813,7 @@ test('cancellation after execution claim aborts pending provider setup', async (
           };
         },
       }),
-      sandbox: virtualSandbox,
+      sandbox: buildSandbox,
       instructions: [],
     }),
   );

@@ -1,16 +1,12 @@
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  type AgentSandbox,
   InMemoryContextStore,
   PollingChangeSource,
   SqliteStreamStore,
   StreamManager,
-  createBashTool,
-  createVirtualSandbox,
 } from '@deepagents/context';
 import {
   type AgentDeclaration,
@@ -22,6 +18,8 @@ import {
   defineAgent,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
+
+import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 
 /** Turns are never scheduled by runtimes that are only initialized. */
 class UnusedTurnQueue extends TurnQueue {
@@ -69,14 +67,8 @@ function adapters(resources: AsyncDisposableStack) {
   };
 }
 
-async function virtualSandbox(): Promise<AgentSandbox> {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
-
 const model = new MockLanguageModelV4();
-const sandbox = virtualSandbox;
+const sandbox = buildSandbox;
 
 function declaration(name: string, subagents: AgentDeclaration[] = []) {
   return defineAgent({ name, model, sandbox, instructions: [], subagents });

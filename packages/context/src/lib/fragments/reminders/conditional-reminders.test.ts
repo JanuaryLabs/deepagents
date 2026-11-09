@@ -1,5 +1,4 @@
 import { type ToolUIPart, type UIMessage, isStaticToolUIPart } from 'ai';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { type TestContext, describe, it } from 'node:test';
 
@@ -15,8 +14,6 @@ import {
   assistant,
   assistantText,
   contentIncludes,
-  createBashTool,
-  createVirtualSandbox,
   dayChanged,
   everyNTurns,
   first,
@@ -31,13 +28,8 @@ import {
   workflow,
 } from '@deepagents/context';
 
+import { buildSandbox } from '../../../../test/helpers/build-sandbox.ts';
 import { getTextParts } from '../../text.ts';
-
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
 
 type TestToolName = 'bash' | 'sql';
 type TestToolType = 'tool-bash' | 'tool-sql';
@@ -220,7 +212,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const lastMsg = messages[messages.length - 1];
     const text = getTextParts(lastMsg).join('');
@@ -250,7 +242,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const lastMsg = messages[messages.length - 1];
     const text = getTextParts(lastMsg).join('');
@@ -274,7 +266,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const lastMsg = messages[messages.length - 1];
     const text = getTextParts(lastMsg).join('');
@@ -301,7 +293,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const lastMsg = messages[messages.length - 1];
     const text = getTextParts(lastMsg).join('');
@@ -330,7 +322,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const lastMsg = messages[messages.length - 1];
     const text = getTextParts(lastMsg).join('');
@@ -360,7 +352,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const lastMsg = messages[messages.length - 1];
     const text = getTextParts(lastMsg).join('');
@@ -413,7 +405,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const lastMsg = messages[messages.length - 1];
     const text = getTextParts(lastMsg).join('');
@@ -447,7 +439,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine2.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const lastMsg = messages[messages.length - 1];
     const text = getTextParts(lastMsg).join('');
@@ -480,11 +472,11 @@ describe('ContextEngine conditional reminders', () => {
     const renderer = new XmlRenderer();
     const result1 = await engine.resolve({
       renderer,
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const result2 = await engine.resolve({
       renderer,
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     const text1 = getTextParts(result1.messages[0]).join('');
@@ -518,7 +510,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const text = getTextParts(messages[0]).join('');
 
@@ -543,7 +535,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const parts = getTextParts(messages[0]);
 
@@ -571,7 +563,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const text = getTextParts(messages[0]).join('');
 
@@ -621,7 +613,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const userMsg = messages.find((m) => m.role === 'user');
     assert.ok(userMsg, 'Expected resolved user message');
@@ -650,7 +642,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     assert.strictEqual(messages.length, 1);
     assert.strictEqual(messages[0].role, 'assistant');
@@ -672,7 +664,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { systemPrompt } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     assert.ok(
@@ -697,7 +689,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const text = getTextParts(messages[0]).join('');
 
@@ -720,7 +712,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const text = getTextParts(messages[0]).join('');
 
@@ -749,7 +741,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
 
     const persistedUser = messages.find(
@@ -791,7 +783,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const userMsg = messages[0];
     const textBefore = getTextParts(userMsg).join('');
@@ -941,7 +933,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const text = getTextParts(messages[messages.length - 1]).join('');
     assert.ok(
@@ -971,7 +963,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const text = getTextParts(messages[messages.length - 1]).join('');
     assert.ok(
@@ -1002,7 +994,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const text = getTextParts(messages[messages.length - 1]).join('');
     assert.ok(
@@ -1034,7 +1026,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const text = getTextParts(messages[messages.length - 1]).join('');
     assert.ok(
@@ -1062,7 +1054,7 @@ describe('ContextEngine conditional reminders', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const lastMsg = messages[messages.length - 1];
       const text = getTextParts(lastMsg).join('');
@@ -1090,7 +1082,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const { messages } = await engine.resolve({
       renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
+      sandbox: await buildSandbox(),
     });
     const lastMsg = messages[messages.length - 1];
     const text = getTextParts(lastMsg).join('');
@@ -1123,7 +1115,7 @@ describe('ContextEngine conditional reminders', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const lastMsg = messages[messages.length - 1];
       const text = getTextParts(lastMsg).join('');
@@ -1154,7 +1146,7 @@ describe('ContextEngine conditional reminders', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const lastMsg = messages[messages.length - 1];
       const text = getTextParts(lastMsg).join('');
@@ -1189,7 +1181,7 @@ describe('ContextEngine conditional reminders', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const parts = getTextParts(messages[0]);
 
@@ -1225,7 +1217,7 @@ describe('ContextEngine conditional reminders', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const text = getTextParts(messages[0]).join('');
 
@@ -1252,7 +1244,7 @@ describe('ContextEngine conditional reminders', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const parts = getTextParts(messages[0]);
 
@@ -1287,7 +1279,7 @@ describe('ContextEngine conditional reminders', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const parts = getTextParts(messages[0]);
 
@@ -1323,7 +1315,7 @@ describe('ContextEngine conditional reminders', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const parts = getTextParts(messages[0]);
 
@@ -1355,7 +1347,7 @@ describe('ContextEngine conditional reminders', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const text = getTextParts(messages[0]).join('');
 
@@ -1387,7 +1379,7 @@ describe('ContextEngine conditional reminders', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const text = getTextParts(messages[0]).join('');
 
@@ -1415,7 +1407,7 @@ describe('ContextEngine conditional reminders', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const userMsg = messages[0];
       const textBefore = getTextParts(userMsg).join('');
@@ -1457,7 +1449,7 @@ describe('ContextEngine conditional reminders', () => {
 
       const { messages } = await engine.resolve({
         renderer: new XmlRenderer(),
-        sandbox: await createVirtualAgentSandbox(),
+        sandbox: await buildSandbox(),
       });
       const userMsg = messages[0];
       const textBefore = getTextParts(userMsg).join('');

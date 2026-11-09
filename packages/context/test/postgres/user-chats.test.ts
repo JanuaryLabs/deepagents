@@ -1,5 +1,4 @@
 import { Postgres } from '@zukhruf/testing/postgres';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -8,18 +7,12 @@ import {
   PostgresContextStore,
   XmlRenderer,
   assistantText,
-  createBashTool,
-  createVirtualSandbox,
   user,
 } from '@deepagents/context';
 
-const testPostgres = new Postgres({ environment: process.env });
+import { buildSandbox } from '../helpers/build-sandbox.ts';
 
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+const testPostgres = new Postgres({ environment: process.env });
 
 const renderer = new XmlRenderer();
 
@@ -40,7 +33,7 @@ describe('User Chat Management', () => {
 
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         const chat = await store.getChat('user-chat-1');
@@ -66,7 +59,7 @@ describe('User Chat Management', () => {
 
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         const chatMeta = engine.chat;
@@ -94,7 +87,7 @@ describe('User Chat Management', () => {
         });
         await aliceChat1.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         const aliceChat2 = new ContextEngine({
@@ -104,7 +97,7 @@ describe('User Chat Management', () => {
         });
         await aliceChat2.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         const bobChat = new ContextEngine({
@@ -114,7 +107,7 @@ describe('User Chat Management', () => {
         });
         await bobChat.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         const aliceChats = await store.listChats({ userId: 'alice-list' });
@@ -196,7 +189,7 @@ describe('User Chat Management', () => {
           store,
           chatId: 'chatinfo-test',
           userId: 'user-abc-info',
-        }).resolve({ renderer, sandbox: await createVirtualAgentSandbox() });
+        }).resolve({ renderer, sandbox: await buildSandbox() });
 
         const chats = await store.listChats({ userId: 'user-abc-info' });
         assert.strictEqual(chats[0].userId, 'user-abc-info');
@@ -593,7 +586,7 @@ describe('User Chat Management', () => {
           chatId: 'reconnect-pg-chat',
           userId: 'different-pg-user',
         });
-        const sandbox = await createVirtualAgentSandbox();
+        const sandbox = await buildSandbox();
         await assert.rejects(
           () => engine2.resolve({ renderer, sandbox }),
           /belongs to user "original-pg-user", not "different-pg-user"/,

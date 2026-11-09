@@ -1,5 +1,4 @@
 import { SqlServer } from '@zukhruf/testing/sqlserver';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -8,18 +7,12 @@ import {
   SqlServerContextStore,
   XmlRenderer,
   assistantText,
-  createBashTool,
-  createVirtualSandbox,
   user,
 } from '@deepagents/context';
 
-const testSqlServer = new SqlServer({ environment: process.env });
+import { buildSandbox } from '../helpers/build-sandbox.ts';
 
-async function createVirtualAgentSandbox() {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+const testSqlServer = new SqlServer({ environment: process.env });
 
 const renderer = new XmlRenderer();
 
@@ -39,7 +32,7 @@ describe('Delete Chat', () => {
         });
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         const result = await store.deleteChat('chat-to-delete');
@@ -81,7 +74,7 @@ describe('Delete Chat', () => {
         });
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         const firstResult = await store.deleteChat('chat-double-delete');
@@ -328,7 +321,7 @@ describe('Delete Chat', () => {
         });
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         const result = await store.deleteChat('alice-chat-auth', {
@@ -357,7 +350,7 @@ describe('Delete Chat', () => {
         });
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         const result = await store.deleteChat('alice-only-chat', {
@@ -388,7 +381,7 @@ describe('Delete Chat', () => {
         });
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         const result = await store.deleteChat('any-user-chat');
@@ -458,7 +451,7 @@ describe('Delete Chat', () => {
         });
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         // SQL Server's default collation is case-insensitive,
@@ -488,7 +481,7 @@ describe('Delete Chat', () => {
         });
         await engine.resolve({
           renderer,
-          sandbox: await createVirtualAgentSandbox(),
+          sandbox: await buildSandbox(),
         });
 
         const result = await store.deleteChat('empty-chat');

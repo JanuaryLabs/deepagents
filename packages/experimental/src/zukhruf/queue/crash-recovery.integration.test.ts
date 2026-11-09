@@ -2,7 +2,6 @@ import { timebox } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import spawn, { SubprocessError } from 'nano-spawn';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
@@ -11,14 +10,11 @@ import { describe, it } from 'node:test';
 import { PgBoss } from 'pg-boss';
 
 import {
-  type AgentSandbox,
   PollingChangeSource,
   PostgresContextStore,
   PostgresStreamStore,
   StreamManager,
   type StreamPart,
-  createBashTool,
-  createVirtualSandbox,
 } from '@deepagents/context';
 import {
   type AgentDeclaration,
@@ -27,6 +23,8 @@ import {
   SqliteMailboxStore,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
+
+import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 
 const testPostgres = new Postgres({ environment: process.env });
 
@@ -83,10 +81,7 @@ function declaration(model: AgentDeclaration['model']): AgentDeclaration {
   return {
     name: 'crash-agent',
     model,
-    sandbox: async (): Promise<AgentSandbox> =>
-      createBashTool({
-        sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      }),
+    sandbox: buildSandbox,
     instructions: [],
   };
 }
