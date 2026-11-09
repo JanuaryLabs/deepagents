@@ -21,6 +21,10 @@ export const conversationSchedulingCapabilities = {
   timezone: new AgentPluginCapability<string>(
     'conversation-scheduling.timezone',
   ),
+  /** An entry binds `globalThis`; a test binds `createClock()`. */
+  clock: new AgentPluginCapability<{ Date: { now(): number } }>(
+    'conversation-scheduling.clock',
+  ),
 } as const;
 
 /** Install durable agent-created schedules into every agent in one runtime. */
@@ -30,6 +34,7 @@ export function conversationScheduling(): AgentPluginDefinition {
     capabilities: [
       conversationSchedulingCapabilities.scheduler,
       conversationSchedulingCapabilities.timezone,
+      conversationSchedulingCapabilities.clock,
     ],
     create(bindings) {
       let host = (): AgentPluginHost => {
@@ -41,6 +46,7 @@ export function conversationScheduling(): AgentPluginDefinition {
         scheduler: bindings.get(conversationSchedulingCapabilities.scheduler),
         host: () => host(),
         timezone: bindings.get(conversationSchedulingCapabilities.timezone),
+        clock: bindings.get(conversationSchedulingCapabilities.clock),
       });
 
       return {

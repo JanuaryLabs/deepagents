@@ -734,6 +734,7 @@ const stack = defineStack(async () => ({
   bindings: [
     conversationSchedulingCapabilities.scheduler.bind(wakes),
     conversationSchedulingCapabilities.timezone.bind('UTC'),
+    conversationSchedulingCapabilities.clock.bind(globalThis),
   ],
 }));
 const runtime = new AgentRuntime(root);

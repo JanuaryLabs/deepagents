@@ -113,6 +113,7 @@ interface ConversationSchedulerOptions {
   scheduler: WakeScheduler<SchedulingWake>;
   host: () => AgentPluginHost;
   timezone: string;
+  clock: { Date: { now(): number } };
 }
 
 interface CronCreateInput {
@@ -125,11 +126,13 @@ interface CronCreateInput {
 export class ConversationScheduler {
   readonly #scheduler: WakeScheduler<SchedulingWake>;
   readonly #host: ConversationSchedulerOptions['host'];
+  readonly #clock: ConversationSchedulerOptions['clock'];
   readonly timezone: string;
 
   constructor(options: ConversationSchedulerOptions) {
     this.#scheduler = options.scheduler;
     this.#host = options.host;
+    this.#clock = options.clock;
     this.timezone = ConversationScheduler.#resolveTimezone(options.timezone);
   }
 
@@ -140,7 +143,7 @@ export class ConversationScheduler {
   ): Promise<CronDefinition> {
     const expression = input.cron.trim();
     const recurring = input.recurring ?? true;
-    const createdAt = Date.now();
+    const createdAt = this.#clock.Date.now();
     const nextRunAt = this.#nextOccurrence(
       expression,
       this.timezone,
@@ -231,7 +234,7 @@ export class ConversationScheduler {
   }> {
     const rounded = Math.round(input.delaySeconds);
     const clampedDelaySeconds = Math.min(3_600, Math.max(60, rounded));
-    const createdAt = Date.now();
+    const createdAt = this.#clock.Date.now();
     const nextRunAt = createdAt + clampedDelaySeconds * 1_000;
     const generation = ConversationScheduler.#randomGeneration();
     let previous: SchedulingState['dynamic'];
@@ -288,7 +291,7 @@ export class ConversationScheduler {
   async materializeDueIfEligible(conversation: ConversationId): Promise<void> {
     if (!(await this.#host().isConversationAvailable(conversation))) return;
     const state = await this.#read(conversation);
-    const now = Date.now();
+    const now = this.#clock.Date.now();
     const wake = state.dispatching
       ? this.#dispatchingWake(conversation, state.dispatching)
       : [
@@ -357,7 +360,7 @@ export class ConversationScheduler {
             nextRunAt: this.#nextOccurrence(
               definition.expression,
               definition.timezone,
-              Math.max(Date.now(), definition.nextRunAt),
+              Math.max(this.#clock.Date.now(), definition.nextRunAt),
             ),
             generation: definition.generation + 1,
           }

@@ -2,6 +2,7 @@ import type {
   LanguageModelV4FunctionTool,
   LanguageModelV4StreamPart,
 } from '@ai-sdk/provider';
+import { createClock } from '@sinonjs/fake-timers';
 import { Latch } from '@zukhruf/async';
 import { open } from '@zukhruf/sqlite-open';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
@@ -328,6 +329,7 @@ function schedulingBindings(
   return [
     conversationSchedulingCapabilities.scheduler.bind(scheduler),
     conversationSchedulingCapabilities.timezone.bind(timezone),
+    conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
   ];
 }
 
@@ -448,6 +450,7 @@ test('configured runtime injects top-level Claude-compatible scheduling tools', 
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack);
@@ -502,6 +505,7 @@ test('CronCreate, CronList, and CronDelete run through the model loop in one con
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('Asia/Amman'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack2);
@@ -550,9 +554,8 @@ test('CronCreate, CronList, and CronDelete run through the model loop in one con
   assert.deepEqual(emptyList?.output, { jobs: [] });
 });
 
-test('CronCreate reports the exact next run and timezone for a one-shot cron', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'] });
-  t.mock.timers.setTime(new Date('2026-08-13T12:09:00Z').getTime());
+test('CronCreate reports the exact next run and timezone for a one-shot cron', async () => {
+  const clock = createClock(new Date('2026-08-13T12:09:00Z').getTime());
 
   const scheduler = new RecordingWakeScheduler();
   using h = disposableHarness(scheduler);
@@ -583,6 +586,7 @@ test('CronCreate reports the exact next run and timezone for a one-shot cron', a
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('Asia/Amman'),
+      conversationSchedulingCapabilities.clock.bind(clock),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack3);
@@ -684,6 +688,7 @@ test('parallel model tool calls preserve concurrent cron creates and deletes', a
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack4);
@@ -732,6 +737,9 @@ test('ScheduleWakeup fires an ask and persists scheduled provenance', async () =
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(
+        createClock(Date.parse('2026-08-12T10:00:00Z')),
+      ),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack5);
@@ -753,6 +761,7 @@ test('ScheduleWakeup fires an ask and persists scheduled provenance', async () =
   );
 
   const wake = [...scheduler.wakes.values()][0];
+  assert.equal(wake.runAt.toISOString(), '2026-08-12T10:10:00.000Z');
   await scheduler.fire(wake.id);
   assert.equal(h.queue.turns.length, 1);
   const scheduledTurn = h.queue.turns[0];
@@ -810,6 +819,7 @@ test('ScheduleWakeup rejects delays outside its supported window', async () => {
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack6);
@@ -826,9 +836,8 @@ test('ScheduleWakeup rejects delays outside its supported window', async () => {
   assert.equal(result?.state, 'output-error');
 });
 
-test('a busy cron window materializes one catch-up ask after queued user work', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'] });
-  t.mock.timers.setTime(new Date('2026-08-12T10:00:00Z').getTime());
+test('a busy cron window materializes one catch-up ask after queued user work', async () => {
+  const clock = createClock(new Date('2026-08-12T10:00:00Z').getTime());
 
   const scheduler = new RecordingWakeScheduler();
   using h = disposableHarness(scheduler);
@@ -860,6 +869,7 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(clock),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack7);
@@ -878,9 +888,9 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
               prompt: 'scheduled catch-up',
               recurring: true,
               timezone: 'UTC',
-              createdAt: Date.now(),
-              expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1_000,
-              nextRunAt: Date.now() + 10 * 60_000,
+              createdAt: clock.Date.now(),
+              expiresAt: clock.Date.now() + 7 * 24 * 60 * 60 * 1_000,
+              nextRunAt: clock.Date.now() + 10 * 60_000,
               generation: 1,
             },
           },
@@ -903,9 +913,9 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
   );
 
   for (let occurrence = 1; occurrence <= 3; occurrence++) {
-    t.mock.timers.tick(10 * 60_000);
+    await clock.tickAsync(10 * 60_000);
     const due = [...scheduler.wakes.values()].find(
-      ({ runAt }) => runAt.getTime() <= Date.now(),
+      ({ runAt }) => runAt.getTime() <= clock.Date.now(),
     );
     if (due) await scheduler.fire(due.id);
     assert.deepEqual(
@@ -917,7 +927,7 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
     );
   }
 
-  t.mock.timers.tick(5 * 60_000);
+  await clock.tickAsync(5 * 60_000);
   finishFirst.resolve();
   await running;
   assert.deepEqual(
@@ -1007,6 +1017,7 @@ test('runtime rejects an invalid scheduling timezone during initialization', asy
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('Not/A_Timezone'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   await assert.rejects(
@@ -1112,6 +1123,7 @@ test('failed wake insertion does not commit a cron definition', async () => {
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack8);
@@ -1212,6 +1224,7 @@ test('retry after enqueue-before-dispatch-clear executes one scheduled turn', as
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack9);
@@ -1291,6 +1304,7 @@ test('retry after claim-before-enqueue executes one scheduled turn', async () =>
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack10);
@@ -1339,6 +1353,7 @@ test('deleting a claimed cron before materialization prevents its scheduled ask'
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack11);
@@ -1394,6 +1409,7 @@ test('deleting a claimed cron during successor insertion prevents its scheduled 
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack12);
@@ -1454,6 +1470,7 @@ test('failed successor insertion leaves the current cron retryable', async () =>
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack13);
@@ -1515,6 +1532,7 @@ test('pg-boss can retry successor insertion through a prolonged outage', async (
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack14);
@@ -1587,6 +1605,7 @@ test('ScheduleWakeup replacement and stop leave cron definitions active', async 
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack15);
@@ -1655,6 +1674,7 @@ test('a queued scheduled turn can be cancelled through AgentObservation', async 
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack16);
@@ -1671,9 +1691,8 @@ test('a queued scheduled turn can be cancelled through AgentObservation', async 
   assert.ok(!seenUserText.includes('must not execute'));
 });
 
-test('cancelling the last queued user turn materializes one overdue occurrence', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'] });
-  t.mock.timers.setTime(new Date('2026-08-12T10:00:00Z').getTime());
+test('cancelling the last queued user turn materializes one overdue occurrence', async () => {
+  const clock = createClock(new Date('2026-08-12T10:00:00Z').getTime());
 
   const scheduler = new RecordingWakeScheduler();
   using h = disposableHarness(scheduler);
@@ -1700,6 +1719,7 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(clock),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack17);
@@ -1712,7 +1732,7 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
     conversation,
     userTurn('cancel-user-turn', 'cancel me'),
   );
-  t.mock.timers.tick(10 * 60_000);
+  await clock.tickAsync(10 * 60_000);
   await scheduler.fire(wake.id);
   assert.equal(h.queue.turns.length, 1);
 
@@ -1727,9 +1747,8 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
   assert.equal(messageText(catchUp), 'cancel catch-up');
 });
 
-test('an overdue occurrence waits for approval before materializing', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'] });
-  t.mock.timers.setTime(new Date('2026-08-12T10:00:00Z').getTime());
+test('an overdue occurrence waits for approval before materializing', async () => {
+  const clock = createClock(new Date('2026-08-12T10:00:00Z').getTime());
 
   const scheduler = new RecordingWakeScheduler();
   using h = disposableHarness(scheduler);
@@ -1765,6 +1784,7 @@ test('an overdue occurrence waits for approval before materializing', async (t) 
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(clock),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack18);
@@ -1774,7 +1794,7 @@ test('an overdue occurrence waits for approval before materializing', async (t) 
   await runTurn(runtime, h.queue, conversation, 'create approval cron');
   const wake = [...scheduler.wakes.values()][0];
   await runTurn(runtime, h.queue, conversation, 'needs approval');
-  t.mock.timers.tick(10 * 60_000);
+  await clock.tickAsync(10 * 60_000);
   await scheduler.fire(wake.id);
   assert.equal(h.queue.turns.length, 0);
 
@@ -1819,6 +1839,7 @@ test('a non-recurring cron fires once and removes its definition', async () => {
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack19);
@@ -2001,6 +2022,7 @@ test('scheduling tools bind to the current root, child, and sibling conversation
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack21);
@@ -2070,6 +2092,7 @@ test('resume ignores scheduling metadata while scheduling tools fail closed', as
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack22);
@@ -2133,6 +2156,7 @@ test('CronCreate rejects six-field and unreachable expressions', async () => {
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack23);
@@ -2175,6 +2199,7 @@ test('CronCreate enforces the 50-definition conversation cap', async () => {
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack24);
@@ -2347,9 +2372,8 @@ test('a cron wake remains usable across a context-store restart', async () => {
   );
 });
 
-test('a recurring cron does not fire when its first occurrence is beyond its seven-day expiry', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'] });
-  t.mock.timers.setTime(new Date('2026-08-13T00:00:00Z').getTime());
+test('a recurring cron does not fire when its first occurrence is beyond its seven-day expiry', async () => {
+  const clock = createClock(new Date('2026-08-13T00:00:00Z').getTime());
   const scheduler = new RecordingWakeScheduler();
   using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
@@ -2376,6 +2400,7 @@ test('a recurring cron does not fire when its first occurrence is beyond its sev
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(clock),
     ],
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack25);
@@ -2384,9 +2409,9 @@ test('a recurring cron does not fire when its first occurrence is beyond its sev
   void _worker;
   await runTurn(runtime, h.queue, conversation, 'create sparse cron');
   const wake = [...scheduler.wakes.values()][0];
-  assert.ok(wake.runAt.getTime() > Date.now() + 7 * 24 * 60 * 60 * 1_000);
+  assert.ok(wake.runAt.getTime() > clock.Date.now() + 7 * 24 * 60 * 60 * 1_000);
 
-  t.mock.timers.setTime(wake.runAt.getTime());
+  clock.setSystemTime(wake.runAt.getTime());
   await scheduler.fire(wake.id);
   assert.deepEqual(h.queue.turns, []);
 

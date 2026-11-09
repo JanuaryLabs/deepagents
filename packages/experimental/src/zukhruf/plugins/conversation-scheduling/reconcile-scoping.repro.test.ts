@@ -1,4 +1,5 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import { createClock } from '@sinonjs/fake-timers';
 import { open } from '@zukhruf/sqlite-open';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
@@ -171,6 +172,7 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(schedulerA),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtimeA = await runtimeASetup.initialize(runtimeAStack);
@@ -191,6 +193,7 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(schedulerB),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
+      conversationSchedulingCapabilities.clock.bind(createClock(Date.now())),
     ],
   }));
   const runtimeB = await runtimeBSetup.initialize(runtimeBStack);
