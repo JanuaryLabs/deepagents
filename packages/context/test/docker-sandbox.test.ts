@@ -1,9 +1,10 @@
 import { DockerTestbed } from '@zukhruf/testing/docker';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
 import assert from 'node:assert';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { text } from 'node:stream/consumers';
 import { describe, it } from 'node:test';
 
@@ -1229,6 +1230,57 @@ describe('Docker Sandbox', () => {
     });
 
     describe('Dockerfile strategy', () => {
+      it('keeps a character that a chunk of the stderr of docker build ends inside', async () => {
+        await using dir = await temporaryFiles.directory('sandbox-dockerfile-');
+        const docker = execFileSync('which', ['docker'], {
+          encoding: 'utf8',
+        }).trim();
+        // A euro sign is three bytes, and a pipe can end a chunk inside it.
+        await writeFile(
+          join(dir.path, 'docker'),
+          `#!${process.execPath}
+const { spawnSync } = require('node:child_process');
+if (process.argv[2] !== 'build') {
+  const args = process.argv.slice(2);
+  const real = spawnSync(${JSON.stringify(docker)}, args, { stdio: 'inherit' });
+  process.exit(real.status);
+}
+process.stderr.write(Buffer.from([0xe2]));
+setTimeout(() => {
+  process.stderr.write(Buffer.from([0x82, 0xac]));
+  process.exit(1);
+}, 200);
+`,
+          { mode: 0o755 },
+        );
+
+        // The sandbox gives the Docker CLI the environment of its process, so
+        // only a process of its own can give the CLI this PATH.
+        const { stdout } = spawnSync(
+          process.execPath,
+          [
+            '--input-type=module',
+            '--eval',
+            `import { createDockerSandbox } from '@deepagents/context';
+const options = ${JSON.stringify(defaults)};
+const dockerfile = 'FROM bash:5.3-alpine3.24\\nRUN echo split-stderr\\n';
+await createDockerSandbox({ ...options, dockerfile }).then(
+  (sandbox) => sandbox.dispose(),
+  (error) => console.log(error.message),
+);`,
+          ],
+          {
+            encoding: 'utf8',
+            env: {
+              ...process.env,
+              PATH: `${dir.path}${delimiter}${process.env.PATH}`,
+            },
+          },
+        );
+
+        assert.match(stdout, /€/);
+      });
+
       it('builds an image from an inline Dockerfile', async () => {
         const sandbox = await createDockerSandbox({
           ...defaults,

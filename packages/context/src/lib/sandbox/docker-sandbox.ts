@@ -491,6 +491,7 @@ function runDockerBuild(
     const child = childSpawn('docker', args, { stdio, env });
 
     let stderr = '';
+    child.stderr?.setEncoding('utf8');
     child.stderr?.on('data', (chunk) => {
       stderr += chunk;
     });
