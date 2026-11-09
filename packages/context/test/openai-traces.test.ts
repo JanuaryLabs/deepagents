@@ -1,4 +1,5 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import { createClock } from '@sinonjs/fake-timers';
 import { Latch } from '@zukhruf/async';
 import { Msw } from '@zukhruf/testing/msw';
 import { type Telemetry, isStepCount, simulateReadableStream } from 'ai';
@@ -339,6 +340,7 @@ describe('OpenAI Traces Integration', () => {
       using captured = captureIngestRequests();
 
       const integration = createOpenAITracesIntegration({
+        clock: createClock(Date.parse('2026-07-12T10:00:00.000Z')),
         apiKey: 'test-key',
         workflowName: 'test-workflow',
         groupId: 'group-123',
@@ -396,6 +398,8 @@ describe('OpenAI Traces Integration', () => {
       const rootSpan = spans.find((span) => span.span_data.type === 'agent');
       assert.ok(rootSpan, 'should have a root agent span');
       assert.ok(rootSpan.ended_at, 'root span should be closed');
+      assert.equal(rootSpan.started_at, '2026-07-12T10:00:00.000Z');
+      assert.equal(rootSpan.ended_at, '2026-07-12T10:00:00.000Z');
       assert.strictEqual(rootSpan.parent_id, null);
 
       const generationSpan = spans.find(
@@ -421,6 +425,7 @@ describe('OpenAI Traces Integration', () => {
       using captured = captureIngestRequests();
 
       const integration = createOpenAITracesIntegration({
+        clock: createClock(),
         apiKey: 'test-key',
         workflowName: 'reused-workflow',
         batch: { scheduleDelayMs: 60_000 },
@@ -468,6 +473,7 @@ describe('OpenAI Traces Integration', () => {
       using captured = captureIngestRequests();
 
       const integration = createOpenAITracesIntegration({
+        clock: createClock(),
         apiKey: 'test-key',
         workflowName: 'concurrent-workflow',
         batch: { scheduleDelayMs: 60_000 },
@@ -517,6 +523,7 @@ describe('OpenAI Traces Integration', () => {
       const { streamText } = await import('ai');
       using captured = captureIngestRequests();
       const integration = createOpenAITracesIntegration({
+        clock: createClock(),
         apiKey: 'test-key',
         batch: { scheduleDelayMs: 60_000 },
       });
@@ -574,6 +581,7 @@ describe('OpenAI Traces Integration', () => {
       using captured = captureIngestRequests();
 
       const integration = createOpenAITracesIntegration({
+        clock: createClock(),
         apiKey: 'test-key',
         workflowName: 'two-step-workflow',
         batch: { scheduleDelayMs: 60_000 },
@@ -624,6 +632,7 @@ describe('OpenAI Traces Integration', () => {
       using captured = captureIngestRequests();
 
       const integration = createOpenAITracesIntegration({
+        clock: createClock(),
         apiKey: 'test-key',
         workflowName: 'tool-workflow',
         batch: { scheduleDelayMs: 60_000 },
@@ -682,6 +691,7 @@ describe('OpenAI Traces Integration', () => {
       const { streamText, tool } = await import('ai');
       using captured = captureIngestRequests();
       const integration = createOpenAITracesIntegration({
+        clock: createClock(),
         apiKey: 'test-key',
         workflowName: 'failing-tool-workflow',
         batch: { scheduleDelayMs: 60_000 },
@@ -727,6 +737,7 @@ describe('OpenAI Traces Integration', () => {
       using captured = captureIngestRequests();
 
       const integration = createOpenAITracesIntegration({
+        clock: createClock(),
         apiKey: 'test-key',
         workflowName: 'private-workflow',
         includeSensitiveData: false,
@@ -802,6 +813,7 @@ describe('OpenAI Traces Integration', () => {
       };
 
       const processor = new BatchTraceProcessor(exporter, {
+        clock: createClock(),
         maxBatchSize: 2,
         maxQueueSize: 10,
         scheduleDelayMs: 60_000,
@@ -859,6 +871,7 @@ describe('OpenAI Traces Integration', () => {
       };
 
       const processor = new BatchTraceProcessor(exporter, {
+        clock: createClock(),
         maxBatchSize: 2,
         maxQueueSize: 10,
         scheduleDelayMs: 60_000,
@@ -903,6 +916,7 @@ describe('OpenAI Traces Integration', () => {
         },
       };
       const processor = new BatchTraceProcessor(exporter, {
+        clock: createClock(),
         scheduleDelayMs: 60_000,
       });
       processor.start();
@@ -934,6 +948,7 @@ describe('OpenAI Traces Integration', () => {
         },
       };
       const processor = new BatchTraceProcessor(exporter, {
+        clock: createClock(),
         scheduleDelayMs: 60_000,
       });
       processor.onSpanEnd({
@@ -960,6 +975,7 @@ describe('OpenAI Traces Integration', () => {
         },
       };
       const processor = new BatchTraceProcessor(exporter, {
+        clock: createClock(),
         scheduleDelayMs: 60_000,
       });
       processor.onSpanEnd({
@@ -989,6 +1005,7 @@ describe('OpenAI Traces Integration', () => {
         },
       };
       const processor = new BatchTraceProcessor(exporter, {
+        clock: createClock(),
         scheduleDelayMs: 60_000,
       });
       processor.onSpanEnd({
@@ -1017,8 +1034,8 @@ describe('OpenAI Traces Integration', () => {
       await first;
     });
 
-    it('exports queued items on the schedule after start()', async (t) => {
-      t.mock.timers.enable({ apis: ['setInterval'] });
+    it('exports queued items on the schedule after start()', async () => {
+      const clock = createClock();
       const exported: string[][] = [];
       const exporter: TracingExporter = {
         async export(items) {
@@ -1026,6 +1043,7 @@ describe('OpenAI Traces Integration', () => {
         },
       };
       const processor = new BatchTraceProcessor(exporter, {
+        clock,
         scheduleDelayMs: 1_000,
       });
       try {
@@ -1039,15 +1057,14 @@ describe('OpenAI Traces Integration', () => {
           span_data: { type: 'agent', name: 'workflow' },
         });
 
-        t.mock.timers.tick(1_000);
-
-        await t.waitFor(() => assert.deepStrictEqual(exported, [['span_1']]), {
-          interval: 10,
-          timeout: 2_000,
-        });
+        await clock.tickAsync(999);
+        assert.deepStrictEqual(exported, []);
+        await clock.tickAsync(1);
+        assert.deepStrictEqual(exported, [['span_1']]);
       } finally {
         await processor.shutdown();
       }
+      assert.equal(clock.countTimers(), 0);
     });
   });
 
@@ -1137,6 +1154,7 @@ describe('OpenAI Traces wire format', () => {
     using captured = captureIngestRequests();
 
     const integration = createOpenAITracesIntegration({
+      clock: createClock(),
       apiKey: 'test-key',
       workflowName: 'wire-test',
       batch: { scheduleDelayMs: 60_000 },
@@ -1177,6 +1195,7 @@ describe('OpenAI Traces wire format', () => {
     using captured = captureIngestRequests();
 
     const integration = createOpenAITracesIntegration({
+      clock: createClock(),
       apiKey: 'test-key',
       workflowName: 'wire-test',
       batch: { scheduleDelayMs: 60_000 },
@@ -1214,6 +1233,7 @@ describe('OpenAI Traces wire format', () => {
     using captured = captureIngestRequests();
 
     const integration = createOpenAITracesIntegration({
+      clock: createClock(),
       apiKey: 'test-key',
       workflowName: 'wire-tool-test',
       batch: { scheduleDelayMs: 60_000 },
@@ -1260,6 +1280,7 @@ describe('OpenAI Traces wire format', () => {
     using captured = captureIngestRequests();
 
     const integration = createOpenAITracesIntegration({
+      clock: createClock(),
       apiKey: 'test-key',
       workflowName: 'usage-keys',
       batch: { scheduleDelayMs: 60_000 },
@@ -1370,6 +1391,7 @@ describe('OpenAI Traces wire format', () => {
     using captured = captureIngestRequests();
 
     const integration = createOpenAITracesIntegration({
+      clock: createClock(),
       apiKey: 'test-key',
       workflowName: 'wire-schema-full',
       batch: { scheduleDelayMs: 60_000 },
@@ -1422,6 +1444,7 @@ describe('OpenAI Traces wire format', () => {
     using captured = captureIngestRequests();
 
     const integration = createOpenAITracesIntegration({
+      clock: createClock(),
       apiKey: 'test-key',
       workflowName: 'disambiguation-workflow',
       batch: { scheduleDelayMs: 60_000 },

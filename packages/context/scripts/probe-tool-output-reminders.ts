@@ -177,6 +177,7 @@ const telemetry = [
     clock: globalThis,
   }),
   createOpenAITracesIntegration({
+    clock: globalThis,
     workflowName: 'tool-output-reminder-probe',
     processor: traceProcessor,
   }),

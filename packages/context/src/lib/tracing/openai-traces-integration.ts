@@ -5,6 +5,7 @@ import type {
 } from 'ai';
 
 import {
+  type BatchTraceClock,
   BatchTraceProcessor,
   type BatchTraceProcessorOptions,
 } from './batch-processor.ts';
@@ -43,6 +44,8 @@ interface ResolvableEvent {
 }
 
 export interface OpenAITracesIntegrationOptions {
+  /** An entry gives `globalThis`; a test gives `createClock()`. */
+  clock: BatchTraceClock & { Date: { now(): number } };
   apiKey?: string | (() => string | Promise<string>);
   baseURL?: string;
   endpoint?: string;
@@ -53,12 +56,12 @@ export interface OpenAITracesIntegrationOptions {
   metadata?: Record<string, unknown>;
   exporter?: OpenAITracesExporter;
   processor?: TracingProcessor | TracingProcessor[];
-  batch?: BatchTraceProcessorOptions;
+  batch?: Omit<BatchTraceProcessorOptions, 'clock'>;
   includeSensitiveData?: boolean;
 }
 
 export function createOpenAITracesIntegration(
-  options: OpenAITracesIntegrationOptions = {},
+  options: OpenAITracesIntegrationOptions,
 ): Telemetry {
   if (process.env.OPENAI_AGENTS_DISABLE_TRACING === '1') {
     return {};
@@ -76,8 +79,12 @@ export function createOpenAITracesIntegration(
 
   const processor: TracingProcessor =
     createTracingProcessor(options.processor) ??
-    new BatchTraceProcessor(exporter, options.batch);
+    new BatchTraceProcessor(exporter, {
+      ...options.batch,
+      clock: options.clock,
+    });
 
+  const now = () => new Date(options.clock.Date.now()).toISOString();
   const includeSensitive =
     options.includeSensitiveData ??
     process.env.OPENAI_AGENTS_TRACE_INCLUDE_SENSITIVE_DATA !== '0';
@@ -418,8 +425,4 @@ function getOutputType(output: unknown): string | undefined {
   }
 
   return typeof output;
-}
-
-function now(): string {
-  return new Date().toISOString();
 }

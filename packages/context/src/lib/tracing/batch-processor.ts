@@ -3,7 +3,14 @@ import pMemoize from 'p-memoize';
 import type { TracingExporter, TracingProcessor } from './processor.ts';
 import type { OpenAISpan, OpenAITrace, TraceItem } from './types.ts';
 
+/** An entry gives `globalThis`; a test gives `createClock()`. */
+export interface BatchTraceClock {
+  setInterval(callback: () => void, ms: number): number | object;
+  clearInterval(timer: unknown): void;
+}
+
 export interface BatchTraceProcessorOptions {
+  clock: BatchTraceClock;
   maxQueueSize?: number;
   maxBatchSize?: number;
   scheduleDelayMs?: number;
@@ -13,7 +20,7 @@ export interface BatchTraceProcessorOptions {
 
 /** A phase of the processor: each phase decides what start, stop and an ended item do. */
 interface BatchPhase {
-  start(delayMs: number, tick: () => void): BatchPhase;
+  start(clock: BatchTraceClock, delayMs: number, tick: () => void): BatchPhase;
   stop(): BatchPhase;
   /** Adds an ended item to the queue, unless this phase takes no more items. */
   admit(queue: TraceItem[], item: TraceItem): void;
@@ -36,11 +43,20 @@ const SHUT_DOWN = new ShutDown();
 
 /** After start(): a timer flushes the queue on the schedule. */
 class Running implements BatchPhase {
-  readonly #timer: NodeJS.Timeout;
+  readonly #clock: BatchTraceClock;
+  readonly #timer: unknown;
 
-  constructor(delayMs: number, tick: () => void) {
-    this.#timer = setInterval(tick, delayMs);
-    this.#timer.unref?.();
+  constructor(clock: BatchTraceClock, delayMs: number, tick: () => void) {
+    const timer = clock.setInterval(tick, delayMs);
+    if (
+      typeof timer === 'object' &&
+      'unref' in timer &&
+      typeof timer.unref === 'function'
+    ) {
+      timer.unref();
+    }
+    this.#clock = clock;
+    this.#timer = timer;
   }
 
   start(): BatchPhase {
@@ -48,7 +64,7 @@ class Running implements BatchPhase {
   }
 
   stop(): BatchPhase {
-    clearInterval(this.#timer);
+    this.#clock.clearInterval(this.#timer);
     return SHUT_DOWN;
   }
 
@@ -59,8 +75,8 @@ class Running implements BatchPhase {
 
 /** Before start(): items queue, and only a full queue or forceFlush() exports them. */
 class Idle implements BatchPhase {
-  start(delayMs: number, tick: () => void): BatchPhase {
-    return new Running(delayMs, tick);
+  start(clock: BatchTraceClock, delayMs: number, tick: () => void): BatchPhase {
+    return new Running(clock, delayMs, tick);
   }
 
   stop(): BatchPhase {
@@ -74,6 +90,7 @@ class Idle implements BatchPhase {
 
 export class BatchTraceProcessor implements TracingProcessor {
   readonly #exporter: TracingExporter;
+  readonly #clock: BatchTraceClock;
   readonly #maxQueueSize: number;
   readonly #maxBatchSize: number;
   readonly #scheduleDelayMs: number;
@@ -85,11 +102,9 @@ export class BatchTraceProcessor implements TracingProcessor {
   /** Joins a flush in flight; a call after it settles starts the next one. */
   readonly #flushOnce = pMemoize(() => this.#flush(), { cache: false });
 
-  constructor(
-    exporter: TracingExporter,
-    options: BatchTraceProcessorOptions = {},
-  ) {
+  constructor(exporter: TracingExporter, options: BatchTraceProcessorOptions) {
     this.#exporter = exporter;
+    this.#clock = options.clock;
     this.#maxQueueSize = options.maxQueueSize ?? 8192;
     this.#maxBatchSize = options.maxBatchSize ?? 128;
     this.#scheduleDelayMs = options.scheduleDelayMs ?? 5000;
@@ -101,7 +116,7 @@ export class BatchTraceProcessor implements TracingProcessor {
   }
 
   start(): void {
-    this.#phase = this.#phase.start(this.#scheduleDelayMs, () => {
+    this.#phase = this.#phase.start(this.#clock, this.#scheduleDelayMs, () => {
       void this.forceFlush();
     });
   }
