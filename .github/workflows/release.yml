@@ -30,6 +30,9 @@ jobs:
       - name: Build packages
         run: npx nx run-many -t build --projects=tag:npm:public
 
+      - name: Check a consumer install of the packed packages
+        run: npx nx run tools:check-consumer-install
+
       - name: Publish packages
         run: npx nx release publish
         env:

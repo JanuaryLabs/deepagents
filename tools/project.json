@@ -1,0 +1,12 @@
+{
+  "name": "tools",
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "tools/src",
+  "projectType": "application",
+  "targets": {
+    "check-consumer-install": {
+      "command": "node tools/src/check-consumer-install.ts",
+      "cache": false
+    }
+  }
+}
