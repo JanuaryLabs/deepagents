@@ -1,4 +1,3 @@
-import { readFileContent } from '../read-file.ts';
 import { type FileFormat, formatBytes } from './format.ts';
 
 const TEXT_MAX_BYTES = 10 * 1024 * 1024;
@@ -17,7 +16,7 @@ export const textFileFormat = {
       };
     }
 
-    const content = readFileContent(bytes, { encoding: 'utf-8' });
+    const content = new TextDecoder().decode(bytes);
     if (offset === undefined && limit === undefined) {
       return { type: 'text', value: content };
     }

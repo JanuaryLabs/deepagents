@@ -269,11 +269,15 @@ test('the turns of one chat borrow one sandbox, which stays open between turns, 
         const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
         created++;
         open++;
+        const close = backend.dispose;
         const dispose = async () => {
           open--;
-          await backend.dispose();
+          await close();
         };
-        return { ...backend, dispose, [Symbol.asyncDispose]: dispose };
+        return Object.assign(backend, {
+          dispose,
+          [Symbol.asyncDispose]: dispose,
+        });
       }),
     }),
   );

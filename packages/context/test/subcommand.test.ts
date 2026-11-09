@@ -37,7 +37,7 @@ async function exec(command: string) {
     fs: new InMemoryFs(),
     customCommands: [defineSubcommandGroup('tool', subcommands)],
   });
-  return sandbox.executeCommand(command);
+  return sandbox.run({ command });
 }
 
 describe('defineSubcommandGroup: dispatch', () => {

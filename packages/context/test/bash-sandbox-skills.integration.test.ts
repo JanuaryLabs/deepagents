@@ -101,13 +101,13 @@ describe('bash sandbox skills mounting', () => {
 
     const { sandbox } = await createBashTool({
       sandbox: await createVirtualSandbox({ fs: filesystem }),
-      destination: '/',
+      workingDirectory: '/',
     });
 
     // This will fail because skills were never mounted
-    const result = await sandbox.executeCommand(
-      'cat /skills/research-grants/SKILL.md',
-    );
+    const result = await sandbox.run({
+      command: 'cat /skills/research-grants/SKILL.md',
+    });
 
     // The bug: exit code is non-zero (file not found)
     assert.notStrictEqual(
@@ -168,13 +168,13 @@ describe('bash sandbox skills mounting', () => {
 
     const { sandbox } = await createBashTool({
       sandbox: await createVirtualSandbox({ fs: filesystem }),
-      destination: '/',
+      workingDirectory: '/',
     });
 
     // The expected path won't work because of wrong mountPoint
-    const correctPath = await sandbox.executeCommand(
-      'cat /skills/research-grants/SKILL.md',
-    );
+    const correctPath = await sandbox.run({
+      command: 'cat /skills/research-grants/SKILL.md',
+    });
 
     // Files appear at the WRONG path
     assert.notStrictEqual(
@@ -184,9 +184,9 @@ describe('bash sandbox skills mounting', () => {
     );
 
     // The files actually appear at a nested path
-    const wrongPath = await sandbox.executeCommand(
-      'cat /skills/research-grants/home/user/project/SKILL.md',
-    );
+    const wrongPath = await sandbox.run({
+      command: 'cat /skills/research-grants/home/user/project/SKILL.md',
+    });
 
     assert.strictEqual(
       wrongPath.exitCode,
@@ -240,13 +240,13 @@ describe('bash sandbox skills mounting', () => {
 
     const { sandbox } = await createBashTool({
       sandbox: await createVirtualSandbox({ fs: filesystem }),
-      destination: '/',
+      workingDirectory: '/',
     });
 
     // Now the correct path works
-    const result = await sandbox.executeCommand(
-      'cat /skills/research-grants/SKILL.md',
-    );
+    const result = await sandbox.run({
+      command: 'cat /skills/research-grants/SKILL.md',
+    });
 
     assert.strictEqual(
       result.exitCode,
@@ -291,11 +291,11 @@ describe('bash sandbox skills mounting', () => {
 
     const { sandbox } = await createBashTool({
       sandbox: await createVirtualSandbox({ fs: filesystem }),
-      destination: '/',
+      workingDirectory: '/',
     });
 
     // Verify directory structure
-    const lsRoot = await sandbox.executeCommand('ls /');
+    const lsRoot = await sandbox.run({ command: 'ls /' });
     assert.strictEqual(lsRoot.exitCode, 0);
     assert.ok(lsRoot.stdout.includes('skills'), 'Should have /skills mount');
     assert.ok(
@@ -304,12 +304,12 @@ describe('bash sandbox skills mounting', () => {
     );
 
     // Navigate into skills
-    const lsSkills = await sandbox.executeCommand('ls /skills');
+    const lsSkills = await sandbox.run({ command: 'ls /skills' });
     assert.strictEqual(lsSkills.exitCode, 0);
     assert.ok(lsSkills.stdout.includes('skills'), 'Should have /skills/skills');
 
     // Navigate into skills/skills (the actual skills directory)
-    const lsSkillsSkills = await sandbox.executeCommand('ls /skills/skills');
+    const lsSkillsSkills = await sandbox.run({ command: 'ls /skills/skills' });
     assert.strictEqual(lsSkillsSkills.exitCode, 0);
     assert.ok(
       lsSkillsSkills.stdout.includes('research-grants'),
@@ -317,9 +317,9 @@ describe('bash sandbox skills mounting', () => {
     );
 
     // Read the skill file at the correct path
-    const catResult = await sandbox.executeCommand(
-      'cat /skills/skills/research-grants/SKILL.md',
-    );
+    const catResult = await sandbox.run({
+      command: 'cat /skills/skills/research-grants/SKILL.md',
+    });
     assert.strictEqual(
       catResult.exitCode,
       0,
@@ -376,19 +376,19 @@ description: Data analysis skill
 
     const { sandbox } = await createBashTool({
       sandbox: await createVirtualSandbox({ fs: filesystem }),
-      destination: '/',
+      workingDirectory: '/',
     });
 
     // Both skills should be accessible
-    const researchResult = await sandbox.executeCommand(
-      'cat /skills/research-grants/SKILL.md',
-    );
+    const researchResult = await sandbox.run({
+      command: 'cat /skills/research-grants/SKILL.md',
+    });
     assert.strictEqual(researchResult.exitCode, 0);
     assert.ok(researchResult.stdout.includes('# Research Grants Skill'));
 
-    const analysisResult = await sandbox.executeCommand(
-      'cat /skills/data-analysis/SKILL.md',
-    );
+    const analysisResult = await sandbox.run({
+      command: 'cat /skills/data-analysis/SKILL.md',
+    });
     assert.strictEqual(analysisResult.exitCode, 0);
     assert.ok(analysisResult.stdout.includes('# Data Analysis Skill'));
   });
@@ -422,16 +422,18 @@ description: Data analysis skill
 
     const { sandbox } = await createBashTool({
       sandbox: await createVirtualSandbox({ fs: filesystem }),
-      destination: '/',
+      workingDirectory: '/',
     });
 
-    // Attempting to write should fail
-    await assert.rejects(
-      () =>
-        sandbox.executeCommand(
-          'echo "hacked" > /skills/research-grants/hack.txt',
-        ),
-      /EROFS|read-only/,
+    const result = await sandbox.run({
+      command: 'echo "hacked" > /skills/research-grants/hack.txt',
+    });
+
+    assert.strictEqual(result.exitCode, 1);
+    assert.match(result.stderr, /EROFS|read-only/);
+    assert.strictEqual(
+      await sandbox.readTextFile({ path: '/skills/research-grants/hack.txt' }),
+      null,
       'Should not be able to write to read-only skill directory',
     );
   });

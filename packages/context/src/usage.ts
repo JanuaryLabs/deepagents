@@ -739,10 +739,12 @@ async function demonstrateDockerSandbox() {
     console.log('Available tools:', Object.keys(tools));
 
     // Execute via the underlying sandbox
-    const pythonResult = await agentSandbox.executeCommand('python3 --version');
+    const pythonResult = await agentSandbox.run({
+      command: 'python3 --version',
+    });
     console.log('Python:', pythonResult.stdout.trim());
 
-    const nodeResult = await agentSandbox.executeCommand('node --version');
+    const nodeResult = await agentSandbox.run({ command: 'node --version' });
     console.log('Node.js:', nodeResult.stdout.trim());
   } finally {
     await agentSandbox.dispose();

@@ -8,7 +8,10 @@ import { ContextEngine } from './engine.ts';
 import { user } from './fragments/message/user.ts';
 import { afterTurn, once, or, reminder } from './fragments/reminders/index.ts';
 import { createBashTool } from './sandbox/bash-tool.ts';
-import { createMicrosandboxSandbox } from './sandbox/microsandbox-sandbox.ts';
+import {
+  MICROSANDBOX_DEFAULT_DESTINATION,
+  createMicrosandboxSandbox,
+} from './sandbox/microsandbox-sandbox.ts';
 import { SqliteContextStore } from './store/sqlite.store.ts';
 import { createFileTelemetry } from './telemetry/file/file-telemetry.ts';
 
@@ -17,6 +20,7 @@ await using backend = await createMicrosandboxSandbox({
 });
 const sandbox = await createBashTool({
   sandbox: backend,
+  workingDirectory: MICROSANDBOX_DEFAULT_DESTINATION,
 });
 
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {

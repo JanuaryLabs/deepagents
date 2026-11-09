@@ -29,12 +29,12 @@ export default context;
 /**
  * Run `sql index` inside the given sandbox, read the manifest, and return the
  * generated `ContextFragment[]`. Shared across backends — the sandbox's
- * `executeCommand` and `readFile` are the only seam.
+ * `run` and `readTextFile` are the only seam.
  */
 export async function index(
   sandbox: DisposableSandbox,
 ): Promise<ContextFragment[]> {
-  const result = await sandbox.executeCommand('sql index');
+  const result = await sandbox.run({ command: 'sql index' });
   if (result.exitCode !== 0) {
     throw new Error(`sql index failed: ${result.stderr}`);
   }
@@ -48,7 +48,7 @@ export async function index(
     throw new Error(`sql index printed no fragmentsPath: ${result.stdout}`);
   }
   const fragments: unknown = JSON.parse(
-    await sandbox.readFile(manifest.fragmentsPath),
+    (await sandbox.readTextFile({ path: manifest.fragmentsPath }))!,
   );
   if (!Array.isArray(fragments) || !fragments.every(isFragment)) {
     throw new Error(`${manifest.fragmentsPath} is not a list of fragments`);

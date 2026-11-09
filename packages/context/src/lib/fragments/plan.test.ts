@@ -292,9 +292,10 @@ describe('plan instructions', () => {
         nextQuestionId: 'Q2',
       },
     };
-    await sandbox.sandbox.writeFiles([
-      { path: socraticPlan.path, content: JSON.stringify(socraticPlanState) },
-    ]);
+    await sandbox.sandbox.writeTextFile({
+      path: socraticPlan.path,
+      content: JSON.stringify(socraticPlanState),
+    });
     const invalidPlan = {
       ...socraticPlanState,
       inquiries: [
@@ -581,7 +582,7 @@ describe('plan instructions', () => {
     );
     assert.equal(syntheticReviews.length, 3);
     assert.deepEqual(
-      JSON.parse(await sandbox.sandbox.readFile(plan.path)),
+      JSON.parse((await sandbox.sandbox.readTextFile({ path: plan.path }))!),
       completedPlan,
     );
 

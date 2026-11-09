@@ -40,7 +40,7 @@
   },
   "dependencies": {
     "@zukhruf/docker": "^0.8.10",
-    "ai": "^7.0.165",
+    "ai": "^7.0.166",
     "duck-duck-scrape": "^2.2.7",
     "nano-spawn": "^2.1.0",
     "zod": "^4.6.7",

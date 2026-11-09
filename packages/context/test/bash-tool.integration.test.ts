@@ -3,13 +3,15 @@ import type { ToolResultOutput } from '@ai-sdk/provider-utils';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { asSchema, generateText, isStepCount } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
+import { InMemoryFs, MountableFs, OverlayFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { setImmediate } from 'node:timers/promises';
 
 import {
+  BashException,
   type BashToolInput,
   type CommandResult,
   type ReadFileContent,
@@ -214,8 +216,8 @@ describe('bash toolkit', () => {
     const backend = new RecordingSandbox();
     const { bash } = await createBashTool({
       sandbox: backend,
+      workingDirectory: '/workspace',
       experimentalTeeTransform: true,
-      promptOptions: { toolPrompt: '' },
     });
     const result = await executeBash(
       bash,
@@ -227,7 +229,7 @@ describe('bash toolkit', () => {
     );
 
     assert.strictEqual(result.stdout.trim(), 'second');
-    assert.match(backend.commands[0], /mkdir -p '\/tmp\/bash-tool'/);
+    assert.match(backend.commands[1], /mkdir -p '\/tmp\/bash-tool'/);
     assert.ok(result.teeFiles?.length);
     assert.ok(
       result.teeFiles.every(({ stdoutFile }) =>
@@ -266,7 +268,6 @@ describe('bash toolkit', () => {
     const backend = new RecordingSandbox();
     const { tools } = await createBashTool({
       sandbox: backend,
-      promptOptions: { toolPrompt: '' },
     });
     const write = tools.writeFile.execute;
     const read = tools.readFile.execute;
@@ -284,39 +285,6 @@ describe('bash toolkit', () => {
     );
   });
 
-  it('describes discovered tools and format-specific helpers', async () => {
-    const backend = new RecordingSandbox();
-    backend.result = {
-      stdout: 'jq\nxan\nawk\ncut\nfold\nnl\nexpand\nunexpand\nod\n',
-      stderr: '',
-      exitCode: 0,
-    };
-    const { bash } = await createBashTool({
-      sandbox: backend,
-      files: { 'data.json': '{}', 'records.csv': 'id\n1\n' },
-    });
-
-    const description = bash.description;
-    assert.ok(typeof description === 'string');
-    assert.match(description, /Available tools:.*fold.*nl.*od/);
-    assert.match(description, /For JSON: jq/);
-    assert.match(description, /For CSV\/TSV: xan, awk, cut/);
-  });
-
-  it('advertises js-exec instead of node in JavaScript virtual sandboxes', async () => {
-    const { bash } = await createBashTool({
-      sandbox: await createVirtualSandbox({
-        fs: new InMemoryFs(),
-        javascript: true,
-      }),
-    });
-
-    const description = bash.description;
-    assert.ok(typeof description === 'string');
-    assert.match(description, /Available tools:.*\bjs-exec\b/);
-    assert.doesNotMatch(description, /Available tools:.*\bnode\b/);
-  });
-
   it('runs hooks around truncated output and merges their metadata', async () => {
     const backend = new RecordingSandbox();
     backend.result = {
@@ -327,8 +295,8 @@ describe('bash toolkit', () => {
     };
     const { bash } = await createBashTool({
       sandbox: backend,
+      workingDirectory: '/workspace',
       maxOutputLength: 3,
-      promptOptions: { toolPrompt: '' },
       onBeforeBashCall: ({ command }) => ({
         command: command.replace('draft', 'final'),
       }),
@@ -382,7 +350,7 @@ describe('bash toolkit', () => {
     });
     const result = generated.steps[0].toolResults[0].output;
 
-    assert.match(backend.commands[0], /echo final$/);
+    assert.match(backend.commands[1], /echo final$/);
     assert.deepStrictEqual(result, {
       stdout: 'hooked\n',
       stderr: 'hooked error\n',
@@ -403,6 +371,288 @@ describe('bash toolkit', () => {
         },
       },
     ]);
+  });
+});
+
+describe('session-backed toolkit', () => {
+  it('rejects with stderr when the working directory cannot be created', async () => {
+    await using source = await temporaryFiles.directory(
+      'deepagents-bash-tool-',
+    );
+    const fs = new MountableFs({
+      base: new InMemoryFs(),
+      mounts: [
+        {
+          mountPoint: '/readonly',
+          filesystem: new OverlayFs({
+            root: source.path,
+            mountPoint: '/',
+            readOnly: true,
+          }),
+        },
+      ],
+    });
+
+    await assert.rejects(
+      createBashTool({
+        sandbox: await createVirtualSandbox({ fs }),
+        workingDirectory: '/readonly/work',
+      }),
+      /Failed to create working directory \/readonly\/work: .*(EROFS|read-only)/s,
+    );
+  });
+
+  it('creates the working directory once and starts every command in it', async () => {
+    const { bash, sandbox } = await createBashTool({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      workingDirectory: '/deep/work',
+    });
+
+    const created = await sandbox.stat({ path: '/deep/work' });
+    const first = await executeBash(
+      bash,
+      { command: 'pwd; cd /tmp', reasoning: 'leave the directory' },
+      'first',
+    );
+    const second = await executeBash(
+      bash,
+      { command: 'pwd', reasoning: 'check the next command' },
+      'second',
+    );
+    await sandbox.run({ command: 'rm -rf /deep/work' });
+    await executeBash(
+      bash,
+      { command: 'true', reasoning: 'run after the directory is gone' },
+      'third',
+    );
+
+    assert.strictEqual(created?.type, 'directory');
+    assert.strictEqual(first.stdout, '/deep/work\n');
+    assert.strictEqual(second.stdout, '/deep/work\n');
+    assert.strictEqual(await sandbox.stat({ path: '/deep/work' }), null);
+  });
+
+  it('runs commands in the sandbox directory when no working directory is given', async () => {
+    await using backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+    const { stdout: ownDirectory } = await backend.run({ command: 'pwd' });
+
+    const { bash, sandbox } = await createBashTool({ sandbox: backend });
+    const result = await executeBash(
+      bash,
+      { command: 'pwd', reasoning: 'find the starting directory' },
+      'pwd',
+    );
+
+    assert.strictEqual(result.stdout, ownDirectory);
+    const description = bash.description;
+    assert.ok(typeof description === 'string');
+    assert.match(
+      description,
+      /^Run Bash commands in the sandbox\. Commands run in the sandbox's default working directory\. /,
+    );
+    assert.ok(description.includes(backend.description));
+    assert.doesNotMatch(description, /\/workspace|Every command starts in/);
+    assert.strictEqual(await sandbox.stat({ path: '/workspace' }), null);
+  });
+
+  it('resolves uploads and file tools against the sandbox directory when no working directory is given', async () => {
+    await using source = await temporaryFiles.directory(
+      'deepagents-bash-tool-',
+    );
+    await writeFile(join(source.path, 'from-disk.txt'), 'from disk');
+    await using backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+    const { stdout } = await backend.run({ command: 'pwd' });
+    const ownDirectory = stdout.trim();
+
+    const { bash, tools, sandbox } = await createBashTool({
+      sandbox: backend,
+      files: {
+        'uploaded/inline.txt': 'from inline',
+        '/elsewhere/uploaded.txt': 'absolute upload',
+      },
+      uploadDirectory: { source: source.path },
+    });
+    const write = tools.writeFile.execute;
+    assert.ok(write);
+    await write(
+      { path: 'notes/written.txt', content: 'from write tool' },
+      executionOptions('write-relative'),
+    );
+    await write(
+      { path: '/elsewhere/written.txt', content: 'absolute write' },
+      executionOptions('write-absolute'),
+    );
+    await sandbox.writeTextFile({
+      path: `${ownDirectory}/from-session.txt`,
+      content: 'from session',
+    });
+
+    const relativeToPwd = await executeBash(
+      bash,
+      {
+        command:
+          'cat uploaded/inline.txt from-disk.txt notes/written.txt /elsewhere/uploaded.txt',
+        reasoning: 'read every file relative to the starting directory',
+      },
+      'cat-relative',
+    );
+
+    assert.strictEqual(
+      relativeToPwd.stdout,
+      'from inlinefrom diskfrom write toolabsolute upload',
+    );
+    assert.strictEqual(
+      await sandbox.readTextFile({
+        path: `${ownDirectory}/uploaded/inline.txt`,
+      }),
+      'from inline',
+    );
+    assert.strictEqual(
+      await sandbox.readTextFile({ path: 'notes/written.txt' }),
+      'from write tool',
+    );
+    assert.strictEqual(
+      await sandbox.readTextFile({ path: '/elsewhere/written.txt' }),
+      'absolute write',
+    );
+    assert.deepStrictEqual(
+      await executeReadFile(
+        tools.readFile,
+        { path: 'from-session.txt' },
+        'read-relative',
+      ),
+      { type: 'text', value: 'from session' },
+    );
+    assert.deepStrictEqual(
+      await executeReadFile(
+        tools.readFile,
+        { path: '/elsewhere/uploaded.txt' },
+        'read-absolute',
+      ),
+      { type: 'text', value: 'absolute upload' },
+    );
+  });
+
+  it('describes the sandbox in AI SDK wording without probing it at creation', async () => {
+    const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+    const commands: string[] = [];
+    const run = backend.run.bind(backend);
+    Object.assign(backend, {
+      run: (options: Parameters<typeof run>[0]) => {
+        commands.push(options.command);
+        return run(options);
+      },
+    });
+
+    const { bash } = await createBashTool({
+      sandbox: backend,
+      workingDirectory: '/workspace',
+      files: { 'data.json': '{}' },
+      extraInstructions: 'Prefer small commands.',
+    });
+
+    const description = bash.description;
+    assert.ok(typeof description === 'string');
+    assert.match(
+      description,
+      /^Run Bash commands in the sandbox\. Every command starts in \/workspace\./,
+    );
+    assert.ok(description.includes(backend.description));
+    assert.ok(description.includes('Prefer small commands.'));
+    assert.match(description, /"reasoning"/);
+    assert.doesNotMatch(
+      description,
+      /Available tools|Available files|Common operations|data\.json/,
+    );
+    assert.doesNotMatch(commands.join('\n'), /\bls\b/);
+  });
+
+  it('returns a BashException from the sandbox as the tool result and rethrows other errors', async () => {
+    class Refused extends BashException {
+      format(): CommandResult {
+        return { stdout: '', stderr: `${this.message}\n`, exitCode: 9 };
+      }
+    }
+    const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+    const run = backend.run.bind(backend);
+    let failure: Error | undefined;
+    Object.assign(backend, {
+      run: (options: Parameters<typeof run>[0]) => {
+        if (failure) throw failure;
+        return run(options);
+      },
+    });
+    const { bash } = await createBashTool({ sandbox: backend });
+
+    failure = new Refused('not allowed');
+    const refused = await executeBash(
+      bash,
+      { command: 'true', reasoning: 'hit the refusal' },
+      'refused',
+    );
+    failure = new Error('boom');
+    const crashed = executeBash(
+      bash,
+      { command: 'true', reasoning: 'hit the crash' },
+      'crashed',
+    );
+
+    assert.deepStrictEqual(refused, {
+      stdout: '',
+      stderr: 'not allowed\n',
+      exitCode: 9,
+    });
+    await assert.rejects(crashed, /boom/);
+  });
+
+  it('fails the read tool call on a missing file', async () => {
+    const { tools } = await createBashTool({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    });
+
+    await assert.rejects(
+      executeReadFile(tools.readFile, { path: 'missing.txt' }, 'read-missing'),
+      /File not found: missing\.txt/,
+    );
+  });
+
+  it('uploads every file with at most 20 writes in flight', async () => {
+    const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+    let inFlight = 0;
+    let peak = 0;
+    const writeTextFile = backend.writeTextFile.bind(backend);
+    Object.assign(backend, {
+      writeTextFile: async (options: Parameters<typeof writeTextFile>[0]) => {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        try {
+          await setImmediate();
+          return await writeTextFile(options);
+        } finally {
+          inFlight -= 1;
+        }
+      },
+    });
+    const files = Object.fromEntries(
+      Array.from({ length: 45 }, (_, index) => [
+        `file-${index}.txt`,
+        `content ${index}`,
+      ]),
+    );
+
+    const { sandbox } = await createBashTool({
+      sandbox: backend,
+      workingDirectory: '/workspace',
+      files,
+    });
+
+    for (const [name, content] of Object.entries(files)) {
+      assert.strictEqual(
+        await sandbox.readTextFile({ path: `/workspace/${name}` }),
+        content,
+      );
+    }
+    assert.strictEqual(peak, 20);
   });
 });
 
@@ -431,8 +681,12 @@ describe('readFile tool', () => {
   it('hands a PNG to the model as an image file part', async () => {
     const { tools, sandbox } = await createBashTool({
       sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      workingDirectory: '/workspace',
     });
-    await sandbox.writeFiles([{ path: '/workspace/pixel.png', content: png }]);
+    await sandbox.writeBinaryFile({
+      path: '/workspace/pixel.png',
+      content: png,
+    });
     const model: MockLanguageModelV4 = new MockLanguageModelV4({
       doGenerate: async () =>
         model.doGenerateCalls.length === 1
@@ -549,8 +803,12 @@ describe('readFile tool', () => {
     );
     const { tools, sandbox } = await createBashTool({
       sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      workingDirectory: '/workspace',
     });
-    await sandbox.writeFiles([{ path: '/workspace/report.pdf', content: pdf }]);
+    await sandbox.writeBinaryFile({
+      path: '/workspace/report.pdf',
+      content: pdf,
+    });
 
     const output = await executeReadFile(
       tools.readFile,
@@ -606,12 +864,12 @@ describe('readFile tool', () => {
     ];
     const { tools, sandbox } = await createBashTool({
       sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      workingDirectory: '/workspace',
     });
-    await sandbox.writeFiles(
-      files.map(({ path, content }) => ({
-        path: `/workspace/${path}`,
-        content,
-      })),
+    await Promise.all(
+      files.map(({ path, content }) =>
+        sandbox.writeBinaryFile({ path: `/workspace/${path}`, content }),
+      ),
     );
 
     for (const { path, content, mediaType } of files) {
@@ -644,12 +902,15 @@ describe('readFile tool', () => {
     } as const;
     const { tools, sandbox } = await createBashTool({
       sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      workingDirectory: '/workspace',
     });
-    await sandbox.writeFiles(
-      Object.keys(mediaTypes).map((path) => ({
-        path: `/workspace/${path}`,
-        content: bytes,
-      })),
+    await Promise.all(
+      Object.keys(mediaTypes).map((path) =>
+        sandbox.writeBinaryFile({
+          path: `/workspace/${path}`,
+          content: bytes,
+        }),
+      ),
     );
 
     for (const [path, mediaType] of Object.entries(mediaTypes)) {
@@ -689,10 +950,12 @@ describe('readFile tool', () => {
     png.copy(oversizedPng);
     const { tools, sandbox } = await createBashTool({
       sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      workingDirectory: '/workspace',
     });
-    await sandbox.writeFiles([
-      { path: '/workspace/oversized.png', content: oversizedPng },
-    ]);
+    await sandbox.writeBinaryFile({
+      path: '/workspace/oversized.png',
+      content: oversizedPng,
+    });
 
     const output = await executeReadFile(
       tools.readFile,
@@ -716,15 +979,25 @@ describe('readFile tool', () => {
   it('refuses HEIC and video bytes with conversion guidance instead of decoding them as text', async () => {
     const { tools, sandbox } = await createBashTool({
       sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      workingDirectory: '/workspace',
     });
     const heic = Buffer.from('0000002066747970686569630000000068656963', 'hex');
     const mov = Buffer.from('0000001466747970717420200000000071742020', 'hex');
     const blob = Buffer.from('000000000000000000000000', 'hex');
-    await sandbox.writeFiles([
-      { path: '/workspace/IMG_0001.HEIC', content: heic },
-      { path: '/workspace/IMG_0002.MOV', content: mov },
-      { path: '/workspace/weights.bin', content: blob },
-      { path: '/workspace/notes.txt', content: 'hello' },
+    await Promise.all([
+      sandbox.writeBinaryFile({
+        path: '/workspace/IMG_0001.HEIC',
+        content: heic,
+      }),
+      sandbox.writeBinaryFile({
+        path: '/workspace/IMG_0002.MOV',
+        content: mov,
+      }),
+      sandbox.writeBinaryFile({
+        path: '/workspace/weights.bin',
+        content: blob,
+      }),
+      sandbox.writeTextFile({ path: '/workspace/notes.txt', content: 'hello' }),
     ]);
 
     const [still, clip, unknown, text] = await Promise.all([
@@ -761,7 +1034,6 @@ describe('readFile tool', () => {
     backend.files.set('/workspace/notes.txt', 'plain text');
     const { tools } = await createBashTool({
       sandbox: backend,
-      promptOptions: { toolPrompt: '' },
     });
     const execute = tools.readFile.execute;
     assert.ok(execute);

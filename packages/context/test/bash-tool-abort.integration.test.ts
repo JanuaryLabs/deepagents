@@ -18,7 +18,7 @@ describe('createBashTool abort handling', () => {
         cwd: '/',
         customCommands: [abortNow],
       }),
-      destination: '/',
+      workingDirectory: '/',
     });
 
     const execute = bash.execute;
@@ -40,6 +40,6 @@ describe('createBashTool abort handling', () => {
       execOptions,
     );
 
-    await assert.rejects(sandbox.readFile('/marker.txt'));
+    assert.equal(await sandbox.readTextFile({ path: '/marker.txt' }), null);
   });
 });

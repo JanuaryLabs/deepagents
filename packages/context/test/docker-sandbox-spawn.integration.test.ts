@@ -229,9 +229,8 @@ describe('Docker Sandbox — spawn', () => {
       await using sandbox = await createDockerSandbox(defaults);
       const agent = await createBashTool({
         sandbox,
-        destination: '/workspace',
+        workingDirectory: '/workspace',
       });
-      await agent.sandbox.executeCommand('mkdir -p /workspace');
       assert.ok(
         agent.sandbox.spawn,
         'createBashTool must forward spawn from the backend',
@@ -242,15 +241,16 @@ describe('Docker Sandbox — spawn', () => {
       await using sandbox = await createDockerSandbox(defaults);
       const agent = await createBashTool({
         sandbox,
-        destination: '/workspace',
+        workingDirectory: '/workspace',
       });
-      await agent.sandbox.executeCommand('mkdir -p /workspace');
       assert.ok(agent.sandbox.spawn);
-      const child = await agent.sandbox.spawn('printf hi; sleep 1; printf bye');
+      const child = await agent.sandbox.spawn({
+        command: 'printf hi; sleep 1; printf bye',
+      });
 
       const winner = await Promise.race([
         readFirstChunk(child.stdout).then(() => 'chunk' as const),
-        child.exit.then(() => 'exit' as const),
+        child.wait().then(() => 'exit' as const),
       ]);
       assert.strictEqual(
         winner,
@@ -259,9 +259,9 @@ describe('Docker Sandbox — spawn', () => {
       );
 
       const rest = await streamText(child.stdout);
-      const info = await child.exit;
+      const info = await child.wait();
       assert.strictEqual(rest, 'bye');
-      assert.strictEqual(info.success, true);
+      assert.strictEqual(info.exitCode, 0);
     });
 
     // Spawn file-change tracking is covered by file-changes.integration.test.ts

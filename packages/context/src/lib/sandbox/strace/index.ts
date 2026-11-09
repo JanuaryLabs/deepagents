@@ -255,7 +255,7 @@ export function matchesGlobs(
 
 /**
  * Parse one command's strace output into a coarse `FileChange[]`. Failed
- * syscalls are skipped; paths are filtered to `destination`; the trace file and
+ * syscalls are skipped; paths are filtered to `workingDirectory`; the trace file and
  * `/proc`,`/sys`,`/dev` are excluded. Per-path final state collapses repeated
  * writes to one `write`; a path written then deleted within the command is
  * treated as transient and dropped.

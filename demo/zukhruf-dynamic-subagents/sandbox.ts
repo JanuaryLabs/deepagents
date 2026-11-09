@@ -36,7 +36,7 @@ export function createWorkspaceSandbox(options: WorkspaceSandboxOptions) {
           },
         ],
       }),
-    { destination: '/agent' },
+    { workingDirectory: '/agent' },
   );
 }
 

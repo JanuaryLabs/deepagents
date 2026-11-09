@@ -5,7 +5,7 @@ import { describe, it } from 'node:test';
 
 import {
   DAYTONA_DEFAULT_DESTINATION,
-  type DisposableSandbox,
+  type LegacySandbox,
   createBashTool,
   createDaytonaSandbox,
 } from '@deepagents/context';
@@ -43,7 +43,7 @@ async function deleteByName(
 }
 
 interface LiveDaytonaSandbox extends AsyncDisposable {
-  readonly sandbox: DisposableSandbox;
+  readonly sandbox: LegacySandbox;
 }
 
 /**
@@ -294,7 +294,7 @@ describe('Daytona Sandbox', async () => {
         assert.strictEqual(mkdir.exitCode, 0);
         const agent = await createBashTool({
           sandbox: live.sandbox,
-          destination: DAYTONA_DEFAULT_DESTINATION,
+          workingDirectory: DAYTONA_DEFAULT_DESTINATION,
         });
         assert.ok(
           agent.sandbox.spawn,
@@ -310,16 +310,16 @@ describe('Daytona Sandbox', async () => {
         assert.strictEqual(mkdir.exitCode, 0);
         const agent = await createBashTool({
           sandbox: live.sandbox,
-          destination: DAYTONA_DEFAULT_DESTINATION,
+          workingDirectory: DAYTONA_DEFAULT_DESTINATION,
         });
         assert.ok(agent.sandbox.spawn);
-        const child = await agent.sandbox.spawn(
-          'printf "hi\\n"; sleep 2; printf "bye\\n"',
-        );
+        const child = await agent.sandbox.spawn({
+          command: 'printf "hi\\n"; sleep 2; printf "bye\\n"',
+        });
 
         const winner = await Promise.race([
           readFirstChunk(child.stdout).then(() => 'chunk' as const),
-          child.exit.then(() => 'exit' as const),
+          child.wait().then(() => 'exit' as const),
         ]);
         assert.strictEqual(
           winner,
@@ -328,9 +328,9 @@ describe('Daytona Sandbox', async () => {
         );
 
         const rest = await streamText(child.stdout);
-        const info = await child.exit;
+        const info = await child.wait();
         assert.match(rest, /bye/);
-        assert.strictEqual(info.success, true);
+        assert.strictEqual(info.exitCode, 0);
       });
 
       // Spawn file-change tracking is covered by file-changes.integration.test.ts;

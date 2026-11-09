@@ -135,10 +135,10 @@ export async function discoverAgentSkills(
   if (sandbox.workingDirectory === undefined) return EMPTY_SKILLS;
   const skillsDirectory = path.posix.join(sandbox.workingDirectory, 'skills');
   const quotedSkillsDirectory = shellQuote(skillsDirectory);
-  const result = await sandbox.sandbox.executeCommand(
-    `if [ -d ${quotedSkillsDirectory} ]; then find ${quotedSkillsDirectory} -mindepth 1 -maxdepth 1 -type d -print; fi`,
-    { signal },
-  );
+  const result = await sandbox.sandbox.run({
+    command: `if [ -d ${quotedSkillsDirectory} ]; then find ${quotedSkillsDirectory} -mindepth 1 -maxdepth 1 -type d -print; fi`,
+    abortSignal: signal,
+  });
   if (result.exitCode !== 0) {
     throw new Error(
       `AgentRuntime: failed to discover sandbox skills: ${result.stderr.trim() || `exit ${result.exitCode}`}`,
@@ -172,10 +172,12 @@ async function loadSkill(
   directory: string,
 ): Promise<AvailableSkill> {
   const directoryName = path.posix.basename(directory);
-  return availableSkill(
-    await sandbox.sandbox.readFile(path.posix.join(directory, 'SKILL.md')),
-    directoryName,
-  );
+  const skillPath = path.posix.join(directory, 'SKILL.md');
+  const skillMd = await sandbox.sandbox.readTextFile({ path: skillPath });
+  if (skillMd === null) {
+    throw new Error(`AgentRuntime: ${skillPath} does not exist`);
+  }
+  return availableSkill(skillMd, directoryName);
 }
 
 function availableSkill(

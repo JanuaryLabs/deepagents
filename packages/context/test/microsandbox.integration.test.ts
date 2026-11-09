@@ -592,16 +592,16 @@ describe('Microsandbox Sandbox', async () => {
         try {
           const agent = await createBashTool({
             sandbox: backend,
-            destination: MICROSANDBOX_DEFAULT_DESTINATION,
+            workingDirectory: MICROSANDBOX_DEFAULT_DESTINATION,
           });
           assert.ok(
             agent.sandbox.spawn,
             'createBashTool must forward spawn from the backend',
           );
 
-          const result = await agent.sandbox.executeCommand(
-            `cd ${MICROSANDBOX_DEFAULT_DESTINATION} && pwd`,
-          );
+          const result = await agent.sandbox.run({
+            command: `cd ${MICROSANDBOX_DEFAULT_DESTINATION} && pwd`,
+          });
           assert.strictEqual(result.exitCode, 0);
           assert.strictEqual(
             result.stdout.trim(),
@@ -617,8 +617,7 @@ describe('Microsandbox Sandbox', async () => {
         try {
           const { bash } = await createBashTool({
             sandbox: backend,
-            destination: MICROSANDBOX_DEFAULT_DESTINATION,
-            promptOptions: { toolPrompt: '' },
+            workingDirectory: MICROSANDBOX_DEFAULT_DESTINATION,
           });
           const execute = bash.execute;
           assert.ok(execute);
@@ -667,16 +666,16 @@ describe('Microsandbox Sandbox', async () => {
         try {
           const agent = await createBashTool({
             sandbox: backend,
-            destination: MICROSANDBOX_DEFAULT_DESTINATION,
+            workingDirectory: MICROSANDBOX_DEFAULT_DESTINATION,
           });
           assert.ok(agent.sandbox.spawn);
-          const child = await agent.sandbox.spawn(
-            'printf "hi\\n"; sleep 2; printf "bye\\n"',
-          );
+          const child = await agent.sandbox.spawn({
+            command: 'printf "hi\\n"; sleep 2; printf "bye\\n"',
+          });
 
           const winner = await Promise.race([
             readFirstChunk(child.stdout).then(() => 'chunk' as const),
-            child.exit.then(() => 'exit' as const),
+            child.wait().then(() => 'exit' as const),
           ]);
           assert.strictEqual(
             winner,
@@ -685,9 +684,9 @@ describe('Microsandbox Sandbox', async () => {
           );
 
           const rest = await streamText(child.stdout);
-          const info = await child.exit;
+          const info = await child.wait();
           assert.match(rest, /bye/);
-          assert.strictEqual(info.success, true);
+          assert.strictEqual(info.exitCode, 0);
         } finally {
           await backend.dispose();
         }

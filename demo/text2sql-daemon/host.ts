@@ -1,9 +1,9 @@
 import pRetry from 'p-retry';
 
-import type { DisposableSandbox } from '@deepagents/context';
+import type { LegacySandbox } from '@deepagents/context';
 
 // Host-side supervision for the text2sql daemon. Everything here operates
-// purely through the DisposableSandbox public contract (`executeCommand`), so
+// purely through the LegacySandbox public contract (`executeCommand`), so
 // the same functions serve every backend demo: docker (daemon auto-starts as
 // the image CMD — call `waitForDaemonReady`), daytona and microsandbox (the
 // runtime never executes the image CMD — call `startDaemon`).
@@ -42,7 +42,7 @@ export interface StartDaemonOptions extends WaitForDaemonReadyOptions {
  * CMD); `startDaemon` composes this for backends that don't.
  */
 export async function waitForDaemonReady(
-  sandbox: DisposableSandbox,
+  sandbox: LegacySandbox,
   options: WaitForDaemonReadyOptions = {},
 ): Promise<void> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
@@ -84,7 +84,7 @@ export async function waitForDaemonReady(
  * (daytona, microsandbox).
  */
 export async function startDaemon(
-  sandbox: DisposableSandbox,
+  sandbox: LegacySandbox,
   options: StartDaemonOptions = {},
 ): Promise<void> {
   // POSIX sh (alpine) — no `disown` bash-ism; nohup + redirected stdio already
@@ -110,7 +110,7 @@ export async function startDaemon(
   await waitForDaemonReady(sandbox, options);
 }
 
-async function logTail(sandbox: DisposableSandbox): Promise<string> {
+async function logTail(sandbox: LegacySandbox): Promise<string> {
   const log = await sandbox.executeCommand(
     `tail -50 ${daemonLogPath} 2>/dev/null || true`,
   );

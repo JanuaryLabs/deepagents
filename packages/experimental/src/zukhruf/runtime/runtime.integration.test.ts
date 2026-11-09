@@ -1180,12 +1180,10 @@ describe('zukhruf runtime — setup failure durability', () => {
     const agentDeclaration = declaration(model);
     agentDeclaration.sandbox = defineSandbox(async () => {
       const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
-      await backend.writeFiles([
-        {
-          path: '/workspace/skills/broken/README.md',
-          content: 'SKILL.md is intentionally missing',
-        },
-      ]);
+      await backend.writeTextFile({
+        path: '/workspace/skills/broken/README.md',
+        content: 'SKILL.md is intentionally missing',
+      });
       return backend;
     });
 
@@ -1469,24 +1467,34 @@ describe('zukhruf runtime — background executor', () => {
     assert.ok(rootSandbox);
     assert.ok(reviewerSandbox);
     assert.equal(
-      await rootSandbox.readFile('/workspace/skills/manage-schedules/SKILL.md'),
+      await rootSandbox.readTextFile({
+        path: '/workspace/skills/manage-schedules/SKILL.md',
+      }),
       schedulesSkillMd,
     );
     assert.equal(
-      await rootSandbox.readFile(
-        '/workspace/skills/manage-schedules/scripts/validate.js',
-      ),
+      await rootSandbox.readTextFile({
+        path: '/workspace/skills/manage-schedules/scripts/validate.js',
+      }),
       'console.log("valid");',
     );
-    await assert.rejects(
-      rootSandbox.readFile('/workspace/skills/review-code/SKILL.md'),
+    assert.equal(
+      await rootSandbox.readTextFile({
+        path: '/workspace/skills/review-code/SKILL.md',
+      }),
+      null,
     );
     assert.equal(
-      await reviewerSandbox.readFile('/workspace/skills/review-code/SKILL.md'),
+      await reviewerSandbox.readTextFile({
+        path: '/workspace/skills/review-code/SKILL.md',
+      }),
       reviewSkillMd,
     );
-    await assert.rejects(
-      reviewerSandbox.readFile('/workspace/skills/manage-schedules/SKILL.md'),
+    assert.equal(
+      await reviewerSandbox.readTextFile({
+        path: '/workspace/skills/manage-schedules/SKILL.md',
+      }),
+      null,
     );
   });
 
@@ -1529,16 +1537,20 @@ describe('zukhruf runtime — background executor', () => {
         const backend = await createVirtualSandbox({
           fs: new InMemoryFs(),
         });
-        const executeCommand = backend.executeCommand.bind(backend);
-        backend.executeCommand = (command, options) => {
-          if (command.includes('/agent-workspace/skills')) discoveryCount++;
-          return executeCommand(command, options);
-        };
+        const run = backend.run.bind(backend);
+        Object.assign(backend, {
+          run: (options: Parameters<typeof run>[0]) => {
+            if (options.command.includes('/agent-workspace/skills')) {
+              discoveryCount++;
+            }
+            return run(options);
+          },
+        });
         backends.push(backend);
         return backend;
       },
       {
-        destination: '/agent-workspace',
+        workingDirectory: '/agent-workspace',
         uploadDirectory: {
           source: directory.path,
           include: 'skills/**/*',
@@ -1574,15 +1586,15 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal(backends.length, 1);
     for (const backend of backends) {
       assert.equal(
-        await backend.readFile(
-          '/agent-workspace/skills/forecast-sales/SKILL.md',
-        ),
+        await backend.readTextFile({
+          path: '/agent-workspace/skills/forecast-sales/SKILL.md',
+        }),
         skillMd,
       );
       assert.equal(
-        await backend.readFile(
-          '/agent-workspace/skills/forecast-sales/scripts/forecast.js',
-        ),
+        await backend.readTextFile({
+          path: '/agent-workspace/skills/forecast-sales/scripts/forecast.js',
+        }),
         'console.log("forecast");',
       );
     }
@@ -1609,17 +1621,19 @@ describe('zukhruf runtime — background executor', () => {
     const agentDeclaration = declaration(model);
     agentDeclaration.sandbox = defineSandbox(async () => {
       const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
-      await backend.writeFiles([
-        {
-          path: '/workspace/skills/preinstalled/SKILL.md',
-          content: skillMd,
+      await backend.writeTextFile({
+        path: '/workspace/skills/preinstalled/SKILL.md',
+        content: skillMd,
+      });
+      const run = backend.run.bind(backend);
+      Object.assign(backend, {
+        run: (options: Parameters<typeof run>[0]) => {
+          if (options.command.includes('/workspace/skills')) {
+            discoveryCount++;
+          }
+          return run(options);
         },
-      ]);
-      const executeCommand = backend.executeCommand.bind(backend);
-      backend.executeCommand = (command, options) => {
-        if (command.includes('/workspace/skills')) discoveryCount++;
-        return executeCommand(command, options);
-      };
+      });
       return backend;
     });
 
@@ -1655,18 +1669,16 @@ describe('zukhruf runtime — background executor', () => {
     const agentDeclaration = declaration(model);
     agentDeclaration.sandbox = async () => {
       const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
-      await backend.writeFiles([
-        {
-          path: '/workspace/README.md',
-          content: `sandbox-${++sandboxCount}`,
-        },
-      ]);
+      await backend.writeTextFile({
+        path: '/workspace/README.md',
+        content: `sandbox-${++sandboxCount}`,
+      });
       return createBashTool({ sandbox: backend });
     };
     agentDeclaration.instructions = [
       fragment('files', async ({ sandbox }) => {
         assert.ok(sandbox);
-        return sandbox.sandbox.readFile('/workspace/README.md');
+        return sandbox.sandbox.readTextFile({ path: '/workspace/README.md' });
       }),
     ];
 

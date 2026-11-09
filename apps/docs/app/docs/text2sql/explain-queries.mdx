@@ -15,11 +15,11 @@ Text2SQL's `instructions()` and indexed schema fragments:
 import { agent, chat, user } from '@deepagents/context';
 import { instructions } from '@deepagents/text2sql';
 
-const indexResult = await sandbox.sandbox.executeCommand('sql index');
+const indexResult = await sandbox.sandbox.run({ command: 'sql index' });
 if (indexResult.exitCode !== 0) throw new Error(indexResult.stderr);
 const manifest = JSON.parse(indexResult.stdout) as { fragmentsPath: string };
 const fragments = JSON.parse(
-  await sandbox.sandbox.readFile(manifest.fragmentsPath),
+  (await sandbox.sandbox.readTextFile({ path: manifest.fragmentsPath }))!,
 );
 context.set(...instructions(), ...fragments);
 

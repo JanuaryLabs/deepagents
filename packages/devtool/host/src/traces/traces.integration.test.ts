@@ -10,6 +10,7 @@ import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -25,6 +26,7 @@ import {
   SqliteStreamStore,
   StreamManager,
   createBashTool,
+  createVirtualSandbox,
 } from '@deepagents/context';
 import {
   FileTraceAdapter,
@@ -58,23 +60,10 @@ const TRACES_HREF = `${ZUKHRUF_MOUNT_PATH}/traces`;
 
 const traceSummaries = z.array(z.record(z.string(), z.unknown()));
 
-/**
- * These turns never reach the sandbox: a real toolkit over a backend that
- * refuses every call.
- */
-function unusedSandbox(): Promise<AgentSandbox> {
-  const refuse = () =>
-    Promise.reject(new Error('This test does not use the sandbox.'));
+/** These turns never use the sandbox; the toolkit only needs a real one to start. */
+async function unusedSandbox(): Promise<AgentSandbox> {
   return createBashTool({
-    sandbox: {
-      executeCommand: refuse,
-      readFile: refuse,
-      writeFiles: refuse,
-      exists: () => Promise.resolve(false),
-      dispose: () => Promise.resolve(),
-      [Symbol.asyncDispose]: () => Promise.resolve(),
-    },
-    promptOptions: { toolPrompt: '' },
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
   });
 }
 
@@ -491,7 +480,9 @@ test('fileTelemetry() composes plugin integrations with agent policy and serves 
       .map(({ type }) => type),
     ['agent', 'generation'],
   );
-  assert.match(JSON.stringify(failedDetail), /model exploded/);
+  // This agent records no inputs, so the AI SDK withholds the provider's message.
+  assert.match(JSON.stringify(failedDetail), /AI SDK operation failed/);
+  assert.doesNotMatch(JSON.stringify(failedDetail), /model exploded/);
 
   assert.equal((await app.request(listUrl)).status, 401);
   assert.equal((await app.request(`${listUrl}?userId=user-1`)).status, 401);

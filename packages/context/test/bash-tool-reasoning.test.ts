@@ -41,7 +41,7 @@ function createBashToolCallModel(input: string) {
 async function runBashToolCall(input: string) {
   const { tools } = await createBashTool({
     sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    destination: '/',
+    workingDirectory: '/',
   });
 
   const result = await generateText({

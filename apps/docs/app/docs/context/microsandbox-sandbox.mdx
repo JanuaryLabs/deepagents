@@ -59,7 +59,7 @@ const backend = await createMicrosandboxSandbox({
 
 const sandbox = await createBashTool({
   sandbox: backend,
-  destination: MICROSANDBOX_DEFAULT_DESTINATION,
+  workingDirectory: MICROSANDBOX_DEFAULT_DESTINATION,
 });
 ```
 

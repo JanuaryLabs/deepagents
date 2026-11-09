@@ -58,9 +58,9 @@ import {
 import { shellQuote } from './shell-quote.ts';
 import type {
   CommandResult,
-  DisposableSandbox,
   ExecuteCommandOptions,
   ExitInfo,
+  LegacySandbox,
   SandboxProcess,
   SpawnOptions,
 } from './types.ts';
@@ -1446,7 +1446,7 @@ export class ComposeStrategy extends ContainerSandboxStrategy<DockerCommonOption
  */
 export async function createDockerSandbox(
   options: DockerSandboxOptions = {},
-): Promise<DisposableSandbox> {
+): Promise<LegacySandbox> {
   if (!isComposeOptions(options)) {
     validateSandboxOptions(options, dockerErrors);
   }
@@ -1491,7 +1491,7 @@ export async function createDockerSandbox(
  */
 export async function useSandbox<T>(
   options: DockerSandboxOptions,
-  fn: (sandbox: DisposableSandbox) => Promise<T>,
+  fn: (sandbox: LegacySandbox) => Promise<T>,
 ): Promise<T> {
   const sandbox = await createDockerSandbox(options);
   try {

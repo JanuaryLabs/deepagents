@@ -36,10 +36,10 @@ const inputSchema = z.strictObject({
 
 export function createReadFileTool({
   sandbox,
-  destination,
+  workingDirectory,
 }: {
   sandbox: DisposableSandbox;
-  destination: string;
+  workingDirectory: string | undefined;
 }): ReadFileTool {
   return tool({
     description:
@@ -54,11 +54,15 @@ export function createReadFileTool({
       options: ToolExecutionOptions<Record<string, unknown>>,
     ) => {
       options.abortSignal?.throwIfAborted();
-      const bytes = await sandbox.readFile(
-        path.posix.resolve(destination, input.path),
-        { encoding: 'binary' },
-      );
+      const bytes = await sandbox.readBinaryFile({
+        path:
+          workingDirectory === undefined
+            ? input.path
+            : path.posix.resolve(workingDirectory, input.path),
+        abortSignal: options.abortSignal,
+      });
       options.abortSignal?.throwIfAborted();
+      if (bytes === null) throw new Error(`File not found: ${input.path}`);
 
       for (const format of formats) {
         const result = format.read({ ...input, bytes, options });

@@ -101,7 +101,7 @@ async function runToolOutputs(chatId: string, commands: string[]) {
     fs: new InMemoryFs(),
     customCommands: [sqlCommand()],
   });
-  await backend.executeCommand('mkdir -p /workspace /sql');
+  await backend.run({ command: 'mkdir -p /workspace /sql' });
   const sandbox = await createBashTool({ sandbox: backend });
 
   const store = new InMemoryContextStore();

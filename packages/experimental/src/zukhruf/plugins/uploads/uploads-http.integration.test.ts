@@ -283,10 +283,9 @@ async function storedBytes(
 ): Promise<Buffer> {
   await using sandbox = await createVirtualSandbox({ fs });
   return Buffer.from(
-    await sandbox.readFile(
-      `${UPLOAD_DIRECTORY}/${userId}/${sessionId}/${fileId}`,
-      { encoding: 'binary' },
-    ),
+    (await sandbox.readBinaryFile({
+      path: `${UPLOAD_DIRECTORY}/${userId}/${sessionId}/${fileId}`,
+    }))!,
   );
 }
 
@@ -297,7 +296,7 @@ async function writeSandboxFile(
   content: Buffer,
 ): Promise<void> {
   await using sandbox = await createVirtualSandbox({ fs });
-  await sandbox.writeFiles([{ path, content }]);
+  await sandbox.writeBinaryFile({ path, content });
 }
 
 async function sessionDirectoryExists(
@@ -306,7 +305,11 @@ async function sessionDirectoryExists(
   sessionId: string,
 ): Promise<boolean> {
   await using sandbox = await createVirtualSandbox({ fs });
-  return sandbox.exists(`${UPLOAD_DIRECTORY}/${userId}/${sessionId}`);
+  return (
+    (await sandbox.stat({
+      path: `${UPLOAD_DIRECTORY}/${userId}/${sessionId}`,
+    })) !== null
+  );
 }
 
 function request(

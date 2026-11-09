@@ -399,39 +399,37 @@ describe('steer reminders integration (chat flow)', () => {
     const sandbox = await createBashTool({
       sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
     });
-    await sandbox.sandbox.writeFiles([
-      {
-        path: plan.path,
-        content: planFile([
-          {
-            id: 'T1',
-            title: 'Establish the review primitive',
-            status: 'completed',
-            blockedBy: [],
-            evidence: [
-              {
-                summary: 'Phase 1 integration test passes',
-                source: 'steer-reminders.integration.test.ts',
-              },
-            ],
-          },
-          {
-            id: 'T2',
-            title: 'Load the sandbox plan',
-            status: 'pending',
-            blockedBy: ['T1'],
-            evidence: [],
-          },
-          {
-            id: 'T3',
-            title: 'Complete end-to-end integration',
-            status: 'pending',
-            blockedBy: ['T2'],
-            evidence: [],
-          },
-        ]),
-      },
-    ]);
+    await sandbox.sandbox.writeTextFile({
+      path: plan.path,
+      content: planFile([
+        {
+          id: 'T1',
+          title: 'Establish the review primitive',
+          status: 'completed',
+          blockedBy: [],
+          evidence: [
+            {
+              summary: 'Phase 1 integration test passes',
+              source: 'steer-reminders.integration.test.ts',
+            },
+          ],
+        },
+        {
+          id: 'T2',
+          title: 'Load the sandbox plan',
+          status: 'pending',
+          blockedBy: ['T1'],
+          evidence: [],
+        },
+        {
+          id: 'T3',
+          title: 'Complete end-to-end integration',
+          status: 'pending',
+          blockedBy: ['T2'],
+          evidence: [],
+        },
+      ]),
+    });
     const chatAgent = await makeAgent(context, model, 'plan-review', sandbox);
 
     context.set(
@@ -498,27 +496,25 @@ describe('steer reminders integration (chat flow)', () => {
     const sandbox = await createBashTool({
       sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
     });
-    await sandbox.sandbox.writeFiles([
-      {
-        path: plan.path,
-        content: planFile([
-          {
-            id: 'T1',
-            title: 'First cyclic task',
-            status: 'pending',
-            blockedBy: ['T2'],
-            evidence: [],
-          },
-          {
-            id: 'T2',
-            title: 'Second cyclic task',
-            status: 'pending',
-            blockedBy: ['T1'],
-            evidence: [],
-          },
-        ]),
-      },
-    ]);
+    await sandbox.sandbox.writeTextFile({
+      path: plan.path,
+      content: planFile([
+        {
+          id: 'T1',
+          title: 'First cyclic task',
+          status: 'pending',
+          blockedBy: ['T2'],
+          evidence: [],
+        },
+        {
+          id: 'T2',
+          title: 'Second cyclic task',
+          status: 'pending',
+          blockedBy: ['T1'],
+          evidence: [],
+        },
+      ]),
+    });
     const chatAgent = await makeAgent(
       context,
       model,

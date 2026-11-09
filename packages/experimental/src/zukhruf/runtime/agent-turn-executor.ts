@@ -514,11 +514,13 @@ export class AgentTurnExecutor {
     if (duplicate) {
       throw new Error(`AgentRuntime: duplicate skill "${duplicate.name}"`);
     }
-    await sandbox.sandbox.writeFiles(
-      pluginSkills.files.map(({ path: relativePath, content }) => ({
-        path: path.posix.join(workingDirectory, relativePath),
-        content,
-      })),
+    await Promise.all(
+      pluginSkills.files.map(({ path: relativePath, content }) =>
+        sandbox.sandbox.writeBinaryFile({
+          path: path.posix.join(workingDirectory, relativePath),
+          content,
+        }),
+      ),
     );
     return createAgentSkills(
       [...available, ...pluginSkills.available].toSorted((left, right) =>

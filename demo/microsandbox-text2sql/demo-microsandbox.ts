@@ -92,7 +92,7 @@ const tracked = await withStraceFileChanges(backend, {
 });
 const sandbox = await createBashTool({
   sandbox: tracked,
-  destination: demoWorkspace,
+  workingDirectory: demoWorkspace,
 });
 
 const schemaFragments = await index(sandbox.sandbox);

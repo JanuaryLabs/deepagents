@@ -36,18 +36,25 @@ with `withStraceFileChanges(...)`, then pass that tracked backend into
 `createBashTool`.
 
 `uploadDirectory` accepts one `{ source, include? }` object. Set the top-level
-`destination` to choose where its files are uploaded and where bash commands run
-(default: `/workspace`). Use `include` to select files with a glob pattern.
+`workingDirectory` to choose where its files are uploaded and where bash commands run.
+Without it, commands run in the sandbox's default working directory, and relative
+paths resolve against that directory. Use `include` to select files with a glob pattern.
 
-All backends expose the buffered command + file API (`executeCommand`,
-`readFile`, `writeFiles`, `dispose`). Backends that can stream real processes,
-including Docker, Apple Container, Microsandbox, and Daytona
-sandboxes, additionally expose an optional `spawn(command, options?)` for live
-streaming stdio. `spawn` is async: await it to get the process.
-Feature-detect it with `if (!sandbox.spawn) { ... }` when writing
-backend-agnostic code.
+The `sandbox` that `createBashTool` returns is an AI SDK
+[`Experimental_SandboxSession`](https://ai-sdk.dev/docs/reference/ai-sdk-core/sandbox)
+for every backend, with `run`, `spawn`, `readTextFile`, `readBinaryFile`,
+`writeTextFile`, `writeBinaryFile` and `stat`, plus our `dispose`.
+`createVirtualSandbox` returns one directly, through the official
+`@ai-sdk/sandbox-just-bash` adapter. Its `spawn` delivers output when the
+process exits, so use a process-backed sandbox for live streaming.
 
-`executeCommand` and `spawn` execute commands with Bash semantics. Process-backed
+Docker, Apple Container, Microsandbox and Daytona factories still return the
+older API (`executeCommand`, `readFile`, `writeFiles`, `exists`, `dispose`, and
+`spawn(command, options?)` with live streaming) while they move to the session.
+Until then `createBashTool` adapts them, and `listDirectory` and `deleteFile`
+are not available on the session it returns for them.
+
+Commands execute with Bash semantics. Process-backed
 environments must contain `bash`; factories fail with a clear error when Bash
 cannot be started. There is no POSIX `sh` fallback.
 
@@ -87,7 +94,7 @@ const backend = await createDockerSandbox({
 });
 const sandbox = await createBashTool({
   sandbox: backend,
-  destination: '/skills/deploy',
+  workingDirectory: '/skills/deploy',
   uploadDirectory: {
     source: '/opt/agent-skills/deploy',
   },
@@ -222,7 +229,7 @@ const sandbox = await createBashTool({
   sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
 });
 
-const result = await sandbox.sandbox.executeCommand('echo "hello"');
+const result = await sandbox.sandbox.run({ command: 'echo "hello"' });
 console.log(result.stdout); // hello
 ```
 
@@ -273,12 +280,12 @@ const sandbox = await createBashTool({
 });
 
 const input: BashToolInput = {
-  command: 'ls /workspace',
+  command: 'ls',
   reasoning: 'List files to find the entry point',
 };
 
 await sandbox.tools.bash.execute!(input, {
-  toolCallId: 'list-workspace',
+  toolCallId: 'list-files',
   messages: [],
 });
 ```

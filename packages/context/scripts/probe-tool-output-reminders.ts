@@ -196,11 +196,11 @@ const tracked = await withStraceFileChanges(backend, {
 });
 const sandbox = await createBashTool({
   sandbox: tracked,
-  destination: workdir,
+  workingDirectory: workdir,
 });
 
 try {
-  const setup = await sandbox.sandbox.executeCommand(`mkdir -p ${workdir}`);
+  const setup = await sandbox.sandbox.run({ command: `mkdir -p ${workdir}` });
   assert.equal(setup.exitCode, 0, setup.stderr);
   fileChangeCalls.length = 0;
 

@@ -205,7 +205,7 @@ class UploadsPlugin implements Uploads {
     const fileId = `${randomUUID()}.${extensionByMediaType[mediaType]}`;
     const path = this.#pathFor(scope, fileId);
     const sandbox = await this.#sandboxFor(scope);
-    await sandbox.sandbox.writeFiles([{ path, content: Buffer.from(data) }]);
+    await sandbox.sandbox.writeBinaryFile({ path, content: data });
     return { fileId, path };
   }
 
@@ -234,7 +234,7 @@ class UploadsPlugin implements Uploads {
       );
     }
     const sandbox = await this.#sandboxFor(scope);
-    if (!(await sandbox.sandbox.exists(path))) {
+    if ((await sandbox.sandbox.stat({ path })) === null) {
       throw new Error(`publish_upload: ${path} does not exist in the sandbox`);
     }
     const basename = posix.basename(path);
@@ -245,9 +245,9 @@ class UploadsPlugin implements Uploads {
       : `${randomUUID()}.${extensionByMediaType[mediaType]}`;
     const target = this.#pathFor(scope, fileId);
     if (target !== path) {
-      const moved = await sandbox.sandbox.executeCommand(
-        `mv -- ${shellQuote(path)} ${shellQuote(target)}`,
-      );
+      const moved = await sandbox.sandbox.run({
+        command: `mv -- ${shellQuote(path)} ${shellQuote(target)}`,
+      });
       if (moved.exitCode !== 0) {
         throw new Error(
           `publish_upload: could not move ${path}: ${moved.stderr.trim() || `exit ${moved.exitCode}`}`,
@@ -317,8 +317,8 @@ class UploadsPlugin implements Uploads {
       extension === undefined ? undefined : mediaTypeByExtension[extension];
     if (mediaType === undefined) return undefined;
     const path = this.#pathFor(scope, fileId);
-    if (!(await sandbox.sandbox.exists(path))) return undefined;
-    const bytes = await sandbox.sandbox.readFile(path, { encoding: 'binary' });
+    const bytes = await sandbox.sandbox.readBinaryFile({ path });
+    if (bytes === null) return undefined;
     return { data: new Uint8Array(bytes), mediaType };
   }
 

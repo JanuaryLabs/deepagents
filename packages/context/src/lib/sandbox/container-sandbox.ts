@@ -11,7 +11,7 @@ import type {
 } from './container-engine.ts';
 import { type Installer } from './installers/installer.ts';
 import { readFileContent } from './read-file.ts';
-import type { DisposableSandbox } from './types.ts';
+import type { LegacySandbox } from './types.ts';
 
 const CONTAINER_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
 
@@ -84,7 +84,7 @@ export abstract class ContainerSandboxStrategy<
    * Creates the sandbox. On failure, everything it made is released and the
    * engine is disposed.
    */
-  async create(): Promise<DisposableSandbox> {
+  async create(): Promise<LegacySandbox> {
     let acquired: AcquiredContainer | undefined;
 
     try {
@@ -298,9 +298,7 @@ export abstract class ContainerSandboxStrategy<
     );
   }
 
-  protected createSandboxMethods(
-    container: EngineContainer,
-  ): DisposableSandbox {
+  protected createSandboxMethods(container: EngineContainer): LegacySandbox {
     let disposal: Promise<void> | undefined;
     const dispose = async (): Promise<void> => {
       try {
@@ -320,7 +318,7 @@ export abstract class ContainerSandboxStrategy<
       exists: (path) => container.exists(path),
       writeFiles: (files) => container.writeFiles(files),
       dispose: () => (disposal ??= dispose()),
-      [Symbol.asyncDispose](this: DisposableSandbox): Promise<void> {
+      [Symbol.asyncDispose](this: LegacySandbox): Promise<void> {
         return this.dispose();
       },
     };

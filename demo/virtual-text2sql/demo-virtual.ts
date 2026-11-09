@@ -34,7 +34,7 @@ const backend = await createVirtualSandbox({
   customCommands: [sqlCommand],
 });
 
-await backend.executeCommand('mkdir -p /workspace /sql');
+await backend.run({ command: 'mkdir -p /sql' });
 
 const sandbox = await createBashTool({ sandbox: backend });
 

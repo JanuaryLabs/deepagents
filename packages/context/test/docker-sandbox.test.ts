@@ -8,11 +8,11 @@ import { describe, it } from 'node:test';
 
 import {
   ContainerCreationError,
-  type DisposableSandbox,
   DockerSandboxError,
   InstallError,
   Installer,
   type InstallerContext,
+  type LegacySandbox,
   MissingRuntimeError,
   PackageInstallError,
   VolumeCreateError,
@@ -1216,7 +1216,7 @@ describe('Docker Sandbox', () => {
           installers: [pkg(['curl'])],
         });
 
-        let second: DisposableSandbox | undefined;
+        let second: LegacySandbox | undefined;
         try {
           await first.executeCommand('echo first-run > /workspace/marker');
 
@@ -1252,8 +1252,8 @@ describe('Docker Sandbox', () => {
         // the inspect-first branch above.)
         const name = uniqueName();
 
-        let a: DisposableSandbox | undefined;
-        let b: DisposableSandbox | undefined;
+        let a: LegacySandbox | undefined;
+        let b: LegacySandbox | undefined;
         try {
           // If recovery were broken, the losing create would reject and this
           // Promise.all would reject — failing the test.
@@ -1400,7 +1400,7 @@ describe('Docker Sandbox', () => {
       const { sandbox } = await createBashTool({ sandbox: backend });
 
       try {
-        const result = await sandbox.executeCommand('echo "from container"');
+        const result = await sandbox.run({ command: 'echo "from container"' });
         assert.strictEqual(result.exitCode, 0);
         assert.strictEqual(result.stdout.trim(), 'from container');
       } finally {
@@ -1416,7 +1416,7 @@ describe('Docker Sandbox', () => {
       const { sandbox } = await createBashTool({ sandbox: backend });
 
       try {
-        const result = await sandbox.executeCommand('curl --version');
+        const result = await sandbox.run({ command: 'curl --version' });
         assert.strictEqual(result.exitCode, 0);
         assert.match(result.stdout, /curl/i);
       } finally {
@@ -1432,7 +1432,7 @@ describe('Docker Sandbox', () => {
       const { sandbox } = await createBashTool({ sandbox: backend });
 
       try {
-        const result = await sandbox.executeCommand('echo "$TOOL_VAR"');
+        const result = await sandbox.run({ command: 'echo "$TOOL_VAR"' });
         assert.strictEqual(result.stdout.trim(), 'via-tool');
       } finally {
         await sandbox.dispose();
@@ -1458,7 +1458,7 @@ describe('Docker Sandbox', () => {
       const { sandbox } = await createBashTool({ sandbox: backend });
 
       try {
-        const result = await sandbox.executeCommand('cat /mounted/test.txt');
+        const result = await sandbox.run({ command: 'cat /mounted/test.txt' });
         assert.strictEqual(result.exitCode, 0);
         assert.strictEqual(result.stdout.trim(), 'mounted content');
       } finally {
@@ -1469,7 +1469,7 @@ describe('Docker Sandbox', () => {
 
   describe('useSandbox', () => {
     it('auto-disposes sandbox on successful completion', async () => {
-      const captured: DisposableSandbox[] = [];
+      const captured: LegacySandbox[] = [];
 
       const result = await useSandbox(defaults, async (sandbox) => {
         captured.push(sandbox);
@@ -1494,7 +1494,7 @@ describe('Docker Sandbox', () => {
     });
 
     it('auto-disposes sandbox even when function throws', async () => {
-      const captured: DisposableSandbox[] = [];
+      const captured: LegacySandbox[] = [];
 
       await assert.rejects(
         useSandbox(defaults, async (sandbox) => {

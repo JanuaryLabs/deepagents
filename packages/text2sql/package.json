@@ -114,7 +114,7 @@
     "@zukhruf/sqlite-drift": "^0.8.10",
     "@zukhruf/sqlite-open": "^0.8.10",
     "@zukhruf/sqlite-transaction": "^0.8.10",
-    "ai": "^7.0.165",
+    "ai": "^7.0.166",
     "cac": "7.0.0",
     "dedent": "1.7.2",
     "just-bash": "^3.6.0",
@@ -128,7 +128,7 @@
   },
   "devDependencies": {
     "@ai-sdk/openai": "^4.0.111",
-    "@ai-sdk/react": "^4.0.169",
+    "@ai-sdk/react": "^4.0.170",
     "@deepagents/evals": "7.5.2",
     "@duckdb/node-api": "^1.5.5-r.3",
     "@google-cloud/bigquery": "^8.3.1",

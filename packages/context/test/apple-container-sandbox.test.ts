@@ -9,7 +9,7 @@ import { after, before, describe, it } from 'node:test';
 import {
   AppleContainerSandboxError,
   AppleContainerVolumePathError,
-  type DisposableSandbox,
+  type LegacySandbox,
   appleEngine,
   createAppleContainerSandbox,
   pkg,
@@ -404,7 +404,7 @@ describe('Apple container sandbox (runtime)', async () => {
   it('reuses a stably-named container across handles', async () => {
     const name = `reuse-${process.pid}`;
     const first = await createAppleContainerSandbox({ name });
-    let second: DisposableSandbox | undefined;
+    let second: LegacySandbox | undefined;
     try {
       await first.writeFiles([
         { path: '/workspace/marker.txt', content: 'shared' },

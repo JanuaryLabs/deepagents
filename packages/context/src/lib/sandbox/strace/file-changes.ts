@@ -3,7 +3,7 @@ import { posix } from 'node:path';
 
 import { BashException } from '../bash-exception.ts';
 import { shellQuote } from '../shell-quote.ts';
-import type { CommandResult, DisposableSandbox } from '../types.ts';
+import type { CommandResult, LegacySandbox } from '../types.ts';
 import type { FileChange } from './file-change.ts';
 import {
   buildStraceCommand,
@@ -90,9 +90,9 @@ function warnOnFileChangesError(error: unknown): void {
  * isolated and surfaced only via `onError`.
  */
 export async function withStraceFileChanges(
-  sandbox: DisposableSandbox,
+  sandbox: LegacySandbox,
   options: WithStraceFileChangesOptions,
-): Promise<DisposableSandbox> {
+): Promise<LegacySandbox> {
   const { include, exclude, onFileChanges } = options;
   const onError = options.onError ?? warnOnFileChangesError;
   const traceDir = options.traceDir ?? DEFAULT_TRACE_DIR;
@@ -134,7 +134,7 @@ export async function withStraceFileChanges(
     }
   };
 
-  const decorated: DisposableSandbox = {
+  const decorated: LegacySandbox = {
     async executeCommand(command, execOptions) {
       const traceFile = `${traceDir}/${randomUUID()}.strace`;
       const sentinel = `__dat_trace_${randomUUID()}__`;
@@ -212,7 +212,7 @@ export async function withStraceFileChanges(
       await sandbox.dispose();
     },
 
-    [Symbol.asyncDispose](this: DisposableSandbox): Promise<void> {
+    [Symbol.asyncDispose](this: LegacySandbox): Promise<void> {
       return this.dispose();
     },
   };

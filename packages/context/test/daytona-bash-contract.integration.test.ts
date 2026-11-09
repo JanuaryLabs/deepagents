@@ -5,7 +5,7 @@ import { describe, it } from 'node:test';
 
 import {
   DAYTONA_DEFAULT_DESTINATION,
-  type DisposableSandbox,
+  type LegacySandbox,
   createBashTool,
   createDaytonaSandbox,
 } from '@deepagents/context';
@@ -15,7 +15,7 @@ type DaytonaClient = Parameters<typeof createDaytonaSandbox>[0];
 interface LiveSandbox {
   client: DaytonaClient;
   name: string;
-  sandbox: DisposableSandbox;
+  sandbox: LegacySandbox;
 }
 
 const LITERAL_LINE = "line one's $HOME `whoami`";
@@ -101,8 +101,7 @@ describe('Daytona Bash contract (live)', { skip: !liveAvailable }, () => {
       assert.strictEqual(mkdir.exitCode, 0);
       const { bash } = await createBashTool({
         sandbox: live.sandbox,
-        destination: DAYTONA_DEFAULT_DESTINATION,
-        promptOptions: { toolPrompt: '' },
+        workingDirectory: DAYTONA_DEFAULT_DESTINATION,
       });
       const execute = bash.execute;
       assert.ok(execute);

@@ -50,7 +50,7 @@ async function executeWithSqlHooks(
 
   const { bash } = await createBashTool({
     sandbox,
-    destination: '/',
+    workingDirectory: '/',
     ...hooks,
   });
   const execute = bash.execute;

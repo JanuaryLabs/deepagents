@@ -168,7 +168,11 @@ export function createPlanReview(
     async ({ sandbox }) => {
       let raw: string;
       try {
-        raw = await sandbox!.sandbox.readFile(PLAN_FILE_PATH);
+        const plan = await sandbox!.sandbox.readTextFile({
+          path: PLAN_FILE_PATH,
+        });
+        if (plan === null) throw new Error('the file does not exist');
+        raw = plan;
       } catch (error) {
         return [
           `The plan file at ${PLAN_FILE_PATH} could not be read: ${errorMessage(error)}`,

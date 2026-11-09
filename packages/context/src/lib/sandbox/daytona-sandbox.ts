@@ -11,9 +11,9 @@ import { readFileContent } from './read-file.ts';
 import { shellQuote } from './shell-quote.ts';
 import type {
   CommandResult,
-  DisposableSandbox,
   ExecuteCommandOptions,
   ExitInfo,
+  LegacySandbox,
   SandboxReadinessOptions,
   SpawnOptions,
 } from './types.ts';
@@ -37,7 +37,7 @@ export interface DaytonaVolumeMount {
   [key: string]: unknown;
 }
 
-export interface DaytonaSandboxOptions extends SandboxReadinessOptions {
+export interface DaytonaSandboxOptions extends SandboxReadinessOptions<LegacySandbox> {
   /**
    * Existing Daytona sandbox id or name to attach to.
    */
@@ -98,7 +98,7 @@ export class DaytonaCommandError extends DaytonaSandboxError {
 export async function createDaytonaSandbox(
   client: Daytona,
   options: DaytonaSandboxOptions = {},
-): Promise<DisposableSandbox> {
+): Promise<LegacySandbox> {
   const target = validateDaytonaOptions(options);
 
   // The caller supplies a Daytona client, so @daytona/sdk is already installed;
@@ -328,7 +328,7 @@ function createDaytonaSandboxMethods(args: {
   sdk: DaytonaSdk;
   sandbox: Sandbox;
   commandTimeout?: number;
-}): DisposableSandbox {
+}): LegacySandbox {
   const { sdk, sandbox, commandTimeout } = args;
 
   const executeCommand = async (
@@ -537,7 +537,7 @@ function createDaytonaSandboxMethods(args: {
       // is nothing for this adapter to release.
     },
 
-    [Symbol.asyncDispose](this: DisposableSandbox): Promise<void> {
+    [Symbol.asyncDispose](this: LegacySandbox): Promise<void> {
       return this.dispose();
     },
   };

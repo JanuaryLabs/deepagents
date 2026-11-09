@@ -27,10 +27,10 @@
     "@zukhruf/sqlite-open": "^0.8.10",
     "microsandbox": "^0.7.8",
     "pg-boss": "^12.29.0",
-    "ai": "^7.0.165"
+    "ai": "^7.0.166"
   },
   "devDependencies": {
-    "ai": "^7.0.165",
+    "ai": "^7.0.166",
     "just-bash": "^3.6.0"
   }
 }

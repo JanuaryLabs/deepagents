@@ -19,5 +19,5 @@ export default defineSandbox(
             volume.bind(join(import.meta.dirname, '..', '..', 'skills')),
           ),
     }),
-  { destination: '/agent' },
+  { workingDirectory: '/agent' },
 );

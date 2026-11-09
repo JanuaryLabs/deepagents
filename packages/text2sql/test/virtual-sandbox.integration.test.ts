@@ -55,9 +55,9 @@ describe('createSqlCommand + createVirtualSandbox', () => {
       customCommands: [command],
     });
 
-    const result = await sandbox.executeCommand(
-      'sql validate mem "SELECT id, name FROM users"',
-    );
+    const result = await sandbox.run({
+      command: 'sql validate mem "SELECT id, name FROM users"',
+    });
 
     assert.equal(result.exitCode, 0, result.stderr);
     assert.equal(result.stdout, 'valid\n');
@@ -70,9 +70,9 @@ describe('createSqlCommand + createVirtualSandbox', () => {
       customCommands: [command],
     });
 
-    const result = await sandbox.executeCommand(
-      'sql validate mem "SELECT bogus FROM nope"',
-    );
+    const result = await sandbox.run({
+      command: 'sql validate mem "SELECT bogus FROM nope"',
+    });
 
     assert.equal(result.exitCode, 1);
     assert.match(result.stderr, /^sql validate: .+\n$/);
@@ -85,7 +85,7 @@ describe('createSqlCommand + createVirtualSandbox', () => {
       customCommands: [command],
     });
 
-    const result = await sandbox.executeCommand('sql run wrong "SELECT 1"');
+    const result = await sandbox.run({ command: 'sql run wrong "SELECT 1"' });
 
     assert.equal(result.exitCode, 1);
     assert.match(result.stderr, /unknown database "wrong"/);
@@ -100,9 +100,9 @@ describe('createSqlCommand + createVirtualSandbox', () => {
       customCommands: [command],
     });
 
-    const result = await sandbox.executeCommand(
-      'sql run main "SELECT id, name FROM users ORDER BY id"',
-    );
+    const result = await sandbox.run({
+      command: 'sql run main "SELECT id, name FROM users ORDER BY id"',
+    });
 
     assert.equal(result.exitCode, 0, result.stderr);
     assert.match(result.stdout, /^results stored in /);
@@ -117,9 +117,9 @@ describe('createSqlCommand + createVirtualSandbox', () => {
       customCommands: [command],
     });
 
-    const result = await sandbox.executeCommand(
-      'sql validate sql_db "SELECT id FROM users"',
-    );
+    const result = await sandbox.run({
+      command: 'sql validate sql_db "SELECT id FROM users"',
+    });
 
     assert.equal(result.exitCode, 0, result.stderr);
     assert.equal(result.stdout, 'valid\n');
@@ -132,9 +132,9 @@ describe('createSqlCommand + createVirtualSandbox', () => {
       customCommands: [command],
     });
 
-    const result = await sandbox.executeCommand(
-      'sql run mem "SELECT id, name FROM users ORDER BY id"',
-    );
+    const result = await sandbox.run({
+      command: 'sql run mem "SELECT id, name FROM users ORDER BY id"',
+    });
 
     assert.equal(result.exitCode, 0, result.stderr);
 
@@ -145,8 +145,8 @@ describe('createSqlCommand + createVirtualSandbox', () => {
     assert.match(result.stdout, /columns: id, name\n/);
     assert.match(result.stdout, /rows: 2\n/);
 
-    const stored = await sandbox.readFile(outPath);
-    const rows = JSON.parse(stored);
+    const stored = await sandbox.readTextFile({ path: outPath });
+    const rows = JSON.parse(stored!);
     assert.deepEqual(rows, [
       { id: 1, name: 'Alice' },
       { id: 2, name: 'Bob' },
@@ -160,9 +160,9 @@ describe('createSqlCommand + createVirtualSandbox', () => {
       customCommands: [command],
     });
 
-    const result = await sandbox.executeCommand(
-      'sql run mem --out-dir /tmp/queries "SELECT 1 AS one"',
-    );
+    const result = await sandbox.run({
+      command: 'sql run mem --out-dir /tmp/queries "SELECT 1 AS one"',
+    });
 
     assert.equal(result.exitCode, 0, result.stderr);
     const match = result.stdout.match(
@@ -179,9 +179,9 @@ describe('createSqlCommand + createVirtualSandbox', () => {
       customCommands: [command],
     });
 
-    const result = await sandbox.executeCommand(
-      'sql run mem "SELECT 1 AS one"',
-    );
+    const result = await sandbox.run({
+      command: 'sql run mem "SELECT 1 AS one"',
+    });
 
     assert.equal(result.exitCode, 0, result.stderr);
     assert.match(result.stdout, /^results stored in \/data\//);
@@ -194,7 +194,7 @@ describe('createSqlCommand + createVirtualSandbox', () => {
       customCommands: [command],
     });
 
-    const result = await sandbox.executeCommand('sql run mem --out-dir');
+    const result = await sandbox.run({ command: 'sql run mem --out-dir' });
 
     assert.equal(result.exitCode, 1);
     assert.match(result.stderr, /^sql run: /);
@@ -209,7 +209,7 @@ describe('createSqlCommand + createVirtualSandbox', () => {
       customCommands: [command],
     });
 
-    const result = await sandbox.executeCommand('sql');
+    const result = await sandbox.run({ command: 'sql' });
 
     assert.equal(result.exitCode, 1);
     assert.match(result.stderr, /Usage:/);

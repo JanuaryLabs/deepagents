@@ -8,6 +8,7 @@ import {
 import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -21,6 +22,7 @@ import {
   SqliteStreamStore,
   StreamManager,
   createBashTool,
+  createVirtualSandbox,
 } from '@deepagents/context';
 import { devtool } from '@deepagents/devtool';
 import { fileTelemetry, tracesHttp } from '@deepagents/devtool/traces';
@@ -72,23 +74,10 @@ const HISTORY_URL = `${ZUKHRUF_MOUNT_PATH}/history`;
 const INFO_URL = `${ZUKHRUF_MOUNT_PATH}/info`;
 const TRACE_ID = '1'.repeat(32);
 
-/**
- * These turns never reach the sandbox: a real toolkit over a backend that
- * refuses every call.
- */
-function unusedSandbox(): Promise<AgentSandbox> {
-  const refuse = () =>
-    Promise.reject(new Error('This test does not use the sandbox.'));
+/** These turns never use the sandbox; the toolkit only needs a real one to start. */
+async function unusedSandbox(): Promise<AgentSandbox> {
   return createBashTool({
-    sandbox: {
-      executeCommand: refuse,
-      readFile: refuse,
-      writeFiles: refuse,
-      exists: () => Promise.resolve(false),
-      dispose: () => Promise.resolve(),
-      [Symbol.asyncDispose]: () => Promise.resolve(),
-    },
-    promptOptions: { toolPrompt: '' },
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
   });
 }
 

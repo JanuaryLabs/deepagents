@@ -37,8 +37,8 @@ import {
 import { shellQuote } from './shell-quote.ts';
 import type {
   CommandResult,
-  DisposableSandbox,
   ExecuteCommandOptions,
+  LegacySandbox,
   SandboxProcess,
   SpawnOptions,
 } from './types.ts';
@@ -600,7 +600,7 @@ function runStreamed(command: string, args: string[]): Promise<void> {
  */
 export async function createAppleContainerSandbox(
   options: AppleContainerSandboxOptions = {},
-): Promise<DisposableSandbox> {
+): Promise<LegacySandbox> {
   if (isAppleContainerfileOptions(options)) {
     return new ContainerfileStrategy(options, appleEngine, {
       dockerfile: options.dockerfile,
@@ -621,7 +621,7 @@ export async function createAppleContainerSandbox(
  */
 export async function useAppleContainerSandbox<T>(
   options: AppleContainerSandboxOptions,
-  fn: (sandbox: DisposableSandbox) => Promise<T>,
+  fn: (sandbox: LegacySandbox) => Promise<T>,
 ): Promise<T> {
   const sandbox = await createAppleContainerSandbox(options);
   try {

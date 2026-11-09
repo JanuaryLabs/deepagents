@@ -1,5 +1,8 @@
-import type { ToolResultOutput } from '@ai-sdk/provider-utils';
-import type { Tool } from 'ai';
+import type {
+  Experimental_SandboxRunOptions,
+  ToolResultOutput,
+} from '@ai-sdk/provider-utils';
+import type { Experimental_SandboxSession, Tool } from 'ai';
 
 export interface CommandResult {
   stdout: string;
@@ -14,10 +17,22 @@ export interface CommandResult {
 }
 
 /**
- * Options accepted by `DisposableSandbox.executeCommand`. Currently only
- * `signal` (cooperative cancellation); shaped as an object so we can add
- * more without breaking backends.
+ * The AI SDK sandbox session plus the lifecycle the session contract leaves to
+ * its owner. `run` may return {@link CommandResult}'s host-only fields; a value
+ * of this type is still a valid `Experimental_SandboxSession`.
  */
+export interface DisposableSandbox
+  extends Omit<Experimental_SandboxSession, 'run'>, AsyncDisposable {
+  readonly run: (
+    options: Experimental_SandboxRunOptions,
+  ) => PromiseLike<CommandResult>;
+  /**
+   * Release the backend's external resources. Called explicitly, or
+   * automatically at scope exit via `await using`.
+   */
+  dispose(): Promise<void>;
+}
+
 export interface ExecuteCommandOptions {
   signal?: AbortSignal;
 }
@@ -76,18 +91,11 @@ export interface SandboxProcess {
 }
 
 /**
- * Sandbox contract used throughout this package: buffered command execution,
- * file IO, and a lifecycle hook. Every backend implements this so callers can
- * dispose uniformly. Backends that honor `options.signal` forward it to their
- * runner; others ignore. Pure backends with no external resources (e.g.
- * virtual-sandbox) supply a no-op `dispose()`.
- *
- * `spawn` is optional: only backends that can honestly expose unbuffered
- * stdio (e.g. Docker or Apple Container sandboxes) implement it. Callers
- * feature-detect with `if (!sandbox.spawn) ...` — no silent fallback that
- * aggregates output and flushes on completion.
+ * The contract of backends not yet ported to {@link DisposableSandbox}.
+ * `createBashTool` adapts them through `fromLegacySandbox`. Deleted with the
+ * last port.
  */
-export interface DisposableSandbox extends Sandbox, AsyncDisposable {
+export interface LegacySandbox extends Sandbox, AsyncDisposable {
   /** Spawn `command` with the same Bash contract as {@link Sandbox.executeCommand}. */
   spawn?(command: string, options?: SpawnOptions): Promise<SandboxProcess>;
   /**
@@ -114,8 +122,8 @@ export interface DisposableSandbox extends Sandbox, AsyncDisposable {
  * });
  * ```
  */
-export interface SandboxReadinessOptions {
-  readiness?: (sandbox: DisposableSandbox) => void | Promise<void>;
+export interface SandboxReadinessOptions<TSandbox = DisposableSandbox> {
+  readiness?: (sandbox: TSandbox) => void | Promise<void>;
 }
 
 /**
@@ -163,17 +171,19 @@ export interface AfterBashCallOutput {
 }
 
 export interface CreateBashToolOptions {
-  sandbox: DisposableSandbox;
-  destination?: string;
+  sandbox: DisposableSandbox | LegacySandbox;
+  /**
+   * Absolute directory every command starts in, created when the tool is created.
+   * When omitted, commands run in the sandbox's default working directory and
+   * relative paths resolve against it.
+   */
+  workingDirectory?: string;
   files?: Record<string, string>;
   uploadDirectory?: {
     source: string;
     include?: string;
   };
   extraInstructions?: string;
-  promptOptions?: {
-    toolPrompt?: string;
-  };
   onBeforeBashCall?: (
     input: BeforeBashCallInput,
   ) => BeforeBashCallOutput | undefined;

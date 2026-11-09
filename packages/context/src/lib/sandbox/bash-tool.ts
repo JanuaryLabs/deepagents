@@ -8,6 +8,7 @@ import z from 'zod';
 import { withHostOnlyToolMetadata } from '@deepagents/agent';
 
 import { BashException } from './bash-exception.ts';
+import { fromLegacySandbox } from './legacy-sandbox.ts';
 import { createReadFileTool } from './read-file-tool/index.ts';
 import { shellQuote } from './shell-quote.ts';
 import {
@@ -20,121 +21,13 @@ import {
   type WriteFileTool,
 } from './types.ts';
 
-const DEFAULT_DESTINATION = '/workspace';
 const DEFAULT_MAX_FILES = 1_000;
 const DEFAULT_MAX_OUTPUT_LENGTH = 30_000;
 const TEE_OUTPUT_DIR = '/tmp/bash-tool';
-const WRITE_BATCH_SIZE = 20;
+const MAX_CONCURRENT_WRITES = 20;
 
 const REASONING_INSTRUCTION =
   'Every bash tool call must include a brief non-empty "reasoning" input explaining why the command is needed.';
-
-const KNOWN_TOOLS = new Set([
-  'awk',
-  'cat',
-  'column',
-  'comm',
-  'curl',
-  'cut',
-  'diff',
-  'expand',
-  'find',
-  'fold',
-  'grep',
-  'head',
-  'html-to-markdown',
-  'iconv',
-  'js-exec',
-  'join',
-  'jq',
-  'node',
-  'nl',
-  'od',
-  'paste',
-  'printf',
-  'python',
-  'rev',
-  'sed',
-  'sort',
-  'split',
-  'strings',
-  'tail',
-  'tee',
-  'tr',
-  'uniq',
-  'unexpand',
-  'wc',
-  'xan',
-  'xargs',
-  'xxd',
-  'yq',
-]);
-
-const FORMAT_TOOLS = {
-  json: ['jq'],
-  yaml: ['yq'],
-  html: ['html-to-markdown'],
-  xml: ['yq'],
-  csv: ['xan', 'awk', 'cut'],
-  toml: ['yq'],
-  ini: ['yq'],
-} as const;
-
-const FORMAT_LABELS: Record<keyof typeof FORMAT_TOOLS, string> = {
-  json: 'JSON',
-  yaml: 'YAML',
-  html: 'HTML',
-  xml: 'XML',
-  csv: 'CSV/TSV',
-  toml: 'TOML',
-  ini: 'INI',
-};
-
-const EXTENSION_FORMATS: Record<string, keyof typeof FORMAT_TOOLS> = {
-  '.json': 'json',
-  '.jsonl': 'json',
-  '.ndjson': 'json',
-  '.yaml': 'yaml',
-  '.yml': 'yaml',
-  '.html': 'html',
-  '.htm': 'html',
-  '.xml': 'xml',
-  '.svg': 'xml',
-  '.csv': 'csv',
-  '.tsv': 'csv',
-  '.toml': 'toml',
-  '.ini': 'ini',
-  '.cfg': 'ini',
-  '.conf': 'ini',
-};
-
-/** Catch structured bash errors without spreading class-based sandboxes. */
-function withBashExceptionCatch(sandbox: DisposableSandbox): DisposableSandbox {
-  const decorated: DisposableSandbox = {
-    async executeCommand(command, options) {
-      try {
-        return await sandbox.executeCommand(command, options);
-      } catch (error) {
-        if (error instanceof BashException) return error.format();
-        throw error;
-      }
-    },
-    readFile: (filePath, options) => sandbox.readFile(filePath, options),
-    writeFiles: (files) => sandbox.writeFiles(files),
-    exists: (filePath) => sandbox.exists(filePath),
-    dispose: () => sandbox.dispose(),
-    [Symbol.asyncDispose]() {
-      return decorated.dispose();
-    },
-  };
-
-  if (sandbox.spawn) {
-    const spawn = sandbox.spawn.bind(sandbox);
-    decorated.spawn = (command, options) => spawn(command, options);
-  }
-
-  return decorated;
-}
 
 function truncateOutput(
   output: string,
@@ -196,107 +89,48 @@ async function listInitialFiles(
 
 async function uploadInitialFiles(
   sandbox: DisposableSandbox,
-  destination: string,
+  workingDirectory: string | undefined,
   files: InitialFile[],
 ): Promise<void> {
-  for (let index = 0; index < files.length; index += WRITE_BATCH_SIZE) {
-    const batch = await Promise.all(
-      files.slice(index, index + WRITE_BATCH_SIZE).map(async (file) => ({
-        path: path.posix.join(destination, file.path),
-        content:
-          'content' in file ? file.content : await readFile(file.sourcePath),
-      })),
+  for (let index = 0; index < files.length; index += MAX_CONCURRENT_WRITES) {
+    await Promise.all(
+      files.slice(index, index + MAX_CONCURRENT_WRITES).map(async (file) => {
+        const target =
+          workingDirectory === undefined
+            ? file.path
+            : path.posix.join(workingDirectory, file.path);
+        await ('content' in file
+          ? sandbox.writeTextFile({ path: target, content: file.content })
+          : sandbox.writeBinaryFile({
+              path: target,
+              content: await readFile(file.sourcePath),
+            }));
+      }),
     );
-    await sandbox.writeFiles(batch);
   }
-}
-
-async function createToolPrompt(
-  sandbox: DisposableSandbox,
-  filenames: string[],
-  customPrompt: string | undefined,
-): Promise<string> {
-  if (customPrompt !== undefined) return customPrompt;
-
-  const result = await sandbox.executeCommand(
-    'ls /usr/bin /usr/local/bin /bin /sbin /usr/sbin 2>/dev/null',
-  );
-  const available = new Set(
-    result.stdout.split('\n').filter((entry) => KNOWN_TOOLS.has(entry)),
-  );
-  if (available.has('js-exec')) available.delete('node');
-  if (available.size === 0) return '';
-
-  const lines = [
-    `Available tools: ${[...available].sort().join(', ')}, and more`,
-  ];
-  const formats = new Set(
-    filenames
-      .map(
-        (filename) => EXTENSION_FORMATS[path.extname(filename).toLowerCase()],
-      )
-      .filter((format) => format !== undefined),
-  );
-  for (const format of formats) {
-    const tools = FORMAT_TOOLS[format].filter((name) => available.has(name));
-    if (tools.length > 0) {
-      lines.push(`For ${FORMAT_LABELS[format]}: ${tools.join(', ')}`);
-    }
-  }
-  return lines.join('\n');
 }
 
 function createBashDescription(options: {
-  destination: string;
-  filenames: string[];
-  toolPrompt: string;
-  extraInstructions: string;
+  workingDirectory: string | undefined;
+  sandboxDescription: string;
+  extraInstructions: string | undefined;
   experimentalTeeTransform: boolean;
 }): string {
-  const lines = [
-    'Execute bash commands in the sandbox environment.',
-    '',
-    `WORKING DIRECTORY: ${options.destination}`,
-    'All commands execute from this directory. Use relative paths from here.',
-    '',
-  ];
-
-  if (options.filenames.length > 0) {
-    lines.push('Available files:');
-    for (const filename of options.filenames.slice(0, 8)) {
-      lines.push(`  ${filename}`);
-    }
-    if (options.filenames.length > 8) {
-      lines.push(`  ... and ${options.filenames.length - 8} more files`);
-    }
-    lines.push('');
-  }
-
-  if (options.toolPrompt) lines.push(options.toolPrompt, '');
-
-  lines.push(
-    'Common operations:',
-    '  ls -la              # List files with details',
-    "  find . -name '*.ts' # Find files by pattern",
-    "  grep -r 'pattern' . # Search file contents",
-    '  cat <file>          # View file contents',
-    '',
-  );
-
-  if (options.experimentalTeeTransform) {
-    lines.push(
-      'INTERMEDIATE OUTPUT CAPTURE:',
-      `Pipeline stdout is captured under ${TEE_OUTPUT_DIR}/.`,
-      'Use the returned teeFiles paths to inspect full intermediate output.',
-      '',
-    );
-  }
-
-  if (options.extraInstructions) {
-    lines.push(options.extraInstructions, '');
-  }
-
-  return lines.join('\n').trim();
+  return [
+    'Run Bash commands in the sandbox. ' +
+      (options.workingDirectory !== undefined
+        ? `Every command starts in ${options.workingDirectory}. `
+        : "Commands run in the sandbox's default working directory. ") +
+      'Use ls to discover files and commands such as cat, grep, sort, awk, and jq to inspect and transform them. ' +
+      'Pipes and redirections are supported. Returns stdout, stderr, and exitCode; long output is truncated.',
+    options.sandboxDescription,
+    options.experimentalTeeTransform &&
+      `Pipeline stdout is captured under ${TEE_OUTPUT_DIR}/. Use the returned teeFiles paths to inspect full intermediate output.`,
+    options.extraInstructions,
+    REASONING_INSTRUCTION,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 /**
@@ -307,27 +141,32 @@ function createBashDescription(options: {
 export async function createBashTool(
   options: CreateBashToolOptions,
 ): Promise<AgentSandbox> {
-  const destination = options.destination ?? DEFAULT_DESTINATION;
+  const { workingDirectory } = options;
+  const sandbox =
+    'run' in options.sandbox
+      ? options.sandbox
+      : fromLegacySandbox(options.sandbox);
   const initialFiles = await listInitialFiles(options);
-  const sandbox = withBashExceptionCatch(options.sandbox);
 
-  await uploadInitialFiles(sandbox, destination, initialFiles);
-  const toolPrompt = await createToolPrompt(
-    sandbox,
-    initialFiles.map((file) => file.path),
-    options.promptOptions?.toolPrompt,
-  );
-  const extraInstructions = [options.extraInstructions, REASONING_INSTRUCTION]
-    .filter(Boolean)
-    .join('\n\n');
+  if (workingDirectory !== undefined) {
+    const created = await sandbox.run({
+      command: `mkdir -p -- ${shellQuote(workingDirectory)}`,
+    });
+    if (created.exitCode !== 0) {
+      throw new Error(
+        `Failed to create working directory ${workingDirectory}: ${created.stderr}`,
+      );
+    }
+  }
+  await uploadInitialFiles(sandbox, workingDirectory, initialFiles);
+
   const experimentalTeeTransform = options.experimentalTeeTransform ?? false;
 
   const bash: WrappedBashTool = tool({
     description: createBashDescription({
-      destination,
-      filenames: initialFiles.map((file) => file.path),
-      toolPrompt,
-      extraInstructions,
+      workingDirectory,
+      sandboxDescription: sandbox.description,
+      extraInstructions: options.extraInstructions,
       experimentalTeeTransform,
     }),
     inputSchema: z.object({
@@ -346,31 +185,33 @@ export async function createBashTool(
       const before = options.onBeforeBashCall?.({ command });
       if (before?.command !== undefined) command = before.command;
 
-      let fullCommand: string;
+      let script = command;
       let teeFiles: CommandResult['teeFiles'];
       if (experimentalTeeTransform) {
         const pipeline = new BashTransformPipeline().use(
           new TeePlugin({ outputDir: TEE_OUTPUT_DIR }),
         );
         const transformed = pipeline.transform(command);
-        fullCommand =
-          `mkdir -p ${shellQuote(TEE_OUTPUT_DIR)} ${shellQuote(destination)} && ` +
-          `cd ${shellQuote(destination)} && ${makeTeeScriptPortable(transformed.script)}`;
+        script = `mkdir -p ${shellQuote(TEE_OUTPUT_DIR)} && ${makeTeeScriptPortable(transformed.script)}`;
         teeFiles = transformed.metadata.teeFiles.map(
           (file: { command: string; stdoutFile: string }) => ({
             command: file.command,
             stdoutFile: file.stdoutFile,
           }),
         );
-      } else {
-        fullCommand =
-          `mkdir -p ${shellQuote(destination)} && ` +
-          `cd ${shellQuote(destination)} && ${command}`;
       }
 
-      let result = await sandbox.executeCommand(fullCommand, {
-        signal: executionOptions.abortSignal,
-      });
+      let result: CommandResult;
+      try {
+        result = await sandbox.run({
+          command: script,
+          ...(workingDirectory !== undefined ? { workingDirectory } : {}),
+          abortSignal: executionOptions.abortSignal,
+        });
+      } catch (error) {
+        if (!(error instanceof BashException)) throw error;
+        result = error.format();
+      }
       const maxOutputLength =
         options.maxOutputLength ?? DEFAULT_MAX_OUTPUT_LENGTH;
       result = {
@@ -389,7 +230,7 @@ export async function createBashTool(
     },
   });
 
-  const readFile = createReadFileTool({ sandbox, destination });
+  const readFileTool = createReadFileTool({ sandbox, workingDirectory });
 
   const writeFile: WriteFileTool = tool({
     description:
@@ -400,12 +241,13 @@ export async function createBashTool(
     }),
     execute: async ({ path: filePath, content }) => {
       try {
-        await sandbox.writeFiles([
-          {
-            path: path.posix.resolve(destination, filePath),
-            content,
-          },
-        ]);
+        await sandbox.writeTextFile({
+          path:
+            workingDirectory === undefined
+              ? filePath
+              : path.posix.resolve(workingDirectory, filePath),
+          content,
+        });
         return { success: true } as const;
       } catch (error) {
         if (error instanceof BashException) return error.format();
@@ -414,8 +256,10 @@ export async function createBashTool(
     },
   });
 
-  const tools = withHostOnlyToolMetadata({ bash, readFile, writeFile });
+  const tools = withHostOnlyToolMetadata({
+    bash,
+    readFile: readFileTool,
+    writeFile,
+  });
   return { bash: tools.bash, tools, sandbox };
 }
-
-export { DEFAULT_MAX_OUTPUT_LENGTH };

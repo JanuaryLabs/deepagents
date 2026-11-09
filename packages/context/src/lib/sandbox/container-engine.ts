@@ -3,6 +3,7 @@ import type { InstallerContext } from './installers/installer.ts';
 import type {
   CommandResult,
   ExecuteCommandOptions,
+  LegacySandbox,
   SandboxProcess,
   SandboxReadinessOptions,
   SpawnOptions,
@@ -84,7 +85,7 @@ export interface SandboxResources {
  * which only its own engine methods see — the skeleton is typed to this common
  * subset and physically cannot read them.
  */
-export interface CommonSandboxOptions extends SandboxReadinessOptions {
+export interface CommonSandboxOptions extends SandboxReadinessOptions<LegacySandbox> {
   volumes?: SandboxVolume[];
   resources?: SandboxResources;
   env?: Record<string, string>;

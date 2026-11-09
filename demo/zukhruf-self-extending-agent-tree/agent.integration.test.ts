@@ -35,7 +35,7 @@ const usage = {
 test('authors a missing skill before a fresh general task agent uses it', async () => {
   await using backend = await createVirtualSandbox({ fs: new InMemoryFs() });
   const sandbox = defineSandbox(async () => backend, {
-    destination: '/agent',
+    workingDirectory: '/agent',
   });
 
   let rootCalls = 0;
@@ -188,11 +188,11 @@ test('authors a missing skill before a fresh general task agent uses it', async 
   assert.equal(skillAuthorityCalls, 2);
   assert.equal(generalTaskCalls, 2);
   assert.match(
-    await backend.readFile('/agent/skills/hono/SKILL.md'),
+    (await backend.readTextFile({ path: '/agent/skills/hono/SKILL.md' }))!,
     /^name: hono$/m,
   );
   assert.equal(
-    await backend.readFile('/agent/workspace/server.ts'),
+    await backend.readTextFile({ path: '/agent/workspace/server.ts' }),
     'export default {}\n',
   );
 });

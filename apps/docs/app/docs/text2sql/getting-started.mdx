@@ -383,11 +383,11 @@ const sandbox = await createBashTool({
   ...createSqlCommandHooks({ adapters: { main: adapter } }),
 });
 
-const indexResult = await sandbox.sandbox.executeCommand('sql index');
+const indexResult = await sandbox.sandbox.run({ command: 'sql index' });
 if (indexResult.exitCode !== 0) throw new Error(indexResult.stderr);
 const manifest = JSON.parse(indexResult.stdout) as { fragmentsPath: string };
 const fragments = JSON.parse(
-  await sandbox.sandbox.readFile(manifest.fragmentsPath),
+  (await sandbox.sandbox.readTextFile({ path: manifest.fragmentsPath }))!,
 );
 context.set(...instructions(), ...fragments);
 
@@ -432,9 +432,9 @@ Use `--verbose` when you want index progress mirrored to `stderr` while keeping
 the JSON manifest on `stdout`:
 
 ```typescript
-const indexResult = await sandbox.sandbox.executeCommand(
-  'sql index --verbose pretty --out-dir ./sql',
-);
+const indexResult = await sandbox.sandbox.run({
+  command: 'sql index --verbose pretty --out-dir ./sql',
+});
 ```
 
 - `--verbose pretty` prints human-readable progress.

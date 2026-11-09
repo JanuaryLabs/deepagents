@@ -8,9 +8,9 @@ import { randomUUID } from 'node:crypto';
 import { readFileContent } from './read-file.ts';
 import type {
   CommandResult,
-  DisposableSandbox,
   ExecuteCommandOptions,
   ExitInfo,
+  LegacySandbox,
   SandboxProcess,
   SandboxReadinessOptions,
   SpawnOptions,
@@ -26,7 +26,7 @@ type RunMicrosandboxOperation = <T>(
   operation: (vm: MicrosandboxVm) => Promise<T>,
 ) => Promise<T>;
 
-export interface MicrosandboxSandboxOptions extends SandboxReadinessOptions {
+export interface MicrosandboxSandboxOptions extends SandboxReadinessOptions<LegacySandbox> {
   /**
    * Stable sandbox name. When provided, the SDK connects to the running
    * sandbox of this name, resumes it if stopped (rootfs state intact), or
@@ -42,7 +42,7 @@ export interface MicrosandboxSandboxOptions extends SandboxReadinessOptions {
    * Default working directory, created at boot (default `'/workspace'`).
    * Microsandbox images default to `/`, and common images ship no
    * `/workspace`, so the factory creates it — pass this same path as
-   * `createBashTool`'s `destination`.
+   * `createBashTool`'s `workingDirectory`.
    */
   workdir?: string;
   /**
@@ -127,13 +127,13 @@ export class MicrosandboxCommandError extends MicrosandboxSandboxError {
  * const sandbox = await createMicrosandboxSandbox({ name: chatId });
  * const { tools } = await createBashTool({
  *   sandbox,
- *   destination: MICROSANDBOX_DEFAULT_DESTINATION,
+ *   workingDirectory: MICROSANDBOX_DEFAULT_DESTINATION,
  * });
  * ```
  */
 export async function createMicrosandboxSandbox(
   options: MicrosandboxSandboxOptions = {},
-): Promise<DisposableSandbox> {
+): Promise<LegacySandbox> {
   validateMicrosandboxOptions(options);
   const sdk = await importMicrosandbox();
 
@@ -265,7 +265,7 @@ function createMicrosandboxMethods(args: {
   ephemeral: boolean;
   commandTimeout?: number;
   reconnect?: () => Promise<MicrosandboxVm>;
-}): DisposableSandbox {
+}): LegacySandbox {
   const { sdk, name, ephemeral, commandTimeout, reconnect } = args;
   let vm = args.vm;
   let reconnecting: Promise<MicrosandboxVm> | undefined;
@@ -369,7 +369,7 @@ function createMicrosandboxMethods(args: {
       }
     },
 
-    [Symbol.asyncDispose](this: DisposableSandbox): Promise<void> {
+    [Symbol.asyncDispose](this: LegacySandbox): Promise<void> {
       return this.dispose();
     },
   };

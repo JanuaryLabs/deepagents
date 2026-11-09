@@ -133,7 +133,7 @@
     "@tavily/core": "^0.7.6",
     "@types/jsdom": "^28.0.3",
     "@types/mdx": "^2.0.14",
-    "ai": "^7.0.165",
+    "ai": "^7.0.166",
     "babel-plugin-react-compiler": "^1.0.0",
     "chrome-devtools-mcp": "^1.9.0",
     "conf": "^15.1.0",

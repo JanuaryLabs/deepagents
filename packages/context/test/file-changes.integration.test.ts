@@ -204,9 +204,12 @@ describe('strace file-change tracking (docker backend)', () => {
         calls.push([...changes]);
       },
     });
-    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
+    const s = await createBashTool({
+      sandbox: tracked,
+      workingDirectory: ROOT,
+    });
     try {
-      await s.sandbox.executeCommand(`mkdir -p ${ROOT}`);
+      await s.sandbox.run({ command: `mkdir -p ${ROOT}` });
       rec.drain();
       return await fn(s, rec);
     } finally {
@@ -216,7 +219,7 @@ describe('strace file-change tracking (docker backend)', () => {
 
   it('reports write for a new file', async () => {
     await withSandbox(async (s, rec) => {
-      const r = await s.sandbox.executeCommand(`echo hi > ${ROOT}/a.txt`);
+      const r = await s.sandbox.run({ command: `echo hi > ${ROOT}/a.txt` });
       assert.strictEqual(r.exitCode, 0, r.stderr);
       const changes = rec.drain();
       assert.ok(
@@ -254,9 +257,10 @@ describe('strace file-change tracking (docker backend)', () => {
 
   it('reports write for a file written via writeFiles (not just bash)', async () => {
     await withSandbox(async (s, rec) => {
-      await s.sandbox.writeFiles([
-        { path: `${ROOT}/via-write.txt`, content: 'hi' },
-      ]);
+      await s.sandbox.writeTextFile({
+        path: `${ROOT}/via-write.txt`,
+        content: 'hi',
+      });
       const changes = rec.drain();
       assert.ok(
         changes.some(
@@ -269,9 +273,9 @@ describe('strace file-change tracking (docker backend)', () => {
 
   it('reports delete for rm', async () => {
     await withSandbox(async (s, rec) => {
-      await s.sandbox.executeCommand(`echo hi > ${ROOT}/a.txt`);
+      await s.sandbox.run({ command: `echo hi > ${ROOT}/a.txt` });
       rec.drain();
-      const r = await s.sandbox.executeCommand(`rm ${ROOT}/a.txt`);
+      const r = await s.sandbox.run({ command: `rm ${ROOT}/a.txt` });
       assert.strictEqual(r.exitCode, 0, r.stderr);
       assert.deepStrictEqual(ops(rec.drain()), [
         { op: 'delete', path: `${ROOT}/a.txt` },
@@ -281,11 +285,11 @@ describe('strace file-change tracking (docker backend)', () => {
 
   it('reports rename for mv', async () => {
     await withSandbox(async (s, rec) => {
-      await s.sandbox.executeCommand(`echo hi > ${ROOT}/a.txt`);
+      await s.sandbox.run({ command: `echo hi > ${ROOT}/a.txt` });
       rec.drain();
-      const r = await s.sandbox.executeCommand(
-        `mv ${ROOT}/a.txt ${ROOT}/b.txt`,
-      );
+      const r = await s.sandbox.run({
+        command: `mv ${ROOT}/a.txt ${ROOT}/b.txt`,
+      });
       assert.strictEqual(r.exitCode, 0, r.stderr);
       assert.ok(
         rec
@@ -302,7 +306,7 @@ describe('strace file-change tracking (docker backend)', () => {
 
   it('reports write for mkdir', async () => {
     await withSandbox(async (s, rec) => {
-      const r = await s.sandbox.executeCommand(`mkdir ${ROOT}/sub`);
+      const r = await s.sandbox.run({ command: `mkdir ${ROOT}/sub` });
       assert.strictEqual(r.exitCode, 0, r.stderr);
       assert.ok(
         rec.drain().some((c) => c.op === 'write' && c.path === `${ROOT}/sub`),
@@ -312,9 +316,9 @@ describe('strace file-change tracking (docker backend)', () => {
 
   it('drops a file written then deleted within one command', async () => {
     await withSandbox(async (s, rec) => {
-      const r = await s.sandbox.executeCommand(
-        `sh -c 'echo x > ${ROOT}/t.txt; rm ${ROOT}/t.txt'`,
-      );
+      const r = await s.sandbox.run({
+        command: `sh -c 'echo x > ${ROOT}/t.txt; rm ${ROOT}/t.txt'`,
+      });
       assert.strictEqual(r.exitCode, 0, r.stderr);
       assert.deepStrictEqual(
         rec.drain().filter((c) => c.path === `${ROOT}/t.txt`),
@@ -325,7 +329,7 @@ describe('strace file-change tracking (docker backend)', () => {
 
   it('excludes the trace directory from the manifest', async () => {
     await withSandbox(async (s, rec) => {
-      await s.sandbox.executeCommand(`echo hi > ${ROOT}/a.txt`);
+      await s.sandbox.run({ command: `echo hi > ${ROOT}/a.txt` });
       assert.ok(!rec.drain().some((c) => c.path.startsWith('/tmp/dat-trace')));
     });
   });
@@ -333,8 +337,8 @@ describe('strace file-change tracking (docker backend)', () => {
   it('fires onFileChanges per command with only that call’s changes', async () => {
     await withSandbox(async (s, rec) => {
       await Promise.all([
-        s.sandbox.executeCommand(`echo one > ${ROOT}/one.txt`),
-        s.sandbox.executeCommand(`echo two > ${ROOT}/two.txt`),
+        s.sandbox.run({ command: `echo one > ${ROOT}/one.txt` }),
+        s.sandbox.run({ command: `echo two > ${ROOT}/two.txt` }),
       ]);
       const paths = rec.calls.map((group) => group.map((c) => c.path));
       const isolatedOne = paths.some(
@@ -349,7 +353,7 @@ describe('strace file-change tracking (docker backend)', () => {
 
   it('decodes octal-escaped non-ASCII filenames (café.txt)', async () => {
     await withSandbox(async (s, rec) => {
-      const r = await s.sandbox.executeCommand(`echo hi > ${ROOT}/café.txt`);
+      const r = await s.sandbox.run({ command: `echo hi > ${ROOT}/café.txt` });
       assert.strictEqual(r.exitCode, 0, r.stderr);
       assert.ok(
         rec
@@ -361,11 +365,11 @@ describe('strace file-change tracking (docker backend)', () => {
 
   it('collapses rename-then-recreate to a single rename (no duplicate)', async () => {
     await withSandbox(async (s, rec) => {
-      await s.sandbox.executeCommand(`echo a > ${ROOT}/a.txt`);
+      await s.sandbox.run({ command: `echo a > ${ROOT}/a.txt` });
       rec.drain();
-      const r = await s.sandbox.executeCommand(
-        `sh -c 'mv ${ROOT}/a.txt ${ROOT}/b.txt && echo c > ${ROOT}/b.txt'`,
-      );
+      const r = await s.sandbox.run({
+        command: `sh -c 'mv ${ROOT}/a.txt ${ROOT}/b.txt && echo c > ${ROOT}/b.txt'`,
+      });
       assert.strictEqual(r.exitCode, 0, r.stderr);
       assert.deepStrictEqual(
         ops(rec.drain()).filter((c) => c.path === `${ROOT}/b.txt`),
@@ -376,13 +380,13 @@ describe('strace file-change tracking (docker backend)', () => {
 
   it('does NOT report a write for an O_RDWR open that only reads', async () => {
     await withSandbox(async (s, rec) => {
-      await s.sandbox.executeCommand(`printf data > ${ROOT}/db`);
+      await s.sandbox.run({ command: `printf data > ${ROOT}/db` });
       rec.drain();
       // python open(path, 'r+') is O_RDWR with no O_CREAT/O_TRUNC; reading emits
       // no write() syscall, so the fix must not record a phantom write.
-      const r = await s.sandbox.executeCommand(
-        `python3 -c "f=open('${ROOT}/db','r+'); f.read(); f.close()"`,
-      );
+      const r = await s.sandbox.run({
+        command: `python3 -c "f=open('${ROOT}/db','r+'); f.read(); f.close()"`,
+      });
       assert.strictEqual(r.exitCode, 0, r.stderr);
       assert.deepStrictEqual(
         rec.drain().filter((c) => c.path === `${ROOT}/db`),
@@ -393,11 +397,11 @@ describe('strace file-change tracking (docker backend)', () => {
 
   it('reports a write when an O_RDWR open actually writes', async () => {
     await withSandbox(async (s, rec) => {
-      await s.sandbox.executeCommand(`printf data > ${ROOT}/db2`);
+      await s.sandbox.run({ command: `printf data > ${ROOT}/db2` });
       rec.drain();
-      const r = await s.sandbox.executeCommand(
-        `python3 -c "f=open('${ROOT}/db2','r+'); f.write('x'); f.close()"`,
-      );
+      const r = await s.sandbox.run({
+        command: `python3 -c "f=open('${ROOT}/db2','r+'); f.write('x'); f.close()"`,
+      });
       assert.strictEqual(r.exitCode, 0, r.stderr);
       assert.ok(
         rec.drain().some((c) => c.op === 'write' && c.path === `${ROOT}/db2`),
@@ -408,7 +412,7 @@ describe('strace file-change tracking (docker backend)', () => {
 
   it('preserves the command exit code under strace (not masked)', async () => {
     await withSandbox(async (s) => {
-      const r = await s.sandbox.executeCommand(`sh -c 'exit 7'`);
+      const r = await s.sandbox.run({ command: `sh -c 'exit 7'` });
       assert.strictEqual(r.exitCode, 7, r.stderr);
     });
   });
@@ -460,10 +464,12 @@ describe('strace file-change tracking (docker backend)', () => {
   it('traces spawn — change reported when the process exits', async () => {
     await withSandbox(async (s, rec) => {
       assert.ok(s.sandbox.spawn, 'docker sandbox should expose spawn');
-      const child = await s.sandbox.spawn(`echo spawned > ${ROOT}/sp.txt`);
+      const child = await s.sandbox.spawn({
+        command: `echo spawned > ${ROOT}/sp.txt`,
+      });
       await Promise.all([drainStream(child.stdout), drainStream(child.stderr)]);
-      const info = await child.exit;
-      assert.strictEqual(info.success, true);
+      const info = await child.wait();
+      assert.strictEqual(info.exitCode, 0);
       assert.ok(
         rec
           .drain()
@@ -485,13 +491,16 @@ describe('strace file-change tracking (docker backend)', () => {
         seen.push(...changes);
       },
     });
-    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
+    const s = await createBashTool({
+      sandbox: tracked,
+      workingDirectory: ROOT,
+    });
     try {
-      await s.sandbox.executeCommand(`mkdir -p ${ROOT}/skills`);
+      await s.sandbox.run({ command: `mkdir -p ${ROOT}/skills` });
       seen.length = 0;
-      const r = await s.sandbox.executeCommand(
-        `sh -c 'echo a > ${ROOT}/skills/SKILL.md; echo b > ${ROOT}/keep.txt'`,
-      );
+      const r = await s.sandbox.run({
+        command: `sh -c 'echo a > ${ROOT}/skills/SKILL.md; echo b > ${ROOT}/keep.txt'`,
+      });
       assert.strictEqual(r.exitCode, 0, r.stderr);
       const paths = seen.map((c) => c.path);
       assert.ok(
@@ -533,6 +542,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
+    await backend.executeCommand(`mkdir -p ${ROOT}`);
     const tracked = await withStraceFileChanges(backend, {
       include: [ROOT, `${ROOT}/**`],
       onFileChanges: () => {
@@ -540,11 +550,12 @@ describe('onFileChanges failure handling (docker backend)', () => {
       },
       onError: (error) => errors.push(error),
     });
-    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
+    const s = await createBashTool({
+      sandbox: tracked,
+      workingDirectory: ROOT,
+    });
     try {
-      // The setup mkdir trips the tripwire too — swallow its failed call.
-      await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
-      const r = await s.sandbox.executeCommand(`echo hi > ${ROOT}/a.txt`);
+      const r = await s.sandbox.run({ command: `echo hi > ${ROOT}/a.txt` });
       assert.strictEqual(r.stdout, '');
       assert.strictEqual(r.stderr, 'rejected: no writes allowed\n');
       assert.strictEqual(r.exitCode, 42);
@@ -558,7 +569,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
 
       // The command itself still ran — reading a.txt (no write → no throw)
       // confirms the side effect landed despite the failed tool result.
-      const read = await s.sandbox.executeCommand(`cat ${ROOT}/a.txt`);
+      const read = await s.sandbox.run({ command: `cat ${ROOT}/a.txt` });
       assert.strictEqual(read.exitCode, 0, read.stderr);
       assert.match(read.stdout, /hi/);
     } finally {
@@ -572,22 +583,25 @@ describe('onFileChanges failure handling (docker backend)', () => {
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
+    await backend.executeCommand(`mkdir -p ${ROOT}`);
     const tracked = await withStraceFileChanges(backend, {
       include: [ROOT, `${ROOT}/**`],
       onFileChanges: throwBoom,
       onError: (error) => errors.push(error),
     });
-    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
+    const s = await createBashTool({
+      sandbox: tracked,
+      workingDirectory: ROOT,
+    });
     try {
-      await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
       // A non-BashException isn't caught up the chain, so the call rejects.
       await assert.rejects(
-        () => s.sandbox.executeCommand(`echo hi > ${ROOT}/b.txt`),
+        async () => s.sandbox.run({ command: `echo hi > ${ROOT}/b.txt` }),
         /boom/,
       );
       assert.strictEqual(errors.length, 0);
 
-      const read = await s.sandbox.executeCommand(`cat ${ROOT}/b.txt`);
+      const read = await s.sandbox.run({ command: `cat ${ROOT}/b.txt` });
       assert.strictEqual(read.exitCode, 0, read.stderr);
       assert.match(read.stdout, /hi/);
     } finally {
@@ -600,22 +614,28 @@ describe('onFileChanges failure handling (docker backend)', () => {
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
+    await backend.executeCommand(`mkdir -p ${ROOT}`);
     const tracked = await withStraceFileChanges(backend, {
       include: [ROOT, `${ROOT}/**`],
       onFileChanges: throwBoom,
     });
-    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
+    const s = await createBashTool({
+      sandbox: tracked,
+      workingDirectory: ROOT,
+    });
     try {
-      await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
       // The sandbox method itself rejects; the writeFile TOOL wraps this (next
       // test). A plain Error has no format(), so it simply propagates.
       await assert.rejects(
-        () =>
-          s.sandbox.writeFiles([{ path: `${ROOT}/blocked.txt`, content: 'x' }]),
+        async () =>
+          s.sandbox.writeTextFile({
+            path: `${ROOT}/blocked.txt`,
+            content: 'x',
+          }),
         /boom/,
       );
       // Post-hoc gate, same as the bash path: the write already landed.
-      const read = await s.sandbox.executeCommand(`cat ${ROOT}/blocked.txt`);
+      const read = await s.sandbox.run({ command: `cat ${ROOT}/blocked.txt` });
       assert.strictEqual(read.exitCode, 0, read.stderr);
       assert.match(read.stdout, /x/);
     } finally {
@@ -628,15 +648,18 @@ describe('onFileChanges failure handling (docker backend)', () => {
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
+    await backend.executeCommand(`mkdir -p ${ROOT}`);
     const tracked = await withStraceFileChanges(backend, {
       include: [ROOT, `${ROOT}/**`],
       onFileChanges: () => {
         throw new RejectChange('no writes allowed');
       },
     });
-    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
+    const s = await createBashTool({
+      sandbox: tracked,
+      workingDirectory: ROOT,
+    });
     try {
-      await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
       const model: MockLanguageModelV4 = new MockLanguageModelV4({
         doGenerate: toolCallsResponse([
           writeFileToolCall('w1', `${ROOT}/blocked.json`, 'x'),
@@ -668,15 +691,18 @@ describe('onFileChanges failure handling (docker backend)', () => {
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
+    await backend.executeCommand(`mkdir -p ${ROOT}`);
     const tracked = await withStraceFileChanges(backend, {
       include: [ROOT, `${ROOT}/**`],
       onFileChanges: () => {
         throw new RejectChange('no writes allowed');
       },
     });
-    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
+    const s = await createBashTool({
+      sandbox: tracked,
+      workingDirectory: ROOT,
+    });
     try {
-      await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
       const model: MockLanguageModelV4 = new MockLanguageModelV4({
         doGenerate: async () => {
           return model.doGenerateCalls.length === 1
@@ -724,27 +750,30 @@ describe('onFileChanges failure handling (docker backend)', () => {
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
+    await backend.executeCommand(`mkdir -p ${ROOT}`);
     const tracked = await withStraceFileChanges(backend, {
       include: [ROOT, `${ROOT}/**`],
       onFileChanges: throwBoom,
     });
-    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
+    const s = await createBashTool({
+      sandbox: tracked,
+      workingDirectory: ROOT,
+    });
     try {
-      await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
       // ls runs under strace too, so its own in-flight trace file is always
       // present (count 1). A leak from the throwing command would push this to
       // ≥2. removeTrace is fire-and-forget, so poll to absorb the async rm.
       const countTraces = async (): Promise<number> => {
-        const r = await s.sandbox.executeCommand(
-          `sh -c 'ls /tmp/dat-trace 2>/dev/null | grep -c "\\.strace$" || true'`,
-        );
+        const r = await s.sandbox.run({
+          command: `sh -c 'ls /tmp/dat-trace 2>/dev/null | grep -c "\\.strace$" || true'`,
+        });
         return Number(r.stdout.trim());
       };
       // The plain-Error throw rejects this call; we only care that its trace
       // was swept, so swallow the rejection.
-      await s.sandbox
-        .executeCommand(`echo hi > ${ROOT}/leak.txt`)
-        .catch(() => {});
+      await Promise.resolve(
+        s.sandbox.run({ command: `echo hi > ${ROOT}/leak.txt` }),
+      ).catch(() => {});
       let count = Number.POSITIVE_INFINITY;
       for (let i = 0; i < 20 && count > 1; i++) {
         count = await countTraces();
@@ -761,19 +790,24 @@ describe('onFileChanges failure handling (docker backend)', () => {
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
+    await backend.executeCommand(`mkdir -p ${ROOT}`);
     const tracked = await withStraceFileChanges(backend, {
       include: [ROOT, `${ROOT}/**`],
       onFileChanges: throwBoom,
       onError: (error) => errors.push(error),
     });
-    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
+    const s = await createBashTool({
+      sandbox: tracked,
+      workingDirectory: ROOT,
+    });
     try {
-      await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
       assert.ok(s.sandbox.spawn, 'docker sandbox should expose spawn');
-      const child = await s.sandbox.spawn(`echo hi > ${ROOT}/sp.txt`);
+      const child = await s.sandbox.spawn({
+        command: `echo hi > ${ROOT}/sp.txt`,
+      });
       await Promise.all([drainStream(child.stdout), drainStream(child.stderr)]);
-      const info = await child.exit;
-      assert.strictEqual(info.success, true);
+      const info = await child.wait();
+      assert.strictEqual(info.exitCode, 0);
       // Spawn is onError's only signal — the isolated throw landed here.
       assert.strictEqual(errors.length, 1);
       const [error] = errors;
@@ -789,6 +823,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
+    await backend.executeCommand(`mkdir -p ${ROOT}`);
     const tracked = await withStraceFileChanges(backend, {
       include: [ROOT, `${ROOT}/**`],
       onFileChanges: throwBoom,
@@ -796,16 +831,20 @@ describe('onFileChanges failure handling (docker backend)', () => {
         throw new Error('onError exploded');
       },
     });
-    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
+    const s = await createBashTool({
+      sandbox: tracked,
+      workingDirectory: ROOT,
+    });
     try {
-      await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
       assert.ok(s.sandbox.spawn, 'docker sandbox should expose spawn');
-      const child = await s.sandbox.spawn(`echo hi > ${ROOT}/sp-err.txt`);
+      const child = await s.sandbox.spawn({
+        command: `echo hi > ${ROOT}/sp-err.txt`,
+      });
       await Promise.all([drainStream(child.stdout), drainStream(child.stderr)]);
       // onError throws inside collectSpawn's catch; the isolation boundary must
       // swallow it so the exit still resolves rather than reject.
-      const info = await child.exit;
-      assert.strictEqual(info.success, true);
+      const info = await child.wait();
+      assert.strictEqual(info.exitCode, 0);
     } finally {
       await s.sandbox.dispose();
     }

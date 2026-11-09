@@ -30,7 +30,7 @@ export function createGroupChatSandbox(readonly: boolean) {
               return readonly ? shared.readonly() : shared;
             }),
       }),
-    { destination: groupChatDirectory },
+    { workingDirectory: groupChatDirectory },
   );
 }
 
