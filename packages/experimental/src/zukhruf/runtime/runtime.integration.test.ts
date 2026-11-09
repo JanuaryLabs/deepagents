@@ -2114,7 +2114,7 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal(messages.length, 2, 'one user message + one assistant reply');
   });
 
-  it('committed turns leave no jobs behind (commit-GC end-to-end)', async () => {
+  it('committed turns leave no jobs behind (commit-GC end-to-end)', async (t) => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(scriptedModel(track));
     await using _worker = await h.runtime.work();
@@ -2127,13 +2127,17 @@ describe('zukhruf runtime — background executor', () => {
     await collectText(
       (await h.runtime.enqueue(conversation, turn('two'))).stream,
     );
-    await sleep(500);
 
-    const jobs = await h.boss.findJobs(h.queue.queue, { key: 'gc1' });
-    assert.deepStrictEqual(
-      jobs.map((j) => j.state),
-      [],
-      'both turns committed and their jobs were deleted — the queue does not accumulate',
+    await t.waitFor(
+      async () => {
+        const jobs = await h.boss.findJobs(h.queue.queue, { key: 'gc1' });
+        assert.deepStrictEqual(
+          jobs.map((j) => j.state),
+          [],
+          'both turns committed and their jobs were deleted — the queue does not accumulate',
+        );
+      },
+      { interval: 20, timeout: 5_000 },
     );
   });
 
@@ -2680,7 +2684,7 @@ describe('zukhruf runtime — background executor', () => {
     );
   });
 
-  it('turns enqueued while a chat awaits approval queue behind it, in order', async () => {
+  it('turns enqueued while a chat awaits approval queue behind it, in order', async (t) => {
     const { track, agent, model } = approvalSetup();
     await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work({ concurrency: 2 });
@@ -2694,7 +2698,13 @@ describe('zukhruf runtime — background executor', () => {
 
     const second = await h.runtime.enqueue(conversation, turn('two'));
     const third = await h.runtime.enqueue(conversation, turn('three'));
-    await sleep(2500);
+    await t.waitFor(
+      async () => {
+        const jobs = await h.boss.findJobs(h.queue.queue, { key: 'a4' });
+        assert.equal(jobs.filter((j) => j.state === 'cancelled').length, 2);
+      },
+      { interval: 20, timeout: 5_000 },
+    );
     assert.deepStrictEqual(
       track.calls,
       ['send it'],
@@ -2719,7 +2729,7 @@ describe('zukhruf runtime — background executor', () => {
     );
   });
 
-  it('an AI SDK approval continuation leaves no queue job behind', async () => {
+  it('an AI SDK approval continuation leaves no queue job behind', async (t) => {
     const { agent, model } = approvalSetup();
     await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work();
@@ -2745,19 +2755,23 @@ describe('zukhruf runtime — background executor', () => {
       approved: true,
     });
     await waitForText(h.runtime, conversation, 'done:send it');
-    await sleep(400);
 
-    const afterApprove = await h.boss.findJobs(h.queue.queue, {
-      key: 'gc-pause',
-    });
-    assert.deepStrictEqual(
-      afterApprove.map((j) => j.state),
-      [],
-      'the assistant-message continuation is deleted once it commits',
+    await t.waitFor(
+      async () => {
+        const afterApprove = await h.boss.findJobs(h.queue.queue, {
+          key: 'gc-pause',
+        });
+        assert.deepStrictEqual(
+          afterApprove.map((j) => j.state),
+          [],
+          'the assistant-message continuation is deleted once it commits',
+        );
+      },
+      { interval: 20, timeout: 5_000 },
     );
   });
 
-  it('the deny flow leaves no queue job behind', async () => {
+  it('the deny flow leaves no queue job behind', async (t) => {
     const { track, agent, model } = approvalSetup();
     await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work();
@@ -2776,13 +2790,17 @@ describe('zukhruf runtime — background executor', () => {
     });
     await waitForText(h.runtime, conversation, 'denied:send it');
     assert.equal(track.toolRuns, 0, 'tool never ran');
-    await sleep(400);
 
-    const jobs = await h.boss.findJobs(h.queue.queue, { key: 'gc-deny' });
-    assert.deepStrictEqual(
-      jobs.map((j) => j.state),
-      [],
-      'denied continuation commits and its job is deleted',
+    await t.waitFor(
+      async () => {
+        const jobs = await h.boss.findJobs(h.queue.queue, { key: 'gc-deny' });
+        assert.deepStrictEqual(
+          jobs.map((j) => j.state),
+          [],
+          'denied continuation commits and its job is deleted',
+        );
+      },
+      { interval: 20, timeout: 5_000 },
     );
   });
 
@@ -2837,7 +2855,7 @@ describe('zukhruf runtime — background executor', () => {
     },
   );
 
-  it('parked follow-ups survive a maintenance pass while gated, then revive in order and leave no jobs behind', async () => {
+  it('parked follow-ups survive a maintenance pass while gated, then revive in order and leave no jobs behind', async (t) => {
     const { track, agent, model } = approvalSetup();
     await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work({ concurrency: 2 });
@@ -2852,18 +2870,23 @@ describe('zukhruf runtime — background executor', () => {
     const second = await h.runtime.enqueue(conversation, turn('two'));
     const third = await h.runtime.enqueue(conversation, turn('three'));
     const fourth = await h.runtime.enqueue(conversation, turn('four'));
-    await sleep(2500);
+    await t.waitFor(
+      async () => {
+        const parked = await h.boss.findJobs(h.queue.queue, {
+          key: 'gc-behind',
+        });
+        assert.equal(
+          parked.filter((j) => j.state === 'cancelled').length,
+          3,
+          'all three follow-ups are parked (cancelled)',
+        );
+      },
+      { interval: 20, timeout: 5_000 },
+    );
     assert.deepStrictEqual(
       track.calls,
       ['send it'],
       'gated — parked turns did not run',
-    );
-
-    const parked = await h.boss.findJobs(h.queue.queue, { key: 'gc-behind' });
-    assert.equal(
-      parked.filter((j) => j.state === 'cancelled').length,
-      3,
-      'all three follow-ups are parked (cancelled)',
     );
 
     // The maintenance pass that would delete a retention-eligible job.
@@ -2895,16 +2918,22 @@ describe('zukhruf runtime — background executor', () => {
       'continuation first, then the three revived follow-ups in original order',
     );
 
-    await sleep(500);
-    const leftover = await h.boss.findJobs(h.queue.queue, { key: 'gc-behind' });
-    assert.deepStrictEqual(
-      leftover.map((j) => j.state),
-      [],
-      'every job is deleted once its turn commits — nothing accumulates',
+    await t.waitFor(
+      async () => {
+        const leftover = await h.boss.findJobs(h.queue.queue, {
+          key: 'gc-behind',
+        });
+        assert.deepStrictEqual(
+          leftover.map((j) => j.state),
+          [],
+          'every job is deleted once its turn commits — nothing accumulates',
+        );
+      },
+      { interval: 20, timeout: 5_000 },
     );
   });
 
-  it('a turn cancelled while queued leaves no job behind when the worker skips it', async () => {
+  it('a turn cancelled while queued leaves no job behind when the worker skips it', async (t) => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(scriptedModel(track));
 
@@ -2916,18 +2945,24 @@ describe('zukhruf runtime — background executor', () => {
 
     void _worker;
     await collectText(stream);
-    await sleep(500);
 
-    assert.deepStrictEqual(track.calls, [], 'the cancelled turn never ran');
-    const jobs = await h.boss.findJobs(h.queue.queue, { key: 'gc-cancelq' });
-    assert.deepStrictEqual(
-      jobs.map((j) => j.state),
-      [],
-      'the skipped job is deleted, not left dangling in the queue',
+    await t.waitFor(
+      async () => {
+        const jobs = await h.boss.findJobs(h.queue.queue, {
+          key: 'gc-cancelq',
+        });
+        assert.deepStrictEqual(
+          jobs.map((j) => j.state),
+          [],
+          'the skipped job is deleted, not left dangling in the queue',
+        );
+      },
+      { interval: 20, timeout: 5_000 },
     );
+    assert.deepStrictEqual(track.calls, [], 'the cancelled turn never ran');
   });
 
-  it('resumeParked revives a user-cancelled follow-up, but the terminal-stream check skips it and cleans it up', async () => {
+  it('resumeParked revives a user-cancelled follow-up, but the terminal-stream check skips it and cleans it up', async (t) => {
     const { track, agent, model } = approvalSetup();
     await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work({ concurrency: 2 });
@@ -2942,14 +2977,18 @@ describe('zukhruf runtime — background executor', () => {
     // A follow-up arrives while gated and parks (job cancelled, stream queued).
     const second = await h.runtime.enqueue(conversation, turn('two'));
     await waitForStatus(h.streamStore, second.id, ['queued']);
-    await sleep(1500);
-    const parked = await h.boss.findJobs(h.queue.queue, {
-      key: 'gc-parkcancel',
-    });
-    assert.equal(
-      parked.filter((j) => j.state === 'cancelled').length,
-      1,
-      'the follow-up is parked',
+    await t.waitFor(
+      async () => {
+        const parked = await h.boss.findJobs(h.queue.queue, {
+          key: 'gc-parkcancel',
+        });
+        assert.equal(
+          parked.filter((j) => j.state === 'cancelled').length,
+          1,
+          'the follow-up is parked',
+        );
+      },
+      { interval: 20, timeout: 5_000 },
     );
 
     // The user cancels that follow-up (stream → cancelled) while it is parked.
@@ -2964,20 +3003,24 @@ describe('zukhruf runtime — background executor', () => {
       approved: true,
     });
     await waitForText(h.runtime, conversation, 'done:send it');
-    await sleep(600);
 
+    await t.waitFor(
+      async () => {
+        const leftover = await h.boss.findJobs(h.queue.queue, {
+          key: 'gc-parkcancel',
+        });
+        assert.deepStrictEqual(
+          leftover.map((j) => j.state),
+          [],
+          'the skipped follow-up job is deleted, not left dangling',
+        );
+      },
+      { interval: 20, timeout: 5_000 },
+    );
     assert.deepStrictEqual(
       track.calls,
       ['send it', 'send it'],
       'the user-cancelled follow-up never ran — only the pause and its continuation',
-    );
-    const leftover = await h.boss.findJobs(h.queue.queue, {
-      key: 'gc-parkcancel',
-    });
-    assert.deepStrictEqual(
-      leftover.map((j) => j.state),
-      [],
-      'the skipped follow-up job is deleted, not left dangling',
     );
   });
 

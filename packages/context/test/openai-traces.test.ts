@@ -5,7 +5,7 @@ import { type Telemetry, isStepCount, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { HttpResponse, http } from 'msw';
 import assert from 'node:assert';
-import { describe, it } from 'node:test';
+import { type TestContext, describe, it } from 'node:test';
 import { z } from 'zod';
 
 import { isRecord } from '@deepagents/context';
@@ -316,13 +316,25 @@ function createTwoStepToolModel() {
   });
 }
 
-async function flushTelemetry() {
-  await new Promise((resolve) => setTimeout(resolve, 25));
+async function tracesExported(
+  t: TestContext,
+  captured: IngestBody[],
+  count = 1,
+) {
+  await t.waitFor(
+    () => {
+      const traces = captured
+        .flatMap((body) => body.data)
+        .filter((item) => item.object === 'trace');
+      assert.ok(traces.length >= count);
+    },
+    { interval: 5, timeout: 5_000 },
+  );
 }
 
 describe('OpenAI Traces Integration', () => {
   describe('createOpenAITracesIntegration', () => {
-    it('produces correct trace and spans for a simple streamText call', async () => {
+    it('produces correct trace and spans for a simple streamText call', async (t) => {
       const { streamText } = await import('ai');
       using captured = captureIngestRequests();
 
@@ -348,7 +360,7 @@ describe('OpenAI Traces Integration', () => {
       }
 
       await result.finalStep;
-      await flushTelemetry();
+      await tracesExported(t, captured);
 
       assert.strictEqual(captured.length, 1, 'should have exported once');
       const items = captured[0].data;
@@ -404,7 +416,7 @@ describe('OpenAI Traces Integration', () => {
       );
     });
 
-    it('can be reused without leaking trace state between runs', async () => {
+    it('can be reused without leaking trace state between runs', async (t) => {
       const { streamText } = await import('ai');
       using captured = captureIngestRequests();
 
@@ -431,7 +443,7 @@ describe('OpenAI Traces Integration', () => {
         await result.finalStep;
       }
 
-      await flushTelemetry();
+      await tracesExported(t, captured, 2);
 
       assert.strictEqual(captured.length, 2);
 
@@ -451,7 +463,7 @@ describe('OpenAI Traces Integration', () => {
       );
     });
 
-    it('supports overlapping runs on the same integration instance', async () => {
+    it('supports overlapping runs on the same integration instance', async (t) => {
       const { streamText } = await import('ai');
       using captured = captureIngestRequests();
 
@@ -479,7 +491,7 @@ describe('OpenAI Traces Integration', () => {
       }
 
       await Promise.all([run('Run A'), run('Run B')]);
-      await flushTelemetry();
+      await tracesExported(t, captured, 2);
 
       const allItems = captured.flatMap((body) => body.data);
       const traces = allItems.filter((item) => item.object === 'trace');
@@ -557,7 +569,7 @@ describe('OpenAI Traces Integration', () => {
       assert.strictEqual(generationSpanForA.trace_id, traceForA.id);
     });
 
-    it('captures multi-step runs with one generation span per step', async () => {
+    it('captures multi-step runs with one generation span per step', async (t) => {
       const { streamText, tool } = await import('ai');
       using captured = captureIngestRequests();
 
@@ -589,7 +601,7 @@ describe('OpenAI Traces Integration', () => {
       }
 
       await result.finalStep;
-      await flushTelemetry();
+      await tracesExported(t, captured);
 
       assert.strictEqual(captured.length, 1);
       const items = captured[0].data;
@@ -607,7 +619,7 @@ describe('OpenAI Traces Integration', () => {
       }
     });
 
-    it('produces function spans for tool calls', async () => {
+    it('produces function spans for tool calls', async (t) => {
       const { streamText, tool } = await import('ai');
       using captured = captureIngestRequests();
 
@@ -639,7 +651,7 @@ describe('OpenAI Traces Integration', () => {
       }
 
       await result.finalStep;
-      await flushTelemetry();
+      await tracesExported(t, captured);
 
       assert.strictEqual(captured.length, 1);
       const items = captured[0].data;
@@ -666,7 +678,7 @@ describe('OpenAI Traces Integration', () => {
       });
     });
 
-    it('records tool failures using span error data', async () => {
+    it('records tool failures using span error data', async (t) => {
       const { streamText, tool } = await import('ai');
       using captured = captureIngestRequests();
       const integration = createOpenAITracesIntegration({
@@ -695,7 +707,7 @@ describe('OpenAI Traces Integration', () => {
       });
       await result.consumeStream();
 
-      await flushTelemetry();
+      await tracesExported(t, captured);
 
       const functionSpan = captured[0].data
         .filter((item) => item.object === 'trace.span')
@@ -710,7 +722,7 @@ describe('OpenAI Traces Integration', () => {
       });
     });
 
-    it('respects includeSensitiveData=false for generation and function spans', async () => {
+    it('respects includeSensitiveData=false for generation and function spans', async (t) => {
       const { streamText, tool } = await import('ai');
       using captured = captureIngestRequests();
 
@@ -743,7 +755,7 @@ describe('OpenAI Traces Integration', () => {
       }
 
       await result.finalStep;
-      await flushTelemetry();
+      await tracesExported(t, captured);
 
       const items = captured[0].data;
       const spans = items.filter((item) => item.object === 'trace.span');
@@ -1120,7 +1132,7 @@ describe('OpenAI Traces Integration', () => {
 });
 
 describe('OpenAI Traces wire format', () => {
-  it('sends generation span input as an array of message objects on the wire', async () => {
+  it('sends generation span input as an array of message objects on the wire', async (t) => {
     const { streamText } = await import('ai');
     using captured = captureIngestRequests();
 
@@ -1143,7 +1155,7 @@ describe('OpenAI Traces wire format', () => {
       // consume
     }
     await result.finalStep;
-    await flushTelemetry();
+    await tracesExported(t, captured);
 
     assert.ok(captured.length >= 1, 'should have posted to /v1/traces/ingest');
     const [genSpan] = spansOfType(captured[0], 'generation');
@@ -1160,7 +1172,7 @@ describe('OpenAI Traces wire format', () => {
     );
   });
 
-  it('sends generation span output as an array of message objects on the wire', async () => {
+  it('sends generation span output as an array of message objects on the wire', async (t) => {
     const { streamText } = await import('ai');
     using captured = captureIngestRequests();
 
@@ -1183,7 +1195,7 @@ describe('OpenAI Traces wire format', () => {
       // consume
     }
     await result.finalStep;
-    await flushTelemetry();
+    await tracesExported(t, captured);
 
     const [genSpan] = spansOfType(captured[0], 'generation');
     const output = genSpan.span_data.output;
@@ -1197,7 +1209,7 @@ describe('OpenAI Traces wire format', () => {
     );
   });
 
-  it('serializes function span input and output as JSON strings on the wire', async () => {
+  it('serializes function span input and output as JSON strings on the wire', async (t) => {
     const { streamText, tool } = await import('ai');
     using captured = captureIngestRequests();
 
@@ -1228,7 +1240,7 @@ describe('OpenAI Traces wire format', () => {
       // consume
     }
     await result.finalStep;
-    await flushTelemetry();
+    await tracesExported(t, captured);
 
     const [fnSpan] = spansOfType(captured[0], 'function');
     assert.ok(fnSpan, 'expected a function span in the exported body');
@@ -1243,7 +1255,7 @@ describe('OpenAI Traces wire format', () => {
     });
   });
 
-  it('does not include total_tokens in generation span_data.usage on the wire', async () => {
+  it('does not include total_tokens in generation span_data.usage on the wire', async (t) => {
     const { streamText } = await import('ai');
     using captured = captureIngestRequests();
 
@@ -1265,7 +1277,7 @@ describe('OpenAI Traces wire format', () => {
       // consume
     }
     await result.finalStep;
-    await flushTelemetry();
+    await tracesExported(t, captured);
 
     const [genSpan] = spansOfType(captured[0], 'generation');
     assert.ok(genSpan, 'expected a generation span');
@@ -1353,7 +1365,7 @@ describe('OpenAI Traces wire format', () => {
     });
   });
 
-  it('validates the full wire schema across generation and function spans in one flow', async () => {
+  it('validates the full wire schema across generation and function spans in one flow', async (t) => {
     const { streamText, tool } = await import('ai');
     using captured = captureIngestRequests();
 
@@ -1384,7 +1396,7 @@ describe('OpenAI Traces wire format', () => {
       // consume
     }
     await result.finalStep;
-    await flushTelemetry();
+    await tracesExported(t, captured);
 
     const spans = captured.flatMap((body) =>
       body.data.filter((item) => item.object === 'trace.span'),
@@ -1405,7 +1417,7 @@ describe('OpenAI Traces wire format', () => {
     );
   });
 
-  it('disambiguates concurrent runs with distinct prompts and no other discriminator', async () => {
+  it('disambiguates concurrent runs with distinct prompts and no other discriminator', async (t) => {
     const { streamText } = await import('ai');
     using captured = captureIngestRequests();
 
@@ -1431,7 +1443,7 @@ describe('OpenAI Traces wire format', () => {
     }
 
     await Promise.all([run('Alpha'), run('Beta')]);
-    await flushTelemetry();
+    await tracesExported(t, captured, 2);
 
     const allItems = captured.flatMap((body) => body.data);
     const traces = allItems.filter((item) => item.object === 'trace');

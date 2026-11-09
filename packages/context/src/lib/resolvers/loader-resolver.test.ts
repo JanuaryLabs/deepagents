@@ -268,11 +268,12 @@ describe('FragmentLoaderResolver — abort signal', () => {
     const f = fragment(
       'slow',
       // Never-resolves; the only way out is through the abort signal.
-      // Topology-based race avoids the timing flakiness of setTimeout vs setTimeout.
-      () => new Promise<string>(() => {}),
+      () => {
+        queueMicrotask(() => ac.abort(new Error('mid-flight')));
+        return new Promise<string>(() => {});
+      },
     );
     const walker = newWalker();
-    setTimeout(() => ac.abort(new Error('mid-flight')), 20);
     const loadContext = await ctx(ac.signal);
     await assert.rejects(() => walker.resolve([f], loadContext), /mid-flight/);
   });

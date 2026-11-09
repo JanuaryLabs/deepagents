@@ -2,7 +2,6 @@ import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
   InMemoryContextStore,
@@ -652,7 +651,7 @@ test('explicit cancellation rejects a conversation that does not own the stored 
   assert.equal(await streamStore.getStreamStatus(alice.id), 'queued');
 });
 
-test('cancelling during sandbox setup prevents model sampling', async () => {
+test('cancelling during sandbox setup prevents model sampling', async (t) => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
@@ -713,9 +712,12 @@ test('cancelling during sandbox setup prevents model sampling', async () => {
   await runtime.observe(conversation).cancel(enqueued.id);
   releaseSandbox.resolve();
   await running;
-  await sleep(25);
 
-  assert.equal(await streamStore.getStreamStatus(enqueued.id), 'cancelled');
+  await t.waitFor(
+    async () =>
+      assert.equal(await streamStore.getStreamStatus(enqueued.id), 'cancelled'),
+    { interval: 20, timeout: 5_000 },
+  );
   assert.equal(modelCalls, 0);
 });
 
@@ -779,7 +781,7 @@ test('cancellation that wins the execution claim prevents model sampling', async
   assert.equal(modelCalls, 0);
 });
 
-test('cancellation after execution claim aborts pending provider setup', async () => {
+test('cancellation after execution claim aborts pending provider setup', async (t) => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
@@ -835,7 +837,10 @@ test('cancellation after execution claim aborts pending provider setup', async (
   await providerStarted.promise;
 
   await runtime.observe(conversation).cancel(enqueued.id);
-  await sleep(25);
+  await t.waitFor(() => assert.equal(providerSignal?.aborted, true), {
+    interval: 20,
+    timeout: 5_000,
+  });
   const aborted = providerSignal?.aborted;
   releaseProvider.resolve();
   await running;

@@ -4,6 +4,7 @@ import { generateText } from 'ai';
 import { http } from 'msw';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { Agent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
 
 import {
   CodexAuthError,
@@ -29,22 +30,11 @@ interface WireRequest {
 /**
  * msw passes a socket that sends nothing first through to the real network
  * and keeps it after close(), so undici's global pool can hand it to a later
- * test. Each test therefore ends with a fresh pool. Node.js sets the pool once,
- * at load, under two keys: one pool under both on Node 24, and on Node 26 the
- * pool plus a wrapper for older callers. The swap keeps that shape.
+ * test. Each test therefore ends with a fresh pool.
  */
 async function replaceGlobalPool() {
-  const poolKey = Symbol.for('undici.globalDispatcher.2');
-  const legacyKey = Symbol.for('undici.globalDispatcher.1');
-  const pool = Reflect.get(globalThis, poolKey);
-  const legacy = Reflect.get(globalThis, legacyKey);
-  const fresh = new pool.constructor();
-  Reflect.set(globalThis, poolKey, fresh);
-  Reflect.set(
-    globalThis,
-    legacyKey,
-    legacy === pool ? fresh : new legacy.constructor(fresh),
-  );
+  const pool = getGlobalDispatcher();
+  setGlobalDispatcher(new Agent());
   await pool.destroy();
 }
 

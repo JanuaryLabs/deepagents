@@ -72,6 +72,7 @@ class FlakyFlushStore extends SqliteStreamStore {
 }
 
 class TestChangeSource implements StreamChangeSource {
+  subscribeCount = 0;
   cleanupCount = 0;
   cleanupDelayMs = 0;
   throwOnSubscribe = false;
@@ -81,6 +82,7 @@ class TestChangeSource implements StreamChangeSource {
     _streamId: string,
     signal: AbortSignal,
   ): AsyncIterable<StreamChange> {
+    this.subscribeCount++;
     try {
       if (this.throwOnSubscribe) {
         throw new Error('subscribe failed');
@@ -1837,7 +1839,7 @@ describe('Stream Chunks', () => {
       assert.strictEqual(received.length, 2);
     });
 
-    it('should await source cleanup when reader cancels watch', async () => {
+    it('should await source cleanup when reader cancels watch', async (t) => {
       await using database = await sqlite.database();
       const store = new SqliteStreamStore(database.connection);
       const slowSource = new TestChangeSource();
@@ -1854,7 +1856,10 @@ describe('Stream Chunks', () => {
 
       const reader = streams.watch(stream.id).getReader();
       const readPromise = reader.read();
-      await sleep(2);
+      await t.waitFor(() => assert.strictEqual(slowSource.subscribeCount, 1), {
+        interval: 1,
+        timeout: 5_000,
+      });
 
       const startedAt = Date.now();
       await reader.cancel();

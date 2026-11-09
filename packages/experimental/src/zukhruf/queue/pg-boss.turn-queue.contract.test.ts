@@ -148,7 +148,6 @@ for (const contract of turnQueueContracts) {
       await using h = await contract.makeQueue();
       const pushed = ref('durable', 1);
       await h.queue.push(pushed);
-      await sleep(300);
 
       const seen: TurnRef[] = [];
       await using _consumer = await h.queue.consume(async (turn) => {

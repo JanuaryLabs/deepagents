@@ -87,13 +87,17 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
     await h.queue.push(ref('c1', 1));
     await h.queue.push(ref('c1', 2));
     await waitFor(t, () => seen.length === 2, 'both turns committed');
-    await sleep(300);
 
-    const remaining = await h.boss.findJobs(h.queue.queue, { key: 'c1' });
-    assert.deepStrictEqual(
-      remaining.map((j) => j.state),
-      [],
-      'committed jobs deleted by commit-GC — nothing accumulates',
+    await t.waitFor(
+      async () => {
+        const remaining = await h.boss.findJobs(h.queue.queue, { key: 'c1' });
+        assert.deepStrictEqual(
+          remaining.map((j) => j.state),
+          [],
+          'committed jobs deleted by commit-GC — nothing accumulates',
+        );
+      },
+      { interval: 20, timeout: 5_000 },
     );
   });
 
@@ -135,12 +139,16 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
     gateOpen = true;
     await h.queue.resumeParked('gchat');
     await waitFor(t, () => ran.length === 1, 'revived turn runs');
-    await sleep(300);
-    const done = await h.boss.findJobs(h.queue.queue, { key: 'gchat' });
-    assert.deepStrictEqual(
-      done.map((j) => j.state),
-      [],
-      'revived turn commits and its job is deleted',
+    await t.waitFor(
+      async () => {
+        const done = await h.boss.findJobs(h.queue.queue, { key: 'gchat' });
+        assert.deepStrictEqual(
+          done.map((j) => j.state),
+          [],
+          'revived turn commits and its job is deleted',
+        );
+      },
+      { interval: 20, timeout: 5_000 },
     );
   });
 

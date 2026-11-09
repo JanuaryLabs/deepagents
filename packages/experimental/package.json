@@ -137,6 +137,7 @@
     "@ai-sdk/provider": "^4.0.37",
     "@electric-sql/pglite": "^0.5.4",
     "just-bash": "^3.6.0",
-    "msw": "^3.0.3"
+    "msw": "^3.0.3",
+    "undici": "^8.12.4"
   }
 }

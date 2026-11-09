@@ -766,7 +766,7 @@ describe('Message Upsert', () => {
     }
   });
 
-  it('should update FTS index on upsert', async () => {
+  it('should update FTS index on upsert', async (t) => {
     await using container = await testSqlServer.database();
 
     const store = await SqlServerContextStore.create({
@@ -801,14 +801,17 @@ describe('Message Upsert', () => {
         createdAt: 1000,
       });
 
-      // Wait for full-text index to update (SQL Server FTS is async)
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // SQL Server updates its full-text index asynchronously.
+      await t.waitFor(
+        async () => {
+          results = await store.searchMessages('upsert-fts-chat', 'original');
+          assert.strictEqual(results.length, 0);
 
-      results = await store.searchMessages('upsert-fts-chat', 'original');
-      assert.strictEqual(results.length, 0);
-
-      results = await store.searchMessages('upsert-fts-chat', 'updated');
-      assert.strictEqual(results.length, 1);
+          results = await store.searchMessages('upsert-fts-chat', 'updated');
+          assert.strictEqual(results.length, 1);
+        },
+        { interval: 100, timeout: 30_000 },
+      );
     } finally {
       await store.close();
     }
