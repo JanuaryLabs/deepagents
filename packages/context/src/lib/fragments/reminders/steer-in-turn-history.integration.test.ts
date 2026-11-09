@@ -1,4 +1,5 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import { createClock } from '@sinonjs/fake-timers';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { type UIMessage, generateId, simulateReadableStream, tool } from 'ai';
 import {
@@ -95,7 +96,7 @@ describe('steer reminders and in-turn history', () => {
         }),
       },
       telemetry: {
-        integrations: createFileTelemetry({ path }),
+        integrations: createFileTelemetry({ path, clock: createClock() }),
       },
     });
 

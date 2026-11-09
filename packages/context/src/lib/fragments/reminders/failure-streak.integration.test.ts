@@ -1,4 +1,5 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import { createClock } from '@sinonjs/fake-timers';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { type UIMessage, generateId, simulateReadableStream, tool } from 'ai';
 import {
@@ -132,7 +133,7 @@ describe('tool-failure streak reminders', () => {
         }),
       },
       telemetry: {
-        integrations: createFileTelemetry({ path }),
+        integrations: createFileTelemetry({ path, clock: createClock() }),
       },
     });
     context.set(repeatedFailureReminder('bash'));

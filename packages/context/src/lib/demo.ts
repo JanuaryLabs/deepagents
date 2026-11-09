@@ -55,6 +55,7 @@ const ai = agent({
   telemetry: {
     integrations: createFileTelemetry({
       path: './telemetry.json',
+      clock: globalThis,
     }),
   },
 });

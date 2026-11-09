@@ -9,15 +9,21 @@ import {
 export interface ConsoleTelemetryOptions {
   pretty?: boolean;
   logger?: Pick<Console, 'log' | 'error'>;
+  /** An entry gives `globalThis`; a test gives `createClock()`. */
+  clock: { Date: { now(): number } };
 }
 
 export function createConsoleTelemetry(
-  options: ConsoleTelemetryOptions = {},
+  options: ConsoleTelemetryOptions,
 ): Telemetry {
   const logger = options.logger ?? console;
   const indentation = (options.pretty ?? true) ? 2 : undefined;
   const write = (method: 'log' | 'error', event: string, data: unknown) => {
-    const record = createTelemetryLogRecord(event, data);
+    const record = createTelemetryLogRecord(
+      options.clock.Date.now(),
+      event,
+      data,
+    );
     try {
       logger[method](stringifyTelemetryLogRecord(record, indentation));
     } catch {

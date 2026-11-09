@@ -5,11 +5,12 @@ export interface TelemetryLogRecord {
 }
 
 export function createTelemetryLogRecord(
+  now: number,
   event: string,
   data: unknown,
 ): TelemetryLogRecord {
   return {
-    timestamp: new Date().toISOString(),
+    timestamp: new Date(now).toISOString(),
     event,
     data: normalizeTelemetryValue(data),
   };

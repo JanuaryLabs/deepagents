@@ -12,6 +12,8 @@ import {
 export interface FileTelemetryOptions {
   path: string;
   onWriteError?: (error: unknown) => void | PromiseLike<void>;
+  /** An entry gives `globalThis`; a test gives `createClock()`. */
+  clock: { Date: { now(): number } };
 }
 
 export function createFileTelemetry(
@@ -36,7 +38,11 @@ export function createFileTelemetry(
     event: string,
     data: unknown,
   ): Promise<void> => {
-    const record = createTelemetryLogRecord(event, data);
+    const record = createTelemetryLogRecord(
+      options.clock.Date.now(),
+      event,
+      data,
+    );
     const line = `${stringifyTelemetryLogRecord(record)}\n`;
     const pendingWrite = queue.then(async () => {
       await appendFile(path, line);

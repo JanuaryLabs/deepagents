@@ -1,3 +1,4 @@
+import { createClock } from '@sinonjs/fake-timers';
 import {
   NoObjectGeneratedError,
   Output,
@@ -144,13 +145,12 @@ async function triggerEveryTelemetryCallback(
 }
 
 describe('createConsoleTelemetry()', () => {
-  it('logs the timestamped generateText lifecycle with inputs and outputs', async (t) => {
+  it('logs the timestamped generateText lifecycle with inputs and outputs', async () => {
     const timestamp = '2026-07-12T10:00:00.000Z';
-    t.mock.timers.enable({ apis: ['Date'] });
-    t.mock.timers.setTime(Date.parse(timestamp));
     const stdout: string[] = [];
     const stderr: string[] = [];
     const telemetry = createConsoleTelemetry({
+      clock: createClock(Date.parse(timestamp)),
       pretty: false,
       logger: {
         log: (value) => stdout.push(String(value)),
@@ -198,6 +198,7 @@ describe('createConsoleTelemetry()', () => {
   it('logs tool execution inputs and outputs', async () => {
     const output: string[] = [];
     const telemetry = createConsoleTelemetry({
+      clock: createClock(),
       pretty: false,
       logger: {
         log: (value) => output.push(String(value)),
@@ -256,6 +257,7 @@ describe('createConsoleTelemetry()', () => {
     const capture = async (recordInputs: boolean, recordOutputs: boolean) => {
       const output: string[] = [];
       const telemetry = createConsoleTelemetry({
+        clock: createClock(),
         pretty: false,
         logger: {
           log: (value) => output.push(String(value)),
@@ -331,6 +333,7 @@ describe('createConsoleTelemetry()', () => {
   it('redacts embedding and structured-object payloads without fabricating fields', async () => {
     const output: string[] = [];
     const telemetry = createConsoleTelemetry({
+      clock: createClock(),
       pretty: false,
       logger: {
         log: (value) => output.push(String(value)),
@@ -408,6 +411,7 @@ describe('createConsoleTelemetry()', () => {
 
   it('never lets logger failures break model execution', async () => {
     const telemetry = createConsoleTelemetry({
+      clock: createClock(),
       logger: {
         log: () => {
           throw new Error('broken console');
@@ -440,6 +444,7 @@ describe('createConsoleTelemetry()', () => {
     const stdout: string[] = [];
     const stderr: string[] = [];
     const telemetry = createConsoleTelemetry({
+      clock: createClock(),
       pretty: false,
       logger: {
         log: (value) => stdout.push(String(value)),
@@ -489,6 +494,7 @@ describe('createConsoleTelemetry()', () => {
   it('preserves own __proto__ fields without prototype pollution', async () => {
     const errors: string[] = [];
     const telemetry = createConsoleTelemetry({
+      clock: createClock(),
       pretty: false,
       logger: {
         log: () => {},
@@ -512,6 +518,7 @@ describe('createConsoleTelemetry()', () => {
     const output: string[] = [];
     const errors: string[] = [];
     const telemetry = createConsoleTelemetry({
+      clock: createClock(),
       pretty: false,
       logger: {
         log: (value) => output.push(String(value)),

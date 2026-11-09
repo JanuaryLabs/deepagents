@@ -1,3 +1,4 @@
+import { createClock } from '@sinonjs/fake-timers';
 import { settleWithin } from '@zukhruf/testing/async';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
 import {
@@ -146,15 +147,16 @@ async function triggerEveryTelemetryCallback(
 }
 
 describe('createFileTelemetry()', () => {
-  it('writes the timestamped generateText lifecycle as JSONL', async (t) => {
+  it('writes the timestamped generateText lifecycle as JSONL', async () => {
     const timestamp = '2026-07-12T10:00:00.000Z';
-    t.mock.timers.enable({ apis: ['Date'] });
-    t.mock.timers.setTime(Date.parse(timestamp));
     await using directory = await temporaryFiles.directory(
       'deepagents-telemetry-',
     );
     const path = join(directory.path, 'nested', 'ai.jsonl');
-    const telemetry = createFileTelemetry({ path });
+    const telemetry = createFileTelemetry({
+      path,
+      clock: createClock(Date.parse(timestamp)),
+    });
     assert.deepEqual(telemetry.traces, { path: pathToFileURL(path).href });
 
     await generateText({
@@ -191,7 +193,7 @@ describe('createFileTelemetry()', () => {
       'deepagents-telemetry-',
     );
     const path = join(directory.path, 'nested', 'ai.jsonl');
-    const telemetry = createFileTelemetry({ path });
+    const telemetry = createFileTelemetry({ path, clock: createClock() });
 
     await generateText({
       model: createTextModel(),
@@ -217,7 +219,7 @@ describe('createFileTelemetry()', () => {
       'deepagents-telemetry-',
     );
     const path = join(directory.path, 'nested', 'ai.jsonl');
-    const telemetry = createFileTelemetry({ path });
+    const telemetry = createFileTelemetry({ path, clock: createClock() });
     const callbackNames = [
       'onStart',
       'onStepStart',
@@ -253,9 +255,11 @@ describe('createFileTelemetry()', () => {
     await generateText({
       model: createTextModel(),
       prompt: 'before-restart',
-      telemetry: { integrations: createFileTelemetry({ path }) },
+      telemetry: {
+        integrations: createFileTelemetry({ path, clock: createClock() }),
+      },
     });
-    const telemetry = createFileTelemetry({ path });
+    const telemetry = createFileTelemetry({ path, clock: createClock() });
 
     const model = createTextModel();
     await Promise.all(
@@ -296,6 +300,7 @@ describe('createFileTelemetry()', () => {
     await writeFile(blockingFile, 'content');
     const errors: unknown[] = [];
     const telemetry = createFileTelemetry({
+      clock: createClock(),
       path: join(blockingFile, 'ai.jsonl'),
       onWriteError: (error) => {
         errors.push(error);
@@ -325,6 +330,7 @@ describe('createFileTelemetry()', () => {
     });
 
     createFileTelemetry({
+      clock: createClock(),
       path: join(blockingFile, 'ai.jsonl'),
       onWriteError: (error) => reportError(error),
     });

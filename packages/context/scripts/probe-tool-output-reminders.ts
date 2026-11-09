@@ -174,6 +174,7 @@ const traceProcessor: TracingProcessor = {
 const telemetry = [
   createFileTelemetry({
     path: telemetryPath,
+    clock: globalThis,
   }),
   createOpenAITracesIntegration({
     workflowName: 'tool-output-reminder-probe',
