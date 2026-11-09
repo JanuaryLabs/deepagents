@@ -74,6 +74,7 @@ npx nx release --skip-publish --dry-run
    - `NPM_ACCESS_TOKEN` secret is invalid or expired
    - Package with same version already exists on npm
    - Build failures
+   - The consumer install check failed before the publish: a consumer of the packed packages gets `ERESOLVE`, or more than one copy of `ai` or `react`. A new `ai` or `react` on npm can cause this with no change in this repo. Run `npx nx run tools:check-consumer-install` to see the conflict.
 
 **Need to republish a failed release?**
 
