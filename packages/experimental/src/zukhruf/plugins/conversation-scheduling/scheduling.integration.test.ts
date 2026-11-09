@@ -45,6 +45,7 @@ import {
   ControlledTurnQueue,
   type TurnConsumer,
 } from '../../../testing/controlled-turn-queue.fixture.ts';
+import { textResult } from '../../../testing/stream-results.fixture.ts';
 import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 import { usage } from '../../../testing/usage.fixture.ts';
 import { userTurn } from '../../../testing/user-turn.fixture.ts';
@@ -429,20 +430,7 @@ test('configured runtime injects top-level Claude-compatible scheduling tools', 
               candidate.type === 'function',
           )
         : [];
-      return {
-        stream: simulateReadableStream({
-          chunks: [
-            { type: 'text-start' as const, id: 'text-1' },
-            { type: 'text-delta' as const, id: 'text-1', delta: 'done' },
-            { type: 'text-end' as const, id: 'text-1' },
-            {
-              type: 'finish' as const,
-              finishReason: { unified: 'stop' as const, raw: '' },
-              usage,
-            },
-          ],
-        }),
-      };
+      return textResult('done');
     },
   });
   const runtimeSetup = new AgentRuntime(
@@ -855,24 +843,7 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
         firstStarted.resolve();
         await finishFirst.promise;
       }
-      return {
-        stream: simulateReadableStream({
-          chunks: [
-            { type: 'text-start' as const, id: 'text-1' },
-            {
-              type: 'text-delta' as const,
-              id: 'text-1',
-              delta: `done:${text}`,
-            },
-            { type: 'text-end' as const, id: 'text-1' },
-            {
-              type: 'finish' as const,
-              finishReason: { unified: 'stop' as const, raw: '' },
-              usage,
-            },
-          ],
-        }),
-      };
+      return textResult(`done:${text}`);
     },
   });
   const runtimeSetup = new AgentRuntime(
@@ -994,20 +965,7 @@ test('unconfigured runtime exposes no scheduling tools', async () => {
       model: new MockLanguageModelV4({
         doStream: async ({ tools }) => {
           toolNames = functionToolNames(tools);
-          return {
-            stream: simulateReadableStream({
-              chunks: [
-                { type: 'text-start' as const, id: 'text-1' },
-                { type: 'text-delta' as const, id: 'text-1', delta: 'done' },
-                { type: 'text-end' as const, id: 'text-1' },
-                {
-                  type: 'finish' as const,
-                  finishReason: { unified: 'stop' as const, raw: '' },
-                  usage,
-                },
-              ],
-            }),
-          };
+          return textResult('done');
         },
       }),
       sandbox: buildSandbox,

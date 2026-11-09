@@ -14,6 +14,10 @@ import {
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 import { ControlledTurnQueue } from '../../testing/controlled-turn-queue.fixture.ts';
+import {
+  textResult,
+  toolCallResult,
+} from '../../testing/stream-results.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
 import { usage } from '../../testing/usage.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
@@ -30,23 +34,6 @@ class ChildFaultTurnQueue extends ControlledTurnQueue {
     }
     await super.push(turn);
   }
-}
-
-function textResponse(text: string) {
-  return {
-    stream: simulateReadableStream({
-      chunks: [
-        { type: 'text-start' as const, id: 'text-1' },
-        { type: 'text-delta' as const, id: 'text-1', delta: text },
-        { type: 'text-end' as const, id: 'text-1' },
-        {
-          type: 'finish' as const,
-          finishReason: { unified: 'stop' as const, raw: '' },
-          usage,
-        },
-      ],
-    }),
-  };
 }
 
 function agentPath(metadata: Record<string, unknown> | undefined) {
@@ -106,14 +93,14 @@ test('concurrent identical spawn_agent calls reserve one canonical child path', 
           }),
         };
       }
-      return textResponse('spawns submitted');
+      return textResult('spawns submitted');
     },
   });
   const sandbox = buildSandbox;
   const worker = defineAgent({
     name: 'worker',
     model: new MockLanguageModelV4({
-      doStream: async () => textResponse('done'),
+      doStream: async () => textResult('done'),
     }),
     sandbox,
     instructions: [],
@@ -169,37 +156,25 @@ test('spawn_agent retries an enqueue gap but does not restart a completed child 
     doStream: async () => {
       rootCalls++;
       if (rootCalls % 2 === 1) {
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              {
-                type: 'tool-call',
-                toolCallId: `spawn-${rootCalls}`,
-                toolName: 'spawn_agent',
-                input: JSON.stringify({
-                  agent_type: 'worker',
-                  task_name: 'retryable',
-                  message: 'Do the work',
-                  fork_turns: 'all',
-                }),
-              },
-              {
-                type: 'finish',
-                finishReason: { unified: 'tool-calls', raw: '' },
-                usage,
-              },
-            ],
+        return toolCallResult({
+          toolCallId: `spawn-${rootCalls}`,
+          toolName: 'spawn_agent',
+          input: JSON.stringify({
+            agent_type: 'worker',
+            task_name: 'retryable',
+            message: 'Do the work',
+            fork_turns: 'all',
           }),
-        };
+        });
       }
-      return textResponse('spawn submitted');
+      return textResult('spawn submitted');
     },
   });
   const sandbox = buildSandbox;
   const worker = defineAgent({
     name: 'worker',
     model: new MockLanguageModelV4({
-      doStream: async () => textResponse('done'),
+      doStream: async () => textResult('done'),
     }),
     sandbox,
     instructions: [],

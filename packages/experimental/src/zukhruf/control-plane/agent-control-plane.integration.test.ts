@@ -34,6 +34,10 @@ import {
   ControlledTurnQueue,
   type TurnConsumer,
 } from '../../testing/controlled-turn-queue.fixture.ts';
+import {
+  textResult,
+  toolCallResult,
+} from '../../testing/stream-results.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
 import { usage } from '../../testing/usage.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
@@ -328,26 +332,9 @@ function textModel(text: string, calls: unknown[]) {
   return new MockLanguageModelV4({
     doStream: async ({ prompt }) => {
       calls.push(prompt);
-      return textResponse(text);
+      return textResult(text);
     },
   });
-}
-
-function textResponse(text: string) {
-  return {
-    stream: simulateReadableStream({
-      chunks: [
-        { type: 'text-start' as const, id: 'text-1' },
-        { type: 'text-delta' as const, id: 'text-1', delta: text },
-        { type: 'text-end' as const, id: 'text-1' },
-        {
-          type: 'finish' as const,
-          finishReason: { unified: 'stop' as const, raw: '' },
-          usage,
-        },
-      ],
-    }),
-  };
 }
 
 async function createAgentChats(
@@ -380,23 +367,7 @@ function toolCallResponse(
   toolCallId: string,
   input: Record<string, unknown>,
 ) {
-  return {
-    stream: simulateReadableStream({
-      chunks: [
-        {
-          type: 'tool-call' as const,
-          toolCallId,
-          toolName,
-          input: JSON.stringify(input),
-        },
-        {
-          type: 'finish' as const,
-          finishReason: { unified: 'tool-calls' as const, raw: '' },
-          usage,
-        },
-      ],
-    }),
-  };
+  return toolCallResult({ toolCallId, toolName, input: JSON.stringify(input) });
 }
 
 function listAgentsModel(capturedPrompts: unknown[]) {
@@ -408,7 +379,7 @@ function listAgentsModel(capturedPrompts: unknown[]) {
         return toolCallResponse('list_agents', 'list-terminal-status', {});
       }
       capturedPrompts.push(prompt);
-      return textResponse('terminal status listed');
+      return textResult('terminal status listed');
     },
   });
 }
@@ -568,31 +539,19 @@ test('spawn_agent queues an independent child turn and returns before it runs', 
     doStream: async ({ prompt }) => {
       rootCalls++;
       if (rootCalls === 1) {
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              {
-                type: 'tool-call',
-                toolCallId: 'spawn-1',
-                toolName: 'spawn_agent',
-                input: JSON.stringify({
-                  agent_type: ' researcher ',
-                  task_name: ' market_research ',
-                  message: 'Research the market',
-                  fork_turns: 'all',
-                }),
-              },
-              {
-                type: 'finish',
-                finishReason: { unified: 'tool-calls', raw: '' },
-                usage,
-              },
-            ],
+        return toolCallResult({
+          toolCallId: 'spawn-1',
+          toolName: 'spawn_agent',
+          input: JSON.stringify({
+            agent_type: ' researcher ',
+            task_name: ' market_research ',
+            message: 'Research the market',
+            fork_turns: 'all',
           }),
-        };
+        });
       }
       promptAfterSpawn = prompt;
-      return textResponse('parent continues');
+      return textResult('parent continues');
     },
   });
   const childCalls: unknown[] = [];
@@ -758,7 +717,7 @@ test('an approval-paused child sends one final answer only after continuation', 
           ? toolCallResponse('publish', 'publish-report', {
               report: 'research complete',
             })
-          : textResponse('published research complete');
+          : textResult('published research complete');
       },
     }),
     sandbox,
@@ -779,7 +738,7 @@ test('an approval-paused child sends one final answer only after continuation', 
         return toolCallResponse('list_agents', 'list-paused-child', {});
       }
       listedPrompt = prompt;
-      return textResponse('listed paused child');
+      return textResult('listed paused child');
     },
   });
   const runtimeSetup = new AgentRuntime(
@@ -881,7 +840,7 @@ test('a failed approval continuation reports failure instead of remaining paused
           ? toolCallResponse('publish', 'failed-publish', {
               report: 'research complete',
             })
-          : textResponse('recovered after failed continuation');
+          : textResult('recovered after failed continuation');
       },
     }),
     sandbox: async () => {
@@ -1024,7 +983,7 @@ test('a cancelled approval continuation clears the gate and revives parked turns
             ? toolCallResponse('publish', 'cancelled-publish', {
                 report: 'ready',
               })
-            : textResponse('new ask recovered');
+            : textResult('new ask recovered');
         },
       }),
       sandbox: async () => {
@@ -1301,7 +1260,7 @@ test('a stale orphan retry cannot clear or supersede a successor turn', async ()
     model: new MockLanguageModelV4({
       doStream: async () => {
         childCalls++;
-        if (childCalls === 1) return textResponse('old result');
+        if (childCalls === 1) return textResult('old result');
         return {
           stream: new ReadableStream({
             async start(controller) {
@@ -1911,28 +1870,16 @@ test('send_message resolves a canonical sibling path and queues mail without wak
     doStream: async () => {
       senderCalls++;
       if (senderCalls === 1) {
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              {
-                type: 'tool-call',
-                toolCallId: 'send-1',
-                toolName: 'send_message',
-                input: JSON.stringify({
-                  target: '/root/reviewer',
-                  message: 'Check this conclusion',
-                }),
-              },
-              {
-                type: 'finish',
-                finishReason: { unified: 'tool-calls', raw: '' },
-                usage,
-              },
-            ],
+        return toolCallResult({
+          toolCallId: 'send-1',
+          toolName: 'send_message',
+          input: JSON.stringify({
+            target: '/root/reviewer',
+            message: 'Check this conclusion',
           }),
-        };
+        });
       }
-      return textResponse('message sent');
+      return textResult('message sent');
     },
   });
   const sandbox = buildSandbox;
@@ -2040,28 +1987,16 @@ test('followup_task wakes a non-root target with a new task', async () => {
     doStream: async () => {
       rootCalls++;
       if (rootCalls === 1) {
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              {
-                type: 'tool-call',
-                toolCallId: 'followup-1',
-                toolName: 'followup_task',
-                input: JSON.stringify({
-                  target: '/root/researcher',
-                  message: 'Verify the edge case',
-                }),
-              },
-              {
-                type: 'finish',
-                finishReason: { unified: 'tool-calls', raw: '' },
-                usage,
-              },
-            ],
+        return toolCallResult({
+          toolCallId: 'followup-1',
+          toolName: 'followup_task',
+          input: JSON.stringify({
+            target: '/root/researcher',
+            message: 'Verify the edge case',
           }),
-        };
+        });
       }
-      return textResponse('follow-up assigned');
+      return textResult('follow-up assigned');
     },
   });
   const researcherCalls: unknown[] = [];
@@ -2178,7 +2113,7 @@ test('interrupt_agent cancels the oldest queued child turn and reports its prior
         });
       }
       if (rootCalls === 3) promptAfterInterrupt = prompt;
-      return textResponse('child interrupted');
+      return textResult('child interrupted');
     },
   });
   const sandbox = buildSandbox;
@@ -2286,7 +2221,7 @@ test('interrupt_agent can retry terminal projection before deleting a queued chi
         );
       }
       promptAfterRetry = prompt;
-      return textResponse('child interrupted after retry');
+      return textResult('child interrupted after retry');
     },
   });
   const sandbox = buildSandbox;
@@ -2404,7 +2339,7 @@ test('interrupt_agent aborts a running child across runtime instances without qu
         });
       }
       promptAfterInterrupt = prompt;
-      return textResponse('active child interrupted');
+      return textResult('active child interrupted');
     },
   });
   const sandbox = buildSandbox;
@@ -2511,7 +2446,7 @@ test('interrupt_agent rejects root and self targets', async () => {
           });
         }
         finalPrompt = prompt;
-        return textResponse('invalid targets rejected');
+        return textResult('invalid targets rejected');
       },
     }),
     sandbox: buildSandbox,
@@ -2616,7 +2551,7 @@ test('interrupt_agent leaves terminal and approval-paused children unchanged', a
           });
         }
         finalPrompt = prompt;
-        return textResponse('terminal children unchanged');
+        return textResult('terminal children unchanged');
       },
     }),
     sandbox,
@@ -2718,7 +2653,7 @@ test('wait_agent returns for pending caller mail without consuming it', async ()
           timeout_ms: 10_000,
         });
       }
-      return textResponse('caller observed its pending mail');
+      return textResult('caller observed its pending mail');
     },
   });
   const root = defineAgent({
@@ -2782,7 +2717,7 @@ test('wait_agent is released by cross-runtime mail that reaches the next model s
           timeout_ms: 10_000,
         });
       }
-      return textResponse('cross-runtime mail observed');
+      return textResult('cross-runtime mail observed');
     },
   });
   const root = defineAgent({
@@ -2876,7 +2811,7 @@ test('wait_agent reports a bounded timeout when no mail arrives', async (t) => {
         });
       }
       advanceWaitClock = false;
-      return textResponse('continued after timeout');
+      return textResult('continued after timeout');
     },
   });
   const root = defineAgent({
@@ -2986,7 +2921,7 @@ test('send_message crosses runtime instances and reaches an active recipient at 
         await releaseRecipient.promise;
         return toolCallResponse('list_agents', 'recipient-safe-boundary', {});
       }
-      return textResponse('recipient incorporated the update');
+      return textResult('recipient incorporated the update');
     },
   });
 
@@ -3000,7 +2935,7 @@ test('send_message crosses runtime instances and reaches an active recipient at 
           message: 'Evidence from the sender runtime',
         });
       }
-      return textResponse('message sent');
+      return textResult('message sent');
     },
   });
 
@@ -3129,7 +3064,7 @@ test('followup_task crosses runtime instances and wakes an idle recipient', asyn
           message: 'Investigate this from the sender runtime',
         });
       }
-      return textResponse('follow-up sent');
+      return textResult('follow-up sent');
     },
   });
   const recipientPrompts: unknown[] = [];
@@ -3237,28 +3172,16 @@ test('followup_task stays behind an unstarted initial ask as a distinct later tu
     doStream: async () => {
       rootCalls++;
       if (rootCalls === 1) {
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              {
-                type: 'tool-call',
-                toolCallId: 'queued-followup',
-                toolName: 'followup_task',
-                input: JSON.stringify({
-                  target: '/root/researcher',
-                  message: 'Verify this after the initial task',
-                }),
-              },
-              {
-                type: 'finish',
-                finishReason: { unified: 'tool-calls', raw: '' },
-                usage,
-              },
-            ],
+        return toolCallResult({
+          toolCallId: 'queued-followup',
+          toolName: 'followup_task',
+          input: JSON.stringify({
+            target: '/root/researcher',
+            message: 'Verify this after the initial task',
           }),
-        };
+        });
       }
-      return textResponse('follow-up assigned');
+      return textResult('follow-up assigned');
     },
   });
   const researcherPrompts: unknown[] = [];
@@ -3362,29 +3285,17 @@ test('followup_task rejects the root agent without storing mail or scheduling a 
     doStream: async ({ prompt }) => {
       calls++;
       if (calls === 1) {
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              {
-                type: 'tool-call',
-                toolCallId: 'followup-root',
-                toolName: 'followup_task',
-                input: JSON.stringify({
-                  target: '/root',
-                  message: 'Do another root task',
-                }),
-              },
-              {
-                type: 'finish',
-                finishReason: { unified: 'tool-calls', raw: '' },
-                usage,
-              },
-            ],
+        return toolCallResult({
+          toolCallId: 'followup-root',
+          toolName: 'followup_task',
+          input: JSON.stringify({
+            target: '/root',
+            message: 'Do another root task',
           }),
-        };
+        });
       }
       promptAfterTool = prompt;
-      return textResponse('root continues');
+      return textResult('root continues');
     },
   });
   const root = defineAgent({
@@ -3439,26 +3350,14 @@ test('list_agents returns exact Codex items with canonical paths and current sta
     doStream: async ({ prompt }) => {
       calls++;
       if (calls === 1) {
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              {
-                type: 'tool-call',
-                toolCallId: 'list-1',
-                toolName: 'list_agents',
-                input: '{}',
-              },
-              {
-                type: 'finish',
-                finishReason: { unified: 'tool-calls', raw: '' },
-                usage,
-              },
-            ],
-          }),
-        };
+        return toolCallResult({
+          toolCallId: 'list-1',
+          toolName: 'list_agents',
+          input: '{}',
+        });
       }
       promptAfterList = prompt;
-      return textResponse('tree listed');
+      return textResult('tree listed');
     },
   });
   const sandbox = buildSandbox;
@@ -3546,26 +3445,14 @@ test('list_agents resolves a relative path prefix and returns only that subtree'
     doStream: async ({ prompt }) => {
       calls++;
       if (calls === 1) {
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              {
-                type: 'tool-call',
-                toolCallId: 'list-subtree',
-                toolName: 'list_agents',
-                input: JSON.stringify({ path_prefix: 'planner' }),
-              },
-              {
-                type: 'finish',
-                finishReason: { unified: 'tool-calls', raw: '' },
-                usage,
-              },
-            ],
-          }),
-        };
+        return toolCallResult({
+          toolCallId: 'list-subtree',
+          toolName: 'list_agents',
+          input: JSON.stringify({ path_prefix: 'planner' }),
+        });
       }
       promptAfterList = prompt;
-      return textResponse('subtree listed');
+      return textResult('subtree listed');
     },
   });
   const sandbox = buildSandbox;
@@ -3669,26 +3556,14 @@ test('list_agents reports a completed child with its result', async () => {
     doStream: async ({ prompt }) => {
       rootCalls++;
       if (rootCalls === 1) {
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              {
-                type: 'tool-call',
-                toolCallId: 'list-completed',
-                toolName: 'list_agents',
-                input: '{}',
-              },
-              {
-                type: 'finish',
-                finishReason: { unified: 'tool-calls', raw: '' },
-                usage,
-              },
-            ],
-          }),
-        };
+        return toolCallResult({
+          toolCallId: 'list-completed',
+          toolName: 'list_agents',
+          input: '{}',
+        });
       }
       promptAfterList = prompt;
-      return textResponse('completion listed');
+      return textResult('completion listed');
     },
   });
   const sandbox = buildSandbox;
@@ -3776,26 +3651,14 @@ test('list_agents reports a completed child with a queued follow-up as running',
     doStream: async ({ prompt }) => {
       rootCalls++;
       if (rootCalls === 1) {
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              {
-                type: 'tool-call',
-                toolCallId: 'list-scheduled-followup',
-                toolName: 'list_agents',
-                input: '{}',
-              },
-              {
-                type: 'finish',
-                finishReason: { unified: 'tool-calls', raw: '' },
-                usage,
-              },
-            ],
-          }),
-        };
+        return toolCallResult({
+          toolCallId: 'list-scheduled-followup',
+          toolName: 'list_agents',
+          input: '{}',
+        });
       }
       promptAfterList = prompt;
-      return textResponse('scheduled work listed');
+      return textResult('scheduled work listed');
     },
   });
   const sandbox = buildSandbox;
@@ -3908,12 +3771,12 @@ test('nested agents run independently, consume sibling mail, and remain visible 
             fork_turns: 'all',
           });
         case 3:
-          return textResponse('root delegated');
+          return textResult('root delegated');
         case 4:
           return toolCallResponse('list_agents', 'list-nested-tree', {});
         default:
           rootPromptAfterList = prompt;
-          return textResponse('root inspected the tree');
+          return textResult('root inspected the tree');
       }
     },
   });
@@ -3936,7 +3799,7 @@ test('nested agents run independently, consume sibling mail, and remain visible 
             message: 'Planner evidence for sibling review',
           });
         default:
-          return textResponse('planner complete');
+          return textResult('planner complete');
       }
     },
   });
@@ -4102,7 +3965,7 @@ test('spawn_agent is rejected with the Codex limit error while the tree has no f
         });
       }
       promptAfterSpawn = prompt;
-      return textResponse('root noted the limit');
+      return textResult('root noted the limit');
     },
   });
   const sandbox = buildSandbox;
@@ -4244,7 +4107,7 @@ test('followup_task is rejected with the Codex limit error while send_message st
         });
       }
       finalPrompt = prompt;
-      return textResponse('root noted the limit');
+      return textResult('root noted the limit');
     },
   });
   const sandbox = buildSandbox;
@@ -4366,7 +4229,7 @@ test('a settled child frees its execution slot for the next spawn', async () => 
         });
       }
       promptAfterSpawn = prompt;
-      return textResponse('root delegated again');
+      return textResult('root delegated again');
     },
   });
   const childCalls: unknown[] = [];

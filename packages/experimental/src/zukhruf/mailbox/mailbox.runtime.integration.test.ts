@@ -1,6 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
 import { timebox } from '@zukhruf/testing/async';
-import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
@@ -22,6 +21,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import { textResult } from '../../testing/stream-results.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
 import { usage } from '../../testing/usage.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
@@ -158,20 +158,7 @@ describe('zukhruf runtime mailbox delivery', () => {
     const model = new MockLanguageModelV4({
       doStream: async ({ prompt }) => {
         prompts.push(prompt);
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              { type: 'text-start', id: 'text-1' },
-              { type: 'text-delta', id: 'text-1', delta: 'received' },
-              { type: 'text-end', id: 'text-1' },
-              {
-                type: 'finish',
-                finishReason: { unified: 'stop', raw: '' },
-                usage,
-              },
-            ],
-          }),
-        };
+        return textResult('received');
       },
     });
     const wakePushObservations: boolean[] = [];

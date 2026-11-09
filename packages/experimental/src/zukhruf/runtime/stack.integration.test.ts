@@ -1,6 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
 import { open } from '@zukhruf/sqlite-open';
-import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
 import { InMemoryFs } from 'just-bash';
@@ -25,25 +24,12 @@ import {
 } from '@deepagents/experimental/zukhruf';
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 
+import { textResult } from '../../testing/stream-results.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
-import { usage } from '../../testing/usage.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 const model = new MockLanguageModelV4({
-  doStream: async () => ({
-    stream: simulateReadableStream({
-      chunks: [
-        { type: 'text-start', id: 'answer' },
-        { type: 'text-delta', id: 'answer', delta: 'hello from the stack' },
-        { type: 'text-end', id: 'answer' },
-        {
-          type: 'finish',
-          finishReason: { unified: 'stop', raw: undefined },
-          usage,
-        },
-      ],
-    }),
-  }),
+  doStream: async () => textResult('hello from the stack'),
 });
 const root = defineAgent({
   name: 'stack-test',

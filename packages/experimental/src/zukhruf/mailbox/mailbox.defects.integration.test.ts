@@ -1,5 +1,4 @@
-import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
-import { type UIMessage, isToolUIPart, simulateReadableStream } from 'ai';
+import { type UIMessage, isToolUIPart } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
@@ -27,8 +26,11 @@ import {
   ControlledTurnQueue,
   type TurnConsumer,
 } from '../../testing/controlled-turn-queue.fixture.ts';
+import {
+  textResult,
+  toolCallResult,
+} from '../../testing/stream-results.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
-import { usage } from '../../testing/usage.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 /** Message metadata the turn executor writes for delivered mail. */
@@ -79,20 +81,7 @@ function mail(content: string) {
 
 function textModel(text = 'done') {
   return new MockLanguageModelV4({
-    doStream: async () => ({
-      stream: simulateReadableStream({
-        chunks: [
-          { type: 'text-start', id: 'text-1' },
-          { type: 'text-delta', id: 'text-1', delta: text },
-          { type: 'text-end', id: 'text-1' },
-          {
-            type: 'finish',
-            finishReason: { unified: 'stop', raw: '' },
-            usage,
-          },
-        ],
-      }),
-    }),
+    doStream: async () => textResult(text),
   });
 }
 
@@ -191,41 +180,16 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
         if (call === 1) {
           firstStepStarted.resolve();
           await releaseFirstStep.promise;
-          return {
-            stream: simulateReadableStream<LanguageModelV4StreamPart>({
-              chunks: [
-                {
-                  type: 'tool-call',
-                  toolCallId: 'boundary-call',
-                  toolName: 'bash',
-                  input: JSON.stringify({
-                    command: 'echo boundary',
-                    reasoning: 'Create a safe model-step boundary.',
-                  }),
-                },
-                {
-                  type: 'finish',
-                  finishReason: { unified: 'tool-calls', raw: '' },
-                  usage,
-                },
-              ],
+          return toolCallResult({
+            toolCallId: 'boundary-call',
+            toolName: 'bash',
+            input: JSON.stringify({
+              command: 'echo boundary',
+              reasoning: 'Create a safe model-step boundary.',
             }),
-          };
+          });
         }
-        return {
-          stream: simulateReadableStream<LanguageModelV4StreamPart>({
-            chunks: [
-              { type: 'text-start', id: 'text-2' },
-              { type: 'text-delta', id: 'text-2', delta: 'finished' },
-              { type: 'text-end', id: 'text-2' },
-              {
-                type: 'finish',
-                finishReason: { unified: 'stop', raw: '' },
-                usage,
-              },
-            ],
-          }),
-        };
+        return textResult('finished');
       },
     });
     const h = await runtimeHarness({ model });
@@ -296,20 +260,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
           await releaseFirstSampling.promise;
         }
         active--;
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              { type: 'text-start', id: `text-${call}` },
-              { type: 'text-delta', id: `text-${call}`, delta: `done ${call}` },
-              { type: 'text-end', id: `text-${call}` },
-              {
-                type: 'finish',
-                finishReason: { unified: 'stop', raw: '' },
-                usage,
-              },
-            ],
-          }),
-        };
+        return textResult(`done ${call}`);
       },
     });
     const h = await runtimeHarness({ model });
@@ -371,20 +322,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
           firstSamplingStarted.resolve();
           await releaseFirstSampling.promise;
         }
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              { type: 'text-start', id: `text-${call}` },
-              { type: 'text-delta', id: `text-${call}`, delta: `done ${call}` },
-              { type: 'text-end', id: `text-${call}` },
-              {
-                type: 'finish',
-                finishReason: { unified: 'stop', raw: '' },
-                usage,
-              },
-            ],
-          }),
-        };
+        return textResult(`done ${call}`);
       },
     });
     const contextStore = new InMemoryContextStore();
@@ -449,20 +387,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
     const model = new MockLanguageModelV4({
       doStream: async ({ prompt }) => {
         prompts.push(prompt);
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              { type: 'text-start', id: 'text-1' },
-              { type: 'text-delta', id: 'text-1', delta: 'received' },
-              { type: 'text-end', id: 'text-1' },
-              {
-                type: 'finish',
-                finishReason: { unified: 'stop', raw: '' },
-                usage,
-              },
-            ],
-          }),
-        };
+        return textResult('received');
       },
     });
     const contextStore = new InMemoryContextStore();
@@ -605,42 +530,13 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
         prompts.push(prompt);
         calls++;
         if (calls === 1) {
-          return {
-            stream: simulateReadableStream<LanguageModelV4StreamPart>({
-              chunks: [
-                {
-                  type: 'tool-call',
-                  toolCallId: 'approval-call',
-                  toolName: 'sendEmail',
-                  input: JSON.stringify({ to: 'a@b.c' }),
-                },
-                {
-                  type: 'finish',
-                  finishReason: { unified: 'tool-calls', raw: '' },
-                  usage,
-                },
-              ],
-            }),
-          };
+          return toolCallResult({
+            toolCallId: 'approval-call',
+            toolName: 'sendEmail',
+            input: JSON.stringify({ to: 'a@b.c' }),
+          });
         }
-        return {
-          stream: simulateReadableStream<LanguageModelV4StreamPart>({
-            chunks: [
-              { type: 'text-start', id: 'text-2' },
-              {
-                type: 'text-delta',
-                id: 'text-2',
-                delta: 'continued',
-              },
-              { type: 'text-end', id: 'text-2' },
-              {
-                type: 'finish',
-                finishReason: { unified: 'stop', raw: '' },
-                usage,
-              },
-            ],
-          }),
-        };
+        return textResult('continued');
       },
     });
     const h = await runtimeHarness({

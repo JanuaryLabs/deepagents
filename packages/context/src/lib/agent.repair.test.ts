@@ -1,4 +1,4 @@
-import { simulateReadableStream, tool } from 'ai';
+import { tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -12,6 +12,10 @@ import {
 } from '@deepagents/context';
 
 import { buildSandbox } from '../../test/helpers/build-sandbox.ts';
+import {
+  textResult,
+  toolCallResult,
+} from '../../test/helpers/stream-results.ts';
 import { usage } from '../../test/helpers/usage.ts';
 
 const sandbox = await buildSandbox();
@@ -31,39 +35,14 @@ function createRepairStreamingModel() {
     },
     doStream: async () => {
       if (model.doStreamCalls.length === 1) {
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              {
-                type: 'tool-call' as const,
-                toolCallId: 'call_1',
-                toolName: 'lookup_order',
-                input: '{"orderId":42}',
-              },
-              {
-                type: 'finish' as const,
-                finishReason: { unified: 'tool-calls', raw: '' },
-                usage,
-              },
-            ],
-          }),
-        };
+        return toolCallResult({
+          toolCallId: 'call_1',
+          toolName: 'lookup_order',
+          input: '{"orderId":42}',
+        });
       }
 
-      return {
-        stream: simulateReadableStream({
-          chunks: [
-            { type: 'text-start' as const, id: 'text-2' },
-            { type: 'text-delta' as const, id: 'text-2', delta: 'done' },
-            { type: 'text-end' as const, id: 'text-2' },
-            {
-              type: 'finish' as const,
-              finishReason: { unified: 'stop', raw: '' },
-              usage,
-            },
-          ],
-        }),
-      };
+      return textResult('done');
     },
   });
   return model;

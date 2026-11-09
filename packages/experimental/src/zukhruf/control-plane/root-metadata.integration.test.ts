@@ -19,6 +19,7 @@ import {
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 import { ControlledTurnQueue } from '../../testing/controlled-turn-queue.fixture.ts';
+import { textResult } from '../../testing/stream-results.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
 import { usage } from '../../testing/usage.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
@@ -83,20 +84,7 @@ test('enqueue only queues; worker execution initializes root metadata', async ()
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4({
-        doStream: async () => ({
-          stream: simulateReadableStream({
-            chunks: [
-              { type: 'text-start', id: 'text-1' },
-              { type: 'text-delta', id: 'text-1', delta: 'hello' },
-              { type: 'text-end', id: 'text-1' },
-              {
-                type: 'finish',
-                finishReason: { unified: 'stop', raw: '' },
-                usage,
-              },
-            ],
-          }),
-        }),
+        doStream: async () => textResult('hello'),
       }),
       sandbox: buildSandbox,
       instructions: [],

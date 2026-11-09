@@ -36,6 +36,10 @@ import {
 } from '@deepagents/context';
 
 import { buildSandbox } from '../../../../test/helpers/build-sandbox.ts';
+import {
+  textResult,
+  toolCallResult,
+} from '../../../../test/helpers/stream-results.ts';
 import { usage } from '../../../../test/helpers/usage.ts';
 import { isUIMessage, requireUIMessage } from '../../ui-message-guards.ts';
 
@@ -168,38 +172,13 @@ function failingAfterToolModel() {
         throw new Error('provider failed before the next step started');
       }
       if (call > 2) {
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              { type: 'text-start', id: 'resumed' },
-              { type: 'text-delta', id: 'resumed', delta: 'resumed' },
-              { type: 'text-end', id: 'resumed' },
-              {
-                type: 'finish',
-                finishReason: { unified: 'stop', raw: '' },
-                usage,
-              },
-            ],
-          }),
-        };
+        return textResult('resumed');
       }
-      return {
-        stream: simulateReadableStream({
-          chunks: [
-            {
-              type: 'tool-call',
-              toolCallId: 'c1',
-              toolName: 'noop',
-              input: '{}',
-            },
-            {
-              type: 'finish',
-              finishReason: { unified: 'tool-calls', raw: '' },
-              usage,
-            },
-          ],
-        }),
-      };
+      return toolCallResult({
+        toolCallId: 'c1',
+        toolName: 'noop',
+        input: '{}',
+      });
     },
   });
   return model;
@@ -213,44 +192,11 @@ function failingAfterTwoToolsModel() {
         throw new Error('provider failed before the third step started');
       }
       if (call > 3) {
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              { type: 'text-start', id: 'resumed-twice' },
-              {
-                type: 'text-delta',
-                id: 'resumed-twice',
-                delta: 'resumed',
-              },
-              { type: 'text-end', id: 'resumed-twice' },
-              {
-                type: 'finish',
-                finishReason: { unified: 'stop', raw: '' },
-                usage,
-              },
-            ],
-          }),
-        };
+        return textResult('resumed');
       }
 
       const toolName = call === 1 ? 'first' : 'second';
-      return {
-        stream: simulateReadableStream({
-          chunks: [
-            {
-              type: 'tool-call',
-              toolCallId: `c${call}`,
-              toolName,
-              input: '{}',
-            },
-            {
-              type: 'finish',
-              finishReason: { unified: 'tool-calls', raw: '' },
-              usage,
-            },
-          ],
-        }),
-      };
+      return toolCallResult({ toolCallId: `c${call}`, toolName, input: '{}' });
     },
   });
   return model;

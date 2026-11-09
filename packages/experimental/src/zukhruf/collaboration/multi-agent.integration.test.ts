@@ -1,6 +1,5 @@
 import type { LanguageModelV4FunctionTool } from '@ai-sdk/provider';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
-import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
@@ -25,45 +24,19 @@ import {
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 import { ControlledTurnQueue } from '../../testing/controlled-turn-queue.fixture.ts';
+import {
+  textResult,
+  toolCallResult,
+} from '../../testing/stream-results.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
-import { usage } from '../../testing/usage.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
 
-function textResponse(text: string) {
-  return {
-    stream: simulateReadableStream({
-      chunks: [
-        { type: 'text-start' as const, id: 'text-1' },
-        { type: 'text-delta' as const, id: 'text-1', delta: text },
-        { type: 'text-end' as const, id: 'text-1' },
-        {
-          type: 'finish' as const,
-          finishReason: { unified: 'stop' as const, raw: '' },
-          usage,
-        },
-      ],
-    }),
-  };
-}
-
 function toolCallResponse(toolName: string, input: unknown) {
-  return {
-    stream: simulateReadableStream({
-      chunks: [
-        {
-          type: 'tool-call' as const,
-          toolCallId: `call-${toolName}`,
-          toolName,
-          input: JSON.stringify(input),
-        },
-        {
-          type: 'finish' as const,
-          finishReason: { unified: 'tool-calls' as const, raw: '' },
-          usage,
-        },
-      ],
-    }),
-  };
+  return toolCallResult({
+    toolCallId: `call-${toolName}`,
+    toolName,
+    input: JSON.stringify(input),
+  });
 }
 
 function systemText(prompt: unknown): string {
@@ -130,7 +103,7 @@ test('host config injects root guidance, spawn guidance, namespace, and wait bou
   const model = new MockLanguageModelV4({
     doStream: async ({ prompt, tools }) => {
       request = { prompt, tools };
-      return textResponse('done');
+      return textResult('done');
     },
   });
   const runtimeSetup = new AgentRuntime(
@@ -242,7 +215,7 @@ test('wait_agent clamps a below-minimum timeout and reports it to the model', as
         return toolCallResponse('wait_agent', { timeout_ms: 1 });
       }
       promptAfterWait = prompt;
-      return textResponse('continued');
+      return textResult('continued');
     },
   });
 
@@ -299,7 +272,7 @@ test('subagent guidance replaces root guidance on a child turn', async () => {
     model: new MockLanguageModelV4({
       doStream: async ({ prompt }) => {
         childPrompt = prompt;
-        return textResponse('done');
+        return textResult('done');
       },
     }),
     sandbox: buildSandbox,
@@ -374,7 +347,7 @@ test('spawn output is the canonical task name without agent_path', async () => {
         });
       }
       parentPrompt = prompt;
-      return textResponse('spawned');
+      return textResult('spawned');
     },
   });
   const child = defineAgent({
@@ -431,7 +404,7 @@ test('plugin-contributed subagent uses AI SDK code mode collaboration', async ()
           js: `return await tools.list_agents({});`,
         });
       }
-      return textResponse('done');
+      return textResult('done');
     },
   });
   const runtimeSetup = new AgentRuntime(
@@ -497,7 +470,7 @@ test('interrupt_agent reports not_found for a missing target', async () => {
         return toolCallResponse('interrupt_agent', { target: 'missing' });
       }
       prompt = currentPrompt;
-      return textResponse('done');
+      return textResult('done');
     },
   });
   const runtimeSetup = new AgentRuntime(
@@ -526,7 +499,7 @@ test('host config rejects invalid namespaces and wait bounds', async () => {
   const declaration = defineAgent({
     name: 'root',
     model: new MockLanguageModelV4({
-      doStream: async () => textResponse('done'),
+      doStream: async () => textResult('done'),
     }),
     sandbox,
     instructions: [],
@@ -592,7 +565,7 @@ test('default guidance tells root and child agents the Codex concurrency slots',
     new MockLanguageModelV4({
       doStream: async ({ prompt }) => {
         prompts[name] = prompt;
-        return textResponse('done');
+        return textResult('done');
       },
     });
   const child = defineAgent({

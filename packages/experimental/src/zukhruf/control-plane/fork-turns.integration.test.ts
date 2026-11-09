@@ -1,4 +1,4 @@
-import { type ToolSet, type UIMessage, simulateReadableStream, tool } from 'ai';
+import { type ToolSet, type UIMessage, tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -14,70 +14,32 @@ import {
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 import { ControlledTurnQueue } from '../../testing/controlled-turn-queue.fixture.ts';
+import {
+  textResult,
+  toolCallResult,
+} from '../../testing/stream-results.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
-import { usage } from '../../testing/usage.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
 
-function textResponse(text: string) {
-  return {
-    stream: simulateReadableStream({
-      chunks: [
-        { type: 'text-start' as const, id: 'text-1' },
-        { type: 'text-delta' as const, id: 'text-1', delta: text },
-        { type: 'text-end' as const, id: 'text-1' },
-        {
-          type: 'finish' as const,
-          finishReason: { unified: 'stop' as const, raw: '' },
-          usage,
-        },
-      ],
-    }),
-  };
-}
-
 function spawnResponse(forkTurns?: string) {
-  return {
-    stream: simulateReadableStream({
-      chunks: [
-        {
-          type: 'tool-call' as const,
-          toolCallId: 'spawn-worker',
-          toolName: 'spawn_agent',
-          input: JSON.stringify({
-            agent_type: 'worker',
-            task_name: 'delegated',
-            message: 'child task',
-            ...(forkTurns === undefined ? {} : { fork_turns: forkTurns }),
-          }),
-        },
-        {
-          type: 'finish' as const,
-          finishReason: { unified: 'tool-calls' as const, raw: '' },
-          usage,
-        },
-      ],
+  return toolCallResult({
+    toolCallId: 'spawn-worker',
+    toolName: 'spawn_agent',
+    input: JSON.stringify({
+      agent_type: 'worker',
+      task_name: 'delegated',
+      message: 'child task',
+      ...(forkTurns === undefined ? {} : { fork_turns: forkTurns }),
     }),
-  };
+  });
 }
 
 function toolCallResponse(toolName: string, input: unknown = {}) {
-  return {
-    stream: simulateReadableStream({
-      chunks: [
-        {
-          type: 'tool-call' as const,
-          toolCallId: `call-${toolName}`,
-          toolName,
-          input: JSON.stringify(input),
-        },
-        {
-          type: 'finish' as const,
-          finishReason: { unified: 'tool-calls' as const, raw: '' },
-          usage,
-        },
-      ],
-    }),
-  };
+  return toolCallResult({
+    toolCallId: `call-${toolName}`,
+    toolName,
+    input: JSON.stringify(input),
+  });
 }
 
 function textOf(messages: UIMessage[]): string {
@@ -94,7 +56,7 @@ async function spawnAfter(options: {
   history: Array<{ input: string; answer: string }>;
   forkTurns?: string;
   rootResponses?: Array<
-    | ReturnType<typeof textResponse>
+    | ReturnType<typeof textResult>
     | ReturnType<typeof spawnResponse>
     | ReturnType<typeof toolCallResponse>
   >;
@@ -121,19 +83,19 @@ async function spawnAfter(options: {
         return scripted;
       }
       if (call < options.history.length) {
-        return textResponse(options.history[call].answer);
+        return textResult(options.history[call].answer);
       }
       if (call === options.history.length) {
         return spawnResponse(options.forkTurns);
       }
-      return textResponse('spawn submitted');
+      return textResult('spawn submitted');
     },
   });
   const childPrompts: unknown[] = [];
   const childModel = new MockLanguageModelV4({
     doStream: async ({ prompt }) => {
       childPrompts.push(prompt);
-      return textResponse('child complete');
+      return textResult('child complete');
     },
   });
   const sandbox = buildSandbox;
@@ -253,9 +215,9 @@ test('forked history keeps final assistant content without tool traffic', async 
     history: [{ input: 'look up the private record', answer: '' }],
     rootResponses: [
       toolCallResponse('private_lookup'),
-      textResponse('public conclusion'),
+      textResult('public conclusion'),
       spawnResponse('all'),
-      textResponse('spawn submitted'),
+      textResult('spawn submitted'),
     ],
     tools: {
       private_lookup: tool({
