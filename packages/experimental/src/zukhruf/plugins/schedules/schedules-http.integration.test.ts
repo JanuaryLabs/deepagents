@@ -14,11 +14,7 @@ import { InMemoryContextStore, SqliteStreamStore } from '@deepagents/context';
 import {
   type AgentHost,
   AgentRuntime,
-  type ConsumeContext,
-  type ConsumeOptions,
   SqliteMailboxStore,
-  type TurnActivity,
-  TurnQueue,
   type TurnRef,
   defineAgent,
   defineStack,
@@ -40,6 +36,10 @@ import {
 } from '@deepagents/experimental/zukhruf/schedules/http';
 
 import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
+import {
+  ControlledTurnQueue,
+  type TurnConsumer,
+} from '../../../testing/controlled-turn-queue.fixture.ts';
 import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 
 const MOUNT = '/zukhruf/v1';
@@ -51,66 +51,18 @@ const FAST_POLLING = {
   notifyPollingIntervalSeconds: 0.5,
 } as const;
 
-class ControlledTurnQueue extends TurnQueue {
-  readonly turns: TurnRef[] = [];
-  readonly #consumers = new Set<{
-    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
-    options: ConsumeOptions;
-  }>();
+class SettlingTurnQueue extends ControlledTurnQueue {
+  protected override async park(): Promise<void> {}
 
-  push(turn: TurnRef): Promise<void> {
-    this.turns.push(turn);
-    return Promise.resolve();
-  }
-
-  getTurnActivity(): Promise<TurnActivity> {
-    return Promise.resolve(this.turns.length === 0 ? 'idle' : 'queued');
-  }
-
-  getCurrentTurn(): Promise<TurnRef | undefined> {
-    return Promise.resolve(this.turns[0]);
-  }
-
-  cancel(streamId: string): Promise<void> {
-    const index = this.turns.findIndex((turn) => turn.streamId === streamId);
-    if (index >= 0) this.turns.splice(index, 1);
-    return Promise.resolve();
-  }
-
-  consume(
-    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
-    options: ConsumeOptions,
-  ): Promise<AsyncDisposable> {
-    const consumer = { handler, options };
-    this.#consumers.add(consumer);
-    return Promise.resolve({
-      [Symbol.asyncDispose]: () => {
-        this.#consumers.delete(consumer);
-        return Promise.resolve();
-      },
-    });
-  }
-
-  resumeParked(): Promise<void> {
-    return Promise.resolve();
-  }
-
-  async runNext(): Promise<void> {
-    const turn = this.turns.shift();
-    assert(turn, 'expected a queued turn');
-    const [consumer] = this.#consumers;
-    assert(consumer, 'expected a running queue consumer');
+  protected override async deliver(
+    turn: TurnRef,
+    consumer: TurnConsumer,
+  ): Promise<void> {
     try {
-      await consumer.handler(turn, {
-        signal: new AbortController().signal,
-        park: () => Promise.resolve(),
-      });
+      await super.deliver(turn, consumer);
       await consumer.options.onSettled?.(turn);
     } catch (error) {
-      await consumer.options.onOrphaned(
-        turn,
-        error instanceof Error ? error.message : String(error),
-      );
+      await this.orphan(turn, consumer, error);
     }
   }
 }
@@ -140,7 +92,7 @@ function completingModel() {
 
 interface Harness extends AsyncDisposable {
   app: Hono<HttpEnv>;
-  queue: ControlledTurnQueue;
+  queue: SettlingTurnQueue;
   runtime: AgentHost;
 }
 
@@ -169,7 +121,7 @@ async function harness(options: { withSchedules?: boolean } = {}) {
     reconciliationIntervalMs: 50,
     workerOptions: FAST_POLLING,
   });
-  const queue = new ControlledTurnQueue();
+  const queue = new SettlingTurnQueue();
   const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'scheduled-agent',

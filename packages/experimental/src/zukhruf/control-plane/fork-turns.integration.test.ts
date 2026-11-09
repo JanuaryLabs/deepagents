@@ -7,85 +7,15 @@ import { z } from 'zod';
 import { InMemoryContextStore, SqliteStreamStore } from '@deepagents/context';
 import {
   AgentRuntime,
-  type ConsumeContext,
-  type ConsumeOptions,
   SqliteMailboxStore,
-  TurnQueue,
-  type TurnRef,
   defineAgent,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import { ControlledTurnQueue } from '../../testing/controlled-turn-queue.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
-
-class ControlledTurnQueue extends TurnQueue {
-  readonly turns: TurnRef[] = [];
-  readonly #consumers = new Set<{
-    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
-  }>();
-
-  override async push(turn: TurnRef) {
-    this.turns.push(turn);
-  }
-
-  override async getTurnActivity(
-    conversation: Pick<TurnRef, 'chatId' | 'userId'>,
-  ): Promise<'idle' | 'queued' | 'running'> {
-    return this.turns.some(
-      (turn) =>
-        turn.chatId === conversation.chatId &&
-        turn.userId === conversation.userId,
-    )
-      ? 'queued'
-      : 'idle';
-  }
-
-  override async getCurrentTurn(
-    conversation: Pick<TurnRef, 'chatId' | 'userId'>,
-  ): Promise<TurnRef | undefined> {
-    return this.turns.find(
-      (turn) =>
-        turn.chatId === conversation.chatId &&
-        turn.userId === conversation.userId,
-    );
-  }
-
-  override async cancel(streamId: string): Promise<void> {
-    const remaining = this.turns.filter((turn) => turn.streamId !== streamId);
-    this.turns.splice(0, this.turns.length, ...remaining);
-  }
-
-  override async consume(
-    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
-    _options: ConsumeOptions,
-  ): Promise<AsyncDisposable> {
-    void _options;
-    const consumer = { handler };
-    this.#consumers.add(consumer);
-    return {
-      [Symbol.asyncDispose]: async () => {
-        this.#consumers.delete(consumer);
-      },
-    };
-  }
-
-  override async resumeParked(): Promise<void> {}
-
-  async runNext(): Promise<void> {
-    const turn = this.turns.shift();
-    assert.ok(turn, 'expected a queued turn');
-    const [consumer] = this.#consumers;
-    assert.ok(consumer, 'expected a running worker');
-    await consumer.handler(turn, {
-      signal: new AbortController().signal,
-      park: async () => {
-        throw new Error('turn unexpectedly parked');
-      },
-    });
-  }
-}
 
 const usage = {
   inputTokens: {

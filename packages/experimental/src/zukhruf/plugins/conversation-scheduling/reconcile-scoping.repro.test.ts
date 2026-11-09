@@ -9,10 +9,7 @@ import { z } from 'zod';
 import { SqliteContextStore, SqliteStreamStore } from '@deepagents/context';
 import {
   AgentRuntime,
-  type ConsumeContext,
-  type ConsumeOptions,
   SqliteMailboxStore,
-  TurnQueue,
   type TurnRef,
   defineAgent,
   defineStack,
@@ -26,6 +23,10 @@ import {
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
 
 import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
+import {
+  ControlledTurnQueue,
+  type TurnConsumer,
+} from '../../../testing/controlled-turn-queue.fixture.ts';
 import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 import { userTurn } from '../../../testing/user-turn.fixture.ts';
 
@@ -67,68 +68,12 @@ class RecordingWakeScheduler extends WakeScheduler<SchedulingWake> {
   }
 }
 
-class RecordingTurnQueue extends TurnQueue {
-  readonly turns: TurnRef[] = [];
-  readonly #consumers = new Set<{
-    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
-    options: ConsumeOptions;
-  }>();
-
-  override async push(turn: TurnRef) {
-    this.turns.push(turn);
-  }
-
-  override async getTurnActivity(
-    conversation: Pick<TurnRef, 'chatId' | 'userId'>,
-  ) {
-    return this.turns.some(
-      (turn) =>
-        turn.chatId === conversation.chatId &&
-        turn.userId === conversation.userId,
-    )
-      ? ('queued' as const)
-      : ('idle' as const);
-  }
-
-  override async getCurrentTurn(
-    conversation: Pick<TurnRef, 'chatId' | 'userId'>,
-  ) {
-    return this.turns.find(
-      (turn) =>
-        turn.chatId === conversation.chatId &&
-        turn.userId === conversation.userId,
-    );
-  }
-
-  override async cancel(streamId: string): Promise<void> {
-    const remaining = this.turns.filter((turn) => turn.streamId !== streamId);
-    this.turns.splice(0, this.turns.length, ...remaining);
-  }
-
-  override async consume(
-    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
-    options: ConsumeOptions,
-  ): Promise<AsyncDisposable> {
-    const consumer = { handler, options };
-    this.#consumers.add(consumer);
-    return {
-      [Symbol.asyncDispose]: async () => {
-        this.#consumers.delete(consumer);
-      },
-    };
-  }
-
-  override async resumeParked(): Promise<void> {}
-
-  async runNext(): Promise<void> {
-    const turn = this.turns.shift();
-    assert.ok(turn, 'expected a queued turn');
-    const [consumer] = this.#consumers;
-    assert.ok(consumer, 'expected a running turn consumer');
-    await consumer.handler(turn, {
-      signal: new AbortController().signal,
-      park: async () => assert.fail('turn unexpectedly parked'),
-    });
+class SettlingTurnQueue extends ControlledTurnQueue {
+  protected override async deliver(
+    turn: TurnRef,
+    consumer: TurnConsumer,
+  ): Promise<void> {
+    await super.deliver(turn, consumer);
     await consumer.options.onSettled?.(turn);
   }
 }
@@ -204,8 +149,8 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
   const store = new SqliteContextStore(database);
   const schedulerA = new RecordingWakeScheduler();
   const schedulerB = new RecordingWakeScheduler();
-  const queueA = new RecordingTurnQueue();
-  const queueB = new RecordingTurnQueue();
+  const queueA = new SettlingTurnQueue();
+  const queueB = new SettlingTurnQueue();
   const streamStoreA = new SqliteStreamStore(':memory:');
   const streamStoreB = new SqliteStreamStore(':memory:');
   const mailboxStoreA = new SqliteMailboxStore(':memory:');

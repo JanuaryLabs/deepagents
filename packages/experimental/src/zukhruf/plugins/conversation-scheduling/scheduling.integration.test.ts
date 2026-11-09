@@ -26,10 +26,7 @@ import {
 import {
   type AgentHost,
   AgentRuntime,
-  type ConsumeContext,
-  type ConsumeOptions,
   SqliteMailboxStore,
-  TurnQueue,
   type TurnRef,
   defineAgent,
   defineStack,
@@ -44,6 +41,10 @@ import {
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
 
 import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
+import {
+  ControlledTurnQueue,
+  type TurnConsumer,
+} from '../../../testing/controlled-turn-queue.fixture.ts';
 import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 import { userTurn } from '../../../testing/user-turn.fixture.ts';
 
@@ -101,13 +102,8 @@ const usage = {
   outputTokens: { total: 1, text: 1, reasoning: undefined },
 } as const;
 
-class ControlledTurnQueue extends TurnQueue {
-  readonly turns: TurnRef[] = [];
+class SchedulingTurnQueue extends ControlledTurnQueue {
   readonly pushFaults: Error[] = [];
-  readonly #consumers = new Set<{
-    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
-    options: ConsumeOptions;
-  }>();
   readonly #pausedActivityReads: { started: Latch; release: Latch }[] = [];
   readonly #running = new Map<string, TurnRef>();
 
@@ -123,7 +119,7 @@ class ControlledTurnQueue extends TurnQueue {
   override async push(turn: TurnRef) {
     const fault = this.pushFaults.shift();
     if (fault) throw fault;
-    this.turns.push(turn);
+    await super.push(turn);
   }
 
   override async getTurnActivity(
@@ -134,62 +130,37 @@ class ControlledTurnQueue extends TurnQueue {
       gate.started.open();
       await gate.release.wait();
     }
-    const belongsToConversation = (turn: TurnRef) =>
-      turn.chatId === conversation.chatId &&
-      turn.userId === conversation.userId;
-    if ([...this.#running.values()].some(belongsToConversation)) {
-      return 'running';
-    }
-    return this.turns.some(belongsToConversation) ? 'queued' : 'idle';
+    if (this.#runningTurn(conversation)) return 'running';
+    return super.getTurnActivity(conversation);
   }
 
   override async getCurrentTurn(
     conversation: Pick<TurnRef, 'chatId' | 'userId'>,
   ) {
-    const belongsToConversation = (turn: TurnRef) =>
-      turn.chatId === conversation.chatId &&
-      turn.userId === conversation.userId;
     return (
-      [...this.#running.values()].find(belongsToConversation) ??
-      this.turns.find(belongsToConversation)
+      this.#runningTurn(conversation) ?? super.getCurrentTurn(conversation)
     );
   }
 
-  override async cancel(streamId: string): Promise<void> {
-    const remaining = this.turns.filter((turn) => turn.streamId !== streamId);
-    this.turns.splice(0, this.turns.length, ...remaining);
-  }
-
-  override async consume(
-    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
-    options: ConsumeOptions,
-  ): Promise<AsyncDisposable> {
-    const consumer = { handler, options };
-    this.#consumers.add(consumer);
-    return {
-      [Symbol.asyncDispose]: async () => {
-        this.#consumers.delete(consumer);
-      },
-    };
-  }
-
-  override async resumeParked(): Promise<void> {}
-
-  async runNext(): Promise<void> {
-    const turn = this.turns.shift();
-    assert.ok(turn);
-    const [consumer] = this.#consumers;
-    assert.ok(consumer);
+  protected override async deliver(
+    turn: TurnRef,
+    consumer: TurnConsumer,
+  ): Promise<void> {
     this.#running.set(turn.streamId, turn);
     try {
-      await consumer.handler(turn, {
-        signal: new AbortController().signal,
-        park: async () => assert.fail('turn unexpectedly parked'),
-      });
+      await super.deliver(turn, consumer);
     } finally {
       this.#running.delete(turn.streamId);
     }
     await consumer.options.onSettled?.(turn);
+  }
+
+  #runningTurn(conversation: Pick<TurnRef, 'chatId' | 'userId'>) {
+    return [...this.#running.values()].find(
+      (turn) =>
+        turn.chatId === conversation.chatId &&
+        turn.userId === conversation.userId,
+    );
   }
 }
 
@@ -345,7 +316,7 @@ function disposableHarness(
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const streams = streamsFor(streamStore);
-  const queue = new ControlledTurnQueue();
+  const queue = new SchedulingTurnQueue();
   return {
     store,
     streams,
@@ -444,7 +415,7 @@ function toolModel(
 
 async function runTurn(
   runtime: AgentHost,
-  queue: ControlledTurnQueue,
+  queue: SchedulingTurnQueue,
   conversation: { chatId: string; userId: string },
   input: string,
 ) {

@@ -7,47 +7,15 @@ import {
   type AgentDeclaration,
   AgentRuntime,
   SqliteMailboxStore,
-  type TurnActivity,
-  TurnQueue,
-  type TurnRef,
   defineAgent,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
+import { UnusedTurnQueue } from '../../testing/unused-turn-queue.fixture.ts';
 
 /** Turns are never scheduled by runtimes that are only initialized. */
-class UnusedTurnQueue extends TurnQueue {
-  override async push(): Promise<void> {
-    throw unusedQueue();
-  }
-
-  override async getTurnActivity(): Promise<TurnActivity> {
-    throw unusedQueue();
-  }
-
-  override async getCurrentTurn(): Promise<TurnRef | undefined> {
-    throw unusedQueue();
-  }
-
-  override async cancel(): Promise<void> {
-    throw unusedQueue();
-  }
-
-  override async consume(): Promise<AsyncDisposable> {
-    throw unusedQueue();
-  }
-
-  override async resumeParked(): Promise<void> {
-    throw unusedQueue();
-  }
-}
-
-function unusedQueue(): Error {
-  return new Error('this test never schedules a turn');
-}
-
 /** In-memory adapters for runtimes that are initialized but never worked. */
 function adapters(resources: AsyncDisposableStack) {
   const streamStore = new SqliteStreamStore(':memory:');

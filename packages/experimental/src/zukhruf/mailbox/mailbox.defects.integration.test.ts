@@ -14,11 +14,8 @@ import {
   type AgentDeclaration,
   type AgentHost,
   AgentRuntime,
-  type ConsumeContext,
-  type ConsumeOptions,
   MessageDeliveryModes,
   SqliteMailboxStore,
-  TurnQueue,
   type TurnRef,
   createInterAgentCommunication,
   defineStack,
@@ -26,6 +23,10 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import {
+  ControlledTurnQueue,
+  type TurnConsumer,
+} from '../../testing/controlled-turn-queue.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
 
@@ -113,80 +114,27 @@ function declaration(model: AgentDeclaration['model']): AgentDeclaration {
   };
 }
 
-class ManualTurnQueue extends TurnQueue {
+class ManualTurnQueue extends ControlledTurnQueue {
   readonly attempted: TurnRef[] = [];
-  readonly pending: TurnRef[] = [];
   readonly pushFaults: Error[] = [];
-  readonly #consumers = new Set<{
-    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
-    options: ConsumeOptions;
-  }>();
 
   override async push(turn: TurnRef) {
     this.attempted.push(turn);
     const fault = this.pushFaults.shift();
     if (fault) throw fault;
-    this.pending.push(turn);
+    await super.push(turn);
   }
 
-  override async getTurnActivity(
-    conversation: Pick<TurnRef, 'chatId' | 'userId'>,
-  ): Promise<'idle' | 'queued' | 'running'> {
-    return this.pending.some(
-      (turn) =>
-        turn.chatId === conversation.chatId &&
-        turn.userId === conversation.userId,
-    )
-      ? 'queued'
-      : 'idle';
-  }
+  protected override async park(): Promise<void> {}
 
-  override async getCurrentTurn(
-    conversation: Pick<TurnRef, 'chatId' | 'userId'>,
-  ): Promise<TurnRef | undefined> {
-    return this.pending.find(
-      (turn) =>
-        turn.chatId === conversation.chatId &&
-        turn.userId === conversation.userId,
-    );
-  }
-
-  override async cancel(streamId: string): Promise<void> {
-    const remaining = this.pending.filter((turn) => turn.streamId !== streamId);
-    this.pending.splice(0, this.pending.length, ...remaining);
-  }
-
-  override async consume(
-    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
-    options: ConsumeOptions,
-  ): Promise<AsyncDisposable> {
-    const consumer = { handler, options };
-    this.#consumers.add(consumer);
-    return {
-      [Symbol.asyncDispose]: async () => {
-        this.#consumers.delete(consumer);
-      },
-    };
-  }
-
-  override async resumeParked(): Promise<void> {}
-
-  async runNext(): Promise<void> {
-    const [consumer] = this.#consumers;
-    assert.ok(consumer, 'start runtime.work() before running a turn');
-    const turn = this.pending.shift();
-    assert.ok(turn, 'expected one queued turn');
-    const abort = new AbortController();
+  protected override async deliver(
+    turn: TurnRef,
+    consumer: TurnConsumer,
+  ): Promise<void> {
     try {
-      await consumer.handler(turn, {
-        signal: abort.signal,
-        park: async () => {},
-      });
+      await super.deliver(turn, consumer);
     } catch (error) {
-      await consumer.options.onOrphaned(
-        turn,
-        error instanceof Error ? error.message : String(error),
-      );
+      await this.orphan(turn, consumer, error);
     }
   }
 }
@@ -305,7 +253,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
         MessageDeliveryModes.QueueOnly,
       );
       assert.equal(
-        h.queue.pending.length,
+        h.queue.turns.length,
         1,
         'active queue-only mail reserves one serialized fallback wake',
       );
@@ -389,7 +337,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
         MessageDeliveryModes.QueueOnly,
       );
       assert.equal(
-        h.queue.pending.length,
+        h.queue.turns.length,
         1,
         'active queue-only mail reserves one serialized fallback wake',
       );
@@ -403,11 +351,11 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
       await executing;
 
       assert.ok(
-        h.queue.pending.length >= 1,
+        h.queue.turns.length >= 1,
         'at least one serialized fallback survives the durable handoff',
       );
-      assert.ok(h.queue.pending.every((turn) => turn.kind === 'mailbox'));
-      while (h.queue.pending.length > 0) await h.queue.runNext();
+      assert.ok(h.queue.turns.every((turn) => turn.kind === 'mailbox'));
+      while (h.queue.turns.length > 0) await h.queue.runNext();
 
       assert.equal(prompts.length, 2);
       assert.equal(maxActive, 1);
@@ -479,7 +427,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
         MessageDeliveryModes.QueueOnly,
       );
       assert.equal(
-        queue.pending.length,
+        queue.turns.length,
         1,
         'durable mailbox activity is visible across coordinator instances',
       );
@@ -488,11 +436,11 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
       await executing;
 
       assert.ok(
-        queue.pending.length >= 1,
+        queue.turns.length >= 1,
         'at least one durable fallback survives the append-to-wake boundary',
       );
-      assert.ok(queue.pending.every((turn) => turn.kind === 'mailbox'));
-      while (queue.pending.length > 0) await queue.runNext();
+      assert.ok(queue.turns.every((turn) => turn.kind === 'mailbox'));
+      while (queue.turns.length > 0) await queue.runNext();
       assert.equal(prompts.length, 2);
       assert.match(
         JSON.stringify(prompts[1]),
@@ -551,7 +499,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
         MessageDeliveryModes.TriggerTurn,
       );
       await queue.runNext();
-      assert.equal(queue.pending.length, 0);
+      assert.equal(queue.turns.length, 0);
       assert.equal(prompts.length, 1);
 
       await senderRuntime.deliver(
@@ -560,7 +508,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
       );
 
       assert.equal(
-        queue.pending.length,
+        queue.turns.length,
         1,
         'a fulfilled sender-local wake must not suppress later trigger turns',
       );
@@ -603,7 +551,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
         await streamStore.getStreamStatus(completed.id),
         'completed',
       );
-      assert.equal(queue.pending.length, 0);
+      assert.equal(queue.turns.length, 0);
 
       await senderRuntime.deliver(
         mail('wait until a natural future turn'),
@@ -611,7 +559,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
       );
 
       assert.equal(
-        queue.pending.length,
+        queue.turns.length,
         0,
         'send_message does not trigger a turn after the durable end-turn handoff',
       );
