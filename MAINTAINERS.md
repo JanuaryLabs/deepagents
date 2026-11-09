@@ -28,13 +28,18 @@ Releases are automated via GitHub Actions. When a release tag is pushed, CI will
 
    Review the proposed version bumps and confirm when prompted.
 
-3. **Push commits and tags**
+3. **Push the commit, then the tag**
+
+   Push `main`. Wait for green CI. Then push only the new tag:
 
    ```bash
-   git push origin main --follow-tags
+   git push origin main
+   git push origin refs/tags/release/x.x.x
    ```
 
-   The `release/*` tag will trigger the GitHub Actions workflow which builds and publishes all packages to npm.
+   The `release/*` tag starts the GitHub Actions workflow. The workflow builds all packages and publishes them to npm.
+
+   Do not use `--follow-tags`. It also pushes older local tags. GitHub sends no push event when one push has more than three tags, so the workflow does not start and npm gets no release.
 
 4. **Verify the release**
    - Check the [Actions tab](../../actions) for the release workflow status
@@ -72,7 +77,9 @@ npx nx release --skip-publish --dry-run
 
 **Need to republish a failed release?**
 
-If the tag was pushed but publishing failed, delete the tag and re-push:
+Do this only for the newest release. Do not push an older tag again: the workflow publishes that version, and the `latest` dist-tag on npm can move back to it. For example, `release/6.2.0` is not on npm.
+
+If you pushed the newest tag and publishing failed, delete the tag and push it again:
 
 ```bash
 git tag -d release/x.x.x
