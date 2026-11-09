@@ -70,7 +70,10 @@ function describe(error: unknown) {
 
 console.log('login:', await ask(claude('claude-haiku-5-5')));
 
-const accounts = createClaudeAccounts({ store: new MemoryStore() });
+const accounts = createClaudeAccounts({
+  store: new MemoryStore(),
+  clock: globalThis,
+});
 const model = accounts.provider('user-42')('claude-haiku-5-5');
 console.log('account:', await ask(model));
 ```

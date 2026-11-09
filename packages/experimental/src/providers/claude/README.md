@@ -76,6 +76,7 @@ import { createClaudeAccounts } from '@deepagents/experimental/providers/claude'
 
 const accounts = createClaudeAccounts({
   store, // KeyValueStore<ClaudeTokens>, keyed by owner
+  clock: globalThis,
   onChange: (owner, state) => notify(owner, state),
 });
 

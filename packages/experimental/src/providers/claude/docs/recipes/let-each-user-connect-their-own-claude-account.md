@@ -6,7 +6,7 @@
 
 ## The steps
 
-1. Create one account manager per store with `createClaudeAccounts({ store, onChange })`.
+1. Create one account manager per store with `createClaudeAccounts({ store, clock, onChange })`.
 2. When a user starts connecting, call `accounts.connect(owner)`, using your application's user ID as `owner`.
 3. Show `authorizationUrl` to the user. The user signs in at claude.ai, and Claude shows a code.
 4. Give the code to `accounts.complete(owner, code)`. If the state stays `pending`, show its `message` and ask for the code again.
@@ -26,6 +26,7 @@ import { createClaudeAccounts } from '@deepagents/experimental/providers/claude'
 
 const accounts = createClaudeAccounts({
   store: new MemoryStore(), // A real app uses an encrypted store.
+  clock: globalThis,
   onChange: (owner, state) => console.log(`[${owner}] ${state.status}`),
 });
 const owner = 'user-42'; // For example, the id of the signed-in user.

@@ -68,6 +68,8 @@ export type ClaudeConnectionState =
 export interface ClaudeAccountsOptions {
   /** Holds each owner's tokens, keyed by the owner passed to every method. */
   store: KeyValueStore<ClaudeTokens>;
+  /** An entry gives `globalThis`; a test gives `createClock()`. */
+  clock: { Date: { now(): number } };
   /** Receives every connection change, including a revoked refresh token. */
   onChange?: (owner: string, state: ClaudeConnectionState) => void;
 }
@@ -88,6 +90,7 @@ interface PendingSignIn {
  * instance per store; refresh serialization lives in the instance.
  */
 export function createClaudeAccounts(options: ClaudeAccountsOptions) {
+  const { clock } = options;
   const vault = createTokenVault(
     options.store,
     (value) => claudeTokens.safeParse(value).data,
@@ -95,8 +98,9 @@ export function createClaudeAccounts(options: ClaudeAccountsOptions) {
   const signIns = new Map<string, PendingSignIn>();
   const tokens = createTokenResolver<ClaudeTokens>({
     vault,
-    isFresh: (current) => current.expiresAt > Date.now() + EXPIRY_MARGIN_MS,
-    refresh: refreshTokens,
+    isFresh: (current) =>
+      current.expiresAt > clock.Date.now() + EXPIRY_MARGIN_MS,
+    refresh: (current) => refreshTokens(current, clock),
     notConnected: () =>
       new ClaudeAuthError(
         'not-connected',
@@ -136,7 +140,7 @@ export function createClaudeAccounts(options: ClaudeAccountsOptions) {
   async function state(owner: string): Promise<ClaudeConnectionState> {
     const signIn = signIns.get(owner);
     if (signIn) {
-      if (signIn.expiresAt > Date.now()) return pending(signIn);
+      if (signIn.expiresAt > clock.Date.now()) return pending(signIn);
       cancel(owner);
     }
     try {
@@ -230,7 +234,7 @@ export function createClaudeAccounts(options: ClaudeAccountsOptions) {
       authorizationUrl: url.href,
       verifier,
       state: oauthState,
-      expiresAt: Date.now() + SIGN_IN_TIMEOUT_MS,
+      expiresAt: clock.Date.now() + SIGN_IN_TIMEOUT_MS,
       revision,
       abort: new AbortController(),
     });
@@ -242,7 +246,7 @@ export function createClaudeAccounts(options: ClaudeAccountsOptions) {
     input: string,
   ): Promise<ClaudeConnectionState> {
     const signIn = signIns.get(owner);
-    if (!signIn || signIn.expiresAt <= Date.now()) {
+    if (!signIn || signIn.expiresAt <= clock.Date.now()) {
       cancel(owner);
       return emit(owner, {
         status: 'error',
@@ -313,7 +317,7 @@ export function createClaudeAccounts(options: ClaudeAccountsOptions) {
         {
           accessToken: parsed.data.access_token,
           refreshToken: parsed.data.refresh_token,
-          expiresAt: Date.now() + parsed.data.expires_in * 1000,
+          expiresAt: clock.Date.now() + parsed.data.expires_in * 1000,
           ...(email && { user: { email } }),
         },
         signIn.revision,
@@ -402,6 +406,7 @@ function pending(signIn: PendingSignIn): ClaudeConnectionState {
 
 async function refreshTokens(
   current: ClaudeTokens,
+  clock: ClaudeAccountsOptions['clock'],
 ): Promise<RefreshResult<ClaudeTokens>> {
   let response: Response;
   try {
@@ -450,7 +455,7 @@ async function refreshTokens(
       ...current,
       accessToken: parsed.data.access_token,
       refreshToken: parsed.data.refresh_token ?? current.refreshToken,
-      expiresAt: Date.now() + parsed.data.expires_in * 1000,
+      expiresAt: clock.Date.now() + parsed.data.expires_in * 1000,
     },
   };
 }
