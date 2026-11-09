@@ -24,6 +24,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
+import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 const stack = defineStack(async (resources) => {
   const database = resources.use(new PGlite());
@@ -107,14 +108,10 @@ for (const stopWhen of [
     const runtime = new AgentRuntime(declaration);
     await using host = await runtime.initialize(stack);
     const conversation = { chatId: 'observations', userId: 'owner' };
-    const turn = await host.enqueue(conversation, {
-      trigger: 'submit-message',
-      message: {
-        id: 'event-1',
-        role: 'user',
-        parts: [{ type: 'text', text: 'Notify once.' }],
-      },
-    });
+    const turn = await host.enqueue(
+      conversation,
+      userTurn('event-1', 'Notify once.'),
+    );
     await host.work();
     await Array.fromAsync(turn.stream);
     assert.equal(
@@ -193,28 +190,20 @@ test('a truncated tool input cannot park the next queued user turn', async (t) =
   await using host = await runtime.initialize(stack);
   await host.work();
   const conversation = { chatId: 'truncated', userId: 'owner' };
-  const first = await host.enqueue(conversation, {
-    trigger: 'submit-message',
-    message: {
-      id: 'first',
-      role: 'user',
-      parts: [{ type: 'text', text: 'Inspect this change.' }],
-    },
-  });
+  const first = await host.enqueue(
+    conversation,
+    userTurn('first', 'Inspect this change.'),
+  );
   const chunks = await Array.fromAsync(first.stream);
   assert.ok(
     chunks.some(
       (chunk) => chunk.type === 'finish' && chunk.finishReason === 'length',
     ),
   );
-  const second = await host.enqueue(conversation, {
-    trigger: 'submit-message',
-    message: {
-      id: 'second',
-      role: 'user',
-      parts: [{ type: 'text', text: 'Here is the next change.' }],
-    },
-  });
+  const second = await host.enqueue(
+    conversation,
+    userTurn('second', 'Here is the next change.'),
+  );
   await second.stream.cancel();
   await t.waitFor(
     async () =>
@@ -279,14 +268,7 @@ test('the turns of one chat borrow one sandbox, which stays open between turns, 
     }),
   );
   const conversation = { chatId: 'shared', userId: 'owner' };
-  const message = (id: string) => ({
-    trigger: 'submit-message' as const,
-    message: {
-      id,
-      role: 'user' as const,
-      parts: [{ type: 'text' as const, text: id }],
-    },
-  });
+  const message = (id: string) => userTurn(id, id);
   {
     await using host = await runtime.initialize(stack);
     await host.work();

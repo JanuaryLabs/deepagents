@@ -23,15 +23,7 @@ import {
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
-
-const userTurn = (id: string, text: string) => ({
-  message: {
-    id,
-    role: 'user' as const,
-    parts: [{ type: 'text' as const, text }],
-  },
-  trigger: 'submit-message' as const,
-});
+import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 class RecordingTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];

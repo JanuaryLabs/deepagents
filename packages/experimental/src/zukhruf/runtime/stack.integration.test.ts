@@ -26,6 +26,7 @@ import {
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
+import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 const model = new MockLanguageModelV4({
   doStream: async () => ({
@@ -138,14 +139,10 @@ test('one setup creates independent ready hosts with plugins, HTTP, and queued t
   assert.equal(info.status, 200);
   assert.partialDeepStrictEqual(await info.json(), { root: root.name });
 
-  const turn = await host.enqueue(conversation, {
-    message: {
-      id: crypto.randomUUID(),
-      role: 'user',
-      parts: [{ type: 'text', text: 'hello' }],
-    },
-    trigger: 'submit-message',
-  });
+  const turn = await host.enqueue(
+    conversation,
+    userTurn(crypto.randomUUID(), 'hello'),
+  );
   assert.equal(
     (await host.observe(conversation).status(turn.id))?.status,
     'queued',
@@ -350,14 +347,10 @@ for (const ownership of ['owned', 'borrowed']) {
     let disposing: Promise<void> | undefined;
     try {
       await host.work();
-      const turn = await host.enqueue(conversation, {
-        message: {
-          id: crypto.randomUUID(),
-          role: 'user',
-          parts: [{ type: 'text', text: 'wait for me' }],
-        },
-        trigger: 'submit-message',
-      });
+      const turn = await host.enqueue(
+        conversation,
+        userTurn(crypto.randomUUID(), 'wait for me'),
+      );
       await turn.stream.cancel();
       await entered.promise;
       disposing = host[Symbol.asyncDispose]();

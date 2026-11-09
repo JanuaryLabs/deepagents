@@ -23,6 +23,7 @@ import {
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
+import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 /** The addressing every queued `TurnRef` payload carries. */
 const queuedTurnSchema = z.looseObject({
@@ -386,14 +387,10 @@ describe('zukhruf runtime mailbox delivery', () => {
     await using _worker = await h.runtime.work({ concurrency: 2 });
     void _worker;
 
-    const running = await h.runtime.enqueue(researcher, {
-      message: {
-        id: 'active-turn',
-        role: 'user',
-        parts: [{ type: 'text', text: 'already working' }],
-      },
-      trigger: 'submit-message',
-    });
+    const running = await h.runtime.enqueue(
+      researcher,
+      userTurn('active-turn', 'already working'),
+    );
     await firstStarted.promise;
 
     await h.runtime.deliver(

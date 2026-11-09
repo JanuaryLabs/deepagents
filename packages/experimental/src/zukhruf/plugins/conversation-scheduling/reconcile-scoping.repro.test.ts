@@ -27,6 +27,7 @@ import {
 
 import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
 import { streamsFor } from '../../../testing/streams-for.fixture.ts';
+import { userTurn } from '../../../testing/user-turn.fixture.ts';
 
 const usage = {
   inputTokens: {
@@ -264,14 +265,10 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
     await runtimeA.createSession(conversationA);
     await runtimeB.createSession(conversationB);
     workerB = await runtimeB.work();
-    await runtimeB.enqueue(conversationB, {
-      message: {
-        id: 'create-b-cron-turn',
-        role: 'user',
-        parts: [{ type: 'text', text: 'create B cron' }],
-      },
-      trigger: 'submit-message',
-    });
+    await runtimeB.enqueue(
+      conversationB,
+      userTurn('create-b-cron-turn', 'create B cron'),
+    );
     await queueB.runNext();
 
     const bWake = schedulerB.scheduled.at(-1);

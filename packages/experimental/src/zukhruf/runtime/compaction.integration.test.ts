@@ -49,6 +49,7 @@ import {
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
+import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 const tokenScopeSchema = z.literal('request').optional();
 
@@ -2123,14 +2124,10 @@ test(
     await using host = await runtime.initialize(stack);
     await host.work();
     await send(host, 'Prior findings. '.repeat(700));
-    const pending = await host.enqueue(conversation, {
-      message: {
-        id: crypto.randomUUID(),
-        role: 'user',
-        parts: [{ type: 'text', text: 'Continue CASE-42.' }],
-      },
-      trigger: 'submit-message',
-    });
+    const pending = await host.enqueue(
+      conversation,
+      userTurn(crypto.randomUUID(), 'Continue CASE-42.'),
+    );
     const chunks: UIMessageChunk[] = [];
     const reading = (async () => {
       for await (const chunk of pending.stream) chunks.push(chunk);

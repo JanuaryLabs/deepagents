@@ -27,19 +27,11 @@ import {
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
+import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 /** Message metadata the turn executor writes for delivered mail. */
 const communicationMessageMetadataSchema = z.object({
   interAgentCommunication: z.looseObject({ content: z.string() }),
-});
-
-const userTurn = (id: string, text: string) => ({
-  message: {
-    id,
-    role: 'user' as const,
-    parts: [{ type: 'text' as const, text }],
-  },
-  trigger: 'submit-message' as const,
 });
 
 async function submitApproval(

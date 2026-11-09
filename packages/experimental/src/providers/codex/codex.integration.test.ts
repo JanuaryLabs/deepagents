@@ -38,6 +38,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
+import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 /** Responses API `input` items; message items may omit `type`. */
 const responsesInput = z.array(z.looseObject({ type: z.string().optional() }));
@@ -685,14 +686,10 @@ test('Zukhruf executes a host tool and persists history across queued turns', as
   await using worker = await runtime.work();
   const conversation = { chatId: 'provider-test', userId: 'user' };
   for (const text of ['Read the marker.', 'What was the marker?']) {
-    const turn = await runtime.enqueue(conversation, {
-      message: {
-        id: crypto.randomUUID(),
-        role: 'user',
-        parts: [{ type: 'text', text }],
-      },
-      trigger: 'submit-message',
-    });
+    const turn = await runtime.enqueue(
+      conversation,
+      userTurn(crypto.randomUUID(), text),
+    );
     let answer = '';
     for await (const chunk of turn.stream) {
       if (chunk.type === 'error') assert.fail(chunk.errorText);

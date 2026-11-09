@@ -37,6 +37,7 @@ import {
 } from '@deepagents/experimental/zukhruf/http';
 
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
+import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 const childActivitySchema = z.looseObject({
   id: z.string(),
@@ -303,14 +304,10 @@ test(
         conversation = project,
       ) => {
         scripted.push(call(toolName, input), text('root done'));
-        const turn = await runtime.enqueue(conversation, {
-          message: {
-            id: crypto.randomUUID(),
-            role: 'user',
-            parts: [{ type: 'text', text: 'run operation' }],
-          },
-          trigger: 'submit-message',
-        });
+        const turn = await runtime.enqueue(
+          conversation,
+          userTurn(crypto.randomUUID(), 'run operation'),
+        );
         for await (const chunk of turn.stream) {
           assert.ok(chunk.type);
         }

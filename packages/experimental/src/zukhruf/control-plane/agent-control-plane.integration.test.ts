@@ -31,6 +31,7 @@ import {
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
+import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 /** Conversation metadata as `AgentThread.toMetadata` and the history forker write it. */
 const threadMetadataSchema = z.looseObject({
@@ -53,15 +54,6 @@ const threadMetadataSchema = z.looseObject({
 /** Message metadata the turn executor writes for delivered mail. */
 const communicationMessageMetadataSchema = z.object({
   interAgentCommunication: z.looseObject({ content: z.string() }),
-});
-
-const userTurn = (id: string, text: string) => ({
-  message: {
-    id,
-    role: 'user' as const,
-    parts: [{ type: 'text' as const, text }],
-  },
-  trigger: 'submit-message' as const,
 });
 
 async function submitApprovals(
@@ -1952,14 +1944,7 @@ test('a child cancelled while queued notifies its parent once without running th
   }
 
   const conversation = { chatId: 'queued-child-chat', userId: 'user-1' };
-  const turn = {
-    message: {
-      id: 'cancelled-before-start',
-      role: 'user' as const,
-      parts: [{ type: 'text' as const, text: 'Never start this' }],
-    },
-    trigger: 'submit-message' as const,
-  };
+  const turn = userTurn('cancelled-before-start', 'Never start this');
   const cancelledTurn = await runtime.enqueue(conversation, turn);
   await runtime.observe(conversation).cancel(cancelledTurn.id);
   await runtime.enqueue(conversation, turn);

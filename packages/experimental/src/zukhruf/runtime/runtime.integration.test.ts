@@ -68,6 +68,7 @@ import {
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
+import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 const usage = {
   inputTokens: {
@@ -79,14 +80,7 @@ const usage = {
   outputTokens: { total: 2, text: 2, reasoning: undefined },
 } as const;
 
-const turn = (text: string) => ({
-  message: {
-    id: `message:${crypto.randomUUID()}`,
-    role: 'user' as const,
-    parts: [{ type: 'text' as const, text }],
-  },
-  trigger: 'submit-message' as const,
-});
+const turn = (text: string) => userTurn(`message:${crypto.randomUUID()}`, text);
 
 interface ModelTrack {
   active: number;
@@ -728,14 +722,10 @@ describe('zukhruf runtime — host sessions', () => {
       ],
     });
 
-    const pending = await h.runtime.enqueue(conversation, {
-      message: {
-        id: 'message-1',
-        role: 'user',
-        parts: [{ type: 'text', text: 'hello' }],
-      },
-      trigger: 'submit-message',
-    });
+    const pending = await h.runtime.enqueue(
+      conversation,
+      userTurn('message-1', 'hello'),
+    );
     assert.deepEqual(await h.runtime.observe(conversation).status(pending.id), {
       status: 'queued',
       startedAt: null,
@@ -863,14 +853,10 @@ describe('zukhruf runtime — host sessions', () => {
     void _worker;
     await collectText(
       (
-        await h.runtime.enqueue(conversation, {
-          message: {
-            id: 'existing-turn',
-            role: 'user',
-            parts: [{ type: 'text', text: 'existing context' }],
-          },
-          trigger: 'submit-message',
-        })
+        await h.runtime.enqueue(
+          conversation,
+          userTurn('existing-turn', 'existing context'),
+        )
       ).stream,
     );
     const task = await scheduleControl.create('user-1', {
@@ -2090,14 +2076,10 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal(b, 'reply:once');
     assert.deepStrictEqual(track.calls, ['once'], 'model ran exactly once');
 
-    const resubmit = await h.runtime.enqueue(conversation, {
-      message: {
-        id: ask.message.id,
-        role: 'user',
-        parts: [{ type: 'text', text: 'a different input under the same id' }],
-      },
-      trigger: 'submit-message',
-    });
+    const resubmit = await h.runtime.enqueue(
+      conversation,
+      userTurn(ask.message.id, 'a different input under the same id'),
+    );
     const text = await collectText(resubmit.stream);
     assert.equal(text, 'reply:once', 'post-completion resubmit replays');
     assert.deepStrictEqual(
@@ -2141,17 +2123,7 @@ describe('zukhruf runtime — background executor', () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(scriptedModel(track));
     await assert.rejects(
-      h.runtime.enqueue(
-        { chatId: 'c10', userId: 'u1' },
-        {
-          message: {
-            id: '',
-            role: 'user',
-            parts: [{ type: 'text', text: 'hi' }],
-          },
-          trigger: 'submit-message',
-        },
-      ),
+      h.runtime.enqueue({ chatId: 'c10', userId: 'u1' }, userTurn('', 'hi')),
       /message id is required/,
     );
   });
