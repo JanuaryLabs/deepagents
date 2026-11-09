@@ -1,13 +1,8 @@
+import type { Experimental_SandboxFileStat } from '@ai-sdk/provider-utils';
+
 import type { ContainerSandboxError } from './container-sandbox-errors.ts';
 import type { InstallerContext } from './installers/installer.ts';
-import type {
-  CommandResult,
-  ExecuteCommandOptions,
-  LegacySandbox,
-  SandboxProcess,
-  SandboxReadinessOptions,
-  SpawnOptions,
-} from './types.ts';
+import type { CommandResult, SandboxReadinessOptions } from './types.ts';
 
 /** The errors the shared skeleton raises itself; each engine gives its own classes. */
 export interface ContainerErrorFactory {
@@ -85,7 +80,7 @@ export interface SandboxResources {
  * which only its own engine methods see — the skeleton is typed to this common
  * subset and physically cannot read them.
  */
-export interface CommonSandboxOptions extends SandboxReadinessOptions<LegacySandbox> {
+export interface CommonSandboxOptions extends SandboxReadinessOptions {
   volumes?: SandboxVolume[];
   resources?: SandboxResources;
   env?: Record<string, string>;
@@ -105,7 +100,7 @@ export interface CommonSandboxOptions extends SandboxReadinessOptions<LegacySand
   /**
    * Args appended after the image at run time.
    * - `undefined` (default): `['tail', '-f', '/dev/null']` keep-alive so a bare
-   *   image stays up for installers and `executeCommand`.
+   *   image stays up for installers and commands.
    * - `[]` or `null`: nothing is appended; the image's own `CMD`/`ENTRYPOINT`
    *   runs as declared.
    * - A non-empty array: appended verbatim, overriding the image `CMD`.
@@ -115,30 +110,73 @@ export interface CommonSandboxOptions extends SandboxReadinessOptions<LegacySand
   workdir?: string;
 }
 
+/** Where and with what environment a process runs in the container. */
+export interface EngineProcessOptions {
+  /** An absolute path. Default: the {@link EngineContainer.workdir}. */
+  workingDirectory?: string;
+  env?: Record<string, string>;
+}
+
+export interface EngineExecOptions extends EngineProcessOptions {
+  signal?: AbortSignal;
+  /** Bytes for standard input, which then ends. */
+  stdin?: Uint8Array;
+}
+
+export interface EngineSpawnOptions extends EngineProcessOptions {
+  stdin?: boolean;
+}
+
+/** A process in a container, while it runs. */
+export interface EngineProcess {
+  readonly stdout: ReadableStream<Uint8Array>;
+  readonly stderr: ReadableStream<Uint8Array>;
+  /** Present when the process was spawned with `stdin`. */
+  readonly stdin?: WritableStream<Uint8Array>;
+  /** Resolves when the output has ended. */
+  readonly exitCode: Promise<number>;
+}
+
 /**
- * One running container of an engine. The sandbox methods delegate here, so
- * each engine owns how commands and files reach its containers.
+ * One running container of an engine. The session of the sandbox is built on
+ * this, so each engine owns how commands and files reach its containers.
  */
 export interface EngineContainer {
   /** The container name: `sandbox-<name>` or `sandbox-<8hex>`. */
   readonly name: string;
-  executeCommand(
-    command: string,
-    options?: ExecuteCommandOptions,
-  ): Promise<CommandResult>;
-  spawn(command: string, options?: SpawnOptions): Promise<SandboxProcess>;
-  /** The bytes of the file at `path`. */
-  readFile(path: string): Promise<Uint8Array>;
-  writeFiles(
-    files: Array<{ path: string; content: string | Buffer }>,
+  /** Where commands start and what a relative path of a file call resolves against. */
+  readonly workdir: string;
+  /** Milliseconds that bound each command of the session. */
+  readonly commandTimeout?: number;
+  /**
+   * Runs `argv` to its end. A command the engine cannot run is a failed command
+   * in the result, as it is for the engine's own CLI, not a rejection.
+   */
+  exec(argv: string[], options?: EngineExecOptions): Promise<CommandResult>;
+  /** Starts `argv` and streams its output. */
+  spawn(argv: string[], options: EngineSpawnOptions): Promise<EngineProcess>;
+  /** The bytes of the file at `path`, or `null` when nothing is there. */
+  readFile(
+    path: string,
+    signal: AbortSignal | undefined,
+  ): Promise<Uint8Array | null>;
+  /** Creates the parent directories. Rejects when `path` is a directory. */
+  writeFile(
+    path: string,
+    content: Uint8Array,
+    signal: AbortSignal | undefined,
   ): Promise<void>;
-  exists(path: string): Promise<boolean>;
+  /** Follows symbolic links, and gives `null` when nothing is at `path`. */
+  stat(
+    path: string,
+    signal: AbortSignal | undefined,
+  ): Promise<Experimental_SandboxFileStat | null>;
   /**
    * The installer context that drives the post-start installer phase
    * (`pkg`/`npm`/`pip`/…) in this container.
    */
   installerContext(image: string): InstallerContext;
-  /** Stops the container; the engine removes it. Resolves when it is already gone. */
+  /** Stops the container, and resolves when the engine removed it or it is already gone. */
   stop(): Promise<void>;
 }
 

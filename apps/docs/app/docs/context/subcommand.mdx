@@ -98,10 +98,10 @@ const sandbox = await createVirtualSandbox({
   customCommands: [defineSubcommandGroup('greet', subcommands)],
 });
 
-await sandbox.executeCommand('greet hello world');
+await sandbox.run({ command: 'greet hello world' });
 // stdout: "Hello, world!\n"
 
-await sandbox.executeCommand('greet');
+await sandbox.run({ command: 'greet' });
 // exitCode: 1
 // stderr includes:
 // greet: missing subcommand

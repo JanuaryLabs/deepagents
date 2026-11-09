@@ -61,9 +61,9 @@ PROFILE=1 node run.ts
 
 ```
 [profile] createDockerSandbox         93ms   # ~1900ms on the FIRST run (apk add strace); ~90ms after, reusing the named container
-[profile] withStraceFileChanges      228ms   # strace self-test = 2 docker-exec round-trips
-[profile] executeCommand (write)     253ms   # strace-wrapped = run + read-back trace (2 round-trips)
-[profile] executeCommand (read)      235ms
+[profile] withStraceFileChanges        1ms
+[profile] run (write)                253ms   # strace-wrapped: one exec carries the output and the trace
+[profile] run (read)                 235ms
 [profile] TOTAL                      809ms
 ```
 

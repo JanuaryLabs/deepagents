@@ -8,7 +8,7 @@ environments. Choose between Docker containers for portable full binary
 execution, Apple Container lightweight VMs for stronger local isolation on
 Apple silicon, Microsandbox microVMs for local hardware-isolated OCI images,
 caller-owned Daytona sandboxes for managed remote workspaces, virtual file
-systems for simulation, custom `Sandbox` implementations for specialized
+systems for simulation, custom `DisposableSandbox` implementations for specialized
 policy, or binary bridges to combine approaches.
 
 ## When to use what
@@ -42,17 +42,19 @@ paths resolve against that directory. Use `include` to select files with a glob 
 
 The `sandbox` that `createBashTool` returns is an AI SDK
 [`Experimental_SandboxSession`](https://ai-sdk.dev/docs/reference/ai-sdk-core/sandbox)
-for every backend, with `run`, `spawn`, `readTextFile`, `readBinaryFile`,
-`writeTextFile`, `writeBinaryFile` and `stat`, plus our `dispose`.
-`createVirtualSandbox` returns one directly, through the official
-`@ai-sdk/sandbox-just-bash` adapter. Its `spawn` delivers output when the
-process exits, so use a process-backed sandbox for live streaming.
+for every backend, with `run`, `spawn`, `readFile`, `readBinaryFile`,
+`readTextFile`, `writeFile`, `writeBinaryFile`, `writeTextFile` and `stat`, plus
+our `dispose`. `createVirtualSandbox`, `createDockerSandbox` and
+`createAppleContainerSandbox` return one directly, with `listDirectory` and
+`deleteFile` too. The virtual sandbox uses the official
+`@ai-sdk/sandbox-just-bash` adapter. Its `spawn` delivers output when the process
+exits, so use a process-backed sandbox for live streaming.
 
-Docker, Apple Container, Microsandbox and Daytona factories still return the
-older API (`executeCommand`, `readFile`, `writeFiles`, `exists`, `dispose`, and
-`spawn(command, options?)` with live streaming) while they move to the session.
-Until then `createBashTool` adapts them, and `listDirectory` and `deleteFile`
-are not available on the session it returns for them.
+Microsandbox and Daytona factories still return the older API (`executeCommand`,
+`readFile`, `writeFiles`, `exists`, `dispose`, and `spawn(command, options?)`
+with live streaming) while they move to the session. Until then
+`createBashTool` and `withStraceFileChanges` adapt them, and `listDirectory` and
+`deleteFile` are not available on the session they return for them.
 
 Commands execute with Bash semantics. Process-backed
 environments must contain `bash`; factories fail with a clear error when Bash
@@ -64,7 +66,7 @@ the sandbox release at scope exit instead of writing `try/finally`:
 
 ```typescript
 await using backend = await createDockerSandbox({ installers: [pkg(['jq'])] });
-await backend.executeCommand('jq --version');
+await backend.run({ command: 'jq --version' });
 // backend.dispose() runs automatically when this scope exits
 ```
 
@@ -158,14 +160,15 @@ const sandbox = await createDockerSandbox({
 });
 
 try {
-  const result = await sandbox.executeCommand('curl --version');
+  const result = await sandbox.run({ command: 'curl --version' });
   console.log(result.stdout);
 
-  await sandbox.writeFiles([
-    { path: '/tmp/hello.txt', content: 'Hello from Docker!' },
-  ]);
+  await sandbox.writeTextFile({
+    path: '/tmp/hello.txt',
+    content: 'Hello from Docker!',
+  });
 
-  const content = await sandbox.readFile('/tmp/hello.txt');
+  const content = await sandbox.readTextFile({ path: '/tmp/hello.txt' });
   console.log(content);
 } finally {
   await sandbox.dispose();
@@ -180,7 +183,7 @@ import { useSandbox } from '@deepagents/context';
 const output = await useSandbox(
   { installers: [pkg(['curl'])] },
   async (sandbox) => {
-    const result = await sandbox.executeCommand('curl --version');
+    const result = await sandbox.run({ command: 'curl --version' });
     return result.stdout;
   },
 );

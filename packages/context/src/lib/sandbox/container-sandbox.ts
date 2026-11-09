@@ -9,9 +9,9 @@ import type {
   EngineContainer,
   SandboxVolume,
 } from './container-engine.ts';
+import { containerSession, validateEnv } from './container-session.ts';
 import { type Installer } from './installers/installer.ts';
-import { readFileContent } from './read-file.ts';
-import type { LegacySandbox } from './types.ts';
+import type { DisposableSandbox } from './types.ts';
 
 const CONTAINER_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
 
@@ -30,11 +30,7 @@ export function validateSandboxOptions(
   opts: CommonSandboxOptions,
   errors: ContainerErrorFactory,
 ): void {
-  for (const key of Object.keys(opts.env ?? {})) {
-    if (key.length === 0 || key.includes('=')) {
-      throw errors.generic(`Invalid environment variable key: "${key}"`);
-    }
-  }
+  validateEnv(opts.env, errors);
   if (opts.name !== undefined && !CONTAINER_NAME_PATTERN.test(opts.name)) {
     throw errors.generic(
       `Invalid container name: "${opts.name}". Use only letters, numbers, underscore, period, or hyphen. The "sandbox-" prefix is added automatically.`,
@@ -84,7 +80,7 @@ export abstract class ContainerSandboxStrategy<
    * Creates the sandbox. On failure, everything it made is released and the
    * engine is disposed.
    */
-  async create(): Promise<LegacySandbox> {
+  async create(): Promise<DisposableSandbox> {
     let acquired: AcquiredContainer | undefined;
 
     try {
@@ -289,7 +285,7 @@ export abstract class ContainerSandboxStrategy<
   }
 
   private async assertBashAvailable(container: EngineContainer): Promise<void> {
-    const result = await container.executeCommand(':');
+    const result = await container.exec(['bash', '-lc', ':']);
     if (result.exitCode === 0) return;
     const detail = result.stderr.trim() || result.stdout.trim();
     throw this.engine.errors.generic(
@@ -298,7 +294,9 @@ export abstract class ContainerSandboxStrategy<
     );
   }
 
-  protected createSandboxMethods(container: EngineContainer): LegacySandbox {
+  protected createSandboxMethods(
+    container: EngineContainer,
+  ): DisposableSandbox {
     let disposal: Promise<void> | undefined;
     const dispose = async (): Promise<void> => {
       try {
@@ -309,18 +307,11 @@ export abstract class ContainerSandboxStrategy<
       }
     };
 
+    const disposeOnce = () => (disposal ??= dispose());
     return {
-      executeCommand: (command, options) =>
-        container.executeCommand(command, options),
-      spawn: (command, options) => container.spawn(command, options),
-      readFile: async (path, options) =>
-        readFileContent(await container.readFile(path), options),
-      exists: (path) => container.exists(path),
-      writeFiles: (files) => container.writeFiles(files),
-      dispose: () => (disposal ??= dispose()),
-      [Symbol.asyncDispose](this: LegacySandbox): Promise<void> {
-        return this.dispose();
-      },
+      ...containerSession(container, this.engine.errors),
+      dispose: disposeOnce,
+      [Symbol.asyncDispose]: disposeOnce,
     };
   }
 

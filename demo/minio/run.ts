@@ -39,14 +39,14 @@ const tracked = await timed('withStraceFileChanges', () =>
 );
 
 const name = `from-sandbox-${Date.now()}.txt`;
-await timed('executeCommand (write)', () =>
-  tracked.executeCommand(
-    `echo 'written by the deepagents sandbox' > /workspace/storage/${name}`,
-  ),
+await timed('run (write)', async () =>
+  tracked.run({
+    command: `echo 'written by the deepagents sandbox' > /workspace/storage/${name}`,
+  }),
 );
 
-const readback = await timed('executeCommand (read)', () =>
-  tracked.executeCommand(`cat /workspace/storage/${name}`),
+const readback = await timed('run (read)', async () =>
+  tracked.run({ command: `cat /workspace/storage/${name}` }),
 );
 console.log(`[run] readback: ${readback.stdout.trim()}`);
 console.log(

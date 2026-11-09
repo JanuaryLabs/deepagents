@@ -167,12 +167,14 @@ const sandbox = await createBashTool({
   ...createSqlCommandHooks({ adapters: { main: adapter } }),
 });
 
-const indexResult = await sandbox.sandbox.executeCommand('sql index');
+const indexResult = await sandbox.sandbox.run({ command: 'sql index' });
 if (indexResult.exitCode !== 0) throw new Error(indexResult.stderr);
 const manifest = JSON.parse(indexResult.stdout) as { fragmentsPath: string };
-const fragments = JSON.parse(
-  await sandbox.sandbox.readFile(manifest.fragmentsPath),
-) as ContextFragment[];
+const fragmentsText = await sandbox.sandbox.readTextFile({
+  path: manifest.fragmentsPath,
+});
+if (fragmentsText === null) throw new Error('sql index wrote no fragments');
+const fragments = JSON.parse(fragmentsText) as ContextFragment[];
 context.set(...instructions(), ...fragments);
 context.set(sqlValidateReminder());
 
@@ -278,7 +280,7 @@ const sandbox = await createVirtualSandbox({
   customCommands: [sqlCommand.command],
 });
 
-await sandbox.executeCommand('sql validate main "SELECT 1"');
+await sandbox.run({ command: 'sql validate main "SELECT 1"' });
 ```
 
 `CreateSqlCommandOptions` configures command defaults (currently `outputDir`).

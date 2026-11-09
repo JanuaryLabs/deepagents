@@ -1,8 +1,14 @@
+import type { Experimental_SandboxFileStat } from '@ai-sdk/provider-utils';
 import spawn, { SubprocessError } from 'nano-spawn';
-import { spawn as childSpawn } from 'node:child_process';
+import {
+  type ChildProcessWithoutNullStreams,
+  spawn as childSpawn,
+} from 'node:child_process';
+import { once } from 'node:events';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable, Writable } from 'node:stream';
 import z from 'zod';
 
 import {
@@ -15,33 +21,30 @@ import {
   AppleContainerVolumeRemoveError,
   ContainerServiceNotRunningError,
 } from './apple-container-sandbox-errors.ts';
-import {
-  commandResultFrom,
-  existsOverExec,
-  readFileOverExec,
-  toSandboxProcess,
-  writeFilesOverExec,
-} from './cli-process.ts';
 import type {
   ContainerEngine,
   EngineContainer,
+  EngineExecOptions,
+  EngineProcess,
+  EngineProcessOptions,
+  EngineSpawnOptions,
   ImageBuildSpec,
   SandboxVolume,
 } from './container-engine.ts';
 import { ContainerfileStrategy, RuntimeStrategy } from './container-sandbox.ts';
+import {
+  collectOutput,
+  readFileOverExec,
+  statOverExec,
+  writeFileOverExec,
+} from './container-session.ts';
 import {
   type Installer,
   type InstallerContext,
   createInstallerContext,
 } from './installers/installer.ts';
 import { shellQuote } from './shell-quote.ts';
-import type {
-  CommandResult,
-  ExecuteCommandOptions,
-  LegacySandbox,
-  SandboxProcess,
-  SpawnOptions,
-} from './types.ts';
+import type { CommandResult, DisposableSandbox } from './types.ts';
 
 export {
   AppleContainerCreationError,
@@ -120,7 +123,7 @@ export interface AppleContainerCommonOptions {
   /**
    * Args appended after the image at `container run` time.
    * - `undefined` (default): `['tail', '-f', '/dev/null']` keep-alive so a bare
-   *   image stays up for installers and `executeCommand`.
+   *   image stays up for installers and commands.
    * - `[]` or `null`: nothing appended; the image's own `CMD`/`ENTRYPOINT` runs.
    * - A non-empty array: appended verbatim, overriding the image command.
    */
@@ -236,80 +239,109 @@ function isNameConflict(message: string): boolean {
   return /already exists/i.test(message);
 }
 
-function execArgs(
-  name: string,
-  command: string,
-  options?: { cwd?: string; env?: Record<string, string> },
-): string[] {
-  const flags: string[] = ['--cwd', options?.cwd || WORKDIR];
-  for (const [key, value] of Object.entries(options?.env ?? {})) {
-    if (key.length === 0 || key.includes('=')) {
-      throw new AppleContainerSandboxError(
-        `Invalid environment variable key: "${key}"`,
-      );
-    }
-    flags.push('--env', `${key}=${value}`);
-  }
-  return ['exec', ...flags, name, 'bash', '-lc', command];
-}
-
-/** Runs `args` with the `container` CLI as a command result. */
-async function run(
-  args: string[],
-  signal?: AbortSignal,
-): Promise<CommandResult> {
-  try {
-    const result = await spawn(CLI, args, { signal });
-    return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
-  } catch (error) {
-    return commandResultFrom(error);
-  }
+function engineProcess(child: ChildProcessWithoutNullStreams): EngineProcess {
+  return {
+    stdout: Readable.toWeb(child.stdout),
+    stderr: Readable.toWeb(child.stderr),
+    exitCode: once(child, 'close').then(([code]) => code ?? 1),
+  };
 }
 
 /** A sandbox container of the Apple `container` runtime. */
 class AppleContainer implements EngineContainer {
   readonly name: string;
+  readonly workdir = WORKDIR;
 
   constructor(name: string) {
     this.name = name;
   }
 
-  executeCommand(
-    command: string,
-    options?: ExecuteCommandOptions,
+  async exec(
+    argv: string[],
+    { stdin, ...options }: EngineExecOptions = {},
   ): Promise<CommandResult> {
-    return run(execArgs(this.name, command), options?.signal);
+    try {
+      const child = this.#exec(argv, options, stdin !== undefined);
+      // A command can end before it reads its input: the result tells why.
+      child.stdin.on('error', () => {});
+      child.stdin.end(stdin);
+      return await collectOutput(engineProcess(child));
+    } catch (error) {
+      return {
+        stdout: '',
+        stderr: error instanceof Error ? error.message : String(error),
+        exitCode: 1,
+      };
+    }
   }
 
   async spawn(
-    command: string,
-    options?: SpawnOptions,
-  ): Promise<SandboxProcess> {
-    return toSandboxProcess(
-      childSpawn(CLI, execArgs(this.name, command, options)),
-      options?.signal,
+    argv: string[],
+    { stdin, ...options }: EngineSpawnOptions,
+  ): Promise<EngineProcess> {
+    const child = this.#exec(argv, options, stdin === true);
+    if (stdin) {
+      return { ...engineProcess(child), stdin: Writable.toWeb(child.stdin) };
+    }
+    child.stdin.end();
+    return engineProcess(child);
+  }
+
+  #exec(
+    argv: string[],
+    {
+      workingDirectory = WORKDIR,
+      env = {},
+      signal,
+    }: EngineProcessOptions & { signal?: AbortSignal },
+    interactive: boolean,
+  ) {
+    return childSpawn(
+      CLI,
+      [
+        'exec',
+        ...(interactive ? ['--interactive'] : []),
+        '--cwd',
+        workingDirectory,
+        ...Object.entries(env).flatMap(([key, value]) => [
+          '--env',
+          `${key}=${value}`,
+        ]),
+        this.name,
+        ...argv,
+      ],
+      // The CLI traps SIGTERM and exits 0, which would read as a success.
+      { signal, killSignal: 'SIGKILL' },
     );
   }
 
-  readFile(path: string): Promise<Uint8Array> {
-    return readFileOverExec((command) => this.executeCommand(command), path);
+  readFile(
+    path: string,
+    signal: AbortSignal | undefined,
+  ): Promise<Uint8Array | null> {
+    return readFileOverExec(this, path, signal);
   }
 
-  writeFiles(
-    files: Array<{ path: string; content: string | Buffer }>,
+  stat(
+    path: string,
+    signal: AbortSignal | undefined,
+  ): Promise<Experimental_SandboxFileStat | null> {
+    return statOverExec(this, path, signal);
+  }
+
+  writeFile(
+    path: string,
+    content: Uint8Array,
+    signal: AbortSignal | undefined,
   ): Promise<void> {
-    return writeFilesOverExec((command) => this.executeCommand(command), files);
-  }
-
-  exists(path: string): Promise<boolean> {
-    return existsOverExec((command) => this.executeCommand(command), path);
+    return writeFileOverExec(this, path, content, signal);
   }
 
   installerContext(image: string): InstallerContext {
     // The Docker installer suite, driven through `container exec`.
     return createInstallerContext(
       {
-        exec: (command) => run(['exec', this.name, 'sh', '-c', command]),
+        exec: (command) => this.exec(['sh', '-c', command]),
         SandboxError: AppleContainerSandboxError,
       },
       this.name,
@@ -585,7 +617,7 @@ function runStreamed(command: string, args: string[]): Promise<void> {
  *   image: 'docker.io/library/bash:5.3-alpine3.24',
  *   installers: [pkg(['curl', 'jq'])],
  * });
- * const { stdout } = await sandbox.executeCommand('echo hello');
+ * const { stdout } = await sandbox.run({ command: 'echo hello' });
  * ```
  *
  * @example Dockerfile
@@ -600,7 +632,7 @@ function runStreamed(command: string, args: string[]): Promise<void> {
  */
 export async function createAppleContainerSandbox(
   options: AppleContainerSandboxOptions = {},
-): Promise<LegacySandbox> {
+): Promise<DisposableSandbox> {
   if (isAppleContainerfileOptions(options)) {
     return new ContainerfileStrategy(options, appleEngine, {
       dockerfile: options.dockerfile,
@@ -621,7 +653,7 @@ export async function createAppleContainerSandbox(
  */
 export async function useAppleContainerSandbox<T>(
   options: AppleContainerSandboxOptions,
-  fn: (sandbox: LegacySandbox) => Promise<T>,
+  fn: (sandbox: DisposableSandbox) => Promise<T>,
 ): Promise<T> {
   const sandbox = await createAppleContainerSandbox(options);
   try {

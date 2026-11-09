@@ -9,8 +9,8 @@ The Apple Container sandbox runs commands inside Linux containers backed by
 Apple's [`container`](https://github.com/apple/container) CLI. Unlike the Docker
 sandbox (shared host kernel via `runc`), each container is its own
 **lightweight virtual machine** with its own guest kernel. It implements the same
-`DisposableSandbox` contract as the other backends: `executeCommand`, `spawn`,
-`readFile`, `writeFiles`, and `dispose`.
+`DisposableSandbox` contract as the Docker backend: the AI SDK sandbox session
+plus `dispose`.
 
 <Callout type="warn">
   Apple silicon, **macOS 26+** only. The `container` service must be running and
@@ -43,7 +43,7 @@ await using sandbox = await createAppleContainerSandbox({
   dns: ['1.1.1.1'],
 });
 
-const { stdout } = await sandbox.executeCommand('python3 --version');
+const { stdout } = await sandbox.run({ command: 'python3 --version' });
 ```
 
 **Default image:** `docker.io/library/bash:5.3-alpine3.24`. Prefer fully-qualified refs — `container` resolves short names against configured registries.
@@ -191,37 +191,41 @@ await using sandbox = await createAppleContainerSandbox({
   env: { NODE_ENV: 'production', API_KEY: 'secret-123' },
 });
 
-const result = await sandbox.executeCommand('echo $NODE_ENV'); // "production"
+const result = await sandbox.run({ command: 'echo $NODE_ENV' }); // "production"
 ```
 
 ## Command execution APIs
 
-`executeCommand` is buffered and runs from `/workspace`; pass an `AbortSignal` to cancel:
+`run` is buffered and starts in `/workspace`; pass an `abortSignal` to cancel:
 
 ```typescript
-const result = await sandbox.executeCommand('python3 --version');
+const result = await sandbox.run({ command: 'python3 --version' });
 console.log(result.stdout, result.stderr, result.exitCode);
 
 const controller = new AbortController();
-const pending = sandbox.executeCommand('sleep 30', {
-  signal: controller.signal,
+const pending = sandbox.run({
+  command: 'sleep 30',
+  abortSignal: controller.signal,
 });
 setTimeout(() => controller.abort(), 1_000);
 await pending;
 ```
 
-For live byte streams, use `spawn` (accepts `cwd`, `env`, `signal`):
+For live byte streams, use `spawn` (accepts `workingDirectory`, `env`, `abortSignal`):
 
 ```typescript
-const proc = await sandbox.spawn('python3 long-task.py', { cwd: '/workspace' });
+const proc = await sandbox.spawn({
+  command: 'python3 long-task.py',
+  workingDirectory: '/workspace',
+});
 const decoder = new TextDecoder();
 for await (const chunk of proc.stdout) {
   process.stdout.write(decoder.decode(chunk, { stream: true }));
 }
-const exit = await proc.exit; // { code, signal, success }
+const { exitCode } = await proc.wait();
 ```
 
-Aborting a running process kills it with `SIGKILL`, so `proc.exit` reports a non-success outcome instead of treating cancellation as a clean exit.
+Aborting a running process rejects `proc.wait()` with the abort reason. `proc.kill()` stops the process group inside the container. Set `stdin: true` to write to the process; closing the stream sends end of file.
 
 ## Installers
 
@@ -239,13 +243,14 @@ await using sandbox = await createAppleContainerSandbox({
 ## File I/O
 
 ```typescript
-await sandbox.writeFiles([
-  { path: '/workspace/data.json', content: '{"key": "value"}' },
-]);
-const content = await sandbox.readFile('/workspace/data.json');
+await sandbox.writeTextFile({
+  path: '/workspace/data.json',
+  content: '{"key": "value"}',
+});
+const content = await sandbox.readTextFile({ path: '/workspace/data.json' });
 ```
 
-Parent directories are created automatically. Content is base64-encoded for binary safety.
+A read or a `stat` of a missing path gives `null`. Parent directories are created automatically. A write sends the bytes through `container exec --interactive`, and a read brings them back as base64, so binary content is safe.
 
 ## Container lifecycle
 
@@ -255,7 +260,7 @@ import { pkg, useAppleContainerSandbox } from '@deepagents/context';
 const version = await useAppleContainerSandbox(
   { installers: [pkg(['curl'])] },
   async (sandbox) => {
-    const result = await sandbox.executeCommand('curl --version');
+    const result = await sandbox.run({ command: 'curl --version' });
     return result.stdout.split('\n')[0];
   },
 );

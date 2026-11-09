@@ -35,7 +35,7 @@ it('Compose uses the existing YAML-derived project name for execution and dispos
       compose: composeFile,
       service: 'app',
     });
-    const result = await sandbox.executeCommand('printf compose-ready');
+    const result = await sandbox.run({ command: 'printf compose-ready' });
     assert.equal(result.exitCode, 0);
     assert.equal(result.stdout, 'compose-ready');
     const containers = await client.containers.list({ filters });

@@ -179,7 +179,7 @@ independent systems explicitly at the call site:
 
 ```
 1. createDockerSandbox(sandboxOptions)
-   └─ Returns: DisposableSandbox { executeCommand, spawn, readFile, writeFiles, dispose }
+   └─ Returns: DisposableSandbox (the AI SDK sandbox session, plus dispose)
 
 2. createBashTool({ sandbox, ...bashOptions })
    └─ Returns: { bash, tools, sandbox }
@@ -190,39 +190,31 @@ available through the backend, pass explicit `AvailableSkill[]` metadata to the
 `skills()` context fragment; `createBashTool` does not inspect those files.
 
 Any `DisposableSandbox` matches what `createBashTool` expects from its
-`sandbox` parameter (`executeCommand(command, options?) → { stdout, stderr,
-exitCode }`). Backends that can expose unbuffered process streams, including
-Docker, Apple Container, Microsandbox, and Daytona, also implement
-optional `spawn(command, options?)` for streaming stdout/stderr. This is why
-real process backends can be plugged directly into the shared, owned
-`createBashTool` from `@deepagents/context`.
-
-### Decorator chain behavior
-
-`createBashTool` layers decorators over the backend sandbox. The decorators
-preserve `spawn` when the backend exposes it:
-
-- The bash tool forwards AI SDK's native `executionOptions.abortSignal` to
-  `executeCommand` as `options.signal`.
-- `observeSandboxFileEvents` snapshots before and after `spawn` to record
-  write/modify/delete events under `destination`, and delays `exit` resolution
-  until the post-spawn snapshot is captured.
+`sandbox` parameter: `run({ command, workingDirectory, env, abortSignal }) →
+{ stdout, stderr, exitCode }`. `spawn` streams stdout and stderr while the process
+runs. Microsandbox and Daytona still use the older contract, and `createBashTool`
+adapts them. The bash tool forwards the AI SDK's `executionOptions.abortSignal`
+to `run` as `abortSignal`.
 
 ### File operations
 
 Docker moves files through the archive requests of the Engine API
 (`readFile()`, `writeFiles()`, `stat()`). These requests cannot reach a tmpfs
-mount, `/proc`, `/sys` or `/dev`. For a path there, Docker uses an exec:
-`cat` for a read, and `cat` with the bytes on standard input for a write. A
-read follows symbolic links. Files and new parent directories belong to the
+mount, `/proc`, `/sys` or `/dev`. For a path there, Docker uses an exec: a script
+for a read or a `stat`, and `cat` with the bytes on standard input for a write.
+A read and a `stat` follow symbolic links. Files and new parent directories belong to the
 container user selected by `security.user` or the image's `USER`. Names and
 numeric IDs are supported; names are resolved inside the container.
 
-Apple Container moves files as base64 text through `container exec`, because
-its CLI has no file requests.
+Apple Container moves files through `container exec`, because its CLI has no
+file requests: the bytes go to standard input for a write, and come back as
+base64 for a read. `listDirectory` and `deleteFile` use a script on
+both engines, because the engines have no request for them.
 
-Await `spawn()` to receive a process with two byte streams (`stdout`, `stderr`)
-and an `exit` promise.
+Await `spawn()` to receive a process with two byte streams (`stdout`, `stderr`),
+`wait()` and `kill()`. No engine has a request that stops an exec, so each
+process runs under a small wrapper. The wrapper records the process group, and
+`kill()` and an abort kill that group from a second exec.
 
 ## Extending
 

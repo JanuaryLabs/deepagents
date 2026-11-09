@@ -52,9 +52,9 @@ const backend = await createDockerSandbox({
   readiness: waitForDaemonReady,
 });
 
-const prepareResult = await backend.executeCommand(
-  `mkdir -p "${demoWorkspace}" "${text2SqlOutDir}"`,
-);
+const prepareResult = await backend.run({
+  command: `mkdir -p "${demoWorkspace}" "${text2SqlOutDir}"`,
+});
 if (prepareResult.exitCode !== 0) {
   throw new Error(
     prepareResult.stderr ||

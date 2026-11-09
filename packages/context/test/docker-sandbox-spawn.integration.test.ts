@@ -26,55 +26,49 @@ async function readFirstChunk(
 
 describe('Docker Sandbox — spawn', () => {
   describe('failure modes', () => {
-    it('exit resolves with signal info when aborted mid-stream', async () => {
+    it('wait rejects with the abort reason when aborted mid-stream', async () => {
       await using sandbox = await createDockerSandbox(defaults);
       assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
       const controller = new AbortController();
-      const child = await sandbox.spawn(
-        'printf hi; while :; do sleep 1; done',
-        {
-          signal: controller.signal,
-        },
-      );
+      const reason = new Error('stop');
+      const child = await sandbox.spawn({
+        command: 'printf hi; while :; do sleep 1; done',
+        abortSignal: controller.signal,
+      });
 
       assert.strictEqual(await readFirstChunk(child.stdout), 'hi');
 
       const drained = streamText(child.stdout);
-      controller.abort();
+      controller.abort(reason);
 
-      assert.deepStrictEqual(await child.exit, {
-        code: null,
-        signal: 'SIGKILL',
-        success: false,
-      });
+      await assert.rejects(
+        Promise.resolve(child.wait()),
+        (error) => error === reason,
+      );
       await drained;
     });
 
     it('exit resolves with non-zero code on command failure', async () => {
       await using sandbox = await createDockerSandbox(defaults);
       assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
-      const child = await sandbox.spawn('exit 42');
+      const child = await sandbox.spawn({ command: 'exit 42' });
       await streamText(child.stdout);
       await streamText(child.stderr);
-      assert.deepStrictEqual(await child.exit, {
-        code: 42,
-        signal: null,
-        success: false,
-      });
+      assert.deepStrictEqual(await child.wait(), { exitCode: 42 });
     });
 
     it('stdout and stderr both close after the child exits', async () => {
       await using sandbox = await createDockerSandbox(defaults);
       assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
-      const child = await sandbox.spawn('echo hi; echo err >&2');
+      const child = await sandbox.spawn({ command: 'echo hi; echo err >&2' });
       const [out, err, info] = await Promise.all([
         streamText(child.stdout),
         streamText(child.stderr),
-        child.exit,
+        child.wait(),
       ]);
       assert.strictEqual(out.trim(), 'hi');
       assert.strictEqual(err.trim(), 'err');
-      assert.deepStrictEqual(info, { code: 0, signal: null, success: true });
+      assert.deepStrictEqual(info, { exitCode: 0 });
     });
   });
 
@@ -82,11 +76,13 @@ describe('Docker Sandbox — spawn', () => {
     it('delivers stdout bytes before the child exits', async () => {
       await using sandbox = await createDockerSandbox(defaults);
       assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
-      const child = await sandbox.spawn('printf hi; sleep 1; printf bye');
+      const child = await sandbox.spawn({
+        command: 'printf hi; sleep 1; printf bye',
+      });
 
       const winner = await Promise.race([
         readFirstChunk(child.stdout).then(() => 'chunk' as const),
-        child.exit.then(() => 'exit' as const),
+        Promise.resolve(child.wait()).then(() => 'exit' as const),
       ]);
       assert.strictEqual(
         winner,
@@ -95,21 +91,21 @@ describe('Docker Sandbox — spawn', () => {
       );
 
       const rest = await streamText(child.stdout);
-      const info = await child.exit;
+      const info = await child.wait();
       assert.strictEqual(rest, 'bye');
-      assert.strictEqual(info.success, true);
+      assert.strictEqual(info.exitCode, 0);
     });
 
     it('streams stderr independently of stdout', async () => {
       await using sandbox = await createDockerSandbox(defaults);
       assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
-      const child = await sandbox.spawn(
-        'echo "to stdout"; echo "to stderr" >&2; echo "also stdout"',
-      );
+      const child = await sandbox.spawn({
+        command: 'echo "to stdout"; echo "to stderr" >&2; echo "also stdout"',
+      });
       const [out, err] = await Promise.all([
         streamText(child.stdout),
         streamText(child.stderr),
-        child.exit,
+        child.wait(),
       ]);
       assert.deepStrictEqual(out.trim().split('\n'), [
         'to stdout',
@@ -119,36 +115,41 @@ describe('Docker Sandbox — spawn', () => {
     });
   });
 
-  describe('SpawnOptions', () => {
-    it('forwards env into the child via docker exec -e', async () => {
+  describe('spawn options', () => {
+    it('forwards env into the child', async () => {
       await using sandbox = await createDockerSandbox(defaults);
       assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
-      const child = await sandbox.spawn('printf "%s" "$MY_VAR"', {
+      const child = await sandbox.spawn({
+        command: 'printf "%s" "$MY_VAR"',
         env: { MY_VAR: 'hello-from-host' },
       });
       const text = await streamText(child.stdout);
-      const info = await child.exit;
+      const info = await child.wait();
       assert.strictEqual(text, 'hello-from-host');
-      assert.strictEqual(info.success, true);
+      assert.strictEqual(info.exitCode, 0);
     });
 
-    it('forwards cwd into the child via docker exec -w', async () => {
+    it('forwards the working directory into the child', async () => {
       await using sandbox = await createDockerSandbox(defaults);
       assert.ok(sandbox.spawn, 'docker sandbox must expose spawn');
-      const child = await sandbox.spawn('pwd', { cwd: '/tmp' });
+      const child = await sandbox.spawn({
+        command: 'pwd',
+        workingDirectory: '/tmp',
+      });
       const text = await streamText(child.stdout);
-      const info = await child.exit;
+      const info = await child.wait();
       assert.strictEqual(text.trim(), '/tmp');
-      assert.strictEqual(info.success, true);
+      assert.strictEqual(info.exitCode, 0);
     });
   });
 
-  describe('executeCommand signal retrofit', () => {
-    it('honors options.signal (no longer silently dropped)', async () => {
+  describe('run signal retrofit', () => {
+    it('honors abortSignal (no longer silently dropped)', async () => {
       await using sandbox = await createDockerSandbox(defaults);
       const controller = new AbortController();
-      const exec = sandbox.executeCommand('sleep 10', {
-        signal: controller.signal,
+      const exec = sandbox.run({
+        command: 'sleep 10; touch /workspace/after-abort',
+        abortSignal: controller.signal,
       });
       setTimeout(() => controller.abort(), 50);
       const result = await exec;
@@ -157,43 +158,47 @@ describe('Docker Sandbox — spawn', () => {
         0,
         'aborted sleep must not return a 0 exit code',
       );
+      await sleep(10_500);
+      assert.strictEqual(
+        await sandbox.stat({ path: '/workspace/after-abort' }),
+        null,
+      );
     });
   });
 
   describe('guest process termination', () => {
-    it('enforces commandTimeout for executeCommand and spawn without delayed writes', async () => {
+    it('enforces commandTimeout for run and spawn without delayed writes', async () => {
       await using timedSandbox = await createDockerSandbox({
         ...defaults,
         commandTimeout: 100,
       });
 
-      const executeResult = await timedSandbox.executeCommand(
-        'sleep 0.5; printf leaked > /workspace/execute-timeout-leaked',
-      );
+      const executeResult = await timedSandbox.run({
+        command: 'sleep 0.5; printf leaked > /workspace/execute-timeout-leaked',
+      });
       assert.strictEqual(executeResult.exitCode, 124);
 
       assert.ok(timedSandbox.spawn);
-      const child = await timedSandbox.spawn(
-        'printf "%s:%s" "$MANAGED" "$PWD"; printf managed-err >&2; sleep 0.5; printf leaked > /workspace/spawn-timeout-leaked',
-        { cwd: '/tmp', env: { MANAGED: 'yes' } },
-      );
+      const child = await timedSandbox.spawn({
+        command:
+          'printf "%s:%s" "$MANAGED" "$PWD"; printf managed-err >&2; sleep 0.5; printf leaked > /workspace/spawn-timeout-leaked',
+        workingDirectory: '/tmp',
+        env: { MANAGED: 'yes' },
+      });
       const [stdout, stderr, exit] = await Promise.all([
         streamText(child.stdout),
         streamText(child.stderr),
-        child.exit,
+        child.wait(),
       ]);
       assert.strictEqual(stdout, 'yes:/tmp');
       assert.match(stderr, /managed-err/);
-      assert.deepStrictEqual(exit, {
-        code: 124,
-        signal: null,
-        success: false,
-      });
+      assert.deepStrictEqual(exit, { exitCode: 124 });
 
       await sleep(700);
-      const sentinel = await timedSandbox.executeCommand(
-        'test ! -e /workspace/execute-timeout-leaked && test ! -e /workspace/spawn-timeout-leaked',
-      );
+      const sentinel = await timedSandbox.run({
+        command:
+          'test ! -e /workspace/execute-timeout-leaked && test ! -e /workspace/spawn-timeout-leaked',
+      });
       assert.strictEqual(sentinel.exitCode, 0);
     });
 
@@ -204,22 +209,24 @@ describe('Docker Sandbox — spawn', () => {
       });
       assert.ok(abortableSandbox.spawn);
       const controller = new AbortController();
-      const child = await abortableSandbox.spawn(
-        'printf ready; while [ ! -e /workspace/release-aborted-command ]; do sleep 0.05; done; printf leaked > /workspace/abort-leaked',
-        { signal: controller.signal },
-      );
-
-      assert.strictEqual(await readFirstChunk(child.stdout), 'ready');
-      controller.abort();
-      assert.deepStrictEqual(await child.exit, {
-        code: null,
-        signal: 'SIGKILL',
-        success: false,
+      const reason = new Error('stop');
+      const child = await abortableSandbox.spawn({
+        command:
+          'printf ready; while [ ! -e /workspace/release-aborted-command ]; do sleep 0.05; done; printf leaked > /workspace/abort-leaked',
+        abortSignal: controller.signal,
       });
 
-      const sentinel = await abortableSandbox.executeCommand(
-        'touch /workspace/release-aborted-command; sleep 0.2; test ! -e /workspace/abort-leaked',
+      assert.strictEqual(await readFirstChunk(child.stdout), 'ready');
+      controller.abort(reason);
+      await assert.rejects(
+        Promise.resolve(child.wait()),
+        (error) => error === reason,
       );
+
+      const sentinel = await abortableSandbox.run({
+        command:
+          'touch /workspace/release-aborted-command; sleep 0.2; test ! -e /workspace/abort-leaked',
+      });
       assert.strictEqual(sentinel.exitCode, 0);
     });
   });

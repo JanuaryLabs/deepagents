@@ -47,9 +47,9 @@ describe('bin installer', () => {
         volumes: [{ ...tempMount, hostPath: fixture.path }],
       },
       async (sandbox) => {
-        const result = await sandbox.executeCommand('hello');
+        const result = await sandbox.run({ command: 'hello' });
         assert.strictEqual(result.exitCode, 0);
-        assert.strictEqual(result.stdout.trim(), 'linked');
+        assert.strictEqual(result.stdout, 'linked\n');
       },
     );
   });
@@ -66,9 +66,9 @@ describe('bin installer', () => {
         volumes: [{ ...tempMount, hostPath: fixture.path }],
       },
       async (sandbox) => {
-        const result = await sandbox.executeCommand('hello-shim');
+        const result = await sandbox.run({ command: 'hello-shim' });
         assert.strictEqual(result.exitCode, 0);
-        assert.strictEqual(result.stdout.trim(), 'linked');
+        assert.strictEqual(result.stdout, 'linked\n');
       },
     );
   });
@@ -87,9 +87,9 @@ describe('bin installer', () => {
         volumes: [{ ...tempMount, hostPath: fixture.path }],
       },
       async (sandbox) => {
-        const result = await sandbox.executeCommand('/opt/bin/greet');
+        const result = await sandbox.run({ command: '/opt/bin/greet' });
         assert.strictEqual(result.exitCode, 0);
-        assert.strictEqual(result.stdout.trim(), 'linked');
+        assert.strictEqual(result.stdout, 'linked\n');
       },
     );
   });

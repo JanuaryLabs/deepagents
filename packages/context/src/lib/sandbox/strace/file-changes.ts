@@ -1,9 +1,21 @@
+import type {
+  Experimental_SandboxProcess,
+  Experimental_SandboxSpawnOptions,
+  Experimental_SandboxSpawnOptionsWithStdin,
+  Experimental_SandboxSpawnOptionsWithoutStdin,
+  Experimental_WritableSandboxProcess,
+} from '@ai-sdk/provider-utils';
 import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 
 import { BashException } from '../bash-exception.ts';
+import { fromLegacySandbox } from '../legacy-sandbox.ts';
 import { shellQuote } from '../shell-quote.ts';
-import type { CommandResult, LegacySandbox } from '../types.ts';
+import type {
+  CommandResult,
+  DisposableSandbox,
+  LegacySandbox,
+} from '../types.ts';
 import type { FileChange } from './file-change.ts';
 import {
   buildStraceCommand,
@@ -59,12 +71,12 @@ function warnOnFileChangesError(error: unknown): void {
 }
 
 /**
- * A `with*` decorator that wraps the sandbox so each `executeCommand` is traced
- * and its filesystem mutations parsed into a per-call `FileChange[]`. Per-call
- * attribution is structural — one UUID-keyed trace file per call — so it is safe under
- * concurrent tool calls. Each call's manifest is surfaced two stateless ways:
- * attached directly to the command result as `meta.fileChanges` and passed to
- * `onFileChanges`. No buffer is retained.
+ * A `with*` decorator that wraps the sandbox so each `run` is traced and its
+ * filesystem mutations parsed into a per-call `FileChange[]`. Per-call
+ * attribution is structural — one UUID-keyed trace file per call — so it is safe
+ * under concurrent tool calls. Each call's manifest is surfaced two stateless
+ * ways: attached directly to the command result as `meta.fileChanges` and passed
+ * to `onFileChanges`. No buffer is retained.
  *
  * This decorator TRUSTS that strace tracing works in the sandbox; it does not
  * self-test. "strace works here" is an invariant of the (image + host kernel +
@@ -75,46 +87,46 @@ function warnOnFileChangesError(error: unknown): void {
  * Re-proving it per composition would re-pay several host→container round-trips
  * on every tool call for no new information.
  *
- * `readFile` passes through unchanged; `writeFiles` is observed directly (it
- * mutates outside strace's view) — each written file matching the
- * `include`/`exclude` globs becomes a `write` change fed to onFileChanges.
- * `dispose` also sweeps the trace
- * dir. `spawn` is traced the same way — its trace is read when the process exits
- * (strace is the top process, so the trace is fully flushed by then). `spawn`
- * has no command result, so its changes go to `onFileChanges` only.
+ * Reads, `stat` and `listDirectory` pass through unchanged. `writeFile`,
+ * `writeBinaryFile` and `writeTextFile` are observed directly (they mutate
+ * outside strace's view) — a written file matching the `include`/`exclude` globs
+ * becomes a `write` change fed to onFileChanges. `deleteFile` passes through
+ * unobserved. `dispose` also sweeps the trace dir. `spawn` is traced the same way
+ * as `run` — its trace is read when the process exits (strace is the top process,
+ * so the trace is fully flushed by then). `spawn` has no command result, so its
+ * changes go to `onFileChanges` only.
  *
  * The trace file is always swept once parsed. A throwing `onFileChanges` on the
- * tool-call path propagates to `withBashExceptionCatch` one level up: a caller's
+ * tool-call path propagates to the bash tool one level up: a caller's
  * `BashException` becomes the tool result (via its `format()`), any other error
  * fails the tool call. The `spawn` path has no exception catcher, so its throw is
  * isolated and surfaced only via `onError`.
  */
 export async function withStraceFileChanges(
-  sandbox: LegacySandbox,
+  sandbox: DisposableSandbox | LegacySandbox,
   options: WithStraceFileChangesOptions,
-): Promise<LegacySandbox> {
+): Promise<DisposableSandbox> {
   const { include, exclude, onFileChanges } = options;
   const onError = options.onError ?? warnOnFileChangesError;
   const traceDir = options.traceDir ?? DEFAULT_TRACE_DIR;
-  const innerExecute = sandbox.executeCommand.bind(sandbox);
-  const innerWriteFiles = sandbox.writeFiles.bind(sandbox);
+  const inner = 'run' in sandbox ? sandbox : fromLegacySandbox(sandbox);
 
-  // Delete the trace file with a fresh executeCommand (no caller signal) so an
-  // aborted turn can't cancel the cleanup and leave the file behind.
+  // Delete the trace file with a fresh run (no caller signal) so an aborted turn
+  // can't cancel the cleanup and leave the file behind.
   const removeTrace = (traceFile: string) =>
-    void innerExecute(`rm -f ${shellQuote(traceFile)}`).catch(() => {});
+    void Promise.resolve(
+      inner.run({ command: `rm -f ${shellQuote(traceFile)}` }),
+    ).catch(() => {});
 
   // Parse one call's changes and sweep its trace file — the trace is consumed
   // once parsed, so it's deleted here regardless of what the caller's callback
   // does next. Returns [] on an empty or unparseable trace.
   const readChanges = async (traceFile: string): Promise<FileChange[]> => {
     try {
-      return parseStraceTrace(await sandbox.readFile(traceFile), {
-        include,
-        exclude,
-        traceFile,
-        traceDir,
-      });
+      const trace = await inner.readTextFile({ path: traceFile });
+      return trace === null
+        ? []
+        : parseStraceTrace(trace, { include, exclude, traceFile, traceDir });
     } catch {
       return [];
     } finally {
@@ -134,19 +146,83 @@ export async function withStraceFileChanges(
     }
   };
 
-  const decorated: LegacySandbox = {
-    async executeCommand(command, execOptions) {
+  let baseDirectory: Promise<string> | undefined;
+  const absolutePath = async (path: string): Promise<string> => {
+    if (posix.isAbsolute(path)) return posix.normalize(path);
+    baseDirectory ??= Promise.resolve(inner.run({ command: 'pwd' })).then(
+      ({ stdout }) => stdout.trimEnd(),
+    );
+    return posix.resolve(await baseDirectory, path);
+  };
+
+  // The write methods mutate the filesystem outside strace's view, so observe
+  // them directly: synthesize a `write` change (under the observation root) and
+  // run it through onFileChanges. A throw propagates to the writeFile tool's
+  // execute (which rejects), the same gate as the bash path — except there's no
+  // CommandResult here, so throw a plain Error to reject; BashException.format()
+  // is meaningful only for bash commands.
+  const observeWrite = async (filePath: string): Promise<void> => {
+    const path = await absolutePath(filePath);
+    if (!matchesGlobs(path, include, exclude)) return;
+    await onFileChanges?.([{ op: 'write', path, timestamp: Date.now() }]);
+  };
+
+  function spawn(
+    options: Experimental_SandboxSpawnOptionsWithStdin,
+  ): Promise<Experimental_WritableSandboxProcess>;
+  function spawn(
+    options: Experimental_SandboxSpawnOptionsWithoutStdin,
+  ): Promise<Experimental_SandboxProcess>;
+  function spawn(
+    options: Experimental_SandboxSpawnOptions,
+  ): Promise<Experimental_SandboxProcess | Experimental_WritableSandboxProcess>;
+  async function spawn(
+    spawnOptions: Experimental_SandboxSpawnOptions,
+  ): Promise<
+    Experimental_SandboxProcess | Experimental_WritableSandboxProcess
+  > {
+    const traceFile = `${traceDir}/${randomUUID()}.strace`;
+    const child = await inner.spawn({
+      ...spawnOptions,
+      command: buildStraceCommand(spawnOptions.command, traceFile, traceDir),
+    });
+    // collectSpawn is the isolation boundary: never let it (e.g. a throwing
+    // onError) reject and mask the real exit result.
+    const exit = Promise.resolve(child.wait()).finally(() =>
+      collectSpawn(traceFile).catch(() => {}),
+    );
+    // An abort rejects `exit` before the caller asks for it.
+    exit.catch(() => {});
+    return {
+      stdout: child.stdout,
+      stderr: child.stderr,
+      ...('stdin' in child ? { stdin: child.stdin } : {}),
+      wait: () => exit,
+      kill: () => child.kill(),
+    };
+  }
+
+  const dispose = async (): Promise<void> => {
+    await Promise.resolve(
+      inner.run({ command: `rm -rf ${shellQuote(traceDir)}` }),
+    ).catch(() => {});
+    await inner.dispose();
+  };
+
+  return {
+    description: inner.description,
+    async run(runOptions) {
       const traceFile = `${traceDir}/${randomUUID()}.strace`;
       const sentinel = `__dat_trace_${randomUUID()}__`;
       const wrapped = buildTracedCommand(
-        command,
+        runOptions.command,
         traceFile,
         traceDir,
         sentinel,
       );
       let raw: CommandResult;
       try {
-        raw = await innerExecute(wrapped, execOptions);
+        raw = await inner.run({ ...runOptions, command: wrapped });
       } catch (error) {
         // The command failed at the sandbox level; the inline `rm` never ran, so
         // sweep the trace and surface the real error.
@@ -154,8 +230,8 @@ export async function withStraceFileChanges(
         throw error;
       }
       // The trace rides back inline on stdout after the sentinel — one exec, no
-      // separate readFile round-trip. strace's own diagnostics (prefixed
-      // `strace: `) share the command's stderr fd; strip them.
+      // separate read round-trip. strace's own diagnostics (prefixed `strace: `)
+      // share the command's stderr fd; strip them.
       const { stdout, trace } = splitTracedOutput(raw.stdout, sentinel);
       const result: CommandResult = {
         ...raw,
@@ -163,14 +239,14 @@ export async function withStraceFileChanges(
         stderr: stripStraceDiagnostics(raw.stderr),
       };
       // On abort the caller discards this command's changes; skip onFileChanges.
-      if (execOptions?.signal?.aborted) return result;
+      if (runOptions.abortSignal?.aborted) return result;
       const changes = trace
         ? parseStraceTrace(trace, { include, exclude, traceFile, traceDir })
         : [];
-      // A throwing onFileChanges propagates here; the catcher one level up
-      // (withBashExceptionCatch) turns a BashException into the tool result, or
-      // fails the call for any other error.
       if (changes.length) {
+        // A throwing onFileChanges propagates to the bash tool, which turns a
+        // BashException into the tool result, or fails the call for any other
+        // error.
         try {
           await onFileChanges?.(changes);
         } catch (error) {
@@ -188,55 +264,26 @@ export async function withStraceFileChanges(
       }
       return result;
     },
-    readFile: (path, options) => sandbox.readFile(path, options),
-    exists: (path) => sandbox.exists(path),
-    // The writeFile tool mutates the filesystem outside strace's view, so
-    // observe it directly: synthesize a `write` change per file (under the
-    // observation root) and run it through onFileChanges. A throw propagates to
-    // the writeFile tool's execute (which rejects), the same gate as the bash
-    // path — except there's no CommandResult here, so throw a plain Error to
-    // reject; BashException.format() is meaningful only for bash commands.
-    writeFiles: async (files) => {
-      await innerWriteFiles(files);
-      const now = Date.now();
-      // File tools resolve writeFile paths to absolute before they reach here,
-      // so match the include/exclude globs against them directly.
-      const changes = files
-        .map((f) => posix.normalize(f.path))
-        .filter((path) => matchesGlobs(path, include, exclude))
-        .map((path): FileChange => ({ op: 'write', path, timestamp: now }));
-      if (changes.length) await onFileChanges?.(changes);
+    spawn,
+    readFile: (readOptions) => inner.readFile(readOptions),
+    readBinaryFile: (readOptions) => inner.readBinaryFile(readOptions),
+    readTextFile: (readOptions) => inner.readTextFile(readOptions),
+    stat: (statOptions) => inner.stat(statOptions),
+    listDirectory: (listOptions) => inner.listDirectory(listOptions),
+    deleteFile: (deleteOptions) => inner.deleteFile(deleteOptions),
+    writeFile: async (writeOptions) => {
+      await inner.writeFile(writeOptions);
+      await observeWrite(writeOptions.path);
     },
-    dispose: async () => {
-      await innerExecute(`rm -rf ${shellQuote(traceDir)}`).catch(() => {});
-      await sandbox.dispose();
+    writeBinaryFile: async (writeOptions) => {
+      await inner.writeBinaryFile(writeOptions);
+      await observeWrite(writeOptions.path);
     },
-
-    [Symbol.asyncDispose](this: LegacySandbox): Promise<void> {
-      return this.dispose();
+    writeTextFile: async (writeOptions) => {
+      await inner.writeTextFile(writeOptions);
+      await observeWrite(writeOptions.path);
     },
+    dispose,
+    [Symbol.asyncDispose]: dispose,
   };
-
-  if (sandbox.spawn) {
-    const innerSpawn = sandbox.spawn.bind(sandbox);
-    decorated.spawn = async (command, spawnOptions) => {
-      const traceFile = `${traceDir}/${randomUUID()}.strace`;
-      const child = await innerSpawn(
-        buildStraceCommand(command, traceFile, traceDir),
-        spawnOptions,
-      );
-      const exit = (async () => {
-        try {
-          return await child.exit;
-        } finally {
-          // collectSpawn is the isolation boundary: never let it (e.g. a
-          // throwing onError) reject and mask the real exit result.
-          await collectSpawn(traceFile).catch(() => {});
-        }
-      })();
-      return { stdout: child.stdout, stderr: child.stderr, exit };
-    };
-  }
-
-  return decorated;
 }

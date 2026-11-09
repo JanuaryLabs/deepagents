@@ -1,3 +1,4 @@
+import type { Experimental_SandboxFileStat } from '@ai-sdk/provider-utils';
 import {
   BindSourceNotFoundError,
   ConnectionFailedError,
@@ -5,6 +6,7 @@ import {
   ContainerNotFoundError,
   type ContainerProcess,
   Docker,
+  DockerEngineError,
   DockerError,
   type EngineApi,
   type Environment,
@@ -12,20 +14,23 @@ import {
   NameConflictError,
   NotAFileError,
   type OwnedContainer,
-  VolumeInUseError,
+  PathNotFoundError,
 } from '@zukhruf/docker';
 import spawn, { SubprocessError } from 'nano-spawn';
 import { type StdioOptions, spawn as childSpawn } from 'node:child_process';
-import { hash, randomUUID } from 'node:crypto';
+import { hash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { posix } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 
 import type {
   CommonSandboxOptions,
   ContainerEngine,
   ContainerErrorFactory,
   EngineContainer,
+  EngineExecOptions,
+  EngineProcess,
+  EngineProcessOptions,
+  EngineSpawnOptions,
   ImageBuildSpec,
   RunResult,
   SandboxNamedVolume,
@@ -39,6 +44,11 @@ import {
   RuntimeStrategy,
   validateSandboxOptions,
 } from './container-sandbox.ts';
+import {
+  readFileOverExec,
+  statOverExec,
+  writeFileOverExec,
+} from './container-session.ts';
 import {
   ComposeStartError,
   ContainerCreationError,
@@ -55,17 +65,8 @@ import {
   type InstallerContext,
   createInstallerContext,
 } from './installers/installer.ts';
-import { shellQuote } from './shell-quote.ts';
-import type {
-  CommandResult,
-  ExecuteCommandOptions,
-  ExitInfo,
-  LegacySandbox,
-  SandboxProcess,
-  SpawnOptions,
-} from './types.ts';
+import type { CommandResult, DisposableSandbox } from './types.ts';
 
-export type { CommandResult as ExecResult, Sandbox } from './types.ts';
 export type {
   SandboxBindVolume as DockerBindVolume,
   SandboxNamedVolume as DockerNamedVolume,
@@ -561,17 +562,13 @@ const dockerErrors: ContainerErrorFactory = {
   volumeInspect: (name, reason) => new VolumeInspectError(name, reason),
   volumeCreate: (name, reason) => new VolumeCreateError(name, reason),
 };
-/** The CLI dropped one final newline; the sandbox contract keeps dropping it. */
-function withoutFinalNewline(text: string): string {
-  return text.replace(/\r?\n$/, '');
-}
 
 /**
  * The output of a container process as two streams and an exit. The chunks
  * queue until their stream is read, so a reader of one stream never blocks the
  * other.
  */
-function sandboxProcess(process: ContainerProcess): SandboxProcess {
+function engineProcess(process: ContainerProcess): EngineProcess {
   const queue = { highWaterMark: Number.POSITIVE_INFINITY };
   const stdout = new TransformStream<Uint8Array, Uint8Array>(
     undefined,
@@ -588,7 +585,7 @@ function sandboxProcess(process: ContainerProcess): SandboxProcess {
     stderr: stderr.writable.getWriter(),
   };
 
-  const exit = (async (): Promise<ExitInfo> => {
+  const exitCode = (async (): Promise<number> => {
     try {
       for await (const { stream, data } of process) {
         await writers[stream].write(data);
@@ -601,62 +598,23 @@ function sandboxProcess(process: ContainerProcess): SandboxProcess {
       throw error;
     }
     await Promise.all([writers.stdout.close(), writers.stderr.close()]);
-    const code = await process.exitCode;
-    return { code, signal: null, success: code === 0 };
+    return process.exitCode;
   })();
 
-  return { stdout: stdout.readable, stderr: stderr.readable, exit };
+  return {
+    stdout: stdout.readable,
+    stderr: stderr.readable,
+    ...(process.stdin ? { stdin: process.stdin } : {}),
+    exitCode,
+  };
 }
-
-/**
- * Wraps `command` so the sandbox can stop it: the container has no request
- * that stops an exec, so the wrapper writes the command's process group to
- * `controlPath` for a later exec to kill, and enforces `commandTimeout` itself.
- */
-function managedDockerCommand(
-  command: string,
-  controlPath: string,
-  commandTimeout?: number,
-): string {
-  return [
-    'set -m',
-    `control=${shellQuote(controlPath)}`,
-    ': > "$control" || exit 1',
-    'timer=',
-    'trap \'if [ -n "$timer" ]; then kill -TERM "$timer" 2>/dev/null || :; wait "$timer" 2>/dev/null || :; fi; rm -f "$control" "$control.timeout"\' EXIT',
-    `bash -lc ${shellQuote(command)} &`,
-    'pid=$!',
-    'printf \'%s\\n\' "$pid" > "$control"',
-    ...(commandTimeout
-      ? [
-          // Keep the deadline on the engine host: SSH setup/round trips must not
-          // let the command run past its execution budget.
-          '(',
-          `sleep ${commandTimeout / 1000} &`,
-          'alarm=$!',
-          'trap \'kill "$alarm" 2>/dev/null || :; wait "$alarm" 2>/dev/null || :; exit 0\' TERM',
-          'wait "$alarm" || exit',
-          'if kill -0 -- "-$pid" 2>/dev/null; then : > "$control.timeout"; kill -KILL -- "-$pid" 2>/dev/null || :; fi',
-          ') &',
-          'timer=$!',
-        ]
-      : []),
-    'wait "$pid"',
-    'status=$?',
-    '[ ! -e "$control.timeout" ] || exit 124',
-    'exit "$status"',
-  ].join('\n');
-}
-
-/** Symbolic links a path may pass through before a read gives up, as Linux's ELOOP limit. */
-const MAX_SYMLINK_HOPS = 40;
 
 /** The kernel filesystems, which the archive requests cannot reach. */
 const KERNEL_FILESYSTEMS = ['/proc', '/sys', '/dev'];
 
 /** Where the files of a container are, for the archive requests. */
 interface FileLayout {
-  /** Relative sandbox paths resolve here, as they did in an exec's shell. */
+  /** Relative sandbox paths resolve here, as they do in an exec's shell. */
   workdir: string;
   /** Paths only an exec reaches: tmpfs mounts and the kernel filesystems. */
   execOnly: string[];
@@ -726,14 +684,32 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * The engine answers 500 for a path under a file and for a symbolic link loop,
+ * and an answer to the stat has no body to tell them apart. The shell can.
+ */
+function isUnexplainedFailure(error: unknown): boolean {
+  return error instanceof DockerEngineError && error.status === 500;
+}
+
+/** The kind of a path, from the type bits of Go's FileMode in `ContainerPathStat.mode`. */
+function fileType(mode: number): Experimental_SandboxFileStat['type'] {
+  const DIRECTORY = 0x80000000;
+  const LINK_DEVICE_PIPE_SOCKET_IRREGULAR = 0x0f280000;
+  if ((mode & DIRECTORY) !== 0) return 'directory';
+  return (mode & LINK_DEVICE_PIPE_SOCKET_IRREGULAR) === 0 ? 'file' : 'other';
+}
+
 /** A sandbox container on the Docker engine. */
 class DockerContainer implements EngineContainer {
   readonly name: string;
+  readonly workdir: string;
+  readonly commandTimeout: number | undefined;
   readonly #container: Container;
-  readonly #layout: FileLayout;
+  readonly #execOnly: string[];
   /** Who owns the files the sandbox writes: the container user, or root. */
   readonly #owner: Owner | undefined;
-  readonly #commandTimeout: number | undefined;
+  readonly #autoRemove: boolean;
 
   constructor(
     name: string,
@@ -741,39 +717,38 @@ class DockerContainer implements EngineContainer {
     layout: FileLayout,
     owner: Owner | undefined,
     commandTimeout: number | undefined,
+    autoRemove: boolean,
   ) {
     this.name = name;
+    this.workdir = layout.workdir;
+    this.commandTimeout = commandTimeout;
     this.#container = container;
-    this.#layout = layout;
+    this.#execOnly = layout.execOnly;
     this.#owner = owner;
-    this.#commandTimeout = commandTimeout;
+    this.#autoRemove = autoRemove;
   }
 
-  /** `command` under `bash -lc`, with the spawn options' directory and environment. */
-  #bash(command: string, options: SpawnOptions = {}): EngineApi.ExecConfig {
-    const env = Object.entries(options.env ?? {}).map(([key, value]) => {
-      if (key.length === 0 || key.includes('=')) {
-        throw new DockerSandboxError(
-          `Invalid environment variable key: "${key}"`,
-        );
-      }
-      return `${key}=${value}`;
-    });
+  #config(
+    argv: string[],
+    { workingDirectory, env = {} }: EngineProcessOptions,
+  ): EngineApi.ExecConfig {
     return {
-      Cmd: ['bash', '-lc', command],
-      Env: env,
-      ...(options.cwd ? { WorkingDir: options.cwd } : {}),
+      Cmd: argv,
+      Env: Object.entries(env).map(([key, value]) => `${key}=${value}`),
+      ...(workingDirectory ? { WorkingDir: workingDirectory } : {}),
     };
   }
 
-  async #exec(config: EngineApi.ExecConfig): Promise<CommandResult> {
+  async exec(
+    argv: string[],
+    options: EngineExecOptions = {},
+  ): Promise<CommandResult> {
     try {
-      const { stdout, stderr, exitCode } = await this.#container.exec(config);
-      return {
-        stdout: withoutFinalNewline(stdout),
-        stderr: withoutFinalNewline(stderr),
-        exitCode,
-      };
+      const { stdout, stderr, exitCode } = await this.#container.exec(
+        this.#config(argv, options),
+        { signal: options.signal, stdin: options.stdin },
+      );
+      return { stdout, stderr, exitCode };
     } catch (error) {
       if (!(error instanceof DockerError)) throw error;
       // As with `docker exec`: a command the engine cannot run is a failed
@@ -782,288 +757,154 @@ class DockerContainer implements EngineContainer {
     }
   }
 
-  async executeCommand(
-    command: string,
-    options: ExecuteCommandOptions = {},
-  ): Promise<CommandResult> {
-    if (!this.#commandTimeout && options.signal === undefined) {
-      return this.#exec(this.#bash(command));
-    }
-
-    const process = await this.spawn(command, { signal: options.signal });
-    const [stdout, stderr, info] = await Promise.all([
-      new Response(process.stdout).text(),
-      new Response(process.stderr).text(),
-      process.exit,
-    ]);
-    const result = {
-      stdout: withoutFinalNewline(stdout),
-      stderr: withoutFinalNewline(stderr),
-    };
-    if (info.signal === 'SIGKILL') {
-      return {
-        ...result,
-        stderr: result.stderr || 'Command aborted',
-        exitCode: 1,
-      };
-    }
-    return { ...result, exitCode: info.code ?? 1 };
-  }
-
   async spawn(
-    command: string,
-    options: SpawnOptions = {},
-  ): Promise<SandboxProcess> {
-    if (!this.#commandTimeout && options.signal === undefined) {
-      return sandboxProcess(
-        await this.#container.spawn(this.#bash(command, options)),
-      );
-    }
-
-    const controlPath = `/dev/shm/deepagents-exec-${randomUUID()}.pid`;
-    const execution = sandboxProcess(
-      await this.#container.spawn(
-        this.#bash(
-          managedDockerCommand(command, controlPath, this.#commandTimeout),
-          options,
-        ),
-      ),
+    argv: string[],
+    options: EngineSpawnOptions,
+  ): Promise<EngineProcess> {
+    return engineProcess(
+      await this.#container.spawn(this.#config(argv, options), {
+        stdin: options.stdin,
+      }),
     );
-    let termination: Promise<boolean> | undefined;
-    const onAbort = () => {
-      termination ??= this.#terminate(controlPath, execution.exit);
-      // Observe transport failures immediately; the exit promise still reports
-      // the original rejection once the command's transport finishes.
-      void termination.catch(() => {});
-    };
-    if (options.signal?.aborted) onAbort();
-    else options.signal?.addEventListener('abort', onAbort, { once: true });
-
-    return {
-      stdout: execution.stdout,
-      stderr: execution.stderr,
-      exit: execution.exit
-        .then(async (info) => {
-          const activeTermination = termination;
-          if (!activeTermination || !(await activeTermination)) {
-            return info;
-          }
-          return { code: null, signal: 'SIGKILL' as const, success: false };
-        })
-        .finally(() => {
-          options.signal?.removeEventListener('abort', onAbort);
-        }),
-    };
-  }
-
-  /** The PID that the managed command wrote, or `undefined` once it exited. */
-  async #managedPid(
-    controlPath: string,
-    exit: Promise<unknown>,
-  ): Promise<number | undefined> {
-    const exited = exit.then(
-      () => true,
-      () => true,
-    );
-    const readPid = `if IFS= read -r pid < ${shellQuote(controlPath)}; then printf '%s' "$pid"; fi`;
-
-    while (true) {
-      const { stdout } = await this.#container.exec(this.#bash(readPid));
-      if (stdout) return Number(stdout);
-      if (await Promise.race([exited, delay(10).then(() => false)])) {
-        return undefined;
-      }
-    }
-  }
-
-  /** Kills the managed command's process group; `true` when it was still running. */
-  async #terminate(
-    controlPath: string,
-    exit: Promise<unknown>,
-  ): Promise<boolean> {
-    const pid = await this.#managedPid(controlPath, exit);
-    if (pid === undefined) return false;
-
-    const { stdout } = await this.#container.exec(
-      this.#bash(
-        [
-          `pid=${pid}`,
-          `IFS= read -r control_pid < ${shellQuote(controlPath)} || exit 0`,
-          '[ "$control_pid" = "$pid" ] || exit 0',
-          'kill -KILL -- "-$pid" 2>/dev/null || exit 0',
-          'group_alive() {',
-          '  local stat rest state pgrp',
-          '  for stat_path in /proc/[0-9]*/stat; do',
-          '    IFS= read -r stat < "$stat_path" || continue',
-          '    rest=${stat##*) }',
-          '    read -r state _ pgrp _ <<< "$rest"',
-          '    if [ "$pgrp" = "$pid" ] && [ "$state" != Z ]; then return 0; fi',
-          '  done',
-          '  return 1',
-          '}',
-          'while group_alive; do sleep 0.01; done',
-          'printf terminated',
-        ].join('\n'),
-      ),
-    );
-    return stdout === 'terminated';
   }
 
   #resolve(path: string): string {
-    return posix.resolve(this.#layout.workdir, path);
+    return posix.resolve(this.workdir, path);
   }
 
   /** The archive requests cannot reach a tmpfs mount or a kernel filesystem. */
   #isExecOnly(path: string): boolean {
-    return this.#layout.execOnly.some(
+    return this.#execOnly.some(
       (root) => path === root || path.startsWith(`${root}/`),
     );
   }
 
-  async readFile(path: string): Promise<Uint8Array> {
+  /** The stat after symbolic links, which the engine's stat does not follow. */
+  async #followLinks(
+    path: string,
+    signal: AbortSignal | undefined,
+  ): Promise<{ path: string; stat: EngineApi.ContainerPathStat } | undefined> {
+    let target = path;
+    while (true) {
+      const stat = await this.#container.stat(target, { signal });
+      if (!stat) return undefined;
+      if (stat.linkTarget === '') return { path: target, stat };
+      target = posix.resolve(posix.dirname(target), stat.linkTarget);
+    }
+  }
+
+  async readFile(
+    path: string,
+    signal: AbortSignal | undefined,
+  ): Promise<Uint8Array | null> {
     const target = this.#resolve(path);
+    if (this.#isExecOnly(target)) {
+      return readFileOverExec(this, target, signal);
+    }
     try {
-      return this.#isExecOnly(target)
-        ? await this.#readByExec(target)
-        : await this.#readArchive(target);
+      return await this.#container.readFile(target, { signal });
     } catch (error) {
-      throw new Error(`Failed to read file "${path}": ${messageOf(error)}`, {
+      if (error instanceof PathNotFoundError) return null;
+      if (isUnexplainedFailure(error)) {
+        return readFileOverExec(this, target, signal);
+      }
+      if (!(error instanceof NotAFileError && error.kind === 'symlink')) {
+        throw error;
+      }
+    }
+    const followed = await this.#followLinks(target, signal);
+    return followed
+      ? this.#container.readFile(followed.path, { signal })
+      : null;
+  }
+
+  async stat(
+    path: string,
+    signal: AbortSignal | undefined,
+  ): Promise<Experimental_SandboxFileStat | null> {
+    const target = this.#resolve(path);
+    if (this.#isExecOnly(target)) return statOverExec(this, target, signal);
+    try {
+      const followed = await this.#followLinks(target, signal);
+      return followed
+        ? { type: fileType(followed.stat.mode), size: followed.stat.size }
+        : null;
+    } catch (error) {
+      if (isUnexplainedFailure(error)) {
+        return statOverExec(this, target, signal);
+      }
+      throw error;
+    }
+  }
+
+  async writeFile(
+    path: string,
+    content: Uint8Array,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    const target = this.#resolve(path);
+    if (this.#isExecOnly(target)) {
+      return writeFileOverExec(this, target, content, signal);
+    }
+    try {
+      // The engine extracts a file over a directory by deleting the tree, and
+      // the client has no way to send `noOverwriteDirNonDir`, so trying is
+      // not harmless.
+      const existing = await this.#container
+        .stat(target, { signal })
+        .catch((error: unknown) => {
+          if (isUnexplainedFailure(error)) return undefined;
+          throw error;
+        });
+      if (existing && fileType(existing.mode) === 'directory') {
+        throw new Error('it is a directory');
+      }
+      const owner = this.#owner;
+      // The engine creates implied parent directories as root, so a non-root
+      // user gets its new directories as explicit entries.
+      const directories = owner
+        ? await this.#missingDirectories(posix.dirname(target), signal)
+        : [];
+      await this.#container.writeFiles(
+        [
+          ...directories.map((directory) => ({
+            path: directory,
+            directory: true as const,
+            ...owner,
+          })),
+          { path: target, data: content, ...owner },
+        ],
+        { signal },
+      );
+    } catch (error) {
+      throw new Error(`Failed to write file "${path}": ${messageOf(error)}`, {
         cause: error,
       });
     }
   }
 
-  /** Follows symbolic links, as reading through the container's shell does. */
-  async #readArchive(path: string): Promise<Uint8Array> {
-    let target = path;
-    for (let hops = 0; ; hops++) {
-      try {
-        return await this.#container.readFile(target);
-      } catch (error) {
-        if (
-          !(error instanceof NotAFileError && error.kind === 'symlink') ||
-          hops === MAX_SYMLINK_HOPS
-        ) {
-          throw error;
-        }
-        const stat = await this.#container.stat(target);
-        if (!stat) throw error;
-        target = posix.resolve(posix.dirname(target), stat.linkTarget);
-      }
+  /** The directories, parents first, that a write into `start` creates. */
+  async #missingDirectories(
+    start: string,
+    signal: AbortSignal | undefined,
+  ): Promise<string[]> {
+    const missing: string[] = [];
+    for (
+      let directory = start;
+      directory !== '/';
+      directory = posix.dirname(directory)
+    ) {
+      if (await this.#container.stat(directory, { signal })) break;
+      missing.unshift(directory);
     }
-  }
-
-  async #readByExec(path: string): Promise<Uint8Array> {
-    const process = await this.#container.spawn({ Cmd: ['cat', '--', path] });
-    const stdout: Uint8Array[] = [];
-    const stderr: Uint8Array[] = [];
-    for await (const { stream, data } of process) {
-      (stream === 'stdout' ? stdout : stderr).push(data);
-    }
-    if ((await process.exitCode) !== 0) {
-      throw new Error(Buffer.concat(stderr).toString('utf-8').trim());
-    }
-    return Buffer.concat(stdout);
-  }
-
-  async writeFiles(
-    files: Array<{ path: string; content: string | Buffer }>,
-  ): Promise<void> {
-    const resolved = files.map(({ path, content }) => ({
-      path: this.#resolve(path),
-      content,
-    }));
-    const byArchive = resolved.filter(({ path }) => !this.#isExecOnly(path));
-    if (byArchive.length > 0) {
-      try {
-        const owner = this.#owner;
-        // The engine creates implied parent directories as root, so a
-        // non-root user gets its new directories as explicit entries.
-        const directories = owner
-          ? await this.#missingDirectories(
-              byArchive.map(({ path }) => posix.dirname(path)),
-            )
-          : [];
-        await this.#container.writeFiles([
-          ...directories.map((path) => ({
-            path,
-            directory: true as const,
-            ...owner,
-          })),
-          ...byArchive.map(({ path, content }) => ({
-            path,
-            data: content,
-            ...owner,
-          })),
-        ]);
-      } catch (error) {
-        throw new Error(
-          `Failed to write file "${byArchive.map(({ path }) => path).join('", "')}": ${messageOf(error)}`,
-          { cause: error },
-        );
-      }
-    }
-
-    for (const { path, content } of resolved.filter(({ path }) =>
-      this.#isExecOnly(path),
-    )) {
-      const result = await this.#container.exec(
-        {
-          Cmd: [
-            'sh',
-            '-c',
-            'mkdir -p "$(dirname "$1")" && cat > "$1"',
-            'sh',
-            path,
-          ],
-        },
-        { stdin: content },
-      );
-      if (result.exitCode !== 0) {
-        throw new Error(`Failed to write file "${path}": ${result.stderr}`);
-      }
-    }
-  }
-
-  /** The directories, parents first, that a write into `directories` creates. */
-  async #missingDirectories(directories: string[]): Promise<string[]> {
-    const missing = new Set<string>();
-    for (const start of new Set(directories)) {
-      for (
-        let directory = start;
-        directory !== '/' && !missing.has(directory);
-        directory = posix.dirname(directory)
-      ) {
-        if (await this.#container.stat(directory)) break;
-        missing.add(directory);
-      }
-    }
-    return [...missing].sort((a, b) => a.length - b.length);
-  }
-
-  async exists(path: string): Promise<boolean> {
-    let target = this.#resolve(path);
-    if (this.#isExecOnly(target)) {
-      const { exitCode } = await this.#container.exec({
-        Cmd: ['test', '-e', target],
-      });
-      return exitCode === 0;
-    }
-    for (let hops = 0; hops <= MAX_SYMLINK_HOPS; hops++) {
-      const stat = await this.#container.stat(target);
-      if (!stat) return false;
-      if (stat.linkTarget === '') return true;
-      target = posix.resolve(posix.dirname(target), stat.linkTarget);
-    }
-    // A symbolic link loop, which `test -e` also reports as missing.
-    return false;
+    return missing;
   }
 
   installerContext(image: string): InstallerContext {
     return createInstallerContext(
       {
         // Installers run with `sh -c`, before the sandbox knows Bash exists.
-        exec: (command) => this.#exec({ Cmd: ['sh', '-c', command] }),
+        exec: (command) => this.exec(['sh', '-c', command]),
         SandboxError: DockerSandboxError,
       },
       this.name,
@@ -1074,6 +915,11 @@ class DockerContainer implements EngineContainer {
   async stop(): Promise<void> {
     try {
       await this.#container.stop();
+      // Stop returns while the engine still removes an AutoRemove container,
+      // which holds its volumes and bind mounts until then.
+      if (this.#autoRemove) {
+        await this.#container.wait({ condition: 'removed' });
+      }
     } catch (error) {
       // The container is gone: AutoRemove removed it, or another handle of a
       // named sandbox stopped it first.
@@ -1136,6 +982,7 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
       layout,
       await resolveOwner(container, layout.user),
       this.#commandTimeout,
+      info.HostConfig?.AutoRemove === true,
     );
   }
 
@@ -1270,26 +1117,13 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
   }
 
   async removeVolume(name: string): Promise<void> {
-    // AutoRemove releases the container's volume references after stop
-    // returns, so the volume stays in use for a moment.
-    const deadline = performance.now() + 30_000;
-    while (true) {
-      try {
-        await this.docker.volumes.find(name).then((volume) => volume?.remove());
-        return;
-      } catch (error) {
-        if (error instanceof VolumeInUseError && performance.now() < deadline) {
-          await delay(25);
-          continue;
-        }
-        if (error instanceof ConnectionFailedError) {
-          throw new DockerNotAvailableError();
-        }
-        throw new VolumeRemoveError(
-          name,
-          error instanceof Error ? error.message : String(error),
-        );
+    try {
+      await this.docker.volumes.find(name).then((volume) => volume?.remove());
+    } catch (error) {
+      if (error instanceof ConnectionFailedError) {
+        throw new DockerNotAvailableError();
       }
+      throw new VolumeRemoveError(name, messageOf(error));
     }
   }
 
@@ -1446,7 +1280,7 @@ export class ComposeStrategy extends ContainerSandboxStrategy<DockerCommonOption
  */
 export async function createDockerSandbox(
   options: DockerSandboxOptions = {},
-): Promise<LegacySandbox> {
+): Promise<DisposableSandbox> {
   if (!isComposeOptions(options)) {
     validateSandboxOptions(options, dockerErrors);
   }
@@ -1491,7 +1325,7 @@ export async function createDockerSandbox(
  */
 export async function useSandbox<T>(
   options: DockerSandboxOptions,
-  fn: (sandbox: LegacySandbox) => Promise<T>,
+  fn: (sandbox: DisposableSandbox) => Promise<T>,
 ): Promise<T> {
   const sandbox = await createDockerSandbox(options);
   try {

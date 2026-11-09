@@ -9,7 +9,7 @@ import { after, before, describe, it } from 'node:test';
 import {
   AppleContainerSandboxError,
   AppleContainerVolumePathError,
-  type LegacySandbox,
+  type DisposableSandbox,
   appleEngine,
   createAppleContainerSandbox,
   pkg,
@@ -218,27 +218,27 @@ describe('Apple container sandbox (runtime)', async () => {
 
   it('runs a command and captures stdout/exit code', async () => {
     await using sandbox = await createAppleContainerSandbox();
-    const result = await sandbox.executeCommand('echo hello');
+    const result = await sandbox.run({ command: 'echo hello' });
     assert.strictEqual(result.exitCode, 0);
-    assert.strictEqual(result.stdout.trim(), 'hello');
+    assert.strictEqual(result.stdout, 'hello\n');
   });
 
   it('defaults to an Alpine image', async () => {
     await using sandbox = await createAppleContainerSandbox();
-    const result = await sandbox.executeCommand('cat /etc/os-release');
+    const result = await sandbox.run({ command: 'cat /etc/os-release' });
     assert.strictEqual(result.exitCode, 0);
     assert.match(result.stdout, /alpine/i);
   });
 
   it('runs commands from /workspace', async () => {
     await using sandbox = await createAppleContainerSandbox();
-    const result = await sandbox.executeCommand('pwd');
-    assert.strictEqual(result.stdout.trim(), '/workspace');
+    const result = await sandbox.run({ command: 'pwd' });
+    assert.strictEqual(result.stdout, '/workspace\n');
   });
 
   it('propagates a non-zero exit code', async () => {
     await using sandbox = await createAppleContainerSandbox();
-    const result = await sandbox.executeCommand('exit 3');
+    const result = await sandbox.run({ command: 'exit 3' });
     assert.strictEqual(result.exitCode, 3);
   });
 
@@ -246,24 +246,27 @@ describe('Apple container sandbox (runtime)', async () => {
     await using sandbox = await createAppleContainerSandbox({
       env: { GREETING: 'hi-there' },
     });
-    const result = await sandbox.executeCommand('echo "$GREETING"');
-    assert.strictEqual(result.stdout.trim(), 'hi-there');
+    const result = await sandbox.run({ command: 'echo "$GREETING"' });
+    assert.strictEqual(result.stdout, 'hi-there\n');
   });
 
-  it('round-trips files via writeFiles/readFile', async () => {
+  it('round-trips files via writeTextFile/readTextFile', async () => {
     await using sandbox = await createAppleContainerSandbox();
-    await sandbox.writeFiles([
-      { path: '/workspace/nested/dir/hello.txt', content: 'file-contents\n' },
-    ]);
-    const content = await sandbox.readFile('/workspace/nested/dir/hello.txt');
+    await sandbox.writeTextFile({
+      path: '/workspace/nested/dir/hello.txt',
+      content: 'file-contents\n',
+    });
+    const content = await sandbox.readTextFile({
+      path: '/workspace/nested/dir/hello.txt',
+    });
     assert.strictEqual(content, 'file-contents\n');
   });
 
   it('round-trips a large file across multiple write chunks', async () => {
     await using sandbox = await createAppleContainerSandbox();
     const big = `${'x'.repeat(50_000)}\n${'y'.repeat(50_000)}`;
-    await sandbox.writeFiles([{ path: '/workspace/big.txt', content: big }]);
-    const read = await sandbox.readFile('/workspace/big.txt');
+    await sandbox.writeTextFile({ path: '/workspace/big.txt', content: big });
+    const read = await sandbox.readTextFile({ path: '/workspace/big.txt' });
     assert.strictEqual(read, big);
   });
 
@@ -271,14 +274,16 @@ describe('Apple container sandbox (runtime)', async () => {
     const sandbox = await createAppleContainerSandbox();
     try {
       const bytes = Buffer.from([0x89, 0x50, 0x00, 0xff]);
-      await sandbox.writeFiles([
-        { path: '/workspace/blob.bin', content: bytes },
-      ]);
-
-      const content = await sandbox.readFile('/workspace/blob.bin', {
-        encoding: 'binary',
+      await sandbox.writeBinaryFile({
+        path: '/workspace/blob.bin',
+        content: bytes,
       });
 
+      const content = await sandbox.readBinaryFile({
+        path: '/workspace/blob.bin',
+      });
+
+      assert.ok(content);
       assert.deepStrictEqual(Array.from(content), [0x89, 0x50, 0x00, 0xff]);
     } finally {
       await sandbox.dispose();
@@ -288,13 +293,23 @@ describe('Apple container sandbox (runtime)', async () => {
   it('reports whether a path exists', async () => {
     const sandbox = await createAppleContainerSandbox();
     try {
-      await sandbox.writeFiles([
-        { path: '/workspace/present.txt', content: 'x' },
-      ]);
+      await sandbox.writeTextFile({
+        path: '/workspace/present.txt',
+        content: 'x',
+      });
 
-      assert.strictEqual(await sandbox.exists('/workspace/present.txt'), true);
-      assert.strictEqual(await sandbox.exists('/workspace'), true);
-      assert.strictEqual(await sandbox.exists('/workspace/missing.txt'), false);
+      assert.deepStrictEqual(
+        await sandbox.stat({ path: '/workspace/present.txt' }),
+        { type: 'file', size: 1 },
+      );
+      assert.strictEqual(
+        (await sandbox.stat({ path: '/workspace' }))?.type,
+        'directory',
+      );
+      assert.strictEqual(
+        await sandbox.stat({ path: '/workspace/missing.txt' }),
+        null,
+      );
     } finally {
       await sandbox.dispose();
     }
@@ -315,10 +330,12 @@ describe('Apple container sandbox (runtime)', async () => {
         ],
       },
       async (sandbox) => {
-        const write = await sandbox.executeCommand('echo persisted > /data/m');
+        const write = await sandbox.run({
+          command: 'echo persisted > /data/m',
+        });
         assert.strictEqual(write.exitCode, 0);
-        const read = await sandbox.executeCommand('cat /data/m');
-        assert.strictEqual(read.stdout.trim(), 'persisted');
+        const read = await sandbox.run({ command: 'cat /data/m' });
+        assert.strictEqual(read.stdout, 'persisted\n');
       },
     );
     const ls = await spawn('container', ['volume', 'ls', '--format', 'json']);
@@ -331,12 +348,14 @@ describe('Apple container sandbox (runtime)', async () => {
   it('streams output via spawn()', async () => {
     await using sandbox = await createAppleContainerSandbox();
     assert.ok(sandbox.spawn, 'backend should expose spawn');
-    const proc = await sandbox.spawn('for i in 1 2 3; do echo "line$i"; done');
+    const proc = await sandbox.spawn({
+      command: 'for i in 1 2 3; do echo "line$i"; done',
+    });
     const [stdout, exit] = await Promise.all([
       readStream(proc.stdout),
-      proc.exit,
+      proc.wait(),
     ]);
-    assert.strictEqual(exit.success, true);
+    assert.strictEqual(exit.exitCode, 0);
     assert.deepStrictEqual(stdout.trim().split('\n'), [
       'line1',
       'line2',
@@ -348,9 +367,11 @@ describe('Apple container sandbox (runtime)', async () => {
     await useAppleContainerSandbox(
       { image: ALPINE, dns: ['1.1.1.1'], installers: [pkg(['jq'])] },
       async (sandbox) => {
-        const result = await sandbox.executeCommand('echo \'{"a":1}\' | jq .a');
+        const result = await sandbox.run({
+          command: 'echo \'{"a":1}\' | jq .a',
+        });
         assert.strictEqual(result.exitCode, 0);
-        assert.strictEqual(result.stdout.trim(), '1');
+        assert.strictEqual(result.stdout, '1\n');
       },
     );
   });
@@ -361,9 +382,9 @@ describe('Apple container sandbox (runtime)', async () => {
         dockerfile: `FROM ${ALPINE}\nRUN echo built-by-dockerfile > /etc/built-marker\n`,
       },
       async (sandbox) => {
-        const result = await sandbox.executeCommand('cat /etc/built-marker');
+        const result = await sandbox.run({ command: 'cat /etc/built-marker' });
         assert.strictEqual(result.exitCode, 0);
-        assert.strictEqual(result.stdout.trim(), 'built-by-dockerfile');
+        assert.strictEqual(result.stdout, 'built-by-dockerfile\n');
       },
     );
   });
@@ -374,9 +395,9 @@ describe('Apple container sandbox (runtime)', async () => {
         dockerfile: `FROM ${ALPINE}\nRUN rm /bin/sh\n`,
       },
       async (sandbox) => {
-        const result = await sandbox.executeCommand('pwd');
+        const result = await sandbox.run({ command: 'pwd' });
         assert.strictEqual(result.exitCode, 0, result.stderr);
-        assert.strictEqual(result.stdout.trim(), '/workspace');
+        assert.strictEqual(result.stdout, '/workspace\n');
       },
     );
   });
@@ -391,11 +412,11 @@ describe('Apple container sandbox (runtime)', async () => {
         ],
       },
       async (sandbox) => {
-        const read = await sandbox.executeCommand('cat /mnt/data/note.txt');
-        assert.strictEqual(read.stdout.trim(), 'from-host');
-        const write = await sandbox.executeCommand(
-          'echo x > /mnt/data/should-fail 2>&1',
-        );
+        const read = await sandbox.run({ command: 'cat /mnt/data/note.txt' });
+        assert.strictEqual(read.stdout, 'from-host');
+        const write = await sandbox.run({
+          command: 'echo x > /mnt/data/should-fail 2>&1',
+        });
         assert.notStrictEqual(write.exitCode, 0);
       },
     );
@@ -404,13 +425,14 @@ describe('Apple container sandbox (runtime)', async () => {
   it('reuses a stably-named container across handles', async () => {
     const name = `reuse-${process.pid}`;
     const first = await createAppleContainerSandbox({ name });
-    let second: LegacySandbox | undefined;
+    let second: DisposableSandbox | undefined;
     try {
-      await first.writeFiles([
-        { path: '/workspace/marker.txt', content: 'shared' },
-      ]);
+      await first.writeTextFile({
+        path: '/workspace/marker.txt',
+        content: 'shared',
+      });
       second = await createAppleContainerSandbox({ name });
-      const seen = await second.readFile('/workspace/marker.txt');
+      const seen = await second.readTextFile({ path: '/workspace/marker.txt' });
       assert.strictEqual(seen, 'shared');
     } finally {
       await (second ?? first).dispose();

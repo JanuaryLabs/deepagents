@@ -8,6 +8,7 @@ import assert from 'node:assert';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { z } from 'zod';
 
 import {
@@ -46,7 +47,7 @@ const NODE_STRACE_IMAGE =
 
 // The probe imports a workspace package + nano-spawn, neither of which exists
 // inside the container, so we esbuild it (plus a thin driver) into one
-// self-contained ESM file, drop it in via `writeFiles`, and run it with `node`.
+// self-contained ESM file, drop it in via `writeTextFile`, and run it with `node`.
 // The driver maps the probe's outcome onto stdout: `OK` on success, or
 // `REASON:<reason>` when it throws StraceUnavailableError — the same
 // classification the host-side assertions used to read off the thrown error.
@@ -76,8 +77,8 @@ const probeBundle = await buildProbeBundle();
 type DockerBackend = Awaited<ReturnType<typeof createDockerSandbox>>;
 
 async function runProbe(backend: DockerBackend): Promise<CommandResult> {
-  await backend.writeFiles([{ path: '/probe.mjs', content: probeBundle }]);
-  return backend.executeCommand('node /probe.mjs');
+  await backend.writeTextFile({ path: '/probe.mjs', content: probeBundle });
+  return backend.run({ command: 'node /probe.mjs' });
 }
 
 // `withStraceFileChanges` attaches the observed changes to a command result as
@@ -170,7 +171,7 @@ function toolResultOutputs(prompt: LanguageModelV4Prompt) {
 interface Recorder {
   /** Flatten + clear changes seen via onFileChanges since the last drain. */
   drain(): FileChange[];
-  /** Per-command groups (one entry per executeCommand/spawn that emitted). */
+  /** Per-command groups (one entry per run/spawn that emitted). */
   readonly calls: FileChange[][];
 }
 
@@ -255,7 +256,7 @@ describe('strace file-change tracking (docker backend)', () => {
     });
   });
 
-  it('reports write for a file written via writeFiles (not just bash)', async () => {
+  it('reports write for a file written via writeTextFile (not just bash)', async () => {
     await withSandbox(async (s, rec) => {
       await s.sandbox.writeTextFile({
         path: `${ROOT}/via-write.txt`,
@@ -267,6 +268,65 @@ describe('strace file-change tracking (docker backend)', () => {
           (c) => c.op === 'write' && c.path === `${ROOT}/via-write.txt`,
         ),
         JSON.stringify(changes),
+      );
+    });
+  });
+
+  it('reports write for writeBinaryFile and writeFile too', async () => {
+    await withSandbox(async (s, rec) => {
+      await s.sandbox.writeBinaryFile({
+        path: `${ROOT}/via-binary.bin`,
+        content: new Uint8Array([0xff]),
+      });
+      await s.sandbox.writeFile({
+        path: `${ROOT}/via-stream.bin`,
+        content: ReadableStream.from([new Uint8Array([0xfe])]),
+      });
+
+      assert.deepStrictEqual(ops(rec.drain()), [
+        { op: 'write', path: `${ROOT}/via-binary.bin` },
+        { op: 'write', path: `${ROOT}/via-stream.bin` },
+      ]);
+    });
+  });
+
+  it('reports a relative write at the session base directory', async () => {
+    const seen: FileChange[] = [];
+    const backend = await createDockerSandbox({
+      ...defaults,
+      dockerfile: STRACE_IMAGE,
+    });
+    const tracked = await withStraceFileChanges(backend, {
+      include: ['/workspace', '/workspace/**'],
+      onFileChanges: (changes) => {
+        seen.push(...changes);
+      },
+    });
+    try {
+      await tracked.writeTextFile({ path: 'rel/one.txt', content: 'x' });
+      assert.deepStrictEqual(ops(seen), [
+        { op: 'write', path: '/workspace/rel/one.txt' },
+      ]);
+    } finally {
+      await tracked.dispose();
+    }
+  });
+
+  it('runs a traced command in its workingDirectory with its env', async () => {
+    await withSandbox(async (s, rec) => {
+      const r = await s.sandbox.run({
+        command: 'echo "$TRACED_VALUE" > here.txt; pwd',
+        workingDirectory: ROOT,
+        env: { TRACED_VALUE: 'from-env' },
+      });
+      assert.strictEqual(r.exitCode, 0, r.stderr);
+      assert.strictEqual(r.stdout, `${ROOT}\n`);
+      assert.deepStrictEqual(ops(rec.drain()), [
+        { op: 'write', path: `${ROOT}/here.txt` },
+      ]);
+      assert.strictEqual(
+        await s.sandbox.readTextFile({ path: `${ROOT}/here.txt` }),
+        'from-env\n',
       );
     });
   });
@@ -478,6 +538,82 @@ describe('strace file-change tracking (docker backend)', () => {
     });
   });
 
+  it('feeds stdin through a traced spawn', async () => {
+    await withSandbox(async (s, rec) => {
+      const child = await s.sandbox.spawn({
+        command: `cat > ${ROOT}/fed.txt`,
+        stdin: true,
+      });
+      const writer = child.stdin.getWriter();
+      await writer.write(new TextEncoder().encode('fed'));
+      await writer.close();
+      await Promise.all([drainStream(child.stdout), drainStream(child.stderr)]);
+
+      assert.deepStrictEqual(await child.wait(), { exitCode: 0 });
+      assert.strictEqual(
+        await s.sandbox.readTextFile({ path: `${ROOT}/fed.txt` }),
+        'fed',
+      );
+      assert.deepStrictEqual(ops(rec.drain()), [
+        { op: 'write', path: `${ROOT}/fed.txt` },
+      ]);
+    });
+  });
+
+  it('stops a traced spawn on kill and on abort, and still sweeps its traces', async (t) => {
+    await withSandbox(async (s) => {
+      const controller = new AbortController();
+      const reason = new Error('stop');
+      const started = async (name: string) => {
+        const deadline = performance.now() + 30_000;
+        while (
+          (await s.sandbox.readTextFile({ path: `${ROOT}/${name}` })) === null
+        ) {
+          assert.ok(performance.now() < deadline, `${name} never started`);
+          await sleep(50);
+        }
+      };
+      const command = (name: string) =>
+        `echo started > ${ROOT}/${name}; sleep 10; echo late > ${ROOT}/${name}-late`;
+
+      const aborted = await s.sandbox.spawn({
+        command: command('aborted'),
+        abortSignal: controller.signal,
+      });
+      await started('aborted');
+      controller.abort(reason);
+      await assert.rejects(
+        Promise.resolve(aborted.wait()),
+        (error) => error === reason,
+      );
+
+      const killed = await s.sandbox.spawn({ command: command('killed') });
+      await started('killed');
+      await killed.kill();
+      await killed.kill();
+      assert.notStrictEqual((await killed.wait()).exitCode, 0);
+
+      await sleep(10_500);
+      assert.strictEqual(
+        await s.sandbox.stat({ path: `${ROOT}/aborted-late` }),
+        null,
+      );
+      assert.strictEqual(
+        await s.sandbox.stat({ path: `${ROOT}/killed-late` }),
+        null,
+      );
+      // The sweep is fire-and-forget, so absorb it with a wait.
+      await t.waitFor(
+        async () =>
+          assert.deepStrictEqual(
+            await s.sandbox.listDirectory({ path: '/tmp/dat-trace' }),
+            [],
+          ),
+        { interval: 50, timeout: 10_000 },
+      );
+    });
+  });
+
   it('drops changes matching an exclude glob (e.g. uploaded skills) but keeps siblings', async () => {
     const seen: FileChange[] = [];
     const backend = await createDockerSandbox({
@@ -542,7 +678,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
-    await backend.executeCommand(`mkdir -p ${ROOT}`);
+    await backend.run({ command: `mkdir -p ${ROOT}` });
     const tracked = await withStraceFileChanges(backend, {
       include: [ROOT, `${ROOT}/**`],
       onFileChanges: () => {
@@ -583,7 +719,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
-    await backend.executeCommand(`mkdir -p ${ROOT}`);
+    await backend.run({ command: `mkdir -p ${ROOT}` });
     const tracked = await withStraceFileChanges(backend, {
       include: [ROOT, `${ROOT}/**`],
       onFileChanges: throwBoom,
@@ -609,12 +745,12 @@ describe('onFileChanges failure handling (docker backend)', () => {
     }
   });
 
-  it('propagates a throwing onFileChanges out of sandbox.writeFiles (post-hoc gate)', async () => {
+  it('propagates a throwing onFileChanges out of sandbox.writeTextFile (post-hoc gate)', async () => {
     const backend = await createDockerSandbox({
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
-    await backend.executeCommand(`mkdir -p ${ROOT}`);
+    await backend.run({ command: `mkdir -p ${ROOT}` });
     const tracked = await withStraceFileChanges(backend, {
       include: [ROOT, `${ROOT}/**`],
       onFileChanges: throwBoom,
@@ -648,7 +784,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
-    await backend.executeCommand(`mkdir -p ${ROOT}`);
+    await backend.run({ command: `mkdir -p ${ROOT}` });
     const tracked = await withStraceFileChanges(backend, {
       include: [ROOT, `${ROOT}/**`],
       onFileChanges: () => {
@@ -691,7 +827,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
-    await backend.executeCommand(`mkdir -p ${ROOT}`);
+    await backend.run({ command: `mkdir -p ${ROOT}` });
     const tracked = await withStraceFileChanges(backend, {
       include: [ROOT, `${ROOT}/**`],
       onFileChanges: () => {
@@ -750,7 +886,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
-    await backend.executeCommand(`mkdir -p ${ROOT}`);
+    await backend.run({ command: `mkdir -p ${ROOT}` });
     const tracked = await withStraceFileChanges(backend, {
       include: [ROOT, `${ROOT}/**`],
       onFileChanges: throwBoom,
@@ -790,7 +926,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
-    await backend.executeCommand(`mkdir -p ${ROOT}`);
+    await backend.run({ command: `mkdir -p ${ROOT}` });
     const tracked = await withStraceFileChanges(backend, {
       include: [ROOT, `${ROOT}/**`],
       onFileChanges: throwBoom,
@@ -823,7 +959,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
-    await backend.executeCommand(`mkdir -p ${ROOT}`);
+    await backend.run({ command: `mkdir -p ${ROOT}` });
     const tracked = await withStraceFileChanges(backend, {
       include: [ROOT, `${ROOT}/**`],
       onFileChanges: throwBoom,

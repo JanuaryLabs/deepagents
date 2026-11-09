@@ -147,7 +147,7 @@ const sandbox = await createDockerSandbox({
   ],
 });
 
-await sandbox.executeCommand('echo "result" > /workspace/storage/output.txt');
+await sandbox.run({ command: 'echo "result" > /workspace/storage/output.txt' });
 ```
 
 The file written at `/workspace/storage/output.txt` becomes an object in `gcs:YOUR_BUCKET`.
@@ -193,7 +193,7 @@ const sandbox = await createDockerSandbox({
   volumes: [gcs({ hostPath: '/mnt/gcs', mountPath: '/workspace/storage' })],
 });
 
-await sandbox.executeCommand('echo "result" > /workspace/storage/output.txt');
+await sandbox.run({ command: 'echo "result" > /workspace/storage/output.txt' });
 ```
 
 `gcs()` is a thin constructor that returns an ordinary `DockerBindVolume` over the host mountpoint — it runs no gcsfuse, touches no credentials, and makes no GCS calls. The cloud wiring stays on the host; the sandbox just sees a bind mount.

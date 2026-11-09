@@ -672,24 +672,25 @@ async function demonstrateDockerSandbox() {
 
   try {
     // Execute commands in the container
-    const result = await sandbox.executeCommand('curl --version');
+    const result = await sandbox.run({ command: 'curl --version' });
     console.log('curl version:', result.stdout.split('\n')[0]);
 
     // Commands return stdout, stderr, and exitCode
-    const lsResult = await sandbox.executeCommand('ls /workspace');
+    const lsResult = await sandbox.run({ command: 'ls /workspace' });
     console.log('Workspace files:', lsResult.stdout.trim().split('\n').length);
 
     // Write files to the container
-    await sandbox.writeFiles([
-      { path: '/tmp/hello.txt', content: 'Hello from Docker sandbox!' },
-    ]);
+    await sandbox.writeTextFile({
+      path: '/tmp/hello.txt',
+      content: 'Hello from Docker sandbox!',
+    });
 
     // Read files from the container
-    const content = await sandbox.readFile('/tmp/hello.txt');
+    const content = await sandbox.readTextFile({ path: '/tmp/hello.txt' });
     console.log('File content:', content);
 
     // Handle command failures gracefully
-    const failResult = await sandbox.executeCommand('nonexistent_command');
+    const failResult = await sandbox.run({ command: 'nonexistent_command' });
     console.log('Failed command exitCode:', failResult.exitCode); // 127
   } finally {
     // Always dispose to stop and remove the container

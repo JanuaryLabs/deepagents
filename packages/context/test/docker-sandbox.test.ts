@@ -4,15 +4,16 @@ import assert from 'node:assert';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { text } from 'node:stream/consumers';
 import { describe, it } from 'node:test';
 
 import {
   ContainerCreationError,
+  type DisposableSandbox,
   DockerSandboxError,
   InstallError,
   Installer,
   type InstallerContext,
-  type LegacySandbox,
   MissingRuntimeError,
   PackageInstallError,
   VolumeCreateError,
@@ -41,17 +42,6 @@ function testVolumeName(prefix: string): string {
 async function removeDockerVolume(name: string): Promise<void> {
   const volume = await (await testbed.client()).volumes.find(name);
   await volume?.remove();
-}
-
-/**
- * dispose() returns when the container stops; Docker's --rm removes it after
- * that, and its volumes stay in use until it is gone.
- */
-async function removeSandboxContainer(name: string): Promise<void> {
-  const container = await (
-    await testbed.client()
-  ).containers.find(`sandbox-${name}`);
-  await container?.remove({ force: true });
 }
 
 class DeleteVolumeThenFailInstaller extends Installer {
@@ -85,9 +75,9 @@ describe('Docker Sandbox', () => {
         const sandbox = await createDockerSandbox(defaults);
 
         try {
-          const result = await sandbox.executeCommand('echo hello');
+          const result = await sandbox.run({ command: 'echo hello' });
           assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(result.stdout.trim(), 'hello');
+          assert.strictEqual(result.stdout, 'hello\n');
         } finally {
           await sandbox.dispose();
         }
@@ -98,7 +88,7 @@ describe('Docker Sandbox', () => {
 
         try {
           // The official Bash image is Alpine-based.
-          const result = await sandbox.executeCommand('cat /etc/os-release');
+          const result = await sandbox.run({ command: 'cat /etc/os-release' });
           assert.strictEqual(result.exitCode, 0);
           assert.match(result.stdout, /alpine/i);
         } finally {
@@ -120,7 +110,7 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand('cat /etc/os-release');
+          const result = await sandbox.run({ command: 'cat /etc/os-release' });
           assert.strictEqual(result.exitCode, 0);
           assert.match(result.stdout, /debian/i);
         } finally {
@@ -132,9 +122,9 @@ describe('Docker Sandbox', () => {
         const sandbox = await createDockerSandbox(defaults);
 
         try {
-          const result = await sandbox.executeCommand('pwd');
+          const result = await sandbox.run({ command: 'pwd' });
           assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(result.stdout.trim(), '/workspace');
+          assert.strictEqual(result.stdout, '/workspace\n');
         } finally {
           await sandbox.dispose();
         }
@@ -149,7 +139,7 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand('curl --version');
+          const result = await sandbox.run({ command: 'curl --version' });
           assert.strictEqual(result.exitCode, 0);
           assert.match(result.stdout, /curl/i);
         } finally {
@@ -165,7 +155,7 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand('curl --version');
+          const result = await sandbox.run({ command: 'curl --version' });
           assert.strictEqual(result.exitCode, 0);
           assert.match(result.stdout, /curl/i);
         } finally {
@@ -180,9 +170,9 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand('echo works');
+          const result = await sandbox.run({ command: 'echo works' });
           assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(result.stdout.trim(), 'works');
+          assert.strictEqual(result.stdout, 'works\n');
         } finally {
           await sandbox.dispose();
         }
@@ -202,44 +192,64 @@ describe('Docker Sandbox', () => {
     describe('command execution', () => {
       it('captures stdout correctly', async () => {
         await using sandbox = await createDockerSandbox(defaults);
-        const result = await sandbox.executeCommand('echo "test output"');
+        const result = await sandbox.run({ command: 'echo "test output"' });
         assert.strictEqual(result.exitCode, 0);
-        assert.strictEqual(result.stdout.trim(), 'test output');
+        assert.strictEqual(result.stdout, 'test output\n');
       });
 
       it('captures stderr correctly', async () => {
         await using sandbox = await createDockerSandbox(defaults);
-        const result = await sandbox.executeCommand('echo "error" >&2');
+        const result = await sandbox.run({ command: 'echo "error" >&2' });
         assert.strictEqual(result.exitCode, 0);
-        assert.strictEqual(result.stderr.trim(), 'error');
+        assert.strictEqual(result.stderr, 'error\n');
+      });
+
+      it('runs each command in a login shell, whichever way it starts', async () => {
+        await using sandbox = await createDockerSandbox(defaults);
+        const command =
+          'shopt -q login_shell && printf login || printf not-login';
+
+        const plain = await sandbox.run({ command });
+        const abortable = await sandbox.run({
+          command,
+          abortSignal: new AbortController().signal,
+        });
+        const spawned = await sandbox.spawn({ command });
+
+        assert.strictEqual(plain.stdout, 'login');
+        assert.strictEqual(abortable.stdout, 'login');
+        assert.strictEqual(await text(spawned.stdout), 'login');
       });
 
       it('preserves exit codes', async () => {
         await using sandbox = await createDockerSandbox(defaults);
-        const result = await sandbox.executeCommand('exit 42');
+        const result = await sandbox.run({ command: 'exit 42' });
         assert.strictEqual(result.exitCode, 42);
       });
 
       it('returns exit code 127 for command not found', async () => {
         await using sandbox = await createDockerSandbox(defaults);
-        const result = await sandbox.executeCommand('nonexistent_command_xyz');
+        const result = await sandbox.run({
+          command: 'nonexistent_command_xyz',
+        });
         assert.strictEqual(result.exitCode, 127);
         assert.match(result.stderr, /not found/i);
       });
 
       it('handles multi-line output', async () => {
         await using sandbox = await createDockerSandbox(defaults);
-        const result = await sandbox.executeCommand(
-          'echo "line1"; echo "line2"; echo "line3"',
-        );
+        const result = await sandbox.run({
+          command: 'echo "line1"; echo "line2"; echo "line3"',
+        });
         assert.strictEqual(result.exitCode, 0);
-        const lines = result.stdout.trim().split('\n');
-        assert.deepStrictEqual(lines, ['line1', 'line2', 'line3']);
+        assert.strictEqual(result.stdout, 'line1\nline2\nline3\n');
       });
 
       it('handles special characters in output', async () => {
         await using sandbox = await createDockerSandbox(defaults);
-        const result = await sandbox.executeCommand('echo "hello $USER world"');
+        const result = await sandbox.run({
+          command: 'echo "hello $USER world"',
+        });
         assert.strictEqual(result.exitCode, 0);
         // $USER should expand (or be empty) - just check it doesn't error
       });
@@ -248,65 +258,80 @@ describe('Docker Sandbox', () => {
     describe('file operations', () => {
       it('writes single file', async () => {
         await using sandbox = await createDockerSandbox(defaults);
-        await sandbox.writeFiles([
-          { path: '/tmp/test.txt', content: 'hello world' },
-        ]);
+        await sandbox.writeTextFile({
+          path: '/tmp/test.txt',
+          content: 'hello world',
+        });
 
-        const content = await sandbox.readFile('/tmp/test.txt');
-        assert.strictEqual(content.trim(), 'hello world');
+        const content = await sandbox.readTextFile({ path: '/tmp/test.txt' });
+        assert.strictEqual(content, 'hello world');
       });
 
       it('writes multiple files', async () => {
         await using sandbox = await createDockerSandbox(defaults);
-        await sandbox.writeFiles([
-          { path: '/tmp/file1.txt', content: 'content1' },
-          { path: '/tmp/file2.txt', content: 'content2' },
-        ]);
+        await sandbox.writeTextFile({
+          path: '/tmp/file1.txt',
+          content: 'content1',
+        });
+        await sandbox.writeTextFile({
+          path: '/tmp/file2.txt',
+          content: 'content2',
+        });
 
-        const content1 = await sandbox.readFile('/tmp/file1.txt');
-        const content2 = await sandbox.readFile('/tmp/file2.txt');
-        assert.strictEqual(content1.trim(), 'content1');
-        assert.strictEqual(content2.trim(), 'content2');
+        const content1 = await sandbox.readTextFile({ path: '/tmp/file1.txt' });
+        const content2 = await sandbox.readTextFile({ path: '/tmp/file2.txt' });
+        assert.strictEqual(content1, 'content1');
+        assert.strictEqual(content2, 'content2');
       });
 
       it('creates parent directories automatically', async () => {
         await using sandbox = await createDockerSandbox(defaults);
-        await sandbox.writeFiles([
-          { path: '/tmp/nested/deep/file.txt', content: 'nested content' },
-        ]);
+        await sandbox.writeTextFile({
+          path: '/tmp/nested/deep/file.txt',
+          content: 'nested content',
+        });
 
-        const content = await sandbox.readFile('/tmp/nested/deep/file.txt');
-        assert.strictEqual(content.trim(), 'nested content');
+        const content = await sandbox.readTextFile({
+          path: '/tmp/nested/deep/file.txt',
+        });
+        assert.strictEqual(content, 'nested content');
       });
 
       it('handles files with special characters', async () => {
         await using sandbox = await createDockerSandbox(defaults);
         const specialContent = 'line1\nline2\ttab\n';
-        await sandbox.writeFiles([
-          { path: '/tmp/special.txt', content: specialContent },
-        ]);
+        await sandbox.writeTextFile({
+          path: '/tmp/special.txt',
+          content: specialContent,
+        });
 
-        const content = await sandbox.readFile('/tmp/special.txt');
+        const content = await sandbox.readTextFile({
+          path: '/tmp/special.txt',
+        });
         // newlines and tabs should be preserved
         assert.strictEqual(content, specialContent);
       });
 
       it('reads a file through a symbolic link', async () => {
         await using sandbox = await createDockerSandbox(defaults);
-        await sandbox.writeFiles([
-          { path: '/tmp/target.txt', content: 'linked content' },
-        ]);
-        const link = await sandbox.executeCommand(
-          'mkdir -p /tmp/links && ln -s ../target.txt /tmp/links/relative.txt',
-        );
+        await sandbox.writeTextFile({
+          path: '/tmp/target.txt',
+          content: 'linked content',
+        });
+        const link = await sandbox.run({
+          command:
+            'mkdir -p /tmp/links && ln -s ../target.txt /tmp/links/relative.txt',
+        });
         assert.strictEqual(link.exitCode, 0, link.stderr);
 
-        const content = await sandbox.readFile('/tmp/links/relative.txt');
+        const content = await sandbox.readTextFile({
+          path: '/tmp/links/relative.txt',
+        });
 
         assert.strictEqual(content, 'linked content');
-        assert.strictEqual(
-          await sandbox.exists('/tmp/links/relative.txt'),
-          true,
+        assert.deepStrictEqual(
+          await sandbox.stat({ path: '/tmp/links/relative.txt' }),
+          { type: 'file', size: 14 },
         );
       });
 
@@ -315,17 +340,19 @@ describe('Docker Sandbox', () => {
           ...defaults,
           security: { user: '1000:1000' },
         });
-        await sandbox.writeFiles([
-          { path: '/tmp/owned/deep/notes.txt', content: 'first' },
-        ]);
+        await sandbox.writeTextFile({
+          path: '/tmp/owned/deep/notes.txt',
+          content: 'first',
+        });
 
-        const modify = await sandbox.executeCommand(
-          'printf " second" >> /tmp/owned/deep/notes.txt && touch /tmp/owned/deep/sibling /tmp/owned/sibling',
-        );
+        const modify = await sandbox.run({
+          command:
+            'printf " second" >> /tmp/owned/deep/notes.txt && touch /tmp/owned/deep/sibling /tmp/owned/sibling',
+        });
 
         assert.strictEqual(modify.exitCode, 0, modify.stderr);
         assert.strictEqual(
-          await sandbox.readFile('/tmp/owned/deep/notes.txt'),
+          await sandbox.readTextFile({ path: '/tmp/owned/deep/notes.txt' }),
           'first second',
         );
       });
@@ -340,26 +367,28 @@ describe('Docker Sandbox', () => {
             '',
           ].join('\n'),
         });
-        await sandbox.writeFiles([
-          { path: '/tmp/named/deep/notes.txt', content: 'first' },
-        ]);
+        await sandbox.writeTextFile({
+          path: '/tmp/named/deep/notes.txt',
+          content: 'first',
+        });
 
-        const modify = await sandbox.executeCommand(
-          'printf " second" >> /tmp/named/deep/notes.txt && touch /tmp/named/deep/sibling /tmp/named/sibling',
-        );
+        const modify = await sandbox.run({
+          command:
+            'printf " second" >> /tmp/named/deep/notes.txt && touch /tmp/named/deep/sibling /tmp/named/sibling',
+        });
 
         assert.strictEqual(modify.exitCode, 0, modify.stderr);
         assert.strictEqual(
-          await sandbox.readFile('/tmp/named/deep/notes.txt'),
+          await sandbox.readTextFile({ path: '/tmp/named/deep/notes.txt' }),
           'first second',
         );
       });
 
-      it('throws error when reading non-existent file', async () => {
+      it('reads a non-existent file as null', async () => {
         await using sandbox = await createDockerSandbox(defaults);
-        await assert.rejects(
-          sandbox.readFile('/nonexistent/path/file.txt'),
-          /Failed to read file/,
+        assert.strictEqual(
+          await sandbox.readTextFile({ path: '/nonexistent/path/file.txt' }),
+          null,
         );
       });
     });
@@ -369,12 +398,16 @@ describe('Docker Sandbox', () => {
         const sandbox = await createDockerSandbox(defaults);
         try {
           const bytes = Buffer.from([0x89, 0x50, 0x00, 0xff]);
-          await sandbox.writeFiles([{ path: '/tmp/blob.bin', content: bytes }]);
-
-          const content = await sandbox.readFile('/tmp/blob.bin', {
-            encoding: 'binary',
+          await sandbox.writeBinaryFile({
+            path: '/tmp/blob.bin',
+            content: bytes,
           });
 
+          const content = await sandbox.readBinaryFile({
+            path: '/tmp/blob.bin',
+          });
+
+          assert.ok(content);
           assert.deepStrictEqual(Array.from(content), [0x89, 0x50, 0x00, 0xff]);
         } finally {
           await sandbox.dispose();
@@ -384,13 +417,23 @@ describe('Docker Sandbox', () => {
       it('reports whether a path exists', async () => {
         const sandbox = await createDockerSandbox(defaults);
         try {
-          await sandbox.writeFiles([
-            { path: '/tmp/present.txt', content: 'x' },
-          ]);
+          await sandbox.writeTextFile({
+            path: '/tmp/present.txt',
+            content: 'x',
+          });
 
-          assert.strictEqual(await sandbox.exists('/tmp/present.txt'), true);
-          assert.strictEqual(await sandbox.exists('/tmp'), true);
-          assert.strictEqual(await sandbox.exists('/tmp/missing.txt'), false);
+          assert.deepStrictEqual(
+            await sandbox.stat({ path: '/tmp/present.txt' }),
+            { type: 'file', size: 1 },
+          );
+          assert.strictEqual(
+            (await sandbox.stat({ path: '/tmp' }))?.type,
+            'directory',
+          );
+          assert.strictEqual(
+            await sandbox.stat({ path: '/tmp/missing.txt' }),
+            null,
+          );
         } finally {
           await sandbox.dispose();
         }
@@ -414,16 +457,16 @@ describe('Docker Sandbox', () => {
 
         try {
           // Should be able to read
-          const readResult = await sandbox.executeCommand(
-            'cat /data/host-file.txt',
-          );
+          const readResult = await sandbox.run({
+            command: 'cat /data/host-file.txt',
+          });
           assert.strictEqual(readResult.exitCode, 0);
-          assert.strictEqual(readResult.stdout.trim(), 'from host');
+          assert.strictEqual(readResult.stdout, 'from host');
 
           // Should not be able to write (read-only)
-          const writeResult = await sandbox.executeCommand(
-            'echo "test" > /data/new-file.txt',
-          );
+          const writeResult = await sandbox.run({
+            command: 'echo "test" > /data/new-file.txt',
+          });
           assert.notStrictEqual(writeResult.exitCode, 0);
           assert.match(writeResult.stderr, /read-only/i);
         } finally {
@@ -448,9 +491,9 @@ describe('Docker Sandbox', () => {
 
         try {
           // Should be able to write
-          const writeResult = await sandbox.executeCommand(
-            'echo "container wrote this" > /data/container-file.txt',
-          );
+          const writeResult = await sandbox.run({
+            command: 'echo "container wrote this" > /data/container-file.txt',
+          });
           assert.strictEqual(writeResult.exitCode, 0);
 
           // Verify file exists on host
@@ -479,13 +522,12 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const writeResult = await writer.executeCommand(
-            'echo "persisted" > /data/file.txt',
-          );
+          const writeResult = await writer.run({
+            command: 'echo "persisted" > /data/file.txt',
+          });
           assert.strictEqual(writeResult.exitCode, 0);
         } finally {
           await writer.dispose();
-          await removeSandboxContainer(writerName);
         }
 
         const readerName = `volume-reader-${crypto.randomUUID()}`;
@@ -502,12 +544,13 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const readResult = await reader.executeCommand('cat /data/file.txt');
+          const readResult = await reader.run({
+            command: 'cat /data/file.txt',
+          });
           assert.strictEqual(readResult.exitCode, 0);
-          assert.strictEqual(readResult.stdout.trim(), 'persisted');
+          assert.strictEqual(readResult.stdout, 'persisted\n');
         } finally {
           await reader.dispose();
-          await removeSandboxContainer(readerName);
         }
       });
 
@@ -553,13 +596,14 @@ describe('Docker Sandbox', () => {
           try {
             // Root filesystem cleanup keeps Docker's auto-removal in progress
             // after stop returns, while it still holds the volume reference.
-            const files = await sandbox.executeCommand(
-              'mkdir -p /tmp/disposal-files; for file in {1..5000}; do : > /tmp/disposal-files/$file; done',
-            );
+            const files = await sandbox.run({
+              command:
+                'mkdir -p /tmp/disposal-files; for file in {1..5000}; do : > /tmp/disposal-files/$file; done',
+            });
             assert.strictEqual(files.exitCode, 0);
-            const writeResult = await sandbox.executeCommand(
-              'echo "managed" > /data/file.txt',
-            );
+            const writeResult = await sandbox.run({
+              command: 'echo "managed" > /data/file.txt',
+            });
             assert.strictEqual(writeResult.exitCode, 0);
           } finally {
             await sandbox.dispose();
@@ -589,9 +633,9 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const writeResult = await sandbox.executeCommand(
-            'echo "blocked" > /data/file.txt',
-          );
+          const writeResult = await sandbox.run({
+            command: 'echo "blocked" > /data/file.txt',
+          });
           assert.notStrictEqual(writeResult.exitCode, 0);
           assert.match(writeResult.stderr, /read-only/i);
         } finally {
@@ -652,11 +696,11 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand(
-            'echo "$MY_VAR $ANOTHER"',
-          );
+          const result = await sandbox.run({
+            command: 'echo "$MY_VAR $ANOTHER"',
+          });
           assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(result.stdout.trim(), 'hello world');
+          assert.strictEqual(result.stdout, 'hello world\n');
         } finally {
           await sandbox.dispose();
         }
@@ -669,10 +713,10 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const r1 = await sandbox.executeCommand('echo "$PERSIST_TEST"');
-          const r2 = await sandbox.executeCommand('echo "$PERSIST_TEST"');
-          assert.strictEqual(r1.stdout.trim(), 'sticky');
-          assert.strictEqual(r2.stdout.trim(), 'sticky');
+          const r1 = await sandbox.run({ command: 'echo "$PERSIST_TEST"' });
+          const r2 = await sandbox.run({ command: 'echo "$PERSIST_TEST"' });
+          assert.strictEqual(r1.stdout, 'sticky\n');
+          assert.strictEqual(r2.stdout, 'sticky\n');
         } finally {
           await sandbox.dispose();
         }
@@ -685,9 +729,9 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand('echo "$SPACED"');
+          const result = await sandbox.run({ command: 'echo "$SPACED"' });
           assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(result.stdout.trim(), 'hello world foo');
+          assert.strictEqual(result.stdout, 'hello world foo\n');
         } finally {
           await sandbox.dispose();
         }
@@ -700,8 +744,8 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand('echo "$DB_URL"');
-          assert.strictEqual(result.stdout.trim(), 'host=localhost;port=5432');
+          const result = await sandbox.run({ command: 'echo "$DB_URL"' });
+          assert.strictEqual(result.stdout, 'host=localhost;port=5432\n');
         } finally {
           await sandbox.dispose();
         }
@@ -714,9 +758,9 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand('echo works');
+          const result = await sandbox.run({ command: 'echo works' });
           assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(result.stdout.trim(), 'works');
+          assert.strictEqual(result.stdout, 'works\n');
         } finally {
           await sandbox.dispose();
         }
@@ -753,9 +797,9 @@ describe('Docker Sandbox', () => {
 
         try {
           // Container should work with limits
-          const result = await sandbox.executeCommand('echo "limited"');
+          const result = await sandbox.run({ command: 'echo "limited"' });
           assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(result.stdout.trim(), 'limited');
+          assert.strictEqual(result.stdout, 'limited\n');
           const found = await (
             await testbed.client()
           ).containers.find(`sandbox-${name}`);
@@ -780,7 +824,7 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand('df -k /dev/shm');
+          const result = await sandbox.run({ command: 'df -k /dev/shm' });
           assert.strictEqual(result.exitCode, 0);
           assert.match(result.stdout, /65536/);
         } finally {
@@ -798,7 +842,7 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand('cat /proc/1/limits');
+          const result = await sandbox.run({ command: 'cat /proc/1/limits' });
           assert.strictEqual(result.exitCode, 0);
           assert.match(result.stdout, /Max open files\s+512\s+512/);
         } finally {
@@ -813,11 +857,12 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand(
-            'cat /sys/fs/cgroup/pids.max 2>/dev/null || cat /sys/fs/cgroup/pids/pids.max',
-          );
+          const result = await sandbox.run({
+            command:
+              'cat /sys/fs/cgroup/pids.max 2>/dev/null || cat /sys/fs/cgroup/pids/pids.max',
+          });
           assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(result.stdout.trim(), '42');
+          assert.strictEqual(result.stdout, '42\n');
         } finally {
           await sandbox.dispose();
         }
@@ -832,9 +877,9 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand('echo runc');
+          const result = await sandbox.run({ command: 'echo runc' });
           assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(result.stdout.trim(), 'runc');
+          assert.strictEqual(result.stdout, 'runc\n');
         } finally {
           await sandbox.dispose();
         }
@@ -862,9 +907,9 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand('ls /sys/class/net');
+          const result = await sandbox.run({ command: 'ls /sys/class/net' });
           assert.strictEqual(result.exitCode, 0);
-          const interfaces = result.stdout.trim().split(/\s+/);
+          const interfaces = result.stdout.split(/\s+/);
           assert.ok(interfaces.includes('lo'));
           assert.ok(
             !interfaces.includes('eth0'),
@@ -882,9 +927,9 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand('hostname');
+          const result = await sandbox.run({ command: 'hostname' });
           assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(result.stdout.trim(), 'sandbox-host');
+          assert.strictEqual(result.stdout, 'sandbox-host\n');
         } finally {
           await sandbox.dispose();
         }
@@ -897,7 +942,7 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand('cat /etc/resolv.conf');
+          const result = await sandbox.run({ command: 'cat /etc/resolv.conf' });
           assert.strictEqual(result.exitCode, 0);
           assert.match(result.stdout, /nameserver\s+1\.2\.3\.4/);
         } finally {
@@ -912,7 +957,7 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand('cat /etc/hosts');
+          const result = await sandbox.run({ command: 'cat /etc/hosts' });
           assert.strictEqual(result.exitCode, 0);
           assert.match(result.stdout, /10\.1\.2\.3\s+myhost/);
         } finally {
@@ -929,9 +974,9 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand('cat /proc/1/comm');
+          const result = await sandbox.run({ command: 'cat /proc/1/comm' });
           assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(result.stdout.trim(), 'docker-init');
+          assert.strictEqual(result.stdout, 'docker-init\n');
         } finally {
           await sandbox.dispose();
         }
@@ -944,9 +989,9 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand('pwd');
+          const result = await sandbox.run({ command: 'pwd' });
           assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(result.stdout.trim(), '/srv');
+          assert.strictEqual(result.stdout, '/srv\n');
         } finally {
           await sandbox.dispose();
         }
@@ -960,9 +1005,9 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand('cat /proc/1/comm');
+          const result = await sandbox.run({ command: 'cat /proc/1/comm' });
           assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(result.stdout.trim(), 'sleep');
+          assert.strictEqual(result.stdout, 'sleep\n');
         } finally {
           await sandbox.dispose();
         }
@@ -975,11 +1020,11 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand(
-            'cat /proc/sys/net/ipv4/ip_forward',
-          );
+          const result = await sandbox.run({
+            command: 'cat /proc/sys/net/ipv4/ip_forward',
+          });
           assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(result.stdout.trim(), '1');
+          assert.strictEqual(result.stdout, '1\n');
         } finally {
           await sandbox.dispose();
         }
@@ -1030,9 +1075,9 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand('id -u');
+          const result = await sandbox.run({ command: 'id -u' });
           assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(result.stdout.trim(), '1000');
+          assert.strictEqual(result.stdout, '1000\n');
         } finally {
           await sandbox.dispose();
         }
@@ -1045,22 +1090,106 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          await sandbox.writeFiles([
-            { path: '/workspace/ok.txt', content: 'written' },
-          ]);
+          await sandbox.writeTextFile({
+            path: '/workspace/ok.txt',
+            content: 'written',
+          });
           assert.strictEqual(
-            (await sandbox.readFile('/workspace/ok.txt')).trim(),
+            await sandbox.readTextFile({ path: '/workspace/ok.txt' }),
             'written',
           );
 
-          const rootWrite = await sandbox.executeCommand(
-            'echo nope > /etc/blocked.txt',
-          );
+          const rootWrite = await sandbox.run({
+            command: 'echo nope > /etc/blocked.txt',
+          });
           assert.notStrictEqual(rootWrite.exitCode, 0);
           assert.match(rootWrite.stderr, /read-only file system/i);
         } finally {
           await sandbox.dispose();
         }
+      });
+
+      it('stops a spawned process as a non-root user on a read-only rootfs', async () => {
+        await using sandbox = await createDockerSandbox({
+          ...defaults,
+          security: { readOnly: true, tmpfs: ['/tmp'], user: '1000:1000' },
+        });
+
+        const child = await sandbox.spawn({
+          command: 'printf started; sleep 30',
+        });
+        const { value } = await child.stdout.getReader().read();
+        await child.kill();
+
+        assert.strictEqual(new TextDecoder().decode(value), 'started');
+        assert.notStrictEqual((await child.wait()).exitCode, 0);
+      });
+
+      it('reaches tmpfs and kernel paths through an exec, with null for a missing one', async () => {
+        await using sandbox = await createDockerSandbox({
+          ...defaults,
+          security: { tmpfs: ['/scratch'] },
+        });
+        await sandbox.writeTextFile({
+          path: '/scratch/deep/note.txt',
+          content: 'tmpfs',
+        });
+        const link = await sandbox.run({
+          command: 'ln -s note.txt /scratch/deep/link',
+        });
+        assert.strictEqual(link.exitCode, 0, link.stderr);
+
+        assert.strictEqual(
+          await sandbox.readTextFile({ path: '/scratch/deep/link' }),
+          'tmpfs',
+        );
+        assert.deepStrictEqual(
+          await sandbox.stat({ path: '/scratch/deep/link' }),
+          { type: 'file', size: 5 },
+        );
+        assert.strictEqual(
+          (await sandbox.stat({ path: '/scratch' }))?.type,
+          'directory',
+        );
+        assert.strictEqual(
+          await sandbox.readTextFile({ path: '/scratch/missing' }),
+          null,
+        );
+        assert.strictEqual(
+          await sandbox.stat({ path: '/scratch/missing' }),
+          null,
+        );
+        assert.strictEqual(
+          await sandbox.readTextFile({ path: '/proc/1/comm' }),
+          'tail\n',
+        );
+        assert.strictEqual(
+          (await sandbox.stat({ path: '/dev/null' }))?.type,
+          'other',
+        );
+        await assert.rejects(
+          Promise.resolve(
+            sandbox.writeTextFile({ path: '/scratch/deep', content: 'boom' }),
+          ),
+          /directory/i,
+        );
+      });
+
+      it('reports a symbolic link loop as an error, not a hang or a missing path', async () => {
+        await using sandbox = await createDockerSandbox(defaults);
+        const loop = await sandbox.run({
+          command: 'ln -s two /tmp/one; ln -s one /tmp/two',
+        });
+        assert.strictEqual(loop.exitCode, 0, loop.stderr);
+
+        await assert.rejects(
+          Promise.resolve(sandbox.stat({ path: '/tmp/one' })),
+          /symbolic link/i,
+        );
+        await assert.rejects(
+          Promise.resolve(sandbox.readBinaryFile({ path: '/tmp/one' })),
+          /symbolic link/i,
+        );
       });
 
       it('drops Linux capabilities', async () => {
@@ -1070,10 +1199,10 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          await sandbox.executeCommand('touch /tmp/cap-probe');
-          const chown = await sandbox.executeCommand(
-            'chown 1000 /tmp/cap-probe',
-          );
+          await sandbox.run({ command: 'touch /tmp/cap-probe' });
+          const chown = await sandbox.run({
+            command: 'chown 1000 /tmp/cap-probe',
+          });
           assert.notStrictEqual(chown.exitCode, 0);
           assert.match(chown.stderr, /not permitted|operation not permitted/i);
         } finally {
@@ -1088,10 +1217,10 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          await sandbox.executeCommand('touch /tmp/cap-probe');
-          const chown = await sandbox.executeCommand(
-            'chown 1000 /tmp/cap-probe',
-          );
+          await sandbox.run({ command: 'touch /tmp/cap-probe' });
+          const chown = await sandbox.run({
+            command: 'chown 1000 /tmp/cap-probe',
+          });
           assert.strictEqual(chown.exitCode, 0, chown.stderr);
         } finally {
           await sandbox.dispose();
@@ -1108,9 +1237,9 @@ describe('Docker Sandbox', () => {
         });
 
         try {
-          const result = await sandbox.executeCommand('cat /built-marker');
+          const result = await sandbox.run({ command: 'cat /built-marker' });
           assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(result.stdout.trim(), 'inline-build');
+          assert.strictEqual(result.stdout, 'inline-build\n');
         } finally {
           await sandbox.dispose();
         }
@@ -1129,9 +1258,9 @@ describe('Docker Sandbox', () => {
           context: dir.path,
         });
         try {
-          const result = await sandbox.executeCommand('cat /built-marker');
+          const result = await sandbox.run({ command: 'cat /built-marker' });
           assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(result.stdout.trim(), 'file-build');
+          assert.strictEqual(result.stdout, 'file-build\n');
         } finally {
           await sandbox.dispose();
         }
@@ -1139,29 +1268,64 @@ describe('Docker Sandbox', () => {
     });
 
     describe('cleanup', () => {
-      it('dispose stops and removes container', async (t) => {
+      it('dispose stops and removes container', async () => {
         const name = `dispose-${crypto.randomUUID()}`;
+        await using sandbox = await createDockerSandbox({ ...defaults, name });
+        const beforeResult = await sandbox.run({ command: 'echo alive' });
+        assert.strictEqual(beforeResult.exitCode, 0);
+
+        await sandbox.dispose();
+
+        const client = await testbed.client();
+        assert.strictEqual(
+          await client.containers.find(`sandbox-${name}`),
+          undefined,
+        );
+      });
+
+      it('dispose resolves only after the engine removed a slow container, so its bind mount is free', async () => {
+        await using fixture = await testbed.directory();
+        const name = `dispose-slow-${crypto.randomUUID()}`;
+        const sandbox = await createDockerSandbox({
+          ...defaults,
+          name,
+          volumes: [
+            {
+              type: 'bind',
+              hostPath: fixture.path,
+              containerPath: '/data',
+              readOnly: false,
+            },
+          ],
+        });
+        // Root filesystem cleanup keeps Docker's auto-removal in progress after
+        // stop returns.
+        const files = await sandbox.run({
+          command:
+            'echo owned > /data/owned.txt; mkdir -p /tmp/many; for file in {1..5000}; do : > /tmp/many/$file; done',
+        });
+        assert.strictEqual(files.exitCode, 0, files.stderr);
+
+        await sandbox.dispose();
+
+        const client = await testbed.client();
+        assert.strictEqual(
+          await client.containers.find(`sandbox-${name}`),
+          undefined,
+        );
+      });
+
+      it('dispose leaves a container that is not auto-removed stopped, without waiting for its removal', async () => {
+        const name = `dispose-kept-${crypto.randomUUID()}`;
+        await using container = await testbed.start(
+          { Image: 'bash:5.3-alpine3.24', Cmd: ['tail', '-f', '/dev/null'] },
+          { name: `sandbox-${name}` },
+        );
         const sandbox = await createDockerSandbox({ ...defaults, name });
 
-        try {
-          const beforeResult = await sandbox.executeCommand('echo alive');
-          assert.strictEqual(beforeResult.exitCode, 0);
+        await sandbox.dispose();
 
-          await sandbox.dispose();
-
-          const client = await testbed.client();
-          await t.waitFor(
-            async () => {
-              assert.strictEqual(
-                await client.containers.find(`sandbox-${name}`),
-                undefined,
-              );
-            },
-            { timeout: 30_000 },
-          );
-        } finally {
-          await removeSandboxContainer(name);
-        }
+        assert.strictEqual((await container.inspect()).State?.Running, false);
       });
 
       it('dispose is idempotent (can call multiple times)', async () => {
@@ -1216,9 +1380,9 @@ describe('Docker Sandbox', () => {
           installers: [pkg(['curl'])],
         });
 
-        let second: LegacySandbox | undefined;
+        let second: DisposableSandbox | undefined;
         try {
-          await first.executeCommand('echo first-run > /workspace/marker');
+          await first.run({ command: 'echo first-run > /workspace/marker' });
 
           second = await createDockerSandbox({
             ...defaults,
@@ -1227,11 +1391,11 @@ describe('Docker Sandbox', () => {
             installers: [pkg(['nonexistent-package-should-not-install'])],
           });
 
-          const marker = await second.executeCommand('cat /workspace/marker');
+          const marker = await second.run({ command: 'cat /workspace/marker' });
           assert.strictEqual(marker.exitCode, 0);
-          assert.strictEqual(marker.stdout.trim(), 'first-run');
+          assert.strictEqual(marker.stdout, 'first-run\n');
 
-          const curl = await second.executeCommand('curl --version');
+          const curl = await second.run({ command: 'curl --version' });
           assert.strictEqual(curl.exitCode, 0);
         } finally {
           // dispose() stops the shared container — either call works once,
@@ -1252,8 +1416,8 @@ describe('Docker Sandbox', () => {
         // the inspect-first branch above.)
         const name = uniqueName();
 
-        let a: LegacySandbox | undefined;
-        let b: LegacySandbox | undefined;
+        let a: DisposableSandbox | undefined;
+        let b: DisposableSandbox | undefined;
         try {
           // If recovery were broken, the losing create would reject and this
           // Promise.all would reject — failing the test.
@@ -1264,10 +1428,10 @@ describe('Docker Sandbox', () => {
 
           // One handle writes; the other must read it back — proving both
           // resolved to the same underlying container.
-          await a.executeCommand('echo converged > /workspace/marker');
-          const read = await b.executeCommand('cat /workspace/marker');
+          await a.run({ command: 'echo converged > /workspace/marker' });
+          const read = await b.run({ command: 'cat /workspace/marker' });
           assert.strictEqual(read.exitCode, 0);
-          assert.strictEqual(read.stdout.trim(), 'converged');
+          assert.strictEqual(read.stdout, 'converged\n');
 
           // Exactly one container exists with that name.
           assert.deepStrictEqual(await containerNames(`sandbox-${name}`), [
@@ -1294,9 +1458,9 @@ describe('Docker Sandbox', () => {
 
         const sandbox = await createDockerSandbox({ ...defaults, name });
         try {
-          const result = await sandbox.executeCommand('echo back-online');
+          const result = await sandbox.run({ command: 'echo back-online' });
           assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(result.stdout.trim(), 'back-online');
+          assert.strictEqual(result.stdout, 'back-online\n');
           const found = await (
             await testbed.client()
           ).containers.find(`sandbox-${name}`);
@@ -1343,10 +1507,10 @@ describe('Docker Sandbox', () => {
             createDockerSandbox({ ...defaults, name }),
           ]);
 
-          const ra = await a.executeCommand('echo a');
-          const rb = await b.executeCommand('echo b');
-          assert.strictEqual(ra.stdout.trim(), 'a');
-          assert.strictEqual(rb.stdout.trim(), 'b');
+          const ra = await a.run({ command: 'echo a' });
+          const rb = await b.run({ command: 'echo b' });
+          assert.strictEqual(ra.stdout, 'a\n');
+          assert.strictEqual(rb.stdout, 'b\n');
 
           assert.deepStrictEqual(await containerNames(containerId), [
             `/${containerId}`,
@@ -1362,8 +1526,8 @@ describe('Docker Sandbox', () => {
         const a = await createDockerSandbox(defaults);
         const b = await createDockerSandbox(defaults);
         try {
-          await a.executeCommand('echo a');
-          await b.executeCommand('echo b');
+          await a.run({ command: 'echo a' });
+          await b.run({ command: 'echo b' });
         } finally {
           await a.dispose();
           await b.dispose();
@@ -1402,7 +1566,7 @@ describe('Docker Sandbox', () => {
       try {
         const result = await sandbox.run({ command: 'echo "from container"' });
         assert.strictEqual(result.exitCode, 0);
-        assert.strictEqual(result.stdout.trim(), 'from container');
+        assert.strictEqual(result.stdout, 'from container\n');
       } finally {
         await sandbox.dispose();
       }
@@ -1433,7 +1597,7 @@ describe('Docker Sandbox', () => {
 
       try {
         const result = await sandbox.run({ command: 'echo "$TOOL_VAR"' });
-        assert.strictEqual(result.stdout.trim(), 'via-tool');
+        assert.strictEqual(result.stdout, 'via-tool\n');
       } finally {
         await sandbox.dispose();
       }
@@ -1460,7 +1624,7 @@ describe('Docker Sandbox', () => {
       try {
         const result = await sandbox.run({ command: 'cat /mounted/test.txt' });
         assert.strictEqual(result.exitCode, 0);
-        assert.strictEqual(result.stdout.trim(), 'mounted content');
+        assert.strictEqual(result.stdout, 'mounted content');
       } finally {
         await sandbox.dispose();
       }
@@ -1469,23 +1633,23 @@ describe('Docker Sandbox', () => {
 
   describe('useSandbox', () => {
     it('auto-disposes sandbox on successful completion', async () => {
-      const captured: LegacySandbox[] = [];
+      const captured: DisposableSandbox[] = [];
 
       const result = await useSandbox(defaults, async (sandbox) => {
         captured.push(sandbox);
-        const output = await sandbox.executeCommand(
-          'echo "hello from useSandbox"',
-        );
-        return output.stdout.trim();
+        const output = await sandbox.run({
+          command: 'echo "hello from useSandbox"',
+        });
+        return output.stdout;
       });
 
-      assert.strictEqual(result, 'hello from useSandbox');
+      assert.strictEqual(result, 'hello from useSandbox\n');
 
       // Verify sandbox is disposed (command should fail)
       const captured1 = captured.at(0);
       if (captured1) {
         try {
-          await captured1.executeCommand('echo test');
+          await captured1.run({ command: 'echo test' });
           // If no error, container might still be stopping - that's ok
         } catch {
           // Expected - container is gone
@@ -1494,13 +1658,13 @@ describe('Docker Sandbox', () => {
     });
 
     it('auto-disposes sandbox even when function throws', async () => {
-      const captured: LegacySandbox[] = [];
+      const captured: DisposableSandbox[] = [];
 
       await assert.rejects(
         useSandbox(defaults, async (sandbox) => {
           captured.push(sandbox);
           // Verify container is running
-          const result = await sandbox.executeCommand('echo alive');
+          const result = await sandbox.run({ command: 'echo alive' });
           assert.strictEqual(result.exitCode, 0);
           // Now throw
           throw new Error('intentional test error');
@@ -1512,7 +1676,7 @@ describe('Docker Sandbox', () => {
       const captured2 = captured.at(0);
       if (captured2) {
         try {
-          await captured2.executeCommand('echo test');
+          await captured2.run({ command: 'echo test' });
         } catch {
           // Expected - container is gone
         }
@@ -1523,7 +1687,7 @@ describe('Docker Sandbox', () => {
       const result = await useSandbox(
         { ...defaults, installers: [pkg(['curl'])] },
         async (sandbox) => {
-          const output = await sandbox.executeCommand('curl --version');
+          const output = await sandbox.run({ command: 'curl --version' });
           return {
             exitCode: output.exitCode,
             hasCurl: output.stdout.includes('curl'),
@@ -1560,9 +1724,9 @@ describe('Docker Sandbox', () => {
           installers: [npm('cowsay', { ensureRuntime: true })],
         });
         try {
-          const node = await sandbox.executeCommand('which node');
+          const node = await sandbox.run({ command: 'which node' });
           assert.strictEqual(node.exitCode, 0);
-          const cli = await sandbox.executeCommand('which cowsay');
+          const cli = await sandbox.run({ command: 'which cowsay' });
           assert.strictEqual(cli.exitCode, 0);
         } finally {
           await sandbox.dispose();
@@ -1576,7 +1740,7 @@ describe('Docker Sandbox', () => {
           installers: [npm('cowsay')],
         });
         try {
-          const result = await sandbox.executeCommand('cowsay -t hi');
+          const result = await sandbox.run({ command: 'cowsay -t hi' });
           assert.strictEqual(result.exitCode, 0);
         } finally {
           await sandbox.dispose();
@@ -1606,9 +1770,10 @@ describe('Docker Sandbox', () => {
           installers: [pip('requests', { ensureRuntime: true })],
         });
         try {
-          const result = await sandbox.executeCommand(
-            'python3 -c "import requests; print(requests.__version__)"',
-          );
+          const result = await sandbox.run({
+            command:
+              'python3 -c "import requests; print(requests.__version__)"',
+          });
           assert.strictEqual(result.exitCode, 0);
           assert.match(result.stdout, /^\d+\.\d+/);
         } finally {
@@ -1634,9 +1799,9 @@ describe('Docker Sandbox', () => {
           ],
         });
         try {
-          const curl = await sandbox.executeCommand('which curl');
+          const curl = await sandbox.run({ command: 'which curl' });
           assert.strictEqual(curl.exitCode, 0);
-          const yq = await sandbox.executeCommand('yq --version');
+          const yq = await sandbox.run({ command: 'yq --version' });
           assert.strictEqual(yq.exitCode, 0);
         } finally {
           await sandbox.dispose();
@@ -1652,9 +1817,9 @@ describe('Docker Sandbox', () => {
           installers: [pkg(['curl']), pkg(['jq'])],
         });
         try {
-          const r1 = await sandbox.executeCommand('which curl');
+          const r1 = await sandbox.run({ command: 'which curl' });
           assert.strictEqual(r1.exitCode, 0);
-          const r2 = await sandbox.executeCommand('which jq');
+          const r2 = await sandbox.run({ command: 'which jq' });
           assert.strictEqual(r2.exitCode, 0);
         } finally {
           await sandbox.dispose();

@@ -57,7 +57,7 @@ deletes the underlying Daytona sandbox.
 spawn, or file write reports the mutations it caused as a `FileChange[]`
 (`{ op: 'write' | 'delete' | 'rename'; path; from?; timestamp }`).
 Consume changes via the `onFileChanges` callback (fires per command, spawn, or
-`writeFiles` call). Bash tool calls also receive
+file write). Bash tool calls also receive
 `tool-result.output.meta.fileChanges` as hidden host-only metadata.
 
 Scope which paths are reported with `include` glob patterns (required — a path
@@ -74,11 +74,11 @@ const tracked = await withStraceFileChanges(backend, {
 });
 const sandbox = await createBashTool({
   sandbox: tracked,
-  destination: '/workspace',
+  workingDirectory: '/workspace',
 });
 ```
 
-Tracking uses `strace` (per `executeCommand` and per `spawn`) when you compose
+Tracking uses `strace` (per `run` and per `spawn`) when you compose
 the `withStraceFileChanges()` decorator. The decorator itself does **no**
 self-test — it trusts that strace tracing works in the sandbox, because "strace
 works here" is an invariant of the (image + host kernel + seccomp/caps) that is

@@ -32,7 +32,7 @@ const sandbox = await createDockerSandbox({
 });
 
 try {
-  await sandbox.executeCommand('python3 --version');
+  await sandbox.run({ command: 'python3 --version' });
 } finally {
   await sandbox.dispose();
 }
@@ -94,10 +94,10 @@ const sandbox = await createDockerSandbox({
 
 try {
   // Commands run in the 'app' service
-  await sandbox.executeCommand('node --version');
+  await sandbox.run({ command: 'node --version' });
 
   // Can reach other services by name
-  await sandbox.executeCommand('curl http://db:5432');
+  await sandbox.run({ command: 'curl http://db:5432' });
 } finally {
   // Stops ALL services
   await sandbox.dispose();
@@ -114,17 +114,17 @@ try {
 ## Command timeouts and cancellation
 
 Set `commandTimeout` once on any Docker sandbox strategy to limit every
-`executeCommand` and `spawn` call in milliseconds:
+`run` and `spawn` call in milliseconds:
 
 ```typescript
 const sandbox = await createDockerSandbox({ commandTimeout: 300_000 });
 ```
 
 A deadline terminates the command's process group inside the container before
-`executeCommand` returns exit code `124` or `(await spawn()).exit` resolves with
-`{ code: 124, signal: null, success: false }`. A per-call `AbortSignal` remains
-separate caller cancellation: `spawn` reports an unsuccessful `SIGKILL`, while
-`executeCommand` returns non-zero; neither is reported as a timeout.
+`run` returns exit code `124` or `(await spawn()).wait()` resolves with
+`{ exitCode: 124 }`. A per-call `abortSignal` remains separate caller
+cancellation: `wait()` rejects with the abort reason, while `run` returns a
+non-zero exit code. Neither is reported as a timeout.
 
 ## Stable container names
 
@@ -218,7 +218,7 @@ The sandbox runs untrusted code, so hardening lives in one place:
   is the baseline for untrusted code; add back only what a workload needs.
 - `readOnly` — mount the root filesystem read-only. Writes then only land in
   `tmpfs` or volume mounts, so pair it with a writable `/workspace` (a `tmpfs`
-  entry or a volume) or `writeFiles` and the installer phase will fail.
+  entry or a volume) or file writes and the installer phase will fail.
 - `tmpfs` — ephemeral, in-memory writable directories, e.g. `['/workspace', '/tmp']`.
 - `user` — run as a non-root `uid[:gid]`. The installer phase (`apk`/`apt`/`npm`/
   `pip`) needs root, so non-root suits a pre-baked Dockerfile image rather than the
@@ -367,7 +367,7 @@ const sandbox = await createDockerSandbox({
 
 ## Environment variables
 
-Set environment variables in the container at creation time. Available to all commands executed via `executeCommand`.
+Set environment variables in the container at creation time. Available to all commands that `run` and `spawn` start.
 
 ```typescript
 const sandbox = await createDockerSandbox({
@@ -378,7 +378,7 @@ const sandbox = await createDockerSandbox({
   },
 });
 
-const result = await sandbox.executeCommand('echo $NODE_ENV');
+const result = await sandbox.run({ command: 'echo $NODE_ENV' });
 // stdout: "production"
 ```
 
@@ -388,10 +388,11 @@ Keys are validated — empty keys and keys containing `=` throw a `DockerSandbox
 
 ## Command execution APIs
 
-`executeCommand` is buffered and returns all output at process exit:
+`run` is buffered and returns the output, exactly as the command wrote it, when
+the process exits:
 
 ```typescript
-const result = await sandbox.executeCommand('python3 --version');
+const result = await sandbox.run({ command: 'python3 --version' });
 console.log(result.stdout, result.stderr, result.exitCode);
 ```
 
@@ -399,8 +400,9 @@ Pass `AbortSignal` to cancel a running command:
 
 ```typescript
 const controller = new AbortController();
-const pending = sandbox.executeCommand('sleep 30', {
-  signal: controller.signal,
+const pending = sandbox.run({
+  command: 'sleep 30',
+  abortSignal: controller.signal,
 });
 
 setTimeout(() => controller.abort(), 1_000);
@@ -410,8 +412,9 @@ await pending;
 For live byte streams, use `spawn`:
 
 ```typescript
-const proc = await sandbox.spawn('python3 long-task.py', {
-  cwd: '/workspace',
+const proc = await sandbox.spawn({
+  command: 'python3 long-task.py',
+  workingDirectory: '/workspace',
   env: { MODE: 'stream' },
 });
 
@@ -421,17 +424,23 @@ for await (const chunk of proc.stdout) {
   process.stdout.write(decoder.decode(chunk, { stream: true }));
 }
 
-const exit = await proc.exit;
-console.log(exit.code, exit.signal, exit.success);
+const { exitCode } = await proc.wait();
+console.log(exitCode);
 ```
 
-`spawn` accepts `cwd`, `env`, and `signal`. Aborting a running process resolves
-`proc.exit` with a non-success status (for Docker backends, typically
-`{ code: null, signal: 'SIGKILL', success: false }`).
+`spawn` accepts `workingDirectory`, `env`, `abortSignal` and `stdin`. Aborting a
+running process rejects `proc.wait()` with the abort reason. `proc.kill()` stops
+the process group inside the container, and you can call it more than once.
 
-Docker exposes `spawn` for unbuffered process streams. Other backends may expose
-the same optional method when they can provide live stdout/stderr; shared code
-should feature-detect with `if (!sandbox.spawn) { ... }`.
+Set `stdin: true` to write to the process. Closing the stream sends end of file:
+
+```typescript
+const proc = await sandbox.spawn({ command: 'cat > /tmp/in.txt', stdin: true });
+const writer = proc.stdin.getWriter();
+await writer.write(new TextEncoder().encode('hello'));
+await writer.close();
+await proc.wait();
+```
 
 ## Installers
 
@@ -551,16 +560,25 @@ Read and write files inside the container. The bytes move through Docker's
 archive requests, so binary content is safe:
 
 ```typescript
-// Write files
-await sandbox.writeFiles([
-  { path: '/tmp/data.json', content: '{"key": "value"}' },
-  { path: '/tmp/script.py', content: 'print("hello")' },
-]);
+await sandbox.writeTextFile({
+  path: '/tmp/data.json',
+  content: '{"key": "value"}',
+});
+await sandbox.writeBinaryFile({
+  path: '/tmp/blob.bin',
+  content: new Uint8Array([0xff, 0x00]),
+});
 
-// Read files
-const content = await sandbox.readFile('/tmp/data.json');
+const content = await sandbox.readTextFile({ path: '/tmp/data.json' });
+const bytes = await sandbox.readBinaryFile({ path: '/tmp/blob.bin' });
+
+const stat = await sandbox.stat({ path: '/tmp/data.json' });
+const entries = await sandbox.listDirectory({ path: '/tmp' });
+const deleted = await sandbox.deleteFile({ path: '/tmp/blob.bin' });
 ```
 
+A read or a `stat` of a missing path gives `null`. A relative path resolves
+against the directory that commands start in. A write onto a directory rejects.
 Parent directories are created automatically during writes. The files, and the
 directories that a write creates, belong to the container's user: the
 `security.user` value, or the `USER` of the image. A process that runs as that
@@ -575,7 +593,7 @@ Always wrap sandbox usage in `try/finally`:
 ```typescript
 const sandbox = await createDockerSandbox({ installers: [pkg(['curl'])] });
 try {
-  await sandbox.executeCommand('curl --version');
+  await sandbox.run({ command: 'curl --version' });
 } finally {
   await sandbox.dispose();
 }
@@ -589,15 +607,18 @@ import { useSandbox } from '@deepagents/context';
 const version = await useSandbox(
   { installers: [pkg(['curl'])] },
   async (sandbox) => {
-    const result = await sandbox.executeCommand('curl --version');
+    const result = await sandbox.run({ command: 'curl --version' });
     return result.stdout.split('\n')[0];
   },
 );
 ```
 
 Runtime and Dockerfile containers are configured for automatic removal when
-stopped. `dispose()` sends a stop request through the Engine API; Compose
-sandboxes run `docker compose down` to stop the stack.
+stopped. `dispose()` sends a stop request through the Engine API and resolves
+when the engine has removed the container, so its volumes and bind mounts are
+free. A container that a named sandbox attached to and that has no automatic
+removal stays stopped. Compose sandboxes run `docker compose down` to stop the
+stack.
 
 ## Error handling
 

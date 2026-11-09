@@ -1,22 +1,38 @@
-import { DockerTestbed } from '@zukhruf/testing/docker';
 import assert from 'node:assert/strict';
 import { text } from 'node:stream/consumers';
 import { type TestContext, describe, it } from 'node:test';
 
-import { createBashTool, createDockerSandbox } from '@deepagents/context';
+import {
+  type FileChange,
+  MICROSANDBOX_DEFAULT_DESTINATION,
+  MicrosandboxNotAvailableError,
+  createBashTool,
+  createMicrosandboxSandbox,
+  withStraceFileChanges,
+} from '@deepagents/context';
 
-import { dockerSandboxDefaults } from './helpers/docker-sandbox-defaults.ts';
+/** Microsandbox stays on the old contract until its own port; Docker no longer is. */
+const open = () => createMicrosandboxSandbox();
 
-const testbed = new DockerTestbed({ environment: process.env });
-const defaults = dockerSandboxDefaults(testbed.defaults);
+async function microsandboxUnavailable(): Promise<string | undefined> {
+  try {
+    await (await open()).dispose();
+    return undefined;
+  } catch (error) {
+    if (error instanceof MicrosandboxNotAvailableError) return error.message;
+    throw error;
+  }
+}
 
 function executionOptions(toolCallId: string) {
   return { abortSignal: undefined, context: {}, messages: [], toolCallId };
 }
 
-describe('a backend still on the old contract', () => {
+const skip = await microsandboxUnavailable();
+
+describe('a backend still on the old contract', { skip }, () => {
   it('serves the bash, write and read tools', async () => {
-    await using backend = await createDockerSandbox(defaults);
+    await using backend = await open();
     const { tools } = await createBashTool({
       sandbox: backend,
       workingDirectory: '/workspace/legacy',
@@ -45,7 +61,7 @@ describe('a backend still on the old contract', () => {
   });
 
   it('answers session file calls, with null for a missing path', async () => {
-    await using backend = await createDockerSandbox(defaults);
+    await using backend = await open();
     const { sandbox } = await createBashTool({
       sandbox: backend,
       workingDirectory: '/workspace/legacy',
@@ -96,7 +112,7 @@ describe('a backend still on the old contract', () => {
   });
 
   it('applies workingDirectory and env, and reports spawn output', async () => {
-    await using backend = await createDockerSandbox(defaults);
+    await using backend = await open();
     const { sandbox } = await createBashTool({
       sandbox: backend,
       workingDirectory: '/workspace/legacy',
@@ -124,7 +140,7 @@ describe('a backend still on the old contract', () => {
   });
 
   it('stops a spawned process on abort and on kill', async (t: TestContext) => {
-    await using backend = await createDockerSandbox(defaults);
+    await using backend = await open();
     const { sandbox } = await createBashTool({
       sandbox: backend,
       workingDirectory: '/workspace/legacy',
@@ -161,5 +177,41 @@ describe('a backend still on the old contract', () => {
 
     assert.equal(await sandbox.stat({ path: '/tmp/aborted-late' }), null);
     assert.equal(await sandbox.stat({ path: '/tmp/killed-late' }), null);
+  });
+
+  it('is traced by withStraceFileChanges through the shim', async () => {
+    await using backend = await open();
+    const installed = await backend.executeCommand('apk add --no-cache strace');
+    assert.equal(installed.exitCode, 0, installed.stderr);
+    const seen: FileChange[] = [];
+    const tracked = await withStraceFileChanges(backend, {
+      include: [
+        MICROSANDBOX_DEFAULT_DESTINATION,
+        `${MICROSANDBOX_DEFAULT_DESTINATION}/**`,
+      ],
+      onFileChanges: (changes) => {
+        seen.push(...changes);
+      },
+    });
+
+    const result = await tracked.run({
+      command: `echo traced > ${MICROSANDBOX_DEFAULT_DESTINATION}/traced.txt`,
+    });
+    await tracked.writeTextFile({
+      path: `${MICROSANDBOX_DEFAULT_DESTINATION}/written.txt`,
+      content: 'written',
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(
+      seen.map(({ op, path }) => ({ op, path })),
+      [
+        { op: 'write', path: `${MICROSANDBOX_DEFAULT_DESTINATION}/traced.txt` },
+        {
+          op: 'write',
+          path: `${MICROSANDBOX_DEFAULT_DESTINATION}/written.txt`,
+        },
+      ],
+    );
   });
 });

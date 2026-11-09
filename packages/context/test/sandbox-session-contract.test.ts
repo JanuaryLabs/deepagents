@@ -1,24 +1,97 @@
 import { experimental_createBashTool } from '@ai-sdk/tool-bash';
+import { DockerTestbed } from '@zukhruf/testing/docker';
 import { InMemoryFs } from 'just-bash';
+import spawn, { SubprocessError } from 'nano-spawn';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { text } from 'node:stream/consumers';
 import { type TestContext, describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import { createVirtualSandbox } from '@deepagents/context';
+import {
+  type DisposableSandbox,
+  appleEngine,
+  createAppleContainerSandbox,
+  createDockerSandbox,
+  createVirtualSandbox,
+} from '@deepagents/context';
 
-const backends = [
+import { dockerSandboxDefaults } from './helpers/docker-sandbox-defaults.ts';
+
+const testbed = new DockerTestbed({ environment: process.env });
+const dockerDefaults = dockerSandboxDefaults(testbed.defaults);
+
+interface Backend {
+  name: string;
+  /** Why this host cannot run the backend. */
+  skip?: string;
+  writableStdin: boolean;
+  open: (sandboxName?: string) => Promise<DisposableSandbox>;
+  /** Whether the engine holds the named sandbox. Absent when a backend holds nothing. */
+  holds?: (sandboxName: string) => Promise<boolean>;
+}
+
+async function appleContainerUnavailable(): Promise<string | undefined> {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') {
+    return 'Apple containers need Apple silicon';
+  }
+  try {
+    await spawn('container', ['system', 'status']);
+    return undefined;
+  } catch {
+    return 'the Apple `container` service is not running';
+  }
+}
+
+const backends: Backend[] = [
   {
     name: 'virtual',
     writableStdin: false,
     open: () => createVirtualSandbox({ fs: new InMemoryFs() }),
   },
+  {
+    name: 'docker',
+    writableStdin: true,
+    open: (name) => createDockerSandbox({ ...dockerDefaults, name }),
+    holds: async (name) => {
+      const client = await testbed.client();
+      return (await client.containers.find(`sandbox-${name}`)) !== undefined;
+    },
+  },
+  {
+    name: 'apple',
+    skip: await appleContainerUnavailable(),
+    writableStdin: true,
+    open: (name) => createAppleContainerSandbox({ name }),
+    holds: async (name) => {
+      try {
+        const { stdout } = await spawn('container', [
+          'inspect',
+          `sandbox-${name}`,
+        ]);
+        return appleEngine.parseStatus(stdout) !== 'absent';
+      } catch (error) {
+        if (
+          error instanceof SubprocessError &&
+          /not found/.test(error.stderr)
+        ) {
+          return false;
+        }
+        throw error;
+      }
+    },
+  },
 ];
 
-const LATER_WRITE_DELAY_MS = 1_200;
+const STARTED = { interval: 50, timeout: 30_000 };
+const LATER_WRITE_DELAY_MS = 3_500;
+/** Long enough for a stop to land on a remote engine, where one exec takes seconds. */
+const STOPPABLE_COMMAND =
+  'echo started > started.txt; sleep 10; echo late > late.txt';
+const STOP_WINDOW_MS = 10_500;
 
-for (const { name, open, writableStdin } of backends) {
-  describe(`sandbox session contract: ${name}`, () => {
+for (const { name, skip, open, writableStdin, holds } of backends) {
+  describe(`sandbox session contract: ${name}`, { skip }, () => {
     describe('failure modes', () => {
       it('stops a running command when run is aborted', async (t: TestContext) => {
         await using sandbox = await open();
@@ -26,20 +99,21 @@ for (const { name, open, writableStdin } of backends) {
 
         const running = Promise.resolve(
           sandbox.run({
-            command:
-              'echo started > started.txt; sleep 1; echo late > late.txt',
+            command: STOPPABLE_COMMAND,
             abortSignal: controller.signal,
           }),
         ).catch(() => undefined);
-        await t.waitFor(async () =>
-          assert.equal(
-            await sandbox.readTextFile({ path: 'started.txt' }),
-            'started\n',
-          ),
+        await t.waitFor(
+          async () =>
+            assert.equal(
+              await sandbox.readTextFile({ path: 'started.txt' }),
+              'started\n',
+            ),
+          STARTED,
         );
         controller.abort(new Error('stop'));
         await running;
-        await sleep(LATER_WRITE_DELAY_MS);
+        await sleep(STOP_WINDOW_MS);
 
         assert.equal(await sandbox.readTextFile({ path: 'late.txt' }), null);
       });
@@ -49,14 +123,16 @@ for (const { name, open, writableStdin } of backends) {
         const controller = new AbortController();
         const reason = new Error('stop');
         const child = await sandbox.spawn({
-          command: 'echo started > started.txt; sleep 1; echo late > late.txt',
+          command: STOPPABLE_COMMAND,
           abortSignal: controller.signal,
         });
-        await t.waitFor(async () =>
-          assert.equal(
-            await sandbox.readTextFile({ path: 'started.txt' }),
-            'started\n',
-          ),
+        await t.waitFor(
+          async () =>
+            assert.equal(
+              await sandbox.readTextFile({ path: 'started.txt' }),
+              'started\n',
+            ),
+          STARTED,
         );
 
         controller.abort(reason);
@@ -65,27 +141,100 @@ for (const { name, open, writableStdin } of backends) {
           Promise.resolve(child.wait()),
           (error) => error === reason,
         );
-        await sleep(LATER_WRITE_DELAY_MS);
+        await sleep(STOP_WINDOW_MS);
         assert.equal(await sandbox.readTextFile({ path: 'late.txt' }), null);
       });
 
       it('stops the process on kill and tolerates a second kill', async (t: TestContext) => {
         await using sandbox = await open();
-        const child = await sandbox.spawn({
-          command: 'echo started > started.txt; sleep 1; echo late > late.txt',
-        });
-        await t.waitFor(async () =>
-          assert.equal(
-            await sandbox.readTextFile({ path: 'started.txt' }),
-            'started\n',
-          ),
+        const child = await sandbox.spawn({ command: STOPPABLE_COMMAND });
+        await t.waitFor(
+          async () =>
+            assert.equal(
+              await sandbox.readTextFile({ path: 'started.txt' }),
+              'started\n',
+            ),
+          STARTED,
         );
 
         await child.kill();
         await child.kill();
-        await sleep(LATER_WRITE_DELAY_MS);
+        await sleep(STOP_WINDOW_MS);
 
         assert.equal(await sandbox.readTextFile({ path: 'late.txt' }), null);
+      });
+
+      it('lets wait settle after kill, and tolerates a kill after the exit', async () => {
+        await using sandbox = await open();
+        const killed = await sandbox.spawn({ command: 'sleep 30' });
+        const finished = await sandbox.spawn({ command: 'exit 5' });
+
+        await killed.kill();
+        const afterKill = await killed.wait();
+        const afterExit = await finished.wait();
+        await finished.kill();
+
+        assert.notEqual(afterKill.exitCode, 0);
+        assert.deepEqual(afterExit, { exitCode: 5 });
+      });
+
+      it('never starts a command when the signal is already aborted', async () => {
+        await using sandbox = await open();
+        const reason = new Error('stop');
+        const command = 'echo started > started.txt';
+
+        await assert.rejects(
+          Promise.resolve(
+            sandbox.run({ command, abortSignal: AbortSignal.abort(reason) }),
+          ),
+          (error) => error === reason,
+        );
+        await assert.rejects(
+          Promise.resolve(
+            sandbox.spawn({ command, abortSignal: AbortSignal.abort(reason) }),
+          ),
+          (error) => error === reason,
+        );
+        await sleep(LATER_WRITE_DELAY_MS);
+
+        assert.equal(await sandbox.readTextFile({ path: 'started.txt' }), null);
+      });
+
+      it('rejects a file call whose signal is already aborted', async () => {
+        await using sandbox = await open();
+        await sandbox.writeTextFile({ path: 'file.txt', content: 'keep' });
+        const reason = new Error('stop');
+        const abortSignal = AbortSignal.abort(reason);
+        const path = 'file.txt';
+
+        for (const call of [
+          () => sandbox.readFile({ path, abortSignal }),
+          () => sandbox.readBinaryFile({ path, abortSignal }),
+          () => sandbox.readTextFile({ path, abortSignal }),
+          () => sandbox.writeTextFile({ path, content: 'x', abortSignal }),
+          () =>
+            sandbox.writeBinaryFile({
+              path,
+              content: new Uint8Array([1]),
+              abortSignal,
+            }),
+          () =>
+            sandbox.writeFile({
+              path,
+              content: ReadableStream.from([new Uint8Array([1])]),
+              abortSignal,
+            }),
+          () => sandbox.stat({ path, abortSignal }),
+          () => sandbox.listDirectory({ path: '.', abortSignal }),
+          () => sandbox.deleteFile({ path, abortSignal }),
+        ]) {
+          await assert.rejects(
+            Promise.resolve(call()),
+            (error) => error === reason,
+          );
+        }
+
+        assert.equal(await sandbox.readTextFile({ path }), 'keep');
       });
 
       it('resolves every read of a missing file to null', async () => {
@@ -97,6 +246,27 @@ for (const { name, open, writableStdin } of backends) {
           null,
         );
         assert.equal(await sandbox.readTextFile({ path: 'missing.txt' }), null);
+      });
+
+      it('reports a path under a file as missing', async () => {
+        await using sandbox = await open();
+        await sandbox.writeTextFile({ path: 'file.txt', content: 'x' });
+        const path = 'file.txt/under';
+
+        assert.equal(await sandbox.readBinaryFile({ path }), null);
+        assert.equal(await sandbox.stat({ path }), null);
+        assert.equal(await sandbox.listDirectory({ path }), null);
+        assert.equal(await sandbox.deleteFile({ path }), false);
+      });
+
+      it('rejects a read of a directory', async () => {
+        await using sandbox = await open();
+        await sandbox.writeTextFile({ path: 'dir/keep.txt', content: 'keep' });
+
+        await assert.rejects(
+          Promise.resolve(sandbox.readBinaryFile({ path: 'dir' })),
+          /directory/i,
+        );
       });
 
       it('rejects a write onto a directory and keeps its contents', async () => {
@@ -114,6 +284,15 @@ for (const { name, open, writableStdin } of backends) {
             sandbox.writeBinaryFile({
               path: 'dir',
               content: new Uint8Array([1]),
+            }),
+          ),
+          /directory/i,
+        );
+        await assert.rejects(
+          Promise.resolve(
+            sandbox.writeFile({
+              path: 'dir',
+              content: ReadableStream.from([new Uint8Array([1])]),
             }),
           ),
           /directory/i,
@@ -175,7 +354,32 @@ for (const { name, open, writableStdin } of backends) {
         );
       });
 
-      if (!writableStdin) {
+      if (writableStdin) {
+        it('feeds stdin to the process and delivers EOF when it closes', async () => {
+          await using sandbox = await open();
+
+          const child = await sandbox.spawn({
+            command: 'cat; echo end',
+            stdin: true,
+          });
+          const stdout = text(child.stdout);
+          const writer = child.stdin.getWriter();
+          await writer.write(new TextEncoder().encode('fed'));
+          await writer.close();
+
+          assert.equal(await stdout, 'fedend\n');
+          assert.deepEqual(await child.wait(), { exitCode: 0 });
+        });
+
+        it('closes standard input when stdin is not requested', async () => {
+          await using sandbox = await open();
+
+          const child = await sandbox.spawn({ command: 'cat; echo end' });
+
+          assert.equal(await text(child.stdout), 'end\n');
+          assert.equal('stdin' in child, false);
+        });
+      } else {
         it('rejects writable stdin before the command starts', async () => {
           await using sandbox = await open();
 
@@ -439,6 +643,19 @@ for (const { name, open, writableStdin } of backends) {
         await sandbox[Symbol.asyncDispose]();
         await sandbox.dispose();
       });
+
+      if (holds) {
+        it('releases what the engine holds by the time dispose resolves', async () => {
+          const sandboxName = `contract-${randomUUID().slice(0, 8)}`;
+          const sandbox = await open(sandboxName);
+          const heldWhileOpen = await holds(sandboxName);
+
+          await sandbox.dispose();
+
+          assert.equal(heldWhileOpen, true);
+          assert.equal(await holds(sandboxName), false);
+        });
+      }
     });
   });
 }
