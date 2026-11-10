@@ -565,5 +565,5 @@ function uniqueParentDirectories(paths: string[]): string[] {
 }
 
 function toError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error));
+  return Error.isError(error) ? error : new Error(String(error));
 }

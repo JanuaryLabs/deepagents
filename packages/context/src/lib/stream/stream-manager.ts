@@ -203,7 +203,7 @@ export class StreamManager {
           throw err;
         }
       } else {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = Error.isError(err) ? err.message : String(err);
         if (pw) {
           await pw.fail(message);
         } else {
@@ -501,7 +501,7 @@ async function drainAvailable(
 
 function isAbortError(error: unknown): boolean {
   return (
-    error instanceof Error &&
+    Error.isError(error) &&
     (error.name === 'AbortError' || /aborted/i.test(error.message))
   );
 }

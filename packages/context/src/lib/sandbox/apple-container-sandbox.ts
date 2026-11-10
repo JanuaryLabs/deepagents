@@ -188,7 +188,7 @@ function getCliErrorMessage(error: unknown): string {
   if (error instanceof SubprocessError) {
     return error.stderr.trim() || error.stdout.trim() || error.message;
   }
-  return (error instanceof Error && error.message) || String(error);
+  return (Error.isError(error) && error.message) || String(error);
 }
 
 function safeParseArray(stdout: string): unknown[] {
@@ -269,7 +269,7 @@ class AppleContainer implements EngineContainer {
     } catch (error) {
       return {
         stdout: '',
-        stderr: error instanceof Error ? error.message : String(error),
+        stderr: Error.isError(error) ? error.message : String(error),
         exitCode: 1,
       };
     }
@@ -445,7 +445,7 @@ export const appleEngine: ContainerEngine<AppleContainerCommonOptions> & {
         throw new AppleContainerCreationError(
           message,
           image,
-          error instanceof Error ? error : undefined,
+          Error.isError(error) ? error : undefined,
         );
       }
     }
@@ -462,7 +462,7 @@ export const appleEngine: ContainerEngine<AppleContainerCommonOptions> & {
       throw new AppleContainerCreationError(
         message,
         image,
-        error instanceof Error ? error : undefined,
+        Error.isError(error) ? error : undefined,
       );
     }
     return { created: true, container: new AppleContainer(name) };
@@ -655,10 +655,7 @@ export async function useAppleContainerSandbox<T>(
   options: AppleContainerSandboxOptions,
   fn: (sandbox: DisposableSandbox) => Promise<T>,
 ): Promise<T> {
-  const sandbox = await createAppleContainerSandbox(options);
-  try {
-    return await fn(sandbox);
-  } finally {
-    await sandbox.dispose();
-  }
+  await using sandbox = await createAppleContainerSandbox(options);
+
+  return await fn(sandbox);
 }

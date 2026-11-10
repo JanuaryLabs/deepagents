@@ -54,8 +54,8 @@ export async function resolveForeignKey(
     if (!cached) return undefined;
     return {
       ...cached,
-      childColumns: [...childColumns]
-        .sort((a, b) => a.ordinal - b.ordinal)
+      childColumns: childColumns
+        .toSorted((a, b) => a.ordinal - b.ordinal)
         .map((c) => c.column),
     };
   }
@@ -127,7 +127,7 @@ async function resolveFK(
     pkByOrdinal.set(row.ordinal_position, row.column_name);
   }
 
-  const ordered = [...childColumns].sort((a, b) => a.ordinal - b.ordinal);
+  const ordered = childColumns.toSorted((a, b) => a.ordinal - b.ordinal);
 
   return {
     referencedDataset,

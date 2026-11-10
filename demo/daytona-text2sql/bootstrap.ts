@@ -1,6 +1,5 @@
 import spawn from 'nano-spawn';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 
 import { pushImage } from './image.ts';
 
@@ -28,7 +27,7 @@ import { pushImage } from './image.ts';
 // Apple Silicon (aarch64), so linux/arm64. Override via DEEPAGENTS_DEMO_PLATFORM
 // (e.g. linux/amd64) if your runner differs.
 
-const here = dirname(fileURLToPath(import.meta.url));
+const here = import.meta.dirname;
 const repoRoot = resolve(here, '..', '..');
 const dockerfile = resolve(here, '..', 'text2sql-daemon', 'Dockerfile');
 

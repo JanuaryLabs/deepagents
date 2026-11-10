@@ -49,7 +49,7 @@ const client = new JSONRPCClient(async (jsonRPCRequest) => {
     });
   } catch (cause) {
     fail(
-      `daemon unreachable at ${DAEMON_URL}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `daemon unreachable at ${DAEMON_URL}: ${Error.isError(cause) ? cause.message : String(cause)}`,
     );
   }
   if (!response.ok) {
@@ -293,13 +293,13 @@ function writeCliError(error: unknown): number {
     process.stderr.write(`sql: ${error.message}\n`);
     return error.exitCode;
   }
-  if (error instanceof Error && error.name === 'CACError') {
+  if (Error.isError(error) && error.name === 'CACError') {
     process.stderr.write(`sql: ${error.message}\n`);
     cli.outputHelp();
     return 2;
   }
   process.stderr.write(
-    `sql: ${error instanceof Error ? error.message : String(error)}\n`,
+    `sql: ${Error.isError(error) ? error.message : String(error)}\n`,
   );
   return 1;
 }

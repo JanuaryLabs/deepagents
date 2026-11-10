@@ -131,14 +131,14 @@ function computePositions(
     const before = normalizedContent.slice(0, matchIndex);
     const beforeLines = before.split('\n');
     const startLine = beforeLines.length;
-    const startColumn = beforeLines[beforeLines.length - 1].length + 1;
+    const startColumn = before.length - before.lastIndexOf('\n');
 
     const lines = matchValue.split('\n');
     const endLine = startLine + lines.length - 1;
     const endColumn =
       lines.length === 1
         ? startColumn + lines[0].length
-        : lines[lines.length - 1].length + 1;
+        : matchValue.length - matchValue.lastIndexOf('\n');
 
     positions.push({ startLine, startColumn, endLine, endColumn });
     searchOffset = matchIndex + matchValue.length;

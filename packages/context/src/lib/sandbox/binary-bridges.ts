@@ -127,7 +127,7 @@ export function createBinaryBridges(
         // Unknown error (e.g., binary not found)
         return {
           stdout: '',
-          stderr: `${name}: ${error instanceof Error ? error.message : String(error)}`,
+          stderr: `${name}: ${Error.isError(error) ? error.message : String(error)}`,
           exitCode: 127,
         };
       }

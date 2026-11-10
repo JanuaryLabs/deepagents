@@ -148,7 +148,7 @@ server.applyMiddleware(async (next, request, context) => {
     return response;
   } catch (error) {
     const ms = (performance.now() - started).toFixed(1);
-    const detail = error instanceof Error ? error.message : String(error);
+    const detail = Error.isError(error) ? error.message : String(error);
     console.log(`[rpc] ${request.method} (${ms}ms) err: ${detail}`);
     if (error instanceof JSONRPCErrorException) throw error;
     if (Text2SqlValidationError.isInstance(error)) {

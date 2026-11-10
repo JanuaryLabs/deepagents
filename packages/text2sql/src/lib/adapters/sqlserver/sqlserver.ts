@@ -59,12 +59,11 @@ function getErrorCode(error: unknown) {
 }
 
 export function formatSqlServerError(sql: string, error: unknown) {
-  const errorMessage =
-    error instanceof Error
-      ? error.message
-      : typeof error === 'string'
-        ? error
-        : 'Unknown error occurred';
+  const errorMessage = Error.isError(error)
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : 'Unknown error occurred';
 
   const code = getErrorCode(error);
   const metadata = code ? SQL_SERVER_ERROR_MAP[code] : undefined;

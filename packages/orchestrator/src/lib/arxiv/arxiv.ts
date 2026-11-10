@@ -79,7 +79,7 @@ const queryPaperTool = tool({
 
       return formattedResults;
     } catch (error) {
-      return `Error querying paper: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      return `Error querying paper: ${Error.isError(error) ? error.message : 'Unknown error'}`;
     }
   },
 });

@@ -534,7 +534,7 @@ async function startContainer(
     throw new ContainerCreationError(
       messageOf(error),
       image,
-      error instanceof Error ? error : undefined,
+      Error.isError(error) ? error : undefined,
     );
   }
 }
@@ -682,7 +682,7 @@ async function resolveOwner(
 }
 
 function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return Error.isError(error) ? error.message : String(error);
 }
 
 /**
@@ -1059,9 +1059,9 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
       }
     }
     return new ContainerCreationError(
-      error instanceof Error ? error.message : String(error),
+      Error.isError(error) ? error.message : String(error),
       image,
-      error instanceof Error ? error : undefined,
+      Error.isError(error) ? error : undefined,
     );
   }
 
@@ -1074,7 +1074,7 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
       }
       throw new VolumeInspectError(
         name,
-        error instanceof Error ? error.message : String(error),
+        Error.isError(error) ? error.message : String(error),
       );
     }
   }
@@ -1098,7 +1098,7 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
         volume.name,
         error instanceof NameConflictError
           ? 'managed volume already exists'
-          : error instanceof Error
+          : Error.isError(error)
             ? error.message
             : String(error),
       );
@@ -1191,7 +1191,7 @@ export class ComposeStrategy extends ContainerSandboxStrategy<DockerCommonOption
       throw new ComposeStartError(
         this.composeFile,
         (error instanceof SubprocessError && error.stderr) ||
-          (error instanceof Error ? error.message : String(error)),
+          (Error.isError(error) ? error.message : String(error)),
       );
     }
 
@@ -1316,10 +1316,7 @@ export async function useSandbox<T>(
   options: DockerSandboxOptions,
   fn: (sandbox: DisposableSandbox) => Promise<T>,
 ): Promise<T> {
-  const sandbox = await createDockerSandbox(options);
-  try {
-    return await fn(sandbox);
-  } finally {
-    await sandbox.dispose();
-  }
+  await using sandbox = await createDockerSandbox(options);
+
+  return await fn(sandbox);
 }

@@ -82,7 +82,7 @@ interface WrappedResult {
 }
 
 function errorMessage(err: unknown): string {
-  if (err instanceof Error) {
+  if (Error.isError(err)) {
     return `${err.name}: ${err.message}`;
   }
   if (typeof err === 'string') return err;
@@ -95,18 +95,17 @@ function errorMessage(err: unknown): string {
 }
 
 function serializeError(err: unknown): string {
-  if (err instanceof Error) {
+  if (Error.isError(err)) {
     return JSON.stringify({
       name: err.name,
       message: err.message,
       stack: err.stack,
-      cause:
-        err.cause instanceof Error
-          ? {
-              name: err.cause.name,
-              message: err.cause.message,
-            }
-          : err.cause,
+      cause: Error.isError(err.cause)
+        ? {
+            name: err.cause.name,
+            message: err.cause.message,
+          }
+        : err.cause,
     });
   }
   if (typeof err === 'string') return JSON.stringify({ message: err });
@@ -295,12 +294,11 @@ export async function runEval<T>(config: EvalConfig<T>): Promise<RunSummary> {
           }
         }
 
-        const lastSuccessful = [...trialResults]
-          .reverse()
+        const lastSuccessful = trialResults
+          .toReversed()
           .find((t) => !t.result.error);
         const baseResult =
-          lastSuccessful?.result ??
-          trialResults[trialResults.length - 1]!.result;
+          lastSuccessful?.result ?? trialResults.at(-1)!.result;
         finalResult = {
           output: baseResult.output,
           latencyMs: Math.round(
@@ -325,10 +323,8 @@ export async function runEval<T>(config: EvalConfig<T>): Promise<RunSummary> {
             trials;
           finalScores[sName] = {
             score: meanScore,
-            reason:
-              trialResults[trialResults.length - 1]!.scores[sName]?.reason,
-            metadata:
-              trialResults[trialResults.length - 1]!.scores[sName]?.metadata,
+            reason: trialResults.at(-1)!.scores[sName]?.reason,
+            metadata: trialResults.at(-1)!.scores[sName]?.metadata,
           };
         }
       } else {

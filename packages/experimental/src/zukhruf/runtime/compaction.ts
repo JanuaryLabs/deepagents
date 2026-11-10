@@ -9,7 +9,7 @@ import {
   asSchema,
   modelMessageSchema,
 } from 'ai';
-import { createHash, randomUUID } from 'node:crypto';
+import { hash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import {
@@ -75,8 +75,8 @@ const inputUsageSchema = cacheObservationSchema
   .pick({ scope: true, prefixLength: true, prefixHash: true })
   .extend({ inputTokens: z.number().int().nonnegative() });
 
-function hash(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+function jsonDigest(value: unknown): string {
+  return hash('sha256', JSON.stringify(value));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -238,7 +238,7 @@ export function createCompaction<TOOLS extends ToolSet>(
               ]),
           );
     const responseFormat = await settings.output?.responseFormat;
-    settingsHash = hash([
+    settingsHash = jsonDigest([
       tools,
       settings.providerOptions,
       settings.toolChoice,
@@ -269,7 +269,7 @@ export function createCompaction<TOOLS extends ToolSet>(
     model: string | { provider: string; modelId: string },
     instructions: unknown,
   ) =>
-    hash([
+    jsonDigest([
       engine.branch,
       typeof model === 'string' ? model : [model.provider, model.modelId],
       instructions,
@@ -314,7 +314,7 @@ export function createCompaction<TOOLS extends ToolSet>(
           // Only reuse it when its entire source prefix still matches.
           if (
             prefix.length === checkpoint.sourceCount &&
-            hash(prefix) === checkpoint.sourceHash
+            jsonDigest(prefix) === checkpoint.sourceHash
           ) {
             source = prefix;
             replacement = checkpoint.replacement;
@@ -337,7 +337,8 @@ export function createCompaction<TOOLS extends ToolSet>(
       // Recover the original prefix solely for durable source attribution.
       if (
         replacement.length > 0 &&
-        hash(messages.slice(0, replacement.length)) !== hash(replacement)
+        jsonDigest(messages.slice(0, replacement.length)) !==
+          jsonDigest(replacement)
       ) {
         source = [];
         replacement = [];
@@ -353,7 +354,8 @@ export function createCompaction<TOOLS extends ToolSet>(
         baseline !== null &&
         baseline.scope === scope(input.model, input.instructions) &&
         baseline.prefixLength <= messages.length &&
-        baseline.prefixHash === hash(messages.slice(0, baseline.prefixLength))
+        baseline.prefixHash ===
+          jsonDigest(messages.slice(0, baseline.prefixLength))
           ? baseline.inputTokens +
             estimateTokens(messages.slice(baseline.prefixLength))
           : messageTokens + overhead;
@@ -373,7 +375,8 @@ export function createCompaction<TOOLS extends ToolSet>(
         cache !== null &&
         cache.scope === scope(input.model, input.instructions) &&
         cache.prefixLength <= messages.length &&
-        cache.prefixHash === hash(messages.slice(0, cache.prefixLength)) &&
+        cache.prefixHash ===
+          jsonDigest(messages.slice(0, cache.prefixLength)) &&
         now >= cache.startedAt
           ? now - cache.startedAt
           : undefined;
@@ -434,7 +437,7 @@ export function createCompaction<TOOLS extends ToolSet>(
       );
       const checkpoint = {
         sourceCount,
-        sourceHash: hash(nextSource),
+        sourceHash: jsonDigest(nextSource),
         replacement: nextReplacement,
       };
       signal.throwIfAborted();
@@ -475,7 +478,7 @@ export function createCompaction<TOOLS extends ToolSet>(
     request = {
       scope: scope(input, input.instructions),
       prefixLength: input.messages.length,
-      prefixHash: hash(input.messages),
+      prefixHash: jsonDigest(input.messages),
       startedAt: Date.now(),
     };
   };

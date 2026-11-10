@@ -1,6 +1,6 @@
 import type { Clock } from '@zukhruf/async';
 import { durableWrite } from '@zukhruf/fs';
-import { createHash } from 'node:crypto';
+import { hash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import pLimit from 'p-limit';
 import z from 'zod';
@@ -212,8 +212,8 @@ export class Checkpoint {
   }
 }
 
-function hash(value: unknown): string {
-  return createHash('md5').update(JSON.stringify(value)).digest('hex');
+function jsonDigest(value: unknown): string {
+  return hash('md5', JSON.stringify(value));
 }
 
 /**
@@ -239,7 +239,7 @@ export class Point<T> {
    * executes, saves the encoded output, and returns the computed value.
    */
   async through(input: unknown, compute: () => Promise<T>): Promise<T> {
-    const inputHash = hash(input);
+    const inputHash = jsonDigest(input);
 
     if (this.#stored.has(inputHash)) {
       return this.codec.decode(this.#stored.get(inputHash));
@@ -275,5 +275,5 @@ export class Point<T> {
  * If config changes, the checkpoint will be invalidated and pipeline restarts.
  */
 export function hashConfig(config: Record<string, unknown>): string {
-  return createHash('md5').update(JSON.stringify(config)).digest('hex');
+  return hash('md5', JSON.stringify(config));
 }

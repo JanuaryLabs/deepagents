@@ -41,7 +41,7 @@ const statusLog = (async () => {
       }
     }
   } catch (error) {
-    if (!(error instanceof Error && error.name === 'AbortError')) throw error;
+    if (!(Error.isError(error) && error.name === 'AbortError')) throw error;
   }
 })();
 

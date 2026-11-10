@@ -313,5 +313,5 @@ async function refreshTokens(
 }
 
 function messageOf(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
+  return Error.isError(error) ? error.message : fallback;
 }

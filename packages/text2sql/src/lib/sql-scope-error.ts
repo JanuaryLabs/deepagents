@@ -5,8 +5,9 @@ export function buildScopeParseErrorPayload(
   parserDialect: string,
   error: unknown,
 ): SQLScopeErrorPayload {
-  const parserError =
-    error instanceof Error ? error.message : String(error ?? 'Unknown error');
+  const parserError = Error.isError(error)
+    ? error.message
+    : String(error ?? 'Unknown error');
 
   return {
     error: `SQL scope analysis failed before validation/execution: ${parserError}`,

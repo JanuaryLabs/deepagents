@@ -1,7 +1,7 @@
 import { Mutex } from '@zukhruf/mutex';
 import { SqliteStore } from '@zukhruf/mutex/sqlite';
 import { writeFile as atomicWriteFile } from 'atomically';
-import { createHash } from 'node:crypto';
+import { hash } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
@@ -140,7 +140,7 @@ async function credentialStore(
     const { AsyncEntry } = await import('@napi-rs/keyring');
     // Claude namespaces explicitly configured homes, even the default path.
     const suffix = env.CLAUDE_CONFIG_DIR
-      ? `-${createHash('sha256').update(directory).digest('hex').slice(0, 8)}`
+      ? `-${hash('sha256', directory).slice(0, 8)}`
       : '';
     const entry = new AsyncEntry(
       `Claude Code-credentials${suffix}`,

@@ -503,7 +503,7 @@ export class PgBossTurnQueue extends TurnQueue {
     } catch (error) {
       await options.onOrphaned(
         turn,
-        `turn follow-up reconciliation failed: ${error instanceof Error ? error.message : String(error)}`,
+        `turn follow-up reconciliation failed: ${Error.isError(error) ? error.message : String(error)}`,
       );
     }
   }

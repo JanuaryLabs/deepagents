@@ -113,7 +113,7 @@ function parseFlags(subcommand: string, args: string[]): ParsedFlags {
       outDir: parsed.values['out-dir'],
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = Error.isError(error) ? error.message : String(error);
     throw new SqlCommandError(subcommand, message);
   }
 }
@@ -180,7 +180,7 @@ async function runHandler(
     if (Text2SqlValidationError.isInstance(error)) {
       return new SqlCommandError(subcommand, error.message).format();
     }
-    const message = error instanceof Error ? error.message : String(error);
+    const message = Error.isError(error) ? error.message : String(error);
     return new SqlCommandError(subcommand, message).format();
   }
 }

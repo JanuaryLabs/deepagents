@@ -329,8 +329,7 @@ Question: ${options.input}
 
       // Create structured output with schema
       const temperature =
-        RETRY_TEMPERATURES[attemptNumber - 1] ??
-        RETRY_TEMPERATURES[RETRY_TEMPERATURES.length - 1];
+        RETRY_TEMPERATURES[attemptNumber - 1] ?? RETRY_TEMPERATURES.at(-1);
       const baseModel = options.model ?? groq('openai/gpt-oss-20b');
       const model = wrapLanguageModel({
         model: baseModel,

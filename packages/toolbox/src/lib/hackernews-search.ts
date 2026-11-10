@@ -173,7 +173,8 @@ async function searchHackerNewsAPI(params: {
     return hnSearchResponse.parse(await response.json());
   } catch (error) {
     throw new Error(
-      `Failed to search HackerNews: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      `Failed to search HackerNews: ${Error.isError(error) ? error.message : 'Unknown error'}`,
+      { cause: error },
     );
   }
 }
@@ -197,7 +198,8 @@ async function fetchHNItem(id: string): Promise<HNItemResponse> {
     return hnItemResponse.parse(await response.json());
   } catch (error) {
     throw new Error(
-      `Failed to fetch HN item: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      `Failed to fetch HN item: ${Error.isError(error) ? error.message : 'Unknown error'}`,
+      { cause: error },
     );
   }
 }
@@ -221,7 +223,8 @@ async function fetchHNUser(username: string): Promise<HNUserResponse> {
     return hnUserResponse.parse(await response.json());
   } catch (error) {
     throw new Error(
-      `Failed to fetch HN user: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      `Failed to fetch HN user: ${Error.isError(error) ? error.message : 'Unknown error'}`,
+      { cause: error },
     );
   }
 }

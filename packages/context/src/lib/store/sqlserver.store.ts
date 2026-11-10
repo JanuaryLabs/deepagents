@@ -448,7 +448,7 @@ export class SqlServerContextStore extends ContextStore {
         write.input(name, mssql.NVarChar, updates.title);
       }
       if (updates.metadata !== undefined) {
-        const name = `p${paramIndex++}`;
+        const name = `p${paramIndex}`;
         setClauses.push(`metadata = @${name}`);
         write.input(name, mssql.NVarChar, JSON.stringify(updates.metadata));
       }

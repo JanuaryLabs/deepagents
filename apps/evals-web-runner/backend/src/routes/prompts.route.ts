@@ -44,7 +44,7 @@ export default function (router: Hono<AppBindings>) {
         return c.json(prompt, 201);
       } catch (err) {
         throw new HTTPException(400, {
-          message: err instanceof Error ? err.message : 'Failed to save',
+          message: Error.isError(err) ? err.message : 'Failed to save',
         });
       }
     },

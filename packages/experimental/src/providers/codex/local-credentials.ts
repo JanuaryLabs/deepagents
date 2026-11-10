@@ -10,7 +10,7 @@ import {
 import { Mutex } from '@zukhruf/mutex';
 import { SqliteStore } from '@zukhruf/mutex/sqlite';
 import { writeFile as atomicWriteFile } from 'atomically';
-import { createHash } from 'node:crypto';
+import { hash } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -180,7 +180,7 @@ async function credentialStore(home: string): Promise<CredentialStore> {
   if (mode === 'file') return file;
 
   const { AsyncEntry } = await import('@napi-rs/keyring');
-  const account = `cli|${createHash('sha256').update(home).digest('hex').slice(0, 16)}`;
+  const account = `cli|${hash('sha256', home).slice(0, 16)}`;
   const entry = new AsyncEntry('Codex Auth', account, {
     linux: { store: 'secret-service' },
   });

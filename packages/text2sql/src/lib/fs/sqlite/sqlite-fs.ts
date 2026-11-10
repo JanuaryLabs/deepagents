@@ -741,7 +741,7 @@ export class SqliteFs implements IFileSystem {
                 .all`SELECT * FROM fs_entries WHERE path = ${srcPrefixed} OR path LIKE ${srcPrefixed} || '/%' ORDER BY path DESC`,
             );
 
-          for (const entry of [...allEntries].reverse()) {
+          for (const entry of allEntries.toReversed()) {
             const relativePath = path.posix.relative(srcPrefixed, entry.path);
             const newPath = path.posix.join(destPrefixed, relativePath);
 

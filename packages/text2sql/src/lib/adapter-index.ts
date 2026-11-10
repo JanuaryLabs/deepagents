@@ -127,10 +127,9 @@ export class AdapterIndexer {
     if (failed) {
       progress({
         type: 'index:error',
-        message:
-          failed.reason instanceof Error
-            ? failed.reason.message
-            : String(failed.reason),
+        message: Error.isError(failed.reason)
+          ? failed.reason.message
+          : String(failed.reason),
       });
       throw failed.reason;
     }
@@ -273,5 +272,5 @@ function adapterProgressEvent(
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return Error.isError(error) ? error.message : String(error);
 }

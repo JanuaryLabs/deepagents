@@ -364,10 +364,7 @@ export class ConversationStatusProjector {
       }
     } catch (error) {
       if (!connected) remote.connected.open({ error });
-      if (
-        connected &&
-        !(error instanceof Error && error.name === 'AbortError')
-      ) {
+      if (connected && !(Error.isError(error) && error.name === 'AbortError')) {
         this.#emit({ type: 'error', error });
       }
     } finally {

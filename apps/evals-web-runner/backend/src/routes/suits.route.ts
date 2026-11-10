@@ -26,8 +26,7 @@ export default function (router: Hono<AppBindings>) {
           runningCount: runs.filter((r) => r.status === 'running').length,
           completedCount: runs.filter((r) => r.status === 'completed').length,
           failedCount: runs.filter((r) => r.status === 'failed').length,
-          lastStartedAt:
-            runs.length > 0 ? runs[runs.length - 1]!.started_at : null,
+          lastStartedAt: runs.length > 0 ? runs.at(-1)!.started_at : null,
         };
       });
       return c.json(result);

@@ -84,7 +84,7 @@ export class FragmentLoaderResolver {
       } catch (cause) {
         throw new Error(
           `Async fragment '${path}' failed in ${handler.name}: ${
-            cause instanceof Error ? cause.message : String(cause)
+            Error.isError(cause) ? cause.message : String(cause)
           }`,
           { cause },
         );

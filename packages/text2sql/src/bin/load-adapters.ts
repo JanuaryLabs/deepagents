@@ -54,7 +54,9 @@ export async function loadAdapters(): Promise<Record<string, Adapter>> {
   try {
     validateAdapterNames(entries.map(([name]) => name));
   } catch (cause) {
-    throw new Error(`TEXT2SQL_ADAPTERS=${target}: ${errorMessage(cause)}`);
+    throw new Error(`TEXT2SQL_ADAPTERS=${target}: ${errorMessage(cause)}`, {
+      cause: cause,
+    });
   }
 
   return adapters;

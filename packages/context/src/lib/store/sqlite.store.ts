@@ -193,7 +193,7 @@ export class SearchQuerySyntaxError extends Error {
 // cannot parse with SQLITE_ERROR (errcode 1) and one of these messages.
 function isFts5QueryError(error: unknown): boolean {
   return (
-    error instanceof Error &&
+    Error.isError(error) &&
     'errcode' in error &&
     error.errcode === 1 &&
     /^(fts5: syntax error near |no such column: |unterminated string$|unknown special query: |expected integer, got )/.test(

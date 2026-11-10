@@ -24,7 +24,7 @@ export function normalizeForJson(value: unknown): unknown {
     return value.toISOString();
   }
 
-  if (value instanceof Error) {
+  if (Error.isError(value)) {
     return errorToSpanError(value);
   }
 
@@ -100,7 +100,7 @@ export function normalizeUsage(
 }
 
 export function errorToSpanError(error: unknown): OpenAISpanError {
-  if (error instanceof Error) {
+  if (Error.isError(error)) {
     const data = normalizeObjectForJson({
       name: error.name,
       stack: error.stack,

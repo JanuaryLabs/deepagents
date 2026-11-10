@@ -56,12 +56,11 @@ function isMysqlError(
 }
 
 export function formatMysqlError(sql: string, error: unknown) {
-  const errorMessage =
-    error instanceof Error
-      ? error.message
-      : typeof error === 'string'
-        ? error
-        : 'Unknown error occurred';
+  const errorMessage = Error.isError(error)
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : 'Unknown error occurred';
 
   if (isMysqlError(error)) {
     const errorCode = error.errno?.toString() ?? error.code ?? '';

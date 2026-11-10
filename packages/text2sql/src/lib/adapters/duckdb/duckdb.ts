@@ -62,7 +62,7 @@ export class DuckDB extends Adapter {
       if (this.#options.validate) return await this.#options.validate(sql);
       await this.#options.execute(`EXPLAIN ${sql}`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = Error.isError(error) ? error.message : String(error);
       return JSON.stringify({
         error: message,
         error_type: 'DUCKDB_ERROR',

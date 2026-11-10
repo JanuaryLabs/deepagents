@@ -316,12 +316,13 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
         } catch (error) {
           // Cancellation is control flow, not a tool failure: surfacing it as a
           // tool result would let the parent model keep reasoning past an abort.
-          if (error instanceof Error && error.name === 'AbortError') {
+          if (Error.isError(error) && error.name === 'AbortError') {
             throw error;
           }
           console.error(error);
-          const details =
-            error instanceof Error ? error.message : JSON.stringify(error);
+          const details = Error.isError(error)
+            ? error.message
+            : JSON.stringify(error);
           return `An error thrown from a tool call. \n<ErrorDetails>\n${details}\n</ErrorDetails>`;
         }
       },

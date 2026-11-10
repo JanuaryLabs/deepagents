@@ -85,7 +85,7 @@ Maximum ${maxSources} sources. Return comprehensive analysis with key findings.`
       };
     } catch (error) {
       return {
-        error: `Research failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        error: `Research failed: ${Error.isError(error) ? error.message : 'Unknown error'}`,
         fallback:
           'Unable to perform web research. Please try a different query or check your connection.',
         suggestions: [

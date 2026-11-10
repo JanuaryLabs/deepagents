@@ -673,8 +673,8 @@ export class ContextEngine {
   > {
     const open = await this.#open();
 
-    if (this.#pendingMessages.length > 0) {
-      const tail = this.#pendingMessages[this.#pendingMessages.length - 1];
+    const tail = this.#pendingMessages.at(-1);
+    if (tail) {
       if (!tail.id) {
         throw new Error(
           `headMessage: pending fragment "${tail.name}" is missing id`,

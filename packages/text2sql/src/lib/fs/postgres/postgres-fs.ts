@@ -882,7 +882,7 @@ export class PostgresFs implements IFileSystem {
           [destPrefixed],
         );
 
-        for (const entry of [...allEntries].reverse()) {
+        for (const entry of allEntries.toReversed()) {
           const relativePath = path.posix.relative(srcPrefixed, entry.path);
           const newPath = path.posix.join(destPrefixed, relativePath);
 

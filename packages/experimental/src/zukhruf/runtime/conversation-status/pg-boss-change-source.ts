@@ -59,7 +59,7 @@ export class PgBossConversationStatusChangeSource implements ConversationStatusC
       );
     } catch (error) {
       if (
-        error instanceof Error &&
+        Error.isError(error) &&
         error.message === 'pg-boss database does not support LISTEN'
       ) {
         throw new Error(

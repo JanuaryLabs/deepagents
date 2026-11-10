@@ -45,7 +45,7 @@ export default function (router: Hono<AppBindings>) {
         saveDataset(file.name, content);
       } catch (err) {
         throw new HTTPException(400, {
-          message: err instanceof Error ? err.message : 'Upload failed',
+          message: Error.isError(err) ? err.message : 'Upload failed',
         });
       }
 
@@ -104,8 +104,9 @@ export default function (router: Hono<AppBindings>) {
         return c.json({ success: true, filename }, 201);
       } catch (err) {
         throw new HTTPException(400, {
-          message:
-            err instanceof Error ? err.message : 'Failed to import dataset',
+          message: Error.isError(err)
+            ? err.message
+            : 'Failed to import dataset',
         });
       }
     },
@@ -142,7 +143,7 @@ export default function (router: Hono<AppBindings>) {
       } catch (err) {
         if (err instanceof HTTPException) throw err;
         throw new HTTPException(404, {
-          message: err instanceof Error ? err.message : 'Dataset not found',
+          message: Error.isError(err) ? err.message : 'Dataset not found',
         });
       }
     },
@@ -164,7 +165,7 @@ export default function (router: Hono<AppBindings>) {
         deleteDataset(name);
       } catch (err) {
         throw new HTTPException(404, {
-          message: err instanceof Error ? err.message : 'Dataset not found',
+          message: Error.isError(err) ? err.message : 'Dataset not found',
         });
       }
       return c.body(null, 204);

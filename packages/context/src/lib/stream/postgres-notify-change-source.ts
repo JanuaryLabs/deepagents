@@ -179,7 +179,7 @@ export class PostgresNotifyChangeSource implements StreamChangeSource {
       }
     } catch (error) {
       // The caller's signal or close() ended the subscription.
-      if (error instanceof Error && error.name === 'AbortError') return;
+      if (Error.isError(error) && error.name === 'AbortError') return;
       throw error;
     } finally {
       this.#subscriptions -= 1;

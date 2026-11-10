@@ -153,7 +153,7 @@ const sqlSemanticMatch: Scorer = async ({ input, output, expected }) => {
       if (attempt === maxAttempts) {
         console.warn(
           `sqlSemanticMatch failed after ${maxAttempts} attempts: ${
-            error instanceof Error ? error.message : String(error)
+            Error.isError(error) ? error.message : String(error)
           }`,
         );
         return { score: 0 };

@@ -60,7 +60,8 @@ async function parseRSSFeed(feedUrl: string) {
   } catch (error) {
     console.error(`Failed to parse RSS feed ${feedUrl}:`, error);
     throw new Error(
-      `RSS parsing failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      `RSS parsing failed: ${Error.isError(error) ? error.message : 'Unknown error'}`,
+      { cause: error },
     );
   }
 }
@@ -98,7 +99,7 @@ async function fetchArticleContent(url: string): Promise<string> {
   } catch (error) {
     console.warn(
       `Failed to fetch article content from ${url}:`,
-      error instanceof Error ? error.message : error,
+      Error.isError(error) ? error.message : error,
     );
     return ''; // Return empty string on failure rather than throwing
   }

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { hash } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
 import { parse } from 'node:path';
 
@@ -19,10 +19,10 @@ export function createWorkspaceSandbox(options: WorkspaceSandboxOptions) {
   return defineSandbox(
     ({ chatId }) =>
       createDockerSandbox({
-        name: `zukhruf-dynamic-subagents-${createHash('sha256')
-          .update(chatId)
-          .digest('hex')
-          .slice(0, 16)}`,
+        name: `zukhruf-dynamic-subagents-${hash('sha256', chatId).slice(
+          0,
+          16,
+        )}`,
         image: 'bash:5.3-alpine3.24',
         init: true,
         installers: [pkg(['git', 'nodejs', 'npm', 'ripgrep'])],

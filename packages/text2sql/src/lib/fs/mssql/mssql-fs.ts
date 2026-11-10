@@ -979,7 +979,7 @@ export class MssqlFs implements IFileSystem {
           `DELETE FROM ${this.#t('fs_entries')} WHERE path = @dp0 OR path LIKE @dp0 + '/%'`,
         );
 
-        for (const entry of [...allEntries].reverse()) {
+        for (const entry of allEntries.toReversed()) {
           const relativePath = path.posix.relative(srcPrefixed, entry.path);
           const newPath = path.posix.join(destPrefixed, relativePath);
 

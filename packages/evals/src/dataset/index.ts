@@ -171,24 +171,21 @@ function loadJSONL(
   filePath: string,
 ): () => AsyncIterable<Record<string, unknown>> {
   return async function* () {
-    const rl = createInterface({
+    using rl = createInterface({
       input: createReadStream(filePath, 'utf-8'),
       crlfDelay: Infinity,
     });
-    try {
-      for await (const line of rl) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        const row: unknown = JSON.parse(trimmed);
-        if (!isRecord(row)) {
-          throw new Error(
-            `JSONL file "${filePath}" has a non-object row: ${trimmed.slice(0, 200)}`,
-          );
-        }
-        yield row;
+
+    for await (const line of rl) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const row: unknown = JSON.parse(trimmed);
+      if (!isRecord(row)) {
+        throw new Error(
+          `JSONL file "${filePath}" has a non-object row: ${trimmed.slice(0, 200)}`,
+        );
       }
-    } finally {
-      rl.close();
+      yield row;
     }
   };
 }
@@ -197,28 +194,25 @@ function loadCSV(
   filePath: string,
 ): () => AsyncIterable<Record<string, string>> {
   return async function* () {
-    const rl = createInterface({
+    using rl = createInterface({
       input: createReadStream(filePath, 'utf-8'),
       crlfDelay: Infinity,
     });
-    try {
-      let headers: string[] | undefined;
-      for await (const line of rl) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        const fields = parseCSVLine(trimmed);
-        if (!headers) {
-          headers = fields;
-          continue;
-        }
-        const row: Record<string, string> = {};
-        for (let i = 0; i < headers.length; i++) {
-          row[headers[i]!] = fields[i] ?? '';
-        }
-        yield row;
+
+    let headers: string[] | undefined;
+    for await (const line of rl) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const fields = parseCSVLine(trimmed);
+      if (!headers) {
+        headers = fields;
+        continue;
       }
-    } finally {
-      rl.close();
+      const row: Record<string, string> = {};
+      for (let i = 0; i < headers.length; i++) {
+        row[headers[i]!] = fields[i] ?? '';
+      }
+      yield row;
     }
   };
 }

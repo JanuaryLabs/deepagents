@@ -21,11 +21,10 @@
  */
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __dirname = import.meta.dirname;
 
 // Paths for the virtual environment
 const VENV_DIR = join(__dirname, '.venv');

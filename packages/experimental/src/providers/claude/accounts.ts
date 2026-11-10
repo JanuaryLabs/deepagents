@@ -1,5 +1,5 @@
 import type { KeyValueStore } from '@opencoredev/loginwithchatgpt-core';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { hash, randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import {
@@ -224,7 +224,7 @@ export function createClaudeAccounts(options: ClaudeAccountsOptions) {
     url.searchParams.set('scope', SCOPES.join(' '));
     url.searchParams.set(
       'code_challenge',
-      createHash('sha256').update(verifier).digest('base64url'),
+      hash('sha256', verifier, 'base64url'),
     );
     url.searchParams.set('code_challenge_method', 'S256');
     url.searchParams.set('state', oauthState);
@@ -503,5 +503,5 @@ function parseCallback(input: string) {
 }
 
 function messageOf(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
+  return Error.isError(error) ? error.message : fallback;
 }

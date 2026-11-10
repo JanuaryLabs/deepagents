@@ -442,7 +442,7 @@ export class PostgresContextStore extends ContextStore {
       limitClause = ` LIMIT $${paramIndex++}`;
       params.push(options.limit);
       if (options.offset !== undefined) {
-        limitClause += ` OFFSET $${paramIndex++}`;
+        limitClause += ` OFFSET $${paramIndex}`;
         params.push(options.offset);
       }
     }

@@ -76,7 +76,7 @@ export function consoleReporter(options?: ConsoleReporterOptions): Reporter {
 
       if (verbosity === 'quiet') return;
 
-      const sorted = [...data.cases].sort((a, b) => a.index - b.index);
+      const sorted = data.cases.toSorted((a, b) => a.index - b.index);
 
       if (verbosity === 'verbose') {
         for (const c of sorted) {

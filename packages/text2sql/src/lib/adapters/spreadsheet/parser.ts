@@ -47,8 +47,10 @@ export function parseFile(filePath: string): ParsedSheet[] {
       cellDates: true, // Parse dates as Date objects
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to read spreadsheet "${filePath}": ${message}`);
+    const message = Error.isError(error) ? error.message : String(error);
+    throw new Error(`Failed to read spreadsheet "${filePath}": ${message}`, {
+      cause: error,
+    });
   }
 
   const sheets: ParsedSheet[] = [];

@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
+import { hash } from 'node:crypto';
 
 export function cid(content: string) {
-  return createHash('sha256').update(content).digest('hex');
+  return hash('sha256', content);
 }

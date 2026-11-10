@@ -62,7 +62,7 @@ export function renderCommandError(
 }
 
 export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return Error.isError(error) ? error.message : String(error);
 }
 
 export abstract class SqlCommand {

@@ -454,7 +454,7 @@ export function http(
           }),
         );
       } catch (error) {
-        if (!(error instanceof Error && error.name === 'AbortError')) {
+        if (!(Error.isError(error) && error.name === 'AbortError')) {
           throw error;
         }
       } finally {

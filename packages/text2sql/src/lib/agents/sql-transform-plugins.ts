@@ -8,7 +8,7 @@ import type {
   WordNode,
 } from 'just-bash';
 import { parse, serialize } from 'just-bash';
-import { createHash } from 'node:crypto';
+import { hash } from 'node:crypto';
 import * as path from 'node:path';
 
 import {
@@ -973,12 +973,9 @@ function rewriteSqlCommand(
   const sqlArgs = cmd.args.slice(2);
   const unquotedSql = extractSqlText(sqlArgs);
 
-  const hash = createHash('sha256')
-    .update(serialize(ast))
-    .digest('hex')
-    .slice(0, 12);
-  const sqlPath = `/tmp/sql-inline-${subcommand}-${hash}.sql`;
-  const heredocTag = `SQL_${hash.toUpperCase()}`;
+  const digest = hash('sha256', serialize(ast)).slice(0, 12);
+  const sqlPath = `/tmp/sql-inline-${subcommand}-${digest}.sql`;
+  const heredocTag = `SQL_${digest.toUpperCase()}`;
 
   const groupScript = [
     `{ cat > ${sqlPath} <<'${heredocTag}'`,

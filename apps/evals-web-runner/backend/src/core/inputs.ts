@@ -24,7 +24,7 @@ export const pageNumberSchema = z.coerce
   .positive()
   .default(1)
   .nullish()
-  .transform((value) => (value === null || value === undefined ? 1 : value))
+  .transform((value) => value ?? 1)
   .describe(
     'Page number for pagination (starts at 1). Use with limit parameter to control result set size.',
   );
@@ -36,7 +36,7 @@ export const pageSizeSchema = z.coerce
   .max(1000)
   .default(50)
   .nullish()
-  .transform((value) => (value === null || value === undefined ? 50 : value))
+  .transform((value) => value ?? 50)
   .describe(
     'Number of results per page. Recommended: use smaller limits (10-50) for initial filtering, then get detailed profiles individually.',
   );
@@ -150,7 +150,7 @@ export const offsetSchema = z.coerce
   .min(0)
   .default(0)
   .nullish()
-  .transform((value) => (value === null || value === undefined ? 0 : value));
+  .transform((value) => value ?? 0);
 
 export const limitSchema = z.coerce
   .number()
@@ -159,7 +159,7 @@ export const limitSchema = z.coerce
   .max(200)
   .default(50)
   .nullish()
-  .transform((value) => (value === null || value === undefined ? 50 : value));
+  .transform((value) => value ?? 50);
 
 export const sortOrderSchema = z
   .enum(['asc', 'desc'])

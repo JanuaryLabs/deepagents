@@ -117,7 +117,7 @@ export class MailboxCoordinator {
         } satisfies TurnRef);
       } catch (error) {
         await this.#streams.store.updateStreamStatus(wakeId, 'failed', {
-          error: error instanceof Error ? error.message : String(error),
+          error: Error.isError(error) ? error.message : String(error),
         });
         throw error;
       }

@@ -142,7 +142,7 @@ export async function execute<O, CIn, COut = CIn>(
         chalk.red(
           `Error during agent (${agent.internalName})(${runId}) execution: `,
         ),
-        error instanceof Error ? error.message : error,
+        Error.isError(error) ? error.message : error,
       );
       console.dir(error, { depth: null });
     },

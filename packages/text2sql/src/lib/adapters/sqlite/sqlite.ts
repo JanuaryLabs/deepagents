@@ -50,12 +50,11 @@ export type SqliteAdapterOptions = {
 };
 
 export function formatError(sql: string, error: unknown) {
-  const errorMessage =
-    error instanceof Error
-      ? error.message
-      : typeof error === 'string'
-        ? error
-        : 'Unknown error occurred';
+  const errorMessage = Error.isError(error)
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : 'Unknown error occurred';
   const errorInfo = SQL_ERROR_MAP.find((it) => it.pattern.test(errorMessage));
 
   if (!errorInfo) {

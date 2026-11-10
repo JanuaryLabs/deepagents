@@ -100,7 +100,7 @@ export class ControlledTurnQueue extends TurnQueue {
   ): Promise<void> {
     await consumer.options.onOrphaned(
       turn,
-      error instanceof Error ? error.message : String(error),
+      Error.isError(error) ? error.message : String(error),
     );
   }
 }

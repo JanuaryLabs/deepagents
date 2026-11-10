@@ -52,7 +52,7 @@ function normalize(value: unknown, ancestors: WeakSet<object>): unknown {
 
   ancestors.add(value);
   try {
-    if (value instanceof Error) return normalizeError(value, ancestors);
+    if (Error.isError(value)) return normalizeError(value, ancestors);
     if (value instanceof Date) {
       return Number.isNaN(value.getTime())
         ? '[Invalid Date]'
@@ -175,5 +175,5 @@ function normalizeDescriptor(
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return Error.isError(error) ? error.message : String(error);
 }

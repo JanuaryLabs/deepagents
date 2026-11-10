@@ -299,7 +299,7 @@ function createStateTools() {
           context.updatePlan(plan);
           return `Plan updated with ${plan.length} steps`;
         } catch (error) {
-          return `Error updating plan: ${error instanceof Error ? error.message : 'Unknown error'}`;
+          return `Error updating plan: ${Error.isError(error) ? error.message : 'Unknown error'}`;
         }
       },
     }),
@@ -318,7 +318,7 @@ function createStateTools() {
           context.addCompletedStep(stepId, result);
           return `Step "${stepId}" marked as completed`;
         } catch (error) {
-          return `Error completing step: ${error instanceof Error ? error.message : 'Unknown error'}`;
+          return `Error completing step: ${Error.isError(error) ? error.message : 'Unknown error'}`;
         }
       },
     }),
@@ -352,7 +352,7 @@ function createStateTools() {
           context.submitWork(stepId, result);
           return `Work submitted for evaluation: step ${stepId}`;
         } catch (error) {
-          return `Error submitting work: ${error instanceof Error ? error.message : 'Unknown error'}`;
+          return `Error submitting work: ${Error.isError(error) ? error.message : 'Unknown error'}`;
         }
       },
     }),
@@ -390,7 +390,7 @@ function createStateTools() {
           context.approveWork(stepId);
           return `Work approved and marked complete: step ${stepId}`;
         } catch (error) {
-          return `Error approving work: ${error instanceof Error ? error.message : 'Unknown error'}`;
+          return `Error approving work: ${Error.isError(error) ? error.message : 'Unknown error'}`;
         }
       },
     }),
@@ -411,7 +411,7 @@ function createStateTools() {
           context.rejectWork(stepId, feedback);
           return `Work rejected with feedback: step ${stepId}`;
         } catch (error) {
-          return `Error rejecting work: ${error instanceof Error ? error.message : 'Unknown error'}`;
+          return `Error rejecting work: ${Error.isError(error) ? error.message : 'Unknown error'}`;
         }
       },
     }),
@@ -450,7 +450,7 @@ function createStateTools() {
           context.clearFeedback(stepId);
           return `Feedback cleared for step: ${stepId}`;
         } catch (error) {
-          return `Error clearing feedback: ${error instanceof Error ? error.message : 'Unknown error'}`;
+          return `Error clearing feedback: ${Error.isError(error) ? error.message : 'Unknown error'}`;
         }
       },
     }),

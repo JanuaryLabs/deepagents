@@ -113,7 +113,7 @@ export class PostgresColumnStatsGrounding extends ColumnStatsGrounding {
 
     const result: ColumnStats = {
       ...(bounds?.length && { min: bounds[0] }),
-      ...(bounds?.length && { max: bounds[bounds.length - 1] }),
+      ...(bounds?.length && { max: bounds.at(-1) }),
       ...(nullFraction != null && {
         nullFraction: Math.max(0, Math.min(1, nullFraction)),
       }),

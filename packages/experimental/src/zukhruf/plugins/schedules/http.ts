@@ -408,7 +408,7 @@ function isScheduledTasksError(
   'name' | 'message' | 'code' | 'resource'
 > {
   return (
-    error instanceof Error &&
+    Error.isError(error) &&
     error.name === 'ScheduledTasksError' &&
     'code' in error &&
     scheduledTasksErrorCodes.has(error.code) &&

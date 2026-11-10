@@ -29,11 +29,11 @@ async function textEmbeddings(
 
 export function tensorToEmbeddings(tensor: Tensor) {
   const dims = tensor.dims;
-  if (!Array.isArray(dims) || dims.length < 2) {
+  const [batchSize, ...rest] = Array.isArray(dims) ? dims : [];
+  const hiddenSize = rest.at(-1);
+  if (hiddenSize === undefined) {
     throw new Error(`Unexpected tensor dims: ${JSON.stringify(dims)}`);
   }
-  const batchSize = dims[0];
-  const hiddenSize = dims[dims.length - 1];
   const expectedLen = batchSize * hiddenSize;
   if (tensor.data.length !== expectedLen) {
     throw new Error(
@@ -46,7 +46,7 @@ export function tensorToEmbeddings(tensor: Tensor) {
   }
   // Reuse the underlying typed array without copying; we'll copy when creating Buffer for SQLite
   const embeddings: Float32Array[] = [];
-  const dimensions = tensor.dims[tensor.dims.length - 1];
+  const dimensions = hiddenSize;
   for (let i = 0; i < batchSize; i++) {
     const start = i * hiddenSize;
     embeddings.push(data.subarray(start, start + hiddenSize));

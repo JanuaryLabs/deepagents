@@ -146,7 +146,7 @@ export function latestEvidence(items: Evidence[]): string {
 }
 
 function errorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = Error.isError(error) ? error.message : String(error);
   return message.length > 500 ? `${message.slice(0, 497)}...` : message;
 }
 
@@ -154,7 +154,7 @@ function parsePlanJson(raw: string): unknown {
   try {
     return JSON.parse(raw);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = Error.isError(error) ? error.message : String(error);
     throw new Error(`invalid JSON: ${message}`, { cause: error });
   }
 }

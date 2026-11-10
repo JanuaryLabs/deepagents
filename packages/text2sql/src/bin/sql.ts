@@ -131,7 +131,7 @@ function rewriteCommandsHelp(body: string): string {
 }
 
 function writeCliError(error: unknown): number {
-  if (error instanceof Error && error.name === 'CACError') {
+  if (Error.isError(error) && error.name === 'CACError') {
     process.stderr.write(`sql: ${error.message}\n`);
     cli.outputHelp();
     return 2;
@@ -141,7 +141,7 @@ function writeCliError(error: unknown): number {
     return error.exitCode;
   }
   process.stderr.write(
-    `sql: unexpected error: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+    `sql: unexpected error: ${Error.isError(error) ? (error.stack ?? error.message) : String(error)}\n`,
   );
   return 1;
 }

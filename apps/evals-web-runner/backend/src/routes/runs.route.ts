@@ -323,7 +323,7 @@ export default function (router: Hono<AppBindings>) {
         scorers = buildScorerModelMap(scorerNames, scorerModelString);
       } catch (err) {
         throw new HTTPException(400, {
-          message: err instanceof Error ? err.message : 'Invalid scorer config',
+          message: Error.isError(err) ? err.message : 'Invalid scorer config',
         });
       }
 
@@ -518,7 +518,7 @@ export default function (router: Hono<AppBindings>) {
         scorers = buildScorerModelMap(scorerNames, scorerModelString);
       } catch (err) {
         throw new HTTPException(400, {
-          message: err instanceof Error ? err.message : 'Invalid scorer config',
+          message: Error.isError(err) ? err.message : 'Invalid scorer config',
         });
       }
 
@@ -532,10 +532,9 @@ export default function (router: Hono<AppBindings>) {
           recordSelection = parseRecordSelection(recordSelectionInput);
         } catch (err) {
           throw new HTTPException(400, {
-            message:
-              err instanceof Error
-                ? err.message
-                : 'Invalid record selection. Use formats like "1,3,5-8".',
+            message: Error.isError(err)
+              ? err.message
+              : 'Invalid record selection. Use formats like "1,3,5-8".',
           });
         }
       }

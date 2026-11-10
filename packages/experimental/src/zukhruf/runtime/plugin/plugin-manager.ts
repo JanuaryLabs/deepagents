@@ -181,7 +181,7 @@ export class PluginManager implements AsyncDisposable {
     if (errors.length > 0) {
       throw new AggregateError(
         errors,
-        `AgentRuntime: conversation availability reconciliation failed for "${conversation.chatId}": ${errors.map((error) => (error instanceof Error ? error.message : String(error))).join('; ')}`,
+        `AgentRuntime: conversation availability reconciliation failed for "${conversation.chatId}": ${errors.map((error) => (Error.isError(error) ? error.message : String(error))).join('; ')}`,
       );
     }
   }

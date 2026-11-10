@@ -393,7 +393,7 @@ function isGenerateTextEndEvent(event: unknown): event is GenerateTextEndEvent {
 }
 
 function currentParentId(state: TraceRunState): string {
-  return state.stepSpans[state.stepSpans.length - 1] ?? state.rootSpan.id;
+  return state.stepSpans.at(-1) ?? state.rootSpan.id;
 }
 
 function normalizeMetadata(

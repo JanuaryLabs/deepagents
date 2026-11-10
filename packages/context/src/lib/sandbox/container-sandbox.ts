@@ -40,7 +40,7 @@ export function validateSandboxOptions(
 
 /** Records a cleanup failure on the error that started the cleanup. */
 function suppress(originalError: unknown, cleanupError: unknown): void {
-  if (!(originalError instanceof Error)) return;
+  if (!Error.isError(originalError)) return;
   const suppressed: unknown[] =
     'suppressed' in originalError && Array.isArray(originalError.suppressed)
       ? originalError.suppressed

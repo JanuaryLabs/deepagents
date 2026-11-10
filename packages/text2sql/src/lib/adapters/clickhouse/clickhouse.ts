@@ -47,7 +47,7 @@ export class ClickHouse extends Adapter {
     try {
       return await this.#options.validate(sql);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = Error.isError(error) ? error.message : String(error);
       return JSON.stringify({
         error: message,
         error_type: 'CLICKHOUSE_ERROR',

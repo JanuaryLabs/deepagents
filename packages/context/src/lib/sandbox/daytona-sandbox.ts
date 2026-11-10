@@ -648,5 +648,5 @@ function compactObject<T extends Record<string, unknown>>(input: T): T {
 }
 
 function toError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error));
+  return Error.isError(error) ? error : new Error(String(error));
 }

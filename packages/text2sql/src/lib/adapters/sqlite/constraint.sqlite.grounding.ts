@@ -77,12 +77,7 @@ export class SqliteConstraintGrounding extends ConstraintGrounding {
     );
 
     // Group foreign keys by id (each FK can have multiple columns)
-    const fkGroups = new Map<number, typeof fkRows>();
-    for (const row of fkRows) {
-      const group = fkGroups.get(row.id) ?? [];
-      group.push(row);
-      fkGroups.set(row.id, group);
-    }
+    const fkGroups = Map.groupBy(fkRows, (row) => row.id);
 
     for (const [id, rows] of fkGroups) {
       // Sort by seq to get correct column order

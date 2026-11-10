@@ -288,10 +288,11 @@ export function parseStraceTrace(
     const dir = dirfdPath(args);
 
     if (RENAME_SYSCALLS.has(syscall)) {
-      const strings = quotedStrings(args);
-      if (strings.length < 2) continue;
-      const from = resolve(dir, strings[0]);
-      const to = resolve(dir, strings[strings.length - 1]);
+      const [first, ...rest] = quotedStrings(args);
+      const last = rest.at(-1);
+      if (last === undefined) continue;
+      const from = resolve(dir, first);
+      const to = resolve(dir, last);
       state.delete(from);
       renames.push({ from, to });
       continue;
@@ -307,8 +308,8 @@ export function parseStraceTrace(
       continue;
     }
     if (LINK_SYSCALLS.has(syscall)) {
-      const strings = quotedStrings(args);
-      if (strings.length) write(resolve(dir, strings[strings.length - 1]));
+      const last = quotedStrings(args).at(-1);
+      if (last !== undefined) write(resolve(dir, last));
       continue;
     }
     if (OPEN_SYSCALLS.has(syscall)) {

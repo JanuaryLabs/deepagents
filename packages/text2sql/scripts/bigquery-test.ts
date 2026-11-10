@@ -32,7 +32,7 @@ async function validate(sql: string) {
     });
     return undefined;
   } catch (err: unknown) {
-    return err instanceof Error ? err.message : String(err);
+    return Error.isError(err) ? err.message : String(err);
   }
 }
 

@@ -48,12 +48,11 @@ function isPostgresError(
 }
 
 export function formatPostgresError(sql: string, error: unknown) {
-  const errorMessage =
-    error instanceof Error
-      ? error.message
-      : typeof error === 'string'
-        ? error
-        : 'Unknown error occurred';
+  const errorMessage = Error.isError(error)
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : 'Unknown error occurred';
 
   if (isPostgresError(error)) {
     const metadata = POSTGRES_ERROR_MAP[error.code ?? ''];

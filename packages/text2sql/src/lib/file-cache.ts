@@ -1,6 +1,6 @@
 import type { Clock } from '@zukhruf/async';
 import { atomicWrite } from '@zukhruf/fs';
-import { createHash } from 'node:crypto';
+import { hash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -22,8 +22,8 @@ export class FileCache {
     watermark: string,
     { clock, extension = '.txt', baseDir = tmpdir() }: FileCacheOptions,
   ) {
-    const hash = createHash('md5').update(watermark).digest('hex');
-    this.path = path.join(baseDir, `text2sql-${hash}${extension}`);
+    const digest = hash('md5', watermark);
+    this.path = path.join(baseDir, `text2sql-${digest}${extension}`);
     this.#clock = clock;
   }
 

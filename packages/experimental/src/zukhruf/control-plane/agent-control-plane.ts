@@ -212,8 +212,8 @@ export class AgentControlPlane {
         declarationName: childDeclaration.name,
       });
     } catch (error) {
-      if (error instanceof Error && error.message.startsWith('agent path ')) {
-        throw new Error(`spawn_agent: ${error.message}`);
+      if (Error.isError(error) && error.message.startsWith('agent path ')) {
+        throw new Error(`spawn_agent: ${error.message}`, { cause: error });
       }
       throw error;
     }

@@ -26,16 +26,15 @@ export type BigQueryAdapterOptions = {
 };
 
 function formatBigQueryError(sql: string, error: unknown) {
-  const errorMessage =
-    error instanceof Error
-      ? error.message
-      : typeof error === 'string'
-        ? error
-        : typeof error === 'object' && error !== null
-          ? 'message' in error && typeof error.message === 'string'
-            ? error.message
-            : JSON.stringify(error)
-          : 'Unknown error occurred';
+  const errorMessage = Error.isError(error)
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : typeof error === 'object' && error !== null
+        ? 'message' in error && typeof error.message === 'string'
+          ? error.message
+          : JSON.stringify(error)
+        : 'Unknown error occurred';
 
   return {
     error: errorMessage,

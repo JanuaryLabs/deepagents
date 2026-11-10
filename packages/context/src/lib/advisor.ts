@@ -169,11 +169,11 @@ export function nullUsage(): LanguageModelUsage {
 export function mapGenerateErrorToCode(
   error: unknown,
 ): AdvisorErrorCode | null {
-  if (error instanceof Error && error.name === 'AbortError') {
+  if (Error.isError(error) && error.name === 'AbortError') {
     return null;
   }
 
-  if (error instanceof Error && error.name === 'TimeoutError') {
+  if (Error.isError(error) && error.name === 'TimeoutError') {
     return 'execution_time_exceeded';
   }
 

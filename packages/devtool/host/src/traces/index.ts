@@ -104,7 +104,7 @@ function fileExporter(
         }
         done({
           code: ExportResultCode.FAILED,
-          error: error instanceof Error ? error : new Error(String(error)),
+          error: Error.isError(error) ? error : new Error(String(error)),
         });
       }
     },
