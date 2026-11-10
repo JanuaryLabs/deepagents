@@ -24,7 +24,9 @@ export async function createVirtualSandbox({
   const dispose = () => native.stop();
   const sandbox: DisposableSandbox = Object.assign(
     // The adapter pins just-bash ^2 and we run ^3 for customCommands on Sandbox.
-    // Its parameter is the other copy's class, whose private members make the two nominally different.
+    // Its parameter is the other copy's class, whose private members make the two
+    // nominally different, so no narrowing can reach it. Goes with #4043.
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- two copies of one class
     createJustBashSandboxSessionFromNativeSandbox(native as never),
     { dispose, [Symbol.asyncDispose]: dispose },
   );

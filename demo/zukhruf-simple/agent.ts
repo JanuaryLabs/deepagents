@@ -1,5 +1,5 @@
 import { createMCPClient } from '@ai-sdk/mcp';
-import { Experimental_StdioMCPTransport } from '@ai-sdk/mcp/mcp-stdio';
+import { StdioMCPTransport } from '@ai-sdk/mcp/mcp-stdio';
 import { openai } from '@ai-sdk/openai';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,7 +26,7 @@ const browser = mcp({
   name: 'browser',
   connect: () =>
     createMCPClient({
-      transport: new Experimental_StdioMCPTransport({
+      transport: new StdioMCPTransport({
         command: process.execPath,
         args: [
           fileURLToPath(

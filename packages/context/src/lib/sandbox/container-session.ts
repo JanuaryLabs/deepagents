@@ -31,6 +31,27 @@ import type { CommandResult, DisposableSandbox } from './types.ts';
 const NOT_FOUND_EXIT_CODE = 3;
 const WRONG_TYPE_EXIT_CODE = 4;
 
+export const FILE_STAT_TYPES = [
+  'file',
+  'directory',
+  'other',
+] as const satisfies readonly Experimental_SandboxFileStat['type'][];
+
+const DIRECTORY_ENTRY_TYPES = [
+  'file',
+  'directory',
+  'symlink',
+  'other',
+] as const satisfies readonly Experimental_SandboxDirectoryEntry['type'][];
+
+/** The contract types `encoding` as a string; Node accepts only its own names. */
+export function bufferEncoding(encoding = 'utf-8'): BufferEncoding {
+  if (!Buffer.isEncoding(encoding)) {
+    throw new TypeError(`Unknown encoding: ${encoding}`);
+  }
+  return encoding;
+}
+
 // `[ -e ]` is false both for missing paths and for paths that cannot be
 // resolved (permissions, symbolic link loops), so open the path to get the
 // reason. The error message ends with the reason; the path before it is
@@ -120,11 +141,12 @@ export async function statOverExec(
   if (exitCode !== 0) {
     throw new Error(`Failed to stat "${path}": ${stderr.trim()}`);
   }
-  const [type, size] = stdout.split(' ');
-  return {
-    type: type as Experimental_SandboxFileStat['type'],
-    size: Number(size),
-  };
+  const [printed, size] = stdout.split(' ');
+  const type = FILE_STAT_TYPES.find((known) => known === printed);
+  if (!type) {
+    throw new Error(`Failed to stat "${path}": unknown type "${printed}"`);
+  }
+  return { type, size: Number(size) };
 }
 
 /** The bytes of `path` through a command, for what no engine request reaches. */
@@ -189,13 +211,12 @@ async function listDirectoryOverExec(
     .filter((record) => record !== '')
     .map((record) => {
       const separator = record.indexOf(' ');
-      return {
-        name: record.slice(separator + 1),
-        type: record.slice(
-          0,
-          separator,
-        ) as Experimental_SandboxDirectoryEntry['type'],
-      };
+      const printed = record.slice(0, separator);
+      const type = DIRECTORY_ENTRY_TYPES.find((known) => known === printed);
+      if (!type) {
+        throw new Error(`Failed to list "${path}": unknown type "${printed}"`);
+      }
+      return { name: record.slice(separator + 1), type };
     });
 }
 
@@ -442,7 +463,7 @@ export function containerSession(
       const bytes = await readBinaryFile(options);
       if (!bytes) return null;
       return extractLines({
-        text: Buffer.from(bytes).toString(encoding as BufferEncoding),
+        text: Buffer.from(bytes).toString(bufferEncoding(encoding)),
         startLine,
         endLine,
       });
@@ -456,7 +477,7 @@ export function containerSession(
     writeTextFile: ({ content, encoding, ...options }) =>
       writeBinaryFile({
         ...options,
-        content: Buffer.from(content, encoding as BufferEncoding),
+        content: Buffer.from(content, bufferEncoding(encoding)),
       }),
     stat: async ({ path, abortSignal }) => {
       abortSignal?.throwIfAborted();

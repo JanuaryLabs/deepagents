@@ -1,10 +1,15 @@
 import {
   type Experimental_SandboxFileStat,
+  type Experimental_SandboxProcess,
   type Experimental_SandboxRunOptions,
   type Experimental_SandboxSpawnOptions,
+  type Experimental_SandboxSpawnOptionsWithStdin,
+  type Experimental_SandboxSpawnOptionsWithoutStdin,
+  type Experimental_WritableSandboxProcess,
   extractLines,
 } from '@ai-sdk/provider-utils';
 
+import { FILE_STAT_TYPES, bufferEncoding } from './container-session.ts';
 import { shellQuote } from './shell-quote.ts';
 import type { DisposableSandbox, LegacySandbox } from './types.ts';
 
@@ -49,7 +54,18 @@ export function fromLegacySandbox(legacy: LegacySandbox): DisposableSandbox {
     content,
   }) => legacy.writeFiles([{ path, content: Buffer.from(content) }]);
 
-  const spawn = async (options: Experimental_SandboxSpawnOptions) => {
+  function spawn(
+    options: Experimental_SandboxSpawnOptionsWithStdin,
+  ): Promise<Experimental_WritableSandboxProcess>;
+  function spawn(
+    options: Experimental_SandboxSpawnOptionsWithoutStdin,
+  ): Promise<Experimental_SandboxProcess>;
+  function spawn(
+    options: Experimental_SandboxSpawnOptions,
+  ): Promise<Experimental_SandboxProcess | Experimental_WritableSandboxProcess>;
+  async function spawn(
+    options: Experimental_SandboxSpawnOptions,
+  ): Promise<Experimental_SandboxProcess> {
     if (options.stdin) throw new Error('This sandbox has no writable stdin.');
     if (!legacy.spawn) throw new Error('This sandbox cannot spawn processes.');
     const killer = new AbortController();
@@ -69,7 +85,7 @@ export function fromLegacySandbox(legacy: LegacySandbox): DisposableSandbox {
       },
       kill: async () => killer.abort(),
     };
-  };
+  }
 
   return {
     description: 'Commands run through bash -lc.',
@@ -78,7 +94,7 @@ export function fromLegacySandbox(legacy: LegacySandbox): DisposableSandbox {
         commandInScope(options),
         options.abortSignal ? { signal: options.abortSignal } : undefined,
       ),
-    spawn: spawn as unknown as DisposableSandbox['spawn'],
+    spawn,
     readBinaryFile,
     readFile: async (options) => {
       const bytes = await readBinaryFile(options);
@@ -88,7 +104,7 @@ export function fromLegacySandbox(legacy: LegacySandbox): DisposableSandbox {
       const bytes = await readBinaryFile(options);
       if (!bytes) return null;
       return extractLines({
-        text: Buffer.from(bytes).toString(encoding as BufferEncoding),
+        text: Buffer.from(bytes).toString(bufferEncoding(encoding)),
         startLine,
         endLine,
       });
@@ -102,19 +118,20 @@ export function fromLegacySandbox(legacy: LegacySandbox): DisposableSandbox {
     writeTextFile: ({ path, content, encoding }) =>
       writeBinaryFile({
         path,
-        content: Buffer.from(content, encoding as BufferEncoding),
+        content: Buffer.from(content, bufferEncoding(encoding)),
       }),
     stat: async ({ path }): Promise<Experimental_SandboxFileStat | null> => {
       const quoted = shellQuote(path);
       const { stdout } = await legacy.executeCommand(
         `if [ -d ${quoted} ]; then echo directory 0; elif [ -f ${quoted} ]; then echo file $(wc -c < ${quoted}); elif [ -e ${quoted} ]; then echo other 0; fi`,
       );
-      const [type, size] = stdout.trim().split(' ');
-      if (!type) return null;
-      return {
-        type: type as Experimental_SandboxFileStat['type'],
-        size: Number(size),
-      };
+      const [printed, size] = stdout.trim().split(' ');
+      if (!printed) return null;
+      const type = FILE_STAT_TYPES.find((known) => known === printed);
+      if (!type) {
+        throw new Error(`Failed to stat "${path}": unknown type "${printed}"`);
+      }
+      return { type, size: Number(size) };
     },
     listDirectory: () => unported('listDirectory'),
     deleteFile: () => unported('deleteFile'),

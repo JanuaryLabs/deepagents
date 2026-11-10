@@ -5,9 +5,9 @@ import assert from 'node:assert';
 import { text as streamText } from 'node:stream/consumers';
 import { describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { z } from 'zod';
 
 import {
-  type CommandResult,
   ContextEngine,
   InMemoryContextStore,
   agent,
@@ -42,11 +42,9 @@ function bashThenText(command: string) {
 }
 
 async function storedBashPart(store: InMemoryContextStore, chatId: string) {
-  const branch = await store.getActiveBranch(chatId);
-  assert.ok(branch?.headMessageId);
-  const chain = await store.getMessageChain(branch.headMessageId);
-  const part = chain
-    .flatMap((entry) => (entry.data as UIMessage).parts)
+  const stored = new ContextEngine({ store, chatId, userId: 'user' });
+  const part = (await stored.getMessages())
+    .flatMap((message) => message.parts)
     .find(isToolUIPart);
   assert.ok(part);
   return part;
@@ -355,7 +353,13 @@ describe('Docker Sandbox — spawn', () => {
 
       const part = await storedBashPart(store, 'tool-timeout');
       assert.strictEqual(part.state, 'output-available');
-      const { stdout, stderr, exitCode } = part.output as CommandResult;
+      const { stdout, stderr, exitCode } = z
+        .object({
+          stdout: z.string(),
+          stderr: z.string(),
+          exitCode: z.number(),
+        })
+        .parse(part.output);
       assert.deepStrictEqual(
         { stdout, exitCode },
         { stdout: '', exitCode: 124 },

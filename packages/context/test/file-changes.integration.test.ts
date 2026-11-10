@@ -654,15 +654,16 @@ describe('strace file-change tracking (docker backend)', () => {
     await withSandbox(async (s) => {
       const controller = new AbortController();
       const reason = new Error('stop');
-      const started = async (name: string) => {
-        const deadline = performance.now() + 30_000;
-        while (
-          (await s.sandbox.readTextFile({ path: `${ROOT}/${name}` })) === null
-        ) {
-          assert.ok(performance.now() < deadline, `${name} never started`);
-          await sleep(50);
-        }
-      };
+      const started = (name: string) =>
+        t.waitFor(
+          async () =>
+            assert.notStrictEqual(
+              await s.sandbox.readTextFile({ path: `${ROOT}/${name}` }),
+              null,
+              `${name} never started`,
+            ),
+          { interval: 50, timeout: 30_000 },
+        );
       const command = (name: string) =>
         `echo started > ${ROOT}/${name}; sleep 10; echo late > ${ROOT}/${name}-late`;
 

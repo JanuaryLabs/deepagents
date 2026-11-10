@@ -132,6 +132,7 @@ export async function generateViaStream(
       case 'tool-input-start':
       case 'tool-input-delta':
       case 'tool-input-end':
+      case 'ping':
       case 'raw':
         break;
     }
