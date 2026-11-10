@@ -1,5 +1,6 @@
 import nx from '@nx/eslint-plugin';
 import zukhruf, { noUnassignedImport } from '@zukhruf/eslint';
+import modernNode from '@zukhruf/eslint/modern-node';
 import { manifest, moduleBoundaries } from '@zukhruf/eslint/nx';
 import prettier from 'eslint-config-prettier';
 import { defineConfig } from 'eslint/config';
@@ -20,6 +21,46 @@ export default defineConfig(
       'zukhruf/hono',
       'manifest/recommended',
     ],
+  },
+  // Modern Node is for code that runs on Node: MDN marks Error.isError limited
+  // availability, so its fix can throw in a browser. These run in browsers,
+  // including what @deepagents/context/browser and @deepagents/elements give
+  // to the React packages at run time. basePath stays the root, so the globs
+  // also hold in a project whose eslint.config spreads this one.
+  {
+    basePath: import.meta.dirname,
+    ignores: [
+      'apps/docs/**',
+      'apps/evals-web-runner/frontend/**',
+      'packages/devtool/history/**',
+      'packages/devtool/host/ui/**',
+      'packages/elements/src/index.ts',
+      'packages/elements/src/lib/**',
+      'packages/react/**',
+      'packages/context/src/browser.ts',
+      'packages/context/src/lib/codec/codec.ts',
+      'packages/context/src/lib/codec/serialized-codec.ts',
+      'packages/context/src/lib/codec/serialized-fragments.ts',
+      'packages/context/src/lib/estimate.ts',
+      'packages/context/src/lib/fragments.ts',
+      'packages/context/src/lib/fragments/domain.ts',
+      'packages/context/src/lib/fragments/message/user.ts',
+      'packages/context/src/lib/fragments/reminders/src/reminders.ts',
+      'packages/context/src/lib/fragments/user.ts',
+      'packages/context/src/lib/guardrail.ts',
+      'packages/context/src/lib/models.generated.ts',
+      'packages/context/src/lib/render.ts',
+      'packages/context/src/lib/renderers/abstract.renderer.ts',
+      'packages/context/src/lib/skills/fragments.ts',
+      'packages/context/src/lib/soul/fragments.ts',
+      'packages/context/src/lib/store/store.ts',
+      'packages/context/src/lib/stream-buffer.ts',
+      'packages/context/src/lib/stream/stream-store.ts',
+      'packages/context/src/lib/text.ts',
+      'packages/context/src/lib/visualize.ts',
+    ],
+    plugins: { 'modern-node': modernNode },
+    extends: ['modern-node/recommended'],
   },
   {
     files: ['**/package.json'],

@@ -124,7 +124,7 @@ export async function generateViaStream(
         }
         break;
       case 'error':
-        throw part.error instanceof Error
+        throw Error.isError(part.error)
           ? part.error
           : new Error(String(part.error));
       // Complete tool-call parts follow the input deltas, so the deltas carry

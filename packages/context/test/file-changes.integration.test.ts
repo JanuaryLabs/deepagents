@@ -318,29 +318,27 @@ describe('strace file-change tracking (docker backend)', () => {
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
-    const tracked = await withStraceFileChanges(backend, {
+
+    await using tracked = await withStraceFileChanges(backend, {
       include: ['/**'],
       exclude: ['/tmp/**'],
       onFileChanges: (changes) => {
         seen.push(...changes);
       },
     });
-    try {
-      const base = (await tracked.run({ command: 'pwd' })).stdout.trimEnd();
-      await backend.run({ command: 'touch relative.txt /absolute.txt' });
 
-      const absolute = await tracked.deleteFile({ path: '/absolute.txt' });
-      const relative = await tracked.deleteFile({ path: 'relative.txt' });
+    const base = (await tracked.run({ command: 'pwd' })).stdout.trimEnd();
+    await backend.run({ command: 'touch relative.txt /absolute.txt' });
 
-      assert.strictEqual(absolute, true);
-      assert.strictEqual(relative, true);
-      assert.deepStrictEqual(ops(seen), [
-        { op: 'delete', path: '/absolute.txt' },
-        { op: 'delete', path: `${base}/relative.txt` },
-      ]);
-    } finally {
-      await tracked.dispose();
-    }
+    const absolute = await tracked.deleteFile({ path: '/absolute.txt' });
+    const relative = await tracked.deleteFile({ path: 'relative.txt' });
+
+    assert.strictEqual(absolute, true);
+    assert.strictEqual(relative, true);
+    assert.deepStrictEqual(ops(seen), [
+      { op: 'delete', path: '/absolute.txt' },
+      { op: 'delete', path: `${base}/relative.txt` },
+    ]);
   });
 
   it('reports a relative write at the session base directory', async () => {
@@ -349,20 +347,18 @@ describe('strace file-change tracking (docker backend)', () => {
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
-    const tracked = await withStraceFileChanges(backend, {
+
+    await using tracked = await withStraceFileChanges(backend, {
       include: ['/workspace', '/workspace/**'],
       onFileChanges: (changes) => {
         seen.push(...changes);
       },
     });
-    try {
-      await tracked.writeTextFile({ path: 'rel/one.txt', content: 'x' });
-      assert.deepStrictEqual(ops(seen), [
-        { op: 'write', path: '/workspace/rel/one.txt' },
-      ]);
-    } finally {
-      await tracked.dispose();
-    }
+
+    await tracked.writeTextFile({ path: 'rel/one.txt', content: 'x' });
+    assert.deepStrictEqual(ops(seen), [
+      { op: 'write', path: '/workspace/rel/one.txt' },
+    ]);
   });
 
   it('runs a traced command in its workingDirectory with its env', async () => {
@@ -805,61 +801,50 @@ describe('onFileChanges failure handling (docker backend)', () => {
   });
 
   it('rejects createBashTool with the veto, not a claim that the directory was not created, when onFileChanges vetoes its mkdir', async () => {
-    const backend = await createDockerSandbox({
+    await using backend = await createDockerSandbox({
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
-    try {
-      const tracked = await withStraceFileChanges(backend, {
-        include: [ROOT, `${ROOT}/**`],
-        onFileChanges: () => {
-          throw new RejectChange('no writes');
-        },
-      });
 
-      await assert.rejects(
-        createBashTool({ sandbox: tracked, workingDirectory: ROOT }),
-        (error: Error) => {
-          assert.match(error.message, /rejected: no writes/);
-          assert.doesNotMatch(error.message, /create/i);
-          return true;
-        },
-      );
-      assert.strictEqual(
-        (await backend.stat({ path: ROOT }))?.type,
-        'directory',
-      );
-    } finally {
-      await backend.dispose();
-    }
+    const tracked = await withStraceFileChanges(backend, {
+      include: [ROOT, `${ROOT}/**`],
+      onFileChanges: () => {
+        throw new RejectChange('no writes');
+      },
+    });
+
+    await assert.rejects(
+      createBashTool({ sandbox: tracked, workingDirectory: ROOT }),
+      (error: Error) => {
+        assert.match(error.message, /rejected: no writes/);
+        assert.doesNotMatch(error.message, /create/i);
+        return true;
+      },
+    );
+    assert.strictEqual((await backend.stat({ path: ROOT }))?.type, 'directory');
   });
 
   it('keeps the tool setup from onFileChanges when it excludes the working directory', async () => {
     const seen: FileChange[] = [];
-    const backend = await createDockerSandbox({
+
+    await using backend = await createDockerSandbox({
       ...defaults,
       dockerfile: STRACE_IMAGE,
     });
-    try {
-      const tracked = await withStraceFileChanges(backend, {
-        include: [ROOT, `${ROOT}/**`],
-        exclude: [ROOT],
-        onFileChanges: (changes) => {
-          seen.push(...changes);
-          throw new RejectChange('no writes');
-        },
-      });
 
-      await createBashTool({ sandbox: tracked, workingDirectory: ROOT });
+    const tracked = await withStraceFileChanges(backend, {
+      include: [ROOT, `${ROOT}/**`],
+      exclude: [ROOT],
+      onFileChanges: (changes) => {
+        seen.push(...changes);
+        throw new RejectChange('no writes');
+      },
+    });
 
-      assert.deepStrictEqual(seen, []);
-      assert.strictEqual(
-        (await backend.stat({ path: ROOT }))?.type,
-        'directory',
-      );
-    } finally {
-      await backend.dispose();
-    }
+    await createBashTool({ sandbox: tracked, workingDirectory: ROOT });
+
+    assert.deepStrictEqual(seen, []);
+    assert.strictEqual((await backend.stat({ path: ROOT }))?.type, 'directory');
   });
 
   it('fails the tool call when onFileChanges throws a plain Error (and does not reach onError)', async () => {
@@ -1096,7 +1081,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
       // Spawn is onError's only signal — the isolated throw landed here.
       assert.strictEqual(errors.length, 1);
       const [error] = errors;
-      assert.ok(error instanceof Error);
+      assert.ok(Error.isError(error));
       assert.match(error.message, /boom/);
     } finally {
       await s.sandbox.dispose();
@@ -1144,33 +1129,23 @@ describe('onFileChanges failure handling (docker backend)', () => {
 
 describe('selfTestStrace (in-container)', () => {
   it('reports OK on a real strace-capable container', async () => {
-    const backend = await createDockerSandbox({
+    await using backend = await createDockerSandbox({
       ...defaults,
       dockerfile: NODE_STRACE_IMAGE,
     });
-    try {
-      const result = await runProbe(backend);
-      assert.equal(result.stdout.trim(), 'OK', result.stderr);
-    } finally {
-      await backend.dispose();
-    }
+
+    const result = await runProbe(backend);
+    assert.equal(result.stdout.trim(), 'OK', result.stderr);
   });
 
   it('reports strace-missing when strace is absent', async () => {
-    const backend = await createDockerSandbox({
+    await using backend = await createDockerSandbox({
       ...defaults,
       image: NODE_BASE,
     });
-    try {
-      const result = await runProbe(backend);
-      assert.equal(
-        result.stdout.trim(),
-        'REASON:strace-missing',
-        result.stderr,
-      );
-    } finally {
-      await backend.dispose();
-    }
+
+    const result = await runProbe(backend);
+    assert.equal(result.stdout.trim(), 'REASON:strace-missing', result.stderr);
   });
 
   it('reports ptrace-blocked when ptrace is denied', async () => {
@@ -1187,21 +1162,15 @@ describe('selfTestStrace (in-container)', () => {
         ],
       }),
     );
-    const backend = await createDockerSandbox({
+
+    await using backend = await createDockerSandbox({
       ...defaults,
       dockerfile: NODE_STRACE_IMAGE,
       security: { securityOpt: [`seccomp=${seccomp}`] },
     });
-    try {
-      const result = await runProbe(backend);
-      assert.equal(
-        result.stdout.trim(),
-        'REASON:ptrace-blocked',
-        result.stderr,
-      );
-    } finally {
-      await backend.dispose();
-    }
+
+    const result = await runProbe(backend);
+    assert.equal(result.stdout.trim(), 'REASON:ptrace-blocked', result.stderr);
   });
 
   it('reports trace-unparseable under an emulated arch', async (t) => {
@@ -1211,20 +1180,18 @@ describe('selfTestStrace (in-container)', () => {
     // amd64 under emulation on an arm64 host: strace runs but the trace is
     // garbled (qemu renders syscalls as raw `syscall_0x…`), which the parser
     // rejects.
-    const backend = await createDockerSandbox({
+
+    await using backend = await createDockerSandbox({
       ...defaults,
       dockerfile: NODE_STRACE_IMAGE,
       platform: 'linux/amd64',
     });
-    try {
-      const result = await runProbe(backend);
-      assert.equal(
-        result.stdout.trim(),
-        'REASON:trace-unparseable',
-        result.stderr,
-      );
-    } finally {
-      await backend.dispose();
-    }
+
+    const result = await runProbe(backend);
+    assert.equal(
+      result.stdout.trim(),
+      'REASON:trace-unparseable',
+      result.stderr,
+    );
   });
 });
