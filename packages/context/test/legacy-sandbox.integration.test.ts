@@ -1,26 +1,55 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { text } from 'node:stream/consumers';
 import { type TestContext, describe, it } from 'node:test';
 
 import {
+  DAYTONA_DEFAULT_DESTINATION,
   type FileChange,
-  MICROSANDBOX_DEFAULT_DESTINATION,
-  MicrosandboxNotAvailableError,
   createBashTool,
-  createMicrosandboxSandbox,
+  createDaytonaSandbox,
   withStraceFileChanges,
 } from '@deepagents/context';
 
-/** Microsandbox stays on the old contract until its own port; Docker no longer is. */
-const open = () => createMicrosandboxSandbox();
+const HOME = DAYTONA_DEFAULT_DESTINATION;
+const LEGACY = `${HOME}/legacy`;
 
-async function microsandboxUnavailable(): Promise<string | undefined> {
+/**
+ * Daytona is the last backend on the old contract. Its `dispose` leaves the
+ * remote sandbox to the caller's client, so the scope deletes it.
+ */
+async function open() {
+  const { Daytona } = await import('@daytona/sdk');
+  const client = new Daytona();
+  const name = `deepagents-legacy-${randomUUID()}`;
+  const remove = async () => {
+    const remote = await client.get(name).catch(() => undefined);
+    await remote?.delete();
+  };
   try {
-    await (await open()).dispose();
-    return undefined;
+    const backend = await createDaytonaSandbox(client, { name });
+    return Object.assign(backend, {
+      [Symbol.asyncDispose]: async () => {
+        try {
+          await backend.dispose();
+        } finally {
+          await remove();
+        }
+      },
+    });
   } catch (error) {
-    if (error instanceof MicrosandboxNotAvailableError) return error.message;
+    await remove();
     throw error;
+  }
+}
+
+async function daytonaUnavailable(): Promise<string | undefined> {
+  if (!process.env.DAYTONA_API_KEY) return 'DAYTONA_API_KEY is not set';
+  try {
+    await import('@daytona/sdk');
+    return undefined;
+  } catch {
+    return '@daytona/sdk is not installed';
   }
 }
 
@@ -28,14 +57,14 @@ function executionOptions(toolCallId: string) {
   return { abortSignal: undefined, context: {}, messages: [], toolCallId };
 }
 
-const skip = await microsandboxUnavailable();
+const skip = await daytonaUnavailable();
 
 describe('a backend still on the old contract', { skip }, () => {
   it('serves the bash, write and read tools', async () => {
     await using backend = await open();
     const { tools } = await createBashTool({
       sandbox: backend,
-      workingDirectory: '/workspace/legacy',
+      workingDirectory: LEGACY,
     });
     assert.ok(tools.bash.execute);
     assert.ok(tools.writeFile.execute);
@@ -55,7 +84,7 @@ describe('a backend still on the old contract', { skip }, () => {
     );
 
     assert.ok(!(Symbol.asyncIterator in shell));
-    assert.equal(shell.stdout.trim(), '/workspace/legacy');
+    assert.equal(shell.stdout.trim(), LEGACY);
     assert.equal(shell.exitCode, 0);
     assert.deepEqual(read, { type: 'text', value: 'hello' });
   });
@@ -64,49 +93,40 @@ describe('a backend still on the old contract', { skip }, () => {
     await using backend = await open();
     const { sandbox } = await createBashTool({
       sandbox: backend,
-      workingDirectory: '/workspace/legacy',
+      workingDirectory: LEGACY,
     });
     const bytes = [0xff, 0x00, 0xfe];
 
     await sandbox.writeBinaryFile({
-      path: '/workspace/legacy/blob.bin',
+      path: `${LEGACY}/blob.bin`,
       content: new Uint8Array(bytes),
     });
     await sandbox.writeTextFile({
-      path: '/workspace/legacy/lines.txt',
+      path: `${LEGACY}/lines.txt`,
       content: 'a\nb\nc\n',
     });
 
     const blob = await sandbox.readBinaryFile({
-      path: '/workspace/legacy/blob.bin',
+      path: `${LEGACY}/blob.bin`,
     });
     assert.deepEqual([...(blob ?? [])], bytes);
     assert.equal(
       await sandbox.readTextFile({
-        path: '/workspace/legacy/lines.txt',
+        path: `${LEGACY}/lines.txt`,
         startLine: 2,
         endLine: 2,
       }),
       'b',
     );
-    assert.deepEqual(
-      await sandbox.stat({ path: '/workspace/legacy/blob.bin' }),
-      {
-        type: 'file',
-        size: 3,
-      },
-    );
+    assert.deepEqual(await sandbox.stat({ path: `${LEGACY}/blob.bin` }), {
+      type: 'file',
+      size: 3,
+    });
+    assert.equal((await sandbox.stat({ path: LEGACY }))?.type, 'directory');
+    assert.equal(await sandbox.stat({ path: `${HOME}/missing` }), null);
+    assert.equal(await sandbox.readTextFile({ path: `${HOME}/missing` }), null);
     assert.equal(
-      (await sandbox.stat({ path: '/workspace/legacy' }))?.type,
-      'directory',
-    );
-    assert.equal(await sandbox.stat({ path: '/workspace/missing' }), null);
-    assert.equal(
-      await sandbox.readTextFile({ path: '/workspace/missing' }),
-      null,
-    );
-    assert.equal(
-      await sandbox.readBinaryFile({ path: '/workspace/missing' }),
+      await sandbox.readBinaryFile({ path: `${HOME}/missing` }),
       null,
     );
   });
@@ -115,7 +135,7 @@ describe('a backend still on the old contract', { skip }, () => {
     await using backend = await open();
     const { sandbox } = await createBashTool({
       sandbox: backend,
-      workingDirectory: '/workspace/legacy',
+      workingDirectory: LEGACY,
     });
 
     const { stdout } = await sandbox.run({
@@ -143,7 +163,7 @@ describe('a backend still on the old contract', { skip }, () => {
     await using backend = await open();
     const { sandbox } = await createBashTool({
       sandbox: backend,
-      workingDirectory: '/workspace/legacy',
+      workingDirectory: LEGACY,
     });
     const controller = new AbortController();
     const reason = new Error('stop');
@@ -181,24 +201,21 @@ describe('a backend still on the old contract', { skip }, () => {
 
   it('is traced by withStraceFileChanges through the shim', async () => {
     await using backend = await open();
-    const installed = await backend.executeCommand('apk add --no-cache strace');
+    const installed = await backend.executeCommand('command -v strace');
     assert.equal(installed.exitCode, 0, installed.stderr);
     const seen: FileChange[] = [];
     const tracked = await withStraceFileChanges(backend, {
-      include: [
-        MICROSANDBOX_DEFAULT_DESTINATION,
-        `${MICROSANDBOX_DEFAULT_DESTINATION}/**`,
-      ],
+      include: [HOME, `${HOME}/**`],
       onFileChanges: (changes) => {
         seen.push(...changes);
       },
     });
 
     const result = await tracked.run({
-      command: `echo traced > ${MICROSANDBOX_DEFAULT_DESTINATION}/traced.txt`,
+      command: `echo traced > ${HOME}/traced.txt`,
     });
     await tracked.writeTextFile({
-      path: `${MICROSANDBOX_DEFAULT_DESTINATION}/written.txt`,
+      path: `${HOME}/written.txt`,
       content: 'written',
     });
 
@@ -206,11 +223,8 @@ describe('a backend still on the old contract', { skip }, () => {
     assert.deepEqual(
       seen.map(({ op, path }) => ({ op, path })),
       [
-        { op: 'write', path: `${MICROSANDBOX_DEFAULT_DESTINATION}/traced.txt` },
-        {
-          op: 'write',
-          path: `${MICROSANDBOX_DEFAULT_DESTINATION}/written.txt`,
-        },
+        { op: 'write', path: `${HOME}/traced.txt` },
+        { op: 'write', path: `${HOME}/written.txt` },
       ],
     );
   });

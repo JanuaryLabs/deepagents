@@ -35,32 +35,27 @@ import { createMicrosandboxSandbox } from '@deepagents/context';
 
 await using sandbox = await createMicrosandboxSandbox();
 
-const result = await sandbox.executeCommand('echo "Hello from Microsandbox"');
+const result = await sandbox.run({ command: 'echo "Hello from Microsandbox"' });
 console.log(result.stdout);
 ```
 
-The default image is `bash:5.3-alpine3.24`. The default working directory is
+The sandbox is an AI SDK `Experimental_SandboxSession` plus `dispose`. The
+default image is `bash:5.3-alpine3.24`. The default working directory is
 `/workspace`, and the factory creates it during boot because common images do
-not ship that directory.
+not ship that directory. Commands start there, and relative paths in every file
+call resolve against it.
 
 ## AI agent integration
 
 ```typescript
-import {
-  MICROSANDBOX_DEFAULT_DESTINATION,
-  createBashTool,
-  createMicrosandboxSandbox,
-} from '@deepagents/context';
+import { createBashTool, createMicrosandboxSandbox } from '@deepagents/context';
 
 const backend = await createMicrosandboxSandbox({
   name: 'chat-123',
   configure: (builder) => builder.image('node:lts-bookworm-slim'),
 });
 
-const sandbox = await createBashTool({
-  sandbox: backend,
-  workingDirectory: MICROSANDBOX_DEFAULT_DESTINATION,
-});
+const sandbox = await createBashTool({ sandbox: backend });
 ```
 
 Pass the `sandbox.tools` object to an agent the same way you would with Docker,
@@ -95,9 +90,9 @@ stops and removes the microVM.
 | Option           | Type                                 | Description                                                                                                                                          |
 | ---------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `name`           | `string`                             | Stable sandbox name for get-or-create reuse                                                                                                          |
-| `workdir`        | `string`                             | Default working directory; defaults to `/workspace`                                                                                                  |
+| `workdir`        | `string`                             | Where commands start and relative paths resolve; defaults to `/workspace`                                                                            |
 | `replace`        | `boolean`                            | Replace an existing named sandbox instead of attaching                                                                                               |
-| `commandTimeout` | `number`                             | Per-command timeout for `executeCommand`, in milliseconds                                                                                            |
+| `commandTimeout` | `number`                             | Per-command timeout for `run` and `spawn`, in milliseconds; the command exits 124                                                                    |
 | `readiness`      | `(sandbox) => void \| Promise<void>` | Hook that must pass before the factory returns                                                                                                       |
 | `configure`      | `(builder) => builder`               | Fluent access to the SDK builder: image (defaults to `bash:5.3-alpine3.24`), cpus, memory, env, volumes, network policy, secrets, user, idle timeout |
 
@@ -113,32 +108,37 @@ one set in `configure`.
 
 ## Command execution APIs
 
-`executeCommand` is buffered and accepts an optional `AbortSignal`:
+`run` is buffered and accepts an `abortSignal`. An abort kills the guest
+process, and `run` rejects with the abort reason:
 
 ```typescript
 const controller = new AbortController();
-const pending = sandbox.executeCommand('sleep 30', {
-  signal: controller.signal,
+const pending = sandbox.run({
+  command: 'sleep 30',
+  abortSignal: controller.signal,
 });
 setTimeout(() => controller.abort(), 1_000);
-await pending;
+await pending; // rejects
 ```
 
-For live byte streams, use `spawn`:
+For live byte streams, use `spawn`. `kill()` stops the process; with
+`stdin: true` the handle has a writable `stdin`:
 
 ```typescript
-const proc = await sandbox.spawn?.('node long-task.js', { cwd: '/workspace' });
-if (!proc) throw new Error('spawn is unavailable');
+const proc = await sandbox.spawn({
+  command: 'node long-task.js',
+  workingDirectory: '/workspace',
+});
 
 const decoder = new TextDecoder();
 for await (const chunk of proc.stdout) {
   process.stdout.write(decoder.decode(chunk, { stream: true }));
 }
-const exit = await proc.exit;
+const { exitCode } = await proc.wait();
 ```
 
-`executeCommand` lowers onto the same streaming path as `spawn`, so cancellation
-kills the guest process instead of abandoning it.
+`run` lowers onto the same streaming path as `spawn`. A killed command exits
+with `-1`, the code the SDK reports for any signal.
 
 ## Readiness hooks
 
@@ -150,7 +150,7 @@ const sandbox = await createMicrosandboxSandbox({
   name: 'daemon-backed-chat',
   configure: (builder) => builder.image('my-daemon-image:0.1.0'),
   readiness: async (sandbox) => {
-    const result = await sandbox.executeCommand('start-daemon && wait-ready');
+    const result = await sandbox.run({ command: 'start-daemon && wait-ready' });
     if (result.exitCode !== 0) throw new Error(result.stderr);
   },
 });
@@ -181,12 +181,13 @@ All package-owned errors extend `MicrosandboxSandboxError`:
 | ------------------------------- | ------------------------------------------------------------------------------- |
 | `MicrosandboxNotAvailableError` | The optional dependency is unavailable, or the runtime is missing or incomplete |
 | `MicrosandboxCreationError`     | Sandbox creation fails outside a known SDK error                                |
-| `MicrosandboxCommandError`      | File reads or writes through the VM filesystem fail                             |
 
 The adapter wraps the SDK's `LibkrunfwNotFoundError`, `RuntimeNotInstalledError`,
 and `RuntimeIncompleteError` in `MicrosandboxNotAvailableError`, retaining the
 SDK error in `cause`. Other `MicrosandboxError` subclasses pass through unchanged,
-so callers can handle those SDK failure classes directly.
+so callers can handle those SDK failure classes directly. File calls reject with
+the SDK's `SandboxFsOpsError`, except that a missing path resolves to `null` (or
+`false` from `deleteFile`).
 
 ## Next steps
 

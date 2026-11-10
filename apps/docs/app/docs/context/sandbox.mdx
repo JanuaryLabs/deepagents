@@ -64,17 +64,17 @@ The `sandbox` that `createBashTool` returns is an AI SDK
 [`Experimental_SandboxSession`](https://ai-sdk.dev/docs/reference/ai-sdk-core/sandbox)
 for every backend, with `run`, `spawn`, `readFile`, `readBinaryFile`,
 `readTextFile`, `writeFile`, `writeBinaryFile`, `writeTextFile` and `stat`, plus
-our `dispose`. `createVirtualSandbox`, `createDockerSandbox` and
-`createAppleContainerSandbox` return one directly, with `listDirectory` and
-`deleteFile` too. The virtual sandbox uses the official
+our `dispose`. `createVirtualSandbox`, `createDockerSandbox`,
+`createAppleContainerSandbox` and `createMicrosandboxSandbox` return one
+directly, with `listDirectory` and `deleteFile` too. The virtual sandbox uses the official
 `@ai-sdk/sandbox-just-bash` adapter. Its `spawn` delivers output when the process
 exits, so use a process-backed sandbox for live streaming.
 
-Microsandbox and Daytona factories still return the older API (`executeCommand`,
-`readFile`, `writeFiles`, `exists`, `dispose`, and `spawn(command, options?)`
-with live streaming) while they move to the session. Until then
-`createBashTool` and `withStraceFileChanges` adapt them, and `listDirectory` and
-`deleteFile` are not available on the session they return for them.
+The Daytona factory still returns the older API (`executeCommand`, `readFile`,
+`writeFiles`, `exists`, `dispose`, and `spawn(command, options?)` with live
+streaming) while it moves to the session. Until then `createBashTool` and
+`withStraceFileChanges` adapt it, and `listDirectory` and `deleteFile` are not
+available on the session they return for it.
 
 Commands execute with Bash semantics. Process-backed
 environments must contain `bash`; factories fail with a clear error when Bash

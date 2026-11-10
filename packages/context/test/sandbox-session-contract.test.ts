@@ -10,9 +10,11 @@ import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
   type DisposableSandbox,
+  MicrosandboxNotAvailableError,
   appleEngine,
   createAppleContainerSandbox,
   createDockerSandbox,
+  createMicrosandboxSandbox,
   createVirtualSandbox,
 } from '@deepagents/context';
 
@@ -34,6 +36,8 @@ interface Backend {
   open: (sandboxName?: string) => Promise<DisposableSandbox>;
   /** Whether the engine holds the named sandbox. Absent when a backend holds nothing. */
   holds?: (sandboxName: string) => Promise<boolean>;
+  /** Removes what a named sandbox keeps after its release, such as a stopped VM's disk. */
+  forget?: (sandboxName: string) => Promise<void>;
 }
 
 async function appleContainerUnavailable(): Promise<string | undefined> {
@@ -45,6 +49,16 @@ async function appleContainerUnavailable(): Promise<string | undefined> {
     return undefined;
   } catch {
     return 'the Apple `container` service is not running';
+  }
+}
+
+async function microsandboxUnavailable(): Promise<string | undefined> {
+  try {
+    await (await createMicrosandboxSandbox()).dispose();
+    return undefined;
+  } catch (error) {
+    if (error instanceof MicrosandboxNotAvailableError) return error.message;
+    throw error;
   }
 }
 
@@ -89,6 +103,23 @@ const backends: Backend[] = [
       }
     },
   },
+  {
+    name: 'microsandbox',
+    skip: await microsandboxUnavailable(),
+    writableStdin: true,
+    runAbort: 'rejects',
+    open: (name) => createMicrosandboxSandbox({ name }),
+    // A named sandbox keeps its disk when it stops, so the released VM is the
+    // one that is no longer running.
+    holds: async (name) => {
+      const { Sandbox } = await import('microsandbox');
+      return (await Sandbox.get(name)).status === 'running';
+    },
+    forget: async (name) => {
+      const { Sandbox } = await import('microsandbox');
+      await Sandbox.remove(name);
+    },
+  },
 ];
 
 const STARTED = { interval: 50, timeout: 30_000 };
@@ -98,7 +129,15 @@ const STOPPABLE_COMMAND =
   'echo started > started.txt; sleep 10; echo late > late.txt';
 const STOP_WINDOW_MS = 10_500;
 
-for (const { name, skip, open, writableStdin, runAbort, holds } of backends) {
+for (const {
+  name,
+  skip,
+  open,
+  writableStdin,
+  runAbort,
+  holds,
+  forget,
+} of backends) {
   describe(`sandbox session contract: ${name}`, { skip }, () => {
     describe('failure modes', () => {
       it(`stops a running command and ${runAbort === 'rejects' ? 'rejects with the abort reason' : 'resolves with exit 124'} when run is aborted`, async (t: TestContext) => {
@@ -661,12 +700,17 @@ for (const { name, skip, open, writableStdin, runAbort, holds } of backends) {
         it('releases what the engine holds by the time dispose resolves', async () => {
           const sandboxName = `contract-${randomUUID().slice(0, 8)}`;
           const sandbox = await open(sandboxName);
-          const heldWhileOpen = await holds(sandboxName);
+          try {
+            const heldWhileOpen = await holds(sandboxName);
 
-          await sandbox.dispose();
+            await sandbox.dispose();
 
-          assert.equal(heldWhileOpen, true);
-          assert.equal(await holds(sandboxName), false);
+            assert.equal(heldWhileOpen, true);
+            assert.equal(await holds(sandboxName), false);
+          } finally {
+            await sandbox.dispose();
+            await forget?.(sandboxName);
+          }
         });
       }
     });

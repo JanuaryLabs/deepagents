@@ -192,14 +192,13 @@ available through the backend, pass explicit `AvailableSkill[]` metadata to the
 Any `DisposableSandbox` matches what `createBashTool` expects from its
 `sandbox` parameter: `run({ command, workingDirectory, env, abortSignal }) →
 { stdout, stderr, exitCode }`. `spawn` streams stdout and stderr while the process
-runs. Microsandbox and Daytona still use the older contract, and `createBashTool`
-adapts them. The bash tool forwards the AI SDK's `executionOptions.abortSignal`
+runs. Daytona still uses the older contract, and `createBashTool` adapts it. The bash tool forwards the AI SDK's `executionOptions.abortSignal`
 to `run` as `abortSignal`.
 
-An abort is not the same on every backend. Docker and Apple Container reject `run`
-with the abort reason after the process group is gone, as `wait()` does, so the
-bash tool call fails. The virtual sandbox resolves with exit code `124`.
-Microsandbox and Daytona resolve with a non-zero exit code until they move to the
+An abort is not the same on every backend. Docker, Apple Container and
+Microsandbox reject `run` with the abort reason after the process is gone, as
+`wait()` does, so the bash tool call fails. The virtual sandbox resolves with
+exit code `124`. Daytona resolves with a non-zero exit code until it moves to the
 session. On those backends the bash tool returns that result.
 
 When the agent's tool timeout (`toolMs` or `tools.bashMs`) stops a command that

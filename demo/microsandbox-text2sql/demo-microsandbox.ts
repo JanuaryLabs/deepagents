@@ -69,9 +69,9 @@ process.once(
 
 // The image pre-creates these, but own the dirs here so the demo doesn't break
 // silently if demoWorkspace ever diverges from the Dockerfile's mkdir.
-const prepare = await backend.executeCommand(
-  `mkdir -p "${demoWorkspace}" "${text2SqlOutDir}"`,
-);
+const prepare = await backend.run({
+  command: `mkdir -p "${demoWorkspace}" "${text2SqlOutDir}"`,
+});
 if (prepare.exitCode !== 0) {
   throw new Error(
     prepare.stderr || `mkdir failed with exit code ${prepare.exitCode}`,

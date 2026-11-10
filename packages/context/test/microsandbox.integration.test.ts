@@ -6,10 +6,12 @@ import { describe, it } from 'node:test';
 import { promisify } from 'node:util';
 
 import {
+  type FileChange,
   MICROSANDBOX_DEFAULT_DESTINATION,
   MicrosandboxSandboxError,
   createBashTool,
   createMicrosandboxSandbox,
+  withStraceFileChanges,
 } from '@deepagents/context';
 
 type MicrosandboxSdk = typeof import('microsandbox');
@@ -132,7 +134,7 @@ describe('Microsandbox Sandbox', async () => {
     describe('command execution', () => {
       it('captures stdout and preserves exit code on success', async () => {
         await using sandbox = await createMicrosandboxSandbox();
-        const result = await sandbox.executeCommand('printf "hello"');
+        const result = await sandbox.run({ command: 'printf "hello"' });
         assert.deepStrictEqual(result, {
           stdout: 'hello',
           stderr: '',
@@ -142,27 +144,23 @@ describe('Microsandbox Sandbox', async () => {
 
       it('preserves non-zero exit codes and stderr', async () => {
         await using sandbox = await createMicrosandboxSandbox();
-        const result = await sandbox.executeCommand(
-          'echo "expected failure" >&2; exit 42',
-        );
+        const result = await sandbox.run({
+          command: 'echo "expected failure" >&2; exit 42',
+        });
         assert.strictEqual(result.exitCode, 42);
         assert.match(result.stderr, /expected failure/);
       });
 
-      it('returns the aborted result without waiting for the command', async () => {
+      it('rejects with the abort reason without waiting for the command', async () => {
         await using sandbox = await createMicrosandboxSandbox();
         const controller = new AbortController();
-        const pending = sandbox.executeCommand('sleep 30', {
-          signal: controller.signal,
-        });
-        controller.abort();
+        const reason = new Error('stop');
+        const pending = Promise.resolve(
+          sandbox.run({ command: 'sleep 30', abortSignal: controller.signal }),
+        );
+        controller.abort(reason);
         const started = Date.now();
-        const result = await pending;
-        assert.deepStrictEqual(result, {
-          stdout: '',
-          stderr: 'Command aborted',
-          exitCode: 1,
-        });
+        await assert.rejects(pending, (error) => error === reason);
         assert.ok(
           Date.now() - started < 25_000,
           'abort must kill the guest command instead of waiting it out',
@@ -173,7 +171,7 @@ describe('Microsandbox Sandbox', async () => {
         await using sandbox = await createMicrosandboxSandbox({
           commandTimeout: 1_000,
         });
-        const result = await sandbox.executeCommand('sleep 30');
+        const result = await sandbox.run({ command: 'sleep 30' });
         assert.strictEqual(result.exitCode, 124);
         assert.match(result.stderr, /timed out/);
       });
@@ -182,24 +180,28 @@ describe('Microsandbox Sandbox', async () => {
     describe('file operations', () => {
       it('writes and reads files round trip, creating nested parents', async () => {
         await using sandbox = await createMicrosandboxSandbox();
-        await sandbox.writeFiles([
-          { path: '/workspace/a/b/c.txt', content: 'nested content' },
-          { path: '/tmp/deepagents-msb-file.txt', content: 'flat content' },
-          {
-            path: '/tmp/deepagents-msb-buf.txt',
-            content: Buffer.from('buffer content'),
-          },
-        ]);
+        await sandbox.writeTextFile({
+          path: '/workspace/a/b/c.txt',
+          content: 'nested content',
+        });
+        await sandbox.writeTextFile({
+          path: '/tmp/deepagents-msb-file.txt',
+          content: 'flat content',
+        });
+        await sandbox.writeBinaryFile({
+          path: '/tmp/deepagents-msb-buf.txt',
+          content: Buffer.from('buffer content'),
+        });
         assert.strictEqual(
-          await sandbox.readFile('/workspace/a/b/c.txt'),
+          await sandbox.readTextFile({ path: '/workspace/a/b/c.txt' }),
           'nested content',
         );
         assert.strictEqual(
-          await sandbox.readFile('/tmp/deepagents-msb-file.txt'),
+          await sandbox.readTextFile({ path: '/tmp/deepagents-msb-file.txt' }),
           'flat content',
         );
         assert.strictEqual(
-          await sandbox.readFile('/tmp/deepagents-msb-buf.txt'),
+          await sandbox.readTextFile({ path: '/tmp/deepagents-msb-buf.txt' }),
           'buffer content',
         );
       });
@@ -208,32 +210,76 @@ describe('Microsandbox Sandbox', async () => {
         await using sandbox = await createMicrosandboxSandbox();
 
         const bytes = Buffer.from([0x89, 0x50, 0x00, 0xff]);
-        await sandbox.writeFiles([
-          { path: '/workspace/blob.bin', content: bytes },
-        ]);
-
-        const content = await sandbox.readFile('/workspace/blob.bin', {
-          encoding: 'binary',
+        await sandbox.writeBinaryFile({
+          path: '/workspace/blob.bin',
+          content: bytes,
         });
 
-        assert.deepStrictEqual(Array.from(content), [0x89, 0x50, 0x00, 0xff]);
+        const content = await sandbox.readBinaryFile({
+          path: '/workspace/blob.bin',
+        });
+
+        assert.deepStrictEqual(
+          Array.from(content ?? []),
+          [0x89, 0x50, 0x00, 0xff],
+        );
       });
 
       it('reports whether a path exists', async () => {
         await using sandbox = await createMicrosandboxSandbox();
 
-        await sandbox.writeFiles([
-          { path: '/workspace/present.txt', content: 'x' },
-        ]);
+        await sandbox.writeTextFile({
+          path: '/workspace/present.txt',
+          content: 'x',
+        });
 
-        assert.strictEqual(
-          await sandbox.exists('/workspace/present.txt'),
-          true,
+        assert.deepStrictEqual(
+          await sandbox.stat({ path: '/workspace/present.txt' }),
+          { type: 'file', size: 1 },
         );
-        assert.strictEqual(await sandbox.exists('/workspace'), true);
         assert.strictEqual(
-          await sandbox.exists('/workspace/missing.txt'),
-          false,
+          (await sandbox.stat({ path: '/workspace' }))?.type,
+          'directory',
+        );
+        assert.strictEqual(
+          await sandbox.stat({ path: '/workspace/missing.txt' }),
+          null,
+        );
+      });
+
+      it('creates parent directories for byte and stream writes', async () => {
+        await using sandbox = await createMicrosandboxSandbox();
+
+        await sandbox.writeBinaryFile({
+          path: 'bytes/nested/a.bin',
+          content: new Uint8Array([1, 2]),
+        });
+        await sandbox.writeFile({
+          path: 'stream/nested/b.bin',
+          content: ReadableStream.from([
+            new Uint8Array([3]),
+            new Uint8Array([4]),
+          ]),
+        });
+
+        const { stdout } = await sandbox.run({
+          command: 'od -An -tu1 bytes/nested/a.bin stream/nested/b.bin',
+        });
+        assert.deepStrictEqual(stdout.trim().split(/\s+/), [
+          '1',
+          '2',
+          '3',
+          '4',
+        ]);
+      });
+
+      it('rejects a streamed read of a directory instead of hanging', async () => {
+        await using sandbox = await createMicrosandboxSandbox();
+        await sandbox.writeTextFile({ path: 'dir/keep.txt', content: 'keep' });
+
+        await assert.rejects(
+          Promise.resolve(sandbox.readFile({ path: 'dir' })),
+          /directory/,
         );
       });
     });
@@ -248,67 +294,92 @@ describe('Microsandbox Sandbox', async () => {
         );
       });
 
-      it('exit resolves with signal info when aborted mid-stream', async () => {
-        await using sandbox = await createMicrosandboxSandbox();
-        assert.ok(sandbox.spawn);
-        const controller = new AbortController();
-        const child = await sandbox.spawn(
-          'printf "hi\\n"; sleep 30; printf "bye\\n"',
-          {
-            signal: controller.signal,
-          },
+      it('leaves no VM behind when Bash is missing', async () => {
+        const sdk = await import('microsandbox');
+        const run = randomUUID();
+        const labelled = () =>
+          sdk.Sandbox.listWith((list) => list.label('deepagents-test', run));
+        {
+          await using control = await createMicrosandboxSandbox({
+            configure: (builder) => builder.label('deepagents-test', run),
+          });
+          await control.run({ command: 'true' });
+          assert.strictEqual((await labelled()).sandboxes.length, 1);
+        }
+
+        await assert.rejects(
+          createMicrosandboxSandbox({
+            configure: (builder) =>
+              builder.image('alpine').label('deepagents-test', run),
+          }),
+          /Bash is required/,
         );
+
+        const { sandboxes } = await labelled();
+        assert.deepStrictEqual(
+          sandboxes.map((handle) => handle.name),
+          [],
+        );
+      });
+
+      it('wait rejects with the abort reason when aborted mid-stream', async () => {
+        await using sandbox = await createMicrosandboxSandbox();
+        const controller = new AbortController();
+        const reason = new Error('stop');
+        const child = await sandbox.spawn({
+          command: 'printf "hi\\n"; sleep 30; printf "bye\\n"',
+          abortSignal: controller.signal,
+        });
 
         assert.match(await readFirstChunk(child.stdout), /hi/);
 
         const drained = streamText(child.stdout);
-        controller.abort();
+        controller.abort(reason);
+        const aborted = Date.now();
 
-        const info = await child.exit;
-        assert.strictEqual(info.success, false);
-        assert.strictEqual(info.signal, 'SIGKILL');
-        await drained;
+        await assert.rejects(
+          Promise.resolve(child.wait()),
+          (error) => error === reason,
+        );
+        assert.doesNotMatch(await drained, /bye/);
+        assert.ok(
+          Date.now() - aborted < 25_000,
+          'abort must kill the guest command instead of waiting it out',
+        );
       });
 
-      it('exit resolves with non-zero code on command failure', async () => {
+      it('wait resolves with non-zero code on command failure', async () => {
         await using sandbox = await createMicrosandboxSandbox();
-        assert.ok(sandbox.spawn);
-        const child = await sandbox.spawn('exit 42');
+        const child = await sandbox.spawn({ command: 'exit 42' });
         await streamText(child.stdout);
         await streamText(child.stderr);
-        assert.deepStrictEqual(await child.exit, {
-          code: 42,
-          signal: null,
-          success: false,
-        });
+        assert.deepStrictEqual(await child.wait(), { exitCode: 42 });
       });
 
       it('stdout and stderr both close after the child exits', async () => {
         await using sandbox = await createMicrosandboxSandbox();
-        assert.ok(sandbox.spawn);
-        const child = await sandbox.spawn('echo hi; echo err >&2');
+        const child = await sandbox.spawn({ command: 'echo hi; echo err >&2' });
         const [out, err, info] = await Promise.all([
           streamText(child.stdout),
           streamText(child.stderr),
-          child.exit,
+          child.wait(),
         ]);
         assert.strictEqual(out.trim(), 'hi');
         assert.strictEqual(err.trim(), 'err');
-        assert.deepStrictEqual(info, { code: 0, signal: null, success: true });
+        assert.deepStrictEqual(info, { exitCode: 0 });
       });
     });
 
     describe('live streaming', () => {
       it('delivers stdout bytes before the child exits', async () => {
         await using sandbox = await createMicrosandboxSandbox();
-        assert.ok(sandbox.spawn);
-        const child = await sandbox.spawn(
-          'printf "hi\\n"; sleep 2; printf "bye\\n"',
-        );
+        const child = await sandbox.spawn({
+          command: 'printf "hi\\n"; sleep 2; printf "bye\\n"',
+        });
 
         const winner = await Promise.race([
           readFirstChunk(child.stdout).then(() => 'chunk' as const),
-          child.exit.then(() => 'exit' as const),
+          Promise.resolve(child.wait()).then(() => 'exit' as const),
         ]);
         assert.strictEqual(
           winner,
@@ -317,21 +388,20 @@ describe('Microsandbox Sandbox', async () => {
         );
 
         const rest = await streamText(child.stdout);
-        const info = await child.exit;
+        const info = await child.wait();
         assert.match(rest, /bye/);
-        assert.strictEqual(info.success, true);
+        assert.strictEqual(info.exitCode, 0);
       });
 
       it('streams stderr independently of stdout', async () => {
         await using sandbox = await createMicrosandboxSandbox();
-        assert.ok(sandbox.spawn);
-        const child = await sandbox.spawn(
-          'echo "to stdout"; echo "to stderr" >&2; echo "also stdout"',
-        );
+        const child = await sandbox.spawn({
+          command: 'echo "to stdout"; echo "to stderr" >&2; echo "also stdout"',
+        });
         const [out, err] = await Promise.all([
           streamText(child.stdout),
           streamText(child.stderr),
-          child.exit,
+          child.wait(),
         ]);
         assert.deepStrictEqual(out.trim().split('\n'), [
           'to stdout',
@@ -341,31 +411,33 @@ describe('Microsandbox Sandbox', async () => {
       });
     });
 
-    describe('SpawnOptions', () => {
+    describe('spawn options', () => {
       it('forwards env into the child', async () => {
         await using sandbox = await createMicrosandboxSandbox();
-        assert.ok(sandbox.spawn);
-        const child = await sandbox.spawn('printf "%s\\n" "$MY_VAR"', {
+        const child = await sandbox.spawn({
+          command: 'printf "%s\\n" "$MY_VAR"',
           env: { MY_VAR: 'hello-from-host' },
         });
         const text = await streamText(child.stdout);
-        const info = await child.exit;
+        const info = await child.wait();
         assert.strictEqual(text.trim(), 'hello-from-host');
-        assert.strictEqual(info.success, true);
+        assert.strictEqual(info.exitCode, 0);
       });
 
-      it('forwards cwd into the child', async () => {
+      it('forwards the working directory into the child', async () => {
         await using sandbox = await createMicrosandboxSandbox();
-        assert.ok(sandbox.spawn);
         const cwd = '/tmp/deepagents-msb-cwd';
-        const mkdir = await sandbox.executeCommand(`mkdir -p ${cwd}`);
+        const mkdir = await sandbox.run({ command: `mkdir -p ${cwd}` });
         assert.strictEqual(mkdir.exitCode, 0);
 
-        const child = await sandbox.spawn('pwd', { cwd });
+        const child = await sandbox.spawn({
+          command: 'pwd',
+          workingDirectory: cwd,
+        });
         const text = await streamText(child.stdout);
-        const info = await child.exit;
+        const info = await child.wait();
         assert.strictEqual(text.trim(), cwd);
-        assert.strictEqual(info.success, true);
+        assert.strictEqual(info.exitCode, 0);
       });
     });
 
@@ -387,7 +459,7 @@ describe('Microsandbox Sandbox', async () => {
         try {
           await first.dispose();
           assert.strictEqual(
-            (await peer.executeCommand('printf alive')).stdout,
+            (await peer.run({ command: 'printf alive' })).stdout,
             'alive',
           );
 
@@ -420,10 +492,11 @@ describe('Microsandbox Sandbox', async () => {
         try {
           await (await sdk.Sandbox.get(name)).stop();
           const [result] = await Promise.all([
-            sandbox.executeCommand('printf recovered'),
-            sandbox.writeFiles([
-              { path: '/workspace/recovered.txt', content: 'still writable' },
-            ]),
+            sandbox.run({ command: 'printf recovered' }),
+            sandbox.writeTextFile({
+              path: '/workspace/recovered.txt',
+              content: 'still writable',
+            }),
           ]);
           assert.deepStrictEqual(result, {
             stdout: 'recovered',
@@ -431,7 +504,7 @@ describe('Microsandbox Sandbox', async () => {
             exitCode: 0,
           });
           assert.strictEqual(
-            await sandbox.readFile('/workspace/recovered.txt'),
+            await sandbox.readTextFile({ path: '/workspace/recovered.txt' }),
             'still writable',
           );
 
@@ -453,15 +526,16 @@ describe('Microsandbox Sandbox', async () => {
           {
             await using first = await createMicrosandboxSandbox({ name });
 
-            await first.writeFiles([
-              { path: '/workspace/persisted.txt', content: 'still here' },
-            ]);
+            await first.writeTextFile({
+              path: '/workspace/persisted.txt',
+              content: 'still here',
+            });
           }
 
           await using second = await createMicrosandboxSandbox({ name });
 
           assert.strictEqual(
-            await second.readFile('/workspace/persisted.txt'),
+            await second.readTextFile({ path: '/workspace/persisted.txt' }),
             'still here',
           );
         } finally {
@@ -471,20 +545,23 @@ describe('Microsandbox Sandbox', async () => {
 
       it('removes an unnamed sandbox entirely on dispose', async () => {
         const sdk = await import('microsandbox');
-        const namesBefore = new Set(
-          (await sdk.Sandbox.list()).sandboxes.map((handle) => handle.name),
-        );
+        const run = randomUUID();
+        const labelled = async () =>
+          (
+            await sdk.Sandbox.listWith((list) =>
+              list.label('deepagents-test', run),
+            )
+          ).sandboxes.map((handle) => handle.name);
 
-        const sandbox = await createMicrosandboxSandbox();
-        await sandbox.executeCommand('true');
+        const sandbox = await createMicrosandboxSandbox({
+          configure: (builder) => builder.label('deepagents-test', run),
+        });
+        await sandbox.run({ command: 'true' });
+        const whileOpen = await labelled();
         await sandbox.dispose();
 
-        const leftovers = (await sdk.Sandbox.list()).sandboxes
-          .map((handle) => handle.name)
-          .filter(
-            (name) =>
-              name.startsWith('deepagents-msb-') && !namesBefore.has(name),
-          );
+        const leftovers = await labelled();
+        assert.strictEqual(whileOpen.length, 1);
         assert.deepStrictEqual(leftovers, []);
       });
     });
@@ -499,12 +576,13 @@ describe('Microsandbox Sandbox', async () => {
         });
 
         try {
-          await sandbox.writeFiles([
-            { path: '/workspace/persist.txt', content: 'survives the stop' },
-          ]);
+          await sandbox.writeTextFile({
+            path: '/workspace/persist.txt',
+            content: 'survives the stop',
+          });
           await (await sdk.Sandbox.get(name)).stop();
           assert.strictEqual(
-            await sandbox.readFile('/workspace/persist.txt'),
+            await sandbox.readTextFile({ path: '/workspace/persist.txt' }),
             'survives the stop',
           );
         } finally {
@@ -516,12 +594,37 @@ describe('Microsandbox Sandbox', async () => {
         }
       });
 
+      it('keeps commands and relative paths in its workdir when it resumes a sandbox created with another', async () => {
+        const sdk = await import('microsandbox');
+        const name = `deepagents-test-${randomUUID()}`;
+        try {
+          await (
+            await createMicrosandboxSandbox({ name, workdir: '/srv/first' })
+          ).dispose();
+          await using second = await createMicrosandboxSandbox({
+            name,
+            workdir: '/srv/second',
+          });
+
+          await second.writeTextFile({ path: 'here.txt', content: 'here' });
+          const result = await second.run({ command: 'pwd; cat here.txt' });
+
+          assert.deepStrictEqual(result, {
+            stdout: '/srv/second\nhere',
+            stderr: '',
+            exitCode: 0,
+          });
+        } finally {
+          await sdk.Sandbox.remove(name).catch(() => {});
+        }
+      });
+
       it('applies the factory workdir after configure()', async () => {
         await using sandbox = await createMicrosandboxSandbox({
           workdir: '/workspace',
           configure: (builder) => builder.workdir('/tmp'),
         });
-        const result = await sandbox.executeCommand('pwd');
+        const result = await sandbox.run({ command: 'pwd' });
         assert.deepStrictEqual(result, {
           stdout: '/workspace\n',
           stderr: '',
@@ -535,14 +638,14 @@ describe('Microsandbox Sandbox', async () => {
     it('returns the sandbox once the readiness hook resolves', async () => {
       await using sandbox = await createMicrosandboxSandbox({
         readiness: async (booting) => {
-          const marker = await booting.executeCommand(
-            'echo ok > /tmp/readiness-ran.txt',
-          );
+          const marker = await booting.run({
+            command: 'echo ok > /tmp/readiness-ran.txt',
+          });
           assert.strictEqual(marker.exitCode, 0);
         },
       });
       assert.strictEqual(
-        await sandbox.readFile('/tmp/readiness-ran.txt'),
+        await sandbox.readTextFile({ path: '/tmp/readiness-ran.txt' }),
         'ok\n',
       );
     });
@@ -597,6 +700,44 @@ describe('Microsandbox Sandbox', async () => {
           result.stdout.trim(),
           MICROSANDBOX_DEFAULT_DESTINATION,
         );
+      });
+
+      it('resolves uploads and relative writes against the directory commands start in', async () => {
+        await using backend = await createMicrosandboxSandbox();
+        const { tools } = await createBashTool({
+          sandbox: backend,
+          files: { 'uploaded.txt': 'from upload' },
+        });
+        assert.ok(tools.bash.execute);
+        assert.ok(tools.writeFile.execute);
+
+        await tools.writeFile.execute(
+          { path: 'written.txt', content: ' and write' },
+          {
+            abortSignal: undefined,
+            context: {},
+            messages: [],
+            toolCallId: 'relative-write',
+          },
+        );
+        const result = await tools.bash.execute(
+          {
+            command: 'pwd; cat uploaded.txt written.txt',
+            reasoning: 'read the files from the starting directory',
+          },
+          {
+            abortSignal: undefined,
+            context: {},
+            messages: [],
+            toolCallId: 'relative-read',
+          },
+        );
+
+        assert.deepStrictEqual(result, {
+          stdout: `${MICROSANDBOX_DEFAULT_DESTINATION}\nfrom upload and write`,
+          stderr: '',
+          exitCode: 0,
+        });
       });
 
       it('executes Bash-only syntax through the public bash tool', async () => {
@@ -674,4 +815,47 @@ describe('Microsandbox Sandbox', async () => {
       });
     },
   );
+
+  describe('withStraceFileChanges', { skip: !usable }, () => {
+    it('reports writes by a command and by the session', async () => {
+      await using sandbox = await createMicrosandboxSandbox();
+      const installed = await sandbox.run({
+        command: 'apk add --no-cache strace',
+      });
+      assert.strictEqual(installed.exitCode, 0, installed.stderr);
+      const seen: FileChange[] = [];
+      const tracked = await withStraceFileChanges(sandbox, {
+        include: [
+          MICROSANDBOX_DEFAULT_DESTINATION,
+          `${MICROSANDBOX_DEFAULT_DESTINATION}/**`,
+        ],
+        onFileChanges: (changes) => {
+          seen.push(...changes);
+        },
+      });
+
+      const result = await tracked.run({
+        command: `echo traced > ${MICROSANDBOX_DEFAULT_DESTINATION}/traced.txt`,
+      });
+      await tracked.writeTextFile({
+        path: `${MICROSANDBOX_DEFAULT_DESTINATION}/written.txt`,
+        content: 'written',
+      });
+
+      assert.strictEqual(result.exitCode, 0, result.stderr);
+      assert.deepStrictEqual(
+        seen.map(({ op, path }) => ({ op, path })),
+        [
+          {
+            op: 'write',
+            path: `${MICROSANDBOX_DEFAULT_DESTINATION}/traced.txt`,
+          },
+          {
+            op: 'write',
+            path: `${MICROSANDBOX_DEFAULT_DESTINATION}/written.txt`,
+          },
+        ],
+      );
+    });
+  });
 });
