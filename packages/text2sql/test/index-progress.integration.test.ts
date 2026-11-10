@@ -439,14 +439,10 @@ describe('Text2Sql index progress events', () => {
   });
 
   it('emits terminal index errors after in-flight adapter progress settles', async () => {
-    let markSlowStarted!: () => void;
-    const slowStarted = new Promise<void>((resolve) => {
-      markSlowStarted = resolve;
-    });
-    let releaseSlow!: () => void;
-    const slowReleased = new Promise<void>((resolve) => {
-      releaseSlow = resolve;
-    });
+    const { promise: slowStarted, resolve: markSlowStarted } =
+      Promise.withResolvers<void>();
+    const { promise: slowReleased, resolve: releaseSlow } =
+      Promise.withResolvers<void>();
 
     const failing = new TestAdapter(async () => {
       await slowStarted;

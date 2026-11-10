@@ -419,7 +419,8 @@ describe('composition with existing predicates', () => {
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
-    const lastMsg = messages[messages.length - 1];
+    const lastMsg = messages.at(-1);
+    assert.ok(lastMsg);
     const text = getTextParts(lastMsg).join('');
     assert.ok(
       text.includes('db-after-turn-1'),
@@ -564,7 +565,8 @@ describe('composition with existing predicates', () => {
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
-    const lastMsg = messages[messages.length - 1];
+    const lastMsg = messages.at(-1);
+    assert.ok(lastMsg);
     const text = getTextParts(lastMsg).join('');
     assert.ok(
       text.includes('db-every-2'),

@@ -217,7 +217,8 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
           return failure;
         });
         throw new Error(
-          `${error instanceof Error ? error.message : String(error)}\nchild stderr:\n${result.stderr}`,
+          `${Error.isError(error) ? error.message : String(error)}\nchild stderr:\n${result.stderr}`,
+          { cause: error },
         );
       }
 

@@ -315,7 +315,7 @@ describe('createFileTelemetry()', () => {
       });
     });
     assert.ok(errors.length > 0);
-    assert.ok(errors[0] instanceof Error);
+    assert.ok(Error.isError(errors[0]));
   });
 
   it('handles initialization failures before any telemetry event', async () => {
@@ -324,10 +324,8 @@ describe('createFileTelemetry()', () => {
     );
     const blockingFile = join(directory.path, 'not-a-directory');
     await writeFile(blockingFile, 'content');
-    let reportError!: (error: unknown) => void;
-    const errorReported = new Promise<unknown>((resolve) => {
-      reportError = resolve;
-    });
+    const { promise: errorReported, resolve: reportError } =
+      Promise.withResolvers<unknown>();
 
     createFileTelemetry({
       clock: createClock(),
@@ -340,6 +338,6 @@ describe('createFileTelemetry()', () => {
       'the initialization error is reported',
       100,
     );
-    assert.ok(error instanceof Error);
+    assert.ok(Error.isError(error));
   });
 });

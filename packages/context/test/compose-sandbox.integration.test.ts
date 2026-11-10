@@ -1,7 +1,7 @@
 import { DockerTestbed } from '@zukhruf/testing/docker';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { hash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { it } from 'node:test';
@@ -25,7 +25,7 @@ it('Compose uses the existing YAML-derived project name for execution and dispos
   });
   // Lock compatibility with the existing project identity, independently of
   // the production one-shot hash API. Run labels make each fixture unique.
-  const project = `sandbox-${createHash('sha256').update(compose).digest('hex').slice(0, 8)}`;
+  const project = `sandbox-${hash('sha256', compose).slice(0, 8)}`;
   await writeFile(composeFile, compose);
   const client = await testbed.client();
   const filters = { label: [`com.docker.compose.project=${project}`] };

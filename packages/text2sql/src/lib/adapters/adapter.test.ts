@@ -12,7 +12,7 @@ const READ_ONLY_MESSAGE = 'only SELECT or WITH queries allowed';
 
 function isReadOnlyError(error: unknown): error is Error {
   return (
-    error instanceof Error &&
+    Error.isError(error) &&
     error.name === 'SQLReadOnlyError' &&
     error.message === READ_ONLY_MESSAGE
   );

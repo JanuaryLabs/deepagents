@@ -973,9 +973,9 @@ describe('readFile tool', () => {
       sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
       workingDirectory: '/workspace',
     });
-    const heic = Buffer.from('0000002066747970686569630000000068656963', 'hex');
-    const mov = Buffer.from('0000001466747970717420200000000071742020', 'hex');
-    const blob = Buffer.from('000000000000000000000000', 'hex');
+    const heic = Uint8Array.fromHex('0000002066747970686569630000000068656963');
+    const mov = Uint8Array.fromHex('0000001466747970717420200000000071742020');
+    const blob = Uint8Array.fromHex('000000000000000000000000');
     await Promise.all([
       sandbox.writeBinaryFile({
         path: '/workspace/IMG_0001.HEIC',

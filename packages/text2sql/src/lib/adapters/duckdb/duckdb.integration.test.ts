@@ -423,7 +423,7 @@ function hasSqlErrorName(
   payload: { referenced_entities?: string[] };
 } {
   return (
-    error instanceof Error &&
+    Error.isError(error) &&
     error.name === name &&
     'payload' in error &&
     typeof error.payload === 'object' &&

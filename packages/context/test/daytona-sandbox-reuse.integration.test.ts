@@ -122,7 +122,7 @@ describe('createDaytonaSandbox typed-error propagation', () => {
     await assert.rejects(
       createDaytonaSandbox(client, { sandboxId: 'sb-missing' }),
       (error: unknown) => {
-        assert.ok(error instanceof Error);
+        assert.ok(Error.isError(error));
         assert.ok(
           error instanceof DaytonaNotFoundError,
           `expected DaytonaNotFoundError, got ${error.name}`,
@@ -152,7 +152,7 @@ describe('createDaytonaSandbox typed-error propagation', () => {
         image: 'ubuntu',
       }),
       (error: unknown) => {
-        assert.ok(error instanceof Error);
+        assert.ok(Error.isError(error));
         assert.ok(
           error instanceof DaytonaCreationError,
           `expected DaytonaCreationError, got ${error.name}`,
@@ -278,7 +278,7 @@ describe('createDaytonaSandbox name implies get-or-create', () => {
     await assert.rejects(
       createDaytonaSandbox(client, { name: 'dai-chat-1' }),
       (error: unknown) => {
-        assert.ok(error instanceof Error);
+        assert.ok(Error.isError(error));
         assert.ok(
           error instanceof DaytonaAuthenticationError,
           `expected DaytonaAuthenticationError, got ${error.name}`,

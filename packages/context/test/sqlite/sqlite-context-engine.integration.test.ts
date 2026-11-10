@@ -32,7 +32,7 @@ const renderer = new XmlRenderer();
 
 class DiskImageUnavailableError extends Error {
   constructor(cause: unknown) {
-    const message = cause instanceof Error ? cause.message : String(cause);
+    const message = Error.isError(cause) ? cause.message : String(cause);
     super(`Unable to create macOS disk image for SQLITE_FULL test: ${message}`);
     this.name = 'DiskImageUnavailableError';
     this.cause = cause;

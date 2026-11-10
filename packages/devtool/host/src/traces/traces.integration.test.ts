@@ -140,7 +140,7 @@ class ControlledTurnQueue extends TurnQueue {
     } catch (error) {
       await consumer.options.onOrphaned(
         turn,
-        error instanceof Error ? error.message : String(error),
+        Error.isError(error) ? error.message : String(error),
       );
     } finally {
       this.#running.delete(turn.streamId);

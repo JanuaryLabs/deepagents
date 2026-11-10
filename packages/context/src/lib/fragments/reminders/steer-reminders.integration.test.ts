@@ -184,48 +184,45 @@ async function runDelayedChat(options: {
     { text: 'done' },
   ]);
   let completedTools = 0;
-  const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
 
-  try {
-    const sandbox = await createBashTool({ sandbox: backend });
-    const chatAgent = agent({
-      name: options.chatId,
-      context,
-      model,
-      sandbox,
-      tools: {
-        noop: tool({
-          description: 'A counted no-op tool.',
-          inputSchema: z.object({}),
-          execute: async () => {
-            completedTools += 1;
-            return { ok: true };
-          },
-        }),
-      },
-    });
-    const assistantId = await context.continue(
-      userMessage(`run ${options.toolCalls} tools`),
+  await using backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+
+  const sandbox = await createBashTool({ sandbox: backend });
+  const chatAgent = agent({
+    name: options.chatId,
+    context,
+    model,
+    sandbox,
+    tools: {
+      noop: tool({
+        description: 'A counted no-op tool.',
+        inputSchema: z.object({}),
+        execute: async () => {
+          completedTools += 1;
+          return { ok: true };
+        },
+      }),
+    },
+  });
+  const assistantId = await context.continue(
+    userMessage(`run ${options.toolCalls} tools`),
+  );
+  if (options.initialAssistantParts !== null) {
+    await context.continue(
+      assistant({
+        id: assistantId,
+        role: 'assistant',
+        parts: options.initialAssistantParts,
+      }),
     );
-    if (options.initialAssistantParts !== null) {
-      await context.continue(
-        assistant({
-          id: assistantId,
-          role: 'assistant',
-          parts: options.initialAssistantParts,
-        }),
-      );
-    }
-    context.set(reminder('DELAYED', { when: options.when, target: 'steer' }));
-    await drain(await chat(chatAgent));
-    return {
-      completedTools,
-      entries: await storedEntries(store, options.chatId),
-      prompts: model.doStreamCalls.map((call) => JSON.stringify(call.prompt)),
-    };
-  } finally {
-    await backend.dispose();
   }
+  context.set(reminder('DELAYED', { when: options.when, target: 'steer' }));
+  await drain(await chat(chatAgent));
+  return {
+    completedTools,
+    entries: await storedEntries(store, options.chatId),
+    prompts: model.doStreamCalls.map((call) => JSON.stringify(call.prompt)),
+  };
 }
 
 function textOf(message: UIMessage): string {
@@ -894,8 +891,10 @@ describe('steer reminders integration (chat flow)', () => {
 
     const chain = await storedEntries(store, 'throws');
     // The turn completed and produced its final assistant content.
+    const last = chain.at(-1);
+    assert.ok(last);
     assert.ok(
-      textOf(messageOf(chain[chain.length - 1])).includes('survived'),
+      textOf(messageOf(last)).includes('survived'),
       'turn must complete despite a throwing predicate',
     );
     const synth = chain.find((e) => e.name === 'user' && isSyntheticEntry(e));

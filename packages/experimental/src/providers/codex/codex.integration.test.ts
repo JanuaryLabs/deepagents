@@ -14,7 +14,7 @@ import {
 } from 'ai';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { hash } from 'node:crypto';
 import { mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type TestContext, test } from 'node:test';
@@ -549,10 +549,7 @@ test('keyring mode uses the Codex service and canonical-home account', async (t)
     join(home, 'config.toml'),
     'cli_auth_credentials_store = "keyring"\n',
   );
-  const account = `cli|${createHash('sha256')
-    .update(home)
-    .digest('hex')
-    .slice(0, 16)}`;
+  const account = `cli|${hash('sha256', home).slice(0, 16)}`;
   t.mock.module('@napi-rs/keyring', {
     namedExports: {
       AsyncEntry: class {

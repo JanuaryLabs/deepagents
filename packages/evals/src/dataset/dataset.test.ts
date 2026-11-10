@@ -84,7 +84,7 @@ describe('dataset', () => {
 
     assert.strictEqual(result.length, original.length);
     assert.deepStrictEqual(
-      [...result].sort((a, b) => a - b),
+      result.toSorted((a, b) => a - b),
       original,
     );
   });

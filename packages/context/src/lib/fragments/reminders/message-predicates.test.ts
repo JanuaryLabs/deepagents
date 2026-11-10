@@ -36,7 +36,9 @@ async function lastUserText(engine: ContextEngine): Promise<string> {
     renderer: new XmlRenderer(),
     sandbox: await buildSandbox(),
   });
-  return getTextParts(messages[messages.length - 1]).join('');
+  const last = messages.at(-1);
+  assert.ok(last);
+  return getTextParts(last).join('');
 }
 
 describe('lastAssistantLength', () => {

@@ -59,7 +59,7 @@ function createToolCall(
     errorText,
   } = options;
   const toolType = `tool-${toolName}` as const;
-  const hasInput = Object.prototype.hasOwnProperty.call(options, 'input');
+  const hasInput = Object.hasOwn(options, 'input');
   const toolInput = hasInput ? input : { sql, reasoning };
 
   if (state === 'output-available') {

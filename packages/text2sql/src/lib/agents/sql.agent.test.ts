@@ -59,7 +59,7 @@ function createCapturingModel(responses: Array<MockModelResponse | Error>) {
     doGenerate: async (): Promise<LanguageModelV4GenerateResult> => {
       const response = responses[model.doGenerateCalls.length - 1];
       assert.ok(response, 'Mock model exhausted its configured responses');
-      if (response instanceof Error) {
+      if (Error.isError(response)) {
         throw response;
       }
       return {
@@ -1227,7 +1227,7 @@ describe('toSql', () => {
             maxRetries: 3,
           }),
         (error: unknown) => {
-          assert(error instanceof Error);
+          assert(Error.isError(error));
           assert.strictEqual(error.message, 'Unknown internal failure');
           return true;
         },

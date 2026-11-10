@@ -74,20 +74,17 @@ const MOUNT = '/zukhruf/v1';
 const USER_HEADER = 'x-test-user';
 const OWNER = 'owner-1';
 const UPLOAD_DIRECTORY = '/workspace/uploads';
-const PNG_PIXEL = Buffer.from(
+const PNG_PIXEL = Uint8Array.fromBase64(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
-  'base64',
 );
 /** `ftyp` boxes are enough for the store, which never sniffs bytes. */
-const MP4_HEADER = Buffer.from(
+const MP4_HEADER = Uint8Array.fromHex(
   '0000002066747970697736d00000020069736f6d69736f32',
-  'hex',
 );
-const HEIC_HEADER = Buffer.from(
+const HEIC_HEADER = Uint8Array.fromHex(
   '0000001866747970686569630000000068656963',
-  'hex',
 );
-const MP3_HEADER = Buffer.from('494433040000000000', 'hex');
+const MP3_HEADER = Uint8Array.fromHex('494433040000000000');
 const MAX_UPLOAD_BYTES = 4096;
 const PUBLIC_URL = `http://localhost${MOUNT}`;
 
@@ -225,9 +222,9 @@ async function storedBytes(
   userId: string,
   sessionId: string,
   fileId: string,
-): Promise<Buffer> {
+): Promise<Uint8Array> {
   await using sandbox = await createVirtualSandbox({ fs });
-  return Buffer.from(
+  return new Uint8Array(
     (await sandbox.readBinaryFile({
       path: `${UPLOAD_DIRECTORY}/${userId}/${sessionId}/${fileId}`,
     }))!,
@@ -238,7 +235,7 @@ async function storedBytes(
 async function writeSandboxFile(
   fs: InMemoryFs,
   path: string,
-  content: Buffer,
+  content: Uint8Array,
 ): Promise<void> {
   await using sandbox = await createVirtualSandbox({ fs });
   await sandbox.writeBinaryFile({ path, content });
@@ -434,7 +431,7 @@ test('POST /session/:sessionId/uploads stores the image in the session sandbox a
   assert.equal(jpeg.mediaType, 'image/jpeg');
   assert.match(jpeg.path, /\.jpg$/);
 
-  const stored: Array<[string, Buffer, string, RegExp]> = [
+  const stored: Array<[string, Uint8Array, string, RegExp]> = [
     ['image/heic', HEIC_HEADER, 'IMG_0001.HEIC', /\.heic$/],
     ['video/mp4', MP4_HEADER, 'clip.mp4', /\.mp4$/],
     ['video/quicktime', MP4_HEADER, 'IMG_0002.MOV', /\.mov$/],
@@ -522,7 +519,7 @@ test('GET /session/:sessionId/uploads/:fileId serves the bytes to the owner only
       length: String(PNG_PIXEL.byteLength),
     },
   );
-  assert.deepEqual(Buffer.from(await served.arrayBuffer()), PNG_PIXEL);
+  assert.deepEqual(new Uint8Array(await served.arrayBuffer()), PNG_PIXEL);
   assert.equal(head.status, 200);
   assert.equal(
     head.headers.get('content-length'),
@@ -571,7 +568,7 @@ test('GET /session/:sessionId/uploads/:fileId honours single byte ranges so medi
       range: prefix.headers.get('content-range'),
       length: prefix.headers.get('content-length'),
       type: prefix.headers.get('content-type'),
-      body: Buffer.from(await prefix.arrayBuffer()),
+      body: new Uint8Array(await prefix.arrayBuffer()),
     },
     {
       status: 206,
@@ -586,7 +583,7 @@ test('GET /session/:sessionId/uploads/:fileId honours single byte ranges so medi
     `bytes ${total - 4}-${total - 1}/${total}`,
   );
   assert.deepEqual(
-    Buffer.from(await suffix.arrayBuffer()),
+    new Uint8Array(await suffix.arrayBuffer()),
     MP4_HEADER.subarray(total - 4),
   );
   assert.equal(
@@ -594,7 +591,7 @@ test('GET /session/:sessionId/uploads/:fileId honours single byte ranges so medi
     `bytes 20-${total - 1}/${total}`,
   );
   assert.deepEqual(
-    Buffer.from(await open.arrayBuffer()),
+    new Uint8Array(await open.arrayBuffer()),
     MP4_HEADER.subarray(20),
   );
   for (const response of [beyond, multi]) {
@@ -816,7 +813,7 @@ test('publish_upload adopts a file the agent rendered into the session and the G
   });
   assert.equal(served.status, 206);
   assert.deepEqual(
-    Buffer.from(await served.arrayBuffer()),
+    new Uint8Array(await served.arrayBuffer()),
     MP4_HEADER.subarray(0, 8),
   );
 

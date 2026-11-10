@@ -87,7 +87,7 @@ async function collect(
         events.push(event);
       }
     } catch (error) {
-      if (!(error instanceof Error && error.name === 'AbortError')) {
+      if (!(Error.isError(error) && error.name === 'AbortError')) {
         throw error;
       }
     }

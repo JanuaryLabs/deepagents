@@ -5,7 +5,7 @@ import { Msw } from '@zukhruf/testing/msw';
 import { generateText } from 'ai';
 import { http } from 'msw';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { hash } from 'node:crypto';
 import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Agent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
@@ -167,7 +167,7 @@ test('signing in with the pasted code connects the account and authenticates its
     authorization.searchParams.get('redirect_uri'),
   );
   assert.equal(
-    createHash('sha256').update(exchange?.code_verifier).digest('base64url'),
+    hash('sha256', exchange?.code_verifier, 'base64url'),
     authorization.searchParams.get('code_challenge'),
   );
   assert.equal(result.text, 'hi');

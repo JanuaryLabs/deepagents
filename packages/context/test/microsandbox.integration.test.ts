@@ -205,42 +205,36 @@ describe('Microsandbox Sandbox', async () => {
       });
 
       it('reads raw bytes with the binary encoding', async () => {
-        const sandbox = await createMicrosandboxSandbox();
-        try {
-          const bytes = Buffer.from([0x89, 0x50, 0x00, 0xff]);
-          await sandbox.writeFiles([
-            { path: '/workspace/blob.bin', content: bytes },
-          ]);
+        await using sandbox = await createMicrosandboxSandbox();
 
-          const content = await sandbox.readFile('/workspace/blob.bin', {
-            encoding: 'binary',
-          });
+        const bytes = Buffer.from([0x89, 0x50, 0x00, 0xff]);
+        await sandbox.writeFiles([
+          { path: '/workspace/blob.bin', content: bytes },
+        ]);
 
-          assert.deepStrictEqual(Array.from(content), [0x89, 0x50, 0x00, 0xff]);
-        } finally {
-          await sandbox.dispose();
-        }
+        const content = await sandbox.readFile('/workspace/blob.bin', {
+          encoding: 'binary',
+        });
+
+        assert.deepStrictEqual(Array.from(content), [0x89, 0x50, 0x00, 0xff]);
       });
 
       it('reports whether a path exists', async () => {
-        const sandbox = await createMicrosandboxSandbox();
-        try {
-          await sandbox.writeFiles([
-            { path: '/workspace/present.txt', content: 'x' },
-          ]);
+        await using sandbox = await createMicrosandboxSandbox();
 
-          assert.strictEqual(
-            await sandbox.exists('/workspace/present.txt'),
-            true,
-          );
-          assert.strictEqual(await sandbox.exists('/workspace'), true);
-          assert.strictEqual(
-            await sandbox.exists('/workspace/missing.txt'),
-            false,
-          );
-        } finally {
-          await sandbox.dispose();
-        }
+        await sandbox.writeFiles([
+          { path: '/workspace/present.txt', content: 'x' },
+        ]);
+
+        assert.strictEqual(
+          await sandbox.exists('/workspace/present.txt'),
+          true,
+        );
+        assert.strictEqual(await sandbox.exists('/workspace'), true);
+        assert.strictEqual(
+          await sandbox.exists('/workspace/missing.txt'),
+          false,
+        );
       });
     });
 
@@ -456,24 +450,20 @@ describe('Microsandbox Sandbox', async () => {
         const sdk = await import('microsandbox');
         const name = `deepagents-test-${randomUUID()}`;
         try {
-          const first = await createMicrosandboxSandbox({ name });
-          try {
+          {
+            await using first = await createMicrosandboxSandbox({ name });
+
             await first.writeFiles([
               { path: '/workspace/persisted.txt', content: 'still here' },
             ]);
-          } finally {
-            await first.dispose();
           }
 
-          const second = await createMicrosandboxSandbox({ name });
-          try {
-            assert.strictEqual(
-              await second.readFile('/workspace/persisted.txt'),
-              'still here',
-            );
-          } finally {
-            await second.dispose();
-          }
+          await using second = await createMicrosandboxSandbox({ name });
+
+          assert.strictEqual(
+            await second.readFile('/workspace/persisted.txt'),
+            'still here',
+          );
         } finally {
           await sdk.Sandbox.remove(name).catch(() => {});
         }
@@ -588,108 +578,99 @@ describe('Microsandbox Sandbox', async () => {
     { skip: !usable },
     () => {
       it('wires the workdir as the bash destination without manual mkdir', async () => {
-        const backend = await createMicrosandboxSandbox();
-        try {
-          const agent = await createBashTool({
-            sandbox: backend,
-            workingDirectory: MICROSANDBOX_DEFAULT_DESTINATION,
-          });
-          assert.ok(
-            agent.sandbox.spawn,
-            'createBashTool must forward spawn from the backend',
-          );
+        await using backend = await createMicrosandboxSandbox();
 
-          const result = await agent.sandbox.run({
-            command: `cd ${MICROSANDBOX_DEFAULT_DESTINATION} && pwd`,
-          });
-          assert.strictEqual(result.exitCode, 0);
-          assert.strictEqual(
-            result.stdout.trim(),
-            MICROSANDBOX_DEFAULT_DESTINATION,
-          );
-        } finally {
-          await backend.dispose();
-        }
+        const agent = await createBashTool({
+          sandbox: backend,
+          workingDirectory: MICROSANDBOX_DEFAULT_DESTINATION,
+        });
+        assert.ok(
+          agent.sandbox.spawn,
+          'createBashTool must forward spawn from the backend',
+        );
+
+        const result = await agent.sandbox.run({
+          command: `cd ${MICROSANDBOX_DEFAULT_DESTINATION} && pwd`,
+        });
+        assert.strictEqual(result.exitCode, 0);
+        assert.strictEqual(
+          result.stdout.trim(),
+          MICROSANDBOX_DEFAULT_DESTINATION,
+        );
       });
 
       it('executes Bash-only syntax through the public bash tool', async () => {
-        const backend = await createMicrosandboxSandbox();
-        try {
-          const { bash } = await createBashTool({
-            sandbox: backend,
-            workingDirectory: MICROSANDBOX_DEFAULT_DESTINATION,
-          });
-          const execute = bash.execute;
-          assert.ok(execute);
+        await using backend = await createMicrosandboxSandbox();
 
-          const result = await execute(
+        const { bash } = await createBashTool({
+          sandbox: backend,
+          workingDirectory: MICROSANDBOX_DEFAULT_DESTINATION,
+        });
+        const execute = bash.execute;
+        assert.ok(execute);
+
+        const result = await execute(
+          {
+            command: 'values=(one two); printf \'%s\\n\' "${values[1]}"',
+            reasoning: 'verify the Bash execution contract',
+          },
+          {
+            abortSignal: undefined,
+            context: {},
+            messages: [],
+            toolCallId: 'bash-array-contract',
+          },
+        );
+
+        assert.deepStrictEqual(result, {
+          stdout: 'two\n',
+          stderr: '',
+          exitCode: 0,
+        });
+
+        assert.deepStrictEqual(
+          await execute(
             {
-              command: 'values=(one two); printf \'%s\\n\' "${values[1]}"',
-              reasoning: 'verify the Bash execution contract',
+              command: "printf '%s\\n' posix",
+              reasoning: 'verify POSIX commands still run under Bash',
             },
             {
               abortSignal: undefined,
               context: {},
               messages: [],
-              toolCallId: 'bash-array-contract',
+              toolCallId: 'posix-command-contract',
             },
-          );
-
-          assert.deepStrictEqual(result, {
-            stdout: 'two\n',
-            stderr: '',
-            exitCode: 0,
-          });
-
-          assert.deepStrictEqual(
-            await execute(
-              {
-                command: "printf '%s\\n' posix",
-                reasoning: 'verify POSIX commands still run under Bash',
-              },
-              {
-                abortSignal: undefined,
-                context: {},
-                messages: [],
-                toolCallId: 'posix-command-contract',
-              },
-            ),
-            { stdout: 'posix\n', stderr: '', exitCode: 0 },
-          );
-        } finally {
-          await backend.dispose();
-        }
+          ),
+          { stdout: 'posix\n', stderr: '', exitCode: 0 },
+        );
       });
 
       it('streams live stdout through the wrapper', async () => {
-        const backend = await createMicrosandboxSandbox();
-        try {
-          const agent = await createBashTool({
-            sandbox: backend,
-            workingDirectory: MICROSANDBOX_DEFAULT_DESTINATION,
-          });
-          assert.ok(agent.sandbox.spawn);
-          const child = await agent.sandbox.spawn({
-            command: 'printf "hi\\n"; sleep 2; printf "bye\\n"',
-          });
+        await using backend = await createMicrosandboxSandbox();
 
-          const winner = await Promise.race([
-            readFirstChunk(child.stdout).then(() => 'chunk' as const),
-            child.wait().then(() => 'exit' as const),
-          ]);
-          assert.strictEqual(
-            winner,
-            'chunk',
-            'first stdout chunk must arrive before exit through createBashTool',
-          );
+        const agent = await createBashTool({
+          sandbox: backend,
+          workingDirectory: MICROSANDBOX_DEFAULT_DESTINATION,
+        });
+        assert.ok(agent.sandbox.spawn);
+        const child = await agent.sandbox.spawn({
+          command: 'printf "hi\\n"; sleep 2; printf "bye\\n"',
+        });
 
-          const rest = await streamText(child.stdout);
-          const info = await child.wait();
-          assert.match(rest, /bye/);
-          assert.strictEqual(info.exitCode, 0);
-        } finally {
-          await backend.dispose();
-        }
+        const winner = await Promise.race([
+          readFirstChunk(child.stdout).then(() => 'chunk' as const),
+          child.wait().then(() => 'exit' as const),
+        ]);
+        assert.strictEqual(
+          winner,
+          'chunk',
+          'first stdout chunk must arrive before exit through createBashTool',
+        );
+
+        const rest = await streamText(child.stdout);
+        const info = await child.wait();
+        assert.match(rest, /bye/);
+        assert.strictEqual(info.exitCode, 0);
       });
     },
   );

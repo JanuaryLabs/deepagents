@@ -271,48 +271,42 @@ describe('Apple container sandbox (runtime)', async () => {
   });
 
   it('reads raw bytes with the binary encoding', async () => {
-    const sandbox = await createAppleContainerSandbox();
-    try {
-      const bytes = Buffer.from([0x89, 0x50, 0x00, 0xff]);
-      await sandbox.writeBinaryFile({
-        path: '/workspace/blob.bin',
-        content: bytes,
-      });
+    await using sandbox = await createAppleContainerSandbox();
 
-      const content = await sandbox.readBinaryFile({
-        path: '/workspace/blob.bin',
-      });
+    const bytes = Buffer.from([0x89, 0x50, 0x00, 0xff]);
+    await sandbox.writeBinaryFile({
+      path: '/workspace/blob.bin',
+      content: bytes,
+    });
 
-      assert.ok(content);
-      assert.deepStrictEqual(Array.from(content), [0x89, 0x50, 0x00, 0xff]);
-    } finally {
-      await sandbox.dispose();
-    }
+    const content = await sandbox.readBinaryFile({
+      path: '/workspace/blob.bin',
+    });
+
+    assert.ok(content);
+    assert.deepStrictEqual(Array.from(content), [0x89, 0x50, 0x00, 0xff]);
   });
 
   it('reports whether a path exists', async () => {
-    const sandbox = await createAppleContainerSandbox();
-    try {
-      await sandbox.writeTextFile({
-        path: '/workspace/present.txt',
-        content: 'x',
-      });
+    await using sandbox = await createAppleContainerSandbox();
 
-      assert.deepStrictEqual(
-        await sandbox.stat({ path: '/workspace/present.txt' }),
-        { type: 'file', size: 1 },
-      );
-      assert.strictEqual(
-        (await sandbox.stat({ path: '/workspace' }))?.type,
-        'directory',
-      );
-      assert.strictEqual(
-        await sandbox.stat({ path: '/workspace/missing.txt' }),
-        null,
-      );
-    } finally {
-      await sandbox.dispose();
-    }
+    await sandbox.writeTextFile({
+      path: '/workspace/present.txt',
+      content: 'x',
+    });
+
+    assert.deepStrictEqual(
+      await sandbox.stat({ path: '/workspace/present.txt' }),
+      { type: 'file', size: 1 },
+    );
+    assert.strictEqual(
+      (await sandbox.stat({ path: '/workspace' }))?.type,
+      'directory',
+    );
+    assert.strictEqual(
+      await sandbox.stat({ path: '/workspace/missing.txt' }),
+      null,
+    );
   });
 
   it('creates and removes a managed named volume', async () => {

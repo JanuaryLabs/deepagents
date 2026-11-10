@@ -225,7 +225,7 @@ class SharedControlledTurnQueue extends TurnQueue {
     } catch (error) {
       await consumer.options.onOrphaned(
         turn,
-        error instanceof Error ? error.message : String(error),
+        Error.isError(error) ? error.message : String(error),
       );
     } finally {
       this.#state.running.delete(key);

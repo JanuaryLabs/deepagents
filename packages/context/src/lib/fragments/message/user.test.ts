@@ -86,7 +86,7 @@ async function bakeUserReminders(
   const users = (await store.getMessages('bake')).filter(
     (m) => m.name === 'user',
   );
-  const data = users[users.length - 1]?.data;
+  const data = users.at(-1)?.data;
   assert.ok(isUIMessage(data), 'Expected a persisted user message');
   return data;
 }

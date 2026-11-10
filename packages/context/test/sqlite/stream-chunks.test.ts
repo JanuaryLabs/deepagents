@@ -2053,8 +2053,9 @@ describe('Stream Chunks', () => {
       const streamId = crypto.randomUUID();
       await streams.register(streamId);
 
-      const watcher = streams.monitorCancellation(streamId, () => {});
-      try {
+      {
+        await using watcher = streams.monitorCancellation(streamId, () => {});
+
         await settleWithin(
           changeSource.thirdAttempt.wait(),
           'watcher retries a repeatedly failing source',
@@ -2066,8 +2067,6 @@ describe('Stream Chunks', () => {
           3,
           'adaptive delay prevents a fixed-rate retry loop',
         );
-      } finally {
-        await watcher[Symbol.asyncDispose]();
       }
       const attemptsAtDisposal = changeSource.attemptTimes.length;
       await sleep(150);
@@ -2082,22 +2081,19 @@ describe('Stream Chunks', () => {
       const streamId = crypto.randomUUID();
       await streams.register(streamId);
 
-      const watcher = streams.monitorCancellation(streamId, () => {});
-      try {
-        await settleWithin(
-          changeSource.thirdAttempt.wait(),
-          'watcher reconnects after a source fails just after subscribing',
-          2_000,
-        );
-        await sleep(120);
-        assert.equal(
-          changeSource.attemptTimes.length,
-          3,
-          'an initial tick cannot reset reconnect backoff',
-        );
-      } finally {
-        await watcher[Symbol.asyncDispose]();
-      }
+      await using watcher = streams.monitorCancellation(streamId, () => {});
+
+      await settleWithin(
+        changeSource.thirdAttempt.wait(),
+        'watcher reconnects after a source fails just after subscribing',
+        2_000,
+      );
+      await sleep(120);
+      assert.equal(
+        changeSource.attemptTimes.length,
+        3,
+        'an initial tick cannot reset reconnect backoff',
+      );
     });
 
     it('should not fail persist when onCancelDetected throws', async (t) => {

@@ -62,10 +62,9 @@ async function bakeUserMessage(
   const users = (await store.getMessages('skills')).filter(
     (m) => m.name === 'user',
   );
-  return requireUIMessage(
-    users[users.length - 1].data,
-    'last stored user message',
-  );
+  const last = users.at(-1);
+  assert.ok(last);
+  return requireUIMessage(last.data, 'last stored user message');
 }
 
 function textOf(message: UIMessage): string {

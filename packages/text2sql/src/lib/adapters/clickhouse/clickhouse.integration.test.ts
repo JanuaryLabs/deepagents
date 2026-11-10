@@ -378,7 +378,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
         await assert.rejects(
           () => adapter.execute(sql),
           (error: unknown) =>
-            error instanceof Error && error.name === 'SQLScopeError',
+            Error.isError(error) && error.name === 'SQLScopeError',
         );
 
         assert.equal(validatorCalls, 0);
@@ -434,7 +434,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
         await assert.rejects(
           () => adapter.execute(sql),
           (error: unknown) =>
-            error instanceof Error && error.name === 'SQLReadOnlyError',
+            Error.isError(error) && error.name === 'SQLReadOnlyError',
         );
         assert.ok(!databaseQueries.includes(sql));
       } finally {
@@ -479,7 +479,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
         await assert.rejects(
           () => adapter.execute(sql),
           (error: unknown) =>
-            error instanceof Error && error.name === 'SQLScopeError',
+            Error.isError(error) && error.name === 'SQLScopeError',
         );
 
         assert.ok(typeof validation === 'string');

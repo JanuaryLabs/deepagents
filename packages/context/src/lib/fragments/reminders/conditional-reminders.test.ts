@@ -214,7 +214,8 @@ describe('ContextEngine conditional reminders', () => {
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
-    const lastMsg = messages[messages.length - 1];
+    const lastMsg = messages.at(-1);
+    assert.ok(lastMsg);
     const text = getTextParts(lastMsg).join('');
 
     assert.ok(
@@ -244,7 +245,8 @@ describe('ContextEngine conditional reminders', () => {
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
-    const lastMsg = messages[messages.length - 1];
+    const lastMsg = messages.at(-1);
+    assert.ok(lastMsg);
     const text = getTextParts(lastMsg).join('');
 
     assert.ok(
@@ -268,7 +270,8 @@ describe('ContextEngine conditional reminders', () => {
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
-    const lastMsg = messages[messages.length - 1];
+    const lastMsg = messages.at(-1);
+    assert.ok(lastMsg);
     const text = getTextParts(lastMsg).join('');
 
     assert.ok(
@@ -295,7 +298,8 @@ describe('ContextEngine conditional reminders', () => {
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
-    const lastMsg = messages[messages.length - 1];
+    const lastMsg = messages.at(-1);
+    assert.ok(lastMsg);
     const text = getTextParts(lastMsg).join('');
 
     assert.ok(
@@ -324,7 +328,8 @@ describe('ContextEngine conditional reminders', () => {
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
-    const lastMsg = messages[messages.length - 1];
+    const lastMsg = messages.at(-1);
+    assert.ok(lastMsg);
     const text = getTextParts(lastMsg).join('');
 
     assert.ok(
@@ -354,7 +359,8 @@ describe('ContextEngine conditional reminders', () => {
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
-    const lastMsg = messages[messages.length - 1];
+    const lastMsg = messages.at(-1);
+    assert.ok(lastMsg);
     const text = getTextParts(lastMsg).join('');
 
     assert.ok(
@@ -407,7 +413,8 @@ describe('ContextEngine conditional reminders', () => {
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
-    const lastMsg = messages[messages.length - 1];
+    const lastMsg = messages.at(-1);
+    assert.ok(lastMsg);
     const text = getTextParts(lastMsg).join('');
 
     assert.ok(
@@ -441,7 +448,8 @@ describe('ContextEngine conditional reminders', () => {
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
-    const lastMsg = messages[messages.length - 1];
+    const lastMsg = messages.at(-1);
+    assert.ok(lastMsg);
     const text = getTextParts(lastMsg).join('');
 
     assert.ok(
@@ -935,7 +943,9 @@ describe('ContextEngine conditional reminders', () => {
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
-    const text = getTextParts(messages[messages.length - 1]).join('');
+    const last = messages.at(-1);
+    assert.ok(last);
+    const text = getTextParts(last).join('');
     assert.ok(
       text.includes('async-fired'),
       `Async predicate returning true should inject reminder. Got: ${text}`,
@@ -965,7 +975,9 @@ describe('ContextEngine conditional reminders', () => {
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
-    const text = getTextParts(messages[messages.length - 1]).join('');
+    const last = messages.at(-1);
+    assert.ok(last);
+    const text = getTextParts(last).join('');
     assert.ok(
       !text.includes('async-skipped'),
       `Async predicate returning false should skip reminder. Got: ${text}`,
@@ -996,7 +1008,9 @@ describe('ContextEngine conditional reminders', () => {
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
-    const text = getTextParts(messages[messages.length - 1]).join('');
+    const last = messages.at(-1);
+    assert.ok(last);
+    const text = getTextParts(last).join('');
     assert.ok(
       text.includes('fetched-from-api'),
       `Async text callback should resolve and inject. Got: ${text}`,
@@ -1028,7 +1042,9 @@ describe('ContextEngine conditional reminders', () => {
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
-    const text = getTextParts(messages[messages.length - 1]).join('');
+    const last = messages.at(-1);
+    assert.ok(last);
+    const text = getTextParts(last).join('');
     assert.ok(
       text.includes('mixed-combo'),
       `and(sync, async) should fire when both true. Got: ${text}`,
@@ -1056,7 +1072,8 @@ describe('ContextEngine conditional reminders', () => {
         renderer: new XmlRenderer(),
         sandbox: await buildSandbox(),
       });
-      const lastMsg = messages[messages.length - 1];
+      const lastMsg = messages.at(-1);
+      assert.ok(lastMsg);
       const text = getTextParts(lastMsg).join('');
 
       assert.ok(
@@ -1084,7 +1101,8 @@ describe('ContextEngine conditional reminders', () => {
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
-    const lastMsg = messages[messages.length - 1];
+    const lastMsg = messages.at(-1);
+    assert.ok(lastMsg);
     const text = getTextParts(lastMsg).join('');
 
     assert.ok(
@@ -1117,7 +1135,8 @@ describe('ContextEngine conditional reminders', () => {
         renderer: new XmlRenderer(),
         sandbox: await buildSandbox(),
       });
-      const lastMsg = messages[messages.length - 1];
+      const lastMsg = messages.at(-1);
+      assert.ok(lastMsg);
       const text = getTextParts(lastMsg).join('');
 
       assert.ok(
@@ -1148,7 +1167,8 @@ describe('ContextEngine conditional reminders', () => {
         renderer: new XmlRenderer(),
         sandbox: await buildSandbox(),
       });
-      const lastMsg = messages[messages.length - 1];
+      const lastMsg = messages.at(-1);
+      assert.ok(lastMsg);
       const text = getTextParts(lastMsg).join('');
 
       assert.ok(

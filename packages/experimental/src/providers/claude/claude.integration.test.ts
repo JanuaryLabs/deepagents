@@ -9,7 +9,7 @@ import {
   tool,
 } from 'ai';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { hash } from 'node:crypto';
 import { readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type TestContext, test } from 'node:test';
@@ -448,7 +448,7 @@ test('macOS uses the configured home keychain first and falls back only when abs
         constructor(service: string, account: string) {
           assert.equal(
             service,
-            `Claude Code-credentials-${createHash('sha256').update(home.path.normalize('NFC')).digest('hex').slice(0, 8)}`,
+            `Claude Code-credentials-${hash('sha256', home.path.normalize('NFC')).slice(0, 8)}`,
           );
           assert.equal(account, process.env.USER);
         }
@@ -518,7 +518,7 @@ test('refresh failures preserve credentials and hide server response bodies', as
       maxRetries: 0,
     }),
     (error) => {
-      assert.ok(error instanceof Error);
+      assert.ok(Error.isError(error));
       assert.match(error.message, /Could not refresh/);
       assert.doesNotMatch(error.message, /sensitive-server-detail/);
       return true;

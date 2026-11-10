@@ -1069,7 +1069,7 @@ describe('tool-output reminders', () => {
             name: 'throwingTool',
             state: 'output-error',
             error: (error) =>
-              error instanceof Error && error.message === 'tool exploded',
+              Error.isError(error) && error.message === 'tool exploded',
             errorText: (text) => text === 'Error: tool exploded',
           }),
           target: 'tool-output',

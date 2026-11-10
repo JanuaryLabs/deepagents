@@ -136,7 +136,7 @@ describe('FragmentLoaderResolver — errors', () => {
       await walker.resolve([f], await ctx());
       assert.fail('expected reject');
     } catch (err) {
-      assert.ok(err instanceof Error);
+      assert.ok(Error.isError(err));
       assert.strictEqual(err.cause, original);
     }
   });

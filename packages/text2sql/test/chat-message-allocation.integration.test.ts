@@ -120,7 +120,8 @@ describe('Text2Sql client message allocation', () => {
 
       const transport: ChatTransport<UIMessage> = {
         sendMessages: async ({ messages }) => {
-          const last = messages[messages.length - 1];
+          const last = messages.at(-1);
+          assert.ok(last);
           await engine.continue(last);
           return createUIMessageStream({
             execute: async ({ writer }) => {
@@ -161,12 +162,11 @@ describe('Text2Sql client message allocation', () => {
         reconnectToStream: async () => null,
       };
 
-      let resolveFinished!: () => void;
-      let rejectFinished!: (err: unknown) => void;
-      const finished = new Promise<void>((resolve, reject) => {
-        resolveFinished = resolve;
-        rejectFinished = reject;
-      });
+      const {
+        promise: finished,
+        resolve: resolveFinished,
+        reject: rejectFinished,
+      } = Promise.withResolvers<void>();
 
       const chatClient = new Chat<UIMessage>({
         transport,

@@ -36,7 +36,7 @@ describe('Full-Text Search', () => {
         );
         assert.ok(error instanceof SearchQuerySyntaxError);
         assert.match(error.message, /not valid FTS5 syntax.*"well-known"/);
-        assert.ok(error.cause instanceof Error);
+        assert.ok(Error.isError(error.cause));
         assert.strictEqual(error.cause.message, cause);
         assert.ok('errcode' in error.cause);
         assert.strictEqual(error.cause.errcode, 1);
@@ -63,7 +63,7 @@ describe('Full-Text Search', () => {
           (rejection: unknown) => rejection,
         );
         assert.ok(error instanceof SearchQuerySyntaxError);
-        assert.ok(error.cause instanceof Error);
+        assert.ok(Error.isError(error.cause));
         assert.strictEqual(error.cause.message, cause);
         assert.ok('errcode' in error.cause);
         assert.strictEqual(error.cause.errcode, 1);
@@ -89,7 +89,7 @@ describe('Full-Text Search', () => {
         );
 
       assert.ok(!(error instanceof SearchQuerySyntaxError));
-      assert.ok(error instanceof Error);
+      assert.ok(Error.isError(error));
       assert.strictEqual(error.message, 'datatype mismatch');
       assert.ok('errcode' in error);
       assert.strictEqual(error.errcode, 20);

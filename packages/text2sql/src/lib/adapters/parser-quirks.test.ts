@@ -12,7 +12,7 @@ function probe(sql: string, dialect: string): Outcome {
     parser.astify(sql, { database: dialect });
     return { ok: true };
   } catch (err) {
-    const message = (err instanceof Error ? err.message : String(err))
+    const message = (Error.isError(err) ? err.message : String(err))
       .split('\n')[0]
       .trim();
     return { ok: false, message };

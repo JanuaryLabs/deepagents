@@ -118,7 +118,7 @@ describe('AdapterIndexer — error annotation', () => {
           broken: badAdapter,
         }),
       (error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = Error.isError(error) ? error.message : String(error);
         assert.match(message, /broken/);
         assert.match(message, /connection refused/);
         return true;

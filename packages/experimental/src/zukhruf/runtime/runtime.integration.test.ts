@@ -3055,7 +3055,7 @@ describe('zukhruf runtime — conversation status', () => {
           }
         }
       } catch (error) {
-        if (!(error instanceof Error && error.name === 'AbortError')) {
+        if (!(Error.isError(error) && error.name === 'AbortError')) {
           throw error;
         }
       }
@@ -3392,7 +3392,7 @@ describe('zukhruf runtime — cross-process conversation status', () => {
       try {
         for await (const event of subscription) void event;
       } catch (error) {
-        assert.ok(error instanceof Error);
+        assert.ok(Error.isError(error));
         assert.equal(error.name, 'AbortError');
       } finally {
         finished = true;
@@ -3455,7 +3455,7 @@ describe('zukhruf runtime — cross-process conversation status', () => {
           }
         }
       } catch (error) {
-        if (!(error instanceof Error && error.name === 'AbortError')) {
+        if (!(Error.isError(error) && error.name === 'AbortError')) {
           throw error;
         }
       }

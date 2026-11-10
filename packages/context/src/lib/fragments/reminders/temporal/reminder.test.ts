@@ -23,8 +23,8 @@ import { getTextParts } from '../../../text.ts';
 import { requireUIMessage } from '../../../ui-message-guards.ts';
 
 function getLastUserMessage(messages: UIMessage[]): UIMessage {
-  const lastUser = [...messages]
-    .reverse()
+  const lastUser = messages
+    .toReversed()
     .find((message) => message.role === 'user');
   assert.ok(lastUser, 'expected a user message');
   return lastUser;

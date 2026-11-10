@@ -264,7 +264,7 @@ it('does not retain bearer tokens in injected fetch failures', async () => {
   await assert.rejects(
     transport.query({ query: { kind: 'HogQLQuery', query: 'SELECT 1' } }),
     (error: unknown) => {
-      assert.ok(error instanceof Error);
+      assert.ok(Error.isError(error));
       assert.doesNotMatch(error.message, /secret-token/);
       assert.equal(error.cause, undefined);
       return true;
@@ -438,7 +438,7 @@ it('validates HogQL scope server-side and normalizes query rows', async () => {
   await assert.rejects(
     adapter.execute('SELECT * FROM secrets'),
     (error: unknown) => {
-      assert.ok(error instanceof Error);
+      assert.ok(Error.isError(error));
       assert.equal(error.name, 'SQLScopeError');
       const payload = scopeErrorPayload.parse(JSON.parse(error.message));
       assert.equal(payload.error_type, 'OUT_OF_SCOPE');

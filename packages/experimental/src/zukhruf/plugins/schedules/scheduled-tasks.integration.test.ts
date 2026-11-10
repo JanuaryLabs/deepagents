@@ -77,9 +77,9 @@ class TestExecutor {
   }): Promise<{ executionId: string }> {
     this.launches.push(input);
     await this.beforeLaunch?.();
-    let execution = [...this.executions.values()].find(
-      ({ runId }) => runId === input.runId,
-    );
+    let execution = this.executions
+      .values()
+      .find(({ runId }) => runId === input.runId);
     if (!execution) {
       execution = {
         id: `execution-${this.executions.size + 1}`,

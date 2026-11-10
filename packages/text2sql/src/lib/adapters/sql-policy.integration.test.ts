@@ -497,7 +497,7 @@ async function startBigQueryRuntime(): Promise<BigQueryRuntime | undefined> {
     }
     console.log(
       `Skipping BigQuery SQL policy tests: ${
-        error instanceof Error ? error.message : String(error)
+        Error.isError(error) ? error.message : String(error)
       }`,
     );
     return undefined;
@@ -808,7 +808,7 @@ for (const adapterCase of adapterCases) {
         () => adapter.execute(runtime.queries.outOfScopeSql),
         (error: unknown) => {
           const payload = parseScopePayload(
-            error instanceof Error ? error.message : String(error),
+            Error.isError(error) ? error.message : String(error),
           );
           assert.strictEqual(payload.error_type, 'OUT_OF_SCOPE');
           return true;
@@ -843,7 +843,7 @@ for (const adapterCase of adapterCases) {
         () => adapter.execute(runtime.queries.inScopeSql),
         (error: unknown) => {
           const payload = parseScopePayload(
-            error instanceof Error ? error.message : String(error),
+            Error.isError(error) ? error.message : String(error),
           );
           assert.strictEqual(payload.error_type, 'OUT_OF_SCOPE');
           return true;

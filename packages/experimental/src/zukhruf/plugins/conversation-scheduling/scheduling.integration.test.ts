@@ -149,11 +149,13 @@ class SchedulingTurnQueue extends ControlledTurnQueue {
   }
 
   #runningTurn(conversation: Pick<TurnRef, 'chatId' | 'userId'>) {
-    return [...this.#running.values()].find(
-      (turn) =>
-        turn.chatId === conversation.chatId &&
-        turn.userId === conversation.userId,
-    );
+    return this.#running
+      .values()
+      .find(
+        (turn) =>
+          turn.chatId === conversation.chatId &&
+          turn.userId === conversation.userId,
+      );
   }
 }
 
@@ -914,9 +916,9 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
 
   for (let occurrence = 1; occurrence <= 3; occurrence++) {
     await clock.tickAsync(10 * 60_000);
-    const due = [...scheduler.wakes.values()].find(
-      ({ runAt }) => runAt.getTime() <= clock.Date.now(),
-    );
+    const due = scheduler.wakes
+      .values()
+      .find(({ runAt }) => runAt.getTime() <= clock.Date.now());
     if (due) await scheduler.fire(due.id);
     assert.deepEqual(
       h.queue.turns.map((turn) =>
@@ -1492,11 +1494,13 @@ test('failed successor insertion leaves the current cron retryable', async () =>
   await scheduler.fire(first.id);
   assert.equal(h.queue.turns.length, 1);
   assert.ok(
-    [...scheduler.wakes.values()].some(
-      ({ data }) =>
-        data.definitionId === first.data.definitionId &&
-        data.generation === first.data.generation + 1,
-    ),
+    scheduler.wakes
+      .values()
+      .some(
+        ({ data }) =>
+          data.definitionId === first.data.definitionId &&
+          data.generation === first.data.generation + 1,
+      ),
     'the successful retry arms the successor',
   );
   await h.queue.runNext();
@@ -1551,11 +1555,13 @@ test('pg-boss can retry successor insertion through a prolonged outage', async (
   await scheduler.fire(first.id);
 
   assert.ok(
-    [...scheduler.wakes.values()].some(
-      ({ data }) =>
-        data.definitionId === first.data.definitionId &&
-        data.generation === first.data.generation + 1,
-    ),
+    scheduler.wakes
+      .values()
+      .some(
+        ({ data }) =>
+          data.definitionId === first.data.definitionId &&
+          data.generation === first.data.generation + 1,
+      ),
     'the successful retry should persist the successor receipt',
   );
 });
@@ -1614,20 +1620,20 @@ test('ScheduleWakeup replacement and stop leave cron definitions active', async 
   void _worker;
 
   await runTurn(runtime, h.queue, conversation, 'create fixed');
-  const cronWake = [...scheduler.wakes.values()].find(
-    ({ data }) => data.kind === 'cron',
-  );
+  const cronWake = scheduler.wakes
+    .values()
+    .find(({ data }) => data.kind === 'cron');
   assert.ok(cronWake);
   const cronWakeId = cronWake.id;
   await runTurn(runtime, h.queue, conversation, 'schedule first');
-  const firstDynamic = [...scheduler.wakes.values()].find(
-    ({ data }) => data.kind === 'dynamic',
-  );
+  const firstDynamic = scheduler.wakes
+    .values()
+    .find(({ data }) => data.kind === 'dynamic');
   assert.ok(firstDynamic);
   await runTurn(runtime, h.queue, conversation, 'schedule replacement');
-  const replacement = [...scheduler.wakes.values()].find(
-    ({ data }) => data.kind === 'dynamic',
-  );
+  const replacement = scheduler.wakes
+    .values()
+    .find(({ data }) => data.kind === 'dynamic');
   assert.ok(replacement);
   assert.notEqual(replacement.id, firstDynamic.id);
   assert.equal(replacement.runAt.getTime() - replacement.data.scheduledFor, 0);
