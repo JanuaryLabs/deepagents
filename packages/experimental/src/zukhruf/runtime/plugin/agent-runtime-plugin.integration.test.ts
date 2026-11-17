@@ -1,4 +1,4 @@
-import { TemporaryFiles } from '@zukhruf/testing/fs';
+import { TemporaryFiles } from '@zukhruf/fs';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';

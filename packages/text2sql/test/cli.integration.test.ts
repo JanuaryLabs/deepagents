@@ -1,4 +1,4 @@
-import { TemporaryFiles } from '@zukhruf/testing/fs';
+import { TemporaryFiles } from '@zukhruf/fs';
 import { Sqlite as TestSqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';

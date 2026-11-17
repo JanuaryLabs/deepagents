@@ -42,9 +42,9 @@
   "dependencies": {
     "@ai-sdk/tool-web-fetch": "^1.0.16",
     "@langchain/textsplitters": "^1.0.1",
-    "@zukhruf/sqlite-drift": "^0.8.13",
-    "@zukhruf/sqlite-open": "^0.8.13",
-    "@zukhruf/sqlite-transaction": "^0.8.13",
+    "@zukhruf/sqlite-drift": "^0.8.22",
+    "@zukhruf/sqlite-open": "^0.8.22",
+    "@zukhruf/sqlite-transaction": "^0.8.22",
     "execa": "^10.0.0",
     "@linear/sdk": "^88.2.0",
     "fast-glob": "^3.3.3",
@@ -59,6 +59,7 @@
     "@langchain/core": "^1.2.3"
   },
   "devDependencies": {
-    "@sinonjs/fake-timers": "^15.4.0"
+    "@sinonjs/fake-timers": "^15.4.0",
+    "@zukhruf/fs": "^0.8.22"
   }
 }

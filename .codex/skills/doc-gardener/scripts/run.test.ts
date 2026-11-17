@@ -1,13 +1,7 @@
+import { TemporaryFiles } from '@zukhruf/fs';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
@@ -26,10 +20,9 @@ async function run(
 }
 
 async function initRepo(
+  root: string,
   structure: (repoRoot: string) => void,
 ): Promise<{ root: string; baseSha: string }> {
-  const root = mkdtempSync(path.join(tmpdir(), 'doc-gardener-'));
-
   mkdirSync(path.join(root, 'apps', 'docs', 'app', 'docs', 'agent'), {
     recursive: true,
   });
@@ -51,7 +44,8 @@ async function initRepo(
 }
 
 test('on-demand run detects API drift on changed package', async () => {
-  const { root, baseSha } = await initRepo((repoRoot) => {
+  await using folder = await new TemporaryFiles().directory('doc-gardener-');
+  const { root, baseSha } = await initRepo(folder.path, (repoRoot) => {
     writeFileSync(
       path.join(repoRoot, 'packages', 'agent', 'src', 'index.ts'),
       'export function knownExport() { return 1; }\n',
@@ -105,7 +99,8 @@ test('on-demand run detects API drift on changed package', async () => {
 });
 
 test('scheduled run with clean docs can produce no-op success', async () => {
-  const { root } = await initRepo((repoRoot) => {
+  await using folder = await new TemporaryFiles().directory('doc-gardener-');
+  const { root } = await initRepo(folder.path, (repoRoot) => {
     writeFileSync(
       path.join(repoRoot, 'packages', 'agent', 'src', 'index.ts'),
       'export function knownExport() { return 1; }\n',
@@ -142,7 +137,8 @@ test('scheduled run with clean docs can produce no-op success', async () => {
 });
 
 test('scheduled run emits batch PR summary for multiple findings', async () => {
-  const { root } = await initRepo((repoRoot) => {
+  await using folder = await new TemporaryFiles().directory('doc-gardener-');
+  const { root } = await initRepo(folder.path, (repoRoot) => {
     writeFileSync(
       path.join(repoRoot, 'packages', 'agent', 'src', 'index.ts'),
       'export function knownExport() { return 1; }\nexport function missingExport() { return 1; }\n',
@@ -186,7 +182,8 @@ test('scheduled run emits batch PR summary for multiple findings', async () => {
 });
 
 test('autofix corrects meta drift and broken links', async () => {
-  const { root } = await initRepo((repoRoot) => {
+  await using folder = await new TemporaryFiles().directory('doc-gardener-');
+  const { root } = await initRepo(folder.path, (repoRoot) => {
     writeFileSync(
       path.join(repoRoot, 'packages', 'agent', 'src', 'index.ts'),
       'export function knownExport() { return 1; }\n',
@@ -246,7 +243,8 @@ test('autofix corrects meta drift and broken links', async () => {
 });
 
 test('autofix preserves sectioned meta ordering and directory pages', async () => {
-  const { root } = await initRepo((repoRoot) => {
+  await using folder = await new TemporaryFiles().directory('doc-gardener-');
+  const { root } = await initRepo(folder.path, (repoRoot) => {
     mkdirSync(
       path.join(repoRoot, 'apps', 'docs', 'app', 'docs', 'agent', 'recipes'),
       { recursive: true },

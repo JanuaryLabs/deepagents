@@ -4,8 +4,8 @@ import type {
 } from '@ai-sdk/provider';
 import { createClock } from '@sinonjs/fake-timers';
 import { Latch } from '@zukhruf/async';
+import { TemporaryFiles } from '@zukhruf/fs';
 import { open } from '@zukhruf/sqlite-open';
-import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { type UIMessage, isToolUIPart, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';

@@ -33,6 +33,7 @@ import type {
   EngineSpawnOptions,
   ImageBuildSpec,
   RunResult,
+  SandboxBindVolume,
   SandboxNamedVolume,
   SandboxResources,
   SandboxVolume,
@@ -1046,13 +1047,13 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
     }
     if (error instanceof BindSourceNotFoundError) {
       const volume = volumes.find(
-        (candidate) =>
+        (candidate): candidate is SandboxBindVolume =>
           candidate.type === 'bind' &&
           isBindSource(error.source, candidate.hostPath),
       );
       if (volume) {
         return new VolumePathError(
-          error.source,
+          volume.hostPath,
           volume.containerPath,
           'hostPath does not exist on host',
         );

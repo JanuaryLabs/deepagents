@@ -1,12 +1,12 @@
 import type { Experimental_SandboxFileStat } from '@ai-sdk/provider-utils';
+import { TemporaryFiles } from '@zukhruf/fs';
 import spawn, { SubprocessError } from 'nano-spawn';
 import {
   type ChildProcessWithoutNullStreams,
   spawn as childSpawn,
 } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import z from 'zod';
@@ -528,17 +528,23 @@ export const appleEngine: ContainerEngine<AppleContainerCommonOptions> & {
     // written to a fresh temp dir that doubles as a minimal build context
     // (a real directory — `container build` rejects the `/tmp` symlink).
     if (spec.dockerfile.includes('\n')) {
-      const tempDir = await mkdtemp(join(tmpdir(), 'sandbox-containerfile-'));
-      const dockerfilePath = join(tempDir, 'Dockerfile');
+      await using tempDir = await new TemporaryFiles().directory(
+        'sandbox-containerfile-',
+      );
+      const dockerfilePath = join(tempDir.path, 'Dockerfile');
       await writeFile(dockerfilePath, spec.dockerfile);
-      try {
-        await runAppleBuild(
-          ['build', ...archFlag, '-t', spec.tag, '-f', dockerfilePath, tempDir],
-          spec.showBuildLogs,
-        );
-      } finally {
-        await rm(tempDir, { recursive: true, force: true });
-      }
+      await runAppleBuild(
+        [
+          'build',
+          ...archFlag,
+          '-t',
+          spec.tag,
+          '-f',
+          dockerfilePath,
+          tempDir.path,
+        ],
+        spec.showBuildLogs,
+      );
       return;
     }
     await runAppleBuild(

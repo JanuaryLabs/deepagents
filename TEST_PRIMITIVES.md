@@ -8,21 +8,21 @@ import path, documented in the package README. Repeated fixture data,
 product-specific harnesses, and infrastructure compositions stay with their
 tests.
 
-| Need                     | Use                                                                 | Important behavior                                                                                                 |
-| ------------------------ | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Strict assertions        | `node:assert/strict`                                                | Makes methods such as `equal` and `deepEqual` strict by default.                                                   |
-| Delay                    | `setTimeout` from `node:timers/promises`                            | Alias it to `sleep`; it supports `AbortSignal` and avoids hand-written promises.                                   |
-| Retry an observation     | `TestContext.waitFor` from `node:test`                              | The callback must throw or reject while waiting. Returning `false` counts as success.                              |
-| Measure a deadline       | `performance.now()`                                                 | Monotonic elapsed time; do not use it as a timestamp or compare it across processes.                               |
-| Temporary directory      | `new TemporaryFiles().directory(prefix)` from `@zukhruf/testing/fs` | Use with `await using`; cleanup removes the directory and its contents, with retries for a file that is held open. |
-| Resource cleanup         | `using` / `await using`                                             | Calls `Symbol.dispose` / `Symbol.asyncDispose` in reverse declaration order, including after errors.               |
-| Deferred promise         | `Promise.withResolvers()`                                           | Provides `{ promise, resolve, reject }` without capturing callbacks in a promise constructor.                      |
-| Disposable timeout       | `using timer = globalThis.setTimeout(...)`                          | Node timers implement `Symbol.dispose`, which cancels the timer when its scope exits.                              |
-| Wait for one event       | `once` from `node:events`                                           | Register before triggering the event; it resolves with the emitted arguments.                                      |
-| Current module directory | `import.meta.dirname`                                               | Replaces `fileURLToPath(import.meta.url)` plus `dirname` in Node ESM files.                                        |
-| Current Node executable  | `process.execPath`                                                  | Use when spawning another Node process instead of assuming `node` is on `PATH`.                                    |
-| Non-mutating sort        | `Array.prototype.toSorted()`                                        | Returns a shallow sorted copy; provide `(a, b) => a - b` for numbers.                                              |
-| Bound promise settlement | `settleWithin` from `@zukhruf/testing/async`                        | Rejects if a non-abortable promise does not settle in time; it does not cancel the underlying operation.           |
+| Need                     | Use                                                         | Important behavior                                                                                                 |
+| ------------------------ | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Strict assertions        | `node:assert/strict`                                        | Makes methods such as `equal` and `deepEqual` strict by default.                                                   |
+| Delay                    | `setTimeout` from `node:timers/promises`                    | Alias it to `sleep`; it supports `AbortSignal` and avoids hand-written promises.                                   |
+| Retry an observation     | `TestContext.waitFor` from `node:test`                      | The callback must throw or reject while waiting. Returning `false` counts as success.                              |
+| Measure a deadline       | `performance.now()`                                         | Monotonic elapsed time; do not use it as a timestamp or compare it across processes.                               |
+| Temporary directory      | `new TemporaryFiles().directory(prefix)` from `@zukhruf/fs` | Use with `await using`; cleanup removes the directory and its contents, with retries for a file that is held open. |
+| Resource cleanup         | `using` / `await using`                                     | Calls `Symbol.dispose` / `Symbol.asyncDispose` in reverse declaration order, including after errors.               |
+| Deferred promise         | `Promise.withResolvers()`                                   | Provides `{ promise, resolve, reject }` without capturing callbacks in a promise constructor.                      |
+| Disposable timeout       | `using timer = globalThis.setTimeout(...)`                  | Node timers implement `Symbol.dispose`, which cancels the timer when its scope exits.                              |
+| Wait for one event       | `once` from `node:events`                                   | Register before triggering the event; it resolves with the emitted arguments.                                      |
+| Current module directory | `import.meta.dirname`                                       | Replaces `fileURLToPath(import.meta.url)` plus `dirname` in Node ESM files.                                        |
+| Current Node executable  | `process.execPath`                                          | Use when spawning another Node process instead of assuming `node` is on `PATH`.                                    |
+| Non-mutating sort        | `Array.prototype.toSorted()`                                | Returns a shallow sorted copy; provide `(a, b) => a - b` for numbers.                                              |
+| Bound promise settlement | `settleWithin` from `@zukhruf/testing/async`                | Rejects if a non-abortable promise does not settle in time; it does not cancel the underlying operation.           |
 
 ## Established patterns
 

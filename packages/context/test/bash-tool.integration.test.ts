@@ -1,6 +1,6 @@
 import type { LanguageModelV4Prompt } from '@ai-sdk/provider';
 import type { ToolResultOutput } from '@ai-sdk/provider-utils';
-import { TemporaryFiles } from '@zukhruf/testing/fs';
+import { TemporaryFiles } from '@zukhruf/fs';
 import { asSchema, generateText, isStepCount } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs, MountableFs, OverlayFs } from 'just-bash';

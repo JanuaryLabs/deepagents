@@ -1,6 +1,6 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { createClock } from '@sinonjs/fake-timers';
-import { TemporaryFiles } from '@zukhruf/testing/fs';
+import { TemporaryFiles } from '@zukhruf/fs';
 import { type UIMessage, generateId, simulateReadableStream, tool } from 'ai';
 import {
   MockLanguageModelV4,

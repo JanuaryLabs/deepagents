@@ -1,4 +1,4 @@
-import { TemporaryFiles } from '@zukhruf/testing/fs';
+import { TemporaryFiles } from '@zukhruf/fs';
 import assert from 'node:assert';
 import path from 'node:path';
 import { describe, it } from 'node:test';

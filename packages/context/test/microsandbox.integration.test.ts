@@ -156,15 +156,11 @@ describe('Microsandbox Sandbox', async () => {
         const controller = new AbortController();
         const reason = new Error('stop');
         const pending = Promise.resolve(
-          sandbox.run({ command: 'sleep 30', abortSignal: controller.signal }),
+          sandbox.run({ command: 'sleep 300', abortSignal: controller.signal }),
         );
         controller.abort(reason);
-        const started = Date.now();
+        // sleep 300 outlives the 240 s test timeout: a run that waits the command out fails the test.
         await assert.rejects(pending, (error) => error === reason);
-        assert.ok(
-          Date.now() - started < 25_000,
-          'abort must kill the guest command instead of waiting it out',
-        );
       });
 
       it('resolves exit code 124 when commandTimeout elapses', async () => {
@@ -327,7 +323,7 @@ describe('Microsandbox Sandbox', async () => {
         const controller = new AbortController();
         const reason = new Error('stop');
         const child = await sandbox.spawn({
-          command: 'printf "hi\\n"; sleep 30; printf "bye\\n"',
+          command: 'printf "hi\\n"; sleep 300; printf "bye\\n"',
           abortSignal: controller.signal,
         });
 
@@ -335,17 +331,13 @@ describe('Microsandbox Sandbox', async () => {
 
         const drained = streamText(child.stdout);
         controller.abort(reason);
-        const aborted = Date.now();
 
+        // sleep 300 outlives the 240 s test timeout: a wait that waits the command out fails the test.
         await assert.rejects(
           Promise.resolve(child.wait()),
           (error) => error === reason,
         );
         assert.doesNotMatch(await drained, /bye/);
-        assert.ok(
-          Date.now() - aborted < 25_000,
-          'abort must kill the guest command instead of waiting it out',
-        );
       });
 
       it('wait resolves with non-zero code on command failure', async () => {

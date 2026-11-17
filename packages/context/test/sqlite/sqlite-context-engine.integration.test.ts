@@ -1,6 +1,6 @@
+import { TemporaryFiles } from '@zukhruf/fs';
 import { open } from '@zukhruf/sqlite-open';
 import { settleWithin } from '@zukhruf/testing/async';
-import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import { validateUIMessages } from 'ai';
 import assert from 'node:assert';

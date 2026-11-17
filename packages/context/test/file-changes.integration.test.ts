@@ -1,6 +1,6 @@
 import type { LanguageModelV4Prompt } from '@ai-sdk/provider';
+import { TemporaryFiles } from '@zukhruf/fs';
 import { DockerTestbed } from '@zukhruf/testing/docker';
-import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { generateText, isStepCount } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { build } from 'esbuild';
@@ -25,7 +25,7 @@ import { dockerSandboxDefaults } from './helpers/docker-sandbox-defaults.ts';
 const temporaryFiles = new TemporaryFiles();
 
 const testbed = new DockerTestbed({ environment: process.env });
-const defaults = dockerSandboxDefaults(testbed.defaults);
+const defaults = dockerSandboxDefaults(await testbed.defaults());
 
 // Native-arch image with strace + python3 baked in. ContainerfileStrategy
 // content-hash-caches the build, so the apt install runs once per machine.

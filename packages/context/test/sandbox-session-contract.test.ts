@@ -21,7 +21,7 @@ import {
 import { dockerSandboxDefaults } from './helpers/docker-sandbox-defaults.ts';
 
 const testbed = new DockerTestbed({ environment: process.env });
-const dockerDefaults = dockerSandboxDefaults(testbed.defaults);
+const dockerDefaults = dockerSandboxDefaults(await testbed.defaults());
 
 interface Backend {
   name: string;

@@ -29,8 +29,9 @@ describe('SQL Server ContextStore Integration', () => {
         pool: container.connectionString,
       });
       try {
-        // Lower bound tolerant of host (Date.now) vs DB-container clock skew.
-        const beforeCreate = Date.now() - 1000;
+        const beforeCreate = Date.now();
+        // Tolerates host (Date.now) vs DB-container clock skew.
+        const clockSkewMs = 1000;
 
         await store.createChat({
           id: 'chat-create-1',
@@ -46,8 +47,8 @@ describe('SQL Server ContextStore Integration', () => {
         assert.strictEqual(chat.userId, 'user-1');
         assert.strictEqual(chat.title, 'Test Chat');
         assert.deepStrictEqual(chat.metadata, { key: 'value' });
-        assert.ok(chat.createdAt >= beforeCreate);
-        assert.ok(chat.updatedAt >= beforeCreate);
+        assert.ok(chat.createdAt + clockSkewMs >= beforeCreate);
+        assert.ok(chat.updatedAt + clockSkewMs >= beforeCreate);
       } finally {
         await store.close();
       }

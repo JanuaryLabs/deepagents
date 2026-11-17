@@ -1,5 +1,5 @@
+import { TemporaryFiles } from '@zukhruf/fs';
 import { open } from '@zukhruf/sqlite-open';
-import { TemporaryFiles } from '@zukhruf/testing/fs';
 import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';

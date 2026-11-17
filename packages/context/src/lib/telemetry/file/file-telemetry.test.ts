@@ -1,6 +1,6 @@
 import { createClock } from '@sinonjs/fake-timers';
+import { TemporaryFiles } from '@zukhruf/fs';
 import { settleWithin } from '@zukhruf/testing/async';
-import { TemporaryFiles } from '@zukhruf/testing/fs';
 import {
   type Telemetry,
   embed,

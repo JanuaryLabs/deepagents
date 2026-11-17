@@ -1,5 +1,5 @@
 import type { LanguageModelV4FunctionTool } from '@ai-sdk/provider';
-import { TemporaryFiles } from '@zukhruf/testing/fs';
+import { TemporaryFiles } from '@zukhruf/fs';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';

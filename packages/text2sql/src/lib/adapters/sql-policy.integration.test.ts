@@ -1,7 +1,7 @@
 /** Live adapter contract tests for SQL policy enforcement. */
 import type { Dataset } from '@google-cloud/bigquery';
+import { TemporaryFiles } from '@zukhruf/fs';
 import { BigQuery as TestBigQuery } from '@zukhruf/testing/bigquery';
-import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { type MysqlDatabase, Mysql as TestMysql } from '@zukhruf/testing/mysql';
 import { Postgres as TestPostgres } from '@zukhruf/testing/postgres';
 import { Sqlite as TestSqlite } from '@zukhruf/testing/sqlite';

@@ -1,7 +1,6 @@
+import { TemporaryFiles } from '@zukhruf/fs';
 import { Image } from 'microsandbox';
 import spawn from 'nano-spawn';
-import { mkdtempDisposable } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { demoImage } from './image.ts';
@@ -29,8 +28,8 @@ async function run(command: string, args: string[]): Promise<void> {
   await subprocess;
 }
 
-await using archiveDirectory = await mkdtempDisposable(
-  join(tmpdir(), 'deepagents-msb-image-'),
+await using archiveDirectory = await new TemporaryFiles().directory(
+  'deepagents-msb-image-',
 );
 const archive = join(archiveDirectory.path, 'image.tar');
 

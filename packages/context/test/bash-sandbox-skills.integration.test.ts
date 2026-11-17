@@ -1,4 +1,4 @@
-import { TemporaryFiles } from '@zukhruf/testing/fs';
+import { TemporaryFiles } from '@zukhruf/fs';
 import { InMemoryFs, MountableFs, OverlayFs, ReadWriteFs } from 'just-bash';
 import assert from 'node:assert';
 import * as fs from 'node:fs/promises';

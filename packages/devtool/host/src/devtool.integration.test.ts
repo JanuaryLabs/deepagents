@@ -5,7 +5,7 @@ import {
   ATTR_SESSION_ID,
   ATTR_USER_ID,
 } from '@opentelemetry/semantic-conventions/incubating';
-import { TemporaryFiles } from '@zukhruf/testing/fs';
+import { TemporaryFiles } from '@zukhruf/fs';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
 import { InMemoryFs } from 'just-bash';

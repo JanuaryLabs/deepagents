@@ -1,5 +1,5 @@
+import { TemporaryFiles } from '@zukhruf/fs';
 import { DockerTestbed } from '@zukhruf/testing/docker';
-import { TemporaryFiles } from '@zukhruf/testing/fs';
 import assert from 'node:assert';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
@@ -34,7 +34,7 @@ import { dockerSandboxDefaults } from './helpers/docker-sandbox-defaults.ts';
 const temporaryFiles = new TemporaryFiles();
 
 const testbed = new DockerTestbed({ environment: process.env });
-const defaults = dockerSandboxDefaults(testbed.defaults);
+const defaults = dockerSandboxDefaults(await testbed.defaults());
 
 function testVolumeName(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -967,7 +967,9 @@ describe('Docker Sandbox', () => {
           container.Config?.Labels?.['com.example.role'],
           'sandbox-test',
         );
-        for (const [key, value] of Object.entries(testbed.defaults.Labels)) {
+        for (const [key, value] of Object.entries(
+          (await testbed.defaults()).Labels,
+        )) {
           assert.strictEqual(container.Config?.Labels?.[key], value);
         }
         assert.strictEqual(container.HostConfig?.Memory, 1024 ** 3);

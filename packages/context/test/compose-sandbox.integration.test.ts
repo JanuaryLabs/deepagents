@@ -1,5 +1,5 @@
+import { TemporaryFiles } from '@zukhruf/fs';
 import { DockerTestbed } from '@zukhruf/testing/docker';
-import { TemporaryFiles } from '@zukhruf/testing/fs';
 import assert from 'node:assert/strict';
 import { hash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
@@ -19,7 +19,7 @@ it('Compose uses the existing YAML-derived project name for execution and dispos
       app: {
         image: 'bash:5.3-alpine3.24',
         command: ['tail', '-f', '/dev/null'],
-        labels: testbed.defaults.Labels,
+        labels: (await testbed.defaults()).Labels,
       },
     },
   });

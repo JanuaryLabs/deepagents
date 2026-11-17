@@ -1,4 +1,4 @@
-import { TemporaryFiles } from '@zukhruf/testing/fs';
+import { TemporaryFiles } from '@zukhruf/fs';
 import { Sqlite as TestSqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert';
 import { readdir, writeFile } from 'node:fs/promises';

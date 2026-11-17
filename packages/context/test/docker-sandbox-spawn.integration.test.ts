@@ -20,7 +20,7 @@ import { dockerSandboxDefaults } from './helpers/docker-sandbox-defaults.ts';
 import { textResult, toolCallResult } from './helpers/stream-results.ts';
 
 const testbed = new DockerTestbed({ environment: process.env });
-const defaults = dockerSandboxDefaults(testbed.defaults);
+const defaults = dockerSandboxDefaults(await testbed.defaults());
 
 function userMessage(text: string): UIMessage {
   return { id: generateId(), role: 'user', parts: [{ type: 'text', text }] };

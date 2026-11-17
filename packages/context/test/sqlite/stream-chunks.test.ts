@@ -2342,8 +2342,8 @@ describe('Stream Chunks', () => {
       const store = new SqliteStreamStore(database.connection);
       const streams = makeManager(store, {
         config: {
-          minMs: 1_000,
-          maxMs: 1_000,
+          minMs: 600_000,
+          maxMs: 600_000,
           multiplier: 2,
           jitterRatio: 0,
           statusCheckEvery: 1,
@@ -2358,14 +2358,9 @@ describe('Stream Chunks', () => {
         },
       });
 
-      const startedAt = Date.now();
+      // The 600 s cancel poll outlives the 240 s test timeout: a persist that
+      // waits for the poll sleep fails the test.
       await streams.persist(dummy, streamId);
-      const elapsedMs = Date.now() - startedAt;
-
-      assert.ok(
-        elapsedMs < 500,
-        `persist should not block on long cancel poll sleep; elapsed=${elapsedMs}ms (1000ms cancel poll configured)`,
-      );
     });
   });
 

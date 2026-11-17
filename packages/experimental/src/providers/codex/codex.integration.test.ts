@@ -1,8 +1,8 @@
 import { NoSuchModelError } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
+import { TemporaryFiles } from '@zukhruf/fs';
 import { open } from '@zukhruf/sqlite-open';
 import { settleWithin } from '@zukhruf/testing/async';
-import { TemporaryFiles } from '@zukhruf/testing/fs';
 import {
   createProviderRegistry,
   defaultSettingsMiddleware,

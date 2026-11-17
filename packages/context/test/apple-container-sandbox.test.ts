@@ -1,4 +1,4 @@
-import { TemporaryFiles } from '@zukhruf/testing/fs';
+import { TemporaryFiles } from '@zukhruf/fs';
 import spawn from 'nano-spawn';
 import assert from 'node:assert';
 import { writeFile } from 'node:fs/promises';

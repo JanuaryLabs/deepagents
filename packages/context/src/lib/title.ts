@@ -44,7 +44,7 @@ export class TitleGenerator {
     if (!msg) return null;
     try {
       const title = await this.#generateTitle(msg, options);
-      return this.#applyTitle(title, 'llm');
+      return await this.#applyTitle(title, 'llm');
     } catch (error) {
       console.warn(
         'TitleGenerator: LLM title generation failed, falling back to static.',

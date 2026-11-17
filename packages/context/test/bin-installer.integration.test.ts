@@ -14,7 +14,7 @@ import {
 import { dockerSandboxDefaults } from './helpers/docker-sandbox-defaults.ts';
 
 const testbed = new DockerTestbed({ environment: process.env });
-const defaults = dockerSandboxDefaults(testbed.defaults);
+const defaults = dockerSandboxDefaults(await testbed.defaults());
 
 /** Seeds an executable `bin/hello.js` that prints `linked`. */
 async function seedHelloBinary(fixture: DockerDirectory): Promise<void> {

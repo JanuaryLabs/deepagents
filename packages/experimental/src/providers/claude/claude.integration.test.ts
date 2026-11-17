@@ -1,6 +1,6 @@
 import { NoSuchModelError } from '@ai-sdk/provider';
+import { TemporaryFiles } from '@zukhruf/fs';
 import { settleWithin } from '@zukhruf/testing/async';
-import { TemporaryFiles } from '@zukhruf/testing/fs';
 import {
   createProviderRegistry,
   generateText,

@@ -8,7 +8,7 @@ import type { DockerTestbed } from '@zukhruf/testing/docker';
 export function dockerSandboxDefaults({
   Labels,
   HostConfig,
-}: DockerTestbed['defaults']) {
+}: Awaited<ReturnType<DockerTestbed['defaults']>>) {
   return {
     labels: Labels,
     resources: {

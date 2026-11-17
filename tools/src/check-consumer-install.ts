@@ -1,6 +1,6 @@
+import { TemporaryFiles } from '@zukhruf/fs';
 import { execFileSync } from 'node:child_process';
-import { mkdtempDisposable, readFile, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 interface Lockfile {
@@ -17,8 +17,8 @@ const publicProjects: string[] = JSON.parse(
   ),
 );
 
-await using consumer = await mkdtempDisposable(
-  join(tmpdir(), 'deepagents-consumer-'),
+await using consumer = await new TemporaryFiles().directory(
+  'deepagents-consumer-',
 );
 
 const packedPackages: Record<string, { filename: string }> = JSON.parse(
