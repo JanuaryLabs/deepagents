@@ -2,8 +2,7 @@ import { TemporaryFiles } from '@zukhruf/fs';
 import { DockerTestbed } from '@zukhruf/testing/docker';
 import assert from 'node:assert';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
 import { text } from 'node:stream/consumers';
 import { describe, it } from 'node:test';
@@ -1826,34 +1825,29 @@ await createDockerSandbox({ ...options, dockerfile }).then(
       });
 
       it('throws VolumePathError for bind host paths containing commas', async () => {
-        const tempDir = join(tmpdir(), `docker-sandbox-comma,${Date.now()}`);
-        await mkdir(tempDir, { recursive: true });
+        await using dir = await temporaryFiles.directory(
+          'docker-sandbox-comma,',
+        );
+        const tempDir = dir.path;
 
-        try {
-          await assert.rejects(
-            createDockerSandbox({
-              ...defaults,
-              volumes: [
-                {
-                  type: 'bind',
-                  hostPath: tempDir,
-                  containerPath: '/app',
-                },
-              ],
-            }),
-            (err: Error) => {
-              assert.ok(err instanceof VolumePathError);
-              assert.strictEqual(err.source, tempDir);
-              assert.strictEqual(
-                err.reason,
-                'hostPath must not contain commas',
-              );
-              return true;
-            },
-          );
-        } finally {
-          await rm(tempDir, { recursive: true, force: true });
-        }
+        await assert.rejects(
+          createDockerSandbox({
+            ...defaults,
+            volumes: [
+              {
+                type: 'bind',
+                hostPath: tempDir,
+                containerPath: '/app',
+              },
+            ],
+          }),
+          (err: Error) => {
+            assert.ok(err instanceof VolumePathError);
+            assert.strictEqual(err.source, tempDir);
+            assert.strictEqual(err.reason, 'hostPath must not contain commas');
+            return true;
+          },
+        );
       });
 
       it('throws VolumePathError for container paths containing commas', async () => {

@@ -1,4 +1,4 @@
-import type { Clock } from '@zukhruf/async';
+import { type Clock, Lock } from '@zukhruf/async';
 import { durableWrite } from '@zukhruf/fs';
 import { hash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -59,7 +59,7 @@ export class Checkpoint {
   private path: string;
   private configHash: string | undefined;
   readonly #clock: Clock;
-  readonly #writes = pLimit(1);
+  readonly #writes = new Lock();
   #changes = 0;
   #writtenChanges = 0;
 
@@ -197,18 +197,21 @@ export class Checkpoint {
    */
   private save(): Promise<void> {
     this.#changes += 1;
-    return this.#writes(async () => {
-      const changes = this.#changes;
-      if (changes === this.#writtenChanges) return;
-      const file: CheckpointFile = {
-        configHash: this.configHash,
-        points: this.points,
-      };
-      await durableWrite(this.path, JSON.stringify(file, null, 2), {
-        clock: this.#clock,
-      });
-      this.#writtenChanges = changes;
-    });
+    return this.#writes.run(
+      async () => {
+        const changes = this.#changes;
+        if (changes === this.#writtenChanges) return;
+        const file: CheckpointFile = {
+          configHash: this.configHash,
+          points: this.points,
+        };
+        await durableWrite(this.path, JSON.stringify(file, null, 2), {
+          clock: this.#clock,
+        });
+        this.#writtenChanges = changes;
+      },
+      { signal: undefined },
+    );
   }
 }
 

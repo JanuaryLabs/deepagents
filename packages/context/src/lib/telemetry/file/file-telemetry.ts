@@ -1,3 +1,4 @@
+import { Lock } from '@zukhruf/async';
 import type { Telemetry } from 'ai';
 import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
@@ -31,7 +32,7 @@ export function createFileTelemetry(
     () => undefined,
     reportWriteError,
   );
-  let queue: Promise<void> = initialize;
+  const writes = new Lock();
 
   const write = (
     _level: 'log' | 'error',
@@ -44,11 +45,15 @@ export function createFileTelemetry(
       data,
     );
     const line = `${stringifyTelemetryLogRecord(record)}\n`;
-    const pendingWrite = queue.then(async () => {
-      await appendFile(path, line);
-    });
-    queue = pendingWrite.catch(() => {});
-    return pendingWrite.catch(reportWriteError);
+    return writes
+      .run(
+        async () => {
+          await initialize;
+          await appendFile(path, line);
+        },
+        { signal: undefined },
+      )
+      .catch(reportWriteError);
   };
 
   return {

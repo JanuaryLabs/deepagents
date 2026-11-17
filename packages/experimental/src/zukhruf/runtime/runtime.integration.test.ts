@@ -3357,6 +3357,44 @@ describe('zukhruf runtime — conversation status', () => {
 });
 
 describe('zukhruf runtime — cross-process conversation status', () => {
+  it('rejects a status subscription with the error of a change source that fails to subscribe, and the next subscription subscribes the source again', async () => {
+    const refused = new Error('change source refused');
+    let subscribes = 0;
+    await using h = await harness(new MockLanguageModelV4(), {
+      runtime: ({ boss }) => {
+        const source = new PgBossConversationStatusChangeSource(boss);
+        return {
+          conversationStatusChanges: {
+            notify: (conversation) => source.notify(conversation),
+            subscribe: async (signal) => {
+              subscribes += 1;
+              if (subscribes === 1) throw refused;
+              return source.subscribe(signal);
+            },
+          },
+        };
+      },
+    });
+
+    await assert.rejects(
+      h.runtime.subscribeConversationStatus(new AbortController().signal),
+      (error) => error === refused,
+    );
+
+    const abort = new AbortController();
+    const subscription = await h.runtime.subscribeConversationStatus(
+      abort.signal,
+    );
+    abort.abort();
+    try {
+      for await (const event of subscription) void event;
+    } catch (error) {
+      assert.ok(Error.isError(error));
+      assert.equal(error.name, 'AbortError');
+    }
+    assert.equal(subscribes, 2);
+  });
+
   it('awaits the database listener cleanup when the last subscriber exits', async () => {
     const closing = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();

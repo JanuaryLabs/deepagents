@@ -1,4 +1,4 @@
-import { Latch } from '@zukhruf/async';
+import { Future, Latch } from '@zukhruf/async';
 import { Mutex } from '@zukhruf/mutex';
 import { MemoryStore } from '@zukhruf/mutex/memory';
 import type { UIMessage } from 'ai';
@@ -82,8 +82,8 @@ const DETACHED = new Detached();
 /** The one remote change source subscription that every current subscriber shares. */
 class RemoteAttachment {
   readonly abort = new AbortController();
-  /** Opens when the source subscribes: with nothing, or with the error that stopped it. */
-  readonly connected = new Latch<{ error: unknown } | undefined>();
+  /** Resolves when the source subscribes; rejects with the error that stopped it. */
+  readonly connected = new Future<void>();
   /** Opens when the consume loop has stopped. */
   readonly ended = new Latch();
 }
@@ -324,10 +324,11 @@ export class ConversationStatusProjector {
       this.#remote = remote;
       void this.#consumeRemote(source, remote);
     }
-    const failure = await remote.connected.wait();
-    if (failure) {
+    try {
+      await remote.connected.wait();
+    } catch (error) {
       await this.#detachRemote();
-      throw failure.error;
+      throw error;
     }
   }
 
@@ -348,7 +349,7 @@ export class ConversationStatusProjector {
     try {
       const events = await source.subscribe(remote.abort.signal);
       connected = true;
-      remote.connected.open(undefined);
+      remote.connected.resolve();
       for await (const event of events) {
         if (event.type === 'reset') {
           this.#emit(event);
@@ -363,7 +364,7 @@ export class ConversationStatusProjector {
         });
       }
     } catch (error) {
-      if (!connected) remote.connected.open({ error });
+      if (!connected) remote.connected.reject(error);
       if (connected && !(Error.isError(error) && error.name === 'AbortError')) {
         this.#emit({ type: 'error', error });
       }
