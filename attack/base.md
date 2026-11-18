@@ -17,11 +17,11 @@ C(q)
 
 Where:
 
-* (h) is everything currently known.
-* (q) is a possible question.
-* (a) is the user’s possible answer.
-* (V) is the expected quality of the eventual execution.
-* (C(q)) is the cost of bothering the user.
+- (h) is everything currently known.
+- (q) is a possible question.
+- (a) is the user’s possible answer.
+- (V) is the expected quality of the eventual execution.
+- (C(q)) is the cost of bothering the user.
 
 Ask only when the expected improvement exceeds the interaction cost.
 
@@ -60,18 +60,18 @@ The actual policy has three actions:
 ```ts
 type DrillAction =
   | {
-      type: "inspect";
+      type: 'inspect';
       query: string;
       resolves: string[];
     }
   | {
-      type: "ask";
+      type: 'ask';
       question: string;
       resolves: string[];
       decisionsAffected: string[];
     }
   | {
-      type: "execute";
+      type: 'execute';
       contract: TaskContract;
     };
 ```
@@ -109,10 +109,10 @@ Request ───────►│    Drill    │
 
 A scenario is principal only when choosing it changes at least one of:
 
-* The implementation or execution plan.
-* An irreversible or risky action.
-* The acceptance criteria.
-* Material cost, latency, security, or user-visible behaviour.
+- The implementation or execution plan.
+- An irreversible or risky action.
+- The acceptance criteria.
+- Material cost, latency, security, or user-visible behaviour.
 
 Everything else is noise.
 
@@ -206,12 +206,12 @@ Build it as an explicit harness policy first.
 
 Otherwise, when results improve or deteriorate, you will not know whether the cause was:
 
-* The dataset.
-* The clarification policy.
-* The executor.
-* The user simulator.
-* The reward.
-* General model degradation.
+- The dataset.
+- The clarification policy.
+- The executor.
+- The user simulator.
+- The reward.
+- General model degradation.
 
 Use this progression:
 
@@ -377,7 +377,7 @@ It is:
 
 Build that benchmark first. Then the fine-tuning target becomes obvious rather than philosophical.
 
-[1]: https://arxiv.org/html/2607.21143v2 "One More Turn, Less Regret:A Regret-Based Multi-Turn Benchmark for LLMs’ Clarification Policies"
-[2]: https://arxiv.org/html/2512.13159v1 "SpeakRL: Synergizing Reasoning, Speaking, and Acting in Language Models with Reinforcement Learning"
-[3]: https://arxiv.org/html/2511.08798v2 "Structured Uncertainty guided Clarification for LLM Agents"
-[4]: https://arxiv.org/html/2602.03468v1 "IntentRL: Training Proactive User-intent Agents for Open-ended Deep Research via Reinforcement Learning"
+[1]: https://arxiv.org/html/2607.21143v2 'One More Turn, Less Regret:A Regret-Based Multi-Turn Benchmark for LLMs’ Clarification Policies'
+[2]: https://arxiv.org/html/2512.13159v1 'SpeakRL: Synergizing Reasoning, Speaking, and Acting in Language Models with Reinforcement Learning'
+[3]: https://arxiv.org/html/2511.08798v2 'Structured Uncertainty guided Clarification for LLM Agents'
+[4]: https://arxiv.org/html/2602.03468v1 'IntentRL: Training Proactive User-intent Agents for Open-ended Deep Research via Reinforcement Learning'

@@ -27,27 +27,27 @@ The research question is whether PostHog can be treated as a SQL database rather
 
 PostHog is not one database surface:
 
-| Question | Answer |
-|---|---|
-| Can I connect `psql`, `node-postgres`, DBeaver, Metabase, or another Postgres client directly? | **Yes, if your organization has Managed Warehouse beta access.** It exposes a PostgreSQL wire endpoint over TLS. [4] |
-| Can I connect directly to normal PostHog Cloud Product Analytics as if it were Postgres or ClickHouse? | **No.** The supported free-form surface is HogQL through the HTTP Query API. [1][2] |
-| Can I run arbitrary SQL through PostHog's API? | **Yes, within HogQL's supported ClickHouse-derived dialect and Query API operational limits.** [1][2] |
-| Can I use the Query API as ETL or continuously export raw events? | **No.** PostHog may rate-limit or reject export-like traffic; use batch exports. [2][9] |
-| Can I serve fixed production analytics from PostHog? | **Yes.** Publish saved SQL or an insight as an Endpoint, optionally materialized. [7][8] |
-| Can an AI agent query PostHog without building this adapter? | **Yes.** PostHog's hosted MCP exposes SQL and schema capabilities, but it is an agent-tool integration rather than a database adapter. [14][15] |
-| Can I connect to underlying ClickHouse on self-hosted PostHog? | **Technically an operator controls those services, but that is an internal-storage integration, not the supported HogQL contract.** It couples the client to PostHog's physical schema, tenant filtering, and upgrades; it should not be the product integration.
+| Question                                                                                               | Answer                                                                                                                                                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Can I connect `psql`, `node-postgres`, DBeaver, Metabase, or another Postgres client directly?         | **Yes, if your organization has Managed Warehouse beta access.** It exposes a PostgreSQL wire endpoint over TLS. [4]                                                                                                                                              |
+| Can I connect directly to normal PostHog Cloud Product Analytics as if it were Postgres or ClickHouse? | **No.** The supported free-form surface is HogQL through the HTTP Query API. [1][2]                                                                                                                                                                               |
+| Can I run arbitrary SQL through PostHog's API?                                                         | **Yes, within HogQL's supported ClickHouse-derived dialect and Query API operational limits.** [1][2]                                                                                                                                                             |
+| Can I use the Query API as ETL or continuously export raw events?                                      | **No.** PostHog may rate-limit or reject export-like traffic; use batch exports. [2][9]                                                                                                                                                                           |
+| Can I serve fixed production analytics from PostHog?                                                   | **Yes.** Publish saved SQL or an insight as an Endpoint, optionally materialized. [7][8]                                                                                                                                                                          |
+| Can an AI agent query PostHog without building this adapter?                                           | **Yes.** PostHog's hosted MCP exposes SQL and schema capabilities, but it is an agent-tool integration rather than a database adapter. [14][15]                                                                                                                   |
+| Can I connect to underlying ClickHouse on self-hosted PostHog?                                         | **Technically an operator controls those services, but that is an internal-storage integration, not the supported HogQL contract.** It couples the client to PostHog's physical schema, tenant filtering, and upgrades; it should not be the product integration. |
 
 ### Decision Matrix
 
-| Option | SQL experience | Freshness | Production posture | Auth model | Best use | Recommendation |
-|---|---|---:|---|---|---|---|
-| Managed Warehouse | PostgreSQL wire; standard Postgres plus DuckDB analytics | Continuously synced, not the Product Analytics query engine | Beta; isolated analytical database | Host/user/password, documented as organization `root` | BI, notebooks, scheduled jobs, `text2sql`, direct SQL | **Preferred direct-SQL path when available** |
-| HogQL Query API | Free-form HogQL over HTTP | Queries live PostHog tables and warehouse catalog | Ad-hoc/embedded only; discouraged for production | Personal key or OAuth with query read | Interactive NL-to-SQL and investigation | **Supported fallback/live lane with hard guardrails** |
-| Endpoints | Parameterized fixed query over HTTP | Direct, cached, or materialized | Designed for production/customer-facing use | Project secret `endpoint:read`, personal key, or OAuth | Stable application metrics and dashboards | **Promotion target for repeated queries** |
-| Batch exports | SQL only after data lands in destination | Scheduled; five-minute to weekly intervals depending on configuration | Reliable ETL with retries/backfills | Destination credentials managed in PostHog | Bulk history, warehouse ownership, large recurring jobs | **Required for bulk/recurring export** |
-| PostHog MCP | Agent tool calls, including SQL | Live | Hosted MCP; tool-level integration | OAuth or personal key | Coding agents, investigations, PostHog administration | **Optional agent-layer integration** |
-| Self-hosted internal ClickHouse/Postgres | Native database protocols | Internal/live | Unsupported physical-schema coupling | Infrastructure credentials | Operators debugging their own deployment | **Do not ship as a product adapter** |
-| Capture SDK/API or real-time destinations | Not SQL | Near-real-time | Supported ingestion/event delivery | Project token or destination auth | Writing events or reacting to events | **Separate write/stream plane, not a query substitute** |
+| Option                                    | SQL experience                                           |                                                             Freshness | Production posture                               | Auth model                                             | Best use                                                | Recommendation                                          |
+| ----------------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------: | ------------------------------------------------ | ------------------------------------------------------ | ------------------------------------------------------- | ------------------------------------------------------- |
+| Managed Warehouse                         | PostgreSQL wire; standard Postgres plus DuckDB analytics |           Continuously synced, not the Product Analytics query engine | Beta; isolated analytical database               | Host/user/password, documented as organization `root`  | BI, notebooks, scheduled jobs, `text2sql`, direct SQL   | **Preferred direct-SQL path when available**            |
+| HogQL Query API                           | Free-form HogQL over HTTP                                |                     Queries live PostHog tables and warehouse catalog | Ad-hoc/embedded only; discouraged for production | Personal key or OAuth with query read                  | Interactive NL-to-SQL and investigation                 | **Supported fallback/live lane with hard guardrails**   |
+| Endpoints                                 | Parameterized fixed query over HTTP                      |                                       Direct, cached, or materialized | Designed for production/customer-facing use      | Project secret `endpoint:read`, personal key, or OAuth | Stable application metrics and dashboards               | **Promotion target for repeated queries**               |
+| Batch exports                             | SQL only after data lands in destination                 | Scheduled; five-minute to weekly intervals depending on configuration | Reliable ETL with retries/backfills              | Destination credentials managed in PostHog             | Bulk history, warehouse ownership, large recurring jobs | **Required for bulk/recurring export**                  |
+| PostHog MCP                               | Agent tool calls, including SQL                          |                                                                  Live | Hosted MCP; tool-level integration               | OAuth or personal key                                  | Coding agents, investigations, PostHog administration   | **Optional agent-layer integration**                    |
+| Self-hosted internal ClickHouse/Postgres  | Native database protocols                                |                                                         Internal/live | Unsupported physical-schema coupling             | Infrastructure credentials                             | Operators debugging their own deployment                | **Do not ship as a product adapter**                    |
+| Capture SDK/API or real-time destinations | Not SQL                                                  |                                                        Near-real-time | Supported ingestion/event delivery               | Project token or destination auth                      | Writing events or reacting to events                    | **Separate write/stream plane, not a query substitute** |
 
 ## Main Analysis
 
@@ -205,13 +205,13 @@ A direct internal connection would require the integration to reproduce PostHog'
 
 ## Authentication Architecture
 
-| Scenario | Credential | Storage and boundary |
-|---|---|---|
-| One organization, Managed Warehouse | Warehouse `root` password | Backend secret manager or OS keychain; never renderer/browser |
-| One owner's internal Query API integration | Personal API key with minimum project and `query:read` scope | Backend only; rotate and audit owner lifecycle |
-| Installable product for many PostHog customers | OAuth 2.0 with CIMD and least scopes | Authorization code flow; encrypted refresh-token storage; bind token to discovered region/project |
-| Production fixed Endpoint | Project secret key with `endpoint:read` | Server-side per project; preferred because it is not tied to an employee |
-| Agent/MCP | OAuth preferred; personal key only for private use | Restrict MCP tools/features and OAuth scope ceiling |
+| Scenario                                       | Credential                                                   | Storage and boundary                                                                              |
+| ---------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| One organization, Managed Warehouse            | Warehouse `root` password                                    | Backend secret manager or OS keychain; never renderer/browser                                     |
+| One owner's internal Query API integration     | Personal API key with minimum project and `query:read` scope | Backend only; rotate and audit owner lifecycle                                                    |
+| Installable product for many PostHog customers | OAuth 2.0 with CIMD and least scopes                         | Authorization code flow; encrypted refresh-token storage; bind token to discovered region/project |
+| Production fixed Endpoint                      | Project secret key with `endpoint:read`                      | Server-side per project; preferred because it is not tied to an employee                          |
+| Agent/MCP                                      | OAuth preferred; personal key only for private use           | Restrict MCP tools/features and OAuth scope ceiling                                               |
 
 Personal keys are tied to a user, can enable account-level access, are deleted when the user is deleted, and must not be used in a frontend. [11] OAuth is specifically documented for third-party apps, supports a region-agnostic authorization domain, CIMD, loopback redirects for native apps, scope ceilings, and short-lived access tokens plus refresh tokens. [13] Project secret keys are not user-bound but currently document only `endpoint:read`, so they cannot replace OAuth or personal keys for free-form Query API access. [12]
 
@@ -308,29 +308,29 @@ Do not make arbitrary Query API calls the production dashboard backend. Add an e
 
 ### Failure Modes and Controls
 
-| Failure | Consequence | Control |
-|---|---|---|
-| Treating HogQL as Postgres | Invalid syntax, wrong properties, broken grounding | Separate engine identity and adapter |
-| Reusing ClickHouse adapter | Native settings/AST queries fail; false policy assumptions | Dedicated HogQL policy and transport |
-| Query API used as ETL | Rejection, rate limits, pipeline breakage | Batch exports |
-| Root warehouse credential exposed | Organization-wide analytical data and write access compromised | Backend-only storage, app authorization, schema allowlist |
-| Personal key tied to departed user | Integration stops when user is deleted | OAuth for products; project secret for Endpoints |
-| Validation executes twice | Double rate usage and cost | Drain a one-entry validated-result cache |
-| No event time predicate | Slow/costly event scans, ten-second failures | Mandatory bounded time window by default |
-| Schema grounding samples PII | Sensitive values enter model context | Metadata first; sampled values opt-in and redacted |
-| Managed Warehouse sync mistaken for transactional state | Stale operational decisions | Freshness display and Product Analytics lane for live investigation |
-| Endpoint created automatically from generated SQL | Stable route publishes unreviewed semantics/data | Human review and explicit promotion |
+| Failure                                                 | Consequence                                                    | Control                                                             |
+| ------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Treating HogQL as Postgres                              | Invalid syntax, wrong properties, broken grounding             | Separate engine identity and adapter                                |
+| Reusing ClickHouse adapter                              | Native settings/AST queries fail; false policy assumptions     | Dedicated HogQL policy and transport                                |
+| Query API used as ETL                                   | Rejection, rate limits, pipeline breakage                      | Batch exports                                                       |
+| Root warehouse credential exposed                       | Organization-wide analytical data and write access compromised | Backend-only storage, app authorization, schema allowlist           |
+| Personal key tied to departed user                      | Integration stops when user is deleted                         | OAuth for products; project secret for Endpoints                    |
+| Validation executes twice                               | Double rate usage and cost                                     | Drain a one-entry validated-result cache                            |
+| No event time predicate                                 | Slow/costly event scans, ten-second failures                   | Mandatory bounded time window by default                            |
+| Schema grounding samples PII                            | Sensitive values enter model context                           | Metadata first; sampled values opt-in and redacted                  |
+| Managed Warehouse sync mistaken for transactional state | Stale operational decisions                                    | Freshness display and Product Analytics lane for live investigation |
+| Endpoint created automatically from generated SQL       | Stable route publishes unreviewed semantics/data               | Human review and explicit promotion                                 |
 
 ### Recommendation by User Goal
 
-| Goal | Choose |
-|---|---|
-| “Treat PostHog exactly like another database in `text2sql`” | Managed Warehouse + existing Postgres adapter |
-| “Ask live, changing questions over current PostHog analytics” | Dedicated HogQL Query API adapter |
-| “Power a customer-facing dashboard/API” | Endpoints, preferably materialized where freshness permits |
-| “Analyze all history or join in our warehouse” | Batch export to Postgres/BigQuery/Snowflake/etc. |
-| “Let Codex/Claude manage and investigate PostHog” | Restricted PostHog MCP |
-| “We self-host and can reach ClickHouse” | Still use HogQL API unless building a version-pinned operator tool |
+| Goal                                                          | Choose                                                             |
+| ------------------------------------------------------------- | ------------------------------------------------------------------ |
+| “Treat PostHog exactly like another database in `text2sql`”   | Managed Warehouse + existing Postgres adapter                      |
+| “Ask live, changing questions over current PostHog analytics” | Dedicated HogQL Query API adapter                                  |
+| “Power a customer-facing dashboard/API”                       | Endpoints, preferably materialized where freshness permits         |
+| “Analyze all history or join in our warehouse”                | Batch export to Postgres/BigQuery/Snowflake/etc.                   |
+| “Let Codex/Claude manage and investigate PostHog”             | Restricted PostHog MCP                                             |
+| “We self-host and can reach ClickHouse”                       | Still use HogQL API unless building a version-pinned operator tool |
 
 ## Limitations and Open Questions
 
@@ -354,15 +354,15 @@ The search covered direct database protocols, HogQL Query API, Managed Warehouse
 
 ### Claims-Evidence Table
 
-| Claim | Evidence | Confidence |
-|---|---|---|
-| Managed Warehouse is a real PostgreSQL-wire analytical database | [3][4][5] | High |
-| Query API is free-form HogQL but not a production/export substitute | [1][2][7] | High |
-| Endpoints and batch exports are PostHog's production and bulk paths | [7][8][9][23] | High |
-| Existing Postgres adapter is the correct Managed Warehouse integration | [4][19][20][21] | Medium pending live probe |
-| HogQL needs a dedicated adapter rather than ClickHouse/Postgres reuse | [1][6][20][22] | High |
-| OAuth is required for an installable third-party product | [10][11][12][13] | High |
-| MCP is suitable at the agent layer but not the row-oriented adapter layer | [14][15][16][17][18][21] | High |
+| Claim                                                                     | Evidence                 | Confidence                |
+| ------------------------------------------------------------------------- | ------------------------ | ------------------------- |
+| Managed Warehouse is a real PostgreSQL-wire analytical database           | [3][4][5]                | High                      |
+| Query API is free-form HogQL but not a production/export substitute       | [1][2][7]                | High                      |
+| Endpoints and batch exports are PostHog's production and bulk paths       | [7][8][9][23]            | High                      |
+| Existing Postgres adapter is the correct Managed Warehouse integration    | [4][19][20][21]          | Medium pending live probe |
+| HogQL needs a dedicated adapter rather than ClickHouse/Postgres reuse     | [1][6][20][22]           | High                      |
+| OAuth is required for an installable third-party product                  | [10][11][12][13]         | High                      |
+| MCP is suitable at the agent layer but not the row-oriented adapter layer | [14][15][16][17][18][21] | High                      |
 
 ### Research Metadata
 

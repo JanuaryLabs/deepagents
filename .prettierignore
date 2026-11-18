@@ -8,3 +8,9 @@
 
 # Generated route types of React Router (react-router typegen)
 .react-router
+
+# Verdaccio writes its own storage when the local registry runs
+registry/verdaccio/storage
+
+# A broken HTML render of report.md (its code fences became <code>`</code>), which Prettier cannot parse
+research/posthog-integration-research-20260731/report.html

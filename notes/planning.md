@@ -231,22 +231,22 @@ This is the right structure! The question is:
 Key Design Questions for User Memory
 
 1. Explicit vs. Implicit capture?
-    - Explicit: "Remember I only care about EMEA"
-    - Implicit: Detect they always filter to EMEA
+   - Explicit: "Remember I only care about EMEA"
+   - Implicit: Detect they always filter to EMEA
 
 2. Persistence scope?
-    - Per database connection?
-    - Per user globally?
-    - Per user-database combination?
+   - Per database connection?
+   - Per user globally?
+   - Per user-database combination?
 
 3. Transparency?
-    - Can user see what's remembered?
-    - Can they edit/delete memories?
-    - "What do you know about me?"
+   - Can user see what's remembered?
+   - Can they edit/delete memories?
+   - "What do you know about me?"
 
 4. Conflict resolution?
-    - Old preference vs. new behavior
-    - Explicit override vs. implicit pattern
+   - Old preference vs. new behavior
+   - Explicit override vs. implicit pattern
 
 ---
 
