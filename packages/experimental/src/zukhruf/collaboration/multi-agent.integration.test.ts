@@ -8,7 +8,7 @@ import test from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
-  type AgentSandbox,
+  type BashToolkitTools,
   InMemoryContextStore,
   SqliteStreamStore,
 } from '@deepagents/context';
@@ -60,7 +60,7 @@ const SANDBOX_TOOLS: ReadonlySet<string> = new Set([
   'bash',
   'readFile',
   'writeFile',
-] satisfies (keyof AgentSandbox['tools'])[]);
+] satisfies (keyof BashToolkitTools)[]);
 
 /** Function tools the model sees, apart from the sandbox's own. */
 function functionTools(tools: unknown): LanguageModelV4FunctionTool[] {

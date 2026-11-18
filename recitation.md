@@ -45,8 +45,8 @@ Review
 ## Established implementation facts
 
 - `@deepagents/context` agents require an `AgentSandbox`.
-- The agent automatically merges the sandbox's `bash`, `readFile`, and
-  `writeFile` tools into its tool set.
+- The agent automatically merges the sandbox's tools (always `bash`;
+  `readFile` and `writeFile` when the host shows them) into its tool set.
 - Every `AgentSandbox` also exposes the portable underlying sandbox `readFile`
   operation to host-side context features.
 - `reminder(..., { target: 'steer' })` is the existing mid-loop recitation

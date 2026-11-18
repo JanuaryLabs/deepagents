@@ -12,8 +12,8 @@ import { fromLegacySandbox } from './legacy-sandbox.ts';
 import { createReadFileTool } from './read-file-tool/index.ts';
 import { shellQuote } from './shell-quote.ts';
 import {
-  type AgentSandbox,
   type BashToolResult,
+  type BashToolkit,
   type CommandResult,
   type CreateBashToolOptions,
   type DisposableSandbox,
@@ -154,7 +154,7 @@ function createBashDescription(options: {
  */
 export async function createBashTool(
   options: CreateBashToolOptions,
-): Promise<AgentSandbox> {
+): Promise<BashToolkit> {
   const { workingDirectory } = options;
   const sandbox =
     'run' in options.sandbox

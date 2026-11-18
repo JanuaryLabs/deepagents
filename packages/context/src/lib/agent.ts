@@ -13,6 +13,7 @@ import {
   type StreamTextResult,
   type StreamTextTransform,
   type Tool,
+  type ToolChoice,
   type ToolLoopAgentSettings,
   type ToolSet,
   type UIMessage,
@@ -60,7 +61,7 @@ import {
   type GuardrailContext,
   runGuardrailChain,
 } from './guardrail.ts';
-import type { AgentSandbox } from './sandbox/types.ts';
+import type { AgentSandbox, SandboxTools } from './sandbox/types.ts';
 
 export type { AgentControls } from '@deepagents/agent';
 
@@ -93,9 +94,10 @@ type PreparedTools<TOOLS extends ToolSet> = ReturnType<
   typeof withHostOnlyToolMetadata<TOOLS>
 >;
 
-type AgentModelTools<TOOLS extends ToolSet> = PreparedTools<
-  AgentSandbox['tools'] & TOOLS
->;
+type AgentModelTools<
+  TOOLS extends ToolSet,
+  SANDBOX_TOOLS extends SandboxTools,
+> = PreparedTools<SANDBOX_TOOLS & TOOLS>;
 
 type ToolCallOptions<TOOLS extends ToolSet, OPTIONS> = Pick<
   ToolLoopAgentSettings<never, TOOLS>,
@@ -104,8 +106,15 @@ type ToolCallOptions<TOOLS extends ToolSet, OPTIONS> = Pick<
   OPTIONS;
 
 /** The `toolsContext` a caller hands to an agent whose tools are `TOOLS`. */
-type AgentToolsContext<TOOLS extends ToolSet> =
-  ToolCallOptions<AgentModelTools<TOOLS>, unknown>['toolsContext'] | undefined;
+type AgentToolsContext<
+  TOOLS extends ToolSet,
+  SANDBOX_TOOLS extends SandboxTools,
+> =
+  | ToolCallOptions<
+      AgentModelTools<TOOLS, SANDBOX_TOOLS>,
+      unknown
+    >['toolsContext']
+  | undefined;
 
 export type ToolCallArguments<TOOLS extends ToolSet, OPTIONS> =
   HasRequiredKey<InferToolSetContext<TOOLS>> extends true
@@ -137,28 +146,27 @@ export interface AgentStream<TOOLS extends ToolSet> {
   ): ReadableStream<UIMessageChunk>;
 }
 
-export interface CreateAgent<TOOLS extends ToolSet = {}> extends AgentControls<
-  AgentModelTools<TOOLS>
-> {
+export interface CreateAgent<
+  TOOLS extends ToolSet = {},
+  SANDBOX_TOOLS extends SandboxTools = SandboxTools,
+> extends AgentControls<AgentModelTools<TOOLS, SANDBOX_TOOLS>> {
   name: string;
-  sandbox: AgentSandbox;
+  sandbox: AgentSandbox<SANDBOX_TOOLS>;
   context?: ContextEngine;
   tools?: TOOLS;
   model?: AgentModel;
-  toolChoice?: Parameters<
-    typeof generateText<AgentModelTools<TOOLS>>
-  >[0]['toolChoice'];
+  toolChoice?: ToolChoice<AgentModelTools<NoInfer<TOOLS>, SANDBOX_TOOLS>>;
   providerOptions?: Parameters<
-    typeof generateText<AgentModelTools<TOOLS>>
+    typeof generateText<AgentModelTools<TOOLS, SANDBOX_TOOLS>>
   >[0]['providerOptions'];
   telemetry?: Parameters<
-    typeof generateText<AgentModelTools<TOOLS>>
+    typeof generateText<AgentModelTools<TOOLS, SANDBOX_TOOLS>>
   >[0]['telemetry'];
   runtimeContext?: Parameters<
-    typeof generateText<AgentModelTools<TOOLS>>
+    typeof generateText<AgentModelTools<TOOLS, SANDBOX_TOOLS>>
   >[0]['runtimeContext'];
   experimental_toolCallers?: Parameters<
-    typeof generateText<AgentModelTools<TOOLS>>
+    typeof generateText<AgentModelTools<TOOLS, SANDBOX_TOOLS>>
   >[0]['experimental_toolCallers'];
   /**
    * Ends the agent loop. Defaults to {@link DEFAULT_STOP_WHEN}. Raise it for a
@@ -178,7 +186,7 @@ export interface CreateAgent<TOOLS extends ToolSet = {}> extends AgentControls<
   /** Supplies durable user input before sampling and at safe step boundaries. */
   prepareStepInput?: PrepareStepInputProvider;
   /** Native AI SDK step overrides, applied after context reminders and host input. */
-  prepareStep?: PrepareStepFunction<AgentModelTools<TOOLS>>;
+  prepareStep?: PrepareStepFunction<AgentModelTools<TOOLS, SANDBOX_TOOLS>>;
 }
 
 /**
@@ -187,14 +195,14 @@ export interface CreateAgent<TOOLS extends ToolSet = {}> extends AgentControls<
  */
 export const DEFAULT_STOP_WHEN = isStepCount(200);
 
-class Agent<TOOLS extends ToolSet> {
-  #options: CreateAgent<TOOLS>;
+class Agent<TOOLS extends ToolSet, SANDBOX_TOOLS extends SandboxTools> {
+  #options: CreateAgent<TOOLS, SANDBOX_TOOLS>;
   #guardrails: Guardrail[] = [];
-  readonly tools: AgentModelTools<TOOLS>;
+  readonly tools: AgentModelTools<TOOLS, SANDBOX_TOOLS>;
   readonly context?: ContextEngine;
   readonly model?: AgentModel;
-  readonly sandbox: AgentSandbox;
-  constructor(options: CreateAgent<TOOLS>) {
+  readonly sandbox: AgentSandbox<SANDBOX_TOOLS>;
+  constructor(options: CreateAgent<TOOLS, SANDBOX_TOOLS>) {
     this.#options = options;
     this.tools = withHostOnlyToolMetadata(
       Object.assign({}, options.sandbox.tools, options.tools),
@@ -206,10 +214,13 @@ class Agent<TOOLS extends ToolSet> {
   }
 
   public async generate(
-    ...[options]: ToolCallArguments<AgentModelTools<TOOLS>, GenerateOptions>
+    ...[options]: ToolCallArguments<
+      AgentModelTools<TOOLS, SANDBOX_TOOLS>,
+      GenerateOptions
+    >
   ): Promise<
     GenerateTextResult<
-      AgentModelTools<TOOLS>,
+      AgentModelTools<TOOLS, SANDBOX_TOOLS>,
       any,
       Output.Output<string, string, unknown>
     >
@@ -228,7 +239,7 @@ class Agent<TOOLS extends ToolSet> {
       renderer: new XmlRenderer(),
       sandbox: this.#options.sandbox,
     });
-    return generateText<AgentModelTools<TOOLS>>({
+    return generateText<AgentModelTools<TOOLS, SANDBOX_TOOLS>>({
       reasoning: this.#options.reasoning,
       maxOutputTokens: this.#options.maxOutputTokens,
       timeout: this.#options.timeout,
@@ -281,10 +292,10 @@ class Agent<TOOLS extends ToolSet> {
    */
   public async stream(
     ...[options]: ToolCallArguments<
-      AgentModelTools<TOOLS>,
-      StreamOptions<AgentModelTools<TOOLS>>
+      AgentModelTools<TOOLS, SANDBOX_TOOLS>,
+      StreamOptions<AgentModelTools<TOOLS, SANDBOX_TOOLS>>
     >
-  ): Promise<AgentStream<AgentModelTools<TOOLS>>> {
+  ): Promise<AgentStream<AgentModelTools<TOOLS, SANDBOX_TOOLS>>> {
     if (!this.#options.context) {
       throw new Error(`Agent ${this.#options.name} is missing a context.`);
     }
@@ -328,8 +339,8 @@ class Agent<TOOLS extends ToolSet> {
   }
 
   #withPrepareStep(
-    prepareContext: PrepareStepFunction<AgentModelTools<TOOLS>>,
-  ): PrepareStepFunction<AgentModelTools<TOOLS>> {
+    prepareContext: PrepareStepFunction<AgentModelTools<TOOLS, SANDBOX_TOOLS>>,
+  ): PrepareStepFunction<AgentModelTools<TOOLS, SANDBOX_TOOLS>> {
     const prepareStep = this.#options.prepareStep;
     if (!prepareStep) return prepareContext;
     return async (input) => {
@@ -346,9 +357,9 @@ class Agent<TOOLS extends ToolSet> {
    * Create a raw stream without guardrail processing.
    */
   async #createRawStream(
-    toolsContext: AgentToolsContext<TOOLS>,
-    config?: StreamOptions<AgentModelTools<TOOLS>>,
-    prepareStep?: PrepareStepFunction<AgentModelTools<TOOLS>>,
+    toolsContext: AgentToolsContext<TOOLS, SANDBOX_TOOLS>,
+    config?: StreamOptions<AgentModelTools<TOOLS, SANDBOX_TOOLS>>,
+    prepareStep?: PrepareStepFunction<AgentModelTools<TOOLS, SANDBOX_TOOLS>>,
   ) {
     const context = this.#options.context;
     if (!context) {
@@ -365,7 +376,7 @@ class Agent<TOOLS extends ToolSet> {
       sandbox: this.#options.sandbox,
     });
 
-    return streamText<AgentModelTools<TOOLS>>({
+    return streamText<AgentModelTools<TOOLS, SANDBOX_TOOLS>>({
       reasoning: this.#options.reasoning,
       maxOutputTokens: this.#options.maxOutputTokens,
       timeout: this.#options.timeout,
@@ -391,7 +402,7 @@ class Agent<TOOLS extends ToolSet> {
       stopWhen: this.#options.stopWhen ?? DEFAULT_STOP_WHEN,
       prepareStep:
         prepareStep ??
-        context.createPrepareStep<AgentModelTools<TOOLS>>({
+        context.createPrepareStep<AgentModelTools<TOOLS, SANDBOX_TOOLS>>({
           sandbox: this.#options.sandbox,
         }),
       experimental_transform: config?.transform ?? smoothStream(),
@@ -412,11 +423,11 @@ class Agent<TOOLS extends ToolSet> {
    * 3. A new stream is started and the model continues from the correction
    */
   #guardedUIMessageStream(
-    result: StreamTextResult<AgentModelTools<TOOLS>, any, any>,
-    toolsContext: AgentToolsContext<TOOLS>,
-    config?: StreamOptions<AgentModelTools<TOOLS>>,
-    prepareStep?: PrepareStepFunction<AgentModelTools<TOOLS>>,
-  ): AgentStream<AgentModelTools<TOOLS>>['toUIMessageStream'] {
+    result: StreamTextResult<AgentModelTools<TOOLS, SANDBOX_TOOLS>, any, any>,
+    toolsContext: AgentToolsContext<TOOLS, SANDBOX_TOOLS>,
+    config?: StreamOptions<AgentModelTools<TOOLS, SANDBOX_TOOLS>>,
+    prepareStep?: PrepareStepFunction<AgentModelTools<TOOLS, SANDBOX_TOOLS>>,
+  ): AgentStream<AgentModelTools<TOOLS, SANDBOX_TOOLS>>['toUIMessageStream'] {
     const maxRetries =
       config?.maxRetries ?? this.#options.maxGuardrailRetries ?? 3;
     const context = this.#options.context;
@@ -453,7 +464,7 @@ class Agent<TOOLS extends ToolSet> {
         },
         execute: async ({ writer }) => {
           let currentResult: StreamTextResult<
-            AgentModelTools<TOOLS>,
+            AgentModelTools<TOOLS, SANDBOX_TOOLS>,
             any,
             any
           > = result;
@@ -565,12 +576,15 @@ class Agent<TOOLS extends ToolSet> {
   public asTool<T = string>(props?: {
     toolDescription?: string;
     outputExtractor?: (
-      output: Awaited<ReturnType<Agent<TOOLS>['generate']>>,
+      output: Awaited<ReturnType<Agent<TOOLS, SANDBOX_TOOLS>['generate']>>,
     ) => T | Promise<T>;
     /** Not sent to the model; surfaces on tool call/result and UI message parts */
     metadata?: JSONObject;
     toModelOutput?: Tool<SubagentToolInput, T | string>['toModelOutput'];
-  }): SubagentTool<T | string, InferToolSetContext<AgentModelTools<TOOLS>>> {
+  }): SubagentTool<
+    T | string,
+    InferToolSetContext<AgentModelTools<TOOLS, SANDBOX_TOOLS>>
+  > {
     return {
       description:
         props?.toolDescription ||
@@ -707,17 +721,20 @@ class Agent<TOOLS extends ToolSet> {
     };
   }
 
-  clone(overrides?: Partial<CreateAgent<TOOLS>>): Agent<TOOLS> {
-    return new Agent<TOOLS>({
+  clone(
+    overrides?: Partial<CreateAgent<TOOLS, SANDBOX_TOOLS>>,
+  ): Agent<TOOLS, SANDBOX_TOOLS> {
+    return new Agent<TOOLS, SANDBOX_TOOLS>({
       ...this.#options,
       ...overrides,
     });
   }
 }
 
-export function agent<const TOOLS extends ToolSet = {}>(
-  options: CreateAgent<TOOLS>,
-): Agent<TOOLS> {
+export function agent<
+  const TOOLS extends ToolSet = {},
+  SANDBOX_TOOLS extends SandboxTools = SandboxTools,
+>(options: CreateAgent<TOOLS, SANDBOX_TOOLS>): Agent<TOOLS, SANDBOX_TOOLS> {
   return new Agent(options);
 }
 

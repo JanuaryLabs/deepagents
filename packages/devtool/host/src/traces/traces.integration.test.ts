@@ -19,7 +19,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
-import type { AgentSandbox } from '@deepagents/context';
+import type { BashToolkit } from '@deepagents/context';
 import {
   InMemoryContextStore,
   PollingChangeSource,
@@ -61,7 +61,7 @@ const TRACES_HREF = `${ZUKHRUF_MOUNT_PATH}/traces`;
 const traceSummaries = z.array(z.record(z.string(), z.unknown()));
 
 /** These turns never use the sandbox; the toolkit only needs a real one to start. */
-async function unusedSandbox(): Promise<AgentSandbox> {
+async function unusedSandbox(): Promise<BashToolkit> {
   return createBashTool({
     sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
   });

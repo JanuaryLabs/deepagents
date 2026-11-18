@@ -276,7 +276,9 @@ export class AgentTurnExecutor {
       let writer: UIMessageStreamWriter;
       const compaction = declaration.compaction
         ? createCompaction<
-            ReturnType<typeof agent<typeof modelTools>>['tools']
+            ReturnType<
+              typeof agent<typeof modelTools, ZukhrufSandbox['tools']>
+            >['tools']
           >(declaration.compaction, engine, this.#store, abort.signal, (data) =>
             writer.write({
               type: 'data-compaction',

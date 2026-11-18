@@ -199,15 +199,29 @@ export type WrappedBashTool = Tool<BashToolInput, BashToolResult>;
 export type ReadFileTool = Tool<ReadFileToolInput, ToolResultOutput>;
 export type WriteFileTool = Tool<WriteFileToolInput, WriteFileToolResult>;
 
-export interface BashToolkit {
-  bash: WrappedBashTool;
-  tools: {
-    bash: WrappedBashTool;
-    readFile: ReadFileTool;
-    writeFile: WriteFileTool;
-  };
+/**
+ * The tools a sandbox shows the model: always `bash`, plus `readFile` and
+ * `writeFile` when the host exposes them.
+ */
+export type SandboxTools = { bash: WrappedBashTool };
+
+/** The tools `createBashTool` builds: bash and both file tools. */
+export type BashToolkitTools = SandboxTools & {
+  readFile: ReadFileTool;
+  writeFile: WriteFileTool;
+};
+
+/**
+ * A sandbox and the tools an agent shows the model for it. The agent gives the
+ * model `tools` and the AI SDK `sandbox`; it calls no tool by name, so a host
+ * that shows the model only bash passes `{ tools: { bash }, sandbox }`.
+ */
+export interface AgentSandbox<TOOLS extends SandboxTools = SandboxTools> {
+  tools: TOOLS;
   sandbox: DisposableSandbox;
 }
 
-/** Bash/read/write tools and their underlying sandbox for use by an agent. */
-export type AgentSandbox = BashToolkit;
+/** What `createBashTool` returns: every tool it builds, and its sandbox. */
+export interface BashToolkit extends AgentSandbox<BashToolkitTools> {
+  bash: WrappedBashTool;
+}

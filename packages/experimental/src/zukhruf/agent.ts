@@ -5,6 +5,7 @@ import type {
   AgentControls,
   AgentModel,
   AgentSandbox,
+  BashToolkitTools,
   ContextFragment,
   CreateAgent,
 } from '@deepagents/context';
@@ -22,7 +23,11 @@ export interface SandboxContext {
   userId: string;
 }
 
-export type ZukhrufSandbox = AgentSandbox & {
+/**
+ * Needs both file tools: the uploads plugin tells the model to read attached
+ * images with `readFile`.
+ */
+export type ZukhrufSandbox = AgentSandbox<BashToolkitTools> & {
   /** Absolute directory containing this conversation's files and skills. Omit to disable discovery. */
   readonly workingDirectory?: string;
 };
