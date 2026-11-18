@@ -116,6 +116,7 @@
           "@deepagents/evals",
           "@deepagents/experimental",
           "@ai-sdk/otel",
+          "@daytona/sdk",
           "@opentelemetry/api",
           "@opentelemetry/core",
           "@opentelemetry/sdk-trace-base",

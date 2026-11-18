@@ -1,8 +1,7 @@
 # Self-contained image for the text2sql demo daemon. Shared by the backend
 # demos: the plain-Docker demo builds it on the fly (createDockerSandbox passes
-# this Dockerfile + the repo root as context), the Daytona demo boots a
-# prebuilt registry tag of it, and the microsandbox demo loads an OCI archive
-# of it. Build standalone from the repo root with:
+# this Dockerfile + the repo root as context), and the microsandbox demo
+# loads an OCI archive of it. Build standalone from the repo root with:
 #
 #   docker build -f demo/text2sql-daemon/Dockerfile -t deepagents-text2sql .
 #
@@ -20,7 +19,8 @@
 # The builder stage installs the workspace, builds the packages the daemon
 # imports at runtime (context, agent, text2sql) and their dist, then prunes
 # devDependencies. The runtime stage carries only the pruned tree and runs the
-# daemon as its main process (the Daytona demo starts it explicitly instead).
+# daemon as its main process (the microsandbox demo starts it explicitly
+# instead).
 
 FROM node:lts-alpine AS builder
 WORKDIR /repo
@@ -35,7 +35,7 @@ WORKDIR /repo
 ENV NODE_NO_WARNINGS=1
 # strace enables createBashTool({ trackFileChanges: true }) — per-tool-call
 # filesystem-change tracking. Needs a native-arch image + ptrace (both hold
-# under default Docker/Daytona). Placed before COPY so it caches independently.
+# under default Docker). Placed before COPY so it caches independently.
 RUN apk add --no-cache strace
 COPY --from=builder /repo /repo
 RUN ln -sf /repo/demo/text2sql-daemon/daemon/sql-shim.ts /usr/local/bin/sql \

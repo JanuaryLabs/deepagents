@@ -103,7 +103,6 @@
     ".evals-sdk-it",
     "demo/text2sql-daemon",
     "demo/docker-text2sql",
-    "demo/daytona-text2sql",
     "demo/microsandbox-text2sql",
     "demo/mcp",
     "demo/minio",

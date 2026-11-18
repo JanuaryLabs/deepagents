@@ -7,7 +7,7 @@ The sandbox system lets AI agents execute real commands in isolated
 environments. Choose between Docker containers for portable full binary
 execution, Apple Container lightweight VMs for stronger local isolation on
 Apple silicon, Microsandbox microVMs for local hardware-isolated OCI images,
-caller-owned Daytona sandboxes for managed remote workspaces, virtual file
+Daytona v2 sandboxes for managed remote workspaces, virtual file
 systems for simulation, custom `DisposableSandbox` implementations for specialized
 policy, or binary bridges to combine approaches.
 
@@ -21,7 +21,7 @@ policy, or binary bridges to combine approaches.
 | `createAppleContainerSandbox`                                                        | Direct VM-backed container control on Apple silicon/macOS 26+                     | No               |
 | [`createMicrosandboxSandbox`](/docs/context/microsandbox-sandbox) + `createBashTool` | Agent needs OCI images in local microVMs with streaming process output            | No               |
 | `createMicrosandboxSandbox`                                                          | Direct local microVM control with get-or-create named sandboxes                   | No               |
-| `createDaytonaSandbox(client, options)` + `createBashTool`                           | Managed remote sandbox with caller-owned Daytona client                           | No               |
+| `createDaytonaSandbox(daytona.v2, options)` + `createBashTool`                       | Managed remote sandbox on Daytona v2                                              | No               |
 | `createVirtualSandbox`                                                               | In-process bash with a virtual filesystem and optional JavaScript command support | No               |
 | `createBinaryBridges`                                                                | Bridge specific host binaries into just-bash virtual FS                           | No               |
 
@@ -64,17 +64,15 @@ The `sandbox` that `createBashTool` returns is an AI SDK
 [`Experimental_SandboxSession`](https://ai-sdk.dev/docs/reference/ai-sdk-core/sandbox)
 for every backend, with `run`, `spawn`, `readFile`, `readBinaryFile`,
 `readTextFile`, `writeFile`, `writeBinaryFile`, `writeTextFile` and `stat`, plus
-our `dispose`. `createVirtualSandbox`, `createDockerSandbox`,
-`createAppleContainerSandbox` and `createMicrosandboxSandbox` return one
-directly, with `listDirectory` and `deleteFile` too. The virtual sandbox uses the official
+our `dispose`. Every factory returns one directly, with `listDirectory` and
+`deleteFile` too. The virtual sandbox uses the official
 `@ai-sdk/sandbox-just-bash` adapter. Its `spawn` delivers output when the process
 exits, so use a process-backed sandbox for live streaming.
 
-The Daytona factory still returns the older API (`executeCommand`, `readFile`,
-`writeFiles`, `exists`, `dispose`, and `spawn(command, options?)` with live
-streaming) while it moves to the session. Until then `createBashTool` and
-`withStraceFileChanges` adapt it, and `listDirectory` and `deleteFile` are not
-available on the session they return for it.
+`dispose()` releases what the sandbox created and leaves what it attached to.
+Docker and Apple Container stop a container they created, Microsandbox stops a
+VM its client owns, and Daytona deletes a sandbox it created, since a Linux
+Daytona sandbox has no stopped state.
 
 Commands execute with Bash semantics. Process-backed
 environments must contain `bash`; factories fail with a clear error when Bash

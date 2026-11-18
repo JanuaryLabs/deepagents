@@ -27,8 +27,9 @@ export interface DisposableSandbox
     options: Experimental_SandboxRunOptions,
   ) => PromiseLike<CommandResult>;
   /**
-   * Release the backend's external resources. Called explicitly, or
-   * automatically at scope exit via `await using`.
+   * Release what this sandbox created, and leave what it attached to (a
+   * container, VM or remote sandbox it found by name or id). Called
+   * explicitly, or automatically at scope exit via `await using`.
    */
   dispose(): Promise<void>;
 }

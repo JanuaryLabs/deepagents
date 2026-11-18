@@ -29,7 +29,7 @@ The server-side package also ships the sandbox primitives used by
 `@deepagents/text2sql` and other tool-driven agents. Use `createBashTool()`
 with `createVirtualSandbox()`, `createDockerSandbox()`,
 `createAppleContainerSandbox()`, `createMicrosandboxSandbox()`, or
-`createDaytonaSandbox(client, options)` depending on whether commands should
+`createDaytonaSandbox(daytona.v2, options)` depending on whether commands should
 run in memory, Docker, Apple Container lightweight VMs, Microsandbox microVMs,
 or managed Daytona sandboxes.
 Virtual sandboxes can opt into in-process JavaScript execution with
@@ -46,10 +46,10 @@ For same-host Linux Docker daemons, `gcs({ hostPath, mountPath })` provides a
 typed bind-volume helper over a host `gcsfuse` mount. For remote daemons, keep
 cloud wiring in the daemon/plugin layer and attach the resulting named volume.
 
-`createDaytonaSandbox(client, options)` takes a caller-owned Daytona client plus either a
-stable `name` (get-or-create) or `sandboxId` (attach). One of those identifiers
-is required because `dispose()` releases only the local wrapper and never
-deletes the underlying Daytona sandbox.
+`createDaytonaSandbox(daytona.v2, options)` takes a Daytona v2 client plus either
+`sandboxId` (attach) or the SDK's own create options, where a `name` makes the
+create a get-or-create. `dispose()` deletes a sandbox it created and leaves one
+it attached to.
 
 ### File-change tracking
 

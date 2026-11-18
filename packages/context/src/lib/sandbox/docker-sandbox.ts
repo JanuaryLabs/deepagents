@@ -64,6 +64,7 @@ import {
   type InstallerContext,
   createInstallerContext,
 } from './installers/installer.ts';
+import { createByteReadable } from './session.ts';
 import type { CommandResult, DisposableSandbox } from './types.ts';
 
 export type {
@@ -275,47 +276,31 @@ const dockerErrors: ContainerErrorFactory = {
   volumeCreate: (name, reason) => new VolumeCreateError(name, reason),
 };
 
-/**
- * The output of a container process as two streams and an exit. The chunks
- * queue until their stream is read, so a reader of one stream never blocks the
- * other.
- */
+/** The output of a container process as two streams and an exit. */
 function engineProcess(process: ContainerProcess): EngineProcess {
-  const queue = { highWaterMark: Number.POSITIVE_INFINITY };
-  const stdout = new TransformStream<Uint8Array, Uint8Array>(
-    undefined,
-    undefined,
-    queue,
-  );
-  const stderr = new TransformStream<Uint8Array, Uint8Array>(
-    undefined,
-    undefined,
-    queue,
-  );
-  const writers = {
-    stdout: stdout.writable.getWriter(),
-    stderr: stderr.writable.getWriter(),
+  const streams = {
+    stdout: createByteReadable(),
+    stderr: createByteReadable(),
   };
 
   const exitCode = (async (): Promise<number> => {
     try {
       for await (const { stream, data } of process) {
-        await writers[stream].write(data);
+        streams[stream].enqueue(data);
       }
     } catch (error) {
-      await Promise.all([
-        writers.stdout.abort(error),
-        writers.stderr.abort(error),
-      ]);
+      streams.stdout.error(error);
+      streams.stderr.error(error);
       throw error;
     }
-    await Promise.all([writers.stdout.close(), writers.stderr.close()]);
+    streams.stdout.close();
+    streams.stderr.close();
     return process.exitCode;
   })();
 
   return {
-    stdout: stdout.readable,
-    stderr: stderr.readable,
+    stdout: streams.stdout.stream,
+    stderr: streams.stderr.stream,
     ...(process.stdin ? { stdin: process.stdin } : {}),
     exitCode,
   };

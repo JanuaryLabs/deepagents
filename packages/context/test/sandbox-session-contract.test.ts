@@ -1,4 +1,5 @@
 import { experimental_createBashTool } from '@ai-sdk/tool-bash';
+import { waitFor } from '@zukhruf/testing/async';
 import { DockerTestbed } from '@zukhruf/testing/docker';
 import { InMemoryFs } from 'just-bash';
 import spawn, { SubprocessError } from 'nano-spawn';
@@ -13,6 +14,7 @@ import {
   MicrosandboxSandboxError,
   appleEngine,
   createAppleContainerSandbox,
+  createDaytonaSandbox,
   createDockerSandbox,
   createMicrosandboxSandbox,
   createVirtualSandbox,
@@ -31,6 +33,13 @@ interface Backend {
    * 124; the session contract only says that `wait()` rejects.
    */
   runAbort: 'rejects' | 'resolves';
+  /**
+   * What stderr does after a reader cancels stdout. The official just-bash
+   * adapter, like the AI SDK's Vercel adapter, errors its other stream when it
+   * next enqueues into the canceled one; the process and its exit still end
+   * normally.
+   */
+  stderrAfterStdoutCancel: 'flows' | 'errors';
   open: (sandboxName?: string) => Promise<DisposableSandbox>;
   /** Whether the engine holds the named sandbox. Absent when a backend holds nothing. */
   holds?: (sandboxName: string) => Promise<boolean>;
@@ -72,17 +81,53 @@ async function microsandboxUnavailable(): Promise<string | undefined> {
   }
 }
 
+const DAYTONA_PROBE_MS = 15_000;
+const daytonaIds = new Map<string, string>();
+
+async function daytonaClient() {
+  const { Daytona } = await import('@daytona/sdk');
+  return new Daytona().v2;
+}
+
+/**
+ * A key and a reachable API: one sandbox list, bounded so that an unreachable
+ * API skips the backend instead of hanging the suite.
+ */
+async function daytonaUnavailable(): Promise<string | undefined> {
+  if (!process.env.DAYTONA_API_KEY) return 'DAYTONA_API_KEY is not set';
+  const client = await daytonaClient();
+  const deadline = AbortSignal.timeout(DAYTONA_PROBE_MS);
+  try {
+    await Promise.race([
+      client.list({ limit: 1 }),
+      new Promise<never>((_, reject) => {
+        deadline.addEventListener('abort', () => reject(deadline.reason), {
+          once: true,
+        });
+      }),
+    ]);
+    return undefined;
+  } catch (error) {
+    if (deadline.aborted) {
+      return `the Daytona API did not answer within ${DAYTONA_PROBE_MS / 1000} s`;
+    }
+    throw error;
+  }
+}
+
 const backends: Backend[] = [
   {
     name: 'virtual',
     writableStdin: false,
     runAbort: 'resolves',
+    stderrAfterStdoutCancel: 'errors',
     open: () => createVirtualSandbox({ fs: new InMemoryFs() }),
   },
   {
     name: 'docker',
     writableStdin: true,
     runAbort: 'rejects',
+    stderrAfterStdoutCancel: 'flows',
     open: (name) => createDockerSandbox({ ...dockerDefaults, name }),
     holds: async (name) => {
       const client = await testbed.client();
@@ -94,6 +139,7 @@ const backends: Backend[] = [
     unavailable: appleContainerUnavailable,
     writableStdin: true,
     runAbort: 'rejects',
+    stderrAfterStdoutCancel: 'flows',
     open: (name) => createAppleContainerSandbox({ name }),
     holds: async (name) => {
       try {
@@ -118,6 +164,7 @@ const backends: Backend[] = [
     unavailable: microsandboxUnavailable,
     writableStdin: true,
     runAbort: 'rejects',
+    stderrAfterStdoutCancel: 'flows',
     open: (name) => createMicrosandboxSandbox({ name }),
     // A named sandbox keeps its disk when it stops, so the released VM is the
     // one that is no longer running.
@@ -130,14 +177,46 @@ const backends: Backend[] = [
       await Sandbox.remove(name);
     },
   },
+  {
+    name: 'daytona',
+    unavailable: daytonaUnavailable,
+    writableStdin: true,
+    runAbort: 'rejects',
+    stderrAfterStdoutCancel: 'flows',
+    open: async (name) => {
+      const client = await daytonaClient();
+      if (!name) return createDaytonaSandbox(client);
+      const sandbox = await createDaytonaSandbox(client, { name });
+      // A repeated create with the same name returns the sandbox the first one
+      // made. Only `get` by id reads it at once; sandbox search lags.
+      daytonaIds.set(name, (await client.create({ name })).id);
+      return sandbox;
+    },
+    holds: async (name) => {
+      const id = daytonaIds.get(name);
+      assert.ok(id, `no Daytona sandbox was opened as ${name}`);
+      const sandbox = await (await daytonaClient()).get(id);
+      return sandbox.state === 'started';
+    },
+  },
 ];
 
-const STARTED = { interval: 50, timeout: 30_000 };
 const LATER_WRITE_DELAY_MS = 3_500;
 /** Long enough for a stop to land on a remote engine, where one exec takes seconds. */
 const STOPPABLE_COMMAND =
   'echo started > started.txt; sleep 10; echo late > late.txt';
 const STOP_WINDOW_MS = 10_500;
+
+function waitForStarted(sandbox: DisposableSandbox, signal: AbortSignal) {
+  return waitFor(
+    async () =>
+      assert.equal(
+        await sandbox.readTextFile({ path: 'started.txt' }),
+        'started\n',
+      ),
+    { signal },
+  );
+}
 
 for (const {
   name,
@@ -145,6 +224,7 @@ for (const {
   open,
   writableStdin,
   runAbort,
+  stderrAfterStdoutCancel,
   holds,
   forget,
 } of backends) {
@@ -162,14 +242,7 @@ for (const {
             abortSignal: controller.signal,
           }),
         );
-        await t.waitFor(
-          async () =>
-            assert.equal(
-              await sandbox.readTextFile({ path: 'started.txt' }),
-              'started\n',
-            ),
-          STARTED,
-        );
+        await waitForStarted(sandbox, t.signal);
         controller.abort(reason);
         if (runAbort === 'rejects') {
           await assert.rejects(running, (error) => error === reason);
@@ -189,14 +262,7 @@ for (const {
           command: STOPPABLE_COMMAND,
           abortSignal: controller.signal,
         });
-        await t.waitFor(
-          async () =>
-            assert.equal(
-              await sandbox.readTextFile({ path: 'started.txt' }),
-              'started\n',
-            ),
-          STARTED,
-        );
+        await waitForStarted(sandbox, t.signal);
 
         controller.abort(reason);
 
@@ -211,14 +277,7 @@ for (const {
       it('stops the process on kill and tolerates a second kill', async (t: TestContext) => {
         await using sandbox = await open();
         const child = await sandbox.spawn({ command: STOPPABLE_COMMAND });
-        await t.waitFor(
-          async () =>
-            assert.equal(
-              await sandbox.readTextFile({ path: 'started.txt' }),
-              'started\n',
-            ),
-          STARTED,
-        );
+        await waitForStarted(sandbox, t.signal);
 
         await child.kill();
         await child.kill();
@@ -533,6 +592,22 @@ for (const {
           { stdout: 'out\n', stderr: 'err\n', exit: { exitCode: 4 } },
         );
       });
+
+      it(`keeps the process ${stderrAfterStdoutCancel === 'flows' ? 'and its stderr ' : ''}when a reader cancels stdout`, async () => {
+        await using sandbox = await open();
+
+        const child = await sandbox.spawn({
+          command: 'echo first; sleep 1; echo second; echo err >&2; exit 3',
+        });
+        const reader = child.stdout.getReader();
+        await reader.read();
+        await reader.cancel(new Error('caller stopped reading'));
+
+        if (stderrAfterStdoutCancel === 'flows') {
+          assert.equal(await text(child.stderr), 'err\n');
+        }
+        assert.deepEqual(await child.wait(), { exitCode: 3 });
+      });
     });
 
     describe('files', { skip }, () => {
@@ -608,6 +683,28 @@ for (const {
         assert.equal(
           await sandbox.readTextFile({ path: 'a/b/c.txt' }),
           'héllo',
+        );
+      });
+
+      it('creates parent directories for binary and stream writes', async () => {
+        await using sandbox = await open();
+
+        await sandbox.writeBinaryFile({
+          path: 'binary/deep/bytes.bin',
+          content: new Uint8Array([0, 255]),
+        });
+        await sandbox.writeFile({
+          path: 'stream/deep/text.txt',
+          content: ReadableStream.from([new TextEncoder().encode('streamed')]),
+        });
+
+        const bytes = await sandbox.readBinaryFile({
+          path: 'binary/deep/bytes.bin',
+        });
+        assert.deepEqual([...(bytes ?? [])], [0, 255]);
+        assert.equal(
+          await sandbox.readTextFile({ path: 'stream/deep/text.txt' }),
+          'streamed',
         );
       });
 
@@ -720,6 +817,25 @@ for (const {
             assert.equal(await holds(sandboxName), false);
           } finally {
             await sandbox.dispose();
+            await forget?.(sandboxName);
+          }
+        });
+
+        it('leaves a sandbox it attached to by name running when it disposes', async () => {
+          const sandboxName = `contract-${randomUUID().slice(0, 8)}`;
+          const owner = await open(sandboxName);
+          try {
+            const attached = await open(sandboxName);
+
+            await attached.dispose();
+
+            assert.equal(await holds(sandboxName), true);
+            assert.equal(
+              (await owner.run({ command: 'echo up' })).stdout,
+              'up\n',
+            );
+          } finally {
+            await owner.dispose();
             await forget?.(sandboxName);
           }
         });

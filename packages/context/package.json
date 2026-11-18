@@ -91,7 +91,7 @@
   },
   "devDependencies": {
     "@ai-sdk/tool-bash": "^1.0.20",
-    "@daytona/sdk": "^0.198.0",
+    "@daytona/sdk": "2.0.0-alpha.13",
     "@sinonjs/fake-timers": "^15.4.0",
     "@types/debug": "^4.1.13",
     "@types/mssql": "^12.3.0",
@@ -100,7 +100,7 @@
     "msw": "^3.0.3"
   },
   "peerDependencies": {
-    "@daytona/sdk": "^0.198.0",
+    "@daytona/sdk": "2.0.0-alpha.13",
     "microsandbox": "^0.7.16",
     "mssql": "^12.7.0",
     "pg": "^8.22.0"

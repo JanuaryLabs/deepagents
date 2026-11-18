@@ -9,12 +9,12 @@ Every agent requires a **sandbox** — an `AgentSandbox`: the underlying `sandbo
 
 ## Sandbox options
 
-| Approach                                                     | When to use                                 | Docker? |
-| ------------------------------------------------------------ | ------------------------------------------- | ------- |
-| `createVirtualSandbox()` + `createBashTool()`                | Local dev, tests, lightweight tasks         | No      |
-| `createDockerSandbox()` + `createBashTool()`                 | Real binaries in isolated Docker containers | Yes     |
-| `createDaytonaSandbox(client, options)` + `createBashTool()` | Managed Daytona sandboxes                   | No      |
-| `createBashTool({ sandbox: e2bSandbox })`                    | Other cloud sandboxes via adapter           | No      |
+| Approach                                                         | When to use                                 | Docker? |
+| ---------------------------------------------------------------- | ------------------------------------------- | ------- |
+| `createVirtualSandbox()` + `createBashTool()`                    | Local dev, tests, lightweight tasks         | No      |
+| `createDockerSandbox()` + `createBashTool()`                     | Real binaries in isolated Docker containers | Yes     |
+| `createDaytonaSandbox(daytona.v2, options)` + `createBashTool()` | Managed Daytona v2 sandboxes                | No      |
+| `createBashTool({ sandbox: e2bSandbox })`                        | Other cloud sandboxes via adapter           | No      |
 
 `createBashTool` is owned by `@deepagents/context`; it adds AI SDK bash and file tools to an explicit backend and returns a `BashToolkit`, an `AgentSandbox` with all three tools. It has no skills-specific behavior.
 
@@ -77,37 +77,28 @@ bin('/opt/tools/cli.mjs', { target: '/opt/bin/tool' });
 ```typescript
 import { Daytona } from '@daytona/sdk';
 
-import {
-  DAYTONA_DEFAULT_DESTINATION,
-  createBashTool,
-  createDaytonaSandbox,
-} from '@deepagents/context';
+import { createBashTool, createDaytonaSandbox } from '@deepagents/context';
 
-const client = new Daytona({
-  apiKey: process.env.DAYTONA_API_KEY!,
-});
+// Authentication and other Daytona config live on `new Daytona(...)`; it reads
+// DAYTONA_API_KEY from the environment.
+const daytona = new Daytona();
 
-// Pass a caller-owned Daytona client plus either a stable `name`
-// (get-or-create) or `sandboxId` (attach). Authentication, base URL, and
-// other Daytona config live on `new Daytona(...)`, not on
-// `createDaytonaSandbox(...)`. The sandbox lifecycle stays with that client.
-const backend = await createDaytonaSandbox(client, {
+// Every Daytona v2 create option passes through (`image`, `env`, `resources`,
+// `lifecyclePolicy`, `networkPolicy`, ...). A `name` makes the create a
+// get-or-create: the same name and options return the same sandbox.
+await using backend = await createDaytonaSandbox(daytona.v2, {
   name: 'agent-backend',
-  image: 'your-registry/agent-image:latest',
+  image: 'your-image',
 });
-await backend.executeCommand(`mkdir -p ${DAYTONA_DEFAULT_DESTINATION}`);
 const sandbox = await createBashTool({
   sandbox: backend,
-  workingDirectory: DAYTONA_DEFAULT_DESTINATION,
+  workingDirectory: '/workspace',
 });
-// Don't forget: await sandbox.sandbox.dispose() when done
 ```
 
-`dispose()` detaches local handles but does not delete a Daytona sandbox. Reuse
-stable `name` values when you want get-or-create semantics across runs, or pass
-`sandboxId` to attach to a specific sandbox directly. An unnamed sandbox cannot
-be reclaimed, so `createDaytonaSandbox(...)` requires one of those two
-identifiers.
+`dispose()` deletes a sandbox this call created and leaves one it attached to,
+either by `sandboxId` or by a `name` that already had a sandbox. A Linux Daytona
+sandbox has no stopped state, so delete is its only release.
 
 The agent merges `sandbox.tools` into its toolset automatically. Any `tools` you pass override sandbox tools on name conflict. The agent calls no sandbox tool by name, so a host that shows the model only bash passes `{ tools: { bash: toolkit.bash }, sandbox: toolkit.sandbox }`, and the agent's tool types then name only `bash`.
 
@@ -188,20 +179,20 @@ const assistant = agent({
 
 ## Configuration
 
-| Option                | Type                               | Default            | Description                                                                                                                                                                                                                                                  |
-| --------------------- | ---------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `name`                | `string`                           | required           | Identifier for logging and error messages                                                                                                                                                                                                                    |
-| `sandbox`             | `AgentSandbox`                     | required           | Sandbox and its model tools (`bash`, plus `readFile` and `writeFile` when the host shows them) — created via `createBashTool()` (optionally chained on top of `createDockerSandbox()` or `createDaytonaSandbox(client, options)`) from `@deepagents/context` |
-| `context`             | `ContextEngine`                    | `undefined`        | Engine that resolves system prompt and messages                                                                                                                                                                                                              |
-| `model`               | `LanguageModelV4`                  | `undefined`        | AI SDK model to use for generation                                                                                                                                                                                                                           |
-| `tools`               | `ToolSet`                          | `{}`               | Additional AI SDK tools — merged with sandbox tools (user tools override sandbox tools on name conflict).                                                                                                                                                    |
-| `toolChoice`          | `ToolChoice`                       | `undefined`        | Controls how the model selects tools                                                                                                                                                                                                                         |
-| `providerOptions`     | `object`                           | `undefined`        | Provider-specific options forwarded to the AI SDK                                                                                                                                                                                                            |
-| `telemetry`           | `object`                           | `undefined`        | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText`                                                                                                                                                                             |
-| `stopWhen`            | `StopCondition \| StopCondition[]` | `isStepCount(200)` | Stops the tool loop after a completed step meets any supplied condition                                                                                                                                                                                      |
-| `guardrails`          | `Guardrail[]`                      | `[]`               | Guardrails applied during streaming                                                                                                                                                                                                                          |
-| `maxGuardrailRetries` | `number`                           | `3`                | Maximum stream attempts, including the initial attempt                                                                                                                                                                                                       |
-| `logging`             | `boolean`                          | `undefined`        | Enable debug logging                                                                                                                                                                                                                                         |
+| Option                | Type                               | Default            | Description                                                                                                                                                                                                                                                      |
+| --------------------- | ---------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                | `string`                           | required           | Identifier for logging and error messages                                                                                                                                                                                                                        |
+| `sandbox`             | `AgentSandbox`                     | required           | Sandbox and its model tools (`bash`, plus `readFile` and `writeFile` when the host shows them) — created via `createBashTool()` (optionally chained on top of `createDockerSandbox()` or `createDaytonaSandbox(daytona.v2, options)`) from `@deepagents/context` |
+| `context`             | `ContextEngine`                    | `undefined`        | Engine that resolves system prompt and messages                                                                                                                                                                                                                  |
+| `model`               | `LanguageModelV4`                  | `undefined`        | AI SDK model to use for generation                                                                                                                                                                                                                               |
+| `tools`               | `ToolSet`                          | `{}`               | Additional AI SDK tools — merged with sandbox tools (user tools override sandbox tools on name conflict).                                                                                                                                                        |
+| `toolChoice`          | `ToolChoice`                       | `undefined`        | Controls how the model selects tools                                                                                                                                                                                                                             |
+| `providerOptions`     | `object`                           | `undefined`        | Provider-specific options forwarded to the AI SDK                                                                                                                                                                                                                |
+| `telemetry`           | `object`                           | `undefined`        | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText`                                                                                                                                                                                 |
+| `stopWhen`            | `StopCondition \| StopCondition[]` | `isStepCount(200)` | Stops the tool loop after a completed step meets any supplied condition                                                                                                                                                                                          |
+| `guardrails`          | `Guardrail[]`                      | `[]`               | Guardrails applied during streaming                                                                                                                                                                                                                              |
+| `maxGuardrailRetries` | `number`                           | `3`                | Maximum stream attempts, including the initial attempt                                                                                                                                                                                                           |
+| `logging`             | `boolean`                          | `undefined`        | Enable debug logging                                                                                                                                                                                                                                             |
 
 ### Stopping the tool loop
 

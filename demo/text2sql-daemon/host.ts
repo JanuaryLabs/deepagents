@@ -1,20 +1,11 @@
 import pRetry from 'p-retry';
 
-import type { DisposableSandbox, LegacySandbox } from '@deepagents/context';
+import type { DisposableSandbox } from '@deepagents/context';
 
 // Host-side supervision for the text2sql daemon. Everything here only runs
 // commands, so the same functions serve every backend demo: docker (daemon
-// auto-starts as the image CMD — call `waitForDaemonReady`), daytona and
-// microsandbox (the runtime never executes the image CMD — call `startDaemon`).
-
-/** Daytona and Microsandbox stay on the old contract until their own ports. */
-type DemoSandbox = DisposableSandbox | LegacySandbox;
-
-function runCommand(sandbox: DemoSandbox, command: string) {
-  return 'run' in sandbox
-    ? sandbox.run({ command })
-    : sandbox.executeCommand(command);
-}
+// auto-starts as the image CMD — call `waitForDaemonReady`) and microsandbox
+// (the runtime never executes the image CMD — call `startDaemon`).
 
 /** Workspace the bash tool cd's into; pre-created by the Dockerfile. */
 export const demoWorkspace = '/tmp/deepagents-demo';
@@ -50,7 +41,7 @@ export interface StartDaemonOptions extends WaitForDaemonReadyOptions {
  * CMD); `startDaemon` composes this for backends that don't.
  */
 export async function waitForDaemonReady(
-  sandbox: DemoSandbox,
+  sandbox: DisposableSandbox,
   options: WaitForDaemonReadyOptions = {},
 ): Promise<void> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
@@ -62,7 +53,7 @@ export async function waitForDaemonReady(
   try {
     const health = await pRetry(
       async () => {
-        const probe = await runCommand(sandbox, healthProbe);
+        const probe = await sandbox.run({ command: healthProbe });
         if (probe.exitCode !== 0) {
           throw new Error('daemon not accepting requests yet');
         }
@@ -89,19 +80,18 @@ export async function waitForDaemonReady(
 /**
  * Launch the daemon detached inside the sandbox, verify it survived its first
  * tick, then wait for readiness. For backends that never run the image CMD
- * (daytona, microsandbox).
+ * (microsandbox).
  */
 export async function startDaemon(
-  sandbox: DemoSandbox,
+  sandbox: DisposableSandbox,
   options: StartDaemonOptions = {},
 ): Promise<void> {
   // POSIX sh (alpine) — no `disown` bash-ism; nohup + redirected stdio already
   // detaches the daemon so it survives this exec.
   const prelude = options.prelude ? `${options.prelude}; ` : '';
-  const spawnResult = await runCommand(
-    sandbox,
-    `${prelude}nohup node ${daemonScript} > ${daemonLogPath} 2>&1 < /dev/null & echo $!`,
-  );
+  const spawnResult = await sandbox.run({
+    command: `${prelude}nohup node ${daemonScript} > ${daemonLogPath} 2>&1 < /dev/null & echo $!`,
+  });
   const daemonPid = spawnResult.stdout.trim();
   if (spawnResult.exitCode !== 0 || !/^\d+$/.test(daemonPid)) {
     throw new Error(
@@ -109,7 +99,7 @@ export async function startDaemon(
     );
   }
 
-  const liveness = await runCommand(sandbox, `kill -0 ${daemonPid}`);
+  const liveness = await sandbox.run({ command: `kill -0 ${daemonPid}` });
   if (liveness.exitCode !== 0) {
     throw new Error(
       `daemon process ${daemonPid} died immediately.${await logTail(sandbox)}`,
@@ -119,10 +109,9 @@ export async function startDaemon(
   await waitForDaemonReady(sandbox, options);
 }
 
-async function logTail(sandbox: DemoSandbox): Promise<string> {
-  const log = await runCommand(
-    sandbox,
-    `tail -50 ${daemonLogPath} 2>/dev/null || true`,
-  );
+async function logTail(sandbox: DisposableSandbox): Promise<string> {
+  const log = await sandbox.run({
+    command: `tail -50 ${daemonLogPath} 2>/dev/null || true`,
+  });
   return log.stdout.trim() ? ` Log tail:\n${log.stdout}` : '';
 }

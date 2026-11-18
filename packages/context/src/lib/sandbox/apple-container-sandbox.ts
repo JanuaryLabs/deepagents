@@ -43,6 +43,7 @@ import {
   type InstallerContext,
   createInstallerContext,
 } from './installers/installer.ts';
+import { createByteReadable } from './session.ts';
 import { shellQuote } from './shell-quote.ts';
 import type { CommandResult, DisposableSandbox } from './types.ts';
 
@@ -239,10 +240,23 @@ function isNameConflict(message: string): boolean {
   return /already exists/i.test(message);
 }
 
+/**
+ * A pipe of the child as a web stream that drains it to the end, also after a
+ * reader cancels: the child then never writes into a closed pipe, so its exit
+ * stays the command's.
+ */
+function drained(pipe: Readable): ReadableStream<Uint8Array> {
+  const readable = createByteReadable();
+  pipe.on('data', (chunk: Buffer) => readable.enqueue(chunk));
+  pipe.once('end', () => readable.close());
+  pipe.once('error', (error) => readable.error(error));
+  return readable.stream;
+}
+
 function engineProcess(child: ChildProcessWithoutNullStreams): EngineProcess {
   return {
-    stdout: Readable.toWeb(child.stdout),
-    stderr: Readable.toWeb(child.stderr),
+    stdout: drained(child.stdout),
+    stderr: drained(child.stderr),
     exitCode: once(child, 'close').then(([code]) => code ?? 1),
   };
 }

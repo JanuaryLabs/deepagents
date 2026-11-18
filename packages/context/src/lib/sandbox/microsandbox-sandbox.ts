@@ -5,7 +5,6 @@ import {
   type Experimental_SandboxSpawnOptionsWithStdin,
   type Experimental_SandboxSpawnOptionsWithoutStdin,
   type Experimental_WritableSandboxProcess,
-  extractLines,
 } from '@ai-sdk/provider-utils';
 import type {
   Sandbox as MicrosandboxVm,
@@ -14,9 +13,15 @@ import type {
 } from 'microsandbox';
 import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
-import { text } from 'node:stream/consumers';
 
-import { FILE_STAT_TYPES, bufferEncoding } from './container-session.ts';
+import { FILE_STAT_TYPES } from './container-session.ts';
+import {
+  collect,
+  controlProcess,
+  createByteReadable,
+  resolveIn,
+  textCalls,
+} from './session.ts';
 import type { DisposableSandbox, SandboxReadinessOptions } from './types.ts';
 
 export const MICROSANDBOX_DEFAULT_DESTINATION = '/workspace';
@@ -289,11 +294,9 @@ function microsandboxSession(args: {
     }
   };
 
-  // Joined, not normalized, so that `link/..` follows the link, as it does in
-  // a command. The exec `cwd` must be absolute too: a relative one fails as
+  // The exec `cwd` must be absolute too: a relative one fails as
   // `spawn "bash": No such file or directory`.
-  const resolve = (path: string) =>
-    posix.isAbsolute(path) ? path : `${workdir}/${path}`;
+  const resolve = (path: string) => resolveIn(workdir, path);
 
   const statAt = async (
     path: string,
@@ -371,28 +374,7 @@ function microsandboxSession(args: {
     const stderr = createByteReadable();
     let exited = false;
     let timedOut = false;
-    let killing: Promise<void> | undefined;
-    // A kill after the exit fails with `execution_closed` instead of doing
-    // nothing, so a second call shares the first call's kill.
-    const kill = async () => {
-      if (exited) return;
-      killing ??= handle.kill().catch((error: unknown) => {
-        if (!exited) throw error;
-      });
-      await killing;
-    };
-    const onAbort = () => {
-      void kill().catch(() => {});
-    };
-    // The exec builder's `timeout()` stops a streamed command too, but its exit
-    // code is -1, as for any signal, so the deadline is kept here to tell a
-    // timeout apart.
-    const timer = commandTimeout
-      ? setTimeout(() => {
-          timedOut = true;
-          onAbort();
-        }, commandTimeout).unref()
-      : undefined;
+    let timer: NodeJS.Timeout | undefined;
 
     const pump = async (): Promise<number> => {
       let code: number | undefined;
@@ -431,12 +413,30 @@ function microsandboxSession(args: {
       .finally(() => {
         exited = true;
         clearTimeout(timer);
-        abortSignal?.removeEventListener('abort', onAbort);
       });
     exitCode.catch(() => {});
 
-    if (abortSignal?.aborted) onAbort();
-    else abortSignal?.addEventListener('abort', onAbort, { once: true });
+    const control = controlProcess({
+      exitCode,
+      // A kill after the exit fails with `execution_closed` instead of doing
+      // nothing.
+      kill: async () => {
+        if (exited) return;
+        await handle.kill().catch((error: unknown) => {
+          if (!exited) throw error;
+        });
+      },
+      abortSignal,
+    });
+    // The exec builder's `timeout()` stops a streamed command too, but its exit
+    // code is -1, as for any signal, so the deadline is kept here to tell a
+    // timeout apart.
+    if (commandTimeout) {
+      timer = setTimeout(() => {
+        timedOut = true;
+        void control.kill().catch(() => {});
+      }, commandTimeout).unref();
+    }
 
     return {
       stdout: stdout.stream,
@@ -450,10 +450,7 @@ function microsandboxSession(args: {
             }),
           }
         : {}),
-      wait: async () => ({
-        exitCode: await exitCode.finally(() => abortSignal?.throwIfAborted()),
-      }),
-      kill,
+      ...control,
     };
   }
 
@@ -484,15 +481,7 @@ function microsandboxSession(args: {
 
   return {
     description: `Commands run through bash -lc in a Microsandbox microVM, starting in ${workdir}.`,
-    run: async (options) => {
-      const process = await spawn(options);
-      const [stdout, stderr, { exitCode }] = await Promise.all([
-        text(process.stdout),
-        text(process.stderr),
-        process.wait(),
-      ]);
-      return { stdout, stderr, exitCode };
-    },
+    run: async (options) => collect(await spawn(options)),
     spawn,
     readBinaryFile,
     readFile: async ({ path, abortSignal }) => {
@@ -501,15 +490,6 @@ function microsandboxSession(args: {
       if (!(await streamable(target))) return null;
       const stream = await orNull(() => withFs((fs) => fs.readStream(target)));
       return stream && ReadableStream.from(stream);
-    },
-    readTextFile: async ({ startLine, endLine, encoding, ...options }) => {
-      const bytes = await readBinaryFile(options);
-      if (!bytes) return null;
-      return extractLines({
-        text: Buffer.from(bytes).toString(bufferEncoding(encoding)),
-        startLine,
-        endLine,
-      });
     },
     writeBinaryFile,
     writeFile: async ({ path, content, abortSignal }) => {
@@ -521,11 +501,7 @@ function microsandboxSession(args: {
       for await (const chunk of content) await sink.write(chunk);
       await sink.close();
     },
-    writeTextFile: ({ content, encoding, ...options }) =>
-      writeBinaryFile({
-        ...options,
-        content: Buffer.from(content, bufferEncoding(encoding)),
-      }),
+    ...textCalls({ readBinaryFile, writeBinaryFile }),
     stat: async ({ path, abortSignal }) => {
       abortSignal?.throwIfAborted();
       return statAt(resolve(path));
@@ -558,55 +534,6 @@ function microsandboxSession(args: {
     },
     dispose,
     [Symbol.asyncDispose]: dispose,
-  };
-}
-
-interface ByteReadable {
-  stream: ReadableStream<Uint8Array>;
-  enqueue(chunk: Uint8Array): void;
-  close(): void;
-  error(error: Error): void;
-}
-
-/**
- * One exec event stream demultiplexes into two web streams, so honoring
- * per-stream backpressure would deadlock (waiting on stdout's `pull` while
- * the next event is stderr stalls both). Like the Daytona backend, the pump
- * enqueues eagerly and lets the unread side buffer.
- */
-function createByteReadable(): ByteReadable {
-  const ended: Omit<ByteReadable, 'stream'> = {
-    enqueue() {},
-    close() {},
-    error() {},
-  };
-  let sink = ended;
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      sink = {
-        enqueue(chunk) {
-          if (chunk.length > 0) controller.enqueue(chunk);
-        },
-        close() {
-          sink = ended;
-          controller.close();
-        },
-        error(error) {
-          sink = ended;
-          controller.error(error);
-        },
-      };
-    },
-    cancel() {
-      sink = ended;
-    },
-  });
-
-  return {
-    stream,
-    enqueue: (chunk) => sink.enqueue(chunk),
-    close: () => sink.close(),
-    error: (error) => sink.error(error),
   };
 }
 

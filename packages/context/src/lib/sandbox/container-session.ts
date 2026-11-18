@@ -7,10 +7,8 @@ import {
   type Experimental_SandboxSpawnOptionsWithStdin,
   type Experimental_SandboxSpawnOptionsWithoutStdin,
   type Experimental_WritableSandboxProcess,
-  extractLines,
 } from '@ai-sdk/provider-utils';
 import { randomUUID } from 'node:crypto';
-import { posix } from 'node:path';
 import { text } from 'node:stream/consumers';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -20,6 +18,7 @@ import type {
   EngineProcess,
   EngineProcessOptions,
 } from './container-engine.ts';
+import { collect, controlProcess, resolveIn, textCalls } from './session.ts';
 import { shellQuote } from './shell-quote.ts';
 import type { CommandResult, DisposableSandbox } from './types.ts';
 
@@ -43,14 +42,6 @@ const DIRECTORY_ENTRY_TYPES = [
   'symlink',
   'other',
 ] as const satisfies readonly Experimental_SandboxDirectoryEntry['type'][];
-
-/** The contract types `encoding` as a string; Node accepts only its own names. */
-export function bufferEncoding(encoding = 'utf-8'): BufferEncoding {
-  if (!Buffer.isEncoding(encoding)) {
-    throw new TypeError(`Unknown encoding: ${encoding}`);
-  }
-  return encoding;
-}
 
 // `[ -e ]` is false both for missing paths and for paths that cannot be
 // resolved (permissions, symbolic link loops), so open the path to get the
@@ -359,40 +350,11 @@ export function containerSession(
     validateEnv(env, errors);
     return {
       env,
-      // Joined, not normalized, so that `link/..` follows the link.
       workingDirectory:
-        workingDirectory === undefined || posix.isAbsolute(workingDirectory)
-          ? workingDirectory
-          : `${container.workdir}/${workingDirectory}`,
+        workingDirectory === undefined
+          ? undefined
+          : resolveIn(container.workdir, workingDirectory),
     };
-  };
-
-  const start = async (options: Experimental_SandboxSpawnOptions) => {
-    const { command, abortSignal, stdin } = options;
-    abortSignal?.throwIfAborted();
-    const controlPath = `/dev/shm/deepagents-exec-${randomUUID()}.pid`;
-    const process = await container.spawn(
-      [
-        'bash',
-        '-c',
-        managedCommand(command, controlPath, container.commandTimeout),
-      ],
-      { ...scope(options), stdin },
-    );
-    let termination: Promise<void> | undefined;
-    const kill = () =>
-      (termination ??= terminate(container, controlPath, process.exitCode));
-    const onAbort = () => {
-      // Observe transport failures immediately; `exitCode` still reports the
-      // original rejection once the command's transport finishes.
-      void kill().catch(() => {});
-    };
-    if (abortSignal?.aborted) onAbort();
-    else abortSignal?.addEventListener('abort', onAbort, { once: true });
-    void process.exitCode
-      .catch(() => {})
-      .finally(() => abortSignal?.removeEventListener('abort', onAbort));
-    return { process, kill };
   };
 
   function spawn(
@@ -409,17 +371,27 @@ export function containerSession(
   ): Promise<
     Experimental_SandboxProcess | Experimental_WritableSandboxProcess
   > {
-    const { process, kill } = await start(options);
+    const { command, abortSignal, stdin } = options;
+    abortSignal?.throwIfAborted();
+    const controlPath = `/dev/shm/deepagents-exec-${randomUUID()}.pid`;
+    const process = await container.spawn(
+      [
+        'bash',
+        '-c',
+        managedCommand(command, controlPath, container.commandTimeout),
+      ],
+      { ...scope(options), stdin },
+    );
+    const control = controlProcess({
+      exitCode: process.exitCode,
+      kill: () => terminate(container, controlPath, process.exitCode),
+      abortSignal,
+    });
     return {
       stdout: process.stdout,
       stderr: process.stderr,
       ...(process.stdin ? { stdin: process.stdin } : {}),
-      wait: async () => ({
-        exitCode: await process.exitCode.finally(() =>
-          options.abortSignal?.throwIfAborted(),
-        ),
-      }),
-      kill,
+      ...control,
     };
   }
 
@@ -448,10 +420,7 @@ export function containerSession(
       if (!abortSignal && !container.commandTimeout) {
         return container.exec(['bash', '-lc', command], scope(options));
       }
-      const { process } = await start(options);
-      return collectOutput(process).finally(() =>
-        abortSignal?.throwIfAborted(),
-      );
+      return collect(await spawn(options));
     },
     spawn,
     readBinaryFile,
@@ -459,26 +428,13 @@ export function containerSession(
       const bytes = await readBinaryFile(options);
       return bytes && ReadableStream.from([bytes]);
     },
-    readTextFile: async ({ startLine, endLine, encoding, ...options }) => {
-      const bytes = await readBinaryFile(options);
-      if (!bytes) return null;
-      return extractLines({
-        text: Buffer.from(bytes).toString(bufferEncoding(encoding)),
-        startLine,
-        endLine,
-      });
-    },
     writeBinaryFile,
     writeFile: async ({ content, ...options }) =>
       writeBinaryFile({
         ...options,
         content: await new Response(content).bytes(),
       }),
-    writeTextFile: ({ content, encoding, ...options }) =>
-      writeBinaryFile({
-        ...options,
-        content: Buffer.from(content, bufferEncoding(encoding)),
-      }),
+    ...textCalls({ readBinaryFile, writeBinaryFile }),
     stat: async ({ path, abortSignal }) => {
       abortSignal?.throwIfAborted();
       return container.stat(path, abortSignal);
