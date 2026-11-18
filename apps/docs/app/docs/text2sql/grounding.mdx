@@ -22,33 +22,37 @@ Reuse the shared `model` setup from
 [Getting Started](/docs/text2sql/getting-started) in the examples below.
 
 <Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'DuckDB', 'SQL Server', 'MySQL/MariaDB', 'BigQuery', 'ClickHouse']}>
+
 <Tab value="PostgreSQL">
+
 ```typescript
 import { Text2Sql } from '@deepagents/text2sql';
 import { Postgres } from '@deepagents/text2sql/postgres';
 import * as postgres from '@deepagents/text2sql/postgres';
 
 const text2sql = new Text2Sql({
-adapters: {
-main: new Postgres({
-execute: async (sql) => pool.query(sql).then(r => r.rows),
-grounding: [
-postgres.tables(),
-postgres.views(),
-postgres.info(),
-postgres.indexes(),
-postgres.constraints(),
-postgres.rowCount(),
-postgres.columnStats(),
-postgres.columnValues(),
-],
-}),
-},
+  adapters: {
+    main: new Postgres({
+      execute: async (sql) => pool.query(sql).then((r) => r.rows),
+      grounding: [
+        postgres.tables(),
+        postgres.views(),
+        postgres.info(),
+        postgres.indexes(),
+        postgres.constraints(),
+        postgres.rowCount(),
+        postgres.columnStats(),
+        postgres.columnValues(),
+      ],
+    }),
+  },
 });
+```
 
-````
 </Tab>
+
 <Tab value="SQLite">
+
 ```typescript
 import { Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
@@ -71,10 +75,12 @@ const text2sql = new Text2Sql({
     }),
   },
 });
-````
+```
 
 </Tab>
+
 <Tab value="DuckDB">
+
 ```typescript
 import { DuckDBInstance } from '@duckdb/node-api';
 
@@ -83,34 +89,36 @@ import { DuckDB } from '@deepagents/text2sql/duckdb';
 import * as duckdb from '@deepagents/text2sql/duckdb';
 
 const instance = await DuckDBInstance.create('./analytics.duckdb', {
-access_mode: 'READ_ONLY',
+  access_mode: 'READ_ONLY',
 });
 const connection = await instance.connect();
 
 const text2sql = new Text2Sql({
-adapters: {
-main: new DuckDB({
-execute: async (sql) => {
-const reader = await connection.runAndReadAll(sql);
-return reader.getRowObjectsJson();
-},
-grounding: [
-duckdb.tables(),
-duckdb.views(),
-duckdb.info(),
-duckdb.indexes(),
-duckdb.constraints(),
-duckdb.rowCount(),
-duckdb.columnStats(),
-duckdb.columnValues(),
-],
-}),
-},
+  adapters: {
+    main: new DuckDB({
+      execute: async (sql) => {
+        const reader = await connection.runAndReadAll(sql);
+        return reader.getRowObjectsJson();
+      },
+      grounding: [
+        duckdb.tables(),
+        duckdb.views(),
+        duckdb.info(),
+        duckdb.indexes(),
+        duckdb.constraints(),
+        duckdb.rowCount(),
+        duckdb.columnStats(),
+        duckdb.columnValues(),
+      ],
+    }),
+  },
 });
+```
 
-````
 </Tab>
+
 <Tab value="SQL Server">
+
 ```typescript
 import { Text2Sql } from '@deepagents/text2sql';
 import { SqlServer } from '@deepagents/text2sql/sqlserver';
@@ -136,39 +144,43 @@ const text2sql = new Text2Sql({
     }),
   },
 });
-````
+```
 
 </Tab>
+
 <Tab value="MySQL/MariaDB">
+
 ```typescript
 import { Text2Sql } from '@deepagents/text2sql';
 import { Mysql } from '@deepagents/text2sql/mysql';
 import * as mysqlGrounding from '@deepagents/text2sql/mysql';
 
 const text2sql = new Text2Sql({
-adapters: {
-main: new Mysql({
-execute: async (sql) => {
-const [rows] = await pool.query(sql);
-return rows;
-},
-grounding: [
-mysqlGrounding.tables(),
-mysqlGrounding.views(),
-mysqlGrounding.info(),
-mysqlGrounding.indexes(),
-mysqlGrounding.constraints(),
-mysqlGrounding.rowCount(),
-mysqlGrounding.columnStats(),
-mysqlGrounding.columnValues(),
-],
-}),
-},
+  adapters: {
+    main: new Mysql({
+      execute: async (sql) => {
+        const [rows] = await pool.query(sql);
+        return rows;
+      },
+      grounding: [
+        mysqlGrounding.tables(),
+        mysqlGrounding.views(),
+        mysqlGrounding.info(),
+        mysqlGrounding.indexes(),
+        mysqlGrounding.constraints(),
+        mysqlGrounding.rowCount(),
+        mysqlGrounding.columnStats(),
+        mysqlGrounding.columnValues(),
+      ],
+    }),
+  },
 });
+```
 
-````
 </Tab>
+
 <Tab value="BigQuery">
+
 ```typescript
 import { BigQuery as BigQueryClient } from '@google-cloud/bigquery';
 
@@ -189,7 +201,11 @@ const text2sql = new Text2Sql({
         return rows;
       },
       validate: async (sql) => {
-        await client.createQueryJob({ query: sql, dryRun: true, useQueryCache: false });
+        await client.createQueryJob({
+          query: sql,
+          dryRun: true,
+          useQueryCache: false,
+        });
       },
       grounding: [
         bigquery.tables(),
@@ -202,35 +218,38 @@ const text2sql = new Text2Sql({
     }),
   },
 });
-````
+```
 
 </Tab>
+
 <Tab value="ClickHouse">
+
 ```typescript
 import { Text2Sql } from '@deepagents/text2sql';
 import { ClickHouse } from '@deepagents/text2sql/clickhouse';
 import * as clickhouse from '@deepagents/text2sql/clickhouse';
 
 const text2sql = new Text2Sql({
-adapters: {
-main: new ClickHouse({
-defaultDatabase: 'analytics',
-execute: query,
-validate: async () => undefined,
-grounding: [
-clickhouse.tables(),
-clickhouse.views(),
-clickhouse.info(),
-clickhouse.indexes(),
-clickhouse.constraints(),
-clickhouse.rowCount(),
-],
-}),
-},
+  adapters: {
+    main: new ClickHouse({
+      defaultDatabase: 'analytics',
+      execute: query,
+      validate: async () => undefined,
+      grounding: [
+        clickhouse.tables(),
+        clickhouse.views(),
+        clickhouse.info(),
+        clickhouse.indexes(),
+        clickhouse.constraints(),
+        clickhouse.rowCount(),
+      ],
+    }),
+  },
 });
+```
 
-````
 </Tab>
+
 </Tabs>
 
 ## Available Groundings
@@ -258,8 +277,8 @@ tables({
 
   // Traverse backward (parent → child) finding referencing tables
   backward: 1,
-})
-````
+});
+```
 
 | Option     | Type                                                  | Description                             |
 | ---------- | ----------------------------------------------------- | --------------------------------------- |
@@ -407,83 +426,77 @@ tables({
 For simple use cases, you can use a minimal grounding setup:
 
 <Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'DuckDB', 'SQL Server', 'MySQL/MariaDB', 'BigQuery', 'ClickHouse']}>
+
 <Tab value="PostgreSQL">
+
 ```typescript
 import * as postgres from '@deepagents/text2sql/postgres';
 
-grounding: [
-postgres.tables(),
-postgres.info(),
-]
+grounding: [postgres.tables(), postgres.info()];
+```
 
-````
 </Tab>
+
 <Tab value="SQLite">
+
 ```typescript
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
-grounding: [
-  sqlite.tables(),
-  sqlite.info(),
-]
-````
+grounding: [sqlite.tables(), sqlite.info()];
+```
 
 </Tab>
+
 <Tab value="DuckDB">
+
 ```typescript
 import * as duckdb from '@deepagents/text2sql/duckdb';
 
-grounding: [
-duckdb.tables(),
-duckdb.info(),
-]
+grounding: [duckdb.tables(), duckdb.info()];
+```
 
-````
 </Tab>
+
 <Tab value="SQL Server">
+
 ```typescript
 import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
-grounding: [
-  sqlserver.tables(),
-  sqlserver.info(),
-]
-````
+grounding: [sqlserver.tables(), sqlserver.info()];
+```
 
 </Tab>
+
 <Tab value="MySQL/MariaDB">
+
 ```typescript
 import * as mysqlGrounding from '@deepagents/text2sql/mysql';
 
-grounding: [
-mysqlGrounding.tables(),
-mysqlGrounding.info(),
-]
+grounding: [mysqlGrounding.tables(), mysqlGrounding.info()];
+```
 
-````
 </Tab>
+
 <Tab value="BigQuery">
+
 ```typescript
 import * as bigquery from '@deepagents/text2sql/bigquery';
 
-grounding: [
-  bigquery.tables(),
-  bigquery.info(),
-]
-````
+grounding: [bigquery.tables(), bigquery.info()];
+```
 
 </Tab>
+
 <Tab value="ClickHouse">
+
 ```typescript
 import * as clickhouse from '@deepagents/text2sql/clickhouse';
 
-grounding: [
-clickhouse.tables(),
-clickhouse.info(),
-]
+grounding: [clickhouse.tables(), clickhouse.info()];
+```
 
-````
 </Tab>
+
 </Tabs>
 
 ## Empty Grounding
@@ -491,8 +504,8 @@ clickhouse.info(),
 Pass an empty array to disable all automatic introspection:
 
 ```typescript
-grounding: []
-````
+grounding: [];
+```
 
 This is useful when providing custom introspection via the adapter's `introspect` option.
 
