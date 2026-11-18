@@ -732,6 +732,50 @@ describe('strace file-change tracking (docker backend)', () => {
       await s.sandbox.dispose();
     }
   });
+
+  it('returns the traced changes and an after-hook’s metadata together on the tool result', async () => {
+    const backend = await createDockerSandbox({
+      ...defaults,
+      dockerfile: STRACE_IMAGE,
+    });
+    await using tracked = await withStraceFileChanges(backend, {
+      include: [ROOT, `${ROOT}/**`],
+    });
+    const { bash } = await createBashTool({
+      sandbox: tracked,
+      workingDirectory: ROOT,
+      onAfterBashCall: () => ({ meta: { source: 'hook' } }),
+    });
+    const model: MockLanguageModelV4 = new MockLanguageModelV4({
+      doGenerate: async () => {
+        return model.doGenerateCalls.length === 1
+          ? toolCallsResponse([
+              bashToolCall('merge', `echo merged > ${ROOT}/merged.txt`),
+            ])
+          : stopResponse;
+      },
+    });
+
+    const res = await generateText({
+      model,
+      tools: { bash },
+      prompt: 'go',
+      stopWhen: isStepCount(2),
+    });
+
+    const [toolResult] = res.toolResults;
+    assert.ok(
+      toolResult && !toolResult.dynamic && toolResult.toolName === 'bash',
+    );
+    assert.deepStrictEqual(
+      fileChangesOf(toolResult.output.meta).map(({ op, path }) => ({
+        op,
+        path,
+      })),
+      [{ op: 'write', path: `${ROOT}/merged.txt` }],
+    );
+    assert.strictEqual(toolResult.output.meta?.source, 'hook');
+  });
 });
 
 describe('onFileChanges failure handling (docker backend)', () => {

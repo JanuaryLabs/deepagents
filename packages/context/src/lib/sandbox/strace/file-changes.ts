@@ -9,13 +9,8 @@ import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 
 import { BashException } from '../bash-exception.ts';
-import { fromLegacySandbox } from '../legacy-sandbox.ts';
 import { shellQuote } from '../shell-quote.ts';
-import type {
-  CommandResult,
-  DisposableSandbox,
-  LegacySandbox,
-} from '../types.ts';
+import type { CommandResult, DisposableSandbox } from '../types.ts';
 import type { FileChange } from './file-change.ts';
 import {
   buildStraceCommand,
@@ -108,19 +103,18 @@ function warnOnFileChangesError(error: unknown): void {
  * isolated and surfaced only via `onError`.
  */
 export async function withStraceFileChanges(
-  sandbox: DisposableSandbox | LegacySandbox,
+  sandbox: DisposableSandbox,
   options: WithStraceFileChangesOptions,
 ): Promise<DisposableSandbox> {
   const { include, exclude, onFileChanges } = options;
   const onError = options.onError ?? warnOnFileChangesError;
   const traceDir = options.traceDir ?? DEFAULT_TRACE_DIR;
-  const inner = 'run' in sandbox ? sandbox : fromLegacySandbox(sandbox);
 
   // Delete the trace file with a fresh run (no caller signal) so an aborted turn
   // can't cancel the cleanup and leave the file behind.
   const removeTrace = (traceFile: string) =>
     void Promise.resolve(
-      inner.run({ command: `rm -f ${shellQuote(traceFile)}` }),
+      sandbox.run({ command: `rm -f ${shellQuote(traceFile)}` }),
     ).catch(() => {});
 
   // Parse one call's changes and sweep its trace file — the trace is consumed
@@ -128,7 +122,7 @@ export async function withStraceFileChanges(
   // does next. Returns [] on an empty or unparseable trace.
   const readChanges = async (traceFile: string): Promise<FileChange[]> => {
     try {
-      const trace = await inner.readTextFile({ path: traceFile });
+      const trace = await sandbox.readTextFile({ path: traceFile });
       return trace === null
         ? []
         : parseStraceTrace(trace, { include, exclude, traceFile, traceDir });
@@ -154,7 +148,7 @@ export async function withStraceFileChanges(
   let baseDirectory: Promise<string> | undefined;
   const absolutePath = async (path: string): Promise<string> => {
     if (posix.isAbsolute(path)) return posix.normalize(path);
-    baseDirectory ??= Promise.resolve(inner.run({ command: 'pwd' })).then(
+    baseDirectory ??= Promise.resolve(sandbox.run({ command: 'pwd' })).then(
       ({ stdout }) => stdout.trimEnd(),
     );
     return posix.resolve(await baseDirectory, path);
@@ -190,7 +184,7 @@ export async function withStraceFileChanges(
     Experimental_SandboxProcess | Experimental_WritableSandboxProcess
   > {
     const traceFile = `${traceDir}/${randomUUID()}.strace`;
-    const child = await inner.spawn({
+    const child = await sandbox.spawn({
       ...spawnOptions,
       command: buildStraceCommand(spawnOptions.command, traceFile, traceDir),
     });
@@ -212,13 +206,13 @@ export async function withStraceFileChanges(
 
   const dispose = async (): Promise<void> => {
     await Promise.resolve(
-      inner.run({ command: `rm -rf ${shellQuote(traceDir)}` }),
+      sandbox.run({ command: `rm -rf ${shellQuote(traceDir)}` }),
     ).catch(() => {});
-    await inner.dispose();
+    await sandbox.dispose();
   };
 
   return {
-    description: inner.description,
+    description: sandbox.description,
     async run(runOptions) {
       const traceFile = `${traceDir}/${randomUUID()}.strace`;
       const sentinel = `__dat_trace_${randomUUID()}__`;
@@ -230,7 +224,7 @@ export async function withStraceFileChanges(
       );
       let raw: CommandResult;
       try {
-        raw = await inner.run({ ...runOptions, command: wrapped });
+        raw = await sandbox.run({ ...runOptions, command: wrapped });
       } catch (error) {
         // The command failed at the sandbox level; the inline `rm` never ran, so
         // sweep the trace and surface the real error.
@@ -273,26 +267,26 @@ export async function withStraceFileChanges(
       return result;
     },
     spawn,
-    readFile: (readOptions) => inner.readFile(readOptions),
-    readBinaryFile: (readOptions) => inner.readBinaryFile(readOptions),
-    readTextFile: (readOptions) => inner.readTextFile(readOptions),
-    stat: (statOptions) => inner.stat(statOptions),
-    listDirectory: (listOptions) => inner.listDirectory(listOptions),
+    readFile: (readOptions) => sandbox.readFile(readOptions),
+    readBinaryFile: (readOptions) => sandbox.readBinaryFile(readOptions),
+    readTextFile: (readOptions) => sandbox.readTextFile(readOptions),
+    stat: (statOptions) => sandbox.stat(statOptions),
+    listDirectory: (listOptions) => sandbox.listDirectory(listOptions),
     deleteFile: async (deleteOptions) => {
-      const deleted = await inner.deleteFile(deleteOptions);
+      const deleted = await sandbox.deleteFile(deleteOptions);
       if (deleted) await observe('delete', deleteOptions.path);
       return deleted;
     },
     writeFile: async (writeOptions) => {
-      await inner.writeFile(writeOptions);
+      await sandbox.writeFile(writeOptions);
       await observe('write', writeOptions.path);
     },
     writeBinaryFile: async (writeOptions) => {
-      await inner.writeBinaryFile(writeOptions);
+      await sandbox.writeBinaryFile(writeOptions);
       await observe('write', writeOptions.path);
     },
     writeTextFile: async (writeOptions) => {
-      await inner.writeTextFile(writeOptions);
+      await sandbox.writeTextFile(writeOptions);
       await observe('write', writeOptions.path);
     },
     dispose,

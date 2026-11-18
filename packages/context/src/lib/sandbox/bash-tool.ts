@@ -8,7 +8,6 @@ import z from 'zod';
 import { withHostOnlyToolMetadata } from '@deepagents/agent';
 
 import { BashException } from './bash-exception.ts';
-import { fromLegacySandbox } from './legacy-sandbox.ts';
 import { createReadFileTool } from './read-file-tool/index.ts';
 import { shellQuote } from './shell-quote.ts';
 import {
@@ -155,11 +154,7 @@ function createBashDescription(options: {
 export async function createBashTool(
   options: CreateBashToolOptions,
 ): Promise<BashToolkit> {
-  const { workingDirectory } = options;
-  const sandbox =
-    'run' in options.sandbox
-      ? options.sandbox
-      : fromLegacySandbox(options.sandbox);
+  const { workingDirectory, sandbox } = options;
   const initialFiles = await listInitialFiles(options);
 
   if (workingDirectory !== undefined) {

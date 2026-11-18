@@ -64,7 +64,7 @@ export interface CreateSqlCommandResult {
  *   fs: new InMemoryFs(),
  *   customCommands: [command],
  * });
- * await sandbox.executeCommand('sql run pagila "SELECT 1"');
+ * await sandbox.run({ command: 'sql run pagila "SELECT 1"' });
  * ```
  */
 export function createSqlCommand(

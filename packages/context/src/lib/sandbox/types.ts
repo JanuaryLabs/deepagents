@@ -34,79 +34,6 @@ export interface DisposableSandbox
   dispose(): Promise<void>;
 }
 
-export interface ExecuteCommandOptions {
-  signal?: AbortSignal;
-}
-
-export type ReadFileEncoding = 'utf-8' | 'binary';
-
-export interface ReadFileOptions<Encoding extends ReadFileEncoding = 'utf-8'> {
-  /** `'utf-8'` (default) decodes text; `'binary'` returns the raw bytes. */
-  encoding?: Encoding;
-}
-
-export type ReadFileContent<Encoding extends ReadFileEncoding> =
-  Encoding extends 'binary' ? Uint8Array : string;
-
-export interface Sandbox {
-  /**
-   * Execute `command` with Bash semantics. Process-backed implementations must
-   * invoke `bash -lc` directly and fail clearly when Bash is unavailable.
-   */
-  executeCommand(
-    command: string,
-    options?: ExecuteCommandOptions,
-  ): Promise<CommandResult>;
-  /**
-   * Read the file at `path` as UTF-8 text, or as raw bytes with
-   * `{ encoding: 'binary' }`. Rejects when nothing readable is at `path`.
-   */
-  readFile<Encoding extends ReadFileEncoding = 'utf-8'>(
-    path: string,
-    options?: ReadFileOptions<Encoding>,
-  ): Promise<ReadFileContent<Encoding>>;
-  writeFiles(
-    files: Array<{ path: string; content: string | Buffer }>,
-  ): Promise<void>;
-  /** Whether a file or directory exists at `path`; resolves `false` (never rejects) when missing. */
-  exists(path: string): Promise<boolean>;
-}
-
-export interface SpawnOptions {
-  signal?: AbortSignal;
-  env?: Record<string, string>;
-  cwd?: string;
-}
-
-export interface ExitInfo {
-  code: number | null;
-  signal: NodeJS.Signals | null;
-  /** Convenience for `code === 0`. */
-  success: boolean;
-}
-
-export interface SandboxProcess {
-  readonly stdout: ReadableStream<Uint8Array>;
-  readonly stderr: ReadableStream<Uint8Array>;
-  readonly exit: Promise<ExitInfo>;
-}
-
-/**
- * The contract of backends not yet ported to {@link DisposableSandbox}.
- * `createBashTool` adapts them through `fromLegacySandbox`. Deleted with the
- * last port.
- */
-export interface LegacySandbox extends Sandbox, AsyncDisposable {
-  /** Spawn `command` with the same Bash contract as {@link Sandbox.executeCommand}. */
-  spawn?(command: string, options?: SpawnOptions): Promise<SandboxProcess>;
-  /**
-   * Release the backend's external resources. Called explicitly, or
-   * automatically at scope exit via `await using` — every backend also
-   * implements `[Symbol.asyncDispose]`, which delegates here.
-   */
-  dispose(): Promise<void>;
-}
-
 /**
  * Readiness option accepted by every sandbox factory. Readiness is workload
  * policy supplied by the caller — the hook runs once after boot and gates the
@@ -123,8 +50,8 @@ export interface LegacySandbox extends Sandbox, AsyncDisposable {
  * });
  * ```
  */
-export interface SandboxReadinessOptions<TSandbox = DisposableSandbox> {
-  readiness?: (sandbox: TSandbox) => void | Promise<void>;
+export interface SandboxReadinessOptions {
+  readiness?: (sandbox: DisposableSandbox) => void | Promise<void>;
 }
 
 /**
@@ -172,7 +99,7 @@ export interface AfterBashCallOutput {
 }
 
 export interface CreateBashToolOptions {
-  sandbox: DisposableSandbox | LegacySandbox;
+  sandbox: DisposableSandbox;
   /**
    * Absolute directory every command starts in, created when the tool is created.
    * When omitted, commands run in the sandbox's default working directory and

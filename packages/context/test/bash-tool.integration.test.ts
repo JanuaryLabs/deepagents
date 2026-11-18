@@ -14,63 +14,16 @@ import {
   BashException,
   type BashToolInput,
   type CommandResult,
-  type ReadFileContent,
-  type ReadFileEncoding,
-  type ReadFileOptions,
   type ReadFileTool,
   type ReadFileToolInput,
   type WrappedBashTool,
   createBashTool,
   createVirtualSandbox,
-  readFileContent,
 } from '@deepagents/context';
 
 import { usage } from './helpers/usage.ts';
 
 const temporaryFiles = new TemporaryFiles();
-
-class RecordingSandbox {
-  readonly commands: string[] = [];
-  readonly files = new Map<string, string>();
-  readonly reads: string[] = [];
-  result: CommandResult = { stdout: 'second\n', stderr: '', exitCode: 0 };
-
-  async executeCommand(command: string) {
-    this.commands.push(command);
-    return this.result;
-  }
-
-  async readFile<Encoding extends ReadFileEncoding = 'utf-8'>(
-    path: string,
-    options?: ReadFileOptions<Encoding>,
-  ): Promise<ReadFileContent<Encoding>> {
-    this.reads.push(path);
-    const content = this.files.get(path);
-    if (content === undefined) throw new Error(`Missing file: ${path}`);
-    return readFileContent(new TextEncoder().encode(content), options);
-  }
-
-  async exists(path: string) {
-    return this.files.has(path);
-  }
-
-  async writeFiles(files: Array<{ path: string; content: string | Buffer }>) {
-    for (const file of files) {
-      this.files.set(
-        file.path,
-        typeof file.content === 'string'
-          ? file.content
-          : file.content.toString('utf8'),
-      );
-    }
-  }
-
-  async dispose() {}
-
-  async [Symbol.asyncDispose]() {
-    await this.dispose();
-  }
-}
 
 function executionOptions(toolCallId: string) {
   return {
@@ -191,23 +144,24 @@ describe('bash toolkit', () => {
     );
     await writeFile(join(source.path, 'first.txt'), 'first');
     await writeFile(join(source.path, 'second.txt'), 'second');
-    const backend = new RecordingSandbox();
+    const sandbox = await createVirtualSandbox({ fs: new InMemoryFs() });
 
     await assert.rejects(
       createBashTool({
-        sandbox: backend,
+        sandbox,
         uploadDirectory: { source: source.path },
         maxFiles: 1,
       }),
       /2 files exceeds the limit of 1/,
     );
-    assert.strictEqual(backend.files.size, 0);
+    assert.strictEqual(await sandbox.stat({ path: 'first.txt' }), null);
+    assert.strictEqual(await sandbox.stat({ path: 'second.txt' }), null);
   });
 
   it('keeps tee capture files under the established bash-tool directory', async () => {
-    const backend = new RecordingSandbox();
+    const sandbox = await createVirtualSandbox({ fs: new InMemoryFs() });
     const { bash } = await createBashTool({
-      sandbox: backend,
+      sandbox,
       workingDirectory: '/workspace',
       experimentalTeeTransform: true,
     });
@@ -221,7 +175,10 @@ describe('bash toolkit', () => {
     );
 
     assert.strictEqual(result.stdout.trim(), 'second');
-    assert.match(backend.commands[1], /mkdir -p '\/tmp\/bash-tool'/);
+    assert.strictEqual(
+      (await sandbox.stat({ path: '/tmp/bash-tool' }))?.type,
+      'directory',
+    );
     assert.ok(result.teeFiles?.length);
     assert.ok(
       result.teeFiles.every(({ stdoutFile }) =>
@@ -256,44 +213,20 @@ describe('bash toolkit', () => {
     );
   });
 
-  it('supports sandbox backends implemented with prototype methods', async () => {
-    const backend = new RecordingSandbox();
-    const { tools } = await createBashTool({
-      sandbox: backend,
-    });
-    const write = tools.writeFile.execute;
-    const read = tools.readFile.execute;
-    assert.ok(write);
-    assert.ok(read);
-
-    await write(
-      { path: 'notes/result.txt', content: 'prototype methods work' },
-      executionOptions('write-file'),
-    );
-
-    assert.deepStrictEqual(
-      await read({ path: 'notes/result.txt' }, executionOptions('read-file')),
-      { type: 'text', value: 'prototype methods work' },
-    );
-  });
-
-  it('runs hooks around truncated output and merges their metadata', async () => {
-    const backend = new RecordingSandbox();
-    backend.result = {
-      stdout: '123456',
-      stderr: 'abcdef',
-      exitCode: 0,
-      meta: { fileChanges: ['/workspace/result.txt'], source: 'sandbox' },
-    };
+  it('runs hooks around truncated output and returns their metadata', async () => {
+    const sandbox = await createVirtualSandbox({ fs: new InMemoryFs() });
     const { bash } = await createBashTool({
-      sandbox: backend,
+      sandbox,
       workingDirectory: '/workspace',
       maxOutputLength: 3,
       onBeforeBashCall: ({ command }) => ({
         command: command.replace('draft', 'final'),
       }),
       onAfterBashCall: ({ command, result }) => {
-        assert.strictEqual(command, 'echo final');
+        assert.strictEqual(
+          command,
+          'printf 123456; printf abcdef >&2; echo final > ran.txt',
+        );
         assert.match(result.stdout, /^123\n\n\[stdout truncated:/);
         assert.match(result.stderr, /^abc\n\n\[stderr truncated:/);
         return {
@@ -318,7 +251,8 @@ describe('bash toolkit', () => {
                   toolCallId: 'run-hooks',
                   toolName: 'bash',
                   input: JSON.stringify({
-                    command: 'echo draft',
+                    command:
+                      'printf 123456; printf abcdef >&2; echo draft > ran.txt',
                     reasoning: 'exercise both hooks',
                   }),
                 },
@@ -342,16 +276,15 @@ describe('bash toolkit', () => {
     });
     const result = generated.steps[0].toolResults[0].output;
 
-    assert.match(backend.commands[1], /echo final$/);
+    assert.strictEqual(
+      await sandbox.readTextFile({ path: '/workspace/ran.txt' }),
+      'final\n',
+    );
     assert.deepStrictEqual(result, {
       stdout: 'hooked\n',
       stderr: 'hooked error\n',
       exitCode: 7,
-      meta: {
-        fileChanges: ['/workspace/result.txt'],
-        formattedSql: 'SELECT 1',
-        source: 'hook',
-      },
+      meta: { formattedSql: 'SELECT 1', source: 'hook' },
     });
     assert.deepStrictEqual(toolResultOutputs(model.doGenerateCalls[1].prompt), [
       {
@@ -1022,17 +955,17 @@ describe('readFile tool', () => {
   });
 
   it('stops an aborted read before touching the sandbox', async () => {
-    const backend = new RecordingSandbox();
-    backend.files.set('/workspace/notes.txt', 'plain text');
     const { tools } = await createBashTool({
-      sandbox: backend,
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
     });
     const execute = tools.readFile.execute;
     assert.ok(execute);
 
+    // A read that reached the sandbox would fail on the missing file; the
+    // abort reason proves the read never started.
     await assert.rejects(async () => {
       const result = await execute(
-        { path: 'notes.txt' },
+        { path: 'missing.txt' },
         {
           ...executionOptions('read-aborted-file'),
           abortSignal: AbortSignal.abort(new Error('read cancelled')),
@@ -1042,6 +975,5 @@ describe('readFile tool', () => {
         assert.fail('expected a buffered file result');
       }
     }, /read cancelled/);
-    assert.deepStrictEqual(backend.reads, []);
   });
 });
