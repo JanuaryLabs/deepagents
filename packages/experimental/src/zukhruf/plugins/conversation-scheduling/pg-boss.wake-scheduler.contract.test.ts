@@ -1,5 +1,6 @@
 import { PGlite } from '@electric-sql/pglite';
-import { settleWithin } from '@zukhruf/testing/async';
+import { untilAborted } from '@zukhruf/async';
+import { waitFor } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
@@ -13,7 +14,7 @@ import {
 
 const testPostgres = new Postgres({ environment: process.env });
 
-test('PgBossWakeScheduler delivers opaque data at or after its due time', async () => {
+test('PgBossWakeScheduler delivers opaque data at or after its due time', async (t) => {
   const database = new PGlite();
   const boss = new PgBoss({
     db: fromPglite(database),
@@ -63,7 +64,7 @@ test('PgBossWakeScheduler delivers opaque data at or after its due time', async 
       false,
       'future wake is not delivered early',
     );
-    const received = await settleWithin(delivered.promise, 'wake');
+    const received = await untilAborted(delivered.promise, t.signal);
     assert.deepEqual(received, wake);
     assert.deepEqual(otherTreeDeliveries, []);
     assert.ok(Date.now() >= runAt.getTime());
@@ -114,9 +115,9 @@ async function waitForCount(
   count: number,
   label: string,
 ) {
-  await t.waitFor(() => assert.equal(values.length, count, label), {
+  await waitFor(() => assert.equal(values.length, count, label), {
+    signal: t.signal,
     interval: 25,
-    timeout: 6_000,
   });
 }
 
@@ -136,14 +137,14 @@ test('PgBossWakeScheduler deduplicates equal wakes and rejects conflicting id re
   });
   void _consumer;
   await waitForCount(t, seen, 1, 'one equal wake is delivered');
-  await t.waitFor(
+  await waitFor(
     async () =>
       assert.equal(
         (await h.boss.findJobs(h.queue, { id: wake.id })).length,
         0,
         'spent receipt is deleted',
       ),
-    { interval: 25, timeout: 6_000 },
+    { signal: t.signal, interval: 25 },
   );
   await sleep(700);
   assert.deepEqual(seen, [wake]);
@@ -347,7 +348,7 @@ test('PgBossWakeScheduler preserves deduplication, retry, cancellation, and rest
       'postgres-after-dispose',
       'postgres-restart',
     ]);
-    await t.waitFor(
+    await waitFor(
       async () =>
         assert.equal(
           (
@@ -357,7 +358,7 @@ test('PgBossWakeScheduler preserves deduplication, retry, cancellation, and rest
           ).length,
           0,
         ),
-      { interval: 25, timeout: 6_000 },
+      { signal: t.signal, interval: 25 },
     );
   } finally {
     await secondBoss.stop({ graceful: false });
@@ -415,9 +416,9 @@ test('PgBossWakeScheduler retries after a PostgreSQL worker dies mid-handler', a
       },
     );
     void _replacement;
-    await t.waitFor(() => assert.deepEqual(seen, ['worker-death']), {
+    await waitFor(() => assert.deepEqual(seen, ['worker-death']), {
+      signal: t.signal,
       interval: 100,
-      timeout: 20_000,
     });
   } finally {
     await secondBoss.stop({ graceful: false });

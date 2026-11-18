@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { it } from 'node:test';
 import { promisify } from 'node:util';
 
-it('generates model types beside the script when launched from another directory', async () => {
+it('generates model types beside the script when launched from another directory', async (t) => {
   await using directory = await new TemporaryFiles().directory(
     'context-models-',
   );
@@ -48,7 +48,7 @@ it('generates model types beside the script when launched from another directory
     ['--no-warnings', '--import', preload, script],
     {
       cwd,
-      signal: AbortSignal.timeout(10_000),
+      signal: t.signal,
     },
   );
   assert.equal(stderr, '');

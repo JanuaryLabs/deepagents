@@ -41,25 +41,25 @@
   },
   "dependencies": {
     "@ai-sdk/tool-web-fetch": "^1.0.16",
+    "@huggingface/transformers": "^4.2.0",
+    "@langchain/core": "^1.2.3",
     "@langchain/textsplitters": "^1.0.1",
-    "@zukhruf/sqlite-drift": "^0.8.25",
-    "@zukhruf/sqlite-open": "^0.8.25",
-    "@zukhruf/sqlite-transaction": "^0.8.25",
-    "execa": "^10.0.0",
     "@linear/sdk": "^88.2.0",
+    "@zukhruf/sqlite-drift": "^0.8.30",
+    "@zukhruf/sqlite-open": "^0.8.30",
+    "@zukhruf/sqlite-transaction": "^0.8.30",
+    "ai": "^7.0.166",
+    "dedent": "1.7.2",
+    "execa": "^10.0.0",
     "fast-glob": "^3.3.3",
     "ignore": "^7.0.6",
-    "unpdf": "^1.6.2",
-    "rss-parser": "^3.13.0",
-    "@huggingface/transformers": "^4.2.0",
     "langchain": "^1.5.3",
-    "ai": "^7.0.166",
+    "rss-parser": "^3.13.0",
     "sqlite-vec": "^0.1.9",
-    "dedent": "1.7.2",
-    "@langchain/core": "^1.2.3"
+    "unpdf": "^1.6.2"
   },
   "devDependencies": {
     "@sinonjs/fake-timers": "^15.4.0",
-    "@zukhruf/fs": "^0.8.25"
+    "@zukhruf/fs": "^0.8.30"
   }
 }

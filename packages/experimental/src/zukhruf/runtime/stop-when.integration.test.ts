@@ -1,6 +1,7 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
 import { open } from '@zukhruf/sqlite-open';
+import { waitFor } from '@zukhruf/testing/async';
 import { hasToolCall, isStepCount, tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
@@ -194,13 +195,13 @@ test('a truncated tool input cannot park the next queued user turn', async (t) =
     userTurn('second', 'Here is the next change.'),
   );
   await second.stream.cancel();
-  await t.waitFor(
+  await waitFor(
     async () =>
       assert.equal(
         (await host.observe(conversation).status(second.id))?.status,
         'completed',
       ),
-    { timeout: 3000 },
+    { signal: t.signal },
   );
   assert.equal(model.doStreamCalls.length, 2);
   assert.equal(queryExecutions, 0, 'An incomplete call cannot execute');
@@ -262,10 +263,10 @@ test('the turns of one chat borrow one sandbox, which stays open between turns, 
     const failed = await host.enqueue(conversation, message('second'));
     await Array.fromAsync(failed.stream).catch(() => {});
     const view = host.observe(conversation);
-    await t.waitFor(
+    await waitFor(
       async () =>
         assert.equal((await view.status(failed.id))?.status, 'failed'),
-      { interval: 50, timeout: 3000 },
+      { interval: 50, signal: t.signal },
     );
     const third = await host.enqueue(conversation, message('third'));
     await Array.fromAsync(third.stream);

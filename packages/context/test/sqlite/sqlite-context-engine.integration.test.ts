@@ -1,6 +1,6 @@
+import { untilAborted } from '@zukhruf/async';
 import { TemporaryFiles } from '@zukhruf/fs';
 import { open } from '@zukhruf/sqlite-open';
-import { settleWithin } from '@zukhruf/testing/async';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import { validateUIMessages } from 'ai';
 import assert from 'node:assert';
@@ -172,7 +172,7 @@ function getPragmaNumber(db: DatabaseSync, name: string): number {
 }
 
 describe('Sqlite ContextEngine Integration', () => {
-  it('resolves an empty chat without hanging', async () => {
+  it('resolves an empty chat without hanging', async (t) => {
     await using database = await sqlite.database();
     const store = new SqliteContextStore(database.connection);
     const engine = new ContextEngine({
@@ -181,21 +181,16 @@ describe('Sqlite ContextEngine Integration', () => {
       userId: 'user-1',
     });
 
-    const result = await settleWithin(
+    const result = await untilAborted(
       engine.resolve({
         renderer,
         sandbox: await buildSandbox(),
       }),
-      'resolve empty chat',
-      10_000,
+      t.signal,
     );
     assert.strictEqual(result.messages.length, 0);
 
-    const emptyResult = await settleWithin(
-      engine.save(),
-      'save empty chat',
-      10_000,
-    );
+    const emptyResult = await untilAborted(engine.save(), t.signal);
     assert.strictEqual(
       emptyResult.headMessageId,
       undefined,
@@ -203,7 +198,7 @@ describe('Sqlite ContextEngine Integration', () => {
     );
   });
 
-  it('resolves when an empty sqlite file already exists', async () => {
+  it('resolves when an empty sqlite file already exists', async (t) => {
     await using database = await sqlite.database();
     database.connection.close();
     await writeFile(database.path, '');
@@ -216,18 +211,17 @@ describe('Sqlite ContextEngine Integration', () => {
       userId: 'user-1',
     });
 
-    const result = await settleWithin(
+    const result = await untilAborted(
       engine.resolve({
         renderer,
         sandbox: await buildSandbox(),
       }),
-      'resolve empty sqlite file',
-      10_000,
+      t.signal,
     );
     assert.strictEqual(result.messages.length, 0);
   });
 
-  it('does not hang with a dangling parent chain', async () => {
+  it('does not hang with a dangling parent chain', async (t) => {
     await using database = await sqlite.database();
     const store = new SqliteContextStore(database.connection);
     const engine = new ContextEngine({
@@ -239,7 +233,7 @@ describe('Sqlite ContextEngine Integration', () => {
     engine.set(user(makeUserMessage('msg-1', 'Root')));
     engine.set(assistantText('Middle', { id: 'msg-2' }));
     engine.set(user(makeUserMessage('msg-3', 'Leaf')));
-    await settleWithin(engine.save(), 'save dangling chain setup', 10_000);
+    await untilAborted(engine.save(), t.signal);
 
     {
       using db = open(database.path);
@@ -248,7 +242,7 @@ describe('Sqlite ContextEngine Integration', () => {
       db.prepare('DELETE FROM messages_fts WHERE messageId = ?').run('msg-2');
     }
 
-    const result = await settleWithin(
+    const result = await untilAborted(
       (async () => {
         try {
           return await engine.resolve({
@@ -259,8 +253,7 @@ describe('Sqlite ContextEngine Integration', () => {
           return { error };
         }
       })(),
-      'resolve dangling parent',
-      10_000,
+      t.signal,
     );
 
     if ('messages' in result) {
@@ -268,7 +261,7 @@ describe('Sqlite ContextEngine Integration', () => {
     }
   });
 
-  it('does not hang when the active branch row is missing', async () => {
+  it('does not hang when the active branch row is missing', async (t) => {
     await using database = await sqlite.database();
     const store = new SqliteContextStore(database.connection);
     const engine = new ContextEngine({
@@ -278,7 +271,7 @@ describe('Sqlite ContextEngine Integration', () => {
     });
 
     engine.set(user(makeUserMessage('msg-1', 'Hello')));
-    await settleWithin(engine.save(), 'save branch setup', 10_000);
+    await untilAborted(engine.save(), t.signal);
 
     {
       using db = open(database.path);
@@ -293,7 +286,7 @@ describe('Sqlite ContextEngine Integration', () => {
       userId: 'user-1',
     });
 
-    await settleWithin(
+    await untilAborted(
       (async () => {
         try {
           await nextEngine.resolve({
@@ -304,12 +297,11 @@ describe('Sqlite ContextEngine Integration', () => {
           // No hang is the requirement for this edge case.
         }
       })(),
-      'resolve missing branch',
-      10_000,
+      t.signal,
     );
   });
 
-  it('does not hang when branch head points to a missing message', async () => {
+  it('does not hang when branch head points to a missing message', async (t) => {
     await using database = await sqlite.database();
     const store = new SqliteContextStore(database.connection);
     const engine = new ContextEngine({
@@ -319,7 +311,7 @@ describe('Sqlite ContextEngine Integration', () => {
     });
 
     engine.set(user(makeUserMessage('msg-1', 'Hello')));
-    await settleWithin(engine.save(), 'save head setup', 10_000);
+    await untilAborted(engine.save(), t.signal);
 
     {
       using db = open(database.path);
@@ -336,18 +328,17 @@ describe('Sqlite ContextEngine Integration', () => {
       userId: 'user-1',
     });
 
-    const result = await settleWithin(
+    const result = await untilAborted(
       nextEngine.resolve({
         renderer,
         sandbox: await buildSandbox(),
       }),
-      'resolve missing head',
-      10_000,
+      t.signal,
     );
     assert.strictEqual(result.messages.length, 0);
   });
 
-  it('rejects self-referential messages (circular reference protection)', async () => {
+  it('rejects self-referential messages (circular reference protection)', async (t) => {
     await using database = await sqlite.database();
     const store = new SqliteContextStore(database.connection);
     const engine = new ContextEngine({
@@ -359,7 +350,7 @@ describe('Sqlite ContextEngine Integration', () => {
     engine.set(
       user(makeUserMessage('msg-1', "let's create comprehensive report")),
     );
-    await settleWithin(engine.save(), 'save tool user message', 10_000);
+    await untilAborted(engine.save(), t.signal);
 
     const toolMessage = makeToolClarificationMessage('msg-2');
 
@@ -377,23 +368,22 @@ describe('Sqlite ContextEngine Integration', () => {
     }, /cannot be its own parent/);
 
     // The original message should still be accessible
-    const result = await settleWithin(
+    const result = await untilAborted(
       engine.resolve({
         renderer,
         sandbox: await buildSandbox(),
       }),
-      'resolve after rejection',
-      10_000,
+      t.signal,
     );
     assert.strictEqual(result.messages.length, 1);
   });
 
-  it('surfaces corruption errors without hanging', async () => {
+  it('surfaces corruption errors without hanging', async (t) => {
     await using database = await sqlite.database();
     database.connection.close();
     await writeFile(database.path, Buffer.from('not-a-database'));
 
-    await settleWithin(
+    await untilAborted(
       assert.rejects(async () => {
         using connection = open(database.path);
         const store = new SqliteContextStore(connection);
@@ -407,8 +397,7 @@ describe('Sqlite ContextEngine Integration', () => {
           sandbox: await buildSandbox(),
         });
       }, /database|file/i),
-      'corrupt db open',
-      10_000,
+      t.signal,
     );
   });
 
@@ -473,7 +462,7 @@ describe('Sqlite ContextEngine Integration', () => {
   it(
     'resolves a large chain without hanging',
     { timeout: 180000 },
-    async () => {
+    async (t) => {
       await using database = await sqlite.database();
       const store = new SqliteContextStore(database.connection);
       const engine = new ContextEngine({
@@ -488,25 +477,20 @@ describe('Sqlite ContextEngine Integration', () => {
       for (let index = 0; index < totalMessages; index += 1) {
         engine.set(user(`message-${index}`));
         if ((index + 1) % batchSize === 0) {
-          await settleWithin(
-            engine.save(),
-            `save batch ${(index + 1) / batchSize}`,
-            60_000,
-          );
+          await untilAborted(engine.save(), t.signal);
         }
       }
 
       if (totalMessages % batchSize !== 0) {
-        await settleWithin(engine.save(), 'save final batch', 60_000);
+        await untilAborted(engine.save(), t.signal);
       }
 
-      const result = await settleWithin(
+      const result = await untilAborted(
         engine.resolve({
           renderer,
           sandbox: await buildSandbox(),
         }),
-        'resolve large chain',
-        120_000,
+        t.signal,
       );
       assert.strictEqual(result.messages.length, totalMessages);
     },

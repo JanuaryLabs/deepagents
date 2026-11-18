@@ -1,6 +1,6 @@
 import { createClock } from '@sinonjs/fake-timers';
+import { untilAborted } from '@zukhruf/async';
 import { TemporaryFiles } from '@zukhruf/fs';
-import { settleWithin } from '@zukhruf/testing/async';
 import {
   type Telemetry,
   embed,
@@ -318,7 +318,7 @@ describe('createFileTelemetry()', () => {
     assert.ok(Error.isError(errors[0]));
   });
 
-  it('handles initialization failures before any telemetry event', async () => {
+  it('handles initialization failures before any telemetry event', async (t) => {
     await using directory = await temporaryFiles.directory(
       'deepagents-telemetry-',
     );
@@ -333,11 +333,7 @@ describe('createFileTelemetry()', () => {
       onWriteError: (error) => reportError(error),
     });
 
-    const error = await settleWithin(
-      errorReported,
-      'the initialization error is reported',
-      100,
-    );
+    const error = await untilAborted(errorReported, t.signal);
     assert.ok(Error.isError(error));
   });
 });

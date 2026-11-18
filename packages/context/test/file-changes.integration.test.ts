@@ -1,5 +1,6 @@
 import type { LanguageModelV4Prompt } from '@ai-sdk/provider';
 import { TemporaryFiles } from '@zukhruf/fs';
+import { waitFor } from '@zukhruf/testing/async';
 import { DockerTestbed } from '@zukhruf/testing/docker';
 import { generateText, isStepCount } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
@@ -620,10 +621,10 @@ describe('strace file-change tracking (docker backend)', () => {
           abortSignal: controller.signal,
         }),
       );
-      await t.waitFor(
+      await waitFor(
         async () =>
           assert.ok(await s.sandbox.stat({ path: `${ROOT}/run-started` })),
-        { interval: 50, timeout: 30_000 },
+        { signal: t.signal },
       );
       controller.abort(reason);
 
@@ -635,13 +636,13 @@ describe('strace file-change tracking (docker backend)', () => {
       );
       assert.deepStrictEqual(rec.drain(), []);
       // The sweep is fire-and-forget, so absorb it with a wait.
-      await t.waitFor(
+      await waitFor(
         async () =>
           assert.deepStrictEqual(
             await s.sandbox.listDirectory({ path: '/tmp/dat-trace' }),
             [],
           ),
-        { interval: 50, timeout: 10_000 },
+        { signal: t.signal },
       );
     });
   });
@@ -651,14 +652,14 @@ describe('strace file-change tracking (docker backend)', () => {
       const controller = new AbortController();
       const reason = new Error('stop');
       const started = (name: string) =>
-        t.waitFor(
+        waitFor(
           async () =>
             assert.notStrictEqual(
               await s.sandbox.readTextFile({ path: `${ROOT}/${name}` }),
               null,
               `${name} never started`,
             ),
-          { interval: 50, timeout: 30_000 },
+          { signal: t.signal },
         );
       const command = (name: string) =>
         `echo started > ${ROOT}/${name}; sleep 10; echo late > ${ROOT}/${name}-late`;
@@ -690,13 +691,13 @@ describe('strace file-change tracking (docker backend)', () => {
         null,
       );
       // The sweep is fire-and-forget, so absorb it with a wait.
-      await t.waitFor(
+      await waitFor(
         async () =>
           assert.deepStrictEqual(
             await s.sandbox.listDirectory({ path: '/tmp/dat-trace' }),
             [],
           ),
-        { interval: 50, timeout: 10_000 },
+        { signal: t.signal },
       );
     });
   });

@@ -1,4 +1,5 @@
-import { settleWithin, timebox } from '@zukhruf/testing/async';
+import { untilAborted } from '@zukhruf/async';
+import { timebox, waitFor } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { type UIMessageChunk, simulateReadableStream } from 'ai';
 import assert from 'node:assert';
@@ -418,7 +419,7 @@ describe('PostgreSQL StreamStore Integration', () => {
       assert.deepStrictEqual(await store.getChunks(reopened.id), []);
     }));
 
-  it('should tail a PostgreSQL stream through PollingChangeSource without notify triggers', async () =>
+  it('should tail a PostgreSQL stream through PollingChangeSource without notify triggers', async (t) =>
     await withStore(async (store) => {
       const stream = createStream({
         status: 'running',
@@ -445,7 +446,7 @@ describe('PostgreSQL StreamStore Integration', () => {
 
       await store.appendChunks([createChunk(stream.id, 1)]);
       await store.updateStreamStatus(stream.id, 'completed');
-      const received = await settleWithin(consume, 'polling stream watch');
+      const received = await untilAborted(consume, t.signal);
 
       assert.deepStrictEqual(received, [textDeltaChunk(0), textDeltaChunk(1)]);
     }));
@@ -484,12 +485,12 @@ describe('PostgreSQL StreamStore Integration', () => {
         strategy: 'immediate',
       });
 
-      await t.waitFor(
+      await waitFor(
         async () =>
           assert.strictEqual(await store.getStreamStatus(streamId), 'failed'),
-        { interval: 10, timeout: 5_000 },
+        { signal: t.signal, interval: 10 },
       );
-      await settleWithin(persistPromise, 'persist error chunk');
+      await untilAborted(persistPromise, t.signal);
 
       const updated = await store.getStream(streamId);
       assert.ok(updated);

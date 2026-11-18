@@ -39,15 +39,15 @@
     "access": "public"
   },
   "dependencies": {
-    "@zukhruf/docker": "^0.8.25",
+    "@ai-sdk/provider": "^4.0.37",
+    "@ai-sdk/provider-utils": "^5.0.76",
+    "@deepagents/retrieval": "7.6.0",
+    "@zukhruf/docker": "^0.8.30",
     "ai": "^7.0.166",
     "duck-duck-scrape": "^2.2.7",
-    "nano-spawn": "^2.1.0",
-    "zod": "^4.6.7",
     "fast-glob": "^3.3.3",
-    "@deepagents/retrieval": "7.6.0",
-    "@ai-sdk/provider-utils": "^5.0.76",
-    "@ai-sdk/provider": "^4.0.37"
+    "nano-spawn": "^2.1.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/debug": "^4.1.13"

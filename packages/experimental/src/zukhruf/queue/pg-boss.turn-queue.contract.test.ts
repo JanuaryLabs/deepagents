@@ -1,5 +1,6 @@
 import { PGlite } from '@electric-sql/pglite';
-import { settleWithin, timebox } from '@zukhruf/testing/async';
+import { untilAborted } from '@zukhruf/async';
+import { waitFor as pollFor, timebox } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
@@ -69,11 +70,10 @@ function waitFor(
   t: TestContext,
   condition: () => boolean,
   what: string,
-  timeoutMs = 10_000,
 ): Promise<void> {
-  return t.waitFor(
+  return pollFor(
     () => assert.ok(condition(), `timed out waiting for: ${what}`),
-    { interval: 25, timeout: timeoutMs },
+    { signal: t.signal, interval: 25 },
   );
 }
 
@@ -159,7 +159,7 @@ for (const contract of turnQueueContracts) {
       assert.deepStrictEqual(seen[0], pushed);
     });
 
-    test('reports queued and active scheduler work until the turn settles', async () => {
+    test('reports queued and active scheduler work until the turn settles', async (t) => {
       await using h = await contract.makeQueue();
       const turn = ref('status', 1);
       const conversation = { chatId: turn.chatId, userId: turn.userId };
@@ -176,7 +176,7 @@ for (const contract of turnQueueContracts) {
       }, noOrphans);
       void _consumer;
       try {
-        await settleWithin(started.promise, 'active handler starts');
+        await untilAborted(started.promise, t.signal);
         assert.equal(await h.queue.getTurnActivity(conversation), 'running');
 
         release.resolve();
@@ -255,7 +255,7 @@ for (const contract of turnQueueContracts) {
       void _consumer;
 
       try {
-        await settleWithin(started.promise, 'active handler starts');
+        await untilAborted(started.promise, t.signal);
         assert.deepStrictEqual(
           await h.queue.getCurrentTurn({
             chatId: first.chatId,
@@ -264,10 +264,7 @@ for (const contract of turnQueueContracts) {
           first,
         );
         await h.queue.cancel(first.streamId);
-        await settleWithin(
-          aborted.promise,
-          'active handler observes cancellation',
-        );
+        await untilAborted(aborted.promise, t.signal);
         const overlapped = await Promise.race([
           successorStarted.promise.then(() => true),
           sleep(1_200).then(() => false),
@@ -430,7 +427,6 @@ for (const contract of turnQueueContracts) {
           t,
           () => started.some((turn) => turn.streamId === independent.streamId),
           'ready turn in the independent chat',
-          3_000,
         );
         assert.deepStrictEqual(
           started.map((turn) => turn.streamId),
@@ -462,7 +458,7 @@ for (const contract of turnQueueContracts) {
       );
       void _consumer;
 
-      await waitFor(t, () => done === 6, 'all six chats processed', 20_000);
+      await waitFor(t, () => done === 6, 'all six chats processed');
       assert.ok(
         maxActive <= 2,
         `never more than the configured concurrency (saw ${maxActive})`,
@@ -495,7 +491,6 @@ for (const contract of turnQueueContracts) {
         t,
         () => invocations.includes(textOf(next)) && orphans.length === 1,
         'orphan reported and chat unblocked',
-        20_000,
       );
       await sleep(500);
       assert.deepStrictEqual(
@@ -535,7 +530,6 @@ for (const contract of turnQueueContracts) {
         t,
         () => invocations.includes(textOf(next)),
         'source acknowledgement unblocks the successor despite callback failure',
-        5_000,
       );
       assert.ok(orphanAttempts >= 1);
       assert.deepStrictEqual(invocations, [textOf(boom), textOf(next)]);
@@ -660,11 +654,7 @@ for (const contract of turnQueueContracts) {
         await h.queue.push(queued);
 
         disposing = Promise.resolve(consumer[Symbol.asyncDispose]());
-        await settleWithin(
-          disposing,
-          'disposal does not wait for the active handler',
-          2_000,
-        );
+        await untilAborted(disposing, t.signal);
         consumer = undefined;
         await sleep(500);
         assert.deepStrictEqual(
@@ -757,7 +747,6 @@ suite('PgBossTurnQueue real PostgreSQL scheduler regressions', () => {
       t,
       () => deliveries === chatIds.length * turnNumbers.length,
       'all real-Postgres FIFO regression turns',
-      30_000,
     );
     const expected = turnNumbers.map((number) => `input-${number}`);
     for (const chatId of chatIds) {
@@ -827,7 +816,6 @@ suite('PgBossTurnQueue real PostgreSQL scheduler regressions', () => {
         t,
         () => deliveries === chatIds.length * turnNumbers.length,
         'all turns consumed across both PgBoss instances',
-        30_000,
       );
       const expected = turnNumbers.map((number) => `input-${number}`);
       for (const chatId of chatIds) {
@@ -886,7 +874,6 @@ suite('PgBossTurnQueue real PostgreSQL scheduler regressions', () => {
         t,
         () => completed.length === 1 && orphaned.length === 1,
         'healthy completion and isolated orphan reconciliation',
-        20_000,
       );
       assert.deepStrictEqual(completed, [healthy.streamId]);
       assert.deepStrictEqual(orphaned, [failing.streamId]);
@@ -1036,10 +1023,7 @@ test('does not delete or overlap a turn claimed after the cancellation snapshot'
   let cancelling: Promise<void> | undefined;
   try {
     cancelling = queue.cancel(first.streamId);
-    await settleWithin(
-      snapshotTaken.promise,
-      'cancellation captures the queued snapshot',
-    );
+    await untilAborted(snapshotTaken.promise, t.signal);
     worker = await queue.consume(
       async (turn, context) => {
         if (turn.streamId !== first.streamId) {
@@ -1059,15 +1043,9 @@ test('does not delete or overlap a turn claimed after the cancellation snapshot'
       },
       { ...noOrphans, concurrency: 2 },
     );
-    await settleWithin(
-      firstStarted.promise,
-      'worker claims the snapshotted turn',
-    );
+    await untilAborted(firstStarted.promise, t.signal);
     releaseSnapshot.resolve();
-    await settleWithin(
-      cancelling,
-      'state-conditional cancellation settles after the claim',
-    );
+    await untilAborted(cancelling, t.signal);
 
     const overlapped = await Promise.race([
       successorStarted.promise.then(() => true),
@@ -1084,10 +1062,7 @@ test('does not delete or overlap a turn claimed after the cancellation snapshot'
       false,
       'a stale queued snapshot cannot delete the now-active FIFO owner',
     );
-    await settleWithin(
-      successorStarted.promise,
-      'the successor eventually becomes eligible',
-    );
+    await untilAborted(successorStarted.promise, t.signal);
     await waitForAsync(
       async () =>
         (await queue.getTurnActivity({
@@ -1161,16 +1136,13 @@ test('delivers cancellation to a local handler registered after cancel returns',
     );
     await queue.push(first);
     await queue.push(second);
-    await settleWithin(
-      claimed.promise,
-      'pg-boss claims the turn before adapter controller registration',
-    );
+    await untilAborted(claimed.promise, t.signal);
     await queue.cancel(first.streamId);
     otherWorker = await queue.consume(async () => {}, noOrphans);
     await otherWorker[Symbol.asyncDispose]();
     otherWorker = undefined;
     registerHandler.resolve();
-    await settleWithin(firstStarted.promise, 'delayed handler registers');
+    await untilAborted(firstStarted.promise, t.signal);
     assert.equal(
       firstSignalAborted,
       true,
@@ -1182,10 +1154,7 @@ test('delivers cancellation to a local handler registered after cancel returns',
     ]);
     releaseFirst.resolve();
     assert.equal(overlapped, false);
-    await settleWithin(
-      successorStarted.promise,
-      'successor runs after the interrupted handler exits',
-    );
+    await untilAborted(successorStarted.promise, t.signal);
     await waitForAsync(
       async () =>
         (await queue.getTurnActivity({

@@ -2,7 +2,9 @@ import { expect, it, vi } from 'vitest';
 
 import { loadRuntime, queryClient } from '../app/runtime-data.ts';
 
-it('loads discovery from the host-configured protocol mount', async () => {
+it('loads discovery from the host-configured protocol mount', async ({
+  signal,
+}) => {
   const configuration = document.createElement('meta');
   configuration.name = 'deepagents-zukhruf-info';
   configuration.content = '/custom/zukhruf/info';
@@ -22,7 +24,7 @@ it('loads discovery from the host-configured protocol mount', async () => {
       .mockResolvedValueOnce(Response.json([]));
     vi.stubGlobal('fetch', request);
 
-    await loadRuntime(AbortSignal.timeout(1_000));
+    await loadRuntime(signal);
 
     expect(request).toHaveBeenNthCalledWith(
       1,

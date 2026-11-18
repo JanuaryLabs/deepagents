@@ -1,5 +1,5 @@
 import { createOpenAI, openai } from '@ai-sdk/openai';
-import { settleWithin } from '@zukhruf/testing/async';
+import { untilAborted } from '@zukhruf/async';
 import { Msw } from '@zukhruf/testing/msw';
 import { HttpResponse, http } from 'msw';
 import assert from 'node:assert/strict';
@@ -115,7 +115,7 @@ test('reserves the human author name from participants', async () => {
   );
 });
 
-test('every member sees a group message concurrently and only volunteers publish replies', async () => {
+test('every member sees a group message concurrently and only volunteers publish replies', async (t) => {
   // The provider refuses to build a request without a key, even one msw answers.
   const members = participants(createOpenAI({ apiKey: 'test' }));
   const firstNotificationStarted = Promise.withResolvers<void>();
@@ -132,11 +132,7 @@ test('every member sees a group message concurrently and only volunteers publish
     if (firstParticipants.size === members.length) {
       firstNotificationStarted.resolve();
     }
-    await settleWithin(
-      firstNotificationStarted.promise,
-      'members receive the notification concurrently',
-      2_000,
-    );
+    await untilAborted(firstNotificationStarted.promise, t.signal);
     activeParticipationChecks--;
   };
 

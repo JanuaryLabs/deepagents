@@ -1,3 +1,4 @@
+import { waitFor } from '@zukhruf/testing/async';
 import { DockerTestbed } from '@zukhruf/testing/docker';
 import { type UIMessage, generateId, isToolUIPart } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
@@ -293,15 +294,15 @@ describe('Docker Sandbox — spawn', () => {
 
       const stream = await chat(chatAgent, { abortSignal: controller.signal });
       const consumed = Array.fromAsync(stream);
-      await t.waitFor(
+      await waitFor(
         async () =>
           assert.ok(await backend.stat({ path: '/workspace/started' })),
-        { interval: 50, timeout: 30_000 },
+        { signal: t.signal },
       );
       controller.abort(reason);
       await assert.rejects(consumed, (error) => error === reason);
 
-      await t.waitFor(
+      await waitFor(
         async () =>
           assert.deepStrictEqual(
             await storedBashPart(store, 'aborted-turn').then(
@@ -309,7 +310,7 @@ describe('Docker Sandbox — spawn', () => {
             ),
             { state: 'output-error', errorText: 'Cancelled by user' },
           ),
-        { interval: 50, timeout: 10_000 },
+        { signal: t.signal },
       );
       assert.strictEqual(model.doStreamCalls.length, 1);
 
@@ -438,10 +439,10 @@ describe('Docker Sandbox — spawn', () => {
           },
         ),
       );
-      await t.waitFor(
+      await waitFor(
         async () =>
           assert.ok(await sandbox.stat({ path: '/workspace/started' })),
-        { interval: 50, timeout: 30_000 },
+        { signal: t.signal },
       );
       controller.abort(reason);
 

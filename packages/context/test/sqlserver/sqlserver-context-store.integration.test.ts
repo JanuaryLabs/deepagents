@@ -1,4 +1,4 @@
-import { settleWithin } from '@zukhruf/testing/async';
+import { untilAborted } from '@zukhruf/async';
 import { SqlServer } from '@zukhruf/testing/sqlserver';
 import sql from 'mssql';
 import assert from 'node:assert';
@@ -1711,7 +1711,7 @@ describe('SQL Server ContextStore Integration', () => {
       }
     });
 
-    it('lets the next store open after an open fails on a caller-owned pool', async () => {
+    it('lets the next store open after an open fails on a caller-owned pool', async (t) => {
       await using container = await testSqlServer.database();
       const schema = `open_${crypto.randomUUID().replaceAll('-', '_')}`;
       const pool = await new sql.ConnectionPool(
@@ -1730,13 +1730,12 @@ describe('SQL Server ContextStore Integration', () => {
         );
         await pool.request().batch(`DROP VIEW [${schema}].[chats]`);
 
-        const store = await settleWithin(
+        const store = await untilAborted(
           SqlServerContextStore.create({
             pool: container.connectionString,
             schema,
           }),
-          'open after the failed open',
-          30_000,
+          t.signal,
         );
         try {
           await store.createChat({ id: 'chat-after', userId: 'user-1' });

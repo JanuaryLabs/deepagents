@@ -1,4 +1,4 @@
-import { settleWithin } from '@zukhruf/testing/async';
+import { untilAborted } from '@zukhruf/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -94,7 +94,7 @@ async function expectNoChange(
 }
 
 describe('PostgreSQL Notify StreamChangeSource Integration', () => {
-  it('installs its triggers while other sources install them at the same time', async () => {
+  it('installs its triggers while other sources install them at the same time', async (t) => {
     await using container = await testPostgres.database();
     const schema = testSchema();
     const store = await PostgresStreamStore.create({
@@ -127,15 +127,13 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
         source.subscribe(stream.id, ac.signal)[Symbol.asyncIterator](),
       );
       await Promise.all(
-        iterators.map((iterator) =>
-          settleWithin(iterator.next(), 'initial tick'),
-        ),
+        iterators.map((iterator) => untilAborted(iterator.next(), t.signal)),
       );
       const nextChunks = iterators.map((iterator) => iterator.next());
       await store.appendChunks([createChunk(stream.id, 0)]);
       assert.deepStrictEqual(
         await Promise.all(
-          nextChunks.map((next) => settleWithin(next, 'chunk notification')),
+          nextChunks.map((next) => untilAborted(next, t.signal)),
         ),
         Array.from({ length: 3 }, () => ({
           value: { kind: 'chunks' },
@@ -149,7 +147,7 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
     }
   });
 
-  it('opens on installed triggers while other sources open at the same time', async () => {
+  it('opens on installed triggers while other sources open at the same time', async (t) => {
     await using container = await testPostgres.database();
     const schema = testSchema();
     const store = await PostgresStreamStore.create({
@@ -187,15 +185,13 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
         source.subscribe(stream.id, ac.signal)[Symbol.asyncIterator](),
       );
       await Promise.all(
-        iterators.map((iterator) =>
-          settleWithin(iterator.next(), 'initial tick'),
-        ),
+        iterators.map((iterator) => untilAborted(iterator.next(), t.signal)),
       );
       const nextChunks = iterators.map((iterator) => iterator.next());
       await store.appendChunks([createChunk(stream.id, 0)]);
       assert.deepStrictEqual(
         await Promise.all(
-          nextChunks.map((next) => settleWithin(next, 'chunk notification')),
+          nextChunks.map((next) => untilAborted(next, t.signal)),
         ),
         Array.from({ length: 3 }, () => ({
           value: { kind: 'chunks' },
@@ -225,7 +221,7 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
     );
   });
 
-  it('should receive chunk and terminal status wakeups through LISTEN/NOTIFY', async () =>
+  it('should receive chunk and terminal status wakeups through LISTEN/NOTIFY', async (t) =>
     await withNotifySource(async (store, source) => {
       const stream = createStream({
         status: 'running',
@@ -238,40 +234,31 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
         .subscribe(stream.id, ac.signal)
         [Symbol.asyncIterator]();
       try {
-        assert.deepStrictEqual(
-          await settleWithin(iterator.next(), 'initial tick'),
-          {
-            value: { kind: 'tick' },
-            done: false,
-          },
-        );
+        assert.deepStrictEqual(await untilAborted(iterator.next(), t.signal), {
+          value: { kind: 'tick' },
+          done: false,
+        });
 
         const nextChunk = iterator.next();
         await store.appendChunks([createChunk(stream.id, 0)]);
-        assert.deepStrictEqual(
-          await settleWithin(nextChunk, 'chunk notification'),
-          {
-            value: { kind: 'chunks' },
-            done: false,
-          },
-        );
+        assert.deepStrictEqual(await untilAborted(nextChunk, t.signal), {
+          value: { kind: 'chunks' },
+          done: false,
+        });
 
         const nextStatus = iterator.next();
         await store.updateStreamStatus(stream.id, 'completed');
-        assert.deepStrictEqual(
-          await settleWithin(nextStatus, 'status notification'),
-          {
-            value: { kind: 'status' },
-            done: false,
-          },
-        );
+        assert.deepStrictEqual(await untilAborted(nextStatus, t.signal), {
+          value: { kind: 'status' },
+          done: false,
+        });
       } finally {
         ac.abort();
         await iterator.return?.();
       }
     }));
 
-  it('should filter unrelated stream IDs and schemas', async () =>
+  it('should filter unrelated stream IDs and schemas', async (t) =>
     await withNotifySource(async (store, source, connectionString) => {
       const watched = createStream({ id: 'watched', status: 'running' });
       const other = createStream({ id: 'other', status: 'running' });
@@ -294,7 +281,7 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
         [Symbol.asyncIterator]();
 
       try {
-        await settleWithin(iterator.next(), 'initial tick');
+        await untilAborted(iterator.next(), t.signal);
 
         const pending = iterator.next();
         await store.appendChunks([createChunk(other.id, 0)]);
@@ -309,13 +296,10 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
         await expectNoChange(pending, 'unrelated schema should be ignored');
 
         await store.appendChunks([createChunk(watched.id, 0)]);
-        assert.deepStrictEqual(
-          await settleWithin(pending, 'watched stream notification'),
-          {
-            value: { kind: 'chunks' },
-            done: false,
-          },
-        );
+        assert.deepStrictEqual(await untilAborted(pending, t.signal), {
+          value: { kind: 'chunks' },
+          done: false,
+        });
       } finally {
         ac.abort();
         await iterator.return?.();
@@ -324,7 +308,7 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       }
     }));
 
-  it('should let StreamManager drain chunks written before subscription readiness', async () =>
+  it('should let StreamManager drain chunks written before subscription readiness', async (t) =>
     await withNotifySource(async (store, source) => {
       const stream = createStream({
         status: 'running',
@@ -335,15 +319,15 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       await store.updateStreamStatus(stream.id, 'completed');
 
       const manager = new StreamManager({ store, changeSource: source });
-      const received = await settleWithin(
+      const received = await untilAborted(
         Array.fromAsync(manager.watch(stream.id)),
-        'initial tick stream drain',
+        t.signal,
       );
 
       assert.deepStrictEqual(received, [textDeltaChunk(0)]);
     }));
 
-  it('should release the listener connection on abort and close', async () => {
+  it('should release the listener connection on abort and close', async (t) => {
     await using container = await testPostgres.database();
 
     const schema = testSchema();
@@ -360,27 +344,24 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       [Symbol.asyncIterator]();
 
     try {
-      await settleWithin(iterator.next(), 'initial tick');
+      await untilAborted(iterator.next(), t.signal);
       ac.abort();
-      await settleWithin(
+      await untilAborted(
         iterator.return?.() ??
           Promise.resolve<IteratorResult<StreamChange>>({
             done: true,
             value: undefined,
           }),
-        'iterator return',
+        t.signal,
       );
 
-      const result = await settleWithin(
-        pool.query('SELECT 1 AS ok'),
-        'pool query after abort',
-      );
+      const result = await untilAborted(pool.query('SELECT 1 AS ok'), t.signal);
       assert.strictEqual(result.rows[0].ok, 1);
 
       await source.close();
-      const afterClose = await settleWithin(
+      const afterClose = await untilAborted(
         pool.query('SELECT 1 AS ok'),
-        'pool query after close',
+        t.signal,
       );
       assert.strictEqual(afterClose.rows[0].ok, 1);
     } finally {
@@ -392,7 +373,7 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
     }
   });
 
-  it('should not leak a listener when closed during LISTEN setup', async () => {
+  it('should not leak a listener when closed during LISTEN setup', async (t) => {
     await using container = await testPostgres.database();
 
     const schema = testSchema();
@@ -417,16 +398,13 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       blocker.release();
       blockerReleased = true;
 
-      await settleWithin(closePromise, 'close during LISTEN setup');
-      assert.deepStrictEqual(await settleWithin(first, 'pending subscribe'), {
+      await untilAborted(closePromise, t.signal);
+      assert.deepStrictEqual(await untilAborted(first, t.signal), {
         value: undefined,
         done: true,
       });
 
-      const result = await settleWithin(
-        pool.query('SELECT 1 AS ok'),
-        'pool query after listen race',
-      );
+      const result = await untilAborted(pool.query('SELECT 1 AS ok'), t.signal);
       assert.strictEqual(result.rows[0].ok, 1);
     } finally {
       ac.abort();
@@ -440,7 +418,7 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
     }
   });
 
-  it('concurrent first subscribers share one LISTEN connection', async () =>
+  it('concurrent first subscribers share one LISTEN connection', async (t) =>
     await withNotifySource(async (_store, source, connectionString) => {
       const admin = new Pool({ connectionString, max: 1 });
       const ac = new AbortController();
@@ -451,9 +429,9 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
         .subscribe('stream-b', ac.signal)
         [Symbol.asyncIterator]();
       try {
-        const ticks = await settleWithin(
+        const ticks = await untilAborted(
           Promise.all([first.next(), second.next()]),
-          'both ticks',
+          t.signal,
         );
         assert.deepStrictEqual(
           ticks.map((tick) => tick.value),
@@ -473,14 +451,13 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       }
     }));
 
-  it('a subscribe whose LISTEN setup fails rejects, and the next one listens', async () => {
+  it('a subscribe whose LISTEN setup fails rejects, and the next one listens', async (t) => {
     await using container = await testPostgres.database();
     const schema = testSchema();
     const pool = new Pool({
       connectionString: container.connectionString,
       max: 1,
-      // Above one connect through an SSH forward to a remote engine, and below
-      // settleWithin's 5 s default: the failing subscribe waits the full limit.
+      // Above one connect through an SSH forward to a remote engine.
       connectionTimeoutMillis: 2_000,
     });
     const store = await PostgresStreamStore.create({ pool, schema });
@@ -496,16 +473,16 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       .subscribe('setup-failure', ac.signal)
       [Symbol.asyncIterator]();
     try {
-      await assert.rejects(settleWithin(failing.next(), 'failed setup'), {
+      await assert.rejects(untilAborted(failing.next(), t.signal), {
         message: /timeout exceeded when trying to connect/,
       });
 
       blocker.release();
       blockerReleased = true;
-      assert.deepStrictEqual(
-        await settleWithin(retried.next(), 'tick after the failed setup'),
-        { value: { kind: 'tick' }, done: false },
-      );
+      assert.deepStrictEqual(await untilAborted(retried.next(), t.signal), {
+        value: { kind: 'tick' },
+        done: false,
+      });
     } finally {
       ac.abort();
       if (!blockerReleased) {
@@ -519,7 +496,7 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
     }
   });
 
-  it('fails subscribers when the LISTEN connection drops, then listens again', async () =>
+  it('fails subscribers when the LISTEN connection drops, then listens again', async (t) =>
     await withNotifySource(async (store, source, connectionString) => {
       const stream = createStream({
         status: 'running',
@@ -538,23 +515,20 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
         .subscribe(stream.id, ac.signal)
         [Symbol.asyncIterator]();
       try {
+        assert.deepStrictEqual(await untilAborted(dropped.next(), t.signal), {
+          value: { kind: 'tick' },
+          done: false,
+        });
         assert.deepStrictEqual(
-          await settleWithin(dropped.next(), 'initial tick'),
-          { value: { kind: 'tick' }, done: false },
-        );
-        assert.deepStrictEqual(
-          await settleWithin(otherStream.next(), 'other stream tick'),
+          await untilAborted(otherStream.next(), t.signal),
           { value: { kind: 'tick' }, done: false },
         );
         // Handled from the start: the drop can fail them before the query returns.
         const failures = Promise.all(
           [dropped, otherStream].map((subscription) =>
-            assert.rejects(
-              settleWithin(subscription.next(), 'subscriber failure'),
-              {
-                message: /terminating connection due to administrator command/,
-              },
-            ),
+            assert.rejects(untilAborted(subscription.next(), t.signal), {
+              message: /terminating connection due to administrator command/,
+            }),
           ),
         );
 
@@ -568,16 +542,16 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
         assert.strictEqual(terminated.rowCount, 1, 'one LISTEN connection');
         await failures;
 
-        assert.deepStrictEqual(
-          await settleWithin(again.next(), 'tick after the drop'),
-          { value: { kind: 'tick' }, done: false },
-        );
+        assert.deepStrictEqual(await untilAborted(again.next(), t.signal), {
+          value: { kind: 'tick' },
+          done: false,
+        });
         const nextChunk = again.next();
         await store.appendChunks([createChunk(stream.id, 0)]);
-        assert.deepStrictEqual(
-          await settleWithin(nextChunk, 'chunk after the drop'),
-          { value: { kind: 'chunks' }, done: false },
-        );
+        assert.deepStrictEqual(await untilAborted(nextChunk, t.signal), {
+          value: { kind: 'chunks' },
+          done: false,
+        });
       } finally {
         ac.abort();
         await dropped.return?.();

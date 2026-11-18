@@ -1,6 +1,6 @@
 import { NoSuchModelError } from '@ai-sdk/provider';
+import { untilAborted } from '@zukhruf/async';
 import { TemporaryFiles } from '@zukhruf/fs';
-import { settleWithin } from '@zukhruf/testing/async';
 import {
   createProviderRegistry,
   generateText,
@@ -601,10 +601,9 @@ test('a request aborted while another request refreshes the login stops waiting 
     // refresh, so the request gets time to reach the wait before the abort.
     await sleep(100);
     controller.abort();
-    await settleWithin(
+    await untilAborted(
       assert.rejects(waitingRequest, { name: 'AbortError' }),
-      'the aborted request stops waiting',
-      1_000,
+      t.signal,
     );
   } finally {
     release.resolve();

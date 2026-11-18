@@ -1,5 +1,6 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
+import { waitFor } from '@zukhruf/testing/async';
 import { StreamHarness } from '@zukhruf/testing/streams';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
@@ -355,9 +356,9 @@ test('owner events announce schedule task and worker-run changes without leaking
     id: run.id,
     taskId: task.id,
   });
-  await t.waitFor(() => assert.equal(h.queue.turns.length, 1), {
+  await waitFor(() => assert.equal(h.queue.turns.length, 1), {
+    signal: t.signal,
     interval: 20,
-    timeout: 10_000,
   });
   let workerChange = await events.next();
   while (
@@ -548,9 +549,9 @@ test('Run now carries scheduled provenance into its own fresh conversation', asy
   });
   assert.equal(runViewSchema.parse(await repeat.json()).id, run.id);
 
-  await t.waitFor(() => assert.equal(queue.turns.length, 1), {
+  await waitFor(() => assert.equal(queue.turns.length, 1), {
+    signal: t.signal,
     interval: 20,
-    timeout: 10_000,
   });
   const [queued] = queue.turns;
   assert.equal(queued.chatId, run.id, 'fresh runs own a conversation per run');
@@ -594,9 +595,9 @@ test('the inbox retains unreviewed runs until review is explicit', async (t) => 
     idempotencyKey: randomUUID(),
   });
   const run = runViewSchema.parse(await accepted.json());
-  await t.waitFor(() => assert.equal(queue.turns.length, 1), {
+  await waitFor(() => assert.equal(queue.turns.length, 1), {
+    signal: t.signal,
     interval: 20,
-    timeout: 10_000,
   });
   await queue.runNext();
   await waitForRun(t, app, run.id, 'completed');
@@ -681,9 +682,9 @@ test('a run targeting an existing conversation keeps that conversation', async (
     idempotencyKey: randomUUID(),
   });
   const run = runViewSchema.parse(await accepted.json());
-  await t.waitFor(() => assert.equal(queue.turns.length, 1), {
+  await waitFor(() => assert.equal(queue.turns.length, 1), {
+    signal: t.signal,
     interval: 20,
-    timeout: 10_000,
   });
   assert.equal(queue.turns[0].chatId, conversation.chatId);
 
@@ -709,14 +710,14 @@ async function waitForRun(
   status: ScheduledRunView['status'],
 ) {
   let run!: ScheduledRunView;
-  await t.waitFor(
+  await waitFor(
     async () => {
       const response = await request(app, `${SCHEDULES}/runs/${runId}`);
       assert.equal(response.status, 200);
       run = runViewSchema.parse(await response.json());
       assert.equal(run.status, status);
     },
-    { interval: 20, timeout: 10_000 },
+    { signal: t.signal, interval: 20 },
   );
   return run;
 }

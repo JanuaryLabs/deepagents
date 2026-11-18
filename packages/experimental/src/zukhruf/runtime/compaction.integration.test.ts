@@ -5,6 +5,7 @@ import type {
 } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
 import { open } from '@zukhruf/sqlite-open';
+import { waitFor } from '@zukhruf/testing/async';
 import {
   type ModelMessage,
   type UIMessageChunk,
@@ -2133,8 +2134,9 @@ test(
       for await (const chunk of pending.stream) chunks.push(chunk);
     })();
     await entered.promise;
-    await t.waitFor(() =>
-      assert.equal(compactionEvents(chunks)[0]?.status, 'started'),
+    await waitFor(
+      () => assert.equal(compactionEvents(chunks)[0]?.status, 'started'),
+      { signal: t.signal },
     );
     assert.equal(
       (await host.observe(conversation).status(pending.id))?.status,
@@ -2150,16 +2152,18 @@ test(
       compactionEvents(chunks).map(({ status }) => status),
       ['started'],
     );
-    await t.waitFor(async () =>
-      assert.deepEqual(
-        (await host.observe(conversation).engine.getMessages())
-          .at(-1)
-          ?.parts.flatMap((part) =>
-            part.type === 'data-compaction' ? [part.data] : [],
-          ),
-        compactionEvents(chunks),
-        'an interrupted attempt remains visible after reopening',
-      ),
+    await waitFor(
+      async () =>
+        assert.deepEqual(
+          (await host.observe(conversation).engine.getMessages())
+            .at(-1)
+            ?.parts.flatMap((part) =>
+              part.type === 'data-compaction' ? [part.data] : [],
+            ),
+          compactionEvents(chunks),
+          'an interrupted attempt remains visible after reopening',
+        ),
+      { signal: t.signal },
     );
     assert.equal(model.doStreamCalls.length, 0);
     assert.equal(summary.doGenerateCalls.length, 1);

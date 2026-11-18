@@ -7,6 +7,7 @@ import {
   ATTR_USER_ID,
 } from '@opentelemetry/semantic-conventions/incubating';
 import { TemporaryFiles } from '@zukhruf/fs';
+import { waitFor } from '@zukhruf/testing/async';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
@@ -570,18 +571,21 @@ test('fileTelemetry() preserves cancellation and recording policy in exported tr
   });
   // Drive and cancel the real queued turn after AI SDK telemetry has started.
   const run = queue.runNext();
-  await t.waitFor(() => assert(started));
+  await waitFor(() => assert(started), { signal: t.signal });
   await runtime.observe(conversation).cancel(turn.id);
   await run;
 
   const reader = runtime.plugin(traceTelemetry).traces;
   let trace: Awaited<ReturnType<typeof reader.list>>[number] | undefined;
-  await t.waitFor(async () => {
-    trace = (await reader.list(conversation)).find(
-      ({ streamId }) => streamId === turn.id,
-    );
-    assert(trace);
-  });
+  await waitFor(
+    async () => {
+      trace = (await reader.list(conversation)).find(
+        ({ streamId }) => streamId === turn.id,
+      );
+      assert(trace);
+    },
+    { signal: t.signal },
+  );
   assert(trace);
   assert.equal(trace.status, 'cancelled');
   assert.deepEqual(trace.recording, {

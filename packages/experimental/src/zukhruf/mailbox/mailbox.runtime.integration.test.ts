@@ -1,5 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
-import { timebox } from '@zukhruf/testing/async';
+import { timebox, waitFor } from '@zukhruf/testing/async';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
@@ -253,9 +253,9 @@ describe('zukhruf runtime mailbox delivery', () => {
     await using _worker = await h.runtime.work();
 
     void _worker;
-    await t.waitFor(() => assert.equal(prompts.length, 1), {
+    await waitFor(() => assert.equal(prompts.length, 1), {
+      signal: t.signal,
       interval: 20,
-      timeout: 5_000,
     });
 
     const renderedPrompt = JSON.stringify(prompts[0]);
@@ -397,9 +397,9 @@ describe('zukhruf runtime mailbox delivery', () => {
     releaseFirst.resolve();
     await drainStream(running.stream);
 
-    await t.waitFor(() => assert.equal(prompts.length, 2), {
+    await waitFor(() => assert.equal(prompts.length, 2), {
+      signal: t.signal,
       interval: 20,
-      timeout: 5_000,
     });
     assert.equal(maxActive, 1);
     const secondPrompt = JSON.stringify(prompts[1]);

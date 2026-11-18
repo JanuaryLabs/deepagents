@@ -1,6 +1,6 @@
-import { Latch } from '@zukhruf/async';
+import { Latch, untilAborted } from '@zukhruf/async';
 import { open } from '@zukhruf/sqlite-open';
-import { settleWithin } from '@zukhruf/testing/async';
+import { waitFor } from '@zukhruf/testing/async';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import { StreamHarness } from '@zukhruf/testing/streams';
 import { type UIMessageChunk, simulateReadableStream } from 'ai';
@@ -191,28 +191,22 @@ interface ManagerHelperOptions {
   onWatchEvent?: (event: StreamWatchTelemetryEvent) => void;
 }
 
-const DEFAULT_WAIT_TIMEOUT_MS = (() => {
-  const raw = process.env.CONTEXT_TEST_TIMEOUT_MS;
-  if (raw == null) return 5_000;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 5_000;
-})();
-
-const WAIT = { interval: 10, timeout: DEFAULT_WAIT_TIMEOUT_MS };
-
 function waitForStatus(
   t: TestContext,
   store: StreamStore,
   streamId: string,
   target: StreamStatus,
 ): Promise<void> {
-  return t.waitFor(async () => {
-    assert.strictEqual(
-      await store.getStreamStatus(streamId),
-      target,
-      `status="${target}" for ${streamId}`,
-    );
-  }, WAIT);
+  return waitFor(
+    async () => {
+      assert.strictEqual(
+        await store.getStreamStatus(streamId),
+        target,
+        `status="${target}" for ${streamId}`,
+      );
+    },
+    { signal: t.signal, interval: 10 },
+  );
 }
 
 function makeManager(
@@ -373,7 +367,7 @@ describe('Stream Chunks', () => {
       source.enqueue(progress);
       const persisted = streams.persist(source.stream, streamId);
       try {
-        await t.waitFor(
+        await waitFor(
           async () => {
             const chunks = await store.getChunks(streamId, -1);
             assert.deepStrictEqual(
@@ -381,7 +375,7 @@ describe('Stream Chunks', () => {
               [{ type: 'start', messageId: 'answer' }, progress],
             );
           },
-          { timeout: 1_000 },
+          { signal: t.signal },
         );
         assert.equal(await store.getStreamStatus(streamId), 'running');
       } finally {
@@ -422,11 +416,7 @@ describe('Stream Chunks', () => {
       const persistPromise = streams.persist(source, streamId);
       try {
         await waitForStatus(t, store, streamId, 'running');
-        await settleWithin(
-          chunksBuffered.promise,
-          'source chunks reach the persistence buffer before cancellation',
-          2_000,
-        );
+        await untilAborted(chunksBuffered.promise, t.signal);
         await streams.cancel(streamId);
 
         await assert.rejects(() => persistPromise, /flush failed once/);
@@ -1546,15 +1536,15 @@ describe('Stream Chunks', () => {
 
       const idleCount = () =>
         pollEvents.filter((e) => e.type === 'idle').length;
-      await t.waitFor(
-        () => assert.ok(idleCount() >= 3, 'idleCount >= 3'),
-        WAIT,
-      );
+      await waitFor(() => assert.ok(idleCount() >= 3, 'idleCount >= 3'), {
+        signal: t.signal,
+        interval: 10,
+      });
       await store.appendChunks([createChunk(stream.id, 0)]);
-      await t.waitFor(
-        () => assert.ok(idleCount() >= 5, 'idleCount >= 5'),
-        WAIT,
-      );
+      await waitFor(() => assert.ok(idleCount() >= 5, 'idleCount >= 5'), {
+        signal: t.signal,
+        interval: 10,
+      });
       await store.updateStreamStatus(stream.id, 'completed');
       await consume;
 
@@ -1596,22 +1586,22 @@ describe('Stream Chunks', () => {
         }
       })();
 
-      await t.waitFor(
+      await waitFor(
         () =>
           assert.ok(
             pollEvents.filter((e) => e.type === 'idle').length >= 3,
             'queued idle count >= 3',
           ),
-        WAIT,
+        { signal: t.signal, interval: 10 },
       );
       await store.updateStreamStatus(stream.id, 'running');
-      await t.waitFor(
+      await waitFor(
         () =>
           assert.ok(
             pollEvents.some((e) => e.type === 'poll' && e.status === 'running'),
             'observed running poll',
           ),
-        WAIT,
+        { signal: t.signal, interval: 10 },
       );
       await store.updateStreamStatus(stream.id, 'completed');
       await consume;
@@ -1856,9 +1846,9 @@ describe('Stream Chunks', () => {
 
       const reader = streams.watch(stream.id).getReader();
       const readPromise = reader.read();
-      await t.waitFor(() => assert.strictEqual(slowSource.subscribeCount, 1), {
+      await waitFor(() => assert.strictEqual(slowSource.subscribeCount, 1), {
+        signal: t.signal,
         interval: 1,
-        timeout: 5_000,
       });
 
       const startedAt = Date.now();
@@ -1994,17 +1984,9 @@ describe('Stream Chunks', () => {
       });
       try {
         await waitForStatus(t, store, streamId, 'running');
-        await settleWithin(
-          changeSource.firstFailure.wait(),
-          'cancellation watcher subscribes',
-          2_000,
-        );
+        await untilAborted(changeSource.firstFailure.wait(), t.signal);
         await controllingStreams.cancel(streamId);
-        await settleWithin(
-          persist,
-          'persist stops even when its first cancellation subscription fails',
-          300,
-        );
+        await untilAborted(persist, t.signal);
         assert.ok(changeSource.attempts >= 1);
         assert.equal(cancellationDetections, 1);
       } finally {
@@ -2033,7 +2015,7 @@ describe('Stream Chunks', () => {
             cancelError = error;
           }
           assert.equal(cancelError, undefined);
-          await settleWithin(persist, 'persist stops after the cancel', 300);
+          await untilAborted(persist, t.signal);
           assert.equal(await store.getStreamStatus(streamId), 'cancelled');
         } finally {
           source[Symbol.dispose]();
@@ -2045,7 +2027,7 @@ describe('Stream Chunks', () => {
       }
     });
 
-    it('should back off repeated cancellation-source failures and stop retrying on disposal', async () => {
+    it('should back off repeated cancellation-source failures and stop retrying on disposal', async (t) => {
       await using database = await sqlite.database();
       const store = new SqliteStreamStore(database.connection);
       const changeSource = new AlwaysFailingChangeSource();
@@ -2056,11 +2038,7 @@ describe('Stream Chunks', () => {
       {
         await using watcher = streams.monitorCancellation(streamId, () => {});
 
-        await settleWithin(
-          changeSource.thirdAttempt.wait(),
-          'watcher retries a repeatedly failing source',
-          2_000,
-        );
+        await untilAborted(changeSource.thirdAttempt.wait(), t.signal);
         await sleep(120);
         assert.equal(
           changeSource.attemptTimes.length,
@@ -2073,7 +2051,7 @@ describe('Stream Chunks', () => {
       assert.equal(changeSource.attemptTimes.length, attemptsAtDisposal);
     });
 
-    it('should preserve reconnect backoff when a failing source yields its initial tick', async () => {
+    it('should preserve reconnect backoff when a failing source yields its initial tick', async (t) => {
       await using database = await sqlite.database();
       const store = new SqliteStreamStore(database.connection);
       const changeSource = new YieldThenFailChangeSource();
@@ -2083,11 +2061,7 @@ describe('Stream Chunks', () => {
 
       await using watcher = streams.monitorCancellation(streamId, () => {});
 
-      await settleWithin(
-        changeSource.thirdAttempt.wait(),
-        'watcher reconnects after a source fails just after subscribing',
-        2_000,
-      );
+      await untilAborted(changeSource.thirdAttempt.wait(), t.signal);
       await sleep(120);
       assert.equal(
         changeSource.attemptTimes.length,

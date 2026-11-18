@@ -1,5 +1,6 @@
 import { PGlite } from '@electric-sql/pglite';
-import { settleWithin } from '@zukhruf/testing/async';
+import { untilAborted } from '@zukhruf/async';
+import { waitFor } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert/strict';
 import { type TestContext, suite, test } from 'node:test';
@@ -100,13 +101,13 @@ async function waitForHints(
   hints: ConversationStatusChangeHint[],
   expected: ConversationId[],
 ): Promise<void> {
-  await t.waitFor(
+  await waitFor(
     () =>
       assert.deepStrictEqual(
         hints,
         expected.map((conversation) => ({ type: 'change', conversation })),
       ),
-    { interval: 20, timeout: 5_000 },
+    { interval: 20, signal: t.signal },
   );
 }
 
@@ -130,7 +131,7 @@ for (const contract of contracts) {
         ]);
       } finally {
         abort.abort();
-        await settleWithin(done, 'subscription ends on abort');
+        await untilAborted(done, t.signal);
       }
     });
 
@@ -145,16 +146,16 @@ for (const contract of contracts) {
         await waitForHints(t, hints, [{ chatId: 'chat-c', userId: 'u3' }]);
       } finally {
         abort.abort();
-        await settleWithin(done, 'subscription ends on abort');
+        await untilAborted(done, t.signal);
       }
     });
 
-    test('an aborted subscription receives nothing further', async () => {
+    test('an aborted subscription receives nothing further', async (t) => {
       await using h = await contract.makeHarness();
       const abort = new AbortController();
       const { hints, done } = await collect(h.subscriber, abort.signal);
       abort.abort();
-      await settleWithin(done, 'subscription ends on abort');
+      await untilAborted(done, t.signal);
       const seen = hints.length;
 
       await h.notifier.notify({ chatId: 'after-abort', userId: 'u1' });

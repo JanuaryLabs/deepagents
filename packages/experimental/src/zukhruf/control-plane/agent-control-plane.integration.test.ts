@@ -1,5 +1,4 @@
-import { Latch } from '@zukhruf/async';
-import { settleWithin } from '@zukhruf/testing/async';
+import { Latch, untilAborted } from '@zukhruf/async';
 import { type UIMessage, isToolUIPart, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
@@ -2287,7 +2286,7 @@ test('interrupt_agent can retry terminal projection before deleting a queued chi
   );
 });
 
-test('interrupt_agent aborts a running child across runtime instances without queue-local access', async () => {
+test('interrupt_agent aborts a running child across runtime instances without queue-local access', async (t) => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
@@ -2396,13 +2395,13 @@ test('interrupt_agent aborts a running child across runtime instances without qu
     userTurn('active-child-turn', 'start long research'),
   );
   const activeChild = childQueue.runNextFor('researcher-chat');
-  await settleWithin(childStarted.promise, 'running child starts');
+  await untilAborted(childStarted.promise, t.signal);
   await rootRuntime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
     userTurn('interrupting-root-turn', 'interrupt the child'),
   );
   await rootQueue.runNextFor('root-chat');
-  await settleWithin(activeChild, 'running child stops after interruption');
+  await untilAborted(activeChild, t.signal);
 
   const prompt = JSON.stringify(promptAfterInterrupt);
   assert.match(prompt, /"previous_status":"running"/);
@@ -2690,7 +2689,7 @@ test('wait_agent returns for pending caller mail without consuming it', async ()
   );
 });
 
-test('wait_agent is released by cross-runtime mail that reaches the next model step', async () => {
+test('wait_agent is released by cross-runtime mail that reaches the next model step', async (t) => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
@@ -2753,7 +2752,7 @@ test('wait_agent is released by cross-runtime mail that reaches the next model s
     userTurn('cross-runtime-wait', 'Wait for the remote result'),
   );
   const running = callerQueue.runNextFor(conversation.chatId);
-  await settleWithin(waitRequested.promise, 'wait_agent tool is requested');
+  await untilAborted(waitRequested.promise, t.signal);
   await deliveryRuntime.deliver(
     createInterAgentCommunication({
       author: { chatId: 'remote-child', userId: 'user-1' },
@@ -2762,7 +2761,7 @@ test('wait_agent is released by cross-runtime mail that reaches the next model s
     }),
     MessageDeliveryModes.QueueOnly,
   );
-  await settleWithin(running, 'cross-runtime wait_agent turn completes');
+  await untilAborted(running, t.signal);
 
   assert.equal(calls, 2);
   const secondPrompt = JSON.stringify(prompts[1]);
@@ -2841,7 +2840,7 @@ test('wait_agent reports a bounded timeout when no mail arrives', async (t) => {
   assert.match(JSON.stringify(prompts[1]), /"timed_out":true/);
 });
 
-test('cancelling the caller aborts an active wait_agent call', async () => {
+test('cancelling the caller aborts an active wait_agent call', async (t) => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new WaitObservedMailboxStore(':memory:');
@@ -2883,13 +2882,10 @@ test('cancelling the caller aborts an active wait_agent call', async () => {
   await using _worker = await runtime.work();
   void _worker;
   const running = queue.runNext();
-  await settleWithin(
-    mailboxStore.pendingChecked.wait(),
-    'wait_agent reaches the pending-mail check',
-  );
+  await untilAborted(mailboxStore.pendingChecked.wait(), t.signal);
 
   await runtime.observe(conversation).cancel(enqueued.id);
-  await settleWithin(running, 'cancelled wait_agent turn completes');
+  await untilAborted(running, t.signal);
 
   assert.equal(calls, 1);
   assert.equal(await streamStore.getStreamStatus(enqueued.id), 'cancelled');
@@ -3917,7 +3913,7 @@ test('nested agents run independently, consume sibling mail, and remain visible 
   assert.match(listed, /"completed":"reviewer complete"/);
 });
 
-test('spawn_agent is rejected with the Codex limit error while the tree has no free execution slot', async () => {
+test('spawn_agent is rejected with the Codex limit error while the tree has no free execution slot', async (t) => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
@@ -4024,7 +4020,7 @@ test('spawn_agent is rejected with the Codex limit error while the tree has no f
     userTurn('occupying-child-turn', 'start long research'),
   );
   const activeChild = childQueue.runNextFor('researcher-chat');
-  await settleWithin(childStarted.promise, 'running child starts');
+  await untilAborted(childStarted.promise, t.signal);
   await rootRuntime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
     userTurn('spawn-over-limit', 'spawn another researcher'),
@@ -4051,11 +4047,11 @@ test('spawn_agent is rejected with the Codex limit error while the tree has no f
     await childRuntime
       .observe({ chatId: 'researcher-chat', userId: 'user-1' })
       .cancel(child.id);
-    await settleWithin(activeChild, 'occupying child stops');
+    await untilAborted(activeChild, t.signal);
   }
 });
 
-test('followup_task is rejected with the Codex limit error while send_message still queues mail', async () => {
+test('followup_task is rejected with the Codex limit error while send_message still queues mail', async (t) => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
@@ -4172,7 +4168,7 @@ test('followup_task is rejected with the Codex limit error while send_message st
     userTurn('occupying-child-turn', 'start long research'),
   );
   const activeChild = childQueue.runNextFor('researcher-chat');
-  await settleWithin(childStarted.promise, 'running child starts');
+  await untilAborted(childStarted.promise, t.signal);
   await rootRuntime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
     userTurn('followup-over-limit', 'nudge the idle agent'),
@@ -4200,7 +4196,7 @@ test('followup_task is rejected with the Codex limit error while send_message st
     await childRuntime
       .observe({ chatId: 'researcher-chat', userId: 'user-1' })
       .cancel(child.id);
-    await settleWithin(activeChild, 'occupying child stops');
+    await untilAborted(activeChild, t.signal);
   }
 });
 
@@ -4295,7 +4291,7 @@ test('a settled child frees its execution slot for the next spawn', async () => 
   );
 });
 
-test('a host cannot start a sub-agent turn while the tree has no free execution slot', async () => {
+test('a host cannot start a sub-agent turn while the tree has no free execution slot', async (t) => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
@@ -4379,7 +4375,7 @@ test('a host cannot start a sub-agent turn while the tree has no free execution 
     userTurn('occupying-child-turn', 'start long research'),
   );
   const activeChild = childQueue.runNextFor('researcher-chat');
-  await settleWithin(childStarted.promise, 'running child starts');
+  await untilAborted(childStarted.promise, t.signal);
   try {
     await assert.rejects(
       runtime.enqueue(
@@ -4405,6 +4401,6 @@ test('a host cannot start a sub-agent turn while the tree has no free execution 
     await runtime
       .observe({ chatId: 'researcher-chat', userId: 'user-1' })
       .cancel(child.id);
-    await settleWithin(activeChild, 'occupying child stops');
+    await untilAborted(activeChild, t.signal);
   }
 });

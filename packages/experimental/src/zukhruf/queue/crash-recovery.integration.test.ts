@@ -1,4 +1,4 @@
-import { timebox } from '@zukhruf/testing/async';
+import { timebox, waitFor } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { MockLanguageModelV4 } from 'ai/test';
 import spawn, { SubprocessError } from 'nano-spawn';
@@ -126,7 +126,7 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
     assert.ok(owner.stdout);
     using lines = createInterface({
       input: owner.stdout,
-      signal: AbortSignal.timeout(30_000),
+      signal: t.signal,
     });
     const output = lines[Symbol.asyncIterator]();
     const first = await output.next();
@@ -145,9 +145,9 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
         name: 'SubprocessError',
         signalName: 'SIGTERM',
       });
-      await t.waitFor(() => assert.equal(isProcessAlive(fixturePid), false), {
+      await waitFor(() => assert.equal(isProcessAlive(fixturePid), false), {
+        signal: t.signal,
         interval: 100,
-        timeout: 5_000,
       });
       return;
     }

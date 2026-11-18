@@ -1,5 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
-import { timebox } from '@zukhruf/testing/async';
+import { waitFor as pollFor, timebox } from '@zukhruf/testing/async';
 import assert from 'node:assert/strict';
 import { type TestContext, describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -14,11 +14,10 @@ function waitFor(
   t: TestContext,
   condition: () => boolean,
   what: string,
-  timeoutMs = 10_000,
 ): Promise<void> {
-  return t.waitFor(
+  return pollFor(
     () => assert.ok(condition(), `timed out waiting for: ${what}`),
-    { interval: 25, timeout: timeoutMs },
+    { signal: t.signal, interval: 25 },
   );
 }
 
@@ -88,7 +87,7 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
     await h.queue.push(ref('c1', 2));
     await waitFor(t, () => seen.length === 2, 'both turns committed');
 
-    await t.waitFor(
+    await pollFor(
       async () => {
         const remaining = await h.boss.findJobs(h.queue.queue, { key: 'c1' });
         assert.deepStrictEqual(
@@ -97,7 +96,7 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
           'committed jobs deleted by commit-GC — nothing accumulates',
         );
       },
-      { interval: 20, timeout: 5_000 },
+      { signal: t.signal, interval: 20 },
     );
   });
 
@@ -139,7 +138,7 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
     gateOpen = true;
     await h.queue.resumeParked('gchat');
     await waitFor(t, () => ran.length === 1, 'revived turn runs');
-    await t.waitFor(
+    await pollFor(
       async () => {
         const done = await h.boss.findJobs(h.queue.queue, { key: 'gchat' });
         assert.deepStrictEqual(
@@ -148,7 +147,7 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
           'revived turn commits and its job is deleted',
         );
       },
-      { interval: 20, timeout: 5_000 },
+      { signal: t.signal, interval: 20 },
     );
   });
 

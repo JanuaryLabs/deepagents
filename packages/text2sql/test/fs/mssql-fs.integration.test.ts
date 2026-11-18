@@ -1,4 +1,4 @@
-import { settleWithin } from '@zukhruf/testing/async';
+import { untilAborted } from '@zukhruf/async';
 import { SqlServer } from '@zukhruf/testing/sqlserver';
 import sql from 'mssql';
 import * as assert from 'node:assert';
@@ -76,7 +76,7 @@ describe('MssqlFs', () => {
       }
     });
 
-    it('lets the next file system open after an open fails on a caller-owned pool', async () => {
+    it('lets the next file system open after an open fails on a caller-owned pool', async (t) => {
       await using container = await testSqlServer.database();
       const schema = `fs_${crypto.randomUUID().replaceAll('-', '_')}`;
       const pool = await new sql.ConnectionPool(
@@ -95,14 +95,13 @@ describe('MssqlFs', () => {
         );
         await pool.request().batch(`DROP VIEW [${schema}].[fs_entries]`);
 
-        const fs = await settleWithin(
+        const fs = await untilAborted(
           MssqlFs.create({
             pool: container.connectionString,
             schema,
             root: '/',
           }),
-          'open after the failed open',
-          30_000,
+          t.signal,
         );
         try {
           await fs.writeFile('/after.txt', 'opened');

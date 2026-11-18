@@ -1,3 +1,4 @@
+import { waitFor } from '@zukhruf/testing/async';
 import { SqlServer } from '@zukhruf/testing/sqlserver';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -802,7 +803,7 @@ describe('Message Upsert', () => {
       });
 
       // SQL Server updates its full-text index asynchronously.
-      await t.waitFor(
+      await waitFor(
         async () => {
           results = await store.searchMessages('upsert-fts-chat', 'original');
           assert.strictEqual(results.length, 0);
@@ -810,7 +811,7 @@ describe('Message Upsert', () => {
           results = await store.searchMessages('upsert-fts-chat', 'updated');
           assert.strictEqual(results.length, 1);
         },
-        { interval: 100, timeout: 30_000 },
+        { signal: t.signal, interval: 100 },
       );
     } finally {
       await store.close();

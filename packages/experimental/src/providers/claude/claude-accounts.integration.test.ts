@@ -1,6 +1,6 @@
 import { MemoryStore } from '@opencoredev/loginwithchatgpt-core';
 import { createClock } from '@sinonjs/fake-timers';
-import { settleWithin } from '@zukhruf/testing/async';
+import { untilAborted } from '@zukhruf/async';
 import { Msw } from '@zukhruf/testing/msw';
 import { generateText } from 'ai';
 import { http } from 'msw';
@@ -442,7 +442,7 @@ test('a rejected access token is refreshed once and the request retried', async 
   assert.equal((await accounts.state('owner-a')).status, 'connected');
 });
 
-test('a request aborted while another request refreshes the token stops waiting for that refresh', async () => {
+test('a request aborted while another request refreshes the token stops waiting for that refresh', async (t) => {
   const accounts = createClaudeAccounts({
     store: new MemoryStore(),
     clock: createClock(),
@@ -482,10 +482,9 @@ test('a request aborted while another request refreshes the token stops waiting 
     // refresh, so the request gets time to reach the wait before the abort.
     await sleep(100);
     controller.abort();
-    await settleWithin(
+    await untilAborted(
       assert.rejects(waitingRequest, { name: 'AbortError' }),
-      'the aborted request stops waiting',
-      1_000,
+      t.signal,
     );
   } finally {
     release.resolve();
@@ -503,7 +502,7 @@ test('a request aborted while another request refreshes the token stops waiting 
   assert.equal((await accounts.state('owner-a')).status, 'connected');
 });
 
-test('a retry aborted while another retry refreshes a rejected token stops waiting for that refresh', async () => {
+test('a retry aborted while another retry refreshes a rejected token stops waiting for that refresh', async (t) => {
   const accounts = createClaudeAccounts({
     store: new MemoryStore(),
     clock: createClock(),
@@ -558,10 +557,9 @@ test('a retry aborted while another retry refreshes a rejected token stops waiti
     // refresh, so the retry gets time to reach the wait before the abort.
     await sleep(100);
     controller.abort();
-    await settleWithin(
+    await untilAborted(
       assert.rejects(waitingRequest, { name: 'AbortError' }),
-      'the aborted retry stops waiting',
-      1_000,
+      t.signal,
     );
   } finally {
     rejectWaiting.resolve();

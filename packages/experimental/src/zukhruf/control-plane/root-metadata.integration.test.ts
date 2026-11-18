@@ -1,3 +1,4 @@
+import { waitFor } from '@zukhruf/testing/async';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
@@ -605,10 +606,10 @@ test('cancelling during sandbox setup prevents model sampling', async (t) => {
   releaseSandbox.resolve();
   await running;
 
-  await t.waitFor(
+  await waitFor(
     async () =>
       assert.equal(await streamStore.getStreamStatus(enqueued.id), 'cancelled'),
-    { interval: 20, timeout: 5_000 },
+    { signal: t.signal, interval: 20 },
   );
   assert.equal(modelCalls, 0);
 });
@@ -729,9 +730,9 @@ test('cancellation after execution claim aborts pending provider setup', async (
   await providerStarted.promise;
 
   await runtime.observe(conversation).cancel(enqueued.id);
-  await t.waitFor(() => assert.equal(providerSignal?.aborted, true), {
+  await waitFor(() => assert.equal(providerSignal?.aborted, true), {
+    signal: t.signal,
     interval: 20,
-    timeout: 5_000,
   });
   const aborted = providerSignal?.aborted;
   releaseProvider.resolve();

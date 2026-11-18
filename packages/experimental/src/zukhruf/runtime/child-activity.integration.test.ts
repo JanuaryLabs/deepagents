@@ -2,6 +2,7 @@ import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
 import { TemporaryFiles } from '@zukhruf/fs';
 import { open } from '@zukhruf/sqlite-open';
+import { waitFor } from '@zukhruf/testing/async';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
@@ -285,7 +286,9 @@ test(
             }
           })(),
         );
-        await t.waitFor(() => assert.deepEqual(events[0], { type: 'ready' }));
+        await waitFor(() => assert.deepEqual(events[0], { type: 'ready' }), {
+          signal: t.signal,
+        });
         return events;
       };
       const ownerEvents = await listen('owner');
@@ -308,10 +311,10 @@ test(
         for await (const chunk of turn.stream) {
           assert.ok(chunk.type);
         }
-        await t.waitFor(
+        await waitFor(
           async () =>
             assert.equal(await queue.getTurnActivity(conversation), 'idle'),
-          { timeout: 10_000 },
+          { signal: t.signal },
         );
         scripted.length = 0;
       };
@@ -346,9 +349,9 @@ test(
         return found;
       };
       const state = async (path: string, expected: ChildProgress['state']) =>
-        t.waitFor(
+        waitFor(
           async () => assert.equal((await child(path))?.state, expected),
-          { timeout: 10_000 },
+          { signal: t.signal },
         );
 
       await spawn('research');
@@ -438,7 +441,7 @@ test(
       await spawn('research', 'worker', secondProject);
       await spawn('research', 'worker', otherProject);
 
-      await t.waitFor(
+      await waitFor(
         () => {
           const childEvents = ownerEvents.filter(
             (event) => event.type === 'change' && event.child,
@@ -467,7 +470,7 @@ test(
             otherEvents.some((event) => event.type === 'change' && event.child),
           );
         },
-        { timeout: 10_000 },
+        { signal: t.signal },
       );
       assert.ok(local.some((event) => event.child?.state === 'queued'));
       assert.ok(local.some((event) => event.child?.state === 'running'));

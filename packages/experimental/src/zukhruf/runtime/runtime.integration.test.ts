@@ -4,8 +4,9 @@ import type {
   LanguageModelV4StreamPart,
 } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
+import { untilAborted } from '@zukhruf/async';
 import { TemporaryFiles } from '@zukhruf/fs';
-import { settleWithin, timebox } from '@zukhruf/testing/async';
+import { timebox, waitFor } from '@zukhruf/testing/async';
 import {
   type ToolSet,
   type UIMessage,
@@ -2097,7 +2098,7 @@ describe('zukhruf runtime — background executor', () => {
       (await h.runtime.enqueue(conversation, turn('two'))).stream,
     );
 
-    await t.waitFor(
+    await waitFor(
       async () => {
         const jobs = await h.boss.findJobs(h.queue.queue, { key: 'gc1' });
         assert.deepStrictEqual(
@@ -2106,7 +2107,7 @@ describe('zukhruf runtime — background executor', () => {
           'both turns committed and their jobs were deleted — the queue does not accumulate',
         );
       },
-      { interval: 20, timeout: 5_000 },
+      { interval: 20, signal: t.signal },
     );
   });
 
@@ -2536,9 +2537,9 @@ describe('zukhruf runtime — background executor', () => {
         reason: 'skip the second',
       },
     );
-    await t.waitFor(() => assert.equal(track.calls.length, 2), {
+    await waitFor(() => assert.equal(track.calls.length, 2), {
       interval: 25,
-      timeout: 3_000,
+      signal: t.signal,
     });
 
     assert.equal(track.calls.length, 2, 'one continuation was sampled');
@@ -2595,9 +2596,9 @@ describe('zukhruf runtime — background executor', () => {
       toolCallId: part.toolCallId,
       approved: true,
     });
-    await t.waitFor(() => assert.equal(track.calls.length, 3), {
+    await waitFor(() => assert.equal(track.calls.length, 3), {
       interval: 25,
-      timeout: 5_000,
+      signal: t.signal,
     });
     assert.equal(await h.streamStore.getStreamStatus(ask.id), 'completed');
     assert.deepStrictEqual(track.calls, [
@@ -2657,12 +2658,12 @@ describe('zukhruf runtime — background executor', () => {
 
     const second = await h.runtime.enqueue(conversation, turn('two'));
     const third = await h.runtime.enqueue(conversation, turn('three'));
-    await t.waitFor(
+    await waitFor(
       async () => {
         const jobs = await h.boss.findJobs(h.queue.queue, { key: 'a4' });
         assert.equal(jobs.filter((j) => j.state === 'cancelled').length, 2);
       },
-      { interval: 20, timeout: 5_000 },
+      { interval: 20, signal: t.signal },
     );
     assert.deepStrictEqual(
       track.calls,
@@ -2715,7 +2716,7 @@ describe('zukhruf runtime — background executor', () => {
     });
     await waitForText(h.runtime, conversation, 'done:send it');
 
-    await t.waitFor(
+    await waitFor(
       async () => {
         const afterApprove = await h.boss.findJobs(h.queue.queue, {
           key: 'gc-pause',
@@ -2726,7 +2727,7 @@ describe('zukhruf runtime — background executor', () => {
           'the assistant-message continuation is deleted once it commits',
         );
       },
-      { interval: 20, timeout: 5_000 },
+      { interval: 20, signal: t.signal },
     );
   });
 
@@ -2750,7 +2751,7 @@ describe('zukhruf runtime — background executor', () => {
     await waitForText(h.runtime, conversation, 'denied:send it');
     assert.equal(track.toolRuns, 0, 'tool never ran');
 
-    await t.waitFor(
+    await waitFor(
       async () => {
         const jobs = await h.boss.findJobs(h.queue.queue, { key: 'gc-deny' });
         assert.deepStrictEqual(
@@ -2759,7 +2760,7 @@ describe('zukhruf runtime — background executor', () => {
           'denied continuation commits and its job is deleted',
         );
       },
-      { interval: 20, timeout: 5_000 },
+      { interval: 20, signal: t.signal },
     );
   });
 
@@ -2777,7 +2778,7 @@ describe('zukhruf runtime — background executor', () => {
         { chatId: 'retained-turn', userId: 'u1' },
         turn('reexecute me'),
       );
-      await t.waitFor(
+      await waitFor(
         async () => {
           await h.boss.supervise(h.queue.queue);
           assert.deepStrictEqual(
@@ -2787,7 +2788,7 @@ describe('zukhruf runtime — background executor', () => {
             [],
           );
         },
-        { interval: 100, timeout: 5_000 },
+        { interval: 100, signal: t.signal },
       );
 
       await using _worker = await h.runtime.work();
@@ -2796,7 +2797,7 @@ describe('zukhruf runtime — background executor', () => {
       const reader = queued.stream.getReader();
       try {
         let text = '';
-        await settleWithin(
+        await untilAborted(
           (async () => {
             while (true) {
               const { done, value } = await reader.read();
@@ -2804,8 +2805,7 @@ describe('zukhruf runtime — background executor', () => {
               if (value.type === 'text-delta') text += value.delta;
             }
           })(),
-          'retained turn re-executes',
-          2_000,
+          t.signal,
         );
         assert.equal(text, 'reply:reexecute me');
       } finally {
@@ -2829,7 +2829,7 @@ describe('zukhruf runtime — background executor', () => {
     const second = await h.runtime.enqueue(conversation, turn('two'));
     const third = await h.runtime.enqueue(conversation, turn('three'));
     const fourth = await h.runtime.enqueue(conversation, turn('four'));
-    await t.waitFor(
+    await waitFor(
       async () => {
         const parked = await h.boss.findJobs(h.queue.queue, {
           key: 'gc-behind',
@@ -2840,7 +2840,7 @@ describe('zukhruf runtime — background executor', () => {
           'all three follow-ups are parked (cancelled)',
         );
       },
-      { interval: 20, timeout: 5_000 },
+      { interval: 20, signal: t.signal },
     );
     assert.deepStrictEqual(
       track.calls,
@@ -2877,7 +2877,7 @@ describe('zukhruf runtime — background executor', () => {
       'continuation first, then the three revived follow-ups in original order',
     );
 
-    await t.waitFor(
+    await waitFor(
       async () => {
         const leftover = await h.boss.findJobs(h.queue.queue, {
           key: 'gc-behind',
@@ -2888,7 +2888,7 @@ describe('zukhruf runtime — background executor', () => {
           'every job is deleted once its turn commits — nothing accumulates',
         );
       },
-      { interval: 20, timeout: 5_000 },
+      { interval: 20, signal: t.signal },
     );
   });
 
@@ -2905,7 +2905,7 @@ describe('zukhruf runtime — background executor', () => {
     void _worker;
     await collectText(stream);
 
-    await t.waitFor(
+    await waitFor(
       async () => {
         const jobs = await h.boss.findJobs(h.queue.queue, {
           key: 'gc-cancelq',
@@ -2916,7 +2916,7 @@ describe('zukhruf runtime — background executor', () => {
           'the skipped job is deleted, not left dangling in the queue',
         );
       },
-      { interval: 20, timeout: 5_000 },
+      { interval: 20, signal: t.signal },
     );
     assert.deepStrictEqual(track.calls, [], 'the cancelled turn never ran');
   });
@@ -2936,7 +2936,7 @@ describe('zukhruf runtime — background executor', () => {
     // A follow-up arrives while gated and parks (job cancelled, stream queued).
     const second = await h.runtime.enqueue(conversation, turn('two'));
     await waitForStatus(h.streamStore, second.id, ['queued']);
-    await t.waitFor(
+    await waitFor(
       async () => {
         const parked = await h.boss.findJobs(h.queue.queue, {
           key: 'gc-parkcancel',
@@ -2947,7 +2947,7 @@ describe('zukhruf runtime — background executor', () => {
           'the follow-up is parked',
         );
       },
-      { interval: 20, timeout: 5_000 },
+      { interval: 20, signal: t.signal },
     );
 
     // The user cancels that follow-up (stream → cancelled) while it is parked.
@@ -2963,7 +2963,7 @@ describe('zukhruf runtime — background executor', () => {
     });
     await waitForText(h.runtime, conversation, 'done:send it');
 
-    await t.waitFor(
+    await waitFor(
       async () => {
         const leftover = await h.boss.findJobs(h.queue.queue, {
           key: 'gc-parkcancel',
@@ -2974,7 +2974,7 @@ describe('zukhruf runtime — background executor', () => {
           'the skipped follow-up job is deleted, not left dangling',
         );
       },
-      { interval: 20, timeout: 5_000 },
+      { interval: 20, signal: t.signal },
     );
     assert.deepStrictEqual(
       track.calls,
@@ -3063,8 +3063,6 @@ describe('zukhruf runtime — conversation status', () => {
     return { seen, done };
   }
 
-  const STATUS_WAIT = { interval: 25, timeout: 10_000 };
-
   it('publishes active then idle for one turn and agrees with the pull view', async (t) => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(scriptedModel(track));
@@ -3080,10 +3078,10 @@ describe('zukhruf runtime — conversation status', () => {
     try {
       const { stream } = await h.runtime.enqueue(conversation, turn('hi'));
       assert.equal(await collectText(stream), 'reply:hi');
-      await t.waitFor(
-        () => assert.deepStrictEqual(seen.at(-1), idle),
-        STATUS_WAIT,
-      );
+      await waitFor(() => assert.deepStrictEqual(seen.at(-1), idle), {
+        interval: 25,
+        signal: t.signal,
+      });
 
       assert.deepStrictEqual(seen, [active(), idle]);
       assert.deepStrictEqual(
@@ -3117,10 +3115,10 @@ describe('zukhruf runtime — conversation status', () => {
     try {
       const crashed = await h.runtime.enqueue(conversation, turn('boom'));
       await waitForStatus(h.streamStore, crashed.id, ['failed']);
-      await t.waitFor(
-        () => assert.deepStrictEqual(seen.at(-1), systemError),
-        STATUS_WAIT,
-      );
+      await waitFor(() => assert.deepStrictEqual(seen.at(-1), systemError), {
+        interval: 25,
+        signal: t.signal,
+      });
       assert.deepStrictEqual(seen, [active(), systemError]);
       assert.deepStrictEqual(
         await h.runtime.observe(conversation).conversationStatus(),
@@ -3129,10 +3127,10 @@ describe('zukhruf runtime — conversation status', () => {
 
       const next = await h.runtime.enqueue(conversation, turn('after'));
       assert.equal(await collectText(next.stream), 'reply:after');
-      await t.waitFor(
-        () => assert.deepStrictEqual(seen.at(-1), idle),
-        STATUS_WAIT,
-      );
+      await waitFor(() => assert.deepStrictEqual(seen.at(-1), idle), {
+        interval: 25,
+        signal: t.signal,
+      });
 
       assert.deepStrictEqual(seen, [active(), systemError, active(), idle]);
     } finally {
@@ -3156,18 +3154,18 @@ describe('zukhruf runtime — conversation status', () => {
     try {
       const paused = await h.runtime.enqueue(conversation, turn('send it'));
       assert.equal(await collectText(paused.stream), 'working ');
-      await t.waitFor(
+      await waitFor(
         () => assert.deepStrictEqual(seen.at(-1), active('waitingOnApproval')),
-        STATUS_WAIT,
+        { interval: 25, signal: t.signal },
       );
       assert.deepStrictEqual(seen, [active(), active('waitingOnApproval')]);
       const { part } = await pausedToolCall(h.runtime, conversation);
 
       await h.runtime.enqueue(conversation, turn('while paused'));
-      await t.waitFor(
+      await waitFor(
         async () =>
           assert.equal(await h.queue.getTurnActivity(conversation), 'idle'),
-        STATUS_WAIT,
+        { interval: 25, signal: t.signal },
       );
       assert.deepStrictEqual(
         seen,
@@ -3191,10 +3189,10 @@ describe('zukhruf runtime — conversation status', () => {
       });
       await waitForText(h.runtime, conversation, 'done:send it');
       await waitForText(h.runtime, conversation, 'reply:while paused');
-      await t.waitFor(
-        () => assert.deepStrictEqual(seen.at(-1), idle),
-        STATUS_WAIT,
-      );
+      await waitFor(() => assert.deepStrictEqual(seen.at(-1), idle), {
+        interval: 25,
+        signal: t.signal,
+      });
 
       assert.deepStrictEqual(seen, [
         active(),
@@ -3227,9 +3225,9 @@ describe('zukhruf runtime — conversation status', () => {
         tools: clientTools,
       });
       assert.equal(await collectText(ask.stream), '');
-      await t.waitFor(
+      await waitFor(
         () => assert.deepStrictEqual(seen.at(-1), active('waitingOnUserInput')),
-        STATUS_WAIT,
+        { interval: 25, signal: t.signal },
       );
       assert.deepStrictEqual(seen, [active(), active('waitingOnUserInput')]);
       const { head, part } = await pausedToolCall(h.runtime, conversation);
@@ -3264,10 +3262,10 @@ describe('zukhruf runtime — conversation status', () => {
         trigger: 'submit-message',
       });
       await waitForText(h.runtime, conversation, 'Prioritize deep work.');
-      await t.waitFor(
-        () => assert.deepStrictEqual(seen.at(-1), idle),
-        STATUS_WAIT,
-      );
+      await waitFor(() => assert.deepStrictEqual(seen.at(-1), idle), {
+        interval: 25,
+        signal: t.signal,
+      });
 
       assert.deepStrictEqual(seen, [
         active(),
@@ -3297,17 +3295,17 @@ describe('zukhruf runtime — conversation status', () => {
     try {
       const { id } = await h.runtime.enqueue(conversation, turn('go'));
       await waitForStatus(h.streamStore, id, ['running']);
-      await t.waitFor(
-        () => assert.deepStrictEqual(seen.at(-1), active()),
-        STATUS_WAIT,
-      );
+      await waitFor(() => assert.deepStrictEqual(seen.at(-1), active()), {
+        interval: 25,
+        signal: t.signal,
+      });
 
       await h.runtime.observe(conversation).cancel(id);
       await waitForStatus(h.streamStore, id, ['cancelled']);
-      await t.waitFor(
-        () => assert.deepStrictEqual(seen.at(-1), idle),
-        STATUS_WAIT,
-      );
+      await waitFor(() => assert.deepStrictEqual(seen.at(-1), idle), {
+        interval: 25,
+        signal: t.signal,
+      });
 
       assert.deepStrictEqual(seen, [active(), idle]);
     } finally {
@@ -3338,10 +3336,10 @@ describe('zukhruf runtime — conversation status', () => {
     try {
       const failed = await h.runtime.enqueue(conversation, turn('first'));
       await waitForStatus(h.streamStore, failed.id, ['failed']);
-      await t.waitFor(
-        () => assert.deepStrictEqual(seen.at(-1), systemError),
-        STATUS_WAIT,
-      );
+      await waitFor(() => assert.deepStrictEqual(seen.at(-1), systemError), {
+        interval: 25,
+        signal: t.signal,
+      });
 
       assert.deepStrictEqual(seen, [active(), systemError]);
       assert.deepStrictEqual(
@@ -3501,9 +3499,9 @@ describe('zukhruf runtime — cross-process conversation status', () => {
     try {
       const { stream } = await h.runtime.enqueue(conversation, turn('hi'));
       assert.equal(await collectText(stream), 'reply:hi');
-      await t.waitFor(
+      await waitFor(
         () => assert.deepStrictEqual(seen.at(-1), { type: 'idle' }),
-        { interval: 25, timeout: 10_000 },
+        { interval: 25, signal: t.signal },
       );
 
       assert.deepStrictEqual(seen, [

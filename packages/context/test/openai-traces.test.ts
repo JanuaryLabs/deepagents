@@ -1,6 +1,7 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { createClock } from '@sinonjs/fake-timers';
 import { Latch } from '@zukhruf/async';
+import { waitFor } from '@zukhruf/testing/async';
 import { Msw } from '@zukhruf/testing/msw';
 import { type Telemetry, isStepCount, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
@@ -322,14 +323,14 @@ async function tracesExported(
   captured: IngestBody[],
   count = 1,
 ) {
-  await t.waitFor(
+  await waitFor(
     () => {
       const traces = captured
         .flatMap((body) => body.data)
         .filter((item) => item.object === 'trace');
       assert.ok(traces.length >= count);
     },
-    { interval: 5, timeout: 5_000 },
+    { signal: t.signal, interval: 5 },
   );
 }
 

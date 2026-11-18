@@ -8,44 +8,38 @@ import path, documented in the package README. Repeated fixture data,
 product-specific harnesses, and infrastructure compositions stay with their
 tests.
 
-| Need                     | Use                                                         | Important behavior                                                                                                 |
-| ------------------------ | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Strict assertions        | `node:assert/strict`                                        | Makes methods such as `equal` and `deepEqual` strict by default.                                                   |
-| Delay                    | `setTimeout` from `node:timers/promises`                    | Alias it to `sleep`; it supports `AbortSignal` and avoids hand-written promises.                                   |
-| Retry an observation     | `TestContext.waitFor` from `node:test`                      | The callback must throw or reject while waiting. Returning `false` counts as success.                              |
-| Measure a deadline       | `performance.now()`                                         | Monotonic elapsed time; do not use it as a timestamp or compare it across processes.                               |
-| Temporary directory      | `new TemporaryFiles().directory(prefix)` from `@zukhruf/fs` | Use with `await using`; cleanup removes the directory and its contents, with retries for a file that is held open. |
-| Resource cleanup         | `using` / `await using`                                     | Calls `Symbol.dispose` / `Symbol.asyncDispose` in reverse declaration order, including after errors.               |
-| Deferred promise         | `Promise.withResolvers()`                                   | Provides `{ promise, resolve, reject }` without capturing callbacks in a promise constructor.                      |
-| Disposable timeout       | `using timer = globalThis.setTimeout(...)`                  | Node timers implement `Symbol.dispose`, which cancels the timer when its scope exits.                              |
-| Wait for one event       | `once` from `node:events`                                   | Register before triggering the event; it resolves with the emitted arguments.                                      |
-| Current module directory | `import.meta.dirname`                                       | Replaces `fileURLToPath(import.meta.url)` plus `dirname` in Node ESM files.                                        |
-| Current Node executable  | `process.execPath`                                          | Use when spawning another Node process instead of assuming `node` is on `PATH`.                                    |
-| Non-mutating sort        | `Array.prototype.toSorted()`                                | Returns a shallow sorted copy; provide `(a, b) => a - b` for numbers.                                              |
-| Bound promise settlement | `settleWithin` from `@zukhruf/testing/async`                | Rejects if a non-abortable promise does not settle in time; it does not cancel the underlying operation.           |
+| Need                     | Use                                                                  | Important behavior                                                                                                 |
+| ------------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Strict assertions        | `node:assert/strict`                                                 | Makes methods such as `equal` and `deepEqual` strict by default.                                                   |
+| Delay                    | `setTimeout` from `node:timers/promises`                             | Alias it to `sleep`; it supports `AbortSignal` and avoids hand-written promises.                                   |
+| Retry an observation     | `waitFor(check, { signal: t.signal })` from `@zukhruf/testing/async` | The check must throw or reject while waiting. It ends at the test's limit, never at one of its own.                |
+| Measure a deadline       | `performance.now()`                                                  | Monotonic elapsed time; do not use it as a timestamp or compare it across processes.                               |
+| Temporary directory      | `new TemporaryFiles().directory(prefix)` from `@zukhruf/fs`          | Use with `await using`; cleanup removes the directory and its contents, with retries for a file that is held open. |
+| Resource cleanup         | `using` / `await using`                                              | Calls `Symbol.dispose` / `Symbol.asyncDispose` in reverse declaration order, including after errors.               |
+| Deferred promise         | `Promise.withResolvers()`                                            | Provides `{ promise, resolve, reject }` without capturing callbacks in a promise constructor.                      |
+| Disposable timeout       | `using timer = globalThis.setTimeout(...)`                           | Node timers implement `Symbol.dispose`, which cancels the timer when its scope exits.                              |
+| Wait for one event       | `once` from `node:events`                                            | Register before triggering the event; it resolves with the emitted arguments.                                      |
+| Current module directory | `import.meta.dirname`                                                | Replaces `fileURLToPath(import.meta.url)` plus `dirname` in Node ESM files.                                        |
+| Current Node executable  | `process.execPath`                                                   | Use when spawning another Node process instead of assuming `node` is on `PATH`.                                    |
+| Non-mutating sort        | `Array.prototype.toSorted()`                                         | Returns a shallow sorted copy; provide `(a, b) => a - b` for numbers.                                              |
+| Promise bound to a test  | `untilAborted(promise, t.signal)` from `@zukhruf/async`              | Rejects with the test's abort reason; it does not cancel the underlying operation.                                 |
 
 ## Established patterns
 
-Use assertions inside `t.waitFor`; a boolean predicate stops immediately:
+A wait in a test ends at the test's own limit, `t.signal`, never at a number of
+its own, so a hanging test fails at the runner's per-test limit. The
+`zukhruf/no-own-wait-limit` lint rule reports `t.waitFor`, a wait that takes no
+signal, and an `AbortSignal.timeout` whose reason the test does not read.
+
+Wait for a fact that only a read shows with `waitFor` from
+`@zukhruf/testing/async`, asserting inside the check:
 
 ```ts
-await t.waitFor(() => assert.equal(messages.length, 2), {
-  interval: 20,
-  timeout: 5_000,
-});
+await waitFor(() => assert.equal(messages.length, 2), { signal: t.signal });
 ```
 
-`t.waitFor` retries every error, including database errors. To retry assertion
-failures while letting other errors fail immediately, use `timebox` from
-`@zukhruf/testing/async`:
-
-```ts
-await timebox(async () => assert.equal(await store.status(), 'ready'), {
-  minTimeout: 20,
-  maxRetryTime: 5_000,
-  shouldRetry: ({ error }) => error instanceof assert.AssertionError,
-});
-```
+`waitFor` retries every error. On abort it rejects with `t.signal.reason` and the
+last error of the check as its `cause`.
 
 Declare resources after their disposable parent so reverse-order cleanup closes
 handles before deleting the directory:
@@ -55,15 +49,17 @@ await using directory = await new TemporaryFiles().directory('test-');
 await using file = await open(join(directory.path, 'data.txt'), 'w');
 ```
 
-Use `settleWithin` only when the operation cannot accept a cancellation signal:
+Wait for an event with `untilAborted(promise, t.signal)` from `@zukhruf/async`,
+or `once(emitter, name, { signal: t.signal })`:
 
 ```ts
-await settleWithin(workerFinished, 'worker finishes', 5_000);
+await untilAborted(workerFinished, t.signal);
 ```
 
-If an operation accepts a signal, pass `AbortSignal.timeout(ms)` to it so the
-operation itself is cancelled. Keep races where timeout means success or
-returns a fallback value local because they have different semantics.
+If an operation accepts a signal, pass it `t.signal` so the operation itself is
+cancelled. A test whose subject is the abort keeps its own signal and asserts
+its reason. Keep races where a timeout means success or returns a fallback value
+local, because they have different semantics.
 
 ## Streams
 
@@ -108,8 +104,8 @@ collects only the remaining chunks and returns either `{ status: 'completed', ch
 or `{ status: 'errored', chunks, error }`, including when the error is `undefined`.
 Disposal cancels unfinished consumption through the locked reader and releases
 the lock. It does not rethrow an existing stream failure, but a failing cancellation
-hook still rejects disposal. Use `settleWithin` separately when a test needs a
-deadline. AI message chunks, transport behavior, and runtime fixtures stay local.
+hook still rejects disposal. Use `untilAborted(promise, t.signal)` separately
+when a test needs a deadline. AI message chunks, transport behavior, and runtime fixtures stay local.
 
 ## HTTP servers
 

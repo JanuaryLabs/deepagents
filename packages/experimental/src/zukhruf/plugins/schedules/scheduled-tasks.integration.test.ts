@@ -1,4 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
+import { waitFor } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -254,10 +255,10 @@ test('missed occurrences collapse into one catch-up while later runs may overlap
   await sleep(3_000);
   await using _worker = await scheduled.work(FAST_POLLING);
   void _worker;
-  await t.waitFor(
+  await waitFor(
     async () =>
       assert.equal((await scheduled.listRuns('owner-1', catchUp.id)).length, 1),
-    { interval: 20, timeout: 5_000 },
+    { signal: t.signal, interval: 20 },
   );
   assert.equal(
     (await scheduled.get('owner-1', catchUp.id)).status,
@@ -272,7 +273,7 @@ test('missed occurrences collapse into one catch-up while later runs may overlap
     timezone: 'UTC',
     executionConfig: { destination: 'overlap' },
   });
-  await t.waitFor(
+  await waitFor(
     async () => {
       const runs = await scheduled.listRuns('owner-1', overlap.id);
       assert.equal(runs.length, 2);
@@ -281,7 +282,7 @@ test('missed occurrences collapse into one catch-up while later runs may overlap
         true,
       );
     },
-    { interval: 20, timeout: 6_000 },
+    { signal: t.signal, interval: 20 },
   );
   assert.equal(executor.executions.size, 3);
   const [later, earlier] = await scheduled.listRuns('owner-1', overlap.id);
@@ -325,13 +326,13 @@ test('duplicate delivery of one occurrence creates one run and one successor', a
   void _worker;
   redeliverOnce.mock.restore();
 
-  await t.waitFor(
+  await waitFor(
     async () => {
       const runs = await scheduled.listRuns('owner-1', task.id);
       assert.equal(runs.length, 1);
       assert.equal(runs[0]?.status, 'running');
     },
-    { interval: 20, timeout: 5_000 },
+    { signal: t.signal, interval: 20 },
   );
   assert.equal(duplicated, true);
   assert.equal(executor.launches.length, 1);
@@ -466,13 +467,13 @@ test('cancelling during launch cancels the external execution instead of orphani
     'cancelled',
   );
   release.resolve();
-  await t.waitFor(
+  await waitFor(
     () =>
       assert.equal(
         [...executor.executions.values()][0]?.state.status,
         'cancelled',
       ),
-    { interval: 20, timeout: 5_000 },
+    { signal: t.signal, interval: 20 },
   );
   assert.equal((await scheduled.getRun('owner-1', run.id)).status, 'cancelled');
 });
@@ -814,12 +815,12 @@ async function waitForRun(
   status: 'running' | 'completed' | 'failed',
 ) {
   let run = await scheduled.getRun(ownerId, runId);
-  await t.waitFor(
+  await waitFor(
     async () => {
       run = await scheduled.getRun(ownerId, runId);
       assert.equal(run.status, status);
     },
-    { interval: 20, timeout: 6_000 },
+    { signal: t.signal, interval: 20 },
   );
   return run;
 }
