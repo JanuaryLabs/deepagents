@@ -1,5 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
-import { waitFor as pollFor, timebox } from '@zukhruf/testing/async';
+import { waitFor as pollFor } from '@zukhruf/testing/async';
 import assert from 'node:assert/strict';
 import { type TestContext, describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -184,14 +184,14 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
 
     // Poll real wall-clock time until retention actually deletes the control
     // job — that is the proof the retention window has elapsed for real.
-    await timebox(
+    await pollFor(
       async () => {
         await h.boss.supervise(control);
         if ((await h.boss.findJobs(control, { id: controlId })).length > 0) {
           throw new Error('control job not deleted yet');
         }
       },
-      { maxRetryTime: 20_000, minTimeout: 300 },
+      { signal: t.signal, interval: 300 },
     );
 
     // The same window elapsed for our parked turn — it survives only because

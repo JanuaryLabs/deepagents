@@ -105,6 +105,7 @@ async function waitForStatus(
   store: SqliteStreamStore,
   id: string,
   expected: string,
+  signal: AbortSignal,
 ): Promise<void> {
   await timebox(
     async () =>
@@ -115,7 +116,8 @@ async function waitForStatus(
       ),
     {
       minTimeout: 20,
-      maxRetryTime: 5_000,
+      signal,
+      maxRetryTime: Number.POSITIVE_INFINITY,
       shouldRetry: ({ error }) => error instanceof assert.AssertionError,
     },
   );
@@ -267,7 +269,7 @@ describe('zukhruf runtime mailbox delivery', () => {
       positions.toSorted((a, b) => a - b),
       positions,
     );
-    await waitForStatus(h.streamStore, wake.streamId, 'completed');
+    await waitForStatus(h.streamStore, wake.streamId, 'completed', t.signal);
     const resumed = await h.runtime.observe(researcher).resume();
     assert.ok(
       resumed,

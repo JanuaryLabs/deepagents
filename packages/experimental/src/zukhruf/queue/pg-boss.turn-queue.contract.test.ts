@@ -80,13 +80,14 @@ function waitFor(
 async function waitForAsync(
   condition: () => Promise<boolean>,
   what: string,
-  timeoutMs = 10_000,
+  signal: AbortSignal,
 ) {
   await timebox(
     async () => assert.ok(await condition(), `timed out waiting for: ${what}`),
     {
       minTimeout: 25,
-      maxRetryTime: timeoutMs,
+      signal,
+      maxRetryTime: Number.POSITIVE_INFINITY,
       shouldRetry: ({ error }) => error instanceof assert.AssertionError,
     },
   );
@@ -183,6 +184,7 @@ for (const contract of turnQueueContracts) {
         await waitForAsync(
           async () => (await h.queue.getTurnActivity(conversation)) === 'idle',
           'settled turn disappears from scheduler status',
+          t.signal,
         );
       } finally {
         release.resolve();
@@ -297,6 +299,7 @@ for (const contract of turnQueueContracts) {
               userId: first.userId,
             })) === 'idle',
           'interrupted and successor rows are commit-deleted',
+          t.signal,
         );
       } finally {
         release.resolve();
@@ -1070,6 +1073,7 @@ test('does not delete or overlap a turn claimed after the cancellation snapshot'
           userId: first.userId,
         })) === 'idle',
       'claimed turn and successor finish commit-driven cleanup',
+      t.signal,
     );
   } finally {
     releaseSnapshot.resolve();
@@ -1162,6 +1166,7 @@ test('delivers cancellation to a local handler registered after cancel returns',
           userId: first.userId,
         })) === 'idle',
       'late-registration turn and successor clean up',
+      t.signal,
     );
   } finally {
     registerHandler.resolve();

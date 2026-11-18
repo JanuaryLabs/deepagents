@@ -636,15 +636,15 @@ async function waitForStatus(
   streamStore: SqliteStreamStore,
   id: string,
   accept: string[],
-  timeoutMs = 10_000,
+  signal: AbortSignal,
 ) {
-  return timebox(
+  return waitFor(
     async () => {
       const status = await streamStore.getStreamStatus(id);
       if (status && accept.includes(status)) return status;
       throw new Error(`timed out waiting for ${accept.join('/')} on ${id}`);
     },
-    { maxRetryTime: timeoutMs, minTimeout: 25 },
+    { signal, interval: 25 },
   );
 }
 
@@ -662,15 +662,15 @@ async function waitForConversation(
   conversation: { chatId: string; userId: string },
   predicate: (messages: UIMessage[]) => boolean,
   label: string,
-  timeoutMs = 10_000,
+  signal: AbortSignal,
 ): Promise<UIMessage[]> {
-  return timebox(
+  return waitFor(
     async () => {
       const messages = await runtime.observe(conversation).engine.getMessages();
       if (predicate(messages)) return messages;
       throw new Error(`timed out waiting for ${label}`);
     },
-    { maxRetryTime: timeoutMs, minTimeout: 25 },
+    { signal, interval: 25 },
   );
 }
 
@@ -678,6 +678,7 @@ async function waitForText(
   runtime: AgentHost,
   conversation: { chatId: string; userId: string },
   expected: string,
+  signal: AbortSignal,
 ): Promise<void> {
   await waitForConversation(
     runtime,
@@ -685,6 +686,7 @@ async function waitForText(
     (messages) =>
       messages.some((message) => messageText(message).includes(expected)),
     `"${expected}"`,
+    signal,
   );
 }
 
@@ -733,7 +735,7 @@ describe('zukhruf runtime — host sessions', () => {
     );
   });
 
-  it('runs scheduled prompts in fresh, idempotent root sessions', async () => {
+  it('runs scheduled prompts in fresh, idempotent root sessions', async (t) => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     let scheduled: ReturnType<typeof schedules> | undefined;
     await using h = await harness(slowModel(track), {
@@ -775,14 +777,14 @@ describe('zukhruf runtime — host sessions', () => {
       cancelledTask.id,
       'cancelled-run',
     );
-    await timebox(
+    await waitFor(
       async () => {
         assert.equal(
           (await scheduleControl.getRun('user-1', cancelled.id)).status,
           'running',
         );
       },
-      { maxRetryTime: 10_000, minTimeout: 25 },
+      { signal: t.signal, interval: 25 },
     );
     assert.deepEqual(
       await scheduleControl.cancelRun('user-1', cancelled.id),
@@ -802,7 +804,7 @@ describe('zukhruf runtime — host sessions', () => {
       await scheduleControl.runNow('user-1', completedTask.id, 'completed-run'),
       launched,
     );
-    const completed = await timebox(
+    const completed = await waitFor(
       async () => {
         const execution = await scheduleControl.getRun('user-1', launched.id);
         if (execution.status !== 'completed') {
@@ -810,7 +812,7 @@ describe('zukhruf runtime — host sessions', () => {
         }
         return execution;
       },
-      { maxRetryTime: 10_000, minTimeout: 25 },
+      { signal: t.signal, interval: 25 },
     );
     assert.equal(completed.error, null);
     assert.equal(
@@ -822,7 +824,7 @@ describe('zukhruf runtime — host sessions', () => {
     );
   });
 
-  it('runs a scheduled prompt in an existing conversation', async () => {
+  it('runs a scheduled prompt in an existing conversation', async (t) => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     let scheduled: ReturnType<typeof schedules> | undefined;
     await using h = await harness(scriptedModel(track), {
@@ -867,14 +869,14 @@ describe('zukhruf runtime — host sessions', () => {
       task.id,
       'existing-conversation-run',
     );
-    await timebox(
+    await waitFor(
       async () => {
         assert.equal(
           (await scheduleControl.getRun('user-1', launched.id)).status,
           'completed',
         );
       },
-      { maxRetryTime: 10_000, minTimeout: 25 },
+      { signal: t.signal, interval: 25 },
     );
 
     assert.deepEqual(track.calls, ['existing context', 'scheduled follow-up']);
@@ -891,7 +893,7 @@ describe('zukhruf runtime — host sessions', () => {
     );
   });
 
-  it('fails a scheduled task that requires interactive approval', async () => {
+  it('fails a scheduled task that requires interactive approval', async (t) => {
     const { track, agent, model } = approvalSetup();
     let scheduled: ReturnType<typeof schedules> | undefined;
     await using h = await harness(model, {
@@ -935,9 +937,10 @@ describe('zukhruf runtime — host sessions', () => {
             (part) => isToolUIPart(part) && part.state === 'approval-requested',
           ) ?? false,
       'scheduled approval pause',
+      t.signal,
     );
 
-    const failed = await timebox(
+    const failed = await waitFor(
       async () => {
         const run = await scheduleControl.getRun('user-1', launched.id);
         if (run.status !== 'failed') {
@@ -945,7 +948,7 @@ describe('zukhruf runtime — host sessions', () => {
         }
         return run;
       },
-      { maxRetryTime: 10_000, minTimeout: 25 },
+      { signal: t.signal, interval: 25 },
     );
     assert.equal(
       failed.error,
@@ -954,7 +957,7 @@ describe('zukhruf runtime — host sessions', () => {
     assert.equal(track.toolRuns, 0);
   });
 
-  it('synchronizes a Markdown schedule and runs it as a fresh root task', async () => {
+  it('synchronizes a Markdown schedule and runs it as a fresh root task', async (t) => {
     await using directory = await new TemporaryFiles().directory(
       'zukhruf-schedules-',
     );
@@ -999,14 +1002,14 @@ Prepare the engineering report.
 
     void _worker;
     const run = await scheduleControl.runNow('user-1', task.id, 'first-run');
-    await timebox(
+    await waitFor(
       async () => {
         assert.equal(
           (await scheduleControl.getRun('user-1', run.id)).status,
           'completed',
         );
       },
-      { maxRetryTime: 10_000, minTimeout: 25 },
+      { signal: t.signal, interval: 25 },
     );
     assert.deepEqual(track.calls, ['Prepare the engineering report.']);
     assert.equal(
@@ -1107,7 +1110,7 @@ Missing a timezone.
 });
 
 describe('zukhruf runtime — setup failure durability', () => {
-  it('records a turn before sandbox setup fails, and the next turn sets the sandbox up again', async () => {
+  it('records a turn before sandbox setup fails, and the next turn sets the sandbox up again', async (t) => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     const model = scriptedModel(track);
     const agentDeclaration = declaration(model);
@@ -1124,7 +1127,7 @@ describe('zukhruf runtime — setup failure durability', () => {
     void worker;
     const conversation = { chatId: 'sandbox-setup-failure', userId: 'u1' };
     const failed = await h.runtime.enqueue(conversation, turn('first'));
-    await waitForStatus(h.streamStore, failed.id, ['failed']);
+    await waitForStatus(h.streamStore, failed.id, ['failed'], t.signal);
 
     const observer = h.runtime.observe(conversation);
     const messages = await observer.engine.getMessages();
@@ -1145,7 +1148,7 @@ describe('zukhruf runtime — setup failure durability', () => {
     assert.equal(sandboxCalls, 2);
   });
 
-  it('records a turn before sandbox skill discovery fails', async () => {
+  it('records a turn before sandbox skill discovery fails', async (t) => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     const model = scriptedModel(track);
     const agentDeclaration = declaration(model);
@@ -1165,7 +1168,7 @@ describe('zukhruf runtime — setup failure durability', () => {
     void worker;
     const conversation = { chatId: 'skill-discovery-failure', userId: 'u1' };
     const failed = await h.runtime.enqueue(conversation, turn('use a skill'));
-    await waitForStatus(h.streamStore, failed.id, ['failed']);
+    await waitForStatus(h.streamStore, failed.id, ['failed'], t.signal);
 
     const observer = h.runtime.observe(conversation);
     const messages = await observer.engine.getMessages();
@@ -1821,7 +1824,7 @@ describe('zukhruf runtime — background executor', () => {
     );
   });
 
-  it('cancel() transitions the in-flight stream to cancelled', async () => {
+  it('cancel() transitions the in-flight stream to cancelled', async (t) => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(slowModel(track));
     await using _worker = await h.runtime.work();
@@ -1829,7 +1832,7 @@ describe('zukhruf runtime — background executor', () => {
 
     const conversation = { chatId: 'c3', userId: 'u1' };
     const { id, stream } = await h.runtime.enqueue(conversation, turn('go'));
-    await waitForStatus(h.streamStore, id, ['running']);
+    await waitForStatus(h.streamStore, id, ['running'], t.signal);
     await h.runtime.observe(conversation).cancel();
     await collectText(stream);
     assert.equal(await h.streamStore.getStreamStatus(id), 'cancelled');
@@ -2141,7 +2144,7 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal(track.toolRuns, 0, 'tool did not execute');
   });
 
-  it('continues a client tool output through the assistant message', async () => {
+  it('continues a client tool output through the assistant message', async (t) => {
     const { clientTools, model, track } = clientToolSetup();
     await using h = await harness(model);
     await using _worker = await h.runtime.work();
@@ -2185,11 +2188,16 @@ describe('zukhruf runtime — background executor', () => {
       trigger: 'submit-message',
     });
     assert.equal(resumed.id, ask.id, 'continuation reuses the turn id');
-    await waitForText(h.runtime, conversation, 'Prioritize deep work.');
+    await waitForText(
+      h.runtime,
+      conversation,
+      'Prioritize deep work.',
+      t.signal,
+    );
     assert.equal(track.calls, 2, 'the client result triggers one continuation');
   });
 
-  it('injects the element catalog, streams whole elements, and keeps a durable snapshot', async () => {
+  it('injects the element catalog, streams whole elements, and keeps a durable snapshot', async (t) => {
     const elements = [
       {
         name: 'followup',
@@ -2266,7 +2274,7 @@ describe('zukhruf runtime — background executor', () => {
 
     const second = await h.runtime.enqueue(conversation, turn('And then?'));
     assert.notEqual(second.id, first.id);
-    await waitForText(h.runtime, conversation, 'Second reply.');
+    await waitForText(h.runtime, conversation, 'Second reply.', t.signal);
     assert.match(
       prompts[1],
       /Never invent elements/,
@@ -2279,7 +2287,7 @@ describe('zukhruf runtime — background executor', () => {
     );
 
     await h.runtime.enqueue(conversation, { ...turn('Bye'), elements: [] });
-    await waitForText(h.runtime, conversation, 'Third reply.');
+    await waitForText(h.runtime, conversation, 'Third reply.', t.signal);
     assert.doesNotMatch(
       prompts[2],
       /Never invent elements/,
@@ -2292,7 +2300,7 @@ describe('zukhruf runtime — background executor', () => {
     );
   });
 
-  it('continues an AI SDK approval response through the assistant message', async () => {
+  it('continues an AI SDK approval response through the assistant message', async (t) => {
     const { track, agent, model } = approvalSetup();
     await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work();
@@ -2308,7 +2316,7 @@ describe('zukhruf runtime — background executor', () => {
       approved: true,
     });
     assert.equal(resumed.id, ask.id, 'continuation reuses the turn id');
-    await waitForText(h.runtime, conversation, 'done:send it');
+    await waitForText(h.runtime, conversation, 'done:send it', t.signal);
 
     assert.equal(track.toolRuns, 1, 'tool executed exactly once');
     const messages = await h.runtime.observe(conversation).engine.getMessages();
@@ -2491,7 +2499,7 @@ describe('zukhruf runtime — background executor', () => {
     });
   }
 
-  it('continues once after AI SDK submits every sibling approval response', async () => {
+  it('continues once after AI SDK submits every sibling approval response', async (t) => {
     const { track, agent, model } = siblingApprovalSetup();
     await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work();
@@ -2510,7 +2518,7 @@ describe('zukhruf runtime — background executor', () => {
         reason: 'skip the second',
       },
     );
-    await waitForText(h.runtime, conversation, 'both approved');
+    await waitForText(h.runtime, conversation, 'both approved', t.signal);
     assert.equal(track.toolRuns, 1, 'only the approved sibling executed');
     assert.equal(track.calls.length, 2, 'exactly one continuation was sampled');
   });
@@ -2545,7 +2553,7 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal(track.calls.length, 2, 'one continuation was sampled');
     assert.equal(track.toolRuns, 1, 'only the approved sibling executed');
     assert.equal(
-      await waitForStatus(h.streamStore, ask.id, ['completed'], 3_000),
+      await waitForStatus(h.streamStore, ask.id, ['completed'], t.signal),
       'completed',
     );
     const final = (
@@ -2587,7 +2595,8 @@ describe('zukhruf runtime — background executor', () => {
       },
       {
         minTimeout: 25,
-        maxRetryTime: 5_000,
+        signal: t.signal,
+        maxRetryTime: Number.POSITIVE_INFINITY,
         shouldRetry: ({ error }) => error instanceof assert.AssertionError,
       },
     );
@@ -2608,7 +2617,7 @@ describe('zukhruf runtime — background executor', () => {
     ]);
   });
 
-  it('continues an AI SDK denial without executing the tool', async () => {
+  it('continues an AI SDK denial without executing the tool', async (t) => {
     const { track, agent, model } = approvalSetup();
     await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work();
@@ -2625,7 +2634,7 @@ describe('zukhruf runtime — background executor', () => {
       approved: false,
       reason: 'not today',
     });
-    await waitForText(h.runtime, conversation, 'denied:send it');
+    await waitForText(h.runtime, conversation, 'denied:send it', t.signal);
     assert.equal(track.toolRuns, 0, 'tool never executed');
 
     const final = (
@@ -2676,7 +2685,7 @@ describe('zukhruf runtime — background executor', () => {
       approved: true,
     });
     const [, b, c] = await Promise.all([
-      waitForText(h.runtime, conversation, 'done:send it'),
+      waitForText(h.runtime, conversation, 'done:send it', t.signal),
       collectText(second.stream),
       collectText(third.stream),
     ]);
@@ -2714,7 +2723,7 @@ describe('zukhruf runtime — background executor', () => {
       toolCallId: part.toolCallId,
       approved: true,
     });
-    await waitForText(h.runtime, conversation, 'done:send it');
+    await waitForText(h.runtime, conversation, 'done:send it', t.signal);
 
     await waitFor(
       async () => {
@@ -2748,7 +2757,7 @@ describe('zukhruf runtime — background executor', () => {
       approved: false,
       reason: 'nope',
     });
-    await waitForText(h.runtime, conversation, 'denied:send it');
+    await waitForText(h.runtime, conversation, 'denied:send it', t.signal);
     assert.equal(track.toolRuns, 0, 'tool never ran');
 
     await waitFor(
@@ -2863,7 +2872,7 @@ describe('zukhruf runtime — background executor', () => {
       approved: true,
     });
     const [, b, c, d] = await Promise.all([
-      waitForText(h.runtime, conversation, 'done:send it'),
+      waitForText(h.runtime, conversation, 'done:send it', t.signal),
       collectText(second.stream),
       collectText(third.stream),
       collectText(fourth.stream),
@@ -2935,7 +2944,7 @@ describe('zukhruf runtime — background executor', () => {
 
     // A follow-up arrives while gated and parks (job cancelled, stream queued).
     const second = await h.runtime.enqueue(conversation, turn('two'));
-    await waitForStatus(h.streamStore, second.id, ['queued']);
+    await waitForStatus(h.streamStore, second.id, ['queued'], t.signal);
     await waitFor(
       async () => {
         const parked = await h.boss.findJobs(h.queue.queue, {
@@ -2961,7 +2970,7 @@ describe('zukhruf runtime — background executor', () => {
       toolCallId: part.toolCallId,
       approved: true,
     });
-    await waitForText(h.runtime, conversation, 'done:send it');
+    await waitForText(h.runtime, conversation, 'done:send it', t.signal);
 
     await waitFor(
       async () => {
@@ -2983,7 +2992,7 @@ describe('zukhruf runtime — background executor', () => {
     );
   });
 
-  it('cancelling a paused turn is currently a no-op: the pause survives and is still approvable', async () => {
+  it('cancelling a paused turn is currently a no-op: the pause survives and is still approvable', async (t) => {
     const { track, agent, model } = approvalSetup();
     await using h = await harness(model, { declaration: agent });
     await using _worker = await h.runtime.work();
@@ -3010,11 +3019,11 @@ describe('zukhruf runtime — background executor', () => {
       toolCallId: part.toolCallId,
       approved: true,
     });
-    await waitForText(h.runtime, conversation, 'done:send it');
+    await waitForText(h.runtime, conversation, 'done:send it', t.signal);
     assert.equal(track.toolRuns, 1, 'still approvable after the no-op cancel');
   });
 
-  it('a crashed turn is marked failed and unblocks the next turn in the chat', async () => {
+  it('a crashed turn is marked failed and unblocks the next turn in the chat', async (t) => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(scriptedModel(track));
     await using _worker = await h.runtime.work();
@@ -3024,7 +3033,7 @@ describe('zukhruf runtime — background executor', () => {
     const crashed = await h.runtime.enqueue(conversation, turn('boom'));
     const next = await h.runtime.enqueue(conversation, turn('after'));
 
-    await waitForStatus(h.streamStore, crashed.id, ['failed']);
+    await waitForStatus(h.streamStore, crashed.id, ['failed'], t.signal);
     const text = await collectText(next.stream);
     assert.equal(text, 'reply:after', 'chat unblocked after the failure');
     assert.equal(await h.streamStore.getStreamStatus(crashed.id), 'failed');
@@ -3114,7 +3123,7 @@ describe('zukhruf runtime — conversation status', () => {
     );
     try {
       const crashed = await h.runtime.enqueue(conversation, turn('boom'));
-      await waitForStatus(h.streamStore, crashed.id, ['failed']);
+      await waitForStatus(h.streamStore, crashed.id, ['failed'], t.signal);
       await waitFor(() => assert.deepStrictEqual(seen.at(-1), systemError), {
         interval: 25,
         signal: t.signal,
@@ -3187,8 +3196,13 @@ describe('zukhruf runtime — conversation status', () => {
         toolCallId: part.toolCallId,
         approved: true,
       });
-      await waitForText(h.runtime, conversation, 'done:send it');
-      await waitForText(h.runtime, conversation, 'reply:while paused');
+      await waitForText(h.runtime, conversation, 'done:send it', t.signal);
+      await waitForText(
+        h.runtime,
+        conversation,
+        'reply:while paused',
+        t.signal,
+      );
       await waitFor(() => assert.deepStrictEqual(seen.at(-1), idle), {
         interval: 25,
         signal: t.signal,
@@ -3261,7 +3275,12 @@ describe('zukhruf runtime — conversation status', () => {
         tools: clientTools,
         trigger: 'submit-message',
       });
-      await waitForText(h.runtime, conversation, 'Prioritize deep work.');
+      await waitForText(
+        h.runtime,
+        conversation,
+        'Prioritize deep work.',
+        t.signal,
+      );
       await waitFor(() => assert.deepStrictEqual(seen.at(-1), idle), {
         interval: 25,
         signal: t.signal,
@@ -3294,14 +3313,14 @@ describe('zukhruf runtime — conversation status', () => {
     );
     try {
       const { id } = await h.runtime.enqueue(conversation, turn('go'));
-      await waitForStatus(h.streamStore, id, ['running']);
+      await waitForStatus(h.streamStore, id, ['running'], t.signal);
       await waitFor(() => assert.deepStrictEqual(seen.at(-1), active()), {
         interval: 25,
         signal: t.signal,
       });
 
       await h.runtime.observe(conversation).cancel(id);
-      await waitForStatus(h.streamStore, id, ['cancelled']);
+      await waitForStatus(h.streamStore, id, ['cancelled'], t.signal);
       await waitFor(() => assert.deepStrictEqual(seen.at(-1), idle), {
         interval: 25,
         signal: t.signal,
@@ -3335,7 +3354,7 @@ describe('zukhruf runtime — conversation status', () => {
     );
     try {
       const failed = await h.runtime.enqueue(conversation, turn('first'));
-      await waitForStatus(h.streamStore, failed.id, ['failed']);
+      await waitForStatus(h.streamStore, failed.id, ['failed'], t.signal);
       await waitFor(() => assert.deepStrictEqual(seen.at(-1), systemError), {
         interval: 25,
         signal: t.signal,

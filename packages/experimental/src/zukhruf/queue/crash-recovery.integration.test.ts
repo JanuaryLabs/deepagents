@@ -58,21 +58,22 @@ async function waitForStatus(
   streamStore: PostgresStreamStore,
   id: string,
   accept: string[],
-  timeoutMs: number,
+  signal: AbortSignal,
 ) {
   return timebox(
     async () => {
       const status = await streamStore.getStreamStatus(id);
       assert.ok(
         status && accept.includes(status),
-        `timed out after ${timeoutMs}ms waiting for ${accept.join('/')} on ${id} ` +
+        `timed out waiting for ${accept.join('/')} on ${id} ` +
           `(last: ${status})`,
       );
       return status;
     },
     {
       minTimeout: 200,
-      maxRetryTime: timeoutMs,
+      signal,
+      maxRetryTime: Number.POSITIVE_INFINITY,
       shouldRetry: ({ error }) => error instanceof assert.AssertionError,
     },
   );
@@ -154,7 +155,7 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
     assert.fail('owner output ended before WORKER READY');
   });
 
-  it('heartbeat lapse fails the job; the DLQ reconciler flips the stream and unblocks the chat', async () => {
+  it('heartbeat lapse fails the job; the DLQ reconciler flips the stream and unblocks the chat', async (t) => {
     await using container = await testPostgres.database();
 
     const streamStore = await PostgresStreamStore.create({
@@ -209,7 +210,7 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
       });
 
       try {
-        await waitForStatus(streamStore, first.id, ['running'], 30_000);
+        await waitForStatus(streamStore, first.id, ['running'], t.signal);
       } catch (error) {
         child.kill('SIGKILL');
         const result = await subprocess.catch((failure: unknown) => {
@@ -229,7 +230,7 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
       });
 
       await using worker = await runtime.work();
-      await waitForStatus(streamStore, first.id, ['failed'], 120_000);
+      await waitForStatus(streamStore, first.id, ['failed'], t.signal);
       const failed = await streamStore.getStream(first.id);
       assert.ok(failed?.error, 'orphaned stream carries an error message');
 

@@ -41,6 +41,19 @@ await waitFor(() => assert.equal(messages.length, 2), { signal: t.signal });
 `waitFor` retries every error. On abort it rejects with `t.signal.reason` and the
 last error of the check as its `cause`.
 
+To retry assertion failures while letting other errors, such as a database
+error, fail at once, use `timebox` from `@zukhruf/testing/async` with
+`shouldRetry`, ended by the test's signal instead of a budget of its own:
+
+```ts
+await timebox(async () => assert.equal(await store.status(), 'ready'), {
+  minTimeout: 20,
+  signal: t.signal,
+  maxRetryTime: Number.POSITIVE_INFINITY,
+  shouldRetry: ({ error }) => error instanceof assert.AssertionError,
+});
+```
+
 Declare resources after their disposable parent so reverse-order cleanup closes
 handles before deleting the directory:
 
