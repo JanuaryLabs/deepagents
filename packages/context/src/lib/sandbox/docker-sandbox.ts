@@ -911,8 +911,8 @@ class DockerContainer implements EngineContainer {
         await this.#container.wait({ condition: 'removed' });
       }
     } catch (error) {
-      // The container is gone: AutoRemove removed it, or another handle of a
-      // named sandbox stopped it first.
+      // The container is gone: AutoRemove removed it, or something outside the
+      // sandbox removed it first.
       if (error instanceof ContainerNotFoundError) return;
       throw error;
     }

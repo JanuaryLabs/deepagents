@@ -91,10 +91,12 @@ export interface CommonSandboxOptions extends SandboxReadinessOptions {
    * volume preparation, and env are skipped); if it exists but is stopped, it is
    * started first; otherwise it is created fresh. Must match `/^[A-Za-z0-9_.-]+$/`.
    *
-   * Warning: `dispose()` stops (and `--rm` removes) the container regardless of
-   * whether it was created or attached to. If two callers in the same process
-   * share a name, the first `dispose()` destroys the container the other is
-   * still using.
+   * Who owns the container follows who created it. A sandbox that created the
+   * container owns it: `dispose()` stops it, and `--rm` removes it. A sandbox
+   * that attached to an existing container borrows it: `dispose()` closes the
+   * connection to the engine and leaves the container running, also when the
+   * sandbox started a stopped one. When two sandboxes share a name, the
+   * container ends when the one that created it is disposed.
    */
   name?: string;
   /**

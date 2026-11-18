@@ -108,9 +108,13 @@ When attaching, installer execution, volume preparation, and env setup are skipp
 <Callout type="warn">
   This is get-or-create for **sequential** callers. Creating the same name from
   two callers concurrently is not supported — the `container` runtime races on
-  duplicate-name `run`. Serialize creation of a given name. Also note
-  `dispose()` stops and removes the container (containers use `--rm`) even when
-  this call attached to an existing one.
+  duplicate-name `run`. Serialize creation of a given name.
+</Callout>
+
+<Callout type="info">
+  The sandbox that created a container owns it: its `dispose()` stops and
+  removes the container (containers use `--rm`). A sandbox that attached to an
+  existing container borrows it: its `dispose()` leaves the container running.
 </Callout>
 
 ## Architecture selection

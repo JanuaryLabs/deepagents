@@ -15,7 +15,10 @@ import type { DisposableSandbox } from './types.ts';
 
 const CONTAINER_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
 
-/** A container the strategy runs in, and whether an earlier caller created it. */
+/**
+ * A container the strategy runs in, and whether an earlier caller created it.
+ * An attached container is borrowed: the sandbox never stops it.
+ */
 export interface AcquiredContainer {
   container: EngineContainer;
   attached: boolean;
@@ -104,7 +107,7 @@ export abstract class ContainerSandboxStrategy<
       throw error;
     }
 
-    const sandbox = this.createSandboxMethods(acquired.container);
+    const sandbox = this.createSandboxMethods(acquired);
     if (this.opts.readiness) {
       try {
         await this.opts.readiness(sandbox);
@@ -279,7 +282,7 @@ export abstract class ContainerSandboxStrategy<
     }
   }
 
-  /** Ends the sandbox's hold on its container: stops it, by default. */
+  /** Ends a container that this sandbox created: stops it, by default. */
   protected release(container: EngineContainer): Promise<void> {
     return container.stop();
   }
@@ -294,13 +297,14 @@ export abstract class ContainerSandboxStrategy<
     );
   }
 
-  protected createSandboxMethods(
-    container: EngineContainer,
-  ): DisposableSandbox {
+  protected createSandboxMethods({
+    container,
+    attached,
+  }: AcquiredContainer): DisposableSandbox {
     let disposal: Promise<void> | undefined;
     const dispose = async (): Promise<void> => {
       try {
-        await this.release(container);
+        if (!attached) await this.release(container);
         await this.cleanupCreatedVolumes();
       } finally {
         await this.engine.dispose();

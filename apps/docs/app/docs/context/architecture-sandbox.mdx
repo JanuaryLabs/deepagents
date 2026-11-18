@@ -72,7 +72,8 @@ create()
 If setup fails, the base class releases a newly acquired container, removes
 managed volumes it created, and disposes the engine. An attached container is
 left running when setup fails. If the readiness hook fails, the
-sandbox is disposed, including an attached container.
+sandbox is disposed. `dispose()` releases only a container that the sandbox
+created; an attached container is borrowed and stays running.
 
 The methods object returned by `createSandboxMethods()` also implements
 `[Symbol.asyncDispose]`, which delegates to `dispose()`. Because

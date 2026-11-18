@@ -151,10 +151,11 @@ already be configured.
 
 `name` must match `/^[A-Za-z0-9_.-]+$/`.
 
-<Callout type="warn">
-  `dispose()` still stops (and removes, because runtime and Dockerfile
-  containers use `--rm`) named containers even when this call attached to an
-  existing one. Coordinate lifecycle if multiple callers share the same `name`.
+<Callout type="info">
+  The sandbox that created a named container owns it: its `dispose()` stops (and
+  removes, because runtime and Dockerfile containers use `--rm`) the container.
+  A sandbox that attached to an existing container borrows it: its `dispose()`
+  closes the connection to the engine and leaves the container running.
 </Callout>
 
 ## Container command overrides
@@ -616,8 +617,8 @@ const version = await useSandbox(
 Runtime and Dockerfile containers are configured for automatic removal when
 stopped. `dispose()` sends a stop request through the Engine API and resolves
 when the engine has removed the container, so its volumes and bind mounts are
-free. A container that a named sandbox attached to and that has no automatic
-removal stays stopped. Compose sandboxes run `docker compose down` to stop the
+free. A container that a named sandbox attached to stays running. Compose
+sandboxes run `docker compose down` to stop the
 stack.
 
 ## Error handling

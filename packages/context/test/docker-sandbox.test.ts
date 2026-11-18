@@ -1257,8 +1257,8 @@ await createDockerSandbox({ ...options, dockerfile }).then(
         );
       });
 
-      it('dispose leaves a container that is not auto-removed stopped, without waiting for its removal', async () => {
-        const name = `dispose-kept-${crypto.randomUUID()}`;
+      it('dispose leaves a container it attached to by name running', async () => {
+        const name = `dispose-borrowed-${crypto.randomUUID()}`;
         await using container = await testbed.start(
           { Image: 'bash:5.3-alpine3.24', Cmd: ['tail', '-f', '/dev/null'] },
           { name: `sandbox-${name}` },
@@ -1267,7 +1267,19 @@ await createDockerSandbox({ ...options, dockerfile }).then(
 
         await sandbox.dispose();
 
-        assert.strictEqual((await container.inspect()).State?.Running, false);
+        assert.strictEqual((await container.inspect()).State?.Running, true);
+      });
+
+      it('dispose of a sandbox that attached by name leaves the sandbox that created the container working', async () => {
+        const name = `dispose-shared-${crypto.randomUUID()}`;
+        await using owner = await createDockerSandbox({ ...defaults, name });
+        const borrower = await createDockerSandbox({ ...defaults, name });
+
+        await borrower.dispose();
+
+        const result = await owner.run({ command: 'echo still-here' });
+        assert.strictEqual(result.exitCode, 0, result.stderr);
+        assert.strictEqual(result.stdout, 'still-here\n');
       });
 
       it('dispose is idempotent (can call multiple times)', async () => {
@@ -1340,8 +1352,8 @@ await createDockerSandbox({ ...options, dockerfile }).then(
           const curl = await second.run({ command: 'curl --version' });
           assert.strictEqual(curl.exitCode, 0);
         } finally {
-          // dispose() stops the shared container — either call works once,
-          // and the second is a no-op (errors swallowed in stopContainer).
+          // The second sandbox borrows the container; the first created it,
+          // so its dispose() removes it.
           await second?.dispose();
           await first.dispose();
           await removeContainer(`sandbox-${name}`);

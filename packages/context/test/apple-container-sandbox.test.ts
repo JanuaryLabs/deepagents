@@ -429,7 +429,20 @@ describe('Apple container sandbox (runtime)', async () => {
       const seen = await second.readTextFile({ path: '/workspace/marker.txt' });
       assert.strictEqual(seen, 'shared');
     } finally {
-      await (second ?? first).dispose();
+      await second?.dispose();
+      await first.dispose();
     }
+  });
+
+  it('leaves the container running when a sandbox that attached by name is disposed', async () => {
+    const name = `borrowed-${process.pid}`;
+    await using owner = await createAppleContainerSandbox({ name });
+    const borrower = await createAppleContainerSandbox({ name });
+
+    await borrower.dispose();
+
+    const result = await owner.run({ command: 'echo still-here' });
+    assert.strictEqual(result.exitCode, 0, result.stderr);
+    assert.strictEqual(result.stdout, 'still-here\n');
   });
 });
