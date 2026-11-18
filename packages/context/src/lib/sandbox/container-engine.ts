@@ -66,23 +66,14 @@ export interface SandboxNamedVolume {
 
 export type SandboxVolume = SandboxBindVolume | SandboxNamedVolume;
 
-/** Resource limits common to every engine. Engines extend with their own knobs. */
-export interface SandboxResources {
-  /** `--memory` — e.g. `'1g'`, `'1024M'`. */
-  memory?: string;
-  /** `--cpus` — number of CPUs. */
-  cpus?: number;
-}
-
 /**
  * The options the shared skeleton is allowed to read. Each engine extends this
- * with its own dialect knobs (Docker's security/network/…; Apple's `arch`),
+ * with its own dialect knobs (Docker's `container` create body; Apple's `arch`),
  * which only its own engine methods see — the skeleton is typed to this common
  * subset and physically cannot read them.
  */
 export interface CommonSandboxOptions extends SandboxReadinessOptions {
   volumes?: SandboxVolume[];
-  resources?: SandboxResources;
   env?: Record<string, string>;
   /**
    * Stable identity suffix. When provided, the container is named

@@ -177,12 +177,12 @@ Bind paths are validated at creation time (`AppleContainerVolumePathError` if a 
 
 ## Resource limits
 
+The sandbox sets none: `container run` gets `--memory` and `--cpus` only when
+`resources` sets them, and the runtime's defaults apply otherwise.
+
 ```typescript
 await using sandbox = await createAppleContainerSandbox({
-  resources: {
-    memory: '512M', // default: '1024M'
-    cpus: 1, // default: 2
-  },
+  resources: { memory: '512M', cpus: 1 },
 });
 ```
 

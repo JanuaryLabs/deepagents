@@ -18,10 +18,8 @@ import {
   createVirtualSandbox,
 } from '@deepagents/context';
 
-import { dockerSandboxDefaults } from './helpers/docker-sandbox-defaults.ts';
-
 const testbed = new DockerTestbed({ environment: process.env });
-const dockerDefaults = dockerSandboxDefaults(await testbed.defaults());
+const dockerDefaults = { container: await testbed.defaults() };
 
 interface Backend {
   name: string;

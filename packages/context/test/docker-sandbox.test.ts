@@ -11,6 +11,7 @@ import { promisify } from 'node:util';
 import {
   ContainerCreationError,
   type DisposableSandbox,
+  type DockerContainerConfig,
   DockerSandboxError,
   DockerfileBuildError,
   InstallError,
@@ -30,13 +31,23 @@ import {
   useSandbox,
 } from '@deepagents/context';
 
-import { dockerSandboxDefaults } from './helpers/docker-sandbox-defaults.ts';
-
 const temporaryFiles = new TemporaryFiles();
 const execFileAsync = promisify(execFile);
 
 const testbed = new DockerTestbed({ environment: process.env });
-const defaults = dockerSandboxDefaults(await testbed.defaults());
+const defaults = { container: await testbed.defaults() };
+
+/** The testbed defaults with `config` merged in, `HostConfig` field by field. */
+function withContainer({ HostConfig, ...config }: DockerContainerConfig) {
+  return {
+    ...defaults,
+    container: {
+      ...defaults.container,
+      ...config,
+      HostConfig: { ...defaults.container.HostConfig, ...HostConfig },
+    },
+  };
+}
 
 function testVolumeName(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -311,10 +322,9 @@ describe('Docker Sandbox', () => {
       });
 
       it('writes files and directories that a numeric non-root user can modify', async () => {
-        await using sandbox = await createDockerSandbox({
-          ...defaults,
-          security: { user: '1000:1000' },
-        });
+        await using sandbox = await createDockerSandbox(
+          withContainer({ User: '1000:1000' }),
+        );
         await sandbox.writeTextFile({
           path: '/tmp/owned/deep/notes.txt',
           content: 'first',
@@ -333,10 +343,9 @@ describe('Docker Sandbox', () => {
       });
 
       it('writes through a symbolic link to a directory as a non-root user, and keeps the link', async () => {
-        await using sandbox = await createDockerSandbox({
-          ...defaults,
-          security: { user: '1000:1000' },
-        });
+        await using sandbox = await createDockerSandbox(
+          withContainer({ User: '1000:1000' }),
+        );
         await sandbox.run({
           command: 'mkdir /tmp/real && ln -s /tmp/real /tmp/link',
         });
@@ -756,13 +765,10 @@ describe('Docker Sandbox', () => {
         const name = `limits-${crypto.randomUUID()}`;
 
         await using sandbox = await createDockerSandbox({
-          ...defaults,
+          ...withContainer({
+            HostConfig: { Memory: 256 * 1024 ** 2, NanoCpus: 500_000_000 },
+          }),
           name,
-          resources: {
-            ...defaults.resources,
-            memory: '256m',
-            cpus: 0.5,
-          },
         });
 
         // Container should work with limits
@@ -783,11 +789,10 @@ describe('Docker Sandbox', () => {
         );
       });
 
-      it('sizes /dev/shm via shmSize', async () => {
-        await using sandbox = await createDockerSandbox({
-          ...defaults,
-          resources: { ...defaults.resources, shmSize: '64m' },
-        });
+      it('sizes /dev/shm via ShmSize', async () => {
+        await using sandbox = await createDockerSandbox(
+          withContainer({ HostConfig: { ShmSize: 64 * 1024 ** 2 } }),
+        );
 
         const result = await sandbox.run({ command: 'df -k /dev/shm' });
         assert.strictEqual(result.exitCode, 0);
@@ -795,24 +800,21 @@ describe('Docker Sandbox', () => {
       });
 
       it('applies a file-descriptor ulimit to PID 1', async () => {
-        await using sandbox = await createDockerSandbox({
-          ...defaults,
-          resources: {
-            ...defaults.resources,
-            ulimits: ['nofile=512:512'],
-          },
-        });
+        await using sandbox = await createDockerSandbox(
+          withContainer({
+            HostConfig: { Ulimits: [{ Name: 'nofile', Soft: 512, Hard: 512 }] },
+          }),
+        );
 
         const result = await sandbox.run({ command: 'cat /proc/1/limits' });
         assert.strictEqual(result.exitCode, 0);
         assert.match(result.stdout, /Max open files\s+512\s+512/);
       });
 
-      it('caps the process count via pidsLimit', async () => {
-        await using sandbox = await createDockerSandbox({
-          ...defaults,
-          resources: { ...defaults.resources, pidsLimit: 42 },
-        });
+      it('caps the process count via PidsLimit', async () => {
+        await using sandbox = await createDockerSandbox(
+          withContainer({ HostConfig: { PidsLimit: 42 } }),
+        );
 
         const result = await sandbox.run({
           command:
@@ -825,21 +827,22 @@ describe('Docker Sandbox', () => {
 
     describe('container runtime', () => {
       it('runs the container under the default runtime when runtime is omitted', async () => {
-        await using sandbox = await createDockerSandbox({
-          ...defaults,
-          runtime: 'runc',
-        });
+        await using sandbox = await createDockerSandbox(
+          withContainer({ HostConfig: { Runtime: 'runc' } }),
+        );
 
         const result = await sandbox.run({ command: 'echo runc' });
         assert.strictEqual(result.exitCode, 0);
         assert.strictEqual(result.stdout, 'runc\n');
       });
 
-      it('passes runtime through to `docker run --runtime`', async () => {
+      it('passes HostConfig.Runtime through to the engine', async () => {
         const bogusRuntime = 'sandbox-nonexistent-runtime';
 
         await assert.rejects(
-          createDockerSandbox({ ...defaults, runtime: bogusRuntime }),
+          createDockerSandbox(
+            withContainer({ HostConfig: { Runtime: bogusRuntime } }),
+          ),
           (error: unknown) => {
             assert.ok(error instanceof ContainerCreationError);
             assert.match(error.message, new RegExp(bogusRuntime));
@@ -851,10 +854,9 @@ describe('Docker Sandbox', () => {
 
     describe('networking', () => {
       it('isolates the container with network mode none', async () => {
-        await using sandbox = await createDockerSandbox({
-          ...defaults,
-          network: { mode: 'none' },
-        });
+        await using sandbox = await createDockerSandbox(
+          withContainer({ HostConfig: { NetworkMode: 'none' } }),
+        );
 
         const result = await sandbox.run({ command: 'ls /sys/class/net' });
         assert.strictEqual(result.exitCode, 0);
@@ -867,10 +869,9 @@ describe('Docker Sandbox', () => {
       });
 
       it('sets a custom hostname', async () => {
-        await using sandbox = await createDockerSandbox({
-          ...defaults,
-          network: { hostname: 'sandbox-host' },
-        });
+        await using sandbox = await createDockerSandbox(
+          withContainer({ Hostname: 'sandbox-host' }),
+        );
 
         const result = await sandbox.run({ command: 'hostname' });
         assert.strictEqual(result.exitCode, 0);
@@ -878,21 +879,19 @@ describe('Docker Sandbox', () => {
       });
 
       it('sets custom DNS servers', async () => {
-        await using sandbox = await createDockerSandbox({
-          ...defaults,
-          network: { dns: ['1.2.3.4'] },
-        });
+        await using sandbox = await createDockerSandbox(
+          withContainer({ HostConfig: { Dns: ['1.2.3.4'] } }),
+        );
 
         const result = await sandbox.run({ command: 'cat /etc/resolv.conf' });
         assert.strictEqual(result.exitCode, 0);
         assert.match(result.stdout, /nameserver\s+1\.2\.3\.4/);
       });
 
-      it('adds host-to-IP mappings with addHost', async () => {
-        await using sandbox = await createDockerSandbox({
-          ...defaults,
-          network: { addHost: ['myhost:10.1.2.3'] },
-        });
+      it('adds host-to-IP mappings with ExtraHosts', async () => {
+        await using sandbox = await createDockerSandbox(
+          withContainer({ HostConfig: { ExtraHosts: ['myhost:10.1.2.3'] } }),
+        );
 
         const result = await sandbox.run({ command: 'cat /etc/hosts' });
         assert.strictEqual(result.exitCode, 0);
@@ -901,11 +900,10 @@ describe('Docker Sandbox', () => {
     });
 
     describe('process and workspace', () => {
-      it('runs an init process as PID 1 with init:true', async () => {
-        await using sandbox = await createDockerSandbox({
-          ...defaults,
-          init: true,
-        });
+      it('runs an init process as PID 1 with HostConfig.Init', async () => {
+        await using sandbox = await createDockerSandbox(
+          withContainer({ HostConfig: { Init: true } }),
+        );
 
         const result = await sandbox.run({ command: 'cat /proc/1/comm' });
         assert.strictEqual(result.exitCode, 0);
@@ -925,8 +923,7 @@ describe('Docker Sandbox', () => {
 
       it('overrides the image entrypoint', async () => {
         await using sandbox = await createDockerSandbox({
-          ...defaults,
-          entrypoint: '/bin/sleep',
+          ...withContainer({ Entrypoint: ['/bin/sleep'] }),
           command: ['infinity'],
         });
 
@@ -935,11 +932,12 @@ describe('Docker Sandbox', () => {
         assert.strictEqual(result.stdout, 'sleep\n');
       });
 
-      it('sets kernel parameters via sysctls', async () => {
-        await using sandbox = await createDockerSandbox({
-          ...defaults,
-          sysctls: { 'net.ipv4.ip_forward': '1' },
-        });
+      it('sets kernel parameters via HostConfig.Sysctls', async () => {
+        await using sandbox = await createDockerSandbox(
+          withContainer({
+            HostConfig: { Sysctls: { 'net.ipv4.ip_forward': '1' } },
+          }),
+        );
 
         const result = await sandbox.run({
           command: 'cat /proc/sys/net/ipv4/ip_forward',
@@ -952,12 +950,13 @@ describe('Docker Sandbox', () => {
         const name = `label-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
         await using sandbox = await createDockerSandbox({
-          ...defaults,
+          ...withContainer({
+            Labels: {
+              ...defaults.container.Labels,
+              'com.example.role': 'sandbox-test',
+            },
+          }),
           name,
-          labels: {
-            ...defaults.labels,
-            'com.example.role': 'sandbox-test',
-          },
         });
 
         const found = await (
@@ -978,18 +977,17 @@ describe('Docker Sandbox', () => {
         assert.strictEqual(container.HostConfig?.NanoCpus, 1_000_000_000);
       });
 
-      // gpus, devices, cpuShares, cpusetCpus, and memorySwap are emitted the same
-      // way as the flags above, but are not asserted here: observing them needs
+      // DeviceRequests, Devices, CpuShares, CpusetCpus and MemorySwap pass
+      // through the same way, but are not asserted here: observing them needs
       // GPU/host-device hardware or CPU/memory contention that a single isolated
       // container cannot reliably create.
     });
 
     describe('security hardening', () => {
       it('runs as a non-root user', async () => {
-        await using sandbox = await createDockerSandbox({
-          ...defaults,
-          security: { user: '1000:1000' },
-        });
+        await using sandbox = await createDockerSandbox(
+          withContainer({ User: '1000:1000' }),
+        );
 
         const result = await sandbox.run({ command: 'id -u' });
         assert.strictEqual(result.exitCode, 0);
@@ -997,10 +995,14 @@ describe('Docker Sandbox', () => {
       });
 
       it('mounts a read-only rootfs with a writable tmpfs workspace', async () => {
-        await using sandbox = await createDockerSandbox({
-          ...defaults,
-          security: { readOnly: true, tmpfs: ['/workspace', '/tmp'] },
-        });
+        await using sandbox = await createDockerSandbox(
+          withContainer({
+            HostConfig: {
+              ReadonlyRootfs: true,
+              Tmpfs: { '/workspace': '', '/tmp': '' },
+            },
+          }),
+        );
 
         await sandbox.writeTextFile({
           path: '/workspace/ok.txt',
@@ -1019,10 +1021,12 @@ describe('Docker Sandbox', () => {
       });
 
       it('stops a spawned process as a non-root user on a read-only rootfs', async () => {
-        await using sandbox = await createDockerSandbox({
-          ...defaults,
-          security: { readOnly: true, tmpfs: ['/tmp'], user: '1000:1000' },
-        });
+        await using sandbox = await createDockerSandbox(
+          withContainer({
+            User: '1000:1000',
+            HostConfig: { ReadonlyRootfs: true, Tmpfs: { '/tmp': '' } },
+          }),
+        );
 
         const child = await sandbox.spawn({
           command: 'printf started; sleep 30',
@@ -1035,10 +1039,9 @@ describe('Docker Sandbox', () => {
       });
 
       it('reaches tmpfs and kernel paths through an exec, with null for a missing one', async () => {
-        await using sandbox = await createDockerSandbox({
-          ...defaults,
-          security: { tmpfs: ['/scratch'] },
-        });
+        await using sandbox = await createDockerSandbox(
+          withContainer({ HostConfig: { Tmpfs: { '/scratch': '' } } }),
+        );
         await sandbox.writeTextFile({
           path: '/scratch/deep/note.txt',
           content: 'tmpfs',
@@ -1102,10 +1105,9 @@ describe('Docker Sandbox', () => {
       });
 
       it('drops Linux capabilities', async () => {
-        await using sandbox = await createDockerSandbox({
-          ...defaults,
-          security: { capDrop: ['ALL'] },
-        });
+        await using sandbox = await createDockerSandbox(
+          withContainer({ HostConfig: { CapDrop: ['ALL'] } }),
+        );
 
         await sandbox.run({ command: 'touch /tmp/cap-probe' });
         const chown = await sandbox.run({
@@ -1115,11 +1117,12 @@ describe('Docker Sandbox', () => {
         assert.match(chown.stderr, /not permitted|operation not permitted/i);
       });
 
-      it('re-grants a capability with capAdd', async () => {
-        await using sandbox = await createDockerSandbox({
-          ...defaults,
-          security: { capDrop: ['ALL'], capAdd: ['CHOWN'] },
-        });
+      it('re-grants a capability with CapAdd', async () => {
+        await using sandbox = await createDockerSandbox(
+          withContainer({
+            HostConfig: { CapDrop: ['ALL'], CapAdd: ['CHOWN'] },
+          }),
+        );
 
         await sandbox.run({ command: 'touch /tmp/cap-probe' });
         const chown = await sandbox.run({

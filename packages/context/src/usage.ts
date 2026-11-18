@@ -667,7 +667,7 @@ async function demonstrateDockerSandbox() {
         readOnly: true, // Read-only by default for security
       },
     ],
-    resources: { memory: '512m', cpus: 1 },
+    container: { HostConfig: { Memory: 512 * 1024 ** 2, NanoCpus: 1e9 } },
   });
 
   try {

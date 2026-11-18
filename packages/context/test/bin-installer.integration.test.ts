@@ -11,10 +11,8 @@ import {
   useSandbox,
 } from '@deepagents/context';
 
-import { dockerSandboxDefaults } from './helpers/docker-sandbox-defaults.ts';
-
 const testbed = new DockerTestbed({ environment: process.env });
-const defaults = dockerSandboxDefaults(await testbed.defaults());
+const defaults = { container: await testbed.defaults() };
 
 /** Seeds an executable `bin/hello.js` that prints `linked`. */
 async function seedHelloBinary(fixture: DockerDirectory): Promise<void> {

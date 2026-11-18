@@ -1,13 +1,10 @@
 import type { LanguageModelV4Prompt } from '@ai-sdk/provider';
-import { TemporaryFiles } from '@zukhruf/fs';
 import { waitFor } from '@zukhruf/testing/async';
 import { DockerTestbed } from '@zukhruf/testing/docker';
 import { generateText, isStepCount } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { build } from 'esbuild';
 import assert from 'node:assert';
-import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { z } from 'zod';
@@ -21,12 +18,8 @@ import {
   withStraceFileChanges,
 } from '@deepagents/context';
 
-import { dockerSandboxDefaults } from './helpers/docker-sandbox-defaults.ts';
-
-const temporaryFiles = new TemporaryFiles();
-
 const testbed = new DockerTestbed({ environment: process.env });
-const defaults = dockerSandboxDefaults(await testbed.defaults());
+const defaults = { container: await testbed.defaults() };
 
 // Native-arch image with strace + python3 baked in. ContainerfileStrategy
 // content-hash-caches the build, so the apt install runs once per machine.
@@ -1152,22 +1145,21 @@ describe('selfTestStrace (in-container)', () => {
   it('reports ptrace-blocked when ptrace is denied', async () => {
     // Real ptrace denial: a default-allow seccomp profile that errnos `ptrace`,
     // so strace's PTRACE_TRACEME fails exactly as a hardened runtime would.
-    await using fixture = await temporaryFiles.directory('strace-seccomp-');
-    const seccomp = join(fixture.path, 'deny-ptrace.json');
-    await writeFile(
-      seccomp,
-      JSON.stringify({
-        defaultAction: 'SCMP_ACT_ALLOW',
-        syscalls: [
-          { names: ['ptrace'], action: 'SCMP_ACT_ERRNO', errnoRet: 1 },
-        ],
-      }),
-    );
+    const seccomp = JSON.stringify({
+      defaultAction: 'SCMP_ACT_ALLOW',
+      syscalls: [{ names: ['ptrace'], action: 'SCMP_ACT_ERRNO', errnoRet: 1 }],
+    });
 
     await using backend = await createDockerSandbox({
       ...defaults,
       dockerfile: NODE_STRACE_IMAGE,
-      security: { securityOpt: [`seccomp=${seccomp}`] },
+      container: {
+        ...defaults.container,
+        HostConfig: {
+          ...defaults.container.HostConfig,
+          SecurityOpt: [`seccomp=${seccomp}`],
+        },
+      },
     });
 
     const result = await runProbe(backend);

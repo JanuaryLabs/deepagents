@@ -377,18 +377,15 @@ export const appleEngine: ContainerEngine<AppleContainerCommonOptions> & {
   defaultImage: 'docker.io/library/bash:5.3-alpine3.24',
 
   runArgs(image, containerId, opts) {
-    const { memory = '1024M', cpus = 2 } = opts.resources ?? {};
-    const args: string[] = [
-      'run',
-      '--detach',
-      '--rm',
-      '--name',
-      containerId,
-      '--memory',
-      memory,
-      '--cpus',
-      String(cpus),
-    ];
+    const { memory, cpus } = opts.resources ?? {};
+    const args: string[] = ['run', '--detach', '--rm', '--name', containerId];
+
+    if (memory) {
+      args.push('--memory', memory);
+    }
+    if (cpus !== undefined) {
+      args.push('--cpus', String(cpus));
+    }
 
     if (opts.arch) {
       args.push('--arch', opts.arch);

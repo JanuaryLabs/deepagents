@@ -206,6 +206,27 @@ describe('appleEngine.runArgs', () => {
     assert.ok(args.includes('1.1.1.1'));
     assert.ok(args.includes('8.8.8.8'));
   });
+
+  it('sets no memory or CPU limit unless resources sets one', () => {
+    const unset = appleEngine.runArgs(
+      ALPINE,
+      'sandbox-plain',
+      {},
+      '/workspace',
+    );
+    const set = appleEngine.runArgs(
+      ALPINE,
+      'sandbox-limited',
+      { resources: { memory: '512M', cpus: 1 } },
+      '/workspace',
+    );
+
+    assert.ok(!unset.includes('--memory') && !unset.includes('--cpus'));
+    assert.deepStrictEqual(
+      [set[set.indexOf('--memory') + 1], set[set.indexOf('--cpus') + 1]],
+      ['512M', '1'],
+    );
+  });
 });
 
 describe('Apple container sandbox (runtime)', async () => {

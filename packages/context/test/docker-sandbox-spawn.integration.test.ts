@@ -17,11 +17,10 @@ import {
   createDockerSandbox,
 } from '@deepagents/context';
 
-import { dockerSandboxDefaults } from './helpers/docker-sandbox-defaults.ts';
 import { textResult, toolCallResult } from './helpers/stream-results.ts';
 
 const testbed = new DockerTestbed({ environment: process.env });
-const defaults = dockerSandboxDefaults(await testbed.defaults());
+const defaults = { container: await testbed.defaults() };
 
 function userMessage(text: string): UIMessage {
   return { id: generateId(), role: 'user', parts: [{ type: 'text', text }] };

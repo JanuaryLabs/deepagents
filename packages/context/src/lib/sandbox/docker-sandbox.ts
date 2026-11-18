@@ -34,7 +34,6 @@ import type {
   RunResult,
   SandboxBindVolume,
   SandboxNamedVolume,
-  SandboxResources,
   SandboxVolume,
 } from './container-engine.ts';
 import {
@@ -89,85 +88,22 @@ export {
   VolumeRemoveError,
 } from './docker-sandbox-errors.ts';
 
-export interface DockerResources extends SandboxResources {
-  /**
-   * `--memory-swap` — total memory + swap (e.g. `'1g'`). Without it Docker
-   * allows swap up to 2× `memory`; set it equal to `memory` to forbid swap
-   * entirely. Must be ≥ `memory`.
-   */
-  memorySwap?: string;
-  /** `--shm-size` — size of `/dev/shm` (e.g. `'64m'`). Raise for Chromium/ML workloads. */
-  shmSize?: string;
-  /** `--pids-limit` — cap the container's process count (fork-bomb protection). */
-  pidsLimit?: number;
-  /** `--ulimit` per entry — e.g. `['nofile=1024:2048']`. */
-  ulimits?: string[];
-  /** `--cpuset-cpus` — CPUs the container may run on, e.g. `'0-1'`. */
-  cpusetCpus?: string;
-  /** `--cpu-shares` — relative CPU weight under contention. */
-  cpuShares?: number;
-}
-
 /**
- * Container hardening for `docker run`. All optional — omit for the daemon's
- * defaults (shared kernel, root user, writable root filesystem).
+ * The part of the Engine API create body that a Docker sandbox passes through:
+ * every field the sandbox does not own. The sandbox sets `Image` from `image`
+ * or `dockerfile`, `WorkingDir` from `workdir`, `Env` from `env` and `Cmd`
+ * from `command`. `HostConfig.AutoRemove` follows who created the container,
+ * and `HostConfig.Mounts` comes from `volumes`. `Labels` also go on the managed
+ * volumes that the sandbox creates.
  */
-export interface DockerSecurity {
-  /**
-   * `--cap-drop` per entry. `['ALL']` drops every Linux capability — the
-   * baseline for running untrusted code; re-grant via {@link capAdd}.
-   */
-  capDrop?: string[];
-  /** `--cap-add` per entry. Re-grant only what's needed after dropping `ALL`. */
-  capAdd?: string[];
-  /**
-   * `--read-only` — mount the container root filesystem read-only. Writes then
-   * only land in `tmpfs`/volume mounts; pair with a writable `/workspace`
-   * (a {@link tmpfs} entry or volume) or the sandbox's `writeFiles` and the
-   * installer phase will fail.
-   */
-  readOnly?: boolean;
-  /**
-   * `--user` (`uid[:gid]`) — run as a non-root user. The installer phase
-   * (`apk`/`apt`/`npm -g`/`pip`) needs root, so non-root suits a pre-baked
-   * Dockerfile image rather than the runtime-image + installers path.
-   */
-  user?: string;
-  /**
-   * `--tmpfs` per entry (e.g. `'/tmp'`, `'/workspace:size=64m'`) — ephemeral,
-   * in-memory writable directories. The companion to {@link readOnly}.
-   */
-  tmpfs?: string[];
-  /**
-   * `--security-opt` per entry — e.g. `['seccomp=/path/profile.json']` to apply
-   * a custom seccomp profile, or `['no-new-privileges']`.
-   */
-  securityOpt?: string[];
-}
+export type DockerContainerConfig = Omit<
+  EngineApi.ContainerCreateRequest,
+  'Image' | 'WorkingDir' | 'Env' | 'Cmd' | 'HostConfig'
+> & {
+  HostConfig?: Omit<EngineApi.HostConfig, 'AutoRemove' | 'Mounts'>;
+};
 
-/** Networking for `docker run`. */
-export interface DockerNetwork {
-  /**
-   * `--network` — e.g. `'none'` (no network at all; strong isolation for
-   * untrusted code, but breaks network installers), a custom network name, or
-   * `'host'` (shares the host network stack — defeats isolation).
-   */
-  mode?: string;
-  /** `--publish` per entry — e.g. `['8080:80']` to expose a container port. */
-  publish?: string[];
-  /** `--dns` per entry — custom DNS servers. */
-  dns?: string[];
-  /** `--add-host` per entry — e.g. `['db:10.0.0.5']` host-to-IP mappings. */
-  addHost?: string[];
-  /** `--hostname` — the container hostname. */
-  hostname?: string;
-}
-
-/**
- * Run-configuration for the Docker engine. Extends the common options the shared
- * skeleton reads with Docker-only `docker run` knobs that only `DockerEngine`
- * sees.
- */
+/** What the Docker engine reads, beside what the shared skeleton reads. */
 export interface DockerCommonOptions extends CommonSandboxOptions {
   /**
    * The environment whose `DOCKER_HOST`, `DOCKER_CONTEXT` and `DOCKER_CONFIG`
@@ -175,47 +111,20 @@ export interface DockerCommonOptions extends CommonSandboxOptions {
    */
   environment?: Environment;
   volumes?: SandboxVolume[];
-  resources?: DockerResources;
   /** Container execution timeout in milliseconds; excludes Docker/SSH connection setup. */
   commandTimeout?: number;
   /**
-   * `--platform` (e.g. `'linux/amd64'`) — emulated when it differs from the host
-   * arch. For the Dockerfile strategy it also applies to `docker build` and is
-   * folded into the image-build cache key.
+   * The platform of the container (e.g. `'linux/amd64'`), emulated when it
+   * differs from the engine's. The Dockerfile strategy also builds for it and
+   * folds it into the image-build cache key.
    */
   platform?: string;
   /**
-   * `--runtime` for `docker run` — selects the OCI runtime that backs the
-   * container (default: the daemon's default, usually `runc`). Set to a
-   * registered runtime such as `'kata-runtime'` (or `'io.containerd.kata.v2'`)
-   * to run the container inside a lightweight VM with its own guest kernel
-   * instead of sharing the host kernel. The runtime must already be installed on
-   * the host and registered in the Docker daemon — and the host must have
-   * hardware virtualization (`/dev/kvm`); it is not provisioned here.
+   * The create body of the container, as `@zukhruf/docker` takes it: limits,
+   * capabilities, user, network, devices, OCI runtime. The sandbox adds no
+   * limit of its own, so the engine's defaults apply to what this leaves out.
    */
-  runtime?: string;
-  /** Container hardening: capabilities, read-only rootfs, user, tmpfs, security-opt. */
-  security?: DockerSecurity;
-  /** Networking: network mode, published ports, DNS, host mappings, hostname. */
-  network?: DockerNetwork;
-  /**
-   * `--gpus` — e.g. `'all'`. Requires the nvidia container runtime on the host
-   * and is incompatible with a `runtime` such as `'kata-runtime'`.
-   */
-  gpus?: string;
-  /**
-   * `--device` per entry — expose a host device, e.g. `['/dev/fuse']`. Passed
-   * through verbatim; the library never injects a device implicitly.
-   */
-  devices?: string[];
-  /** `--init` — run an init process as PID 1 that reaps zombie subprocesses. */
-  init?: boolean;
-  /** `--label` metadata on the container and any managed volumes it creates. */
-  labels?: Record<string, string>;
-  /** `--sysctl` — kernel parameters, emitted as `key=value` per entry. */
-  sysctls?: Record<string, string>;
-  /** `--entrypoint` — override the image `ENTRYPOINT`. */
-  entrypoint?: string;
+  container?: DockerContainerConfig;
 }
 
 export interface RuntimeSandboxOptions extends DockerCommonOptions {
@@ -250,7 +159,6 @@ export interface ComposeSandboxOptions {
   environment?: Environment;
   compose: string;
   service: string;
-  resources?: DockerResources;
   /** Container execution timeout in milliseconds; excludes Docker/SSH connection setup. */
   commandTimeout?: number;
 }
@@ -268,92 +176,6 @@ export function isComposeOptions(
   opts: DockerSandboxOptions,
 ): opts is ComposeSandboxOptions {
   return 'compose' in opts;
-}
-
-/** Container units `docker run` takes for sizes: a number with an optional binary unit. */
-const SIZE_UNITS: Record<string, number> = {
-  '': 1,
-  k: 1024,
-  m: 1024 ** 2,
-  g: 1024 ** 3,
-  t: 1024 ** 4,
-  p: 1024 ** 5,
-};
-
-/** Bytes of a `docker run` size such as `'1g'`, `'512m'` or `'1073741824b'`. */
-function sizeInBytes(flag: string, value: string): number {
-  const match = /^(\d+(?:\.\d+)?)\s*([kmgtp]?)(?:i?b)?$/i.exec(value);
-  if (!match) {
-    throw new DockerSandboxError(`Invalid ${flag} size: "${value}"`);
-  }
-  return Math.floor(Number(match[1]) * SIZE_UNITS[match[2].toLowerCase()]);
-}
-
-/** A `--ulimit` entry such as `'nofile=1024:2048'` or `'nproc=64'`. */
-function ulimit(value: string): EngineApi.Ulimit {
-  const match = /^([a-z]+)=(-?\d+)(?::(-?\d+))?$/.exec(value);
-  if (!match) {
-    throw new DockerSandboxError(`Invalid ulimit: "${value}"`);
-  }
-  const soft = Number(match[2]);
-  return {
-    Name: match[1],
-    Soft: soft,
-    Hard: match[3] === undefined ? soft : Number(match[3]),
-  };
-}
-
-/** A `--device` entry: `host[:container[:permissions]]`. */
-function device(value: string): EngineApi.DeviceMapping {
-  const [host, container = host, permissions = 'rwm'] = value.split(':');
-  return {
-    PathOnHost: host,
-    PathInContainer: container,
-    CgroupPermissions: permissions,
-  };
-}
-
-/** The `--gpus` request: `'all'`, a count, or `'device=0,1'`. */
-function gpuRequest(value: string): EngineApi.DeviceRequest {
-  if (value === 'all') return { Count: -1, Capabilities: [['gpu']] };
-  if (/^\d+$/.test(value)) {
-    return { Count: Number(value), Capabilities: [['gpu']] };
-  }
-  const devices = /^device=(.+)$/.exec(value);
-  if (devices) {
-    return { DeviceIDs: devices[1].split(','), Capabilities: [['gpu']] };
-  }
-  throw new DockerSandboxError(`Invalid gpus value: "${value}"`);
-}
-
-/** A `--publish` entry: `[ip:][hostPort:]containerPort[/protocol]`. */
-function publishedPort(value: string): {
-  port: string;
-  binding: EngineApi.PortBinding;
-} {
-  const [address, protocol = 'tcp'] = value.split('/');
-  const parts = address.split(':');
-  const containerPort = parts.pop();
-  const hostPort = parts.pop() ?? '';
-  const hostIp = parts.join(':');
-  if (!containerPort || !/^\d+$/.test(containerPort)) {
-    throw new DockerSandboxError(`Invalid publish value: "${value}"`);
-  }
-  return {
-    port: `${containerPort}/${protocol}`,
-    binding: { HostIp: hostIp, HostPort: hostPort },
-  };
-}
-
-/**
- * A `--security-opt` entry as the engine takes it. The CLI reads a seccomp
- * profile from this machine and sends its JSON; the engine cannot read a path
- * on the client.
- */
-function securityOption(entry: string): string {
-  const match = /^seccomp[=:](.+)$/.exec(entry);
-  if (!match || match[1] === 'unconfined') return entry;
-  return `seccomp=${JSON.stringify(JSON.parse(readFileSync(match[1], 'utf-8')))}`;
 }
 
 function mount(volume: SandboxVolume): EngineApi.Mount {
@@ -382,87 +204,28 @@ function mount(volume: SandboxVolume): EngineApi.Mount {
   };
 }
 
-/**
- * The body of `POST /containers/create` for a long-running sandbox container:
- * what `docker run -d --rm` sends for the same options.
- */
+/** The body of `POST /containers/create` for a sandbox container. */
 function containerCreateRequest(
   image: string,
   opts: DockerCommonOptions,
   workdir: string,
 ): EngineApi.ContainerCreateRequest {
-  const {
-    memory = '1g',
-    cpus = 2,
-    memorySwap,
-    shmSize,
-    pidsLimit,
-    ulimits = [],
-    cpusetCpus,
-    cpuShares,
-  } = opts.resources ?? {};
-  const security = opts.security ?? {};
-  const network = opts.network ?? {};
-  const published = (network.publish ?? []).map(publishedPort);
-
+  const { HostConfig, ...config } = opts.container ?? {};
   return {
+    ...config,
     Image: image,
     WorkingDir: workdir,
     Env: Object.entries(opts.env ?? {}).map(
       ([key, value]) => `${key}=${value}`,
     ),
-    Labels: opts.labels ?? {},
     ...(opts.command === undefined
       ? { Cmd: ['tail', '-f', '/dev/null'] }
       : opts.command === null || opts.command.length === 0
         ? {}
         : { Cmd: [...opts.command] }),
-    ...(opts.entrypoint === undefined ? {} : { Entrypoint: [opts.entrypoint] }),
-    ...(security.user ? { User: security.user } : {}),
-    ...(network.hostname ? { Hostname: network.hostname } : {}),
-    ExposedPorts: Object.fromEntries(published.map(({ port }) => [port, {}])),
     HostConfig: {
+      ...HostConfig,
       AutoRemove: true,
-      Memory: sizeInBytes('memory', memory),
-      NanoCpus: Math.round(cpus * 1e9),
-      ...(memorySwap
-        ? {
-            MemorySwap:
-              memorySwap === '-1' ? -1 : sizeInBytes('memorySwap', memorySwap),
-          }
-        : {}),
-      ...(shmSize ? { ShmSize: sizeInBytes('shmSize', shmSize) } : {}),
-      ...(pidsLimit === undefined ? {} : { PidsLimit: pidsLimit }),
-      Ulimits: ulimits.map(ulimit),
-      ...(cpusetCpus ? { CpusetCpus: cpusetCpus } : {}),
-      ...(cpuShares === undefined ? {} : { CpuShares: cpuShares }),
-      ...(opts.runtime ? { Runtime: opts.runtime } : {}),
-      CapDrop: security.capDrop ?? [],
-      CapAdd: security.capAdd ?? [],
-      ReadonlyRootfs: security.readOnly === true,
-      Tmpfs: Object.fromEntries(
-        (security.tmpfs ?? []).map((entry) => {
-          const separator = entry.indexOf(':');
-          return separator < 0
-            ? [entry, '']
-            : [entry.slice(0, separator), entry.slice(separator + 1)];
-        }),
-      ),
-      SecurityOpt: (security.securityOpt ?? []).map(securityOption),
-      ...(network.mode ? { NetworkMode: network.mode } : {}),
-      PortBindings: published.reduce<Record<string, EngineApi.PortBinding[]>>(
-        (bindings, { port, binding }) => ({
-          ...bindings,
-          [port]: [...(bindings[port] ?? []), binding],
-        }),
-        {},
-      ),
-      Dns: network.dns ?? [],
-      ExtraHosts: network.addHost ?? [],
-      ...(opts.gpus ? { DeviceRequests: [gpuRequest(opts.gpus)] } : {}),
-      Devices: (opts.devices ?? []).map(device),
-      ...(opts.init ? { Init: true } : {}),
-      Sysctls: opts.sysctls ?? {},
       Mounts: (opts.volumes ?? []).map(mount),
     },
   };
@@ -949,7 +712,7 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
     try {
       await this.docker.volumes.create({
         Name: volume.name,
-        Labels: opts.labels ?? {},
+        Labels: opts.container?.Labels,
         ...(volume.driver ? { Driver: volume.driver } : {}),
         DriverOpts: volume.driverOptions ?? {},
       });
@@ -985,7 +748,6 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
     return (await this.docker.images.inspect(tag)) !== undefined;
   }
 
-  /** An inline Dockerfile goes to `docker build -f -` on stdin. */
   /** An inline Dockerfile goes to `docker build -f -` on stdin. */
   async buildImage(spec: ImageBuildSpec): Promise<void> {
     const inline = spec.dockerfile.includes('\n');
@@ -1026,7 +788,6 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
 export interface ComposeStrategyArgs {
   compose: string;
   service: string;
-  resources?: DockerResources;
 }
 
 /**
@@ -1042,7 +803,7 @@ export class ComposeStrategy extends ContainerSandboxStrategy<DockerCommonOption
   private dockerEngine: DockerEngine;
 
   constructor(args: ComposeStrategyArgs, engine: DockerEngine) {
-    super({ resources: args.resources }, engine);
+    super({}, engine);
     this.dockerEngine = engine;
     this.composeFile = args.compose;
     this.service = args.service;
@@ -1158,11 +919,7 @@ export async function createDockerSandbox(
   try {
     if (isComposeOptions(options)) {
       strategy = new ComposeStrategy(
-        {
-          compose: options.compose,
-          service: options.service,
-          resources: options.resources,
-        },
+        { compose: options.compose, service: options.service },
         engine,
       );
     } else if (isDockerfileOptions(options)) {

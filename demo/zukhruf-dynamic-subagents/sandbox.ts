@@ -24,9 +24,15 @@ export function createWorkspaceSandbox(options: WorkspaceSandboxOptions) {
           16,
         )}`,
         image: 'bash:5.3-alpine3.24',
-        init: true,
         installers: [pkg(['git', 'nodejs', 'npm', 'ripgrep'])],
-        security: { securityOpt: ['no-new-privileges'] },
+        container: {
+          HostConfig: {
+            Init: true,
+            Memory: 1024 ** 3,
+            NanoCpus: 2e9,
+            SecurityOpt: ['no-new-privileges'],
+          },
+        },
         volumes: [
           {
             type: 'bind',
