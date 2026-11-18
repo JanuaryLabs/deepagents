@@ -1,5 +1,7 @@
 import { Declaration } from '@zukhruf/sqlite-drift';
 import { transaction } from '@zukhruf/sqlite-transaction';
+import { Vector } from '@zukhruf/vectors';
+import { toSql } from '@zukhruf/vectors/sqlite';
 import dedent from 'dedent';
 import type { DatabaseSync } from 'node:sqlite';
 
@@ -46,7 +48,7 @@ export class SQLiteStore implements Store {
   #searchByDocument(inputs: {
     sourceId: string;
     documentId: string;
-    embedding: Buffer<ArrayBufferLike>;
+    embedding: Uint8Array;
     k: number;
   }) {
     const stmt = this.#db.prepare(dedent`
@@ -68,7 +70,7 @@ export class SQLiteStore implements Store {
   }
   #searchBySource(inputs: {
     sourceId: string;
-    embedding: Buffer<ArrayBufferLike>;
+    embedding: Uint8Array;
     k: number;
   }) {
     const stmt = this.#db.prepare(dedent`
@@ -87,7 +89,7 @@ export class SQLiteStore implements Store {
     if (!embeddings.length) {
       return [];
     }
-    const vectorBlob = vectorToBlob(embeddings[0]);
+    const vectorBlob = toSql(Vector.from(embeddings[0]));
     const topN = options.topN;
 
     if (options.documentId) {
@@ -155,7 +157,7 @@ export class SQLiteStore implements Store {
         inputs.sourceId,
         inputs.documentId,
         chunk.content,
-        vectorToBlob(chunk.embedding),
+        toSql(Vector.from(chunk.embedding)),
       );
     };
   }
