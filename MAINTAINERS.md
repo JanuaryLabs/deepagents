@@ -2,48 +2,16 @@
 
 ## Release Process
 
-Releases are automated via GitHub Actions. When a release tag is pushed, CI will build and publish all packages to npm.
+Releases need no command. When CI passes for a push to `main`, the [Release workflow](.github/workflows/release.yml) releases what the conventional commits since the last `release/*` tag ask for:
 
-### Prerequisites
+1. It checks that `main` is still the commit that CI tested. If a newer commit is on `main`, it stops: the run of the newer commit releases it.
+2. `npx nx release version` builds the public packages, sets the new version, then commits, tags (`release/x.x.x`) and pushes the release commit to `main`.
+3. `npx nx run tools:check-consumer-install` packs the packages and installs them in a consumer.
+4. The packages are published to npm with provenance. A version that is already on npm is skipped.
 
-- You must have push access to the `main` branch
-- All CI checks must be passing on `main`
+A push with no `fix:`, `feat:`, `refactor:` or breaking commit since the last release changes nothing. The release commit and tag are pushed with `GITHUB_TOKEN`, so they start no CI run.
 
-### Steps to Release
-
-1. **Pull the latest main branch**
-
-   ```bash
-   git checkout main
-   git pull origin main
-   ```
-
-2. **Run the release command**
-
-   This will analyze commits since the last release, bump versions based on conventional commits, update changelogs, and create a git tag.
-
-   ```bash
-   npx nx release --skip-publish
-   ```
-
-   Review the proposed version bumps and confirm when prompted.
-
-3. **Push the commit, then the tag**
-
-   Push `main`. Wait for green CI. Then push only the new tag:
-
-   ```bash
-   git push origin main
-   git push origin refs/tags/release/x.x.x
-   ```
-
-   The `release/*` tag starts the GitHub Actions workflow. The workflow builds all packages and publishes them to npm.
-
-   Do not use `--follow-tags`. It also pushes older local tags. GitHub sends no push event when one push has more than three tags, so the workflow does not start and npm gets no release.
-
-4. **Verify the release**
-   - Check the [Actions tab](../../actions) for the release workflow status
-   - Verify packages are published on [npm](https://www.npmjs.com/org/deepagents)
+To release, merge or push conventional commits to `main`, then check the [Actions tab](../../actions) and [npm](https://www.npmjs.com/org/deepagents).
 
 ### Version Bumping
 
@@ -59,32 +27,25 @@ Versions are determined automatically from commit messages using [Conventional C
 
 ### Dry Run
 
-To preview what a release would do without making changes:
+To preview the next version without making changes:
 
 ```bash
-npx nx release --skip-publish --dry-run
+npx nx release version --dry-run
 ```
 
 ### Troubleshooting
 
 **Release workflow failed?**
 
-1. Check the workflow logs in the Actions tab
-2. Common issues:
-   - `NPM_ACCESS_TOKEN` secret is invalid or expired
-   - Package with same version already exists on npm
-   - Build failures
-   - The consumer install check failed before the publish: a consumer of the packed packages gets `ERESOLVE`, or more than one copy of `ai` or `react`. A new `ai` or `react` on npm can cause this with no change in this repo. Run `npx nx run tools:check-consumer-install` to see the conflict.
+Check the workflow logs in the Actions tab. Common issues:
 
-**Need to republish a failed release?**
+- `NPM_ACCESS_TOKEN` secret is invalid or expired
+- Build failures
+- The consumer install check failed before the publish: a consumer of the packed packages gets `ERESOLVE`, or more than one copy of `ai` or `react`. A new `ai` or `react` on npm can cause this with no change in this repo. Run `npx nx run tools:check-consumer-install` to see the conflict.
 
-Do this only for the newest release. Do not push an older tag again: the workflow publishes that version, and the `latest` dist-tag on npm can move back to it. For example, `release/6.2.0` is not on npm.
+**What to do when a release fails**
 
-If you pushed the newest tag and publishing failed, delete the tag and push it again:
+The publish step already retries once the packages that the first attempt did not publish (for example, after a sigstore Rekor 409). Do not push or delete `release/*` tags by hand.
 
-```bash
-git tag -d release/x.x.x
-git push origin :refs/tags/release/x.x.x
-git tag release/x.x.x
-git push origin release/x.x.x
-```
+- **The run failed before the Version step** (npm authentication, the build): nothing was tagged. Fix the cause and re-run the failed Release run from the Actions tab. If a newer commit is already on `main`, the re-run stops, and the run of that commit releases instead.
+- **The run failed after the Version step** (the consumer install check or the publish): the release commit and tag are on `main`, but npm does not have the version. A re-run of that Release run stops, because `main` is now the release commit, not the commit that CI tested. Push the fix to `main`. When CI passes, its Release run publishes: if the fix is a `chore:` or `docs:` commit, it publishes the version that failed; if it is a `fix:` or `feat:` commit, it publishes the next version, and the failed version is never published.
