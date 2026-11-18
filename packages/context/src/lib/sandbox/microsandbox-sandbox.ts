@@ -21,7 +21,6 @@ import type { DisposableSandbox, SandboxReadinessOptions } from './types.ts';
 
 export const MICROSANDBOX_DEFAULT_DESTINATION = '/workspace';
 const MICROSANDBOX_DEFAULT_IMAGE = 'bash:5.3-alpine3.24';
-const MICROSANDBOX_MAX_NAME_BYTES = 128;
 const COMMAND_TIMEOUT_EXIT_CODE = 124;
 
 // The SDK has no typed not-found error. The guest's errno ends the message, as
@@ -237,14 +236,6 @@ function normalizeMicrosandboxError(
 function validateMicrosandboxOptions(
   options: MicrosandboxSandboxOptions,
 ): void {
-  if (
-    options.name !== undefined &&
-    Buffer.byteLength(options.name, 'utf-8') > MICROSANDBOX_MAX_NAME_BYTES
-  ) {
-    throw new MicrosandboxSandboxError(
-      `Microsandbox names are limited to ${MICROSANDBOX_MAX_NAME_BYTES} UTF-8 bytes.`,
-    );
-  }
   if (options.replace && options.name === undefined) {
     throw new MicrosandboxSandboxError(
       'Microsandbox options can only include "replace" together with "name" — an unnamed sandbox is always created fresh.',
@@ -319,10 +310,11 @@ function microsandboxSession(args: {
   };
 
   /**
-   * Whether `path` can be read. `fs.read` and `fs.readStream` of a directory
-   * never settle (SDK 0.7.8), so the trial is unsafe and a stat goes first.
+   * Whether `path` can be read as a stream. `fs.readStream` opens a directory
+   * and fails only at its first chunk (SDK 0.7.16), so a stat goes first to
+   * reject the call itself.
    */
-  const readable = async (path: string): Promise<boolean> => {
+  const streamable = async (path: string): Promise<boolean> => {
     const stat = await statAt(path);
     if (stat?.type === 'directory') {
       throw new Error(`Cannot read "${path}": it is a directory.`);
@@ -379,13 +371,15 @@ function microsandboxSession(args: {
     const stderr = createByteReadable();
     let exited = false;
     let timedOut = false;
-    // A kill after the exit fails with `delivery_unconfirmed` instead of
-    // doing nothing.
+    let killing: Promise<void> | undefined;
+    // A kill after the exit fails with `execution_closed` instead of doing
+    // nothing, so a second call shares the first call's kill.
     const kill = async () => {
       if (exited) return;
-      await handle.kill().catch((error: unknown) => {
+      killing ??= handle.kill().catch((error: unknown) => {
         if (!exited) throw error;
       });
+      await killing;
     };
     const onAbort = () => {
       void kill().catch(() => {});
@@ -429,8 +423,7 @@ function microsandboxSession(args: {
           const err = toError(error);
           stdout.error(err);
           stderr.error(err);
-          // Kills a guest process the pump lost. Not called after an exit: a
-          // kill then waits out a delivery deadline of about 3 s.
+          // Kills the guest process the pump lost.
           await handle[Symbol.asyncDispose]();
           throw err;
         },
@@ -470,7 +463,6 @@ function microsandboxSession(args: {
   }) => {
     abortSignal?.throwIfAborted();
     const target = resolve(path);
-    if (!(await readable(target))) return null;
     return orNull(() => withFs((fs) => fs.read(target)));
   };
 
@@ -506,7 +498,7 @@ function microsandboxSession(args: {
     readFile: async ({ path, abortSignal }) => {
       abortSignal?.throwIfAborted();
       const target = resolve(path);
-      if (!(await readable(target))) return null;
+      if (!(await streamable(target))) return null;
       const stream = await orNull(() => withFs((fs) => fs.readStream(target)));
       return stream && ReadableStream.from(stream);
     },

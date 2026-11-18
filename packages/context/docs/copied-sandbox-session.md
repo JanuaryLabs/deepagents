@@ -43,11 +43,13 @@ Imported, not copied: `FILE_STAT_TYPES` and `bufferEncoding` come from
 
 **An idempotent `kill()`.**
 
-- Same: a second call does nothing, and a call after the exit does nothing.
-- Differs: the container session keeps the first call's promise (`??=`) and
-  kills the process group through an exec (`terminate`). Microsandbox calls
-  `ExecHandle.kill()`, which tolerates a second call, and returns early after
-  the exit: the SDK fails a kill after the exit with `delivery_unconfirmed`.
+- Same: a second call shares the first call's promise (`??=`), and a call after
+  the exit does nothing.
+- Differs: the container session kills the process group through an exec
+  (`terminate`). Microsandbox calls `ExecHandle.kill()` and returns early after
+  the exit: the SDK fails a kill after the exit with `execution_closed`, within
+  milliseconds since 0.7.16, so a second `ExecHandle.kill()` could reject before
+  the event pump saw the exit.
 
 **`run` over `spawn`.**
 

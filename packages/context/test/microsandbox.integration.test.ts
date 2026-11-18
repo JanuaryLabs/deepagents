@@ -73,13 +73,21 @@ describe('Microsandbox Sandbox', async () => {
     );
   }
 
+  const sdkInstalled = (await importMicrosandboxSdk()) !== undefined;
+
   describe('option validation', () => {
-    it('rejects names longer than 128 UTF-8 bytes', async () => {
-      await assert.rejects(
-        createMicrosandboxSandbox({ name: 'x'.repeat(129) }),
-        MicrosandboxSandboxError,
-      );
-    });
+    it(
+      'rejects names longer than 128 UTF-8 bytes with the SDK error',
+      { skip: !sdkInstalled },
+      async () => {
+        const { InvalidConfigError } = await import('microsandbox');
+
+        await assert.rejects(
+          createMicrosandboxSandbox({ name: 'é'.repeat(65) }),
+          InvalidConfigError,
+        );
+      },
+    );
 
     it('rejects "replace" without "name"', async () => {
       await assert.rejects(
@@ -89,7 +97,6 @@ describe('Microsandbox Sandbox', async () => {
     });
   });
 
-  const sdkInstalled = (await importMicrosandboxSdk()) !== undefined;
   describe('runtime availability', { skip: !sdkInstalled }, () => {
     // The SDK keeps the runtime it resolved for its first VM, and the
     // usability probe above has already booted one in this process, so the
