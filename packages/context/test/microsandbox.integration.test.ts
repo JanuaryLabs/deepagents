@@ -856,5 +856,43 @@ describe('Microsandbox Sandbox', async () => {
         ],
       );
     });
+
+    it('reports writes by a spawned process by the time wait resolves', async () => {
+      await using sandbox = await createMicrosandboxSandbox();
+      const installed = await sandbox.run({
+        command: 'apk add --no-cache strace',
+      });
+      assert.strictEqual(installed.exitCode, 0, installed.stderr);
+      const seen: FileChange[] = [];
+      const tracked = await withStraceFileChanges(sandbox, {
+        include: [
+          MICROSANDBOX_DEFAULT_DESTINATION,
+          `${MICROSANDBOX_DEFAULT_DESTINATION}/**`,
+        ],
+        onFileChanges: (changes) => {
+          seen.push(...changes);
+        },
+      });
+
+      const child = await tracked.spawn({
+        command: `echo spawned > ${MICROSANDBOX_DEFAULT_DESTINATION}/spawned.txt`,
+      });
+      const [, , exit] = await Promise.all([
+        streamText(child.stdout),
+        streamText(child.stderr),
+        child.wait(),
+      ]);
+
+      assert.deepStrictEqual(exit, { exitCode: 0 });
+      assert.deepStrictEqual(
+        seen.map(({ op, path }) => ({ op, path })),
+        [
+          {
+            op: 'write',
+            path: `${MICROSANDBOX_DEFAULT_DESTINATION}/spawned.txt`,
+          },
+        ],
+      );
+    });
   });
 });
