@@ -10,6 +10,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
   type DisposableSandbox,
+  MicrosandboxSandboxError,
   appleEngine,
   createAppleContainerSandbox,
   createDockerSandbox,
@@ -24,10 +25,8 @@ const dockerDefaults = dockerSandboxDefaults(await testbed.defaults());
 
 interface Backend {
   name: string;
-  /** Why this host cannot run the backend. */
-  skip?: string;
-  /** The backlog id of a known defect that keeps this backend from meeting the contract. */
-  todo?: string;
+  /** Says why this host cannot run the backend, or `undefined` when it can. */
+  unavailable?: () => Promise<string | undefined>;
   writableStdin: boolean;
   /**
    * What `run` does on abort. The official virtual adapter resolves with exit
@@ -53,6 +52,28 @@ async function appleContainerUnavailable(): Promise<string | undefined> {
   }
 }
 
+/**
+ * Whether the runtime can boot a VM here (KVM access on a Linux runner, a
+ * catalog that this msb can read) shows only when it boots one, so the probe
+ * boots one. A failure the package or the runtime reports skips the backend;
+ * any other error fails it.
+ */
+async function microsandboxUnavailable(): Promise<string | undefined> {
+  const { MicrosandboxError } = await import('microsandbox');
+  try {
+    await (await createMicrosandboxSandbox()).dispose();
+    return undefined;
+  } catch (error) {
+    if (
+      error instanceof MicrosandboxSandboxError ||
+      error instanceof MicrosandboxError
+    ) {
+      return error.message;
+    }
+    throw error;
+  }
+}
+
 const backends: Backend[] = [
   {
     name: 'virtual',
@@ -72,7 +93,7 @@ const backends: Backend[] = [
   },
   {
     name: 'apple',
-    skip: await appleContainerUnavailable(),
+    unavailable: appleContainerUnavailable,
     writableStdin: true,
     runAbort: 'rejects',
     open: (name) => createAppleContainerSandbox({ name }),
@@ -96,9 +117,7 @@ const backends: Backend[] = [
   },
   {
     name: 'microsandbox',
-    // The VM fails to boot on the GitHub Linux runner and on this Mac (#4535),
-    // so each test opens it and fails as todo instead of the file failing at load.
-    todo: '#4535',
+    unavailable: microsandboxUnavailable,
     writableStdin: true,
     runAbort: 'rejects',
     open: (name) => createMicrosandboxSandbox({ name }),
@@ -124,16 +143,16 @@ const STOP_WINDOW_MS = 10_500;
 
 for (const {
   name,
-  skip,
-  todo,
+  unavailable,
   open,
   writableStdin,
   runAbort,
   holds,
   forget,
 } of backends) {
-  describe(`sandbox session contract: ${name}`, { skip, todo }, () => {
-    describe('failure modes', () => {
+  describe(`sandbox session contract: ${name}`, async () => {
+    const skip = await unavailable?.();
+    describe('failure modes', { skip }, () => {
       it(`stops a running command and ${runAbort === 'rejects' ? 'rejects with the abort reason' : 'resolves with exit 124'} when run is aborted`, async (t: TestContext) => {
         await using sandbox = await open();
         const controller = new AbortController();
@@ -448,7 +467,7 @@ for (const {
       }
     });
 
-    describe('commands', () => {
+    describe('commands', { skip }, () => {
       it('does not carry cd into the next command or relative file paths', async () => {
         await using sandbox = await open();
         const before = await sandbox.run({ command: 'pwd' });
@@ -518,7 +537,7 @@ for (const {
       });
     });
 
-    describe('files', () => {
+    describe('files', { skip }, () => {
       it('reads 1-based inclusive line ranges and stops at end of file', async () => {
         await using sandbox = await open();
         await sandbox.writeTextFile({
@@ -652,7 +671,7 @@ for (const {
       });
     });
 
-    describe('official tool and lifecycle', () => {
+    describe('official tool and lifecycle', { skip }, () => {
       it('lets the official bash tool run a real command through the session', async () => {
         await using sandbox = await open();
         await sandbox.writeTextFile({
