@@ -6,44 +6,69 @@ on:
   push:
     branches: [main]
 
+# A new push to a pull request replaces its run. On main every commit keeps its
+# own run, even when it is run again: release.yml releases a commit only after
+# CI passes for it.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ case(github.event_name == 'pull_request', github.ref, github.sha) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  # affected-range reads this workflow's runs to find the last green commit.
+  actions: read
+  contents: read
+  # action-junit-report publishes the test results as a check run.
+  checks: write
 
 jobs:
   ci:
     runs-on: ubuntu-latest
     env:
+      # Each packages/*/.env.test defaults to a remote Docker engine
+      # (TEST_PRIMITIVES.md, "Local and remote Docker tests"); CI uses the
+      # runner's own engine.
       DOCKER_CONTEXT: default
       DOCKER_HOST: unix:///var/run/docker.sock
+      # nx.json runs 14 tasks at once, which suits a workstation. On the runner,
+      # that many tasks used all its memory, so CI runs three at once.
+      NX_PARALLEL: 3
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up the workspace
         uses: JanuaryLabs/zukhruf/.github/actions/setup-workspace@main
 
-      - name: Set SHAs for affected commands
-        uses: nrwl/nx-set-shas@v5
+      - name: Find what changed
+        uses: JanuaryLabs/zukhruf/.github/actions/affected-range@main
 
+      # The checks of the whole tree run beside the affected targets.
       - name: Check Nx workspace sync
+        background: true
         run: npx nx sync:check
 
-      - name: Lint affected
-        run: npx nx affected -t lint
+      - name: Check formatting
+        background: true
+        run: npx prettier --check .
 
-      # nx.json runs 14 tasks at once, which suits a workstation. On the runner,
-      # that many tasks used all its memory, so these steps run three at once.
-      - name: Type check affected
-        run: npx nx affected -t typecheck --parallel=3
+      - name: Audit the workflows
+        background: true
+        uses: zizmorcore/zizmor-action@v0.8.1
+        with:
+          advanced-security: false
+          annotations: true
 
       - name: Check runner Docker
         run: docker info
 
-      - name: Test affected
-        run: npx nx affected -t test --parallel=3
+      - name: Lint, type check, test and build what changed
+        run: npx nx affected -t lint typecheck test build
+
+      - name: Wait for the checks of the whole tree
+        wait-all:
 
       - name: Publish test results
         uses: mikepenz/action-junit-report@v6
@@ -54,6 +79,3 @@ jobs:
             **/test-results.xml
           check_name: 'Test Results'
           include_passed: true
-
-      - name: Build affected
-        run: npx nx affected -t build --parallel=3
