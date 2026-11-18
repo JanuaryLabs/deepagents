@@ -1,16 +1,18 @@
 import { TemporaryFiles } from '@zukhruf/fs';
 import { DockerTestbed } from '@zukhruf/testing/docker';
 import assert from 'node:assert';
-import { execFileSync, spawnSync } from 'node:child_process';
-import { writeFile } from 'node:fs/promises';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
+import { symlink, writeFile } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
 import { text } from 'node:stream/consumers';
 import { describe, it } from 'node:test';
+import { promisify } from 'node:util';
 
 import {
   ContainerCreationError,
   type DisposableSandbox,
   DockerSandboxError,
+  DockerfileBuildError,
   InstallError,
   Installer,
   type InstallerContext,
@@ -31,6 +33,7 @@ import {
 import { dockerSandboxDefaults } from './helpers/docker-sandbox-defaults.ts';
 
 const temporaryFiles = new TemporaryFiles();
+const execFileAsync = promisify(execFile);
 
 const testbed = new DockerTestbed({ environment: process.env });
 const defaults = dockerSandboxDefaults(await testbed.defaults());
@@ -1206,6 +1209,102 @@ await createDockerSandbox({ ...options, dockerfile }).then(
         const result = await sandbox.run({ command: 'cat /built-marker' });
         assert.strictEqual(result.exitCode, 0);
         assert.strictEqual(result.stdout, 'file-build\n');
+      });
+
+      it('rejects an inline Dockerfile whose RUN fails with DockerfileBuildError carrying the build output', async () => {
+        const marker = crypto.randomUUID();
+
+        await assert.rejects(
+          createDockerSandbox({
+            ...defaults,
+            dockerfile: `FROM bash:5.3-alpine3.24\nRUN echo $((6*7))-${marker} >&2 && exit 3\n`,
+          }),
+          (error: unknown) => {
+            assert.ok(error instanceof DockerfileBuildError, String(error));
+            assert.match(error.message, new RegExp(`42-${marker}`));
+            assert.match(error.message, /exit code: 3/);
+            return true;
+          },
+        );
+      });
+
+      it('rejects a Dockerfile path whose RUN fails with DockerfileBuildError carrying the build output', async () => {
+        await using dir = await temporaryFiles.directory('sandbox-dockerfile-');
+        const marker = crypto.randomUUID();
+        await writeFile(
+          join(dir.path, 'Dockerfile'),
+          `FROM bash:5.3-alpine3.24\nRUN echo $((6*7))-${marker} >&2 && exit 4\n`,
+        );
+
+        await assert.rejects(
+          createDockerSandbox({
+            ...defaults,
+            dockerfile: join(dir.path, 'Dockerfile'),
+            context: dir.path,
+          }),
+          (error: unknown) => {
+            assert.ok(error instanceof DockerfileBuildError, String(error));
+            assert.match(error.message, new RegExp(`42-${marker}`));
+            assert.match(error.message, /exit code: 4/);
+            return true;
+          },
+        );
+      });
+
+      it('streams the output of a failing build to the terminal with showBuildLogs, and rejects with DockerfileBuildError', async (t) => {
+        const marker = crypto.randomUUID();
+
+        // Only a process of its own shows what reaches the terminal.
+        const { stdout, stderr } = await execFileAsync(
+          process.execPath,
+          [
+            '--input-type=module',
+            '--eval',
+            `import { createDockerSandbox } from '@deepagents/context';
+const options = ${JSON.stringify(defaults)};
+const dockerfile = ${JSON.stringify(`FROM bash:5.3-alpine3.24\nRUN echo $((6*7))-${marker} && exit 5\n`)};
+await createDockerSandbox({ ...options, dockerfile, showBuildLogs: true }).then(
+  (sandbox) => sandbox.dispose(),
+  (error) => console.log(error.name),
+);`,
+          ],
+          { signal: t.signal },
+        );
+
+        assert.strictEqual(
+          stdout.trim().split('\n').at(-1),
+          'DockerfileBuildError',
+        );
+        assert.match(stderr, new RegExp(`42-${marker}`));
+      });
+
+      it('rejects with DockerfileBuildError when the docker CLI cannot be started', async (t) => {
+        await using dir = await temporaryFiles.directory('sandbox-no-docker-');
+        // The PATH keeps ssh, which reaches an SSH engine, and has no docker.
+        await symlink(
+          execFileSync('which', ['ssh'], { encoding: 'utf8' }).trim(),
+          join(dir.path, 'ssh'),
+        );
+
+        const { stdout } = await execFileAsync(
+          process.execPath,
+          [
+            '--input-type=module',
+            '--eval',
+            `import { createDockerSandbox } from '@deepagents/context';
+const options = ${JSON.stringify(defaults)};
+const dockerfile = ${JSON.stringify(`FROM bash:5.3-alpine3.24\nRUN echo ${crypto.randomUUID()}\n`)};
+await createDockerSandbox({ ...options, dockerfile }).then(
+  (sandbox) => sandbox.dispose(),
+  (error) => console.log(JSON.stringify({ name: error.name, message: error.message })),
+);`,
+          ],
+          { env: { ...process.env, PATH: dir.path }, signal: t.signal },
+        );
+
+        const { name, message } = JSON.parse(stdout.trim());
+        assert.strictEqual(name, 'DockerfileBuildError', message);
+        assert.match(message, /ENOENT/);
       });
     });
 

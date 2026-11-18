@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
 import {
+  AppleContainerImageBuildError,
   AppleContainerSandboxError,
   AppleContainerVolumePathError,
   type DisposableSandbox,
@@ -380,6 +381,16 @@ describe('Apple container sandbox (runtime)', async () => {
         assert.strictEqual(result.exitCode, 0);
         assert.strictEqual(result.stdout, 'built-by-dockerfile\n');
       },
+    );
+  });
+
+  it('rejects a failing Dockerfile build with AppleContainerImageBuildError under showBuildLogs', async () => {
+    await assert.rejects(
+      createAppleContainerSandbox({
+        dockerfile: `FROM ${ALPINE}\nRUN echo ${crypto.randomUUID()} && exit 3\n`,
+        showBuildLogs: true,
+      }),
+      AppleContainerImageBuildError,
     );
   });
 

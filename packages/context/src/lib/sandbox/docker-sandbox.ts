@@ -17,7 +17,6 @@ import {
   PathNotFoundError,
 } from '@zukhruf/docker';
 import spawn, { SubprocessError } from 'nano-spawn';
-import { type StdioOptions, spawn as childSpawn } from 'node:child_process';
 import { hash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { posix } from 'node:path';
@@ -467,58 +466,6 @@ function containerCreateRequest(
       Mounts: (opts.volumes ?? []).map(mount),
     },
   };
-}
-
-/**
- * Runs `docker build`. An inline Dockerfile is piped to `docker build -f -` over
- * stdin (no shell, no quoting). With `showBuildLogs`, output streams live to the
- * parent terminal; otherwise it is buffered so the failure stderr can be
- * surfaced in a {@link DockerfileBuildError}. `env` sends the CLI to the
- * engine of the sandbox.
- */
-function runDockerBuild(
-  args: string[],
-  stdin: string | undefined,
-  showBuildLogs: boolean,
-  env: NodeJS.ProcessEnv,
-): Promise<void> {
-  const stdio: StdioOptions = [
-    stdin === undefined ? 'inherit' : 'pipe',
-    showBuildLogs ? 'inherit' : 'ignore',
-    showBuildLogs ? 'inherit' : 'pipe',
-  ];
-
-  return new Promise((resolve, reject) => {
-    const child = childSpawn('docker', args, { stdio, env });
-
-    let stderr = '';
-    child.stderr?.setEncoding('utf8');
-    child.stderr?.on('data', (chunk) => {
-      stderr += chunk;
-    });
-
-    child.once('error', (error) =>
-      reject(new DockerfileBuildError(error.message)),
-    );
-    child.once('exit', (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(
-        new DockerfileBuildError(
-          showBuildLogs
-            ? `docker build exited with code ${code} (see build output above)`
-            : stderr || `docker build exited with code ${code}`,
-        ),
-      );
-    });
-
-    if (stdin !== undefined && child.stdin) {
-      child.stdin.on('error', () => {});
-      child.stdin.end(stdin);
-    }
-  });
 }
 
 /** Starts a stopped container of a named sandbox; `image` names the request in an error. */
@@ -1123,23 +1070,37 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
     return (await this.docker.images.inspect(tag)) !== undefined;
   }
 
+  /** An inline Dockerfile goes to `docker build -f -` on stdin. */
+  /** An inline Dockerfile goes to `docker build -f -` on stdin. */
   async buildImage(spec: ImageBuildSpec): Promise<void> {
     const inline = spec.dockerfile.includes('\n');
-    const args = [
-      'build',
-      ...(spec.identity ? ['--platform', spec.identity] : []),
-      '-t',
-      spec.tag,
-      '-f',
-      inline ? '-' : spec.dockerfile,
-      spec.context,
-    ];
-    await runDockerBuild(
-      args,
-      inline ? spec.dockerfile : undefined,
-      spec.showBuildLogs,
-      this.cliEnv,
-    );
+    try {
+      await spawn(
+        'docker',
+        [
+          'build',
+          ...(spec.identity ? ['--platform', spec.identity] : []),
+          '-t',
+          spec.tag,
+          '-f',
+          inline ? '-' : spec.dockerfile,
+          spec.context,
+        ],
+        {
+          stdin: inline ? { string: spec.dockerfile } : 'inherit',
+          stdout: spec.showBuildLogs ? 'inherit' : 'ignore',
+          stderr: spec.showBuildLogs ? 'inherit' : 'pipe',
+          env: this.cliEnv,
+        },
+      );
+    } catch (error) {
+      // nano-spawn names a CLI that could not start only in the cause.
+      throw new DockerfileBuildError(
+        error instanceof SubprocessError
+          ? error.stderr || messageOf(error.cause ?? error)
+          : messageOf(error),
+      );
+    }
   }
 
   dispose(): Promise<void> {

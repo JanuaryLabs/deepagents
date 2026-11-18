@@ -582,30 +582,15 @@ async function runAppleBuild(
   showBuildLogs: boolean,
 ): Promise<void> {
   try {
-    if (showBuildLogs) {
-      await runStreamed(CLI, args);
-    } else {
-      await spawn(CLI, args);
-    }
+    await spawn(CLI, args, showBuildLogs ? { stdio: 'inherit' } : {});
   } catch (error) {
-    throw new AppleContainerImageBuildError(getCliErrorMessage(error));
-  }
-}
-
-function runStreamed(command: string, args: string[]): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = childSpawn(command, args, { stdio: 'inherit' });
-    child.once('error', reject);
-    child.once('exit', (code) =>
-      code === 0
-        ? resolve()
-        : reject(
-            new Error(
-              `${command} build exited with code ${code} (see build output above)`,
-            ),
-          ),
+    // nano-spawn names a CLI that could not start only in the cause.
+    throw new AppleContainerImageBuildError(
+      getCliErrorMessage(
+        error instanceof SubprocessError ? (error.cause ?? error) : error,
+      ),
     );
-  });
+  }
 }
 
 /**
