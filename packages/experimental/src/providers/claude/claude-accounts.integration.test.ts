@@ -30,15 +30,29 @@ interface WireRequest {
 }
 
 /**
- * msw passes a socket that sends nothing first through to the real network
- * and keeps it after close(), so undici's global pool can hand it to a later
- * test. Each test therefore ends with a fresh pool.
+ * msw passes some connections through to the real network (a socket that
+ * sends nothing first, a request it cannot attribute to fetch, any connection
+ * after close()) and keeps them after close(), so undici's global pool can
+ * hand one to a later test. A pool here resolves no real address, so such a
+ * connection fails instead of reaching Anthropic (msw resolves its own mocked
+ * connections), and each test ends with a fresh pool.
  */
+function offlinePool() {
+  return new Agent({
+    connect: {
+      lookup: (hostname, _options, callback) =>
+        callback(new Error(`A test request escaped msw to ${hostname}`), ''),
+    },
+  });
+}
+
 async function replaceGlobalPool() {
   const pool = getGlobalDispatcher();
-  setGlobalDispatcher(new Agent());
+  setGlobalDispatcher(offlinePool());
   await pool.destroy();
 }
+
+setGlobalDispatcher(offlinePool());
 
 const msw = new Msw();
 
