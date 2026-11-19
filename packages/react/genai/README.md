@@ -8,7 +8,7 @@ React components that render AI SDK chat flows, trajectories, tools, citations, 
 npm i @deepagents/react-genai @zukhruf/ui @zukhruf/shadcn
 ```
 
-The peer dependencies are `@zukhruf/ui`, `react` 19 and `react-dom` 19. Install `@zukhruf/ui` yourself. npm does not install it for you when `legacy-peer-deps` is set.
+The peer dependencies are `@zukhruf/shadcn`, `@zukhruf/ui`, `react` 19 and `react-dom` 19. Install `@zukhruf/shadcn` and `@zukhruf/ui` yourself. npm does not install them for you when `legacy-peer-deps` is set.
 
 ## Stylesheets
 
