@@ -15,6 +15,7 @@ import z from 'zod';
 
 import { elementsSchema } from '@deepagents/elements';
 
+import { agentTurnIdSchema } from '../../control-plane/agent-turn-id.ts';
 import type { ConversationNotFoundError } from '../../control-plane/conversation-not-found-error.ts';
 import type { ConversationId } from '../../mailbox/types.ts';
 import type {
@@ -332,7 +333,7 @@ export function http(
       },
       turnId: {
         select: payload.params.turnId,
-        against: sessionIdSchema,
+        against: agentTurnIdSchema,
       },
     })),
     async (context) => {
@@ -368,7 +369,7 @@ export function http(
       },
       turnId: {
         select: payload.params.turnId,
-        against: sessionIdSchema,
+        against: agentTurnIdSchema,
       },
     })),
     async (context) => {

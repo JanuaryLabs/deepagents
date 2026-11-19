@@ -616,7 +616,8 @@ test('POST /zukhruf/v1/session/:sessionId/cancel cancels the current turn', asyn
 
 test('GET /zukhruf/v1/session/:sessionId/turn/:turnId exposes the exact durable turn outcome', async () => {
   const sessionId = '9d1f5c40-f250-5aa9-8979-2e0ef4fc2c15';
-  const turnId = 'e4ee8b3c-9054-5bc1-9d88-a0db1a40f759';
+  const turnId =
+    'zukhruf-turn:9d1f5c40-f250-5aa9-8979-2e0ef4fc2c15:e4ee8b3c-9054-5bc1-9d88-a0db1a40f759';
   const observed: string[] = [];
   const runtime = createRuntime({
     observe() {
@@ -653,7 +654,8 @@ test('GET /zukhruf/v1/session/:sessionId/turn/:turnId exposes the exact durable 
 
 test('POST /zukhruf/v1/session/:sessionId/turn/:turnId/cancel cancels only that turn', async () => {
   const sessionId = '9d1f5c40-f250-5aa9-8979-2e0ef4fc2c15';
-  const turnId = 'e4ee8b3c-9054-5bc1-9d88-a0db1a40f759';
+  const turnId =
+    'zukhruf-turn:9d1f5c40-f250-5aa9-8979-2e0ef4fc2c15:e4ee8b3c-9054-5bc1-9d88-a0db1a40f759';
   const cancelled: Array<string | undefined> = [];
   const runtime = createRuntime({
     observe() {
