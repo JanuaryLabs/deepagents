@@ -1,3 +1,4 @@
+import { useClock } from '@zukhruf/ui';
 import { cn } from 'cn';
 import { useEffect, useState } from 'react';
 
@@ -46,6 +47,7 @@ function UnicodeSpinner({
 }: Omit<React.ComponentProps<'span'>, 'children'> & {
   variant?: SpinnerVariant;
 }) {
+  const clock = useClock();
   const { frames, interval } = spinners[variant];
   const [frameIndex, setFrameIndex] = useState(0);
 
@@ -53,11 +55,11 @@ function UnicodeSpinner({
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
     if (mq.matches) return;
 
-    const timer = setInterval(() => {
+    const timer = clock.setInterval(() => {
       setFrameIndex((i) => (i + 1) % frames.length);
     }, interval);
-    return () => clearInterval(timer);
-  }, [frames.length, interval]);
+    return () => clock.clearInterval(timer);
+  }, [clock, frames.length, interval]);
 
   return (
     <span

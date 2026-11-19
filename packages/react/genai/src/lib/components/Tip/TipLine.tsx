@@ -1,3 +1,4 @@
+import { useClock } from '@zukhruf/ui';
 import { cn } from 'cn';
 import { Lightbulb } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -8,6 +9,7 @@ import { useTipValue } from './TipProvider.tsx';
 const SHIMMER_DURATION = 1.5;
 
 export function TipLine({ className }: { className?: string }) {
+  const clock = useClock();
   const tip = useTipValue();
   const [prevTip, setPrevTip] = useState(tip);
   const [shimmerEnabled, setShimmerEnabled] = useState(false);
@@ -21,12 +23,12 @@ export function TipLine({ className }: { className?: string }) {
 
   useEffect(() => {
     if (!shimmerEnabled) return;
-    const timer = setTimeout(
+    const timer = clock.setTimeout(
       () => setShimmerEnabled(false),
       SHIMMER_DURATION * 1000,
     );
-    return () => clearTimeout(timer);
-  }, [shimmerEnabled]);
+    return () => clock.clearTimeout(timer);
+  }, [clock, shimmerEnabled]);
 
   return (
     <p

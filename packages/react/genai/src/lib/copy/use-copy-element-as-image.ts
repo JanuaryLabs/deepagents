@@ -1,3 +1,4 @@
+import { useClock } from '@zukhruf/ui';
 import type { RefObject } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -33,29 +34,30 @@ export function useCopyElementAsImage({
   excludeMode: CopyExclusionMode;
   fallbackText?: string;
 }) {
+  const clock = useClock();
   const [isCopying, setIsCopying] = useState(false);
   const [feedback, setFeedback] = useState<CopyImageFeedback>(null);
-  const feedbackTimeoutRef = useRef<number | null>(null);
+  const feedbackTimeoutRef = useRef<unknown>(null);
 
   const clearFeedbackTimeout = useCallback(() => {
     if (feedbackTimeoutRef.current === null) {
       return;
     }
 
-    window.clearTimeout(feedbackTimeoutRef.current);
+    clock.clearTimeout(feedbackTimeoutRef.current);
     feedbackTimeoutRef.current = null;
-  }, []);
+  }, [clock]);
 
   const setTimedFeedback = useCallback(
     (nextFeedback: Exclude<CopyImageFeedback, null>) => {
       clearFeedbackTimeout();
       setFeedback(nextFeedback);
-      feedbackTimeoutRef.current = window.setTimeout(() => {
+      feedbackTimeoutRef.current = clock.setTimeout(() => {
         setFeedback(null);
         feedbackTimeoutRef.current = null;
       }, 3000);
     },
-    [clearFeedbackTimeout],
+    [clock, clearFeedbackTimeout],
   );
 
   useEffect(

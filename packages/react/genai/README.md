@@ -24,7 +24,7 @@ Import `TheButton` directly from `@zukhruf/ui`. This package does not export it.
 
 ## The clock
 
-`AssistantSnapshot` renders a `TheButton` of `@zukhruf/ui`. `TheButton` gets its clock from a `ClockProvider` above it, and throws at its first render when there is none. `AssistantSnapshot` renders inside the tree of the host, so this package gives no clock. The tree has one clock, and the host gives it.
+A component of this package that waits on a timer gets its clock from `useClock` of `@zukhruf/ui`, which throws at its first render when no `ClockProvider` is above it. These components wait: `AssistantSnapshot` (its `TheButton` and its copied label), `CodeBlockCopyButton`, `TipLine`, the copy buttons of a message, and the spinner of a running tool. They render inside the tree of the host, so this package gives no clock. The tree has one clock, and the host gives it.
 
 The root of the host gives `globalThis`:
 
@@ -65,4 +65,4 @@ Version 7.5.2 lists `@zukhruf/ui` as a dependency, with the range `^0.8.10`. An 
 Do these steps:
 
 1. Add `@zukhruf/ui` to the dependencies of the host.
-2. If the host renders `AssistantSnapshot`, put a `ClockProvider` above it, at the root of the host.
+2. Put a `ClockProvider` above the components of this package, at the root of the host.

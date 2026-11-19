@@ -1,12 +1,13 @@
 import nx from '@nx/eslint-plugin';
 import zukhruf, { noUnassignedImport } from '@zukhruf/eslint';
 import modernNode from '@zukhruf/eslint/modern-node';
-import { manifest, moduleBoundaries } from '@zukhruf/eslint/nx';
+import island, { manifest, moduleBoundaries } from '@zukhruf/eslint/nx';
 import prettier from 'eslint-config-prettier';
 import { defineConfig } from 'eslint/config';
 
 const typescript = ['**/*.ts', '**/*.tsx', '**/*.cts', '**/*.mts'];
 const source = [...typescript, '**/*.js', '**/*.jsx', '**/*.cjs', '**/*.mjs'];
+const reactClock = 'packages/react/genai/src/**/*.{ts,tsx}';
 const tests = ['**/*.{test,spec}.{ts,tsx,cts,mts,js,jsx,cjs,mjs}'];
 
 export default defineConfig(
@@ -180,6 +181,17 @@ export default defineConfig(
       '**/context/src/lib/fragments/reminders/tool-output-reminders.integration.test.ts',
     ],
     rules: { '@typescript-eslint/no-deprecated': 'off' },
+  },
+  // A React component or hook gets the clock from useClock of @zukhruf/ui
+  // (zukhruf ui ADR 0001); other library code takes the time from its caller
+  // (zukhruf root ADR 0004).
+  {
+    basePath: import.meta.dirname,
+    files: [reactClock],
+    ignores: [...tests, '**/src/test-setup.ts'],
+    plugins: { island },
+    settings: { island: { libraries: [reactClock] } },
+    rules: { 'island/no-ambient-time': 'error' },
   },
   prettier,
 );

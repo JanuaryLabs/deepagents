@@ -62,6 +62,47 @@ test('the clock of the host runs the spinner delay of the copy button', async ()
   }
 });
 
+test('the copied label returns to the copy label after 3 seconds of the host clock', async () => {
+  const clock = createClock();
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText: () => Promise.resolve() },
+  });
+  try {
+    render(
+      <ClockProvider clock={clock}>
+        <AssistantSnapshot
+          message={message}
+          renderContent={() => 'The answer is 42.'}
+        />
+      </ClockProvider>,
+    );
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Copy snapshot' }),
+    );
+
+    expect(
+      await screen.findByRole('button', { name: 'Copied text' }),
+    ).toBeEnabled();
+
+    act(() => {
+      clock.tick(2999);
+    });
+
+    expect(screen.getByRole('button', { name: 'Copied text' })).toBeEnabled();
+
+    act(() => {
+      clock.tick(1);
+    });
+
+    expect(screen.getByRole('button', { name: 'Copy snapshot' })).toBeEnabled();
+  } finally {
+    Reflect.deleteProperty(navigator, 'clipboard');
+    cleanup();
+  }
+});
+
 test('with no ClockProvider in the host, the copy button throws at its first render', () => {
   // React reports the render error on console.error before it throws. The
   // assertion reads the error, so this only keeps the expected report out of

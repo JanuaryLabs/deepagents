@@ -1,4 +1,6 @@
+import { createClock } from '@sinonjs/fake-timers';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { ClockProvider } from '@zukhruf/ui';
 import {
   type UIMessage,
   type UIMessageChunk,
@@ -68,7 +70,11 @@ it('renders the Devtool transcript through the compact trajectory', async () => 
       { initialEntries: ['/chat'] },
     );
 
-    render(<RouterProvider router={router} />);
+    render(
+      <ClockProvider clock={createClock()}>
+        <RouterProvider router={router} />
+      </ClockProvider>,
+    );
 
     const activity = await screen.findByRole('button', {
       name: /Ran 3 tools/,
