@@ -1,4 +1,10 @@
-import { type ToolUIPart, type UIMessage, isStaticToolUIPart } from 'ai';
+import {
+  type DynamicToolUIPart,
+  type ToolUIPart,
+  type UIMessage,
+  getToolName,
+  isToolUIPart,
+} from 'ai';
 
 import type { CountSpec, ToolOutcome, WhenPredicate } from '../types.ts';
 import { assertCountSpec, checkCount } from './message.ts';
@@ -33,13 +39,11 @@ function matchesName(spec: ToolNameSpec, name: string): boolean {
   return typeof spec === 'function' ? spec(name) : spec === name;
 }
 
-function toolNameOf(part: ToolUIPart): string {
-  return part.type.slice('tool-'.length);
-}
-
-function toolPartsOf(message: UIMessage | undefined): ToolUIPart[] {
+function toolPartsOf(
+  message: UIMessage | undefined,
+): Array<ToolUIPart | DynamicToolUIPart> {
   if (!message) return [];
-  return message.parts.filter(isStaticToolUIPart);
+  return message.parts.filter(isToolUIPart);
 }
 
 export function toolCall(options: ToolCallOptions): WhenPredicate {
@@ -53,7 +57,7 @@ export function toolCall(options: ToolCallOptions): WhenPredicate {
       }
       if (
         options.name !== undefined &&
-        !matchesName(options.name, toolNameOf(part))
+        !matchesName(options.name, getToolName(part))
       ) {
         return false;
       }
@@ -66,8 +70,7 @@ export function toolCall(options: ToolCallOptions): WhenPredicate {
       }
       if (options.errorText) {
         if (part.state !== 'output-error') return false;
-        const text = part.errorText ?? '';
-        if (!options.errorText(text)) return false;
+        if (!options.errorText(part.errorText)) return false;
       }
       return true;
     });
@@ -132,7 +135,8 @@ export function toolCallCount(
   return (ctx) => {
     const count = toolPartsOf(ctx.lastAssistantMessage).filter(
       (part) =>
-        COMPLETED_STATES.has(part.state) && matchesName(name, toolNameOf(part)),
+        COMPLETED_STATES.has(part.state) &&
+        matchesName(name, getToolName(part)),
     ).length;
     return checkCount(count, spec);
   };
@@ -172,7 +176,7 @@ export function toolFailureStreak(
   name: ToolNameSpec,
 ): number {
   const parts = (ctx.lastAssistantMessages ?? []).flatMap((message) =>
-    toolPartsOf(message).filter((part) => matchesName(name, toolNameOf(part))),
+    toolPartsOf(message).filter((part) => matchesName(name, getToolName(part))),
   );
   let streak = 0;
   for (const part of parts.toReversed()) {

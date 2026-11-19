@@ -1,4 +1,4 @@
-import type { ToolUIPart, UIMessage } from 'ai';
+import type { DynamicToolUIPart, ToolUIPart, UIMessage } from 'ai';
 import { generateId } from 'ai';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -17,6 +17,7 @@ import {
   toolCallCount,
   toolCalled,
   toolFailed,
+  toolFailedStreak,
   user,
 } from '@deepagents/context';
 
@@ -296,6 +297,118 @@ describe('toolFailed', () => {
     );
     await engine.save();
     assert.ok(!(await lastUserText(engine)).includes('failed'));
+  });
+});
+
+describe('an MCP tool, which arrives as a dynamic-tool part', () => {
+  it('fires toolFailed for its name on output-error', async () => {
+    const failedMcpBash: DynamicToolUIPart = {
+      type: 'dynamic-tool',
+      toolName: 'bash',
+      toolCallId: generateId(),
+      state: 'output-error',
+      input: {},
+      errorText: 'permission denied',
+    };
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'tf-dynamic',
+      userId: 'u1',
+    });
+    engine.set(
+      user('turn 1'),
+      assistant({
+        id: generateId(),
+        role: 'assistant',
+        parts: [failedMcpBash],
+      }),
+    );
+    await engine.save();
+
+    engine.set(
+      reminder('failed', { when: toolFailed('bash') }),
+      user('turn 2'),
+    );
+    await engine.save();
+
+    assert.ok((await lastUserText(engine)).includes('failed'));
+  });
+
+  it('counts toward toolCallCount for its name alongside a built-in tool of the same name', async () => {
+    const mcpBash: DynamicToolUIPart = {
+      type: 'dynamic-tool',
+      toolName: 'bash',
+      toolCallId: generateId(),
+      state: 'output-available',
+      input: {},
+      output: 'ok',
+    };
+    const engine = new ContextEngine({
+      store: new InMemoryContextStore(),
+      chatId: 'tcc-dynamic',
+      userId: 'u1',
+    });
+    engine.set(
+      user('turn 1'),
+      assistant({
+        id: generateId(),
+        role: 'assistant',
+        parts: [
+          toolPart({
+            name: 'bash',
+            state: 'output-available',
+            input: {},
+            output: 'ok',
+          }),
+          mcpBash,
+        ],
+      }),
+    );
+    await engine.save();
+
+    engine.set(
+      reminder('two-bashes', { when: toolCallCount('bash', { eq: 2 }) }),
+      user('turn 2'),
+    );
+    await engine.save();
+
+    assert.ok((await lastUserText(engine)).includes('two-bashes'));
+  });
+
+  it('builds a toolFailedStreak for its name', async () => {
+    const failedMcpBash = (): DynamicToolUIPart => ({
+      type: 'dynamic-tool',
+      toolName: 'bash',
+      toolCallId: generateId(),
+      state: 'output-error',
+      input: {},
+      errorText: 'permission denied',
+    });
+    const engine = new ContextEngine({
+      store: new InMemoryContextStore(),
+      chatId: 'tfs-dynamic',
+      userId: 'u1',
+    });
+    engine.set(
+      user('turn 1'),
+      assistant({
+        id: generateId(),
+        role: 'assistant',
+        parts: [failedMcpBash(), failedMcpBash()],
+      }),
+    );
+    await engine.save();
+
+    engine.set(
+      reminder('bash-keeps-failing', {
+        when: toolFailedStreak('bash', { gte: 2 }),
+      }),
+      user('turn 2'),
+    );
+    await engine.save();
+
+    assert.ok((await lastUserText(engine)).includes('bash-keeps-failing'));
   });
 });
 

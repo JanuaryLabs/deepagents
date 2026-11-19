@@ -1,6 +1,9 @@
 import type { WhenPredicate } from '../types.ts';
 
 export function everyNTurns(n: number): WhenPredicate {
+  if (!Number.isInteger(n) || n < 1) {
+    throw new Error('everyNTurns(n) requires a positive integer');
+  }
   return ({ turn }) => turn % n === 0;
 }
 

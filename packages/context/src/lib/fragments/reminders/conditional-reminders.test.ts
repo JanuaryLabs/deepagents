@@ -1497,3 +1497,13 @@ describe('ContextEngine conditional reminders', () => {
     });
   });
 });
+
+describe('everyNTurns', () => {
+  it('refuses a count that could never fire', () => {
+    for (const n of [0, -1, 1.5, Number.NaN]) {
+      assert.throws(() => everyNTurns(n), {
+        message: 'everyNTurns(n) requires a positive integer',
+      });
+    }
+  });
+});
