@@ -45,10 +45,10 @@
     "@langchain/core": "^1.2.3",
     "@langchain/textsplitters": "^1.0.1",
     "@linear/sdk": "^88.2.0",
-    "@zukhruf/sqlite-drift": "^0.8.33",
-    "@zukhruf/sqlite-open": "^0.8.33",
-    "@zukhruf/sqlite-transaction": "^0.8.33",
-    "@zukhruf/vectors": "^0.8.33",
+    "@zukhruf/sqlite-drift": "^0.8.37",
+    "@zukhruf/sqlite-open": "^0.8.37",
+    "@zukhruf/sqlite-transaction": "^0.8.37",
+    "@zukhruf/vectors": "^0.8.37",
     "ai": "^7.0.166",
     "dedent": "1.7.2",
     "execa": "^10.0.0",
@@ -61,6 +61,6 @@
   },
   "devDependencies": {
     "@sinonjs/fake-timers": "^15.4.0",
-    "@zukhruf/fs": "^0.8.33"
+    "@zukhruf/fs": "^0.8.37"
   }
 }

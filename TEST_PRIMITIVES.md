@@ -254,17 +254,24 @@ images, passwords, or labels select separate servers. Supply a unique label when
 a verification suite must own a separate server. The constructor's `database`
 option is used by `start()`; `database()` always creates a unique name.
 
-Shared servers remain running until explicit cleanup. A readiness failure also
-leaves the shared server available for diagnosis; one caller must not stop a
-server another caller may be using. Abruptly killed tests can leave their database
-behind until the container is removed. There is no idle timer or exit hook.
+A shared server has the label `dev.zukhruf.testing.server`, which holds the
+fingerprint of its request. At the end of a run that used Docker, the run's
+reaper removes each shared server older than its time to live (TTL) of 7 days,
+unless a test process still holds a lease on it (zukhruf testing ADR 0019). The
+reaper also drops the databases of a killed test process in that run. A readiness
+failure leaves the shared server available for diagnosis; one caller must not
+stop a server another caller may be using.
 
 List the shared containers and, after their tests finish, stop the selected IDs:
 
 ```sh
-docker ps -a --filter label=dev.zukhruf.testing.shared=1
+docker ps -a --filter label=dev.zukhruf.testing.server
 docker stop <container-id> [<container-id> ...]
 ```
+
+Servers from `@zukhruf/testing` before ADR 0019 carry the label
+`dev.zukhruf.testing.shared=1` instead. The current version does not see them;
+stop them once with the same commands and that filter.
 
 These containers use Docker's `--rm` option, so stopping also removes them.
 Do not clean up a server while other tests are using it. The next acquisition

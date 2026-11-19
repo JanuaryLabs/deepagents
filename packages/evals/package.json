@@ -76,15 +76,15 @@
     "access": "public"
   },
   "dependencies": {
-    "@zukhruf/sqlite-drift": "^0.8.33",
-    "@zukhruf/sqlite-open": "^0.8.33",
-    "@zukhruf/sqlite-transaction": "^0.8.33",
+    "@zukhruf/sqlite-drift": "^0.8.37",
+    "@zukhruf/sqlite-open": "^0.8.37",
+    "@zukhruf/sqlite-transaction": "^0.8.37",
     "chalk": "^5.6.2",
     "openai": "^6.48.0",
     "p-memoize": "^8.0.0"
   },
   "devDependencies": {
-    "@zukhruf/fs": "^0.8.33",
+    "@zukhruf/fs": "^0.8.37",
     "daisyui": "^5.6.18",
     "tsx": "^4.23.1"
   }

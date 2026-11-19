@@ -29,7 +29,7 @@
     "@deepagents/experimental": "*",
     "@electric-sql/pglite": "^0.5.4",
     "@hono/node-server": "^2.0.10",
-    "@zukhruf/sqlite-open": "^0.8.33",
+    "@zukhruf/sqlite-open": "^0.8.37",
     "chrome-devtools-mcp": "1.8.0",
     "hono": "^4.12.33",
     "microsandbox": "^0.7.16",
