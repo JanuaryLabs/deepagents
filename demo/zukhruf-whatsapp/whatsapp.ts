@@ -13,10 +13,10 @@ import {
   AgentRuntime,
   PgBossTurnQueue,
   SqliteMailboxStore,
-  defineStack,
 } from '@deepagents/experimental/zukhruf';
 
-import { type WhatsAppParticipant, createParticipantAgent } from './agent.ts';
+import createParticipantAgent, { type WhatsAppParticipant } from './agent.ts';
+import participantStack from './stack.ts';
 
 export type { WhatsAppParticipant } from './agent.ts';
 
@@ -114,12 +114,7 @@ export class WhatsAppGroup implements AsyncDisposable {
           replies.post(participant.name, message),
         ),
       );
-      const stack = defineStack(async () => ({
-        store,
-        streams,
-        queue,
-        mailboxStore,
-      }));
+      const stack = participantStack({ store, streams, queue, mailboxStore });
       const host = resources.use(await runtime.initialize(stack));
 
       participants.push({

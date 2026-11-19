@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createCodingAgent } from '@deepagents/demo-zukhruf-dynamic-subagents';
+import createCodingAgent from '@deepagents/demo-zukhruf-dynamic-subagents';
 import { AgentRuntime } from '@deepagents/experimental/zukhruf';
 
 import stack from './stack.ts';

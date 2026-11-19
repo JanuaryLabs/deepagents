@@ -5,7 +5,7 @@ import { defineAgent } from '@deepagents/experimental/zukhruf';
 import instructions from './instructions.ts';
 import sandbox from './sandbox.ts';
 
-export const specialist = defineAgent({
+export default defineAgent({
   name: 'specialist',
   model: openai('gpt-5.4-mini'),
   sandbox,

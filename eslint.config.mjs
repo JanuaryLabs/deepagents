@@ -193,5 +193,14 @@ export default defineConfig(
     settings: { island: { libraries: [reactClock] } },
     rules: { 'island/no-ambient-time': 'error' },
   },
+  // A Zukhruf app is loaded by import, so only this check keeps its layout:
+  // one define* call per file, as the file's default export. A test builds
+  // its declarations inline.
+  {
+    basePath: import.meta.dirname,
+    files: ['demo/zukhruf-*/**/*.ts'],
+    ignores: tests,
+    rules: { '@nx/workspace-zukhruf-define-default-export': 'error' },
+  },
   prettier,
 );

@@ -3,9 +3,9 @@ import { openai } from '@ai-sdk/openai';
 import { defineAgent } from '@deepagents/experimental/zukhruf';
 
 import instructions from './instructions.ts';
-import { createWorkspaceSandbox } from './sandbox.ts';
+import createWorkspaceSandbox from './sandbox.ts';
 
-export function createCodingAgent(workspaceDirectory: string) {
+export default function createCodingAgent(workspaceDirectory: string) {
   return defineAgent({
     name: 'coding-agent',
     description: 'Implements focused changes in an existing repository.',

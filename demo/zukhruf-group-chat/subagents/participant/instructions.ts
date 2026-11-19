@@ -3,7 +3,10 @@ import { defineInstructions } from '@deepagents/experimental/zukhruf';
 
 import { transcriptPath } from '../../environment.ts';
 
-export function participantInstructions(name: string, expertise: string) {
+export default function participantInstructions(
+  name: string,
+  expertise: string,
+) {
   return defineInstructions(
     role(
       [

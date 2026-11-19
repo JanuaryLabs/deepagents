@@ -10,7 +10,7 @@ import {
   sandboxRunLabel,
 } from './environment.ts';
 
-export function createGroupChatSandbox(readonly: boolean) {
+export default function createGroupChatSandbox(readonly: boolean) {
   return defineSandbox(
     ({ chatId }) =>
       createMicrosandboxSandbox({

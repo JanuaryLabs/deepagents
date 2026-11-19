@@ -10,7 +10,9 @@ export interface WorkspaceSandboxOptions {
 }
 
 /** Give one durable agent chat an isolated container over the shared host workspace. */
-export function createWorkspaceSandbox(options: WorkspaceSandboxOptions) {
+export default function createWorkspaceSandbox(
+  options: WorkspaceSandboxOptions,
+) {
   const workspaceDirectory = existingDirectory(
     options.workspaceDirectory,
     'workspaceDirectory',

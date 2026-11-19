@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util';
 
 import { AgentRuntime } from '@deepagents/experimental/zukhruf';
 
-import { createCodingAgent } from './agent.ts';
+import createCodingAgent from './agent.ts';
 import stack from './stack.ts';
 
 const { values, positionals } = parseArgs({

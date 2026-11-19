@@ -7,7 +7,7 @@ import { defineAgent } from '@deepagents/experimental/zukhruf';
 import { groupChatHostDirectory } from './environment.ts';
 import instructions from './instructions.ts';
 import { managerSandbox } from './sandbox.ts';
-import { participant } from './subagents/participant/agent.ts';
+import participant from './subagents/participant/agent.ts';
 
 const community = participant(
   'community',

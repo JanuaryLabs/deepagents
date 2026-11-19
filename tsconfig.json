@@ -101,6 +101,9 @@
     },
     {
       "path": "./tools"
+    },
+    {
+      "path": "./tools/eslint-rules"
     }
   ]
 }

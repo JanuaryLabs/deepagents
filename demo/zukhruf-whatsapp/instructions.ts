@@ -1,7 +1,7 @@
 import { role } from '@deepagents/context';
 import { defineInstructions } from '@deepagents/experimental/zukhruf';
 
-export function participantInstructions({
+export default function participantInstructions({
   name,
   specialty,
 }: {

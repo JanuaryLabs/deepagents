@@ -1,9 +1,9 @@
 import type { AgentModel } from '@deepagents/context';
 import { defineAgent } from '@deepagents/experimental/zukhruf';
 
-import { participantInstructions } from './instructions.ts';
+import participantInstructions from './instructions.ts';
 import sandbox from './sandbox.ts';
-import { replyToGroup } from './tools/reply-to-group.ts';
+import replyToGroup from './tools/reply-to-group.ts';
 
 export interface WhatsAppParticipant {
   name: string;
@@ -11,7 +11,7 @@ export interface WhatsAppParticipant {
   model: AgentModel;
 }
 
-export function createParticipantAgent(
+export default function createParticipantAgent(
   participant: WhatsAppParticipant,
   post: (message: string) => void,
 ) {
