@@ -70,6 +70,7 @@ export function createOpenAITracesIntegration(
   const exporter =
     options.exporter ??
     new OpenAITracesExporter({
+      clock: options.clock,
       apiKey: options.apiKey,
       baseURL: options.baseURL,
       endpoint: options.endpoint,

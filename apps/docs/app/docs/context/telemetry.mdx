@@ -28,7 +28,7 @@ import { createOpenAITracesIntegration } from '@deepagents/context/tracing';
 registerTelemetry(
   createConsoleTelemetry(),
   createFileTelemetry({ path: './logs/ai-telemetry.jsonl' }),
-  createOpenAITracesIntegration(),
+  createOpenAITracesIntegration({ clock: globalThis }),
 );
 ```
 

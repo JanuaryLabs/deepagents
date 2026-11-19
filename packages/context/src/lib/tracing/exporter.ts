@@ -1,4 +1,4 @@
-import { setTimeout } from 'node:timers/promises';
+import { type Clock, delay } from '@zukhruf/async';
 
 import type { TracingExporter } from './processor.ts';
 import type {
@@ -85,6 +85,8 @@ export class OpenAIExportError extends Error {
 }
 
 export interface OpenAITracesExporterOptions {
+  /** An entry gives `globalThis`; a test gives `createClock()`. */
+  clock: Clock;
   apiKey?: string | (() => string | Promise<string>);
   endpoint?: string;
   baseURL?: string;
@@ -96,6 +98,7 @@ export interface OpenAITracesExporterOptions {
 }
 
 export class OpenAITracesExporter implements TracingExporter {
+  #clock: Clock;
   #apiKey: string | (() => string | Promise<string>);
   #endpoint: string;
   #organization?: string;
@@ -104,7 +107,8 @@ export class OpenAITracesExporter implements TracingExporter {
   #baseDelayMs: number;
   #maxDelayMs: number;
 
-  constructor(options: OpenAITracesExporterOptions = {}) {
+  constructor(options: OpenAITracesExporterOptions) {
+    this.#clock = options.clock;
     this.#apiKey = options.apiKey ?? process.env.OPENAI_API_KEY ?? '';
     this.#endpoint =
       options.endpoint ??
@@ -170,12 +174,15 @@ export class OpenAITracesExporter implements TracingExporter {
         lastError = error;
       }
       if (attempt < this.#maxRetries - 1) {
-        const delay = Math.min(
+        const backoff = Math.min(
           this.#baseDelayMs * 2 ** attempt,
           this.#maxDelayMs,
         );
-        const jitter = delay * (0.9 + Math.random() * 0.2);
-        await setTimeout(jitter);
+        const jitter = backoff * (0.9 + Math.random() * 0.2);
+        await delay(jitter, {
+          clock: this.#clock,
+          signal: init.signal ?? undefined,
+        });
       }
     }
     throw lastError;

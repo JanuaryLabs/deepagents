@@ -1,10 +1,11 @@
+import { type Clock, timeout } from '@zukhruf/async';
 import pMemoize from 'p-memoize';
 
 import type { TracingExporter, TracingProcessor } from './processor.ts';
 import type { OpenAISpan, OpenAITrace, TraceItem } from './types.ts';
 
 /** An entry gives `globalThis`; a test gives `createClock()`. */
-export interface BatchTraceClock {
+export interface BatchTraceClock extends Clock {
   setInterval(callback: () => void, ms: number): number | object;
   clearInterval(timer: unknown): void;
 }
@@ -153,10 +154,8 @@ export class BatchTraceProcessor implements TracingProcessor {
   async #flush(): Promise<void> {
     while (this.#queue.length > 0) {
       const batch = this.#queue.slice(0, this.#maxBatchSize);
-      await this.#exporter.export(
-        batch,
-        AbortSignal.timeout(this.#exportTimeoutMs),
-      );
+      using limit = timeout(this.#exportTimeoutMs, { clock: this.#clock });
+      await this.#exporter.export(batch, limit.signal);
       this.#queue.splice(0, batch.length);
     }
   }

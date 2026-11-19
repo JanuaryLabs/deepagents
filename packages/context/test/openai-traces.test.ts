@@ -1067,19 +1067,59 @@ describe('OpenAI Traces Integration', () => {
       }
       assert.equal(clock.countTimers(), 0);
     });
+
+    it('aborts an export that outlasts exportTimeoutMs', async (t) => {
+      const clock = createClock();
+      const signals: AbortSignal[] = [];
+      const exporter: TracingExporter = {
+        export(_items, signal) {
+          assert.ok(signal);
+          signals.push(signal);
+          return new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => reject(signal.reason));
+          });
+        },
+      };
+      const processor = new BatchTraceProcessor(exporter, {
+        clock,
+        exportTimeoutMs: 60_000,
+      });
+      processor.onSpanEnd({
+        object: 'trace.span',
+        id: 'span_1',
+        trace_id: 'trace_1',
+        started_at: new Date().toISOString(),
+        ended_at: new Date().toISOString(),
+        span_data: { type: 'agent', name: 'workflow' },
+      });
+
+      const flushed = assert.rejects(processor.forceFlush(), {
+        name: 'TimeoutError',
+      });
+      await waitFor(() => assert.equal(signals.length, 1), {
+        signal: t.signal,
+        interval: 5,
+      });
+      await clock.tickAsync(59_999);
+      assert.equal(signals[0].aborted, false);
+      await clock.tickAsync(1);
+      assert.equal(signals[0].aborted, true);
+
+      await flushed;
+      assert.equal(clock.countTimers(), 0);
+    });
   });
 
   describe('OpenAITracesExporter', () => {
     for (const outcome of ['recovers', 'exhausts retries'] as const) {
       it(`${outcome} after waiting to resend the trace payload`, async (t) => {
+        const clock = createClock();
         const bodies: unknown[] = [];
-        const arrivals: number[] = [];
         using interception = msw.intercept(
           http.post(
             'https://api.openai.com/v1/traces/ingest',
             async ({ request }) => {
               bodies.push(await request.json());
-              arrivals.push(performance.now());
               return new HttpResponse(null, {
                 status:
                   outcome === 'recovers' && bodies.length === 2 ? 200 : 503,
@@ -1089,6 +1129,7 @@ describe('OpenAI Traces Integration', () => {
         );
         t.mock.method(Math, 'random', () => 0.5);
         const exporter = new OpenAITracesExporter({
+          clock,
           apiKey: 'test',
           maxRetries: 2,
           baseDelayMs: 100,
@@ -1098,18 +1139,27 @@ describe('OpenAI Traces Integration', () => {
           { object: 'trace', id: 'trace_retry', workflow_name: 'retry-test' },
         ];
         const exported = exporter.export(items);
-        if (outcome === 'recovers') await exported;
-        else await assert.rejects(exported, /Server error 503/);
+        const settled =
+          outcome === 'recovers'
+            ? exported
+            : assert.rejects(exported, /Server error 503/);
+        await waitFor(() => assert.equal(clock.countTimers(), 1), {
+          signal: t.signal,
+          interval: 5,
+        });
+        await clock.tickAsync(99);
+        assert.deepStrictEqual(bodies, [{ data: items }]);
+        await clock.tickAsync(1);
+        await settled;
         assert.deepStrictEqual(bodies, [{ data: items }, { data: items }]);
-        assert.ok(
-          arrivals[1] - arrivals[0] >= 90,
-          'retry must wait for its backoff',
-        );
       });
     }
 
     it('throws on missing API key', async () => {
-      const exporter = new OpenAITracesExporter({ apiKey: '' });
+      const exporter = new OpenAITracesExporter({
+        clock: createClock(),
+        apiKey: '',
+      });
       await assert.rejects(
         () =>
           exporter.export([
@@ -1124,7 +1174,10 @@ describe('OpenAI Traces Integration', () => {
     });
 
     it('skips export for empty items', async () => {
-      const exporter = new OpenAITracesExporter({ apiKey: 'test' });
+      const exporter = new OpenAITracesExporter({
+        clock: createClock(),
+        apiKey: 'test',
+      });
       await exporter.export([]);
     });
   });
@@ -1314,7 +1367,10 @@ describe('OpenAI Traces wire format', () => {
 
   it('omits function span input/output from the wire when their in-memory value is null', async () => {
     using captured = captureIngestRequests();
-    const exporter = new OpenAITracesExporter({ apiKey: 'test-key' });
+    const exporter = new OpenAITracesExporter({
+      clock: createClock(),
+      apiKey: 'test-key',
+    });
 
     await exporter.export([
       {
@@ -1348,7 +1404,10 @@ describe('OpenAI Traces wire format', () => {
 
   it('stringifies transcription span input and output on the wire', async () => {
     using captured = captureIngestRequests();
-    const exporter = new OpenAITracesExporter({ apiKey: 'test-key' });
+    const exporter = new OpenAITracesExporter({
+      clock: createClock(),
+      apiKey: 'test-key',
+    });
 
     await exporter.export([
       {
