@@ -17,6 +17,7 @@ import {
   createDockerSandbox,
 } from '@deepagents/context';
 
+import { readFirstChunk } from './helpers/read-first-chunk.ts';
 import { textResult, toolCallResult } from './helpers/stream-results.ts';
 
 const testbed = new DockerTestbed({ environment: process.env });
@@ -48,19 +49,6 @@ async function storedBashPart(store: InMemoryContextStore, chatId: string) {
     .find(isToolUIPart);
   assert.ok(part);
   return part;
-}
-
-async function readFirstChunk(
-  stream: ReadableStream<Uint8Array>,
-): Promise<string> {
-  const reader = stream.getReader();
-  try {
-    const { value, done } = await reader.read();
-    if (done || !value) throw new Error('stream closed without a chunk');
-    return new TextDecoder().decode(value);
-  } finally {
-    reader.releaseLock();
-  }
 }
 
 describe('Docker Sandbox — spawn', () => {

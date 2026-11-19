@@ -5,6 +5,8 @@ import { describe, it } from 'node:test';
 
 import { createBashTool, createDaytonaSandbox } from '@deepagents/context';
 
+import { readFirstChunk } from './helpers/read-first-chunk.ts';
+
 type DaytonaClient = Parameters<typeof createDaytonaSandbox>[0];
 
 const LITERAL_LINE = "line one's $HOME `whoami`";
@@ -16,19 +18,6 @@ async function daytonaClient(): Promise<DaytonaClient | undefined> {
     return new Daytona().v2;
   } catch {
     return undefined;
-  }
-}
-
-async function readFirstChunk(
-  stream: ReadableStream<Uint8Array>,
-): Promise<string> {
-  const reader = stream.getReader();
-  try {
-    const { value, done } = await reader.read();
-    if (done || !value) throw new Error('stream closed without a chunk');
-    return new TextDecoder().decode(value);
-  } finally {
-    reader.releaseLock();
   }
 }
 
