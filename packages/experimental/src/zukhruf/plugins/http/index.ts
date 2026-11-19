@@ -15,8 +15,12 @@ import z from 'zod';
 
 import { elementsSchema } from '@deepagents/elements';
 
+import type { AgentThreadLimitError } from '../../control-plane/agent-thread-limit-error.ts';
 import { agentTurnIdSchema } from '../../control-plane/agent-turn-id.ts';
 import type { ConversationNotFoundError } from '../../control-plane/conversation-not-found-error.ts';
+import type { StaleTurnError } from '../../control-plane/stale-turn-error.ts';
+import type { TurnNotFoundError } from '../../control-plane/turn-not-found-error.ts';
+import { isNamedError } from '../../is-named-error.ts';
 import type { ConversationId } from '../../mailbox/types.ts';
 import type {
   AgentHost,
@@ -172,7 +176,12 @@ export function http(
         NO_STORE,
       );
     }
-    if (isConversationNotFoundError(error)) {
+    if (
+      isNamedError<ConversationNotFoundError>(
+        error,
+        'ConversationNotFoundError',
+      )
+    ) {
       return context.json(
         {
           cause: {
@@ -182,6 +191,45 @@ export function http(
           error: 'Session not found',
         },
         404,
+        NO_STORE,
+      );
+    }
+    if (isNamedError<TurnNotFoundError>(error, 'TurnNotFoundError')) {
+      return context.json(
+        {
+          cause: {
+            code: 'zukhruf/session-turn-not-found',
+            detail: `Turn ${error.turnId} does not exist in session ${context.req.param('sessionId')}`,
+          },
+          error: 'Session turn not found',
+        },
+        404,
+        NO_STORE,
+      );
+    }
+    if (isNamedError<StaleTurnError>(error, 'StaleTurnError')) {
+      return context.json(
+        {
+          cause: {
+            code: 'zukhruf/session-turn-stale',
+            detail: `Turn ${error.turnId} is not the latest turn of session ${context.req.param('sessionId')}`,
+          },
+          error: 'Session turn is stale',
+        },
+        409,
+        NO_STORE,
+      );
+    }
+    if (isNamedError<AgentThreadLimitError>(error, 'AgentThreadLimitError')) {
+      return context.json(
+        {
+          cause: {
+            code: 'zukhruf/agent-thread-limit',
+            detail: `Every agent slot of session ${context.req.param('sessionId')}'s tree is busy; retry when one finishes`,
+          },
+          error: 'Agent thread limit reached',
+        },
+        429,
         NO_STORE,
       );
     }
@@ -600,21 +648,6 @@ async function requireSession(
       detail: `Session ${conversation.chatId} does not exist`,
     },
   });
-}
-
-/**
- * `name` rather than `instanceof`: this subpath is its own build entry point, so
- * the main entry's class is a different copy here.
- */
-function isConversationNotFoundError(
-  error: unknown,
-): error is Pick<ConversationNotFoundError, 'name' | 'message' | 'chatId'> {
-  return (
-    Error.isError(error) &&
-    error.name === 'ConversationNotFoundError' &&
-    'chatId' in error &&
-    typeof error.chatId === 'string'
-  );
 }
 
 function methodNotAllowed(context: Context<HttpEnv>, allow: string): never {

@@ -83,22 +83,51 @@ async function serve(resources: AsyncDisposableStack) {
   return { app, runtime };
 }
 
-async function startTurn(app: Hono<HttpEnv>, sessionId: string) {
-  const response = await app.request(`${MOUNT}/session/${sessionId}`, {
+function postSession(
+  app: Hono<HttpEnv>,
+  sessionId: string,
+  message: { id: string; role: 'user' | 'assistant' },
+  trigger: 'submit-message' | 'regenerate-message' = 'submit-message',
+) {
+  return app.request(`${MOUNT}/session/${sessionId}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       sessionId,
-      message: {
-        id: `message-${randomUUID()}`,
-        role: 'user',
-        parts: [{ type: 'text', text: 'Hello' }],
-      },
-      trigger: 'submit-message',
+      message: { ...message, parts: [{ type: 'text', text: 'Hello' }] },
+      trigger,
     }),
+  });
+}
+
+async function startTurn(app: Hono<HttpEnv>, sessionId: string) {
+  const response = await postSession(app, sessionId, {
+    id: `message-${randomUUID()}`,
+    role: 'user',
   });
   assert.equal(response.status, 202);
   return acceptedBodySchema.parse(await response.json()).turnId;
+}
+
+async function statusOf(app: Hono<HttpEnv>, sessionId: string, turnId: string) {
+  const response = await app.request(
+    `${MOUNT}/session/${sessionId}/turn/${turnId}`,
+  );
+  return turnStatusSchema.parse(await response.json()).status;
+}
+
+async function completedTurn(
+  app: Hono<HttpEnv>,
+  sessionId: string,
+  signal: AbortSignal,
+) {
+  const turnId = await startTurn(app, sessionId);
+  await waitFor(
+    async () =>
+      assert.equal(await statusOf(app, sessionId, turnId), 'completed'),
+    { signal },
+  );
+  return turnId;
 }
 
 test('GET /session/:sessionId/turn/:turnId reports the outcome of the turn POST /session returned', async (t) => {
@@ -142,12 +171,6 @@ test('POST /session/:sessionId/turn/:turnId/cancel cancels only the turn POST /s
   const olderTurn = await startTurn(app, sessionId);
   const cancelledTurn = await startTurn(app, sessionId);
   const newerTurn = await startTurn(app, sessionId);
-  const statusOf = async (turnId: string) =>
-    turnStatusSchema.parse(
-      await (
-        await app.request(`${MOUNT}/session/${sessionId}/turn/${turnId}`)
-      ).json(),
-    ).status;
 
   const cancelled = await app.request(
     `${MOUNT}/session/${sessionId}/turn/${cancelledTurn}/cancel`,
@@ -157,15 +180,121 @@ test('POST /session/:sessionId/turn/:turnId/cancel cancels only the turn POST /s
   assert.deepStrictEqual(
     {
       cancel: cancelled.status,
-      olderTurn: await statusOf(olderTurn),
-      cancelledTurn: await statusOf(cancelledTurn),
-      newerTurn: await statusOf(newerTurn),
+      olderTurn: await statusOf(app, sessionId, olderTurn),
+      cancelledTurn: await statusOf(app, sessionId, cancelledTurn),
+      newerTurn: await statusOf(app, sessionId, newerTurn),
     },
     {
       cancel: 204,
       olderTurn: 'queued',
       cancelledTurn: 'cancelled',
       newerTurn: 'queued',
+    },
+  );
+});
+
+test('GET /session/:sessionId/turn/:turnId answers 404 for a turn of another session', async () => {
+  await using resources = new AsyncDisposableStack();
+  const { app } = await serve(resources);
+  const sessionId = randomUUID();
+  const otherSessionId = randomUUID();
+  await startTurn(app, sessionId);
+  const otherTurn = await startTurn(app, otherSessionId);
+
+  const response = await app.request(
+    `${MOUNT}/session/${sessionId}/turn/${otherTurn}`,
+  );
+
+  assert.equal(response.status, 404);
+  assert.deepStrictEqual(await response.json(), {
+    error: 'Session turn not found',
+    cause: {
+      code: 'zukhruf/session-turn-not-found',
+      detail: `Turn ${otherTurn} does not exist in session ${sessionId}`,
+    },
+  });
+});
+
+test('POST /session/:sessionId/turn/:turnId/cancel answers 404 for a turn of another session and leaves that turn queued', async () => {
+  await using resources = new AsyncDisposableStack();
+  const { app } = await serve(resources);
+  const sessionId = randomUUID();
+  const otherSessionId = randomUUID();
+  await startTurn(app, sessionId);
+  const otherTurn = await startTurn(app, otherSessionId);
+
+  const response = await app.request(
+    `${MOUNT}/session/${sessionId}/turn/${otherTurn}/cancel`,
+    { method: 'POST' },
+  );
+
+  assert.equal(response.status, 404);
+  assert.deepStrictEqual(await response.json(), {
+    error: 'Session turn not found',
+    cause: {
+      code: 'zukhruf/session-turn-not-found',
+      detail: `Turn ${otherTurn} does not exist in session ${sessionId}`,
+    },
+  });
+  assert.equal(await statusOf(app, otherSessionId, otherTurn), 'queued');
+});
+
+test('POST /session answers 409 for an approval continuation of a turn that is no longer the latest, and runs nothing', async (t) => {
+  await using resources = new AsyncDisposableStack();
+  const { app, runtime } = await serve(resources);
+  resources.use(await runtime.work());
+  const sessionId = randomUUID();
+  const staleTurn = await completedTurn(app, sessionId, t.signal);
+  await completedTurn(app, sessionId, t.signal);
+
+  const response = await postSession(app, sessionId, {
+    id: staleTurn,
+    role: 'assistant',
+  });
+
+  assert.equal(response.status, 409);
+  assert.deepStrictEqual(await response.json(), {
+    error: 'Session turn is stale',
+    cause: {
+      code: 'zukhruf/session-turn-stale',
+      detail: `Turn ${staleTurn} is not the latest turn of session ${sessionId}`,
+    },
+  });
+  assert.equal(await statusOf(app, sessionId, staleTurn), 'completed');
+});
+
+test('POST /session answers 404 when asked to regenerate a message that never ran', async () => {
+  await using resources = new AsyncDisposableStack();
+  const { app } = await serve(resources);
+  const sessionId = randomUUID();
+  await startTurn(app, sessionId);
+
+  const response = await postSession(
+    app,
+    sessionId,
+    { id: `message-${randomUUID()}`, role: 'user' },
+    'regenerate-message',
+  );
+
+  assert.equal(response.status, 404);
+  const body = z
+    .object({
+      error: z.string(),
+      cause: z.object({ code: z.string(), detail: z.string() }),
+    })
+    .parse(await response.json());
+  assert.deepStrictEqual(
+    {
+      error: body.error,
+      code: body.cause.code,
+      detailNamesOnlyThisSession: new RegExp(
+        `^Turn zukhruf-turn:\\S+ does not exist in session ${sessionId}$`,
+      ).test(body.cause.detail),
+    },
+    {
+      error: 'Session turn not found',
+      code: 'zukhruf/session-turn-not-found',
+      detailNamesOnlyThisSession: true,
     },
   );
 });

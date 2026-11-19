@@ -253,7 +253,7 @@ test('explicit cancellation rejects a stream owned by another conversation', asy
 
   await assert.rejects(
     runtime.observe({ chatId: 'bob-chat', userId: 'bob' }).cancel(alice.id),
-    /stream .* does not belong to conversation/,
+    { name: 'TurnNotFoundError', turnId: alice.id },
   );
   assert.equal(await streamStore.getStreamStatus(alice.id), 'queued');
 });

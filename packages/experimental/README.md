@@ -145,6 +145,16 @@ phases explicitly: `projectHttp(definition, project)` produces HTTP-owned
 gRPC package can project the same running phase into
 services and streaming without changing core. The HTTP transport plugin rejects
 duplicate capability names and relative paths.
+Runtime refusals keep their meaning over HTTP, and no answer names another user
+or session: a session the caller does not own answers 404
+`zukhruf/session-not-found`, a turn the session never issued (including a
+regenerate of a message that never ran) answers 404
+`zukhruf/session-turn-not-found`, an approval continuation for a turn the
+session has moved past answers 409 `zukhruf/session-turn-stale`, and a
+sub-agent turn whose tree has no free agent slot answers 429
+`zukhruf/agent-thread-limit`. Hosts that call the runtime directly catch the
+same refusals as `ConversationNotFoundError`, `TurnNotFoundError`,
+`StaleTurnError` and `AgentThreadLimitError` from the main entry.
 Plugins may also contribute one AI SDK telemetry integration per turn through
 `telemetry(context)`; the runtime applies every contribution with the agent's
 declaration-local telemetry policy.

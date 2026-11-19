@@ -5,6 +5,7 @@ import { HTTPException } from 'hono/http-exception';
 import { validate as validateUuid } from 'uuid';
 import z from 'zod';
 
+import { isNamedError } from '../../is-named-error.ts';
 import type { AgentPluginDefinition } from '../../runtime/agent-runtime.ts';
 import {
   type HttpEnv,
@@ -23,8 +24,6 @@ import type {
   ScheduledTask,
   ScheduledTaskStatus,
   ScheduledTasksError,
-  ScheduledTasksErrorCode,
-  ScheduledTasksResource,
 } from './scheduled-tasks.ts';
 
 const SCHEDULES_PATH = '/schedules';
@@ -391,34 +390,9 @@ function domain<T>(result: Promise<T>): Promise<T> {
   return result.catch(rethrowAsHttp);
 }
 
-const scheduledTasksErrorCodes: ReadonlySet<unknown> =
-  new Set<ScheduledTasksErrorCode>(['invalid-input', 'not-found', 'conflict']);
-const scheduledTasksResources: ReadonlySet<unknown> =
-  new Set<ScheduledTasksResource>(['task', 'run']);
-
-/**
- * `name` rather than `instanceof`: this subpath is its own build entry point, so
- * a value import of the domain would bundle a second copy of the class and every
- * `instanceof` check against it would fail.
- */
-function isScheduledTasksError(
-  error: unknown,
-): error is Pick<
-  ScheduledTasksError,
-  'name' | 'message' | 'code' | 'resource'
-> {
-  return (
-    Error.isError(error) &&
-    error.name === 'ScheduledTasksError' &&
-    'code' in error &&
-    scheduledTasksErrorCodes.has(error.code) &&
-    'resource' in error &&
-    scheduledTasksResources.has(error.resource)
-  );
-}
-
 function rethrowAsHttp(error: unknown): never {
-  if (!isScheduledTasksError(error)) throw error;
+  if (!isNamedError<ScheduledTasksError>(error, 'ScheduledTasksError'))
+    throw error;
   if (error.code === 'not-found') {
     throw new HTTPException(404, {
       message: 'Scheduled resource not found',

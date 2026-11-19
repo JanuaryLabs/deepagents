@@ -24,9 +24,12 @@ import {
   type AgentStatusProjector,
   type ListedAgent,
 } from './agent-status-projector.ts';
+import { AgentThreadLimitError } from './agent-thread-limit-error.ts';
 import type { AgentThread } from './agent-thread.ts';
 import { AgentTurnId } from './agent-turn-id.ts';
 import type { ForkTurns } from './fork-turns.ts';
+import { StaleTurnError } from './stale-turn-error.ts';
+import { TurnNotFoundError } from './turn-not-found-error.ts';
 
 export interface AgentControlPlaneOptions {
   root: AgentDeclaration;
@@ -127,7 +130,7 @@ export class AgentControlPlane {
       (await this.#queue.getTurnActivity(conversation)) !== 'running' &&
       !(await this.#hasExecutionCapacity(thread))
     ) {
-      throw new Error('agent thread limit reached');
+      throw new AgentThreadLimitError();
     }
 
     const streamId =
@@ -137,8 +140,7 @@ export class AgentControlPlane {
 
     if (message.role === 'assistant' || turn.trigger === 'regenerate-message') {
       const status = await this.#streams.store.getStreamStatus(streamId);
-      if (status === undefined)
-        throw new Error('enqueue: continuation stream does not exist');
+      if (status === undefined) throw new TurnNotFoundError(streamId);
       if (status === 'queued' || status === 'running') return streamId;
       await this.#streams.reopen(streamId);
     } else {
@@ -160,12 +162,7 @@ export class AgentControlPlane {
     message: UIMessage,
   ): Promise<string> {
     const streamId = (await this.#directory.load(conversation))?.lastTurnId;
-    if (!streamId)
-      throw new Error('enqueue: assistant continuation has no previous turn');
-    if (message.id !== streamId)
-      throw new Error(
-        'enqueue: assistant continuation must update the current assistant message',
-      );
+    if (message.id !== streamId) throw new StaleTurnError(message.id);
     return streamId;
   }
 

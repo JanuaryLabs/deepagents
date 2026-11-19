@@ -2,6 +2,7 @@ import { v5 as uuidv5, validate as validateUuid } from 'uuid';
 import { z } from 'zod';
 
 import type { ConversationId } from '../mailbox/types.ts';
+import { TurnNotFoundError } from './turn-not-found-error.ts';
 
 const prefix = 'zukhruf-turn';
 
@@ -42,9 +43,7 @@ export class AgentTurnId {
   static assertOwner(conversation: ConversationId, streamId: string): void {
     const expectedPrefix = `${prefix}:${conversationNamespace(conversation)}:`;
     if (!streamId.startsWith(expectedPrefix)) {
-      throw new Error(
-        `stream "${streamId}" does not belong to conversation "${conversation.chatId}"`,
-      );
+      throw new TurnNotFoundError(streamId);
     }
   }
 
