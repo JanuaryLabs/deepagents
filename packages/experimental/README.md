@@ -137,11 +137,12 @@ mount at its chosen path: create or continue sessions with idempotent `POST`
 calls, receive the durable `turnId`, check or cancel a specific turn, cancel the
 active session turn, stream durable UI-message output, and read runtime info
 plus health checks. `GET /info` advertises mount-relative
-`capabilities.history.href` and `capabilities.chat.href`. Runtime plugin
-definitions return typed transport-neutral instances. Transport packages bind
-those exact installed instances explicitly: `projectHttp(definition, project)`
-produces HTTP-owned `publicRoutes`, `authenticatedRoutes`, and discovery
-entries, while a future gRPC package can project the same plugin instance into
+`capabilities.history.href` and `capabilities.chat.href`. A runtime plugin's
+`initialize(host)` returns its typed transport-neutral running phase, which
+`host.plugin(definition)` returns. Transport packages bind those exact running
+phases explicitly: `projectHttp(definition, project)` produces HTTP-owned
+`publicRoutes`, `authenticatedRoutes`, and discovery entries, while a future
+gRPC package can project the same running phase into
 services and streaming without changing core. The HTTP transport plugin rejects
 duplicate capability names and relative paths.
 Plugins may also contribute one AI SDK telemetry integration per turn through

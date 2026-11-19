@@ -22,7 +22,7 @@ import type {
   AgentHost,
   AgentObservation,
   AgentPluginDefinition,
-  AgentPluginInstance,
+  AgentPluginInitialization,
 } from '../../runtime/agent-runtime.ts';
 
 export type HttpEnv = { Variables: { userId: string } };
@@ -61,10 +61,10 @@ export interface HttpProjection {
   project(runtime: HttpRuntime): HttpContribution;
 }
 
-export function projectHttp<Instance extends object>(
-  definition: AgentPluginDefinition<Instance>,
+export function projectHttp<Running extends object>(
+  definition: AgentPluginDefinition<Running>,
   project: (
-    plugin: AgentPluginInstance & Instance,
+    plugin: AgentPluginInitialization & Running,
     runtime: HttpRuntime,
   ) => HttpContribution,
 ): HttpProjection {

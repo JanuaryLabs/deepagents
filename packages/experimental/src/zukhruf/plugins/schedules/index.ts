@@ -1,5 +1,4 @@
 import { isToolUIPart } from 'ai';
-import pMemoize from 'p-memoize';
 import type { JobPollingOptions, PgBoss } from 'pg-boss';
 import { z } from 'zod';
 
@@ -7,7 +6,7 @@ import {
   AgentPluginCapability,
   type AgentPluginDefinition,
   type AgentPluginHost,
-  type AgentPluginInstance,
+  type AgentPluginInitialization,
 } from '../../runtime/agent-runtime.ts';
 import {
   type CreateScheduledTaskInput,
@@ -91,7 +90,7 @@ export const schedulesCapabilities = {
   ),
 } as const;
 
-export type Schedules = AgentPluginInstance & ScheduleControl;
+export type Schedules = AgentPluginInitialization & ScheduleControl;
 
 /** Install durable schedules that run in fresh or existing conversations. */
 export function schedules(
@@ -103,37 +102,45 @@ export function schedules(
       schedulesCapabilities.boss,
       schedulesCapabilities.transaction,
     ],
-    create: (bindings) =>
-      new SchedulesPlugin({
-        ...options,
-        boss: bindings.get(schedulesCapabilities.boss),
-        transaction: bindings.get(schedulesCapabilities.transaction),
-      }),
+    create: (bindings) => {
+      const boss = bindings.get(schedulesCapabilities.boss);
+      const transaction = bindings.get(schedulesCapabilities.transaction);
+      return {
+        initialize: (host) =>
+          RunningSchedules.start(host, { ...options, boss, transaction }),
+      };
+    },
   };
 }
 
-class SchedulesPlugin implements Schedules {
+class RunningSchedules implements Schedules {
+  readonly #host: AgentPluginHost;
   readonly #scheduled: ScheduledTasks<ExecutionConfig>;
-  readonly #sources: readonly ScheduleSource[] | undefined;
   readonly #workerOptions: JobPollingOptions | undefined;
-  #host: {
-    require(): AgentPluginHost;
-    is(host: AgentPluginHost): boolean;
-  } = {
-    require() {
-      throw new Error('schedules plugin is not initialized');
-    },
-    is: () => false,
-  };
-  readonly #initializeOnce = pMemoize(() => this.#initialize());
 
-  constructor({
-    sources,
-    workerOptions,
-    ...options
-  }: SchedulesOptions &
-    Pick<ScheduledTasksOptions<ExecutionConfig>, 'boss' | 'transaction'>) {
-    this.#sources = sources;
+  static async start(
+    host: AgentPluginHost,
+    {
+      sources,
+      ...options
+    }: SchedulesOptions &
+      Pick<ScheduledTasksOptions<ExecutionConfig>, 'boss' | 'transaction'>,
+  ): Promise<RunningSchedules> {
+    const running = new RunningSchedules(host, options);
+    await running.#scheduled.initialize();
+    for (const source of sources ?? []) await source(running);
+    return running;
+  }
+
+  private constructor(
+    host: AgentPluginHost,
+    {
+      workerOptions,
+      ...options
+    }: Omit<SchedulesOptions, 'sources'> &
+      Pick<ScheduledTasksOptions<ExecutionConfig>, 'boss' | 'transaction'>,
+  ) {
+    this.#host = host;
     this.#workerOptions = workerOptions;
     this.#scheduled = new ScheduledTasks({
       ...options,
@@ -146,20 +153,7 @@ class SchedulesPlugin implements Schedules {
     });
   }
 
-  initialize(host: AgentPluginHost): Promise<void> {
-    this.#host = { require: () => host, is: (other) => other === host };
-    return this.#initializeOnce();
-  }
-
-  work(
-    host: AgentPluginHost,
-    waitForActive?: boolean,
-  ): Promise<AsyncDisposable> {
-    if (!this.#host.is(host)) {
-      throw new Error(
-        'schedules plugin must be initialized before work starts',
-      );
-    }
+  work(waitForActive?: boolean): Promise<AsyncDisposable> {
     return this.#scheduled.work(this.#workerOptions, waitForActive);
   }
 
@@ -275,12 +269,6 @@ class SchedulesPlugin implements Schedules {
     return this.#scheduled.archiveRun(ownerId, runId);
   }
 
-  async #initialize(): Promise<void> {
-    await this.#scheduled.initialize();
-    if (!this.#sources) return;
-    for (const source of this.#sources) await source(this);
-  }
-
   async #launch({
     runId,
     taskId,
@@ -298,17 +286,16 @@ class SchedulesPlugin implements Schedules {
     prompt: string;
     executionConfig: ExecutionConfig;
   }): Promise<{ executionId: string }> {
-    const host = this.#host.require();
     const conversation = executionConversation(runId, ownerId, executionConfig);
     if (
       executionConfig.target?.kind === 'existing-conversation' &&
-      !(await host.conversationExists(conversation))
+      !(await this.#host.conversationExists(conversation))
     ) {
       throw new Error(
         `Scheduled target conversation "${conversation.chatId}" was not found`,
       );
     }
-    const execution = await host.enqueue(conversation, {
+    const execution = await this.#host.enqueue(conversation, {
       message: {
         id: runId,
         role: 'user',
@@ -336,9 +323,9 @@ class SchedulesPlugin implements Schedules {
     executionId: string;
     executionConfig: ExecutionConfig;
   }): Promise<ScheduledExecutionObservation> {
-    const observation = this.#host
-      .require()
-      .observe(executionConversation(runId, ownerId, executionConfig));
+    const observation = this.#host.observe(
+      executionConversation(runId, ownerId, executionConfig),
+    );
     const execution = await observation.status(executionId);
     if (!execution) {
       throw new Error(`Scheduled execution "${executionId}" was not found`);
@@ -393,7 +380,6 @@ class SchedulesPlugin implements Schedules {
     executionConfig: ExecutionConfig;
   }): Promise<void> {
     await this.#host
-      .require()
       .observe(executionConversation(runId, ownerId, executionConfig))
       .cancel(executionId);
   }
@@ -407,7 +393,7 @@ class SchedulesPlugin implements Schedules {
       chatId: executionConfig.target.chatId,
       userId: ownerId,
     };
-    if (await this.#host.require().conversationExists(conversation)) return;
+    if (await this.#host.conversationExists(conversation)) return;
     throw new ScheduledTasksError(
       'invalid-input',
       'task',

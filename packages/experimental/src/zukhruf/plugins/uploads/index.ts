@@ -5,11 +5,11 @@ import z from 'zod';
 
 import { reminder } from '@deepagents/context';
 
-import type { AgentDeclaration, ZukhrufSandbox } from '../../agent.ts';
+import type { ZukhrufSandbox } from '../../agent.ts';
 import type {
   AgentPluginDefinition,
   AgentPluginHost,
-  AgentPluginInstance,
+  AgentPluginInitialization,
   AgentPluginToolContext,
 } from '../../runtime/agent-runtime.ts';
 
@@ -99,7 +99,7 @@ export interface UploadsOptions {
   publicUrl?: string;
 }
 
-export interface Uploads extends AgentPluginInstance {
+export interface Uploads extends AgentPluginInitialization {
   /** Stores one file in the session's sandbox. */
   write(scope: UploadScope, upload: StoredUpload): Promise<WrittenUpload>;
   read(scope: UploadScope, fileId: string): Promise<StoredUpload | undefined>;
@@ -137,7 +137,17 @@ export function uploads({
   const resolvedPublicUrl = normalizePublicUrl(publicUrl);
   return {
     name: 'uploads',
-    create: () => new UploadsPlugin(directory, resolvedPublicUrl),
+    create: () => ({
+      configure: (root) => ({
+        ...root,
+        instructions: [
+          ...root.instructions,
+          attachedUploadsReminder(directory),
+        ],
+      }),
+      initialize: async (host) =>
+        new RunningUploads(host, directory, resolvedPublicUrl),
+    }),
   };
 }
 
@@ -155,14 +165,10 @@ const publishInputSchema = z.object({
     .describe('Display name shown to the user; defaults to the file name.'),
 });
 
-class UploadsPlugin implements Uploads {
+class RunningUploads implements Uploads {
+  readonly #host: AgentPluginHost;
   readonly #directory: string;
   readonly #publicUrl: string | undefined;
-  #requiredHost = (): AgentPluginHost => {
-    throw new Error(
-      'uploads plugin must be initialized before storing or reading uploads',
-    );
-  };
 
   readonly tools = {
     publish_upload: tool<
@@ -181,21 +187,14 @@ class UploadsPlugin implements Uploads {
     }),
   };
 
-  constructor(directory: string, publicUrl: string | undefined) {
+  constructor(
+    host: AgentPluginHost,
+    directory: string,
+    publicUrl: string | undefined,
+  ) {
+    this.#host = host;
     this.#directory = directory;
     this.#publicUrl = publicUrl;
-  }
-
-  configure(root: AgentDeclaration): AgentDeclaration {
-    return {
-      ...root,
-      instructions: [...root.instructions, this.#attachedUploadsReminder()],
-    };
-  }
-
-  initialize(host: AgentPluginHost): Promise<void> {
-    this.#requiredHost = () => host;
-    return Promise.resolve();
   }
 
   async write(
@@ -267,41 +266,8 @@ class UploadsPlugin implements Uploads {
     };
   }
 
-  /**
-   * Lists the turn's attachments for the model. The engine folds it into the
-   * user message being saved and hands over that chat, so only files uploaded
-   * for this chat by its owner are listed.
-   */
-  #attachedUploadsReminder() {
-    return reminder(
-      ({ currentMessage, chat }) => {
-        if (currentMessage === undefined || chat === undefined) {
-          throw new Error(
-            'uploads: the user reminder context must carry currentMessage and chat',
-          );
-        }
-        const scope = this.#scopeFor({
-          userId: chat.userId,
-          sessionId: chat.id,
-        });
-        const attached = attachedUploads(currentMessage).filter(({ path }) =>
-          isBelow(scope, path),
-        );
-        if (attached.length === 0) return '';
-        return [
-          'The user attached the files listed below for this turn; read images by path with the readFile tool when needed (convert HEIC and extract video frames with sandbox commands first), and [Image #N], [Video #N], or [Audio #N] in the message refers to the Nth listed file.',
-          ...attached.map(
-            ({ path, name, mediaType, size }) =>
-              `- ${path} (${name}, ${mediaType}, ${size} bytes)`,
-          ),
-        ].join('\n');
-      },
-      { asPart: true },
-    );
-  }
-
   #sandboxFor(scope: UploadScope): Promise<ZukhrufSandbox> {
-    return this.#requiredHost().sandbox({
+    return this.#host.sandbox({
       chatId: scope.sessionId,
       userId: scope.userId,
     });
@@ -322,16 +288,56 @@ class UploadsPlugin implements Uploads {
     return { data: new Uint8Array(bytes), mediaType };
   }
 
-  /** `<directory>/<userId>/<sessionId>`; both identifiers must be one path segment. */
-  #scopeFor({ userId, sessionId }: UploadScope): string {
-    assertPathSegment('userId', userId);
-    assertPathSegment('sessionId', sessionId);
-    return posix.join(this.#directory, userId, sessionId);
+  #scopeFor(scope: UploadScope): string {
+    return scopeFor(this.#directory, scope);
   }
 
   #pathFor(scope: UploadScope, fileId: string): string {
     return posix.join(this.#scopeFor(scope), fileId);
   }
+}
+
+/**
+ * Lists the turn's attachments for the model. The engine folds it into the
+ * user message being saved and hands over that chat, so only files uploaded
+ * for this chat by its owner are listed.
+ */
+function attachedUploadsReminder(directory: string) {
+  return reminder(
+    ({ currentMessage, chat }) => {
+      if (currentMessage === undefined || chat === undefined) {
+        throw new Error(
+          'uploads: the user reminder context must carry currentMessage and chat',
+        );
+      }
+      const scope = scopeFor(directory, {
+        userId: chat.userId,
+        sessionId: chat.id,
+      });
+      const attached = attachedUploads(currentMessage).filter(({ path }) =>
+        isBelow(scope, path),
+      );
+      if (attached.length === 0) return '';
+      return [
+        'The user attached the files listed below for this turn; read images by path with the readFile tool when needed (convert HEIC and extract video frames with sandbox commands first), and [Image #N], [Video #N], or [Audio #N] in the message refers to the Nth listed file.',
+        ...attached.map(
+          ({ path, name, mediaType, size }) =>
+            `- ${path} (${name}, ${mediaType}, ${size} bytes)`,
+        ),
+      ].join('\n');
+    },
+    { asPart: true },
+  );
+}
+
+/** `<directory>/<userId>/<sessionId>`; both identifiers must be one path segment. */
+function scopeFor(
+  directory: string,
+  { userId, sessionId }: UploadScope,
+): string {
+  assertPathSegment('userId', userId);
+  assertPathSegment('sessionId', sessionId);
+  return posix.join(directory, userId, sessionId);
 }
 
 function normalizePublicUrl(publicUrl: string | undefined): string | undefined {

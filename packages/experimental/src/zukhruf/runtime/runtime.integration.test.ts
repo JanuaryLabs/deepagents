@@ -1199,11 +1199,15 @@ describe('zukhruf runtime — background executor', () => {
         definitions: failures.slice(0, 2).map((failure) => ({
           name: failure.message,
           create: () => ({
-            async work() {
+            async initialize() {
               return {
-                async [Symbol.asyncDispose]() {
-                  events.push(failure.message);
-                  throw failure;
+                async work() {
+                  return {
+                    async [Symbol.asyncDispose]() {
+                      events.push(failure.message);
+                      throw failure;
+                    },
+                  };
                 },
               };
             },
@@ -1249,13 +1253,13 @@ describe('zukhruf runtime — background executor', () => {
               async [Symbol.asyncDispose]() {
                 events.push(`${name}:dispose`);
               },
-            };
-          },
-          async work() {
-            events.push(`${name}:work`);
-            return {
-              async [Symbol.asyncDispose]() {
-                events.push(`${name}:stop`);
+              async work() {
+                events.push(`${name}:work`);
+                return {
+                  async [Symbol.asyncDispose]() {
+                    events.push(`${name}:stop`);
+                  },
+                };
               },
             };
           },

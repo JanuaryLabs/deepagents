@@ -802,7 +802,7 @@ occurrence into a metadata-resident dispatch while advancing the active definiti
 cleared only after deterministic enqueue succeeds, so a crash resumes it without reopening the
 delete/claim race. Therefore a failed insert leaves the previous authoritative state retryable; an
 inserted-but-unpublished wake reloads metadata and no-ops. Deletion removes or supersedes metadata
-before best-effort wake cancellation. The plugin's `work()` hook starts the wake consumer inside
+before best-effort wake cancellation. The plugin's running-phase `work()` starts the wake consumer inside
 the runtime's combined lifecycle without scanning conversations. A stale, cancelled, duplicated, or racing
 wake becomes a no-op when its definition generation or intended time no longer matches.
 
@@ -831,7 +831,7 @@ The ordered implementation work and crash-boundary proofs live in `SCHEDULING_PL
 ## Runtime plugin instances and transport projections _(Built)_
 
 The root Zukhruf entry point is transport-neutral. A runtime plugin definition returns its typed
-operation surface directly:
+operation surface from `initialize(host)`, its running phase:
 
 ```ts
 interface TracePlugin {
@@ -840,12 +840,13 @@ interface TracePlugin {
 
 const traceTelemetry: AgentPluginDefinition<TracePlugin> = {
   name: 'trace-telemetry',
-  create: () => ({ traces: reader }),
+  create: () => ({ initialize: async () => ({ traces: reader }) }),
 };
 ```
 
-- `AgentHost.plugin(definition)` returns the installed instance for that exact definition object
-  and fails when the definition does not belong to the runtime. Core needs no second capability or
+- `AgentHost.plugin(definition)` returns the running phase that `initialize(host)` returned for
+  that exact definition object. It fails when the definition does not belong to the runtime or its
+  `initialize()` returned nothing. Core needs no second capability or
   projection registry.
 - Core knows neither Hono nor gRPC. The plugin instance exposes transport-neutral operations, not
   protocol metadata, routes, serializers, or authentication policy.
@@ -871,8 +872,14 @@ const traceTelemetry: AgentPluginDefinition<TracePlugin> = {
   `AgentRuntime.initialize()` constructs the host and composes static contributions before
   initializing plugins. The returned `AgentHost` owns conversation execution and stack resources.
   Plugin workers join the queue worker's disposal scope, preserving cleanup and error order.
-- Plugin `create()` remains synchronous. Its asynchronous `initialize(host)` may return an
-  `AgentPluginInitialization`: discovered `tools` and a `Symbol.asyncDispose` method. The runtime
+- Plugin `create()` remains synchronous and returns only static contributions (tools, agents,
+  skills, runtime context, telemetry, `configure`), since `host.info` is built from them before the
+  host exists. Its asynchronous `initialize(host)` returns the running phase, an
+  `AgentPluginInitialization`: discovered `tools`, `work(waitForActive)`,
+  `conversationAvailable(conversation)`, the plugin's control surface, and an optional
+  `Symbol.asyncDispose` method. Anything that needs the host is built there, so no plugin holds a
+  host that is not yet set. `PluginManager` keeps the running phases and starts their workers and
+  availability reconciliation. The runtime
   validates those tools against static plugin tools, runtime tools, and every agent's tools
   before starting a worker. Failed initialization disposes all acquired contributions.
 - `PluginToolComposition` owns shared tool names, owner diagnostics, and composition. Each

@@ -61,16 +61,18 @@ export function fileTelemetry(
         ],
       });
       return {
-        traces: new FileTraceAdapter(pathToFileURL(path)),
         telemetry: (context: AgentPluginToolContext) =>
           openTelemetry(provider, context, calls),
-        work: () =>
-          Promise.resolve({
-            [Symbol.asyncDispose]: async () => {
-              await provider.shutdown();
-              calls.clear();
-            },
-          }),
+        initialize: async () => ({
+          traces: new FileTraceAdapter(pathToFileURL(path)),
+          work: () =>
+            Promise.resolve({
+              [Symbol.asyncDispose]: async () => {
+                await provider.shutdown();
+                calls.clear();
+              },
+            }),
+        }),
       };
     },
   };

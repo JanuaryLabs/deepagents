@@ -1069,18 +1069,22 @@ test('conversation availability reaches every plugin before reporting failures',
         {
           name: 'failing',
           create: () => ({
-            conversationAvailable: async () => {
-              calls.push('failing');
-              throw new Error('availability failed');
-            },
+            initialize: async () => ({
+              conversationAvailable: async () => {
+                calls.push('failing');
+                throw new Error('availability failed');
+              },
+            }),
           }),
         },
         {
           name: 'following',
           create: () => ({
-            conversationAvailable: async () => {
-              calls.push('following');
-            },
+            initialize: async () => ({
+              conversationAvailable: async () => {
+                calls.push('following');
+              },
+            }),
           }),
         },
       ],

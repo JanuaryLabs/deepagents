@@ -50,11 +50,11 @@ const tool = defineTool({
 });
 const stack = defineStack(async (resources) => adapters(resources));
 
-function plugin<Instance extends object>(
+function plugin<Running extends object>(
   name: string,
-  create: AgentPluginDefinition<Instance>['create'],
-  capabilities?: AgentPluginDefinition<Instance>['capabilities'],
-): AgentPluginDefinition<Instance> {
+  create: AgentPluginDefinition<Running>['create'],
+  capabilities?: AgentPluginDefinition<Running>['capabilities'],
+): AgentPluginDefinition<Running> {
   return { name, create, ...(capabilities ? { capabilities } : {}) };
 }
 
@@ -76,7 +76,10 @@ test('one exported definition materializes fresh bound plugin instances per host
   const value = new AgentPluginCapability<string>('test.value');
   const stateful = plugin(
     'stateful',
-    (bindings) => ({ value: bindings.get(value), identity: {} }),
+    (bindings) => {
+      const bound = bindings.get(value);
+      return { initialize: async () => ({ value: bound, identity: {} }) };
+    },
     [value],
   );
   const agent = declaration([stateful]);
@@ -107,7 +110,10 @@ test('AgentRuntime validates capability bindings during initialization', async (
   const unknown = new AgentPluginCapability<string>('test.unknown');
   const requiring = plugin(
     'requiring',
-    (bindings) => ({ value: bindings.get(required) }),
+    (bindings) => {
+      const bound = bindings.get(required);
+      return { initialize: async () => ({ value: bound }) };
+    },
     [required],
   );
   const agent = declaration([requiring]);
@@ -141,12 +147,18 @@ test('one binding may satisfy several plugins requiring one capability', async (
   const shared = new AgentPluginCapability<object>('test.shared');
   const first = plugin(
     'first',
-    (bindings) => ({ value: bindings.get(shared) }),
+    (bindings) => {
+      const bound = bindings.get(shared);
+      return { initialize: async () => ({ value: bound }) };
+    },
     [shared],
   );
   const second = plugin(
     'second',
-    (bindings) => ({ value: bindings.get(shared) }),
+    (bindings) => {
+      const bound = bindings.get(shared);
+      return { initialize: async () => ({ value: bound }) };
+    },
     [shared],
   );
   const value = {};
@@ -200,9 +212,14 @@ test('AgentRuntime rejects conflicting capability identities and undeclared acce
   const undeclared = new AgentPluginCapability<string>('test.undeclared');
   const undeclaredCapabilityRuntime = new AgentRuntime(
     declaration([
-      plugin('invalid', (bindings) => ({ value: bindings.get(undeclared) }), [
-        declared,
-      ]),
+      plugin(
+        'invalid',
+        (bindings) => {
+          const bound = bindings.get(undeclared);
+          return { initialize: async () => ({ value: bound }) };
+        },
+        [declared],
+      ),
     ]),
   );
   const undeclaredCapabilityRuntimeStack = defineStack(async (resources) => ({
@@ -320,14 +337,14 @@ test('failed plugin workers close earlier workers while initialization resources
           async [Symbol.asyncDispose]() {
             events.push(`${name}:dispose`);
           },
-        };
-      },
-      async work() {
-        events.push(`${name}:work`);
-        if (name === 'second') throw failing;
-        return {
-          async [Symbol.asyncDispose]() {
-            events.push(`${name}:stop`);
+          async work() {
+            events.push(`${name}:work`);
+            if (name === 'second') throw failing;
+            return {
+              async [Symbol.asyncDispose]() {
+                events.push(`${name}:stop`);
+              },
+            };
           },
         };
       },

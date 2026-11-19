@@ -1,7 +1,6 @@
 import {
   AgentPluginCapability,
   type AgentPluginDefinition,
-  type AgentPluginHost,
 } from '../../runtime/agent-runtime.ts';
 import {
   ConversationScheduler,
@@ -37,26 +36,28 @@ export function conversationScheduling(): AgentPluginDefinition {
       conversationSchedulingCapabilities.clock,
     ],
     create(bindings) {
-      let host = (): AgentPluginHost => {
-        throw new Error(
-          'conversation-scheduling plugin must be initialized before use',
-        );
-      };
-      const scheduler = new ConversationScheduler({
-        scheduler: bindings.get(conversationSchedulingCapabilities.scheduler),
-        host: () => host(),
-        timezone: bindings.get(conversationSchedulingCapabilities.timezone),
-        clock: bindings.get(conversationSchedulingCapabilities.clock),
-      });
-
+      const scheduler = bindings.get(
+        conversationSchedulingCapabilities.scheduler,
+      );
+      const timezone = bindings.get(
+        conversationSchedulingCapabilities.timezone,
+      );
+      const clock = bindings.get(conversationSchedulingCapabilities.clock);
       return {
-        tools: createSchedulingTools(scheduler),
-        async initialize(runtimeHost) {
-          host = () => runtimeHost;
+        async initialize(host) {
+          const conversationScheduler = new ConversationScheduler({
+            scheduler,
+            host,
+            timezone,
+            clock,
+          });
+          return {
+            tools: createSchedulingTools(conversationScheduler),
+            work: (waitForActive) => conversationScheduler.work(waitForActive),
+            conversationAvailable: (conversation) =>
+              conversationScheduler.materializeDueIfEligible(conversation),
+          };
         },
-        work: (_host, waitForActive) => scheduler.work(waitForActive),
-        conversationAvailable: (_host, conversation) =>
-          scheduler.materializeDueIfEligible(conversation),
       };
     },
   };

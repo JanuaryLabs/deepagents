@@ -128,12 +128,22 @@ export interface AgentPluginBindings {
   get<Value>(capability: AgentPluginCapability<Value>): Value;
 }
 
-/** Resources and tools acquired by asynchronous plugin initialization. */
-export interface AgentPluginInitialization extends AsyncDisposable {
+/**
+ * A plugin's running phase: what `initialize(host)` builds once the host
+ * exists, and what `AgentHost.plugin(definition)` returns.
+ */
+export interface AgentPluginInitialization extends Partial<AsyncDisposable> {
   readonly tools?: ZukhrufToolSet;
+  /** Hosts wait for active plugin work before releasing infrastructure. */
+  work?(waitForActive?: boolean): Promise<AsyncDisposable>;
+  conversationAvailable?(conversation: ConversationId): Promise<void>;
 }
 
-export interface AgentPluginInstance {
+/**
+ * What a plugin contributes before the host exists, since `host.info` is built
+ * from it, and the `initialize(host)` that builds its running phase.
+ */
+export interface AgentPluginInstance<Running extends object = object> {
   readonly tools?: ZukhrufToolSet;
   /** Per-turn AI SDK telemetry integration contributed by this plugin. */
   telemetry?(context: AgentPluginToolContext): Telemetry;
@@ -144,22 +154,15 @@ export interface AgentPluginInstance {
   /** Static namespaced context merged into every model call made by this runtime. */
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
   configure?(root: AgentDeclaration): AgentDeclaration;
-  initialize?(host: AgentPluginHost): Promise<void | AgentPluginInitialization>;
-  /** Hosts wait for active plugin work before releasing infrastructure. */
-  work?(
+  initialize?(
     host: AgentPluginHost,
-    waitForActive?: boolean,
-  ): Promise<AsyncDisposable>;
-  conversationAvailable?(
-    host: AgentPluginHost,
-    conversation: ConversationId,
-  ): Promise<void>;
+  ): Promise<void | (AgentPluginInitialization & Running)>;
 }
 
-export interface AgentPluginDefinition<Instance extends object = object> {
+export interface AgentPluginDefinition<Running extends object = object> {
   readonly name: string;
   readonly capabilities?: readonly AgentPluginCapability<unknown>[];
-  create(bindings: AgentPluginBindings): AgentPluginInstance & Instance;
+  create(bindings: AgentPluginBindings): AgentPluginInstance<Running>;
 }
 
 export interface AgentRuntimeWorkOptions {
@@ -493,9 +496,10 @@ class RuntimeHost implements AsyncDisposable {
     return this.#resources.disposeAsync();
   }
 
-  plugin<Instance extends object>(
-    definition: AgentPluginDefinition<Instance>,
-  ): AgentPluginInstance & Instance {
+  /** The running phase `initialize(host)` returned for `definition`. */
+  plugin<Running extends object>(
+    definition: AgentPluginDefinition<Running>,
+  ): AgentPluginInitialization & Running {
     return this.#plugins.get(definition);
   }
 
@@ -533,7 +537,7 @@ class RuntimeHost implements AsyncDisposable {
         read: () => this.#conversationStatus.read(conversation),
         publish: () => this.#conversationStatus.publish(conversation),
       },
-      () => this.#plugins.conversationAvailable(this.#pluginHost, conversation),
+      () => this.#plugins.conversationAvailable(conversation),
     );
   }
 
@@ -626,7 +630,7 @@ class RuntimeHost implements AsyncDisposable {
     options: AgentRuntimeWorkOptions | undefined,
   ): Promise<AsyncDisposable> {
     await using workers = new AsyncDisposableStack();
-    await this.#plugins.startWorkers(this.#pluginHost, workers, true);
+    await this.#plugins.startWorkers(workers, true);
     const reconcilesAvailability = this.#plugins.reconcilesAvailability;
     workers.use(
       await this.#queue.consume(this.#executor.execute.bind(this.#executor), {
@@ -638,10 +642,7 @@ class RuntimeHost implements AsyncDisposable {
           // the settled transition from host subscribers.
           await this.#conversationStatus.publish({ chatId, userId });
           if (reconcilesAvailability) {
-            await this.#plugins.conversationAvailable(this.#pluginHost, {
-              chatId,
-              userId,
-            });
+            await this.#plugins.conversationAvailable({ chatId, userId });
           }
         },
       }),

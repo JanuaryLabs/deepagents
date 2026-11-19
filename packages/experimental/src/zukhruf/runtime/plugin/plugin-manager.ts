@@ -10,6 +10,7 @@ import type {
   AgentPluginBinding,
   AgentPluginDefinition,
   AgentPluginHost,
+  AgentPluginInitialization,
   AgentPluginInstance,
   AgentPluginToolContext,
 } from '../agent-runtime.ts';
@@ -24,15 +25,20 @@ interface MaterializedAgentPlugin {
   readonly instance: AgentPluginInstance;
 }
 
+interface RunningAgentPlugin {
+  readonly definition: AgentPluginDefinition;
+  readonly running: AgentPluginInitialization;
+}
+
 /**
- * Plugins are materialized only by calling `definition.create`, so the
- * instance of the plugin created from `definition` has its instance type.
+ * A running phase comes only from the `initialize` of the instance that
+ * `definition.create` returned, so it has the definition's running type.
  */
-function createdFrom<Instance extends object>(
-  plugin: MaterializedAgentPlugin,
-  definition: AgentPluginDefinition<Instance>,
-): plugin is MaterializedAgentPlugin & {
-  readonly instance: AgentPluginInstance & Instance;
+function initializedFrom<Running extends object>(
+  plugin: RunningAgentPlugin,
+  definition: AgentPluginDefinition<Running>,
+): plugin is RunningAgentPlugin & {
+  readonly running: AgentPluginInitialization & Running;
 } {
   return plugin.definition === definition;
 }
@@ -49,6 +55,7 @@ export class PluginManager implements AsyncDisposable {
   readonly #plugins: readonly MaterializedAgentPlugin[];
   readonly #toolComposition: PluginToolComposition;
   readonly #resources = new AsyncDisposableStack();
+  readonly #running: RunningAgentPlugin[] = [];
 
   constructor(
     root: AgentDeclaration,
@@ -107,18 +114,23 @@ export class PluginManager implements AsyncDisposable {
     return this.#resources.disposeAsync();
   }
 
-  get<Instance extends object>(
-    definition: AgentPluginDefinition<Instance>,
-  ): AgentPluginInstance & Instance {
-    const plugin = this.#plugins.find((candidate) =>
-      createdFrom(candidate, definition),
-    );
-    if (!plugin) {
+  get<Running extends object>(
+    definition: AgentPluginDefinition<Running>,
+  ): AgentPluginInitialization & Running {
+    if (!this.#plugins.some((plugin) => plugin.definition === definition)) {
       throw new Error(
         `AgentRuntime: plugin "${definition.name}" does not belong to this runtime`,
       );
     }
-    return plugin.instance;
+    const plugin = this.#running.find((candidate) =>
+      initializedFrom(candidate, definition),
+    );
+    if (!plugin) {
+      throw new Error(
+        `AgentRuntime: plugin "${definition.name}" has no running phase, since its initialize() returned nothing`,
+      );
+    }
+    return plugin.running;
   }
 
   configureTelemetry(
@@ -135,19 +147,18 @@ export class PluginManager implements AsyncDisposable {
   }
 
   get reconcilesAvailability(): boolean {
-    return this.#plugins.some(({ instance }) =>
-      Boolean(instance.conversationAvailable),
+    return this.#running.some(({ running }) =>
+      Boolean(running.conversationAvailable),
     );
   }
 
   async startWorkers(
-    host: AgentPluginHost,
     workers: AsyncDisposableStack,
     waitForActive: boolean,
   ): Promise<void> {
     // Share the queue worker's disposal scope to preserve error suppression order.
-    for (const { instance } of this.#plugins) {
-      if (instance.work) workers.use(await instance.work(host, waitForActive));
+    for (const { running } of this.#running) {
+      if (running.work) workers.use(await running.work(waitForActive));
     }
   }
 
@@ -155,7 +166,8 @@ export class PluginManager implements AsyncDisposable {
     for (const { definition, instance } of this.#plugins) {
       const initialized = await instance.initialize?.(host);
       if (!initialized) continue;
-      this.#resources.use(initialized);
+      this.#running.push({ definition, running: initialized });
+      this.#resources.defer(() => initialized[Symbol.asyncDispose]?.());
       if (initialized.tools) {
         this.#toolComposition.add(definition.name, initialized.tools);
       }
@@ -166,14 +178,11 @@ export class PluginManager implements AsyncDisposable {
     );
   }
 
-  async conversationAvailable(
-    host: AgentPluginHost,
-    conversation: ConversationId,
-  ): Promise<void> {
+  async conversationAvailable(conversation: ConversationId): Promise<void> {
     const errors: unknown[] = [];
-    for (const { instance } of this.#plugins) {
+    for (const { running } of this.#running) {
       try {
-        await instance.conversationAvailable?.(host, conversation);
+        await running.conversationAvailable?.(conversation);
       } catch (error) {
         errors.push(error);
       }

@@ -5,8 +5,8 @@ import { z } from 'zod';
 
 import type { StreamPart } from '@deepagents/context';
 import type {
-  AgentPluginBindings,
   AgentPluginDefinition,
+  AgentPluginInitialization,
 } from '@deepagents/experimental/zukhruf';
 import {
   type HttpEnv,
@@ -50,12 +50,18 @@ const runtimeInfo = {
   ],
 } satisfies TestRuntime['info'];
 
-/** Plugins created in these tests declare no capabilities. */
-const unboundCapabilities: AgentPluginBindings = {
-  get(capability) {
-    throw new Error(`capability "${capability.name}" is not bound`);
+/** The fake host installs one plugin, so its running phase has the definition's type. */
+function initializedFrom<Running extends object>(
+  installed: {
+    readonly definition: AgentPluginDefinition;
+    readonly running: object;
   },
-};
+  definition: AgentPluginDefinition<Running>,
+): installed is typeof installed & {
+  readonly running: AgentPluginInitialization & Running;
+} {
+  return installed.definition === definition;
+}
 
 const emptyEngine = {
   getMessages: () => Promise.resolve([]),
@@ -818,7 +824,7 @@ test('HTTP projections bind installed plugins behind the transport boundary', as
   const reader = { read: () => 'ready' };
   const notices: AgentPluginDefinition<typeof reader> = {
     name: 'notices',
-    create: () => reader,
+    create: () => ({ initialize: async () => reader }),
   };
   const noticesHttp = projectHttp(notices, (plugin) => {
     const publicRoutes = new Hono<HttpEnv>().get('/notice-health', (context) =>
@@ -836,8 +842,9 @@ test('HTTP projections bind installed plugins behind the transport boundary', as
   });
   const runtime = createRuntime({
     plugin(definition) {
-      assert.equal(definition, notices);
-      return definition.create(unboundCapabilities);
+      const installed = { definition: notices, running: reader };
+      assert.ok(initializedFrom(installed, definition));
+      return installed.running;
     },
   });
 

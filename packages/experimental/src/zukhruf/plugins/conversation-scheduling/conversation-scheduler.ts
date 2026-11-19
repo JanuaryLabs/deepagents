@@ -111,7 +111,7 @@ const schedulingWakeSchema: z.ZodType<SchedulingWake> = z
 
 interface ConversationSchedulerOptions {
   scheduler: WakeScheduler<SchedulingWake>;
-  host: () => AgentPluginHost;
+  host: AgentPluginHost;
   timezone: string;
   clock: { Date: { now(): number } };
 }
@@ -289,7 +289,7 @@ export class ConversationScheduler {
   }
 
   async materializeDueIfEligible(conversation: ConversationId): Promise<void> {
-    if (!(await this.#host().isConversationAvailable(conversation))) return;
+    if (!(await this.#host.isConversationAvailable(conversation))) return;
     const state = await this.#read(conversation);
     const now = this.#clock.Date.now();
     const wake = state.dispatching
@@ -327,8 +327,7 @@ export class ConversationScheduler {
         `Scheduling wake id "${rawWake.id}" does not match its payload`,
       );
     }
-    if (!(await this.#host().isConversationAvailable(wake.conversation)))
-      return;
+    if (!(await this.#host.isConversationAvailable(wake.conversation))) return;
 
     const state = await this.#read(wake.conversation);
     const dispatching = this.#matchingDispatching(state, wake);
@@ -434,7 +433,7 @@ export class ConversationScheduler {
       scheduledFor: wake.scheduledFor,
       occurrenceId,
     };
-    await this.#host().enqueue(wake.conversation, {
+    await this.#host.enqueue(wake.conversation, {
       message: {
         id: occurrenceId,
         role: 'user',
@@ -592,16 +591,14 @@ export class ConversationScheduler {
   }
 
   async #read(conversation: ConversationId): Promise<SchedulingState> {
-    return this.#parse(
-      await this.#host().readConversationMetadata(conversation),
-    );
+    return this.#parse(await this.#host.readConversationMetadata(conversation));
   }
 
   async #update(
     conversation: ConversationId,
     update: (state: SchedulingState) => SchedulingState,
   ): Promise<void> {
-    await this.#host().updateConversationMetadata(conversation, (stored) => {
+    await this.#host.updateConversationMetadata(conversation, (stored) => {
       const state = update(this.#parse(stored));
       const metadata = stored ?? {};
       const zukhruf = ConversationScheduler.#record(metadata.zukhruf);

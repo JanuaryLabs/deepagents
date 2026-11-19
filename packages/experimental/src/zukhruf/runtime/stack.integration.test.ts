@@ -73,13 +73,13 @@ test('one setup creates independent ready hosts with plugins, HTTP, and queued t
     name: 'bound',
     capabilities: [value],
     create: (bindings) => {
+      const instance = bindings.get(value);
       const initializations: unknown[] = [];
       return {
-        instance: bindings.get(value),
-        initializations,
         async initialize(pluginHost) {
           await Promise.resolve();
           initializations.push(pluginHost);
+          return { instance, initializations };
         },
       };
     },
@@ -216,17 +216,17 @@ test('a ready host waits for worker startup, then closes workers before plugins 
         [Symbol.asyncDispose]: async () => {
           closed.push('plugin');
         },
+        work: async (waitForActive) => {
+          assert.equal(waitForActive, true);
+          workerEntered.resolve();
+          await releaseWorker.promise;
+          return {
+            [Symbol.asyncDispose]: async () => {
+              closed.push('worker');
+            },
+          };
+        },
       }),
-      work: async (_host, waitForActive) => {
-        assert.equal(waitForActive, true);
-        workerEntered.resolve();
-        await releaseWorker.promise;
-        return {
-          [Symbol.asyncDispose]: async () => {
-            closed.push('worker');
-          },
-        };
-      },
     }),
   };
   const setup = new AgentRuntime(defineAgent({ ...root, plugins: [plugin] }));
