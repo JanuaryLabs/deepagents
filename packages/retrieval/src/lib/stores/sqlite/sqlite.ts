@@ -250,17 +250,6 @@ export class SQLiteStore implements Store {
   }
 }
 
-export function vectorToBlob(vector: number[] | Float32Array): Buffer {
-  if (vector instanceof Float32Array) {
-    // Copy into a fresh Buffer to avoid retaining references to a larger batch tensor buffer
-    const copied = new Float32Array(vector.length);
-    copied.set(vector);
-    return Buffer.from(copied.buffer);
-  }
-  const floatArray = new Float32Array(vector);
-  return Buffer.from(floatArray.buffer);
-}
-
 function toSearchResult(row: unknown): SearchResult {
   if (
     typeof row !== 'object' ||
