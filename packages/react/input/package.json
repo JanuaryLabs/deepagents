@@ -52,10 +52,12 @@
     "lucide-react": "^1.33.0"
   },
   "peerDependencies": {
+    "@zukhruf/ui": "^0.8.37",
     "react": "^19.2.8"
   },
   "devDependencies": {
     "@rolldown/plugin-babel": "^0.2.3",
+    "@sinonjs/fake-timers": "^15.4.0",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -63,6 +65,7 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
     "@vitejs/plugin-react": "^6.0.3",
+    "@zukhruf/ui": "^0.8.37",
     "babel-plugin-react-compiler": "^1.0.0",
     "happy-dom": "20.11.2",
     "react": "19.2.8",

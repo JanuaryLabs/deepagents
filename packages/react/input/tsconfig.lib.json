@@ -21,6 +21,7 @@
     "**/*.spec.tsx",
     "**/*.test.tsx",
     "src/test-setup.ts",
+    "src/testing/**",
     "eslint.config.js",
     "eslint.config.cjs",
     "eslint.config.mjs"

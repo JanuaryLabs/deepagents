@@ -1,3 +1,4 @@
+import { createClock } from '@sinonjs/fake-timers';
 import {
   act,
   fireEvent,
@@ -7,6 +8,7 @@ import {
   within,
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { ClockProvider } from '@zukhruf/ui';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -25,6 +27,8 @@ import {
   prepareComposerPayload,
   useComposer,
 } from '@deepagents/react-input/browser';
+
+import { FakeClock } from '../testing/fake-clock.tsx';
 
 const COMMAND_TRIGGERS = ['/'];
 
@@ -220,7 +224,7 @@ function renderRichInput(
   } = {},
 ) {
   const user = userEvent.setup();
-  render(<RichInputScenario {...options} />);
+  render(<RichInputScenario {...options} />, { wrapper: FakeClock });
   return {
     user,
     prompt: screen.getByRole<HTMLElement>('textbox', {
@@ -576,9 +580,9 @@ function formatSubmissionItem(item: ComposerSubmission['items'][number]) {
 
 describe('Composer compound API', () => {
   it('throws a component-specific error when a compound consumer is rendered outside Root', () => {
-    expect(() => render(<OrphanRichConsumer />)).toThrow(
-      'OrphanRichConsumer must be used inside Composer.Root.',
-    );
+    expect(() =>
+      render(<OrphanRichConsumer />, { wrapper: FakeClock }),
+    ).toThrow('OrphanRichConsumer must be used inside Composer.Root.');
   });
 
   it('renders action triggers as non-submit buttons by default', () => {
@@ -594,6 +598,7 @@ describe('Composer compound API', () => {
       <Composer.Root>
         <Composer.Editor />
       </Composer.Root>,
+      { wrapper: FakeClock },
     );
 
     const prompt = await screen.findByRole('textbox', {
@@ -607,6 +612,7 @@ describe('Composer compound API', () => {
       <Composer.Root editorAriaLabel="Message">
         <Composer.Editor />
       </Composer.Root>,
+      { wrapper: FakeClock },
     );
 
     expect(
@@ -616,7 +622,7 @@ describe('Composer compound API', () => {
 
   it('supports render action triggers while honoring prevented clicks', async () => {
     const user = userEvent.setup();
-    render(<RichCompoundActionScenario />);
+    render(<RichCompoundActionScenario />, { wrapper: FakeClock });
 
     await user.click(
       screen.getByRole('button', { name: /blocked rich child submit/i }),
@@ -643,7 +649,7 @@ describe('Composer compound API', () => {
 
   it('marks disabled non-native render actions without leaking native disabled', async () => {
     const user = userEvent.setup();
-    render(<RichDisabledAnchorActionScenario />);
+    render(<RichDisabledAnchorActionScenario />, { wrapper: FakeClock });
 
     const submit = screen.getByRole('button', {
       name: /disabled rich anchor submit/i,
@@ -661,7 +667,7 @@ describe('Composer compound API', () => {
 
   it('exposes state, actions, and meta to custom compound children', async () => {
     const user = userEvent.setup();
-    render(<RichContextConsumerScenario />);
+    render(<RichContextConsumerScenario />, { wrapper: FakeClock });
 
     expect(
       screen.getByRole('region', { name: /rich context consumer/i }),
@@ -681,7 +687,7 @@ describe('Composer compound API', () => {
 
   it('lets custom popup children accept a non-highlighted slash suggestion by index', async () => {
     const user = userEvent.setup();
-    render(<RichCustomPopupScenario />);
+    render(<RichCustomPopupScenario />, { wrapper: FakeClock });
 
     const prompt = screen.getByRole('textbox', {
       name: /rich prompt composer/i,
@@ -701,7 +707,7 @@ describe('Composer compound API', () => {
 
   it('lets custom popup children accept a non-highlighted mention suggestion by index', async () => {
     const user = userEvent.setup();
-    render(<RichCustomPopupScenario />);
+    render(<RichCustomPopupScenario />, { wrapper: FakeClock });
 
     const prompt = screen.getByRole('textbox', {
       name: /rich prompt composer/i,
@@ -740,6 +746,7 @@ describe('Composer empty prompt', () => {
       <Composer.Root onSubmit={submitted}>
         <Composer.Editor />
       </Composer.Root>,
+      { wrapper: FakeClock },
     );
 
     await user.click(screen.getByRole('textbox'));
@@ -1514,6 +1521,7 @@ describe('Composer slash and mention behavior', () => {
     );
     const { rerender } = render(
       <RichInputScenario mentionCandidates={withoutFileCandidates} />,
+      { wrapper: FakeClock },
     );
     const prompt = screen.getByRole<HTMLElement>('textbox', {
       name: /rich prompt composer/i,
@@ -1684,6 +1692,7 @@ describe('Composer editing shortcuts', () => {
         />
         <Composer.Editor />
       </Composer.Root>,
+      { wrapper: FakeClock },
     );
     const comment = screen.getByRole('textbox', {
       name: /annotation comment/i,
@@ -3936,7 +3945,9 @@ describe('Composer attachments', () => {
     const createObjectUrl = vi.spyOn(URL, 'createObjectURL');
     const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL');
     const user = userEvent.setup();
-    const view = render(<RichInputScenario persistDraft={false} />);
+    const view = render(<RichInputScenario persistDraft={false} />, {
+      wrapper: FakeClock,
+    });
 
     try {
       const files = [
@@ -4460,7 +4471,7 @@ describe('Composer registry-dependent restore', () => {
 
   it('notifies state changes only for real state changes, not parent re-renders', async () => {
     const user = userEvent.setup();
-    render(<StateChangeCountScenario />);
+    render(<StateChangeCountScenario />, { wrapper: FakeClock });
     const notifications = () =>
       screen.getByRole('region', { name: /composer notifications/i });
     const changeCount = () =>
@@ -4514,6 +4525,7 @@ describe('Composer host-declared triggers', () => {
           <Composer.Editor />
         </Composer.Content>
       </Composer.Root>,
+      { wrapper: FakeClock },
     );
     const prompt = screen.getByRole('textbox', {
       name: /rich prompt composer/i,
@@ -4546,6 +4558,7 @@ describe('Composer host-declared triggers', () => {
           <Composer.Editor />
         </Composer.Content>
       </Composer.Root>,
+      { wrapper: FakeClock },
     );
     const prompt = screen.getByRole('textbox', {
       name: /rich prompt composer/i,
@@ -4568,6 +4581,7 @@ describe('Composer host-declared triggers', () => {
           <Composer.Editor />
         </Composer.Content>
       </Composer.Root>,
+      { wrapper: FakeClock },
     );
     const prompt = screen.getByRole('textbox', {
       name: /rich prompt composer/i,
@@ -4612,6 +4626,7 @@ describe('Composer host-declared triggers', () => {
           <Composer.Editor />
         </Composer.Content>
       </Composer.Root>,
+      { wrapper: FakeClock },
     );
     const prompt = screen.getByRole('textbox', {
       name: /rich prompt composer/i,
@@ -4644,6 +4659,7 @@ describe('Composer host-declared triggers', () => {
           <Composer.Editor />
         </Composer.Content>
       </Composer.Root>,
+      { wrapper: FakeClock },
     );
     const prompt = screen.getByRole('textbox', {
       name: /rich prompt composer/i,
@@ -4688,7 +4704,7 @@ describe('Composer host-declared triggers', () => {
         </button>
       );
     }
-    render(<MenuScenario />);
+    render(<MenuScenario />, { wrapper: FakeClock });
 
     await user.click(screen.getByRole('button', { name: /toggle menu/i }));
 
@@ -4709,6 +4725,7 @@ describe('Composer host-declared triggers', () => {
             <Composer.Editor />
           </Composer.Content>
         </Composer.Root>,
+        { wrapper: FakeClock },
       ),
     ).toThrow(/must be placed inside a <Composer.Trigger>/);
   });
@@ -4735,6 +4752,7 @@ describe('Composer host-declared triggers', () => {
             <Composer.Editor />
           </Composer.Content>
         </Composer.Root>,
+        { wrapper: FakeClock },
       ),
     ).toThrow(/accepts only <Composer.Command> and <Composer.Mention>/);
   });
@@ -4762,6 +4780,7 @@ describe('Composer host-declared triggers', () => {
             <Composer.Editor />
           </Composer.Content>
         </Composer.Root>,
+        { wrapper: FakeClock },
       ),
     ).toThrow(/already holds commands/);
   });
@@ -4778,6 +4797,7 @@ describe('Composer token detection', () => {
           <Composer.Editor />
         </Composer.Content>
       </Composer.Root>,
+      { wrapper: FakeClock },
     );
     const prompt = screen.getByRole('textbox', {
       name: /rich prompt composer/i,
@@ -4787,5 +4807,58 @@ describe('Composer token detection', () => {
     await user.keyboard('@front@end');
 
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+});
+
+describe('Composer host clock', () => {
+  it('stamps a submission with the time of the host clock', async () => {
+    const user = userEvent.setup();
+    const submitted = vi.fn();
+    const clock = createClock(Date.UTC(2020, 0, 1, 9, 30, 15));
+
+    render(
+      <ClockProvider clock={clock}>
+        <Composer.Root onSubmit={submitted}>
+          <Composer.Editor />
+        </Composer.Root>
+      </ClockProvider>,
+    );
+
+    await user.click(screen.getByRole('textbox'));
+    await user.keyboard('{Enter}');
+    clock.tick(65_000);
+    await user.keyboard('{Enter}');
+
+    expect(submitted.mock.calls.map(([submission]) => submission.at)).toEqual([
+      new Date(Date.UTC(2020, 0, 1, 9, 30, 15)).toLocaleTimeString(),
+      new Date(Date.UTC(2020, 0, 1, 9, 31, 20)).toLocaleTimeString(),
+    ]);
+  });
+
+  it('names an added remote image from the time of the host clock', async () => {
+    const user = userEvent.setup();
+    const onStateChange = vi.fn();
+    const clock = createClock(Date.UTC(2020, 0, 1));
+
+    render(
+      <ClockProvider clock={clock}>
+        <Composer.Root onStateChange={onStateChange}>
+          <Composer.AddRemoteImage url={REMOTE_IMAGE_URL}>
+            Add remote image
+          </Composer.AddRemoteImage>
+          <Composer.Editor />
+        </Composer.Root>
+      </ClockProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: /add remote image/i }));
+
+    const [state] = onStateChange.mock.lastCall ?? [];
+    expect(state.remoteImages).toEqual([
+      {
+        id: `remote-image:${Date.UTC(2020, 0, 1)}:${REMOTE_IMAGE_URL}`,
+        url: REMOTE_IMAGE_URL,
+      },
+    ]);
   });
 });

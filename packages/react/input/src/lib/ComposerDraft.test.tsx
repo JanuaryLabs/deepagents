@@ -10,6 +10,8 @@ import { describe, expect, it } from 'vitest';
 
 import { Composer } from '@deepagents/react-input/browser';
 
+import { FakeClock } from '../testing/fake-clock.tsx';
+
 function DraftScenario({
   draftKey,
   send = () => Promise.resolve(),
@@ -37,12 +39,14 @@ describe('Composer.Root draftKey', () => {
     try {
       localStorage.clear();
       const user = userEvent.setup();
-      const first = render(<DraftScenario draftKey="chat-1" />);
+      const first = render(<DraftScenario draftKey="chat-1" />, {
+        wrapper: FakeClock,
+      });
       await user.click(promptElement());
       await user.keyboard('hello draft');
       first.unmount();
 
-      render(<DraftScenario draftKey="chat-1" />);
+      render(<DraftScenario draftKey="chat-1" />, { wrapper: FakeClock });
 
       expect(promptElement()).toHaveTextContent('hello draft');
     } finally {
@@ -54,18 +58,22 @@ describe('Composer.Root draftKey', () => {
     try {
       localStorage.clear();
       const user = userEvent.setup();
-      const first = render(<DraftScenario draftKey="chat-1" />);
+      const first = render(<DraftScenario draftKey="chat-1" />, {
+        wrapper: FakeClock,
+      });
       await user.click(promptElement());
       await user.keyboard('first');
       first.unmount();
 
-      const second = render(<DraftScenario draftKey="chat-2" />);
+      const second = render(<DraftScenario draftKey="chat-2" />, {
+        wrapper: FakeClock,
+      });
       expect(promptElement()).not.toHaveTextContent('first');
       await user.click(promptElement());
       await user.keyboard('second');
       second.unmount();
 
-      render(<DraftScenario draftKey="chat-1" />);
+      render(<DraftScenario draftKey="chat-1" />, { wrapper: FakeClock });
 
       expect(promptElement()).toHaveTextContent('first');
       expect(promptElement()).not.toHaveTextContent('second');
@@ -78,7 +86,9 @@ describe('Composer.Root draftKey', () => {
     try {
       localStorage.clear();
       const user = userEvent.setup();
-      const view = render(<DraftScenario draftKey="chat-1" />);
+      const view = render(<DraftScenario draftKey="chat-1" />, {
+        wrapper: FakeClock,
+      });
       await user.click(promptElement());
       await user.keyboard('first');
 
@@ -99,7 +109,7 @@ describe('Composer.Root draftKey', () => {
     try {
       localStorage.clear();
       const user = userEvent.setup();
-      render(<DraftScenario draftKey="chat-1" />);
+      render(<DraftScenario draftKey="chat-1" />, { wrapper: FakeClock });
       await user.click(promptElement());
       await user.keyboard('temporary');
       expect(localStorage.length).toBe(1);
@@ -122,6 +132,7 @@ describe('Composer.Root draftKey', () => {
             <Composer.Editor />
           </Composer.Content>
         </Composer.Root>,
+        { wrapper: FakeClock },
       );
       await user.click(promptElement());
       await user.keyboard('fire and forget');
@@ -140,7 +151,9 @@ describe('Composer.Root draftKey', () => {
       localStorage.clear();
       const user = userEvent.setup();
       const { promise, resolve } = Promise.withResolvers<void>();
-      render(<DraftScenario draftKey="chat-1" send={() => promise} />);
+      render(<DraftScenario draftKey="chat-1" send={() => promise} />, {
+        wrapper: FakeClock,
+      });
       await user.click(promptElement());
       await user.keyboard('mid flight');
       await user.keyboard('{Enter}');
@@ -161,7 +174,9 @@ describe('Composer.Root draftKey', () => {
       localStorage.clear();
       const user = userEvent.setup();
       const { promise, reject } = Promise.withResolvers<never>();
-      render(<DraftScenario draftKey="chat-1" send={() => promise} />);
+      render(<DraftScenario draftKey="chat-1" send={() => promise} />, {
+        wrapper: FakeClock,
+      });
       await user.click(promptElement());
       await user.keyboard('will fail');
       await user.keyboard('{Enter}');
@@ -183,7 +198,9 @@ describe('Composer.Root draftKey', () => {
     try {
       localStorage.clear();
       const user = userEvent.setup();
-      const first = render(<DraftScenario draftKey="chat-1" />);
+      const first = render(<DraftScenario draftKey="chat-1" />, {
+        wrapper: FakeClock,
+      });
       await user.type(promptElement(), 'describe this ');
       fireEvent.paste(promptElement(), {
         clipboardData: {
@@ -201,7 +218,7 @@ describe('Composer.Root draftKey', () => {
       expect(stored).not.toContain('clipboard.png');
       first.unmount();
 
-      render(<DraftScenario draftKey="chat-1" />);
+      render(<DraftScenario draftKey="chat-1" />, { wrapper: FakeClock });
       expect(promptElement()).toHaveTextContent('describe this');
       expect(promptElement()).not.toHaveTextContent('[Image #1]');
       expect(
@@ -216,7 +233,9 @@ describe('Composer.Root draftKey', () => {
     try {
       localStorage.clear();
       const user = userEvent.setup();
-      const seeded = render(<DraftScenario draftKey="chat-1" />);
+      const seeded = render(<DraftScenario draftKey="chat-1" />, {
+        wrapper: FakeClock,
+      });
       await user.click(promptElement());
       await user.keyboard('about to corrupt');
       const [storageKey] = Object.keys(localStorage);
@@ -224,12 +243,14 @@ describe('Composer.Root draftKey', () => {
       seeded.unmount();
 
       localStorage.setItem(storageKey, '{not json');
-      const corrupted = render(<DraftScenario draftKey="chat-1" />);
+      const corrupted = render(<DraftScenario draftKey="chat-1" />, {
+        wrapper: FakeClock,
+      });
       expect(promptElement()).not.toHaveTextContent('about to corrupt');
       corrupted.unmount();
 
       localStorage.setItem(storageKey, JSON.stringify({ foo: 1 }));
-      render(<DraftScenario draftKey="chat-1" />);
+      render(<DraftScenario draftKey="chat-1" />, { wrapper: FakeClock });
 
       expect(promptElement()).not.toHaveTextContent('about to corrupt');
     } finally {

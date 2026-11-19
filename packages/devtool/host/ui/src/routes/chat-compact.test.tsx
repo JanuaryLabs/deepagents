@@ -1,6 +1,4 @@
-import { createClock } from '@sinonjs/fake-timers';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { ClockProvider } from '@zukhruf/ui';
 import {
   type UIMessage,
   type UIMessageChunk,
@@ -11,6 +9,7 @@ import { expect, it, vi } from 'vitest';
 
 import type { CompactionEvent } from '@deepagents/experimental/zukhruf';
 
+import { FakeClock } from '../testing/fake-clock.tsx';
 import { Component as ChatRoute } from './chat.tsx';
 
 const messages = [
@@ -70,11 +69,7 @@ it('renders the Devtool transcript through the compact trajectory', async () => 
       { initialEntries: ['/chat'] },
     );
 
-    render(
-      <ClockProvider clock={createClock()}>
-        <RouterProvider router={router} />
-      </ClockProvider>,
-    );
+    render(<RouterProvider router={router} />, { wrapper: FakeClock });
 
     const activity = await screen.findByRole('button', {
       name: /Ran 3 tools/,
@@ -148,7 +143,7 @@ function renderConversation(
     ],
     { initialEntries: ['/chat'] },
   );
-  return render(<RouterProvider router={router} />);
+  return render(<RouterProvider router={router} />, { wrapper: FakeClock });
 }
 
 it('shows live compaction, one completed entry on replay, and its details after reopening', async () => {

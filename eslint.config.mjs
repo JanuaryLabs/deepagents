@@ -7,7 +7,7 @@ import { defineConfig } from 'eslint/config';
 
 const typescript = ['**/*.ts', '**/*.tsx', '**/*.cts', '**/*.mts'];
 const source = [...typescript, '**/*.js', '**/*.jsx', '**/*.cjs', '**/*.mjs'];
-const reactClock = 'packages/react/genai/src/**/*.{ts,tsx}';
+const reactClock = 'packages/react/{genai,input}/src/**/*.{ts,tsx}';
 const tests = ['**/*.{test,spec}.{ts,tsx,cts,mts,js,jsx,cjs,mjs}'];
 
 export default defineConfig(

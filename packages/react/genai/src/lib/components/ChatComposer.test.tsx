@@ -1,5 +1,7 @@
+import { createClock } from '@sinonjs/fake-timers';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
+import { ClockProvider } from '@zukhruf/ui';
 import { expect, test } from 'vitest';
 
 import {
@@ -10,23 +12,25 @@ import {
 
 function renderComposer() {
   return render(
-    <AgentProvider
-      chatId="chat-1"
-      transport={new ZukhrufChatTransport({ api: '/sessions' })}
-      onResetChat={() => {}}
-    >
-      <ChatComposer.Provider>
-        <ChatComposer.Root>
-          <ChatComposer.Content>
-            <ChatComposer.Attachments />
-            <ChatComposer.Editor placeholder="Message" />
-          </ChatComposer.Content>
-          <ChatComposer.Toolbar>
-            <ChatComposer.AttachFiles />
-          </ChatComposer.Toolbar>
-        </ChatComposer.Root>
-      </ChatComposer.Provider>
-    </AgentProvider>,
+    <ClockProvider clock={createClock()}>
+      <AgentProvider
+        chatId="chat-1"
+        transport={new ZukhrufChatTransport({ api: '/sessions' })}
+        onResetChat={() => {}}
+      >
+        <ChatComposer.Provider>
+          <ChatComposer.Root>
+            <ChatComposer.Content>
+              <ChatComposer.Attachments />
+              <ChatComposer.Editor placeholder="Message" />
+            </ChatComposer.Content>
+            <ChatComposer.Toolbar>
+              <ChatComposer.AttachFiles />
+            </ChatComposer.Toolbar>
+          </ChatComposer.Root>
+        </ChatComposer.Provider>
+      </AgentProvider>
+    </ClockProvider>,
   );
 }
 

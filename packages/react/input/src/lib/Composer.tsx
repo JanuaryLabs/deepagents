@@ -1,6 +1,7 @@
 import { Button } from '@base-ui/react/button';
 import type { JSONContent } from '@tiptap/core';
 import { type Editor, EditorContent, useEditor } from '@tiptap/react';
+import { useClock } from '@zukhruf/ui';
 import { cn } from 'cn';
 import {
   type ComponentPropsWithoutRef,
@@ -196,6 +197,7 @@ function ComposerRootInner({
   onSubmit,
   onStateChange,
 }: ComposerRootProps) {
+  const clock = useClock();
   const collectedRegistry = collectComposerRegistry(children);
   const registryRef = useRef({
     signature: composerRegistrySignature(collectedRegistry),
@@ -762,7 +764,7 @@ function ComposerRootInner({
     const nextRemoteImages = [
       ...remoteImagesRef.current,
       {
-        id: stableId('remote-image', url, Date.now()),
+        id: stableId('remote-image', url, clock.Date.now()),
         url,
       },
     ];
@@ -1116,7 +1118,7 @@ function ComposerRootInner({
     ];
     const event: ComposerSubmission = {
       id: crypto.randomUUID(),
-      at: new Date().toLocaleTimeString(),
+      at: new Date(clock.Date.now()).toLocaleTimeString(),
       mode: shouldQueue ? 'queued' : prepared.mode,
       prompt: prepared.prompt,
       persistedPrompt: prepared.persistedPrompt,

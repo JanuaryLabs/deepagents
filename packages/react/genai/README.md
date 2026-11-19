@@ -24,7 +24,7 @@ Import `TheButton` directly from `@zukhruf/ui`. This package does not export it.
 
 ## The clock
 
-A component of this package that waits on a timer gets its clock from `useClock` of `@zukhruf/ui`, which throws at its first render when no `ClockProvider` is above it. These components wait: `AssistantSnapshot` (its `TheButton` and its copied label), `CodeBlockCopyButton`, `TipLine`, the copy buttons of a message, and the spinner of a running tool. They render inside the tree of the host, so this package gives no clock. The tree has one clock, and the host gives it.
+A component of this package that waits on a timer gets its clock from `useClock` of `@zukhruf/ui`, which throws at its first render when no `ClockProvider` is above it. These components wait: `AssistantSnapshot` (its `TheButton` and its copied label), `CodeBlockCopyButton`, `TipLine`, the copy buttons of a message, the spinner of a running tool, and `ChatComposer` (its `Composer` of `@deepagents/react-input` reads the clock for the time of a submission). They render inside the tree of the host, so this package gives no clock. The tree has one clock, and the host gives it.
 
 The root of the host gives `globalThis`:
 

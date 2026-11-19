@@ -13,6 +13,7 @@ import { expect, it, vi } from 'vitest';
 import { RuntimeEventsProvider } from '@deepagents/devtool-history';
 
 import { DevtoolSidebar, NewChatButton } from '../app/sidebar.tsx';
+import { FakeClock } from '../testing/fake-clock.tsx';
 import { Component, loader } from './chat.tsx';
 
 const { loadRuntime } = vi.hoisted(() => ({ loadRuntime: vi.fn() }));
@@ -202,7 +203,7 @@ it('only offers file attachments when the runtime advertises uploads, accepting 
       ],
       { initialEntries: [`/chat/${sessionId}`] },
     );
-    return render(<RouterProvider router={router} />);
+    return render(<RouterProvider router={router} />, { wrapper: FakeClock });
   };
 
   try {
