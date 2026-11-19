@@ -1,5 +1,5 @@
 import { untilAborted } from '@zukhruf/async';
-import { timebox, waitFor } from '@zukhruf/testing/async';
+import { retryUntilReady, waitFor } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { type UIMessageChunk, simulateReadableStream } from 'ai';
 import assert from 'node:assert';
@@ -72,7 +72,7 @@ function openStoreWithRetry(
   connectionString: string,
   schema: string,
 ): Promise<PostgresStreamStore> {
-  return timebox(
+  return retryUntilReady(
     () => PostgresStreamStore.create({ pool: connectionString, schema }),
     {
       retries: 9,

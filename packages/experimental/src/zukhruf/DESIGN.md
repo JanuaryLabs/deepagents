@@ -628,7 +628,7 @@ surface; full history lives in the chain, which is the source of truth anyway.
   restarts (the pause is durable chain data). Pinned by `pg-boss.turn-queue.retention.test.ts`
   (config, commit-GC no-accumulation, parked-survives-maintenance-then-revives, and a real-time
   load-bearing proof — a control job with `deleteAfterSeconds: 1` is deleted by retention while the
-  parked turn survives, polled via `timebox`) plus the runtime approval scenarios
+  parked turn survives, polled via `waitFor`) plus the runtime approval scenarios
   (pause/assistant continuation/queue-behind/cancel-while-queued all leave no jobs behind).
   (`retentionSeconds`, which governs still-`created` jobs, cannot be zero. A sufficiently deep or
   blocked backlog can still outlive its 14-day default; startup reconciliation for that remaining

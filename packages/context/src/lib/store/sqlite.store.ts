@@ -1,5 +1,5 @@
 import { Declaration } from '@zukhruf/sqlite-drift';
-import { open } from '@zukhruf/sqlite-open';
+import { SQLITE_ERROR, open, sqliteResultCode } from '@zukhruf/sqlite-open';
 import { transaction } from '@zukhruf/sqlite-transaction';
 import type { DatabaseSync, SQLInputValue, SQLTagStore } from 'node:sqlite';
 import { z } from 'zod';
@@ -190,12 +190,11 @@ export class SearchQuerySyntaxError extends Error {
 }
 
 // FTS5 reads the MATCH text when the statement runs, and rejects a query it
-// cannot parse with SQLITE_ERROR (errcode 1) and one of these messages.
+// cannot parse with SQLITE_ERROR and one of these messages.
 function isFts5QueryError(error: unknown): boolean {
   return (
     Error.isError(error) &&
-    'errcode' in error &&
-    error.errcode === 1 &&
+    sqliteResultCode(error)?.extendedCode === SQLITE_ERROR &&
     /^(fts5: syntax error near |no such column: |unterminated string$|unknown special query: |expected integer, got )/.test(
       error.message,
     )

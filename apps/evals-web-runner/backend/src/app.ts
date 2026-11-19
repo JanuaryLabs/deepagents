@@ -19,7 +19,6 @@ const app = new Hono<AppBindings>()
     timing(),
     cors({
       origin: (origin) => {
-        if (process.env.NODE_ENV === 'development') return origin;
         if (!origin) return '';
         return process.env.ALLOWED_ORIGINS.includes(origin) ? origin : '';
       },

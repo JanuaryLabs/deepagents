@@ -41,10 +41,10 @@ import {
 ## Repository polling helper
 
 ```ts
-import { timebox } from '@zukhruf/testing/async';
+import { waitFor } from '@zukhruf/testing/async';
 ```
 
-Use `timebox(probe, options)` for asynchronous status, conversation, or readiness polling. The probe throws until ready and its successful value becomes the result. Set `maxRetryTime` and `minTimeout` when the test owns a specific timeout or polling cadence. AI SDK does not provide status or conversation polling.
+Use `waitFor(check, { signal: t.signal })` for asynchronous status or conversation polling. The check throws (usually an `assert`) until ready and its successful value becomes the result; the wait ends at the test's limit and rejects with the last check error as its `cause`. Set `interval` when the test owns a polling cadence. A helper without a test context takes the signal from its caller. AI SDK does not provide status or conversation polling.
 
 ## V4 mock models
 

@@ -1,4 +1,4 @@
-import { timebox, waitFor } from '@zukhruf/testing/async';
+import { waitFor } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { MockLanguageModelV4 } from 'ai/test';
 import spawn, { SubprocessError } from 'nano-spawn';
@@ -60,7 +60,7 @@ async function waitForStatus(
   accept: string[],
   signal: AbortSignal,
 ) {
-  return timebox(
+  return waitFor(
     async () => {
       const status = await streamStore.getStreamStatus(id);
       assert.ok(
@@ -70,12 +70,7 @@ async function waitForStatus(
       );
       return status;
     },
-    {
-      minTimeout: 200,
-      signal,
-      maxRetryTime: Number.POSITIVE_INFINITY,
-      shouldRetry: ({ error }) => error instanceof assert.AssertionError,
-    },
+    { signal, interval: 200 },
   );
 }
 

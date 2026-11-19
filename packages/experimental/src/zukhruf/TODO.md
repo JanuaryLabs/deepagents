@@ -87,7 +87,7 @@
       (`pg-boss.turn-queue.ts`). A parked turn awaits its approval indefinitely, zero loss, no
       auto-deny. Accepted consequence: an abandoned approval keeps its parked job forever (bounded;
       folds into per-chat sandbox GC below). Pinned by `pg-boss.turn-queue.retention.test.ts` (incl.
-      a real-time load-bearing proof via `timebox`) and the runtime approval scenarios.
+      a real-time load-bearing proof via `waitFor`) and the runtime approval scenarios.
 - [ ] Cancel-of-paused-turn = deny? (paused stream is terminal; cancel currently no-ops). Codex
       answers it: cancelling while waiting on approval aborts the turn (`core/src/tasks/mod.rs`), so
       agent-backlog #4790 ports that. Current

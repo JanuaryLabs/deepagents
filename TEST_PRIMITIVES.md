@@ -41,16 +41,16 @@ await waitFor(() => assert.equal(messages.length, 2), { signal: t.signal });
 `waitFor` retries every error. On abort it rejects with `t.signal.reason` and the
 last error of the check as its `cause`.
 
-To retry assertion failures while letting other errors, such as a database
-error, fail at once, use `timebox` from `@zukhruf/testing/async` with
-`shouldRetry`, ended by the test's signal instead of a budget of its own:
+`retryUntilReady` from `@zukhruf/testing/async` is for readiness where no test
+context exists, such as opening a store while its server starts. It retries a
+probe on p-retry's options; the `zukhruf/no-assert-in-retry-until-ready` lint
+rule refuses a probe that polls an assertion, which belongs in `waitFor`:
 
 ```ts
-await timebox(async () => assert.equal(await store.status(), 'ready'), {
-  minTimeout: 20,
-  signal: t.signal,
-  maxRetryTime: Number.POSITIVE_INFINITY,
-  shouldRetry: ({ error }) => error instanceof assert.AssertionError,
+await retryUntilReady(() => PostgresStreamStore.create({ pool, schema }), {
+  retries: 9,
+  minTimeout: 100,
+  shouldRetry: ({ error }) => isTransientPostgresStartupError(error),
 });
 ```
 

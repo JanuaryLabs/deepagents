@@ -655,9 +655,9 @@ test('CronCreate with a day of month and an nth weekday runs on whichever comes 
           await runtime.observe(conversation).engine.getMessages(),
         ).parts.find(isToolUIPart)?.output,
       );
-    const wake = [...scheduler.wakes.values()].find(
-      ({ data }) => data.definitionId === output.id,
-    );
+    const wake = scheduler.wakes
+      .values()
+      .find(({ data }) => data.definitionId === output.id);
     return {
       reported: new Date(output.nextRunAt).toISOString(),
       scheduled: wake?.runAt.toISOString(),

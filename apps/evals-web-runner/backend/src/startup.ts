@@ -4,7 +4,6 @@ import z from 'zod';
 import { stringBoolean } from './core/inputs.ts';
 
 const env = z.object({
-  NODE_ENV: z.enum(['development', 'production']).default('development'),
   DEBUG_HTTP_ERRORS: stringBoolean,
   PORT: z.string().optional().default('3000'),
   ALLOWED_ORIGINS: z

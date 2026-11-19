@@ -1,6 +1,6 @@
 import { PGlite } from '@electric-sql/pglite';
 import { untilAborted } from '@zukhruf/async';
-import { waitFor as pollFor, timebox } from '@zukhruf/testing/async';
+import { waitFor as pollFor } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
@@ -82,14 +82,9 @@ async function waitForAsync(
   what: string,
   signal: AbortSignal,
 ) {
-  await timebox(
+  await pollFor(
     async () => assert.ok(await condition(), `timed out waiting for: ${what}`),
-    {
-      minTimeout: 25,
-      signal,
-      maxRetryTime: Number.POSITIVE_INFINITY,
-      shouldRetry: ({ error }) => error instanceof assert.AssertionError,
-    },
+    { signal, interval: 25 },
   );
 }
 

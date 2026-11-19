@@ -6,7 +6,7 @@ import type {
 import { PGlite } from '@electric-sql/pglite';
 import { untilAborted } from '@zukhruf/async';
 import { TemporaryFiles } from '@zukhruf/fs';
-import { timebox, waitFor } from '@zukhruf/testing/async';
+import { waitFor } from '@zukhruf/testing/async';
 import {
   type ToolSet,
   type UIMessage,
@@ -2586,7 +2586,7 @@ describe('zukhruf runtime — background executor', () => {
       conversation,
       turn('after approval'),
     );
-    await timebox(
+    await waitFor(
       async () => {
         const jobs = await h.boss.findJobs(h.queue.queue, {
           key: conversation.chatId,
@@ -2597,12 +2597,7 @@ describe('zukhruf runtime — background executor', () => {
         )?.state;
         assert.equal(parkedState, 'cancelled', 'the follow-up is parked first');
       },
-      {
-        minTimeout: 25,
-        signal: t.signal,
-        maxRetryTime: Number.POSITIVE_INFINITY,
-        shouldRetry: ({ error }) => error instanceof assert.AssertionError,
-      },
+      { interval: 25, signal: t.signal },
     );
 
     await submitApprovalResponses(h.runtime, conversation, {

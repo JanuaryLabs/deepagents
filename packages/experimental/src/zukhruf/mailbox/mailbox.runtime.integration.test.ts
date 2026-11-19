@@ -1,5 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
-import { timebox, waitFor } from '@zukhruf/testing/async';
+import { waitFor } from '@zukhruf/testing/async';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
@@ -107,19 +107,14 @@ async function waitForStatus(
   expected: string,
   signal: AbortSignal,
 ): Promise<void> {
-  await timebox(
+  await waitFor(
     async () =>
       assert.equal(
         await store.getStreamStatus(id),
         expected,
         `timed out waiting for ${id} to become ${expected}`,
       ),
-    {
-      minTimeout: 20,
-      signal,
-      maxRetryTime: Number.POSITIVE_INFINITY,
-      shouldRetry: ({ error }) => error instanceof assert.AssertionError,
-    },
+    { signal, interval: 20 },
   );
 }
 

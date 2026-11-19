@@ -14,7 +14,7 @@ baseline were recorded before source edits, starting from commit `00fd4739`.
   additional native connections use `using`. Product setup stays local.
 - **2205:** the assumption that a conflicting Docker name is immediately
   inspectable, and the consequent missing-container branch in the configuration
-  guard. The existing `timebox` API now waits only for missing inspections;
+  guard. The existing `retryUntilReady` API now waits only for missing inspections;
   ownership and fingerprint validation remain outside that wait.
 
 Evidence for each removal:
@@ -74,7 +74,7 @@ addition is this evidence report. Reindentation accounts for most churn.
 - Installed `nano-spawn` 2.1.0 exposes `SubprocessError` and subprocess options,
   but no coordination/retry or relevant environment/debug hook. Installed
   `p-retry` 8.0.0 exposes `shouldRetry` and `maxRetryTime`; its runtime preserves
-  Error identity. The existing `timebox` supplies polling defaults, so this
+  Error identity. The existing `retryUntilReady` supplies polling defaults, so this
   fix introduces none. Node's `DatabaseSync` and disposable APIs supply SQLite
   lifecycle ownership without new dependencies.
 - Existing design documents and ticket history remain. This report preserves

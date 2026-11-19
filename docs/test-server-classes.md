@@ -36,7 +36,7 @@ Leave unrelated release work and product implementation unchanged.
   `--rm` retain ownership of process coordination and container removal.
 - Native `await using` and `Symbol.asyncDispose` own test scope cleanup; remove
   the callback API and the promises that bridge its lifetime.
-- `p-retry` already supplies polling through the existing `timebox` primitive.
+- `p-retry` already supplies polling through the existing `retryUntilReady` primitive.
   Its public options are retained; no retry mechanism is introduced.
 - `mssql` publicly exposes `ConnectionPool`; retain its connect/query/close
   lifecycle. No container coordination API exists in these installed packages.

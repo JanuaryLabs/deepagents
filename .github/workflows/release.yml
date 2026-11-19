@@ -57,7 +57,8 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
 
-      # The preVersionCommand in nx.json builds the tag:npm:public packages.
+      # The preVersionCommand of @zukhruf/nx/release.json, which nx.json
+      # extends, builds the tag:npm:public packages.
       - name: Version
         if: steps.tested.outputs.current == 'true'
         run: |
