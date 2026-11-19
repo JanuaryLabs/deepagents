@@ -9,7 +9,9 @@
       [timgit/pg-boss#871](https://github.com/timgit/pg-boss/pull/871). Both Docker-gated concurrent
       FIFO regressions pass on real PostgreSQL, and the temporary group claim layer is removed.
 - [x] **Process-kill crash test** — SHIPPED (`queue/crash-recovery.integration.test.ts`, docker-gated): real child worker SIGKILLed mid-turn on real Postgres; heartbeat lapse → monitor fails job → DLQ → `onOrphaned` flips stream `failed` (with error) → chat unblocks → next turn runs; crashed turn never re-ran. ~16s.
-- [ ] Multi-process contract run: two workers on one Postgres — serialization + concurrency cap hold across processes. (The crash test partially covers this: parent + child workers shared one queue.)
+- [x] Multi-process contract run: 'preserves per-chat FIFO across independent consumer instances'
+      runs two PgBoss instances on one real PostgreSQL, and the crash test runs a child-process worker.
+      Concurrency is per consumer by design; the agent thread limit is derived from the database.
 
 ## 2. Hardening
 
@@ -25,7 +27,7 @@
 - [x] **Root metadata initialization CAS**: worker initialization preserves a concurrent host
       metadata write and retries against the fresh snapshot.
 - [ ] **Startup reconciliation sweep**: non-terminal stream rows with no live/queued job → `failed`
-      (covers register→push orphans beyond the retried-message self-heal).
+      (covers register→push orphans beyond the retried-message self-heal). Tracked as agent-backlog #682.
 - [x] **Host cancel reaches the queue**: `interrupt_agent` and `AgentObservation.cancel()` cancel the
       exact queue job as well as the durable stream. Queued copies are removed immediately while
       active work retains FIFO ownership through handler exit.
@@ -86,10 +88,13 @@
       auto-deny. Accepted consequence: an abandoned approval keeps its parked job forever (bounded;
       folds into per-chat sandbox GC below). Pinned by `pg-boss.turn-queue.retention.test.ts` (incl.
       a real-time load-bearing proof via `timebox`) and the runtime approval scenarios.
-- [ ] Cancel-of-paused-turn = deny? (paused stream is terminal; cancel currently no-ops). Current
+- [ ] Cancel-of-paused-turn = deny? (paused stream is terminal; cancel currently no-ops). Codex
+      answers it: cancelling while waiting on approval aborts the turn (`core/src/tasks/mod.rs`), so
+      agent-backlog #4790 ports that. Current
       no-op behavior is now **characterization-tested** (`runtime.integration.test.ts`: "cancelling a
       paused turn is currently a no-op"), so changing it to mean deny is a deliberate, visible break.
-- [ ] Sandbox-bound approval tools (approve-before-bash) — needs per-turn tool factories.
+- [ ] Sandbox-bound approval tools (approve-before-bash). AI SDK `toolApproval` may already gate
+      sandbox tools; agent-backlog #4773 proves it with one test.
 - [ ] run.ts approval showcase.
 - [ ] Regenerate (attempt-level identity split, branches-as-attempts): deferred; design when needed.
 
@@ -174,9 +179,12 @@
 - [ ] Add a host-configurable per-tree agent/residency limit that counts the root, rejects unbounded
       growth deterministically, and unloads only idle terminal/interrupted children with no pending
       mail. Reuse persisted ContextStore history for reload; do not add close/resume model tools.
-- [ ] Per-chat sandbox GC policy (nothing reclaims dead chats' containers).
-- [ ] Queued-turn visibility for observers (resume() can't see unstarted turns;
-      `conversationStatus()` now reports them as `active`).
+      Start with Codex's spawn residency reservation (`reserve_spawn_slot`): agent-backlog #2287.
+- [ ] Per-chat sandbox GC policy (nothing reclaims dead chats' containers). Tracked as
+      agent-backlog #4771, including multi-worker Daytona deletion.
+- [x] Queued-turn visibility for observers: `resume()` reads the head through
+      `TurnQueue.getCurrentTurn`, which includes created (unstarted) jobs, and
+      `conversationStatus()` reports them as `active`.
 - [x] CI: affected tests block merging (`continue-on-error` removed from the test step; the JUnit
       publish step still runs with `if: always()`). The known-red retention re-execution test is
       marked `todo` until agent-backlog #682 replaces it with orphan-terminal coverage.
