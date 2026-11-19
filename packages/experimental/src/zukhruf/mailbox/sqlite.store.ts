@@ -4,6 +4,7 @@ import { transaction } from '@zukhruf/sqlite-transaction';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 
+import { communicationSchema } from './communication-schema.ts';
 import { SETUP, statements } from './ddl.sqlite.ts';
 import {
   type MailboxEndTurnResult,
@@ -17,23 +18,6 @@ import {
 } from './types.ts';
 
 const tables = new Declaration(statements, { rows: 'keep' });
-
-const conversationIdSchema = z.object({
-  chatId: z.string(),
-  userId: z.string(),
-});
-
-/** One `InterAgentCommunication` as `enqueue` serializes it. */
-const communicationSchema = z.object({
-  id: z.string(),
-  type: z.enum(InterAgentCommunicationTypes),
-  author: conversationIdSchema,
-  recipient: conversationIdSchema,
-  otherRecipients: z.array(conversationIdSchema),
-  content: z.string(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-  triggerTurn: z.boolean(),
-}) satisfies z.ZodType<InterAgentCommunication>;
 
 const mailboxItemRowsSchema = z.array(
   z.object({

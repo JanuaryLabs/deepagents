@@ -919,6 +919,7 @@ Ports (the runtime's needs):
 | --------------------- | ---------------------------------------- | --------------------------------------------- |
 | ContextStore          | Postgres                                 | DO storage / D1                               |
 | StreamStore           | Postgres                                 | DO storage                                    |
+| MailboxStore          | Postgres (`PostgresMailboxStore`)        | DO storage                                    |
 | ChangeSource          | `LISTEN/NOTIFY`                          | **absorbed** (DO WebSocket)                   |
 | Queue (pending turns) | Postgres/PgBoss                          | **absorbed** (actor addressability)           |
 | WakeScheduler         | pg-boss `sendAfter()`                    | **absorbed** (DO alarms)                      |
@@ -1000,7 +1001,7 @@ work({concurrency?}) → AsyncDisposable }`.
   `list-agents.ts`, `wait-agent.ts`, and `interrupt-agent.ts` are thin model-facing adapters over
   `AgentControlPlane`. These collaborators and adapters are package-internal; the customer barrel
   exposes the runtime, DSL, domain values, and store/queue ports and adapters.
-- `mailbox/` — caller-owned durable `MailboxStore` / `SqliteMailboxStore`, stable communication IDs,
+- `mailbox/` — caller-owned durable `MailboxStore` / `SqliteMailboxStore` / `PostgresMailboxStore`, stable communication IDs,
   durable-before-wake delivery, FIFO drain, and a transactional begin/enqueue-active/end
   handoff keyed by the active turn's stream ID. This tiny activity record orders queue-only delivery
   across worker processes and rejects stale end-turn attempts; it is not a thread store, execution
