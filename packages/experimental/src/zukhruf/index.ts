@@ -1,6 +1,7 @@
 export * from './agent.ts';
 export * from './control-plane/agent-path.ts';
 export * from './control-plane/agent-thread.ts';
+export { ConversationNotFoundError } from './control-plane/conversation-not-found-error.ts';
 export * from './instructions.ts';
 export * from './mailbox/sqlite.store.ts';
 export * from './mailbox/store.ts';

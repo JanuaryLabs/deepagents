@@ -168,7 +168,10 @@ test('an existing chat can only be used by its stored owner', async () => {
 
   await assert.rejects(
     runtime.enqueue(intruder, userTurn('intruder-turn', 'hello')),
-    /chat "shared-chat" belongs to user "alice", not "bob"/,
+    {
+      name: 'ConversationNotFoundError',
+      message: 'chat "shared-chat" does not exist',
+    },
   );
   assert.equal(queue.turns.length, 0);
   assert.equal(await streamStore.getStreamStatus('intruder-turn'), undefined);
@@ -497,7 +500,10 @@ test('host delivery rejects a recipient that does not own the stored chat', asyn
       }),
       MessageDeliveryModes.TriggerTurn,
     ),
-    /chat "shared-chat" belongs to user "alice", not "bob"/,
+    {
+      name: 'ConversationNotFoundError',
+      message: 'chat "shared-chat" does not exist',
+    },
   );
   assert.equal(await mailboxStore.hasPending(recipient), false);
   assert.equal(queue.turns.length, 0);
@@ -539,7 +545,10 @@ test('explicit cancellation rejects a conversation that does not own the stored 
     runtime
       .observe({ chatId: 'shared-chat', userId: 'bob' })
       .cancel('alice-turn'),
-    /chat "shared-chat" belongs to user "alice", not "bob"/,
+    {
+      name: 'ConversationNotFoundError',
+      message: 'chat "shared-chat" does not exist',
+    },
   );
   assert.equal(await streamStore.getStreamStatus(alice.id), 'queued');
 });

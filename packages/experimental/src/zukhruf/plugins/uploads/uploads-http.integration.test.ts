@@ -175,11 +175,15 @@ async function harness(
   });
   const model = scriptedModel(options.script);
   const queue = new SettlingTurnQueue();
+  const acquisitions: Array<{ chatId: string; userId: string }> = [];
   const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'uploads-agent',
       model,
-      sandbox: defineSandbox(async () => createVirtualSandbox({ fs })),
+      sandbox: defineSandbox(async (context) => {
+        acquisitions.push(context);
+        return createVirtualSandbox({ fs });
+      }),
       instructions: [],
       plugins: [uploaded],
     }),
@@ -211,6 +215,7 @@ async function harness(
     fs,
     model,
     queue,
+    acquisitions,
     uploads: runtime.plugin(uploaded),
     [Symbol.asyncDispose]: () => resources.disposeAsync(),
   };
@@ -482,6 +487,63 @@ test('POST /session/:sessionId/uploads requires a URI-encoded x-upload-filename 
     );
   }
   assert.equal(await sessionDirectoryExists(h.fs, OWNER, sessionId), false);
+});
+
+test("POST /session/:sessionId/uploads answers 404 on another user's session without acquiring its sandbox", async () => {
+  await using h = await harness();
+  const sessionId = randomUUID();
+  const started = await turn(h.app, sessionId, {
+    parts: [{ type: 'text', text: 'Hello' }],
+  });
+  assert.equal(started.status, 202);
+  await h.queue.runNext();
+
+  const response = await upload(h.app, sessionId, {
+    filename: 'pixel.png',
+    user: 'owner-2',
+  });
+  const body = await response.text();
+
+  assert.equal(response.status, 404);
+  assert.equal(
+    errorBodySchema.parse(JSON.parse(body)).cause.code,
+    'zukhruf/session-not-found',
+  );
+  assert.doesNotMatch(body, new RegExp(OWNER));
+  assert.deepEqual(
+    h.acquisitions.filter((context) => context.userId === 'owner-2'),
+    [],
+  );
+  assert.equal(await sessionDirectoryExists(h.fs, 'owner-2', sessionId), false);
+});
+
+test("GET /session/:sessionId/uploads/:fileId answers 404 on another user's session without acquiring its sandbox", async () => {
+  await using h = await harness();
+  const sessionId = randomUUID();
+  const { url } = receiptSchema.parse(
+    await (await upload(h.app, sessionId, { filename: 'pixel.png' })).json(),
+  );
+  const started = await turn(h.app, sessionId, {
+    parts: [{ type: 'text', text: 'Hello' }],
+  });
+  assert.equal(started.status, 202);
+  await h.queue.runNext();
+
+  const response = await request(h.app, new URL(url).pathname, {
+    user: 'owner-2',
+  });
+  const body = await response.text();
+
+  assert.equal(response.status, 404);
+  assert.equal(
+    errorBodySchema.parse(JSON.parse(body)).cause.code,
+    'zukhruf/session-not-found',
+  );
+  assert.doesNotMatch(body, new RegExp(OWNER));
+  assert.deepEqual(
+    h.acquisitions.filter((context) => context.userId === 'owner-2'),
+    [],
+  );
 });
 
 test('GET /session/:sessionId/uploads/:fileId serves the bytes to the owner only', async () => {

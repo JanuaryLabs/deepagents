@@ -15,6 +15,10 @@ import { AgentHistoryForker } from '../control-plane/agent-history-forker.ts';
 import { AgentStatusProjector } from '../control-plane/agent-status-projector.ts';
 import { AgentThread } from '../control-plane/agent-thread.ts';
 import { AgentTurnId } from '../control-plane/agent-turn-id.ts';
+import {
+  ConversationNotFoundError,
+  assertConversationOwner,
+} from '../control-plane/conversation-not-found-error.ts';
 import { MailboxCoordinator } from '../mailbox/coordinator.ts';
 import type { MailboxStore } from '../mailbox/store.ts';
 import type {
@@ -470,11 +474,13 @@ class RuntimeHost implements AsyncDisposable {
         this.subscribeConversationStatus(signal),
       // Borrows the root declaration's sandbox directly: resolving the
       // conversation through the control plane would create its root thread.
-      sandbox: (conversation) =>
-        sandboxes.acquire(this.#root, {
+      sandbox: async (conversation) => {
+        await this.#directory.assertOwnerIfExists(conversation);
+        return sandboxes.acquire(this.#root, {
           chatId: conversation.chatId,
           userId: conversation.userId,
-        }),
+        });
+      },
     };
     resources.use(this.#workers);
   }
@@ -556,12 +562,8 @@ class RuntimeHost implements AsyncDisposable {
     conversation: ConversationId,
   ): Promise<Record<string, unknown> | undefined> {
     const chat = await this.#store.getChat(conversation.chatId);
-    if (!chat) throw new Error(`chat "${conversation.chatId}" not found`);
-    if (chat.userId !== conversation.userId) {
-      throw new Error(
-        `chat "${conversation.chatId}" belongs to user "${chat.userId}", not "${conversation.userId}"`,
-      );
-    }
+    if (!chat) throw new ConversationNotFoundError(conversation.chatId);
+    assertConversationOwner(conversation, chat.userId);
     return chat.metadata;
   }
 
@@ -572,11 +574,7 @@ class RuntimeHost implements AsyncDisposable {
     ) => Record<string, unknown>,
   ): Promise<void> {
     await this.#store.updateChat(conversation.chatId, (chat) => {
-      if (chat.userId !== conversation.userId) {
-        throw new Error(
-          `chat "${conversation.chatId}" belongs to user "${chat.userId}", not "${conversation.userId}"`,
-        );
-      }
+      assertConversationOwner(conversation, chat.userId);
       return { metadata: update(chat.metadata) };
     });
   }

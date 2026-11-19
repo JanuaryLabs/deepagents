@@ -15,6 +15,7 @@ import z from 'zod';
 
 import { elementsSchema } from '@deepagents/elements';
 
+import type { ConversationNotFoundError } from '../../control-plane/conversation-not-found-error.ts';
 import type { ConversationId } from '../../mailbox/types.ts';
 import type {
   AgentHost,
@@ -167,6 +168,19 @@ export function http(
       return context.json(
         { cause: error.cause, error: error.message },
         error.status,
+        NO_STORE,
+      );
+    }
+    if (isConversationNotFoundError(error)) {
+      return context.json(
+        {
+          cause: {
+            code: 'zukhruf/session-not-found',
+            detail: `Session ${error.chatId} does not exist`,
+          },
+          error: 'Session not found',
+        },
+        404,
         NO_STORE,
       );
     }
@@ -585,6 +599,21 @@ async function requireSession(
       detail: `Session ${conversation.chatId} does not exist`,
     },
   });
+}
+
+/**
+ * `name` rather than `instanceof`: this subpath is its own build entry point, so
+ * the main entry's class is a different copy here.
+ */
+function isConversationNotFoundError(
+  error: unknown,
+): error is Pick<ConversationNotFoundError, 'name' | 'message' | 'chatId'> {
+  return (
+    Error.isError(error) &&
+    error.name === 'ConversationNotFoundError' &&
+    'chatId' in error &&
+    typeof error.chatId === 'string'
+  );
 }
 
 function methodNotAllowed(context: Context<HttpEnv>, allow: string): never {
