@@ -1179,6 +1179,68 @@ test('delivers cancellation to a local handler registered after cancel returns',
   }
 });
 
+test('a worker keeps a cancel intent only as long as the existing queue lets a job live, whatever its own expireInSeconds says', async (t) => {
+  const pglite = new PGlite();
+  const boss = new PgBoss({ db: fromPglite(pglite), backend: 'pglite' });
+  boss.on('error', () => {});
+  await boss.start();
+  const running = await PgBossTurnQueue.create(boss, {
+    pollingIntervalSeconds: 0.5,
+    schema: 'pgboss',
+    expireInSeconds: 1,
+  });
+  const cancelling = await PgBossTurnQueue.create(boss, {
+    pollingIntervalSeconds: 0.5,
+    schema: 'pgboss',
+    expireInSeconds: 3600,
+  });
+  const cancelled = ref('stale-cancel-intent', 1);
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const reopenedAborted = Promise.withResolvers<boolean>();
+  let runningWorker: AsyncDisposable | undefined;
+  let cancellingWorker: AsyncDisposable | undefined;
+  try {
+    runningWorker = await running.consume(async () => {
+      started.resolve();
+      await release.promise;
+    }, noOrphans);
+    await running.push(cancelled);
+    await untilAborted(started.promise, t.signal);
+    await cancelling.cancel(cancelled.streamId);
+    release.resolve();
+    await waitForAsync(
+      async () =>
+        (await running.getTurnActivity({
+          chatId: cancelled.chatId,
+          userId: cancelled.userId,
+        })) === 'idle',
+      'the cancelled turn leaves the queue',
+      t.signal,
+    );
+    await runningWorker[Symbol.asyncDispose]();
+    runningWorker = undefined;
+    await sleep(1_500);
+
+    cancellingWorker = await cancelling.consume(async (_turn, context) => {
+      reopenedAborted.resolve(context.signal.aborted);
+    }, noOrphans);
+    await cancelling.push({ ...cancelled });
+
+    assert.equal(
+      await untilAborted(reopenedAborted.promise, t.signal),
+      false,
+      "the reopened turn runs: the intent ended with the queue's 1 s expiration",
+    );
+  } finally {
+    release.resolve();
+    await runningWorker?.[Symbol.asyncDispose]();
+    await cancellingWorker?.[Symbol.asyncDispose]();
+    await boss.stop({ graceful: false });
+    await pglite.close();
+  }
+});
+
 test('a consumer disposed while its claim is in flight hands the claimed turn to the next consumer', async (t) => {
   const pglite = new PGlite();
   const database = fromPglite(pglite);
@@ -1272,7 +1334,12 @@ test('fails fast when a custom-adapter schema is omitted and accepts it explicit
         pollingIntervalSeconds: 0.5,
         schema,
       }),
-      /expireInSeconds must be a finite positive duration/,
+      /expiration cannot exceed 24 hours/,
+    );
+    assert.equal(
+      await boss.getQueue('zukhruf-turns'),
+      null,
+      'a refused expiration never creates the turn queue',
     );
     await assert.rejects(
       PgBossTurnQueue.create(boss, { pollingIntervalSeconds: 0.5 }),
@@ -1298,7 +1365,8 @@ test('fails fast when a custom-adapter schema is omitted and accepts it explicit
     } finally {
       recordCreatedQueues.mock.restore();
     }
-    assert.deepStrictEqual(createdQueues, [queue.deadLetterQueue, queue.queue]);
+    // The rejected call above created the dead-letter queue before pg-boss refused its expiration.
+    assert.deepStrictEqual(createdQueues, [queue.queue]);
     const queued = ref('custom-schema', 1);
     await queue.push(queued);
     await queue.cancel(queued.streamId);
