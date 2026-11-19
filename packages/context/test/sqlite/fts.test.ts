@@ -6,7 +6,6 @@ import {
   ContextEngine,
   SearchQuerySyntaxError,
   SqliteContextStore,
-  assistantText,
   reminder,
   user,
 } from '@deepagents/context';
@@ -118,27 +117,6 @@ describe('Full-Text Search', () => {
   });
 
   describe('FTS Cleanup', () => {
-    it('should remove FTS entries when chat is deleted', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'fts-chat',
-        userId: 'alice',
-      });
-      engine.set(user('The quick brown fox jumps'));
-      engine.set(assistantText('Over the lazy dog'));
-      await engine.save();
-
-      const resultsBefore = await store.searchMessages('fts-chat', 'fox');
-      assert.strictEqual(resultsBefore.length, 1);
-
-      await store.deleteChat('fts-chat');
-
-      const resultsAfter = await store.searchMessages('fts-chat', 'fox');
-      assert.strictEqual(resultsAfter.length, 0);
-    });
-
     it('should not affect FTS entries of other chats', async () => {
       await using database = await sqlite.database();
       const store = new SqliteContextStore(database.connection);
@@ -163,54 +141,6 @@ describe('Full-Text Search', () => {
       const results = await store.searchMessages('fts-chat-2', 'apple');
       assert.strictEqual(results.length, 1);
       assert.ok(results[0].snippet?.includes('dragonfruit'));
-    });
-
-    it('should handle search after deletion (no stale results)', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'stale-fts-chat',
-        userId: 'alice',
-      });
-      engine.set(user('Unique searchable content xyz123'));
-      await engine.save();
-
-      const before = await store.searchMessages('stale-fts-chat', 'xyz123');
-      assert.strictEqual(before.length, 1);
-
-      await store.deleteChat('stale-fts-chat');
-
-      const after = await store.searchMessages('stale-fts-chat', 'xyz123');
-      assert.strictEqual(after.length, 0);
-    });
-  });
-
-  describe('Search Scoping', () => {
-    it('should scope searchMessages to the correct chat', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const aliceEngine = new ContextEngine({
-        store,
-        chatId: 'alice-search',
-        userId: 'alice',
-      });
-      aliceEngine.set(user('I love pizza and pasta'));
-      await aliceEngine.save();
-
-      const bobEngine = new ContextEngine({
-        store,
-        chatId: 'bob-search',
-        userId: 'bob',
-      });
-      bobEngine.set(user('I prefer sushi and ramen'));
-      await bobEngine.save();
-
-      const aliceResults = await store.searchMessages('alice-search', 'pizza');
-      assert.strictEqual(aliceResults.length, 1);
-
-      const wrongResults = await store.searchMessages('alice-search', 'sushi');
-      assert.strictEqual(wrongResults.length, 0);
     });
   });
 

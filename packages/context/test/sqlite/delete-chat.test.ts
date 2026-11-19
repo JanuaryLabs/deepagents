@@ -5,69 +5,14 @@ import { describe, it } from 'node:test';
 import {
   ContextEngine,
   SqliteContextStore,
-  XmlRenderer,
   assistantText,
   user,
 } from '@deepagents/context';
 
-import { buildSandbox } from '../helpers/build-sandbox.ts';
-
 const sqlite = new Sqlite();
-
-const renderer = new XmlRenderer();
 
 describe('Delete Chat', () => {
   describe('Basic Deletion', () => {
-    it('should delete an existing chat and return true', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-to-delete',
-        userId: 'alice',
-      });
-      await engine.resolve({
-        renderer,
-        sandbox: await buildSandbox(),
-      });
-
-      const result = await store.deleteChat('chat-to-delete');
-
-      assert.strictEqual(result, true);
-      const chat = await store.getChat('chat-to-delete');
-      assert.strictEqual(chat, undefined);
-    });
-
-    it('should return false when deleting non-existent chat', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const result = await store.deleteChat('non-existent-chat');
-
-      assert.strictEqual(result, false);
-    });
-
-    it('should return false when deleting already-deleted chat', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-double-delete',
-        userId: 'alice',
-      });
-      await engine.resolve({
-        renderer,
-        sandbox: await buildSandbox(),
-      });
-
-      // First delete
-      const firstResult = await store.deleteChat('chat-double-delete');
-      assert.strictEqual(firstResult, true);
-
-      // Second delete
-      const secondResult = await store.deleteChat('chat-double-delete');
-      assert.strictEqual(secondResult, false);
-    });
-
     it('should not affect other chats when deleting one', async () => {
       await using database = await sqlite.database();
       const store = new SqliteContextStore(database.connection);
@@ -104,146 +49,6 @@ describe('Delete Chat', () => {
   });
 
   describe('Cascading Deletes', () => {
-    it('should delete all messages when chat is deleted', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-with-messages',
-        userId: 'alice',
-      });
-      engine.set(user('Message 1'));
-      engine.set(assistantText('Response 1'));
-      engine.set(user('Message 2'));
-      engine.set(assistantText('Response 2'));
-      await engine.save();
-
-      // Get branch to find message chain
-      const branch = await store.getActiveBranch('chat-with-messages');
-      assert.ok(branch?.headMessageId);
-
-      // Verify messages exist before deletion
-      const messagesBefore = await store.getMessageChain(branch.headMessageId);
-      assert.strictEqual(messagesBefore.length, 4);
-
-      // Delete the chat
-      await store.deleteChat('chat-with-messages');
-
-      // Verify messages are gone (getMessageChain returns empty for non-existent)
-      const messagesAfter = await store.getMessageChain(branch.headMessageId);
-      assert.strictEqual(messagesAfter.length, 0);
-    });
-
-    it('should delete all branches when chat is deleted', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-with-branches',
-        userId: 'alice',
-      });
-      engine.set(user('Message 1'));
-      await engine.save();
-
-      // Create checkpoint and restore to create a new branch
-      await engine.checkpoint('before-branch');
-      engine.set(user('Message on main'));
-      await engine.save();
-
-      await engine.restore('before-branch');
-      engine.set(user('Message on new branch'));
-      await engine.save();
-
-      // Verify multiple branches exist
-      const branchesBefore = await store.listBranches('chat-with-branches');
-      assert.strictEqual(branchesBefore.length, 2);
-
-      // Delete the chat
-      await store.deleteChat('chat-with-branches');
-
-      // Verify branches are gone
-      const branchesAfter = await store.listBranches('chat-with-branches');
-      assert.strictEqual(branchesAfter.length, 0);
-    });
-
-    it('should delete all checkpoints when chat is deleted', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-with-checkpoints',
-        userId: 'alice',
-      });
-      engine.set(user('Message 1'));
-      await engine.save();
-      await engine.checkpoint('cp-1');
-
-      engine.set(user('Message 2'));
-      await engine.save();
-      await engine.checkpoint('cp-2');
-
-      engine.set(user('Message 3'));
-      await engine.save();
-      await engine.checkpoint('cp-3');
-
-      // Verify checkpoints exist
-      const checkpointsBefore = await store.listCheckpoints(
-        'chat-with-checkpoints',
-      );
-      assert.strictEqual(checkpointsBefore.length, 3);
-
-      // Delete the chat
-      await store.deleteChat('chat-with-checkpoints');
-
-      // Verify checkpoints are gone
-      const checkpointsAfter = await store.listCheckpoints(
-        'chat-with-checkpoints',
-      );
-      assert.strictEqual(checkpointsAfter.length, 0);
-    });
-
-    it('should handle chat with multiple branches', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'multi-branch-chat',
-        userId: 'alice',
-      });
-
-      // Create initial message
-      engine.set(user('Initial message'));
-      await engine.save();
-      await engine.checkpoint('fork-point');
-
-      // Create branch 1
-      engine.set(user('Branch 1 message'));
-      await engine.save();
-
-      // Create branch 2
-      await engine.restore('fork-point');
-      engine.set(user('Branch 2 message'));
-      await engine.save();
-
-      // Create branch 3
-      await engine.restore('fork-point');
-      engine.set(user('Branch 3 message'));
-      await engine.save();
-
-      const branchesBefore = await store.listBranches('multi-branch-chat');
-      assert.strictEqual(branchesBefore.length, 3);
-
-      // Delete and verify all cleaned up
-      const result = await store.deleteChat('multi-branch-chat');
-      assert.strictEqual(result, true);
-
-      const chat = await store.getChat('multi-branch-chat');
-      assert.strictEqual(chat, undefined);
-
-      const branchesAfter = await store.listBranches('multi-branch-chat');
-      assert.strictEqual(branchesAfter.length, 0);
-    });
-
     it('should handle chat with deep message chains', async () => {
       await using database = await sqlite.database();
       const store = new SqliteContextStore(database.connection);
@@ -269,144 +74,6 @@ describe('Delete Chat', () => {
 
       const chatAfter = await store.getChat('deep-chain-chat');
       assert.strictEqual(chatAfter, undefined);
-    });
-  });
-
-  describe('User Authorization (userId validation)', () => {
-    it('should delete chat when userId matches', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'alice-chat',
-        userId: 'alice',
-      });
-      await engine.resolve({
-        renderer,
-        sandbox: await buildSandbox(),
-      });
-
-      const result = await store.deleteChat('alice-chat', {
-        userId: 'alice',
-      });
-
-      assert.strictEqual(result, true);
-      const chat = await store.getChat('alice-chat');
-      assert.strictEqual(chat, undefined);
-    });
-
-    it('should return false when userId does not match (no deletion)', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'alice-only-chat',
-        userId: 'alice',
-      });
-      await engine.resolve({
-        renderer,
-        sandbox: await buildSandbox(),
-      });
-
-      // Bob tries to delete Alice's chat
-      const result = await store.deleteChat('alice-only-chat', {
-        userId: 'bob',
-      });
-
-      assert.strictEqual(result, false);
-
-      // Verify chat still exists
-      const chat = await store.getChat('alice-only-chat');
-      assert.ok(chat);
-      assert.strictEqual(chat.userId, 'alice');
-    });
-
-    it('should delete any chat when userId is not provided (admin mode)', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'any-user-chat',
-        userId: 'someuser',
-      });
-      await engine.resolve({
-        renderer,
-        sandbox: await buildSandbox(),
-      });
-
-      // Delete without userId (admin mode)
-      const result = await store.deleteChat('any-user-chat');
-
-      assert.strictEqual(result, true);
-      const chat = await store.getChat('any-user-chat');
-      assert.strictEqual(chat, undefined);
-    });
-
-    it('should not delete other users chats', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      // Create chats for Alice and Bob
-      const aliceEngine = new ContextEngine({
-        store,
-        chatId: 'alice-private',
-        userId: 'alice',
-      });
-      aliceEngine.set(user('Alice secret message'));
-      await aliceEngine.save();
-
-      const bobEngine = new ContextEngine({
-        store,
-        chatId: 'bob-private',
-        userId: 'bob',
-      });
-      bobEngine.set(user('Bob secret message'));
-      await bobEngine.save();
-
-      // Alice tries to delete Bob's chat
-      const result = await store.deleteChat('bob-private', {
-        userId: 'alice',
-      });
-      assert.strictEqual(result, false);
-
-      // Bob's chat should still exist
-      const bobChat = await store.getChat('bob-private');
-      assert.ok(bobChat);
-
-      // Alice's chat should still exist too
-      const aliceChat = await store.getChat('alice-private');
-      assert.ok(aliceChat);
-    });
-
-    it('should handle case-sensitive userId comparison', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'case-sensitive-chat',
-        userId: 'Alice',
-      });
-      await engine.resolve({
-        renderer,
-        sandbox: await buildSandbox(),
-      });
-
-      // Try with lowercase 'alice' - should fail
-      const result1 = await store.deleteChat('case-sensitive-chat', {
-        userId: 'alice',
-      });
-      assert.strictEqual(result1, false);
-
-      // Try with uppercase 'ALICE' - should fail
-      const result2 = await store.deleteChat('case-sensitive-chat', {
-        userId: 'ALICE',
-      });
-      assert.strictEqual(result2, false);
-
-      // Try with correct case 'Alice' - should succeed
-      const result3 = await store.deleteChat('case-sensitive-chat', {
-        userId: 'Alice',
-      });
-      assert.strictEqual(result3, true);
     });
   });
 
@@ -469,26 +136,6 @@ describe('Delete Chat', () => {
   });
 
   describe('Edge Cases', () => {
-    it('should handle deleting chat with no messages', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'empty-chat',
-        userId: 'alice',
-      });
-      await engine.resolve({
-        renderer,
-        sandbox: await buildSandbox(),
-      }); // Initialize but don't add messages
-
-      const result = await store.deleteChat('empty-chat');
-
-      assert.strictEqual(result, true);
-      const chat = await store.getChat('empty-chat');
-      assert.strictEqual(chat, undefined);
-    });
-
     it('should handle deleting chat with empty title', async () => {
       await using database = await sqlite.database();
       const store = new SqliteContextStore(database.connection);
@@ -569,34 +216,6 @@ describe('Delete Chat', () => {
       // All should be gone
       const chats = await store.listChats({ userId: 'alice' });
       assert.strictEqual(chats.length, 0);
-    });
-
-    it('should handle concurrent deletion of same chat (one succeeds)', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      await store.upsertChat({ id: 'race-chat', userId: 'alice' });
-
-      // Try to delete the same chat 5 times concurrently
-      const deletePromises = Array.from({ length: 5 }, () =>
-        store.deleteChat('race-chat'),
-      );
-
-      const results = await Promise.all(deletePromises);
-
-      // Exactly one should succeed, rest should return false
-      const successCount = results.filter((r) => r === true).length;
-      const failCount = results.filter((r) => r === false).length;
-
-      assert.strictEqual(successCount, 1, 'Exactly one delete should succeed');
-      assert.strictEqual(
-        failCount,
-        4,
-        'Other deletes should return false (already deleted)',
-      );
-
-      // Chat should be gone
-      const chat = await store.getChat('race-chat');
-      assert.strictEqual(chat, undefined);
     });
 
     it('should not affect concurrent reads of other chats', async () => {

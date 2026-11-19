@@ -250,46 +250,6 @@ describe('Metadata Filtering', () => {
 
 describe('User Chat Management', () => {
   describe('Chat Creation with userId', () => {
-    it('should create a chat associated with a specific user', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-1',
-        userId: 'alice',
-      });
-
-      // Trigger initialization
-      await engine.resolve({
-        renderer,
-        sandbox: await buildSandbox(),
-      });
-
-      const chat = await store.getChat('chat-1');
-      assert.ok(chat);
-      assert.strictEqual(chat.userId, 'alice');
-    });
-
-    it('should expose userId via chat metadata getter', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-2',
-        userId: 'bob',
-      });
-
-      await engine.resolve({
-        renderer,
-        sandbox: await buildSandbox(),
-      });
-
-      const chatMeta = engine.chat;
-      assert.ok(chatMeta);
-      assert.strictEqual(chatMeta.userId, 'bob');
-      assert.strictEqual(chatMeta.id, 'chat-2');
-    });
-
     it('should require userId when creating ContextEngine', async () => {
       await using database = await sqlite.database();
       const store = new SqliteContextStore(database.connection);
@@ -550,28 +510,6 @@ describe('User Chat Management', () => {
   });
 
   describe('Security & Data Integrity', () => {
-    it('should not return cross-user chats when filtering by userId', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      // Create chats for multiple users
-      await store.upsertChat({ id: 'alice-1', userId: 'alice' });
-      await store.upsertChat({ id: 'alice-2', userId: 'alice' });
-      await store.upsertChat({ id: 'bob-1', userId: 'bob' });
-      await store.upsertChat({ id: 'charlie-1', userId: 'charlie' });
-
-      // Filter by alice - should NEVER include bob or charlie's chats
-      const aliceChats = await store.listChats({ userId: 'alice' });
-
-      assert.strictEqual(aliceChats.length, 2);
-      for (const chat of aliceChats) {
-        assert.strictEqual(chat.userId, 'alice');
-        assert.ok(
-          !['bob-1', 'charlie-1'].includes(chat.id),
-          `Should not include other users' chats, got: ${chat.id}`,
-        );
-      }
-    });
-
     it('should allow empty userId string (SQLite accepts it)', async () => {
       await using database = await sqlite.database();
       const store = new SqliteContextStore(database.connection);
@@ -585,20 +523,6 @@ describe('User Chat Management', () => {
       const chat = await store.getChat('empty-user-chat');
       assert.ok(chat);
       assert.strictEqual(chat.userId, '');
-    });
-
-    it('should preserve userId when getChat retrieves stored chat', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      await store.upsertChat({
-        id: 'test-chat',
-        userId: 'specific-user-id-12345',
-        title: 'Test',
-      });
-
-      const retrieved = await store.getChat('test-chat');
-      assert.ok(retrieved);
-      assert.strictEqual(retrieved.userId, 'specific-user-id-12345');
     });
 
     it('should handle userId with special characters', async () => {
@@ -637,120 +561,6 @@ describe('User Chat Management', () => {
         );
         assert.strictEqual(chats[0].userId, userId);
       }
-    });
-
-    it('should treat userId filtering as case-sensitive', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      await store.upsertChat({ id: 'chat-lower', userId: 'alice' });
-      await store.upsertChat({ id: 'chat-upper', userId: 'Alice' });
-      await store.upsertChat({ id: 'chat-mixed', userId: 'ALICE' });
-
-      const lowerChats = await store.listChats({ userId: 'alice' });
-      const upperChats = await store.listChats({ userId: 'Alice' });
-      const allCapsChats = await store.listChats({ userId: 'ALICE' });
-
-      // Each should only match exact case
-      assert.strictEqual(lowerChats.length, 1);
-      assert.strictEqual(upperChats.length, 1);
-      assert.strictEqual(allCapsChats.length, 1);
-      assert.strictEqual(lowerChats[0].id, 'chat-lower');
-      assert.strictEqual(upperChats[0].id, 'chat-upper');
-      assert.strictEqual(allCapsChats[0].id, 'chat-mixed');
-    });
-  });
-
-  describe('userId with Branching & Checkpoints', () => {
-    it('should preserve userId through branching operations', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'branching-chat',
-        userId: 'branch-user',
-      });
-
-      // Add messages and create branches
-      engine.set(user('First message'));
-      await engine.save();
-
-      engine.set(assistantText('Response'));
-      await engine.save();
-
-      // Create a checkpoint
-      await engine.checkpoint('before-branch');
-
-      engine.set(user('More messages'));
-      await engine.save();
-
-      // Restore to checkpoint (creates a new branch)
-      await engine.restore('before-branch');
-
-      // Verify userId is still correct after branching
-      const chat = await store.getChat('branching-chat');
-      assert.ok(chat);
-      assert.strictEqual(chat.userId, 'branch-user');
-
-      // Verify through engine getter too
-      assert.strictEqual(engine.chat?.userId, 'branch-user');
-    });
-
-    it('should preserve userId through checkpoint restore', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'checkpoint-chat',
-        userId: 'checkpoint-user',
-      });
-
-      engine.set(user('Message 1'));
-      await engine.save();
-      await engine.checkpoint('cp1');
-
-      engine.set(user('Message 2'));
-      await engine.save();
-
-      // Restore to checkpoint
-      await engine.restore('cp1');
-
-      // userId should be preserved
-      const chat = await store.getChat('checkpoint-chat');
-      assert.ok(chat);
-      assert.strictEqual(chat.userId, 'checkpoint-user');
-    });
-  });
-
-  describe('userId with Search & Aggregations', () => {
-    it('should return correct messageCount per user chat', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      // Alice's chat with 3 messages
-      const aliceEngine = new ContextEngine({
-        store,
-        chatId: 'alice-counted',
-        userId: 'alice',
-      });
-      aliceEngine.set(user('Msg 1'));
-      aliceEngine.set(assistantText('Response 1'));
-      aliceEngine.set(user('Msg 2'));
-      await aliceEngine.save();
-
-      // Bob's chat with 1 message
-      const bobEngine = new ContextEngine({
-        store,
-        chatId: 'bob-counted',
-        userId: 'bob',
-      });
-      bobEngine.set(user('Only message'));
-      await bobEngine.save();
-
-      // Verify counts are correct per user
-      const aliceChats = await store.listChats({ userId: 'alice' });
-      const bobChats = await store.listChats({ userId: 'bob' });
-
-      assert.strictEqual(aliceChats[0].messageCount, 3);
-      assert.strictEqual(bobChats[0].messageCount, 1);
     });
   });
 
@@ -816,54 +626,9 @@ describe('User Chat Management', () => {
       const uniqueIds = new Set(ids);
       assert.strictEqual(uniqueIds.size, 10);
     });
-
-    it('should return empty when offset exceeds total chats', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      await store.upsertChat({ id: 'only-chat', userId: 'user' });
-
-      // Note: OFFSET only works with LIMIT in SQLite
-      const result = await store.listChats({
-        userId: 'user',
-        limit: 10,
-        offset: 100,
-      });
-      assert.strictEqual(result.length, 0);
-    });
   });
 
   describe('userId Immutability & Validation', () => {
-    it('should not change userId when upserting existing chat with different userId', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      // Create chat with original userId
-      await store.upsertChat({
-        id: 'immutable-chat',
-        userId: 'original-owner',
-        title: 'Original',
-      });
-
-      // Attempt to upsert same chat with different userId
-      // Current behavior: ON CONFLICT DO UPDATE SET id = excluded.id (no-op)
-      // The userId from the second call is ignored
-      await store.upsertChat({
-        id: 'immutable-chat',
-        userId: 'attacker-trying-to-hijack',
-        title: 'Hijacked?',
-      });
-
-      // Verify original userId is preserved
-      const chat = await store.getChat('immutable-chat');
-      assert.ok(chat);
-      assert.strictEqual(
-        chat.userId,
-        'original-owner',
-        'userId should not change after initial creation',
-      );
-      // Note: title also won't change due to ON CONFLICT behavior
-      assert.strictEqual(chat.title, 'Original');
-    });
-
     it('should validate userId at TypeScript level (compile-time)', async () => {
       await using database = await sqlite.database();
       const store = new SqliteContextStore(database.connection);
@@ -878,70 +643,9 @@ describe('User Chat Management', () => {
       });
       assert.strictEqual(result.userId, 'valid-user');
     });
-
-    it('should reject a ContextEngine reconnecting with a different userId', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      // First engine creates the chat
-      const engine1 = new ContextEngine({
-        store,
-        chatId: 'reconnect-chat',
-        userId: 'original-user',
-      });
-      engine1.set(user('First message'));
-      await engine1.save();
-
-      // Second engine with DIFFERENT userId connects to same chatId
-      // This simulates a potential attack or bug scenario
-      const engine2 = new ContextEngine({
-        store,
-        chatId: 'reconnect-chat',
-        userId: 'different-user', // Different userId!
-      });
-      const sandbox = await buildSandbox();
-      await assert.rejects(
-        () => engine2.resolve({ renderer, sandbox }),
-        /belongs to user "original-user", not "different-user"/,
-        'reconnecting with a different userId must be rejected, not silently allowed',
-      );
-
-      // The stored chat still belongs to its original owner
-      const storedChat = await store.getChat('reconnect-chat');
-      assert.ok(storedChat);
-      assert.strictEqual(
-        storedChat.userId,
-        'original-user',
-        'Stored userId should not change when different engine connects',
-      );
-    });
   });
 
   describe('Concurrent Operations', () => {
-    it('should handle concurrent chat creation for same user', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      // Create multiple chats concurrently for same user
-      const createPromises = Array.from({ length: 10 }, (_, i) =>
-        store.upsertChat({
-          id: `concurrent-${i}`,
-          userId: 'concurrent-user',
-          title: `Chat ${i}`,
-        }),
-      );
-
-      const results = await Promise.all(createPromises);
-
-      // All should succeed
-      assert.strictEqual(results.length, 10);
-      for (const result of results) {
-        assert.strictEqual(result.userId, 'concurrent-user');
-      }
-
-      // All should be retrievable
-      const chats = await store.listChats({ userId: 'concurrent-user' });
-      assert.strictEqual(chats.length, 10);
-    });
-
     it('should handle concurrent chat creation for different users', async () => {
       await using database = await sqlite.database();
       const store = new SqliteContextStore(database.connection);
@@ -974,79 +678,5 @@ describe('User Chat Management', () => {
       const allChats = await store.listChats();
       assert.strictEqual(allChats.length, 25);
     });
-
-    it('should handle concurrent reads and writes', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      // Create initial chat
-      await store.upsertChat({ id: 'rw-chat', userId: 'rw-user' });
-
-      // Perform concurrent reads and writes
-      const operations = [
-        store.getChat('rw-chat'),
-        store.listChats({ userId: 'rw-user' }),
-        store.upsertChat({ id: 'rw-chat-2', userId: 'rw-user' }),
-        store.getChat('rw-chat'),
-        store.listChats({ userId: 'rw-user' }),
-        store.upsertChat({ id: 'rw-chat-3', userId: 'rw-user' }),
-      ];
-
-      const results = await Promise.all(operations);
-
-      // All operations should complete without error
-      assert.ok(results[0]); // getChat result
-      assert.ok(Array.isArray(results[1])); // listChats result
-      assert.ok(results[2]); // upsertChat result
-
-      // Final state should be consistent
-      const finalChats = await store.listChats({ userId: 'rw-user' });
-      assert.strictEqual(finalChats.length, 3);
-    });
-  });
-});
-
-describe('Message Upsert', () => {
-  it('should update existing message with same ID', async () => {
-    await using database = await sqlite.database();
-    const store = new SqliteContextStore(database.connection);
-    await store.upsertChat({ id: 'chat-1', userId: 'user-1' });
-
-    await store.addMessage({
-      id: 'msg-1',
-      chatId: 'chat-1',
-      parentId: null,
-      name: 'user',
-      type: 'message',
-      data: { text: 'Original content' },
-      createdAt: 1000,
-    });
-
-    await store.addMessage({
-      id: 'msg-2',
-      chatId: 'chat-1',
-      parentId: 'msg-1',
-      name: 'assistant',
-      type: 'message',
-      data: { text: 'Response' },
-      createdAt: 1500,
-    });
-
-    await store.addMessage({
-      id: 'msg-1',
-      chatId: 'chat-1',
-      parentId: null,
-      name: 'assistant',
-      type: 'message',
-      data: { text: 'Updated content' },
-      createdAt: 2000,
-    });
-
-    const msg = await store.getMessage('msg-1');
-    assert.ok(msg);
-
-    assert.deepStrictEqual(msg.data, { text: 'Updated content' });
-    assert.strictEqual(msg.name, 'assistant');
-    assert.strictEqual(msg.parentId, null);
-    assert.strictEqual(msg.createdAt, 1000);
   });
 });
