@@ -1,5 +1,4 @@
 import { useFumadocsLoader } from 'fumadocs-core/source/client';
-import browserCollections from 'fumadocs-mdx:collections/browser';
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 // import { DocsLayout } from 'fumadocs-ui/layouts/notebook';
 import { DocsLayout } from 'fumadocs-ui/layouts/docs';
@@ -10,10 +9,11 @@ import {
   DocsPage,
   DocsTitle,
 } from 'fumadocs-ui/page';
-import type { Route } from '~routes/routes/+types/docs.ts';
 
+import browserCollections from '../../.source/browser.ts';
 import { baseOptions } from '../layout.shared.tsx';
 import { source } from '../source.ts';
+import type { Route } from './+types/docs.ts';
 
 export async function loader({ params }: Route.LoaderArgs) {
   const slugs = params['*']?.split('/').filter((v) => v.length > 0);

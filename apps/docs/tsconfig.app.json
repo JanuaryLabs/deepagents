@@ -10,11 +10,7 @@
     "target": "ES2022",
     "allowJs": true,
     "tsBuildInfoFile": "dist/tsconfig.app.tsbuildinfo",
-    "rootDirs": [".", ".react-router/types"],
-    "paths": {
-      "fumadocs-mdx:collections/*": ["./.source/*"],
-      "~routes/*": ["./.react-router/types/app/*"]
-    }
+    "rootDirs": [".", ".react-router/types"]
   },
   "include": [
     "app",
