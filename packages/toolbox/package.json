@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/toolbox",
-  "version": "7.7.0",
+  "version": "7.7.1",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -41,7 +41,7 @@
   "dependencies": {
     "@ai-sdk/provider": "^4.0.37",
     "@ai-sdk/provider-utils": "^5.0.76",
-    "@deepagents/retrieval": "7.7.0",
+    "@deepagents/retrieval": "7.7.1",
     "@zukhruf/docker": "^0.8.33",
     "ai": "^7.0.166",
     "duck-duck-scrape": "^2.2.7",
