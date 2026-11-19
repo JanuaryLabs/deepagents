@@ -414,6 +414,10 @@ delivery to an idle target still never schedules work.
 
 ### Intentional differences from Codex
 
+- **The shell tool follows the AI SDK, not Codex.** Codex exposes `exec_command` (`cmd`, `workdir`,
+  plain-text output with wall time and exit code, yield-after-10s sessions with `write_stdin`).
+  Zukhruf's `bash` tool follows `@ai-sdk/tool-bash` instead (user decision, 2026-11-19), so the
+  tool-parity work for the shell aligns with that package rather than with Codex.
 - **Pending mail is durable.** Codex currently keeps a session-local `VecDeque` and makes mail
   durable only after consumption into rollout/history. Zukhruf enqueue and work may run in different
   processes, so `SqliteMailboxStore` persists pending envelopes and proves survival across store
