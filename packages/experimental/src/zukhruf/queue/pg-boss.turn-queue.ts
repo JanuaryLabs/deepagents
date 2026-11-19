@@ -269,18 +269,18 @@ export class PgBossTurnQueue extends TurnQueue {
   override async cancel(streamId: string): Promise<void> {
     this.#rememberCancelIntent(streamId);
     this.#abortLocal(streamId);
-    const jobs = await this.#boss.findJobs<TurnRef>(this.#queue, {
-      data: { streamId },
-    });
+    const queued = (
+      await this.#boss.findJobs<TurnRef>(this.#queue, {
+        data: { streamId },
+        queued: true,
+      })
+    ).map((job) => job.id);
     // An active row must retain the strict-FIFO key until its handler exits.
     // Delete only rows that are still queued at mutation time: a worker may
     // claim one after findJobs() returns, and pg-boss's public cancel/delete
     // methods do not provide the state predicate needed to close that race.
     // Remote active handlers are stopped by the runtime's durable stream
     // cancellation; their normal handler exit performs commit-driven GC.
-    const queued = jobs
-      .filter((job) => job.state === 'created' || job.state === 'retry')
-      .map((job) => job.id);
     if (queued.length > 0) await this.#deleteIfStillQueued(queued);
 
     // Close the inverse race too: a local worker can claim after the first
