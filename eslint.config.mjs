@@ -19,6 +19,7 @@ export default defineConfig(
       'zukhruf/tests',
       'zukhruf/react',
       'zukhruf/hono',
+      'zukhruf/github-actions',
       'manifest/recommended',
     ],
   },
