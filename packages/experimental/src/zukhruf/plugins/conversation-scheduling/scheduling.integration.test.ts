@@ -612,6 +612,80 @@ test('CronCreate reports the exact next run and timezone for a one-shot cron', a
   });
 });
 
+test('CronCreate with a day of month and an nth weekday runs on whichever comes first', async () => {
+  const clock = createClock(new Date('2026-01-01T00:00:00Z').getTime());
+
+  const scheduler = new RecordingWakeScheduler();
+  using h = disposableHarness(scheduler);
+  const fifteenthOrFirstMonday = {
+    name: 'CronCreate',
+    input: { cron: '0 9 15 * 1#1', prompt: 'monthly report', recurring: true },
+  };
+  const commands = new Map<string, { name: string; input: unknown }>([
+    ['create on new year', fifteenthOrFirstMonday],
+    ['create after the first monday', fifteenthOrFirstMonday],
+  ]);
+  const runtime = await new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: toolModel(commands, []),
+      sandbox: buildSandbox,
+      instructions: [],
+      plugins: [conversationScheduling()],
+    }),
+  ).initialize(
+    defineStack(async () => ({
+      ...h,
+      bindings: [
+        conversationSchedulingCapabilities.scheduler.bind(scheduler),
+        conversationSchedulingCapabilities.timezone.bind('UTC'),
+        conversationSchedulingCapabilities.clock.bind(clock),
+      ],
+    })),
+  );
+  await using _worker = await runtime.work();
+  void _worker;
+  const nextRun = async (chatId: string, prompt: string) => {
+    const conversation = { chatId, userId: 'user-1' };
+    await runTurn(runtime, h.queue, conversation, prompt);
+    const output = z
+      .object({ id: z.string(), nextRunAt: z.number() })
+      .parse(
+        last(
+          await runtime.observe(conversation).engine.getMessages(),
+        ).parts.find(isToolUIPart)?.output,
+      );
+    const wake = [...scheduler.wakes.values()].find(
+      ({ data }) => data.definitionId === output.id,
+    );
+    return {
+      reported: new Date(output.nextRunAt).toISOString(),
+      scheduled: wake?.runAt.toISOString(),
+    };
+  };
+
+  const firstMondayFirst = await nextRun('new-year', 'create on new year');
+  clock.setSystemTime(new Date('2026-01-06T00:00:00Z').getTime());
+  const fifteenthFirst = await nextRun(
+    'after-first-monday',
+    'create after the first monday',
+  );
+
+  assert.deepStrictEqual(
+    { firstMondayFirst, fifteenthFirst },
+    {
+      firstMondayFirst: {
+        reported: '2026-01-05T09:00:00.000Z',
+        scheduled: '2026-01-05T09:00:00.000Z',
+      },
+      fifteenthFirst: {
+        reported: '2026-01-15T09:00:00.000Z',
+        scheduled: '2026-01-15T09:00:00.000Z',
+      },
+    },
+  );
+});
+
 test('parallel model tool calls preserve concurrent cron creates and deletes', async () => {
   const scheduler = new RecordingWakeScheduler();
   using h = disposableHarness(scheduler);

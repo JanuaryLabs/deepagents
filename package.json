@@ -140,7 +140,7 @@
     "babel-plugin-react-compiler": "^1.0.0",
     "chrome-devtools-mcp": "^1.9.0",
     "conf": "^15.1.0",
-    "cron-parser": "^5.6.2",
+    "cron-parser": "^5.10.6",
     "date-fns": "^4.4.0",
     "debug": "^4.4.3",
     "dedent": "^1.7.2",
