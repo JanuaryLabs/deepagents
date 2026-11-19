@@ -1,7 +1,9 @@
+import { waitFor } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
+import pg from 'pg';
 
 import { PostgresContextStore } from '@deepagents/context';
 
@@ -14,6 +16,51 @@ const testPostgres = new Postgres({ environment: process.env });
  * Tests fail explicitly if Docker is not available.
  */
 describe('PostgreSQL ContextStore Integration', () => {
+  describe('Transactions', () => {
+    it('rejects with the error that ended the transaction when its connection dies, not with the failed rollback', async (t) => {
+      await using container = await testPostgres.database();
+      const pool = new pg.Pool({
+        connectionString: container.connectionString,
+        application_name: 'store-under-test',
+      });
+      const blocker = new pg.Client({
+        connectionString: container.connectionString,
+      });
+      await blocker.connect();
+      try {
+        const store = await PostgresContextStore.create({ pool });
+        await store.createChat({ id: 'chat-tx', userId: 'user-1' });
+        await blocker.query('BEGIN');
+        await blocker.query(
+          'SELECT 1 FROM "public"."chats" WHERE id = $1 FOR UPDATE',
+          ['chat-tx'],
+        );
+
+        const update = store.updateChat('chat-tx', () => ({
+          title: 'renamed',
+        }));
+        const waiting = await waitFor(
+          async () => {
+            const { rows } = await blocker.query<{ pid: number }>(
+              `SELECT pid FROM pg_stat_activity
+                WHERE application_name = 'store-under-test'
+                  AND wait_event_type = 'Lock'`,
+            );
+            assert.strictEqual(rows.length, 1);
+            return rows[0].pid;
+          },
+          { signal: t.signal },
+        );
+        await blocker.query('SELECT pg_terminate_backend($1)', [waiting]);
+
+        await assert.rejects(update, { code: '57P01' });
+      } finally {
+        await blocker.end();
+        await pool.end();
+      }
+    });
+  });
+
   describe('Opening', () => {
     it('opens an existing schema while other stores open it at the same time', async () => {
       await using container = await testPostgres.database();

@@ -1,10 +1,11 @@
 import { createRequire } from 'node:module';
-import type { Pool, PoolClient, PoolConfig } from 'pg';
+import type { Pool, PoolConfig } from 'pg';
 import { z } from 'zod';
 
 import { bigintColumn, jsonObject } from './columns.ts';
 import { storeDDL } from './ddl.postgres.ts';
 import { lockSchemaDDL } from './postgres-schema-lock.ts';
+import { postgresTransaction } from './postgres-transaction.ts';
 import type {
   BranchData,
   BranchInfo,
@@ -264,25 +265,6 @@ export class PostgresContextStore extends ContextStore {
   }
 
   /**
-   * Execute a function within a transaction.
-   * Automatically commits on success or rolls back on error.
-   */
-  async #useTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-    const client = await this.#pool.connect();
-    try {
-      await client.query('BEGIN');
-      const result = await fn(client);
-      await client.query('COMMIT');
-      return result;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
-  }
-
-  /**
    * Execute a query using the pool (no transaction).
    */
   async #query(sql: string, params?: unknown[]): Promise<unknown[]> {
@@ -316,7 +298,7 @@ export class PostgresContextStore extends ContextStore {
   // ==========================================================================
 
   async createChat(chat: ChatData): Promise<StoredChatData> {
-    return this.#useTransaction(async (client) => {
+    return postgresTransaction(this.#pool, async (client) => {
       const result = await client.query(
         `INSERT INTO ${this.#t('chats')} (id, userId, title, metadata)
          VALUES ($1, $2, $3, $4)
@@ -341,7 +323,7 @@ export class PostgresContextStore extends ContextStore {
   }
 
   async upsertChat(chat: ChatData): Promise<StoredChatData> {
-    return this.#useTransaction(async (client) => {
+    return postgresTransaction(this.#pool, async (client) => {
       const result = await client.query(
         `INSERT INTO ${this.#t('chats')} (id, userId, title, metadata)
          VALUES ($1, $2, $3, $4)
@@ -380,7 +362,7 @@ export class PostgresContextStore extends ContextStore {
     chatId: string,
     update: ChatUpdater,
   ): Promise<StoredChatData> {
-    return this.#useTransaction(async (client) => {
+    return postgresTransaction(this.#pool, async (client) => {
       const result = await client.query(
         `SELECT * FROM ${this.#t('chats')} WHERE id = $1 FOR UPDATE`,
         [chatId],
@@ -472,7 +454,7 @@ export class PostgresContextStore extends ContextStore {
     chatId: string,
     options?: DeleteChatOptions,
   ): Promise<boolean> {
-    return this.#useTransaction(async (client) => {
+    return postgresTransaction(this.#pool, async (client) => {
       let sql = `DELETE FROM ${this.#t('chats')} WHERE id = $1`;
       const params: unknown[] = [chatId];
 
@@ -495,7 +477,7 @@ export class PostgresContextStore extends ContextStore {
       throw new Error(`Message ${message.id} cannot be its own parent`);
     }
 
-    await this.#useTransaction(async (client) => {
+    await postgresTransaction(this.#pool, async (client) => {
       await client.query(
         `INSERT INTO ${this.#t('messages')} (id, chatId, parentId, name, type, data, createdAt)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -637,7 +619,7 @@ export class PostgresContextStore extends ContextStore {
   }
 
   async setActiveBranch(chatId: string, branchId: string): Promise<void> {
-    await this.#useTransaction(async (client) => {
+    await postgresTransaction(this.#pool, async (client) => {
       await client.query(
         `UPDATE ${this.#t('branches')} SET isActive = FALSE WHERE chatId = $1`,
         [chatId],

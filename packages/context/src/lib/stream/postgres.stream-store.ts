@@ -1,9 +1,10 @@
 import { createRequire } from 'node:module';
-import type { Pool, PoolClient, PoolConfig } from 'pg';
+import type { Pool, PoolConfig } from 'pg';
 import { z } from 'zod';
 
 import { bigintColumn } from '../store/columns.ts';
 import { lockSchemaDDL } from '../store/postgres-schema-lock.ts';
+import { postgresTransaction } from '../store/postgres-transaction.ts';
 import { postgresStreamDDL } from './ddl.stream.postgres.ts';
 import { streamStatus, toStreamPart } from './rows.ts';
 import type {
@@ -133,21 +134,6 @@ export class PostgresStreamStore extends StreamStore {
     return z.array(row).parse(await this.#query(sql, params));
   }
 
-  async #useTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-    const client = await this.#pool.connect();
-    try {
-      await client.query('BEGIN');
-      const result = await fn(client);
-      await client.query('COMMIT');
-      return result;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
-  }
-
   async createStream(stream: StreamData): Promise<void> {
     await this.#query(
       `INSERT INTO ${this.#t('streams')}
@@ -220,7 +206,7 @@ export class PostgresStreamStore extends StreamStore {
     streamId: string,
     update: StreamUpdater,
   ): Promise<StreamUpdateResult> {
-    return this.#useTransaction(async (client) => {
+    return postgresTransaction(this.#pool, async (client) => {
       const selected = await client.query(
         `SELECT * FROM ${this.#t('streams')} WHERE id = $1 FOR UPDATE`,
         [streamId],
@@ -332,7 +318,7 @@ export class PostgresStreamStore extends StreamStore {
       return;
     }
 
-    await this.#useTransaction(async (client) => {
+    await postgresTransaction(this.#pool, async (client) => {
       await client.query(insertSql, params);
       const failedAt = Date.now();
       for (const failure of failures) {
@@ -393,7 +379,7 @@ export class PostgresStreamStore extends StreamStore {
   }
 
   async reopenStream(streamId: string): Promise<StreamData> {
-    return this.#useTransaction(async (client) => {
+    return postgresTransaction(this.#pool, async (client) => {
       const result = await client.query(
         `SELECT * FROM ${this.#t('streams')} WHERE id = $1 FOR UPDATE`,
         [streamId],
