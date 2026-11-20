@@ -880,8 +880,23 @@ export class TomlRenderer extends ContextRenderer {
     return '';
   }
 
+  static readonly #shortEscapes: Record<string, string> = {
+    '\b': '\\b',
+    '\t': '\\t',
+    '\n': '\\n',
+    '\f': '\\f',
+    '\r': '\\r',
+    '"': '\\"',
+    '\\': '\\\\',
+  };
+
   #escape(value: string): string {
-    return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return value.replace(
+      /[\p{Cc}"\\]/gu,
+      (char) =>
+        TomlRenderer.#shortEscapes[char] ??
+        `\\u${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`,
+    );
   }
 
   #formatValue(value: unknown): string {

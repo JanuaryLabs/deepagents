@@ -89,6 +89,80 @@ describe('TomlRenderer', () => {
       const result = renderer.render(fragments);
       assert.strictEqual(result, 'complex = "path: \\"C:\\\\test\\""');
     });
+
+    it('escapes a newline', () => {
+      const renderer = new TomlRenderer();
+      const fragments: ContextFragment[] = [
+        { name: 'text', data: 'line one\nline two' },
+      ];
+      const result = renderer.render(fragments);
+      assert.strictEqual(result, 'text = "line one\\nline two"');
+    });
+
+    it('escapes a carriage return', () => {
+      const renderer = new TomlRenderer();
+      const fragments: ContextFragment[] = [{ name: 'text', data: 'a\r\nb' }];
+      const result = renderer.render(fragments);
+      assert.strictEqual(result, 'text = "a\\r\\nb"');
+    });
+
+    it('escapes a tab', () => {
+      const renderer = new TomlRenderer();
+      const fragments: ContextFragment[] = [{ name: 'text', data: 'a\tb' }];
+      const result = renderer.render(fragments);
+      assert.strictEqual(result, 'text = "a\\tb"');
+    });
+
+    it('escapes a backspace', () => {
+      const renderer = new TomlRenderer();
+      const fragments: ContextFragment[] = [{ name: 'text', data: 'a\bb' }];
+      const result = renderer.render(fragments);
+      assert.strictEqual(result, 'text = "a\\bb"');
+    });
+
+    it('escapes a form feed', () => {
+      const renderer = new TomlRenderer();
+      const fragments: ContextFragment[] = [{ name: 'text', data: 'a\fb' }];
+      const result = renderer.render(fragments);
+      assert.strictEqual(result, 'text = "a\\fb"');
+    });
+
+    it('escapes other control characters as \\uXXXX', () => {
+      const renderer = new TomlRenderer();
+      const fragments: ContextFragment[] = [
+        { name: 'text', data: 'a\u0000b\u0001c\u001fd\u007fe' },
+      ];
+      const result = renderer.render(fragments);
+      assert.strictEqual(result, 'text = "a\\u0000b\\u0001c\\u001Fd\\u007Fe"');
+    });
+
+    it('keeps a literal backslash-n distinct from a newline', () => {
+      const renderer = new TomlRenderer();
+      const fragments: ContextFragment[] = [{ name: 'text', data: 'a\\nb\nc' }];
+      const result = renderer.render(fragments);
+      assert.strictEqual(result, 'text = "a\\\\nb\\nc"');
+    });
+
+    it('escapes control characters in array items', () => {
+      const renderer = new TomlRenderer();
+      const fragments: ContextFragment[] = [
+        { name: 'lines', data: ['a\nb', 'c\td'] },
+      ];
+      const result = renderer.render(fragments);
+      assert.strictEqual(result, 'lines = ["a\\nb", "c\\td"]');
+    });
+
+    it('escapes control characters in object values', () => {
+      const renderer = new TomlRenderer();
+      const fragments: ContextFragment[] = [
+        { name: 'config', data: { note: 'x\ny' } },
+      ];
+      const result = renderer.render(fragments);
+      assert.deepStrictEqual(result.split('\n'), [
+        '[config]',
+        'note = "x\\ny"',
+      ]);
+    });
   });
 
   describe('object data', () => {
