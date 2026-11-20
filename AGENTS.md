@@ -112,6 +112,13 @@ A local-first RAG (Retrieval-Augmented Generation) system that ingests content f
 
 **Main Exports:** `ingest`, `similaritySearch`, `FastEmbed`, `SqliteStore`
 
+### React chat UI (`packages/react`)
+
+`@deepagents/react-input` is the headless chat composer (the `Composer` parts in `./browser`). `@deepagents/react-genai` gives them the chat kit's look (`ChatComposer`).
+
+- A chat-composer part that consumer repos copy (the `@genui/*` packages of text2sql and blackboard, such as dictation) moves here, not to zukhruf: headless in react-input, the look in react-genai.
+- Composer behavior follows the ChatGPT/Codex desktop app. Read its installed Electron bundle with the `baoyu-electron-extract` skill (with `--skip-format`), not docs or memory.
+
 ---
 
 ### Building packages
