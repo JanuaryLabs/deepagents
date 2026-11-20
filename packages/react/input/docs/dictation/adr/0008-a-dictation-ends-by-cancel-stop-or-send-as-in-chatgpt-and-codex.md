@@ -27,5 +27,5 @@ Once an end is pending, the stop control is disabled. The send stays enabled whi
 
 - No send can overtake a transcription, so the words always join the message that the user meant.
 - Cancel is now part of the first release, not later.
-- When the host disables the composer during a dictation (not through its submit), the dictation is cancelled. This is the design's own judgment; ChatGPT's code was not read for it.
+- When the host disables the composer during a dictation (not through its submit), the dictation ends with `abort`, so no text appears in a composer that the host disabled (ruled by Ezz on 2026-11-20; ChatGPT's code was not read for this case).
 - Later, from the same app: "Retry transcription" (the clip is kept after a failure), press-and-hold (`CHATGPT_DICTATION_START_GESTURE_PRESS_AND_HOLD`), and sending the recording itself to a model that takes audio (Codex's `isDictationRecording` attachments).
