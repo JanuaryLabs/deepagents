@@ -1,8 +1,77 @@
 import { cleanup, render, screen, within } from '@testing-library/react';
-import type { UIMessage } from 'ai';
+import type { ChatTransport, UIMessage } from 'ai';
 import { expect, test } from 'vitest';
 
-import { UserMessageContent } from '@deepagents/react-genai';
+import {
+  AgentProvider,
+  Messages,
+  UserMessageContent,
+} from '@deepagents/react-genai';
+
+const idleTransport: ChatTransport<UIMessage> & {
+  uploadFile: () => never;
+} = {
+  sendMessages: () => Promise.reject(new Error('No sends expected')),
+  reconnectToStream: () => Promise.resolve(null),
+  uploadFile: () => {
+    throw new Error('No uploads expected');
+  },
+};
+
+function renderAssistantFile(mediaType: string) {
+  const message: UIMessage = {
+    id: 'asst-file',
+    role: 'assistant',
+    parts: [
+      {
+        type: 'file',
+        filename: 'chart',
+        mediaType,
+        url: 'https://files.test/chart',
+      },
+    ],
+  };
+  return render(
+    <AgentProvider
+      chatId="message-parts-test"
+      transport={idleTransport}
+      onResetChat={() => {}}
+    >
+      <Messages.Root messages={[message]}>
+        <Messages.Item message={message} index={0}>
+          <Messages.AssistantContent />
+        </Messages.Item>
+      </Messages.Root>
+    </AgentProvider>,
+  );
+}
+
+test('a file part with the top-level image media type renders as an image', () => {
+  try {
+    renderAssistantFile('image');
+
+    expect(screen.getByRole('img', { name: 'chart' })).toHaveAttribute(
+      'src',
+      'https://files.test/chart',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('a file part with a non-image media type renders as a download, not an image', () => {
+  try {
+    renderAssistantFile('application');
+
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Download' })).toHaveAttribute(
+      'href',
+      'https://files.test/chart',
+    );
+  } finally {
+    cleanup();
+  }
+});
 
 test('upload receipts render as one thumbnail strip above the original text', () => {
   const uploads = Array.from({ length: 5 }, (_, index) => ({

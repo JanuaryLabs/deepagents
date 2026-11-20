@@ -87,7 +87,7 @@ export function MessageAttachmentPart({
   mediaType,
   url,
 }: MessageAttachmentPartProps) {
-  return mediaType.startsWith('image/') ? (
+  return mediaType.split('/')[0] === 'image' ? (
     <ImageFilePart filename={filename} url={url} />
   ) : (
     <FileAttachmentPart filename={filename} mediaType={mediaType} url={url} />
