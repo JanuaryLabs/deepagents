@@ -93,7 +93,7 @@
       agent-backlog #4790 ports that. Current
       no-op behavior is now **characterization-tested** (`runtime.integration.test.ts`: "cancelling a
       paused turn is currently a no-op"), so changing it to mean deny is a deliberate, visible break.
-- [ ] Sandbox-bound approval tools (approve-before-bash). AI SDK `toolApproval` may already gate
+- [x] Sandbox-bound approval tools (approve-before-bash). AI SDK `toolApproval` may already gate
       sandbox tools; agent-backlog #4773 proves it with one test.
 - [ ] run.ts approval showcase.
 - [ ] Regenerate (attempt-level identity split, branches-as-attempts): deferred; design when needed.

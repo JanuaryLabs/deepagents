@@ -2657,6 +2657,105 @@ describe('zukhruf runtime — background executor', () => {
     );
   });
 
+  it('toolApproval gates the sandbox bash tool: the command runs only once approved, never when denied', async (t) => {
+    const fs = new InMemoryFs();
+    const calls: string[] = [];
+    const model = new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        const text = lastUserText(prompt);
+        calls.push(text);
+        const chunks: LanguageModelV4StreamPart[] =
+          calls.filter((call) => call === text).length === 1
+            ? [
+                {
+                  type: 'tool-call',
+                  toolCallId: `bash-${text}`,
+                  toolName: 'bash',
+                  input: JSON.stringify({
+                    command: `echo ran > /${text}.txt`,
+                    reasoning: 'record the run',
+                  }),
+                },
+                {
+                  type: 'finish',
+                  finishReason: { unified: 'tool-calls', raw: '' },
+                  usage,
+                },
+              ]
+            : [
+                { type: 'text-start', id: 't1' },
+                { type: 'text-delta', id: 't1', delta: `continued:${text}` },
+                { type: 'text-end', id: 't1' },
+                {
+                  type: 'finish',
+                  finishReason: { unified: 'stop', raw: '' },
+                  usage,
+                },
+              ];
+        return { stream: simulateReadableStream({ chunks }) };
+      },
+    });
+    await using h = await harness(model, {
+      declaration: {
+        ...declaration(model),
+        sandbox: async () =>
+          createBashTool({ sandbox: await createVirtualSandbox({ fs }) }),
+        toolApproval: { bash: 'user-approval' },
+      },
+    });
+    await using _worker = await h.runtime.work();
+    void _worker;
+    const approvedChat = { chatId: 'bash-approved', userId: 'u1' };
+    const deniedChat = { chatId: 'bash-denied', userId: 'u1' };
+
+    await collectText(
+      (await h.runtime.enqueue(approvedChat, turn('approve'))).stream,
+    );
+    await collectText(
+      (await h.runtime.enqueue(deniedChat, turn('deny'))).stream,
+    );
+    const approvedPause = await pausedToolCall(h.runtime, approvedChat);
+    const deniedPause = await pausedToolCall(h.runtime, deniedChat);
+    assert.deepStrictEqual(
+      [
+        [approvedPause.part.type, approvedPause.part.state],
+        [deniedPause.part.type, deniedPause.part.state],
+      ],
+      [
+        ['tool-bash', 'approval-requested'],
+        ['tool-bash', 'approval-requested'],
+      ],
+    );
+    assert.equal(await fs.exists('/approve.txt'), false, 'paused, not run');
+
+    await submitApprovalResponses(h.runtime, approvedChat, {
+      toolCallId: approvedPause.part.toolCallId,
+      approved: true,
+    });
+    await submitApprovalResponses(h.runtime, deniedChat, {
+      toolCallId: deniedPause.part.toolCallId,
+      approved: false,
+      reason: 'no',
+    });
+    await waitForText(h.runtime, approvedChat, 'continued:approve', t.signal);
+    await waitForText(h.runtime, deniedChat, 'continued:deny', t.signal);
+
+    assert.equal(await fs.readFile('/approve.txt'), 'ran\n');
+    assert.equal(await fs.exists('/deny.txt'), false, 'denied, never run');
+    const [approvedFinal, deniedFinal] = await Promise.all(
+      [approvedChat, deniedChat].map(
+        async (chat) =>
+          (await h.runtime.observe(chat).engine.getMessages())
+            .at(-1)
+            ?.parts.find(isToolUIPart)?.state,
+      ),
+    );
+    assert.deepStrictEqual(
+      [approvedFinal, deniedFinal],
+      ['output-available', 'output-denied'],
+    );
+  });
+
   it('turns enqueued while a chat awaits approval queue behind it, in order', async (t) => {
     const { track, agent, model } = approvalSetup();
     await using h = await harness(model, { declaration: agent });
