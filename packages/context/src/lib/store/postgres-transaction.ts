@@ -7,13 +7,27 @@ import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
  */
 function surfacedThroughQueries(): void {}
 
-let openTransaction: (client: PoolClient) => PostgresTransaction;
-let finishTransaction: (tx: PostgresTransaction) => void;
-let openSavepoint: (parent: PostgresTransaction) => PostgresTransaction;
-let closeSavepoint: (
-  parent: PostgresTransaction,
-  child: PostgresTransaction,
-) => void;
+function classNotLoaded(): never {
+  throw new Error('PostgresTransaction: the class has not loaded');
+}
+
+const bridge: {
+  open: (client: PoolClient) => PostgresTransaction;
+  finish: (tx: PostgresTransaction) => void;
+  openSavepoint: (parent: PostgresTransaction) => {
+    child: PostgresTransaction;
+    savepoint: string;
+  };
+  closeSavepoint: (
+    parent: PostgresTransaction,
+    child: PostgresTransaction,
+  ) => void;
+} = {
+  open: classNotLoaded,
+  finish: classNotLoaded,
+  openSavepoint: classNotLoaded,
+  closeSavepoint: classNotLoaded,
+};
 
 /**
  * An open transaction on one pooled client. Only `postgresTransaction`
@@ -23,18 +37,23 @@ let closeSavepoint: (
  * every query, because its client may already serve someone else.
  */
 export class PostgresTransaction {
+  static #savepoints = 0;
+
   static {
-    openTransaction = (client) => new PostgresTransaction(client, undefined);
-    finishTransaction = (tx) => {
+    bridge.open = (client) => new PostgresTransaction(client, undefined);
+    bridge.finish = (tx) => {
       tx.#finished = true;
     };
-    openSavepoint = (parent) => {
+    bridge.openSavepoint = (parent) => {
       parent.#assertUsable();
       const child = new PostgresTransaction(parent.#client, parent);
       parent.#child = child;
-      return child;
+      return {
+        child,
+        savepoint: `deepagents_savepoint_${++PostgresTransaction.#savepoints}`,
+      };
     };
-    closeSavepoint = (parent, child) => {
+    bridge.closeSavepoint = (parent, child) => {
       child.#finished = true;
       parent.#child = undefined;
     };
@@ -80,8 +99,6 @@ export class PostgresTransaction {
   }
 }
 
-let savepoints = 0;
-
 /**
  * Runs `fn` in one transaction and rethrows the error that ended it. On a
  * pool it opens the transaction on a pooled client; a ROLLBACK that fails too
@@ -98,7 +115,7 @@ export async function postgresTransaction<T>(
   }
   const client = await db.connect();
   client.on('error', surfacedThroughQueries);
-  const tx = openTransaction(client);
+  const tx = bridge.open(client);
   let broken = false;
   try {
     await client.query('BEGIN');
@@ -106,7 +123,7 @@ export async function postgresTransaction<T>(
     try {
       result = await fn(tx);
     } finally {
-      finishTransaction(tx);
+      bridge.finish(tx);
     }
     await client.query('COMMIT');
     return result;
@@ -127,18 +144,17 @@ async function inSavepoint<T>(
   parent: PostgresTransaction,
   fn: (tx: PostgresTransaction) => Promise<T>,
 ): Promise<T> {
-  const savepoint = `deepagents_savepoint_${++savepoints}`;
-  const child = openSavepoint(parent);
+  const { child, savepoint } = bridge.openSavepoint(parent);
   let result: T;
   try {
     await child.query(`SAVEPOINT ${savepoint}`);
     result = await fn(child);
   } catch (error) {
-    closeSavepoint(parent, child);
+    bridge.closeSavepoint(parent, child);
     await parent.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
     throw error;
   }
-  closeSavepoint(parent, child);
+  bridge.closeSavepoint(parent, child);
   await parent.query(`RELEASE SAVEPOINT ${savepoint}`);
   return result;
 }
