@@ -3244,6 +3244,67 @@ describe('Composer link and paste behavior', () => {
     expect(submissions()).toHaveTextContent('item:@report.csv');
   });
 
+  it('pastes a file URI whose name holds a raw percent sign as a file mention', async () => {
+    const sent: ComposerSubmission[] = [];
+    const { prompt } = renderRichInput({
+      send: (submission) => {
+        sent.push(submission);
+      },
+    });
+
+    fireEvent.paste(prompt, {
+      clipboardData: clipboardData({ 'text/uri-list': 'file:///tmp/100%' }),
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('region', { name: /rich composer snapshot/i }),
+      ).toHaveTextContent('Draft: @100%');
+    });
+
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter' });
+
+    expect(sent.at(0)?.items.find((item) => item.type === 'item')).toEqual(
+      expect.objectContaining({
+        value: '100%',
+        payload: { path: '/tmp/100%', type: 'file' },
+      }),
+    );
+  });
+
+  it('drops a file URI with an encoded hash as a decoded file mention', async () => {
+    const sent: ComposerSubmission[] = [];
+    const { user, prompt } = renderRichInput({
+      send: (submission) => {
+        sent.push(submission);
+      },
+    });
+
+    await user.click(prompt);
+    fireEvent.drop(prompt, {
+      dataTransfer: {
+        files: [],
+        getData: (type: string) =>
+          type === 'text/uri-list' ? 'file:///tmp/a%23b' : '',
+      },
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('region', { name: /rich composer snapshot/i }),
+      ).toHaveTextContent('Draft: @a#b');
+    });
+
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter' });
+
+    expect(sent.at(0)?.items.find((item) => item.type === 'item')).toEqual(
+      expect.objectContaining({
+        value: 'a#b',
+        payload: { path: '/tmp/a#b', type: 'file' },
+      }),
+    );
+  });
+
   it('treats image DownloadURL values as links, not attachments', async () => {
     const { user, prompt, submissions } = renderRichInput();
 

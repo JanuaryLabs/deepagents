@@ -1682,17 +1682,21 @@ function normalizeFileReference(path: string) {
   if (!trimmed.startsWith('file://')) {
     return trimmed;
   }
-  try {
-    return decodeURI(new URL(trimmed).pathname);
-  } catch {
+  const url = URL.parse(trimmed);
+  if (!url) {
     return trimmed;
+  }
+  try {
+    return decodeURIComponent(url.pathname);
+  } catch {
+    return url.pathname;
   }
 }
 
 function fileMentionLabel(path: string) {
   const normalized = path.replace(/[\\/]+$/, '');
   const label = normalized.split(/[\\/]/).filter(Boolean).pop();
-  return label ? decodeURIComponent(label) : path;
+  return label ?? path;
 }
 
 function isDirectoryReference(path: string) {
