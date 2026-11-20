@@ -228,14 +228,10 @@ Node has no recorder: a search of the exports of every built-in module of Node 2
 
 ## Who uses what
 
-| Consumer                                                                              | Today               | After #3158 and this design                      |
-| ------------------------------------------------------------------------------------- | ------------------- | ------------------------------------------------ |
-| text2sql `apps/frontend`: ChatBot, Dashboards, SpaceDetailChatbot, Embed/EmbedChatbot | `VoiceRecordButton` | `ChatComposer.Dictate`, or the react-input parts |
-| text2sql `apps/desktop/frontend`: ChatBot, Dashboards, SpaceDetailChatbot             | `VoiceRecordButton` | the same                                         |
-| text2sql `apps/v2/frontend`: `ComposerVoiceButton`                                    | `VoiceRecordButton` | the same                                         |
-| text2sql `packages/features/workspace`: ReportsView                                   | `VoiceRecordButton` | the same                                         |
-| text2sql `packages/sdk/react`: LimerenceChat and its re-export                        | `VoiceRecordButton` | the same; backlog #4922 for its private peers    |
-| blackboard `apps/web`: ChatComposer                                                   | `VoiceRecordButton` | the react-input parts                            |
+| Consumer                                                                                                                    | Uses                                                                                                                                                                                        |
+| --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| blackboard `apps/web`: ChatComposer                                                                                         | `Composer.Root` `dictation`, `Composer.Dictate` and `Composer.CancelDictation`, with its own look; its send button says "Transcribe and send" while dictating (blackboard 780f88e, 6ada991) |
+| text2sql: 10 sites (ChatBot, Dashboards, SpaceDetailChatbot, EmbedChatbot, ComposerVoiceButton, ReportsView, LimerenceChat) | its own `@genui/voice` copy: text2sql is no longer actively developed (Ezz, 2026-11-20), so it does not move                                                                                |
 
 ## Later and never
 
