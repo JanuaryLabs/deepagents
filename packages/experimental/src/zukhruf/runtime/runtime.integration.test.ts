@@ -1518,13 +1518,11 @@ describe('zukhruf runtime — background executor', () => {
         const backend = await createVirtualSandbox({
           fs: new InMemoryFs(),
         });
-        const run = backend.run.bind(backend);
+        const listDirectory = backend.listDirectory.bind(backend);
         Object.assign(backend, {
-          run: (options: Parameters<typeof run>[0]) => {
-            if (options.command.includes('/agent-workspace/skills')) {
-              discoveryCount++;
-            }
-            return run(options);
+          listDirectory: (options: Parameters<typeof listDirectory>[0]) => {
+            if (options.path === '/agent-workspace/skills') discoveryCount++;
+            return listDirectory(options);
           },
         });
         backends.push(backend);
@@ -1606,13 +1604,11 @@ describe('zukhruf runtime — background executor', () => {
         path: '/workspace/skills/preinstalled/SKILL.md',
         content: skillMd,
       });
-      const run = backend.run.bind(backend);
+      const listDirectory = backend.listDirectory.bind(backend);
       Object.assign(backend, {
-        run: (options: Parameters<typeof run>[0]) => {
-          if (options.command.includes('/workspace/skills')) {
-            discoveryCount++;
-          }
-          return run(options);
+        listDirectory: (options: Parameters<typeof listDirectory>[0]) => {
+          if (options.path === '/workspace/skills') discoveryCount++;
+          return listDirectory(options);
         },
       });
       return backend;
@@ -1636,6 +1632,44 @@ describe('zukhruf runtime — background executor', () => {
       assert.match(prompt, /Use a skill installed by the sandbox provider/);
       assert.match(prompt, /skills\/preinstalled\/SKILL\.md/);
     }
+  });
+
+  it('answers without skills when the sandbox has no skills directory', async () => {
+    const modelPrompts: string[] = [];
+    let discoveryCount = 0;
+    const model = new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        modelPrompts.push(JSON.stringify(prompt));
+        return { stream: buildStream(['ok'], 0) };
+      },
+    });
+    const agentDeclaration = declaration(model);
+    agentDeclaration.sandbox = defineSandbox(async () => {
+      const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+      const listDirectory = backend.listDirectory.bind(backend);
+      Object.assign(backend, {
+        listDirectory: (options: Parameters<typeof listDirectory>[0]) => {
+          if (options.path === '/workspace/skills') discoveryCount++;
+          return listDirectory(options);
+        },
+      });
+      return backend;
+    });
+
+    await using h = await harness(model, {
+      declaration: agentDeclaration,
+    });
+    await using worker = await h.runtime.work();
+    void worker;
+    const result = await h.runtime.enqueue(
+      { chatId: 'no-skills-directory', userId: 'u1' },
+      turn('hello'),
+    );
+
+    assert.equal(await collectText(result.stream), 'ok');
+    assert.equal(discoveryCount, 1);
+    assert.equal(modelPrompts.length, 1);
+    assert.doesNotMatch(modelPrompts[0], /<available_skills>/);
   });
 
   it('resolves sandbox-bound instruction fragments with the sandbox that the turns of one chat share', async () => {

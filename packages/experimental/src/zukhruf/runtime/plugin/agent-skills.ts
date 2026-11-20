@@ -134,21 +134,15 @@ export async function discoverAgentSkills(
 ): Promise<AgentSkills> {
   if (sandbox.workingDirectory === undefined) return EMPTY_SKILLS;
   const skillsDirectory = path.posix.join(sandbox.workingDirectory, 'skills');
-  const quotedSkillsDirectory = shellQuote(skillsDirectory);
-  const result = await sandbox.sandbox.run({
-    command: `if [ -d ${quotedSkillsDirectory} ]; then find ${quotedSkillsDirectory} -mindepth 1 -maxdepth 1 -type d -print; fi`,
+  const entries = await sandbox.sandbox.listDirectory({
+    path: skillsDirectory,
     abortSignal: signal,
   });
-  if (result.exitCode !== 0) {
-    throw new Error(
-      `AgentRuntime: failed to discover sandbox skills: ${result.stderr.trim() || `exit ${result.exitCode}`}`,
-    );
-  }
+  if (entries === null) return EMPTY_SKILLS;
 
-  const skillDirectories = result.stdout
-    .split('\n')
-    .filter(Boolean)
-    .filter((directory) => !path.posix.basename(directory).startsWith('.'))
+  const skillDirectories = entries
+    .filter(({ type, name }) => type === 'directory' && !name.startsWith('.'))
+    .map(({ name }) => path.posix.join(skillsDirectory, name))
     .toSorted();
   if (skillDirectories.length === 0) return EMPTY_SKILLS;
 
@@ -196,8 +190,4 @@ function availableSkill(
     description: frontmatter.description,
     path: path.posix.join('skills', directoryName, 'SKILL.md'),
   };
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
 }
