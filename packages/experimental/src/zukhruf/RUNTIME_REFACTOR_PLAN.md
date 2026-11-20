@@ -405,9 +405,10 @@ The refactor is complete when:
 
 - Stored chat ownership is authoritative across enqueue, host delivery, execution, observation,
   explicit cancellation, and approval.
-- Approval decisions use the assistant message as their sole durable record. A required
-  Zukhruf-owned mutex serializes its read–validate–rewrite transition, sibling decisions wait for
-  one another, and failed continuation handoffs remain repairable on completion or retry.
+- Approval decisions use the assistant message as their sole durable record. A decision arrives as
+  an ordinary `submit-message` turn, so the TurnQueue's per-chat strict FIFO serializes its
+  read–validate–rewrite transition, sibling decisions wait for one another, and failed continuation
+  handoffs remain repairable on completion or retry.
 - Approval-paused children report model-facing `running` and project one final answer only after
   continuation. Failed or cancelled continuations project their terminal status instead of remaining
   visibly paused.
