@@ -1,7 +1,11 @@
-import type { Pool, PoolClient } from 'pg';
+import type { Pool } from 'pg';
 import { z } from 'zod';
 
-import { lockSchemaDDL, postgresTransaction } from '@deepagents/context';
+import {
+  type PostgresTransaction,
+  lockSchemaDDL,
+  postgresTransaction,
+} from '@deepagents/context';
 
 import { communicationSchema } from './communication-schema.ts';
 import { mailboxDDL } from './ddl.postgres.ts';
@@ -63,16 +67,13 @@ export class PostgresMailboxStore extends MailboxStore {
    */
   #forRecipient<T>(
     recipient: ConversationId,
-    fn: (client: PoolClient) => Promise<T>,
+    fn: (tx: PostgresTransaction) => Promise<T>,
   ): Promise<T> {
-    return postgresTransaction(this.#pool, async (client) => {
-      await client.query(
-        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
-        [
-          `zukhruf:mailbox:${JSON.stringify([this.#schema, recipient.chatId, recipient.userId])}`,
-        ],
-      );
-      return fn(client);
+    return postgresTransaction(this.#pool, async (tx) => {
+      await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+        `zukhruf:mailbox:${JSON.stringify([this.#schema, recipient.chatId, recipient.userId])}`,
+      ]);
+      return fn(tx);
     });
   }
 
@@ -206,7 +207,7 @@ export class PostgresMailboxStore extends MailboxStore {
   }
 
   #hasPending(
-    queryable: Pool | PoolClient,
+    queryable: Pick<PostgresTransaction, 'query'>,
     recipient: ConversationId,
   ): Promise<boolean> {
     return this.#exists(
@@ -219,7 +220,7 @@ export class PostgresMailboxStore extends MailboxStore {
   }
 
   #isTurnActive(
-    client: PoolClient,
+    client: PostgresTransaction,
     recipient: ConversationId,
   ): Promise<boolean> {
     return this.#exists(
@@ -232,7 +233,7 @@ export class PostgresMailboxStore extends MailboxStore {
   }
 
   async #exists(
-    queryable: Pool | PoolClient,
+    queryable: Pick<PostgresTransaction, 'query'>,
     sql: string,
     params: unknown[],
   ): Promise<boolean> {
