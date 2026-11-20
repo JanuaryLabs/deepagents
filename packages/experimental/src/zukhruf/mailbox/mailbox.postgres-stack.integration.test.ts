@@ -4,7 +4,6 @@ import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
-import pg from 'pg';
 import { PgBoss } from 'pg-boss';
 
 import {
@@ -33,10 +32,7 @@ const testPostgres = new Postgres({ environment: process.env });
 test("a child's FINAL_ANSWER reaches its parent's wait_agent on a PostgreSQL stack, and disposing the runtime leaves the host's pool open", async () => {
   await using resources = new AsyncDisposableStack();
   const database = resources.use(await testPostgres.database());
-  const pool = resources.adopt(
-    new pg.Pool({ connectionString: database.connectionString }),
-    (value) => value.end(),
-  );
+  const pool = database.pool();
   const boss = new PgBoss({ connectionString: database.connectionString });
   boss.on('error', () => {});
   await boss.start();

@@ -19,10 +19,7 @@ describe('PostgreSQL ContextStore Integration', () => {
   describe('Transactions', () => {
     it('rejects with the error that ended the transaction when its connection dies, not with the failed rollback', async (t) => {
       await using container = await testPostgres.database();
-      const pool = new pg.Pool({
-        connectionString: container.connectionString,
-        application_name: 'store-under-test',
-      });
+      const pool = container.pool({ application_name: 'store-under-test' });
       const blocker = new pg.Client({
         connectionString: container.connectionString,
       });
@@ -56,7 +53,6 @@ describe('PostgreSQL ContextStore Integration', () => {
         await assert.rejects(update, { code: '57P01' });
       } finally {
         await blocker.end();
-        await pool.end();
       }
     });
   });
@@ -66,7 +62,7 @@ describe('PostgreSQL ContextStore Integration', () => {
       await using container = await testPostgres.database();
       const schema = `open_${randomUUID().replaceAll('-', '_')}`;
       const initial = await PostgresContextStore.create({
-        pool: container.connectionString,
+        pool: container.pool(),
         schema,
       });
       await initial.close();
@@ -76,7 +72,7 @@ describe('PostgreSQL ContextStore Integration', () => {
       const results = await Promise.allSettled(
         Array.from({ length: 6 }, () =>
           PostgresContextStore.create({
-            pool: container.connectionString,
+            pool: container.pool(),
             schema,
           }),
         ),
@@ -108,7 +104,7 @@ describe('PostgreSQL ContextStore Integration', () => {
       const results = await Promise.allSettled(
         Array.from({ length: 3 }, () =>
           PostgresContextStore.create({
-            pool: container.connectionString,
+            pool: container.pool(),
             schema,
           }),
         ),
@@ -143,10 +139,10 @@ describe('PostgreSQL ContextStore Integration', () => {
       await using container = await testPostgres.database();
 
       const first = await PostgresContextStore.create({
-        pool: container.connectionString,
+        pool: container.pool(),
       });
       const second = await PostgresContextStore.create({
-        pool: container.connectionString,
+        pool: container.pool(),
       });
       try {
         await first.createChat({ id: 'chat-cas', userId: 'user-1' });
@@ -179,7 +175,7 @@ describe('PostgreSQL ContextStore Integration', () => {
         await using container = await testPostgres.database();
 
         const store = await PostgresContextStore.create({
-          pool: container.connectionString,
+          pool: container.pool(),
         });
         try {
           await store.createChat({
@@ -210,7 +206,7 @@ describe('PostgreSQL ContextStore Integration', () => {
         await using container = await testPostgres.database();
 
         const store = await PostgresContextStore.create({
-          pool: container.connectionString,
+          pool: container.pool(),
         });
         try {
           await store.createChat({
@@ -249,7 +245,7 @@ describe('PostgreSQL ContextStore Integration', () => {
         await using container = await testPostgres.database();
 
         const store = await PostgresContextStore.create({
-          pool: container.connectionString,
+          pool: container.pool(),
         });
         try {
           await store.createChat({

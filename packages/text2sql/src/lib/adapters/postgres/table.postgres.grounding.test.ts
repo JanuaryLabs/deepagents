@@ -1,7 +1,6 @@
 import { Postgres as TestPostgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
-import pg from 'pg';
 import { z } from 'zod';
 
 import { Postgres, tables } from '@deepagents/text2sql/postgres';
@@ -20,19 +19,15 @@ async function relationships(
 ): Promise<z.output<typeof relationshipData>[]> {
   await using container = await testPostgres.database();
 
-  const pool = new pg.Pool({ connectionString: container.connectionString });
-  try {
-    await pool.query(ddl);
-    const adapter = new Postgres({
-      execute: (sql: string) => pool.query(sql),
-      grounding: [tables(config)],
-    });
-    return (await adapter.introspect())
-      .filter((fragment) => fragment.name === 'relationship')
-      .map((fragment) => relationshipData.parse(fragment.data));
-  } finally {
-    await pool.end();
-  }
+  const pool = container.pool();
+  await pool.query(ddl);
+  const adapter = new Postgres({
+    execute: (sql: string) => pool.query(sql),
+    grounding: [tables(config)],
+  });
+  return (await adapter.introspect())
+    .filter((fragment) => fragment.name === 'relationship')
+    .map((fragment) => relationshipData.parse(fragment.data));
 }
 
 const compositeKey = `

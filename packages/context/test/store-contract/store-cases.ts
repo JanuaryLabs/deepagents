@@ -60,7 +60,7 @@ export const storeCases: readonly StoreCase[] = [
       await using stack = new AsyncDisposableStack();
       const database = stack.use(await postgres.database());
       const store = await PostgresContextStore.create({
-        pool: database.connectionString,
+        pool: database.pool(),
       });
       stack.defer(() => store.close());
       const owned = stack.move();

@@ -1,7 +1,6 @@
 import { Postgres as TestPostgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
-import pg from 'pg';
 import { z } from 'zod';
 
 import {
@@ -29,20 +28,16 @@ async function introspected(
 ): Promise<string[]> {
   await using container = await testPostgres.database();
 
-  const pool = new pg.Pool({ connectionString: container.connectionString });
-  try {
-    await pool.query(twoSchemas);
-    const adapter = new Postgres({
-      execute: (sql: string) => pool.query(sql),
-      ...options,
-    });
-    return (await adapter.introspect())
-      .filter((fragment) => fragment.name === kind)
-      .map((fragment) => named.parse(fragment.data).name)
-      .sort();
-  } finally {
-    await pool.end();
-  }
+  const pool = container.pool();
+  await pool.query(twoSchemas);
+  const adapter = new Postgres({
+    execute: (sql: string) => pool.query(sql),
+    ...options,
+  });
+  return (await adapter.introspect())
+    .filter((fragment) => fragment.name === kind)
+    .map((fragment) => named.parse(fragment.data).name)
+    .sort();
 }
 
 describe('Postgres schemas option', () => {

@@ -12,7 +12,7 @@ describe('Delete Chat', () => {
       await using container = await testPostgres.database();
 
       const store = await PostgresContextStore.create({
-        pool: container.connectionString,
+        pool: container.pool(),
       });
       try {
         const engine1 = new ContextEngine({
@@ -47,7 +47,7 @@ describe('Delete Chat', () => {
       await using container = await testPostgres.database();
 
       const store = await PostgresContextStore.create({
-        pool: container.connectionString,
+        pool: container.pool(),
       });
       try {
         const specialIds = [
@@ -79,7 +79,7 @@ describe('Delete Chat', () => {
       await using container = await testPostgres.database();
 
       const store = await PostgresContextStore.create({
-        pool: container.connectionString,
+        pool: container.pool(),
       });
       try {
         const longChatId = 'c'.repeat(200);
@@ -102,7 +102,7 @@ describe('Delete Chat', () => {
       await using container = await testPostgres.database();
 
       const store = await PostgresContextStore.create({
-        pool: container.connectionString,
+        pool: container.pool(),
       });
       try {
         for (let i = 0; i < 10; i++) {
@@ -128,7 +128,7 @@ describe('Delete Chat', () => {
       await using container = await testPostgres.database();
 
       const store = await PostgresContextStore.create({
-        pool: container.connectionString,
+        pool: container.pool(),
       });
       try {
         for (let i = 0; i < 5; i++) {

@@ -1,7 +1,6 @@
 import { Postgres as TestPostgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
-import pg from 'pg';
 import { z } from 'zod';
 
 import {
@@ -41,19 +40,13 @@ async function withPgAdapter(
 ): Promise<void> {
   await using container = await testPostgres.database();
 
-  const pool = new pg.Pool({
-    connectionString: container.connectionString,
+  const pool = container.pool();
+  await pool.query(ddl);
+  const adapter = new Postgres({
+    execute: (sql: string) => pool.query(sql),
+    grounding: [tables(), constraints(), columnValues()],
   });
-  try {
-    await pool.query(ddl);
-    const adapter = new Postgres({
-      execute: (sql: string) => pool.query(sql),
-      grounding: [tables(), constraints(), columnValues()],
-    });
-    await fn(await adapter.introspect());
-  } finally {
-    await pool.end();
-  }
+  await fn(await adapter.introspect());
 }
 
 describe('PostgresColumnValuesGrounding', () => {

@@ -22,7 +22,7 @@ describe('User Chat Management', () => {
       await using container = await testPostgres.database();
 
       const store = await PostgresContextStore.create({
-        pool: container.connectionString,
+        pool: container.pool(),
       });
       try {
         const aliceChat1 = new ContextEngine({
@@ -71,7 +71,7 @@ describe('User Chat Management', () => {
       await using container = await testPostgres.database();
 
       const store = await PostgresContextStore.create({
-        pool: container.connectionString,
+        pool: container.pool(),
       });
       try {
         const noChats = await store.listChats({
@@ -89,7 +89,7 @@ describe('User Chat Management', () => {
       await using container = await testPostgres.database();
 
       const store = await PostgresContextStore.create({
-        pool: container.connectionString,
+        pool: container.pool(),
       });
       try {
         const aliceEngine = new ContextEngine({
@@ -127,7 +127,7 @@ describe('User Chat Management', () => {
       await using container = await testPostgres.database();
 
       const store = await PostgresContextStore.create({
-        pool: container.connectionString,
+        pool: container.pool(),
       });
       try {
         await new ContextEngine({
@@ -149,7 +149,7 @@ describe('User Chat Management', () => {
       await using container = await testPostgres.database();
 
       const store = await PostgresContextStore.create({
-        pool: container.connectionString,
+        pool: container.pool(),
       });
       try {
         const specialUserIds = [
@@ -175,7 +175,7 @@ describe('User Chat Management', () => {
       await using container = await testPostgres.database();
 
       const store = await PostgresContextStore.create({
-        pool: container.connectionString,
+        pool: container.pool(),
       });
       try {
         const unicodeUserIds = ['用户123', 'пользователь', 'المستخدم'];
@@ -201,7 +201,7 @@ describe('User Chat Management', () => {
       await using container = await testPostgres.database();
 
       const store = await PostgresContextStore.create({
-        pool: container.connectionString,
+        pool: container.pool(),
       });
       try {
         const longUserId = 'u'.repeat(200);
@@ -220,7 +220,7 @@ describe('User Chat Management', () => {
       await using container = await testPostgres.database();
 
       const store = await PostgresContextStore.create({
-        pool: container.connectionString,
+        pool: container.pool(),
       });
       try {
         for (let i = 0; i < 10; i++) {
@@ -273,7 +273,7 @@ describe('User Chat Management', () => {
       await using container = await testPostgres.database();
 
       const store = await PostgresContextStore.create({
-        pool: container.connectionString,
+        pool: container.pool(),
       });
       try {
         const users = [
@@ -316,7 +316,7 @@ describe('Message Upsert', () => {
     await using container = await testPostgres.database();
 
     const store = await PostgresContextStore.create({
-      pool: container.connectionString,
+      pool: container.pool(),
     });
     try {
       await store.upsertChat({ id: 'upsert-fts-chat', userId: 'user-1' });

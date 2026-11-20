@@ -11,7 +11,7 @@ import assert from 'node:assert';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { type MockTracker, type TestContext, describe, it } from 'node:test';
-import pg from 'pg';
+import type pg from 'pg';
 import { z } from 'zod';
 
 import type { GroundingFn, SQLScopeErrorPayload } from '@deepagents/text2sql';
@@ -578,10 +578,7 @@ const adapterCases: AdapterCase[] = [
     setup: async () => {
       await using resources = new AsyncDisposableStack();
       const database = resources.use(await testPostgres.database());
-      const pool = new pg.Pool({
-        connectionString: database.connectionString,
-      });
-      resources.defer(() => pool.end());
+      const pool = database.pool();
       await pool.query(policyPostgresDdl);
       const owned = resources.move();
 

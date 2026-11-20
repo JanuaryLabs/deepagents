@@ -5,6 +5,7 @@
  */
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
+import pg from 'pg';
 import { PgBoss } from 'pg-boss';
 
 import { PostgresContextStore, PostgresStreamStore } from '@deepagents/context';
@@ -58,10 +59,10 @@ const queue = await PgBossTurnQueue.create(boss, {
   pollingIntervalSeconds: 0.5,
 });
 
-const streamStore = await PostgresStreamStore.create({
-  pool: connectionString,
-});
-const store = await PostgresContextStore.create({ pool: connectionString });
+// Never ended: the pool ends with this process, which the parent kills.
+const pool = new pg.Pool({ connectionString });
+const streamStore = await PostgresStreamStore.create({ pool });
+const store = await PostgresContextStore.create({ pool });
 const streams = streamsFor(streamStore);
 
 const runtime = new AgentRuntime(declaration);

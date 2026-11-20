@@ -2510,10 +2510,10 @@ test('duplicate wake delivery across runtimes advances PostgreSQL state once', a
   await using container = await testPostgres.database();
 
   const firstStore = await PostgresContextStore.create({
-    pool: container.connectionString,
+    pool: container.pool(),
   });
   const secondStore = await PostgresContextStore.create({
-    pool: container.connectionString,
+    pool: container.pool(),
   });
   const scheduler = new RecordingWakeScheduler();
   using h = disposableHarness(scheduler, firstStore);

@@ -12,7 +12,7 @@ describe('Branching', () => {
       await using container = await testPostgres.database();
 
       const store = await PostgresContextStore.create({
-        pool: container.connectionString,
+        pool: container.pool(),
       });
       try {
         const engine = new ContextEngine({

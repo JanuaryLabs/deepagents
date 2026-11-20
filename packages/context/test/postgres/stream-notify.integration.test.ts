@@ -1,9 +1,8 @@
 import { untilAborted } from '@zukhruf/async';
-import { Postgres } from '@zukhruf/testing/postgres';
+import { Postgres, type PostgresDatabase } from '@zukhruf/testing/postgres';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { Pool } from 'pg';
 
 import {
   PostgresNotifyChangeSource,
@@ -60,22 +59,22 @@ async function withNotifySource<T>(
   fn: (
     store: PostgresStreamStore,
     source: PostgresNotifyChangeSource,
-    connectionString: string,
+    database: PostgresDatabase,
   ) => Promise<T>,
 ): Promise<T> {
   await using container = await testPostgres.database();
 
   const schema = testSchema();
   const store = await PostgresStreamStore.create({
-    pool: container.connectionString,
+    pool: container.pool(),
     schema,
   });
   const source = await PostgresNotifyChangeSource.create({
-    pool: container.connectionString,
+    pool: container.pool(),
     schema,
   });
   try {
-    return await fn(store, source, container.connectionString);
+    return await fn(store, source, container);
   } finally {
     await source.close();
     await store.close();
@@ -98,14 +97,14 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
     await using container = await testPostgres.database();
     const schema = testSchema();
     const store = await PostgresStreamStore.create({
-      pool: container.connectionString,
+      pool: container.pool(),
       schema,
     });
 
     const results = await Promise.allSettled(
       Array.from({ length: 3 }, () =>
         PostgresNotifyChangeSource.create({
-          pool: container.connectionString,
+          pool: container.pool(),
           schema,
         }),
       ),
@@ -151,11 +150,11 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
     await using container = await testPostgres.database();
     const schema = testSchema();
     const store = await PostgresStreamStore.create({
-      pool: container.connectionString,
+      pool: container.pool(),
       schema,
     });
     const initial = await PostgresNotifyChangeSource.create({
-      pool: container.connectionString,
+      pool: container.pool(),
       schema,
     });
     await initial.close();
@@ -163,7 +162,7 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
     const results = await Promise.allSettled(
       Array.from({ length: 3 }, () =>
         PostgresNotifyChangeSource.create({
-          pool: container.connectionString,
+          pool: container.pool(),
           schema,
         }),
       ),
@@ -210,7 +209,7 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
 
     await assert.rejects(
       PostgresNotifyChangeSource.create({
-        pool: container.connectionString,
+        pool: container.pool(),
         schema: testSchema(),
       }),
       (error: unknown) =>
@@ -259,7 +258,7 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
     }));
 
   it('should filter unrelated stream IDs and schemas', async (t) =>
-    await withNotifySource(async (store, source, connectionString) => {
+    await withNotifySource(async (store, source, database) => {
       const watched = createStream({ id: 'watched', status: 'running' });
       const other = createStream({ id: 'other', status: 'running' });
       await store.createStream(watched);
@@ -267,11 +266,11 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
 
       const otherSchema = testSchema();
       const otherStore = await PostgresStreamStore.create({
-        pool: connectionString,
+        pool: database.pool(),
         schema: otherSchema,
       });
       const otherSource = await PostgresNotifyChangeSource.create({
-        pool: connectionString,
+        pool: database.pool(),
         schema: otherSchema,
       });
 
@@ -331,10 +330,7 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
     await using container = await testPostgres.database();
 
     const schema = testSchema();
-    const pool = new Pool({
-      connectionString: container.connectionString,
-      max: 1,
-    });
+    const pool = container.pool({ max: 1 });
     const store = await PostgresStreamStore.create({ pool, schema });
     const source = await PostgresNotifyChangeSource.create({ pool, schema });
 
@@ -369,7 +365,6 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       await iterator.return?.();
       await source.close();
       await store.close();
-      await pool.end();
     }
   });
 
@@ -377,10 +372,7 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
     await using container = await testPostgres.database();
 
     const schema = testSchema();
-    const pool = new Pool({
-      connectionString: container.connectionString,
-      max: 1,
-    });
+    const pool = container.pool({ max: 1 });
     const store = await PostgresStreamStore.create({ pool, schema });
     const source = await PostgresNotifyChangeSource.create({ pool, schema });
 
@@ -414,13 +406,12 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       await iterator.return?.();
       await source.close();
       await store.close();
-      await pool.end();
     }
   });
 
   it('concurrent first subscribers share one LISTEN connection', async (t) =>
-    await withNotifySource(async (_store, source, connectionString) => {
-      const admin = new Pool({ connectionString, max: 1 });
+    await withNotifySource(async (_store, source, database) => {
+      const admin = database.pool({ max: 1 });
       const ac = new AbortController();
       const first = source
         .subscribe('stream-a', ac.signal)
@@ -447,15 +438,13 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
         ac.abort();
         await first.return?.();
         await second.return?.();
-        await admin.end();
       }
     }));
 
   it('a subscribe whose LISTEN setup fails rejects, and the next one listens', async (t) => {
     await using container = await testPostgres.database();
     const schema = testSchema();
-    const pool = new Pool({
-      connectionString: container.connectionString,
+    const pool = container.pool({
       max: 1,
       // Above one connect through an SSH forward to a remote engine.
       connectionTimeoutMillis: 2_000,
@@ -492,18 +481,17 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       await retried.return?.();
       await source.close();
       await store.close();
-      await pool.end();
     }
   });
 
   it('fails subscribers when the LISTEN connection drops, then listens again', async (t) =>
-    await withNotifySource(async (store, source, connectionString) => {
+    await withNotifySource(async (store, source, database) => {
       const stream = createStream({
         status: 'running',
         startedAt: Date.now(),
       });
       await store.createStream(stream);
-      const admin = new Pool({ connectionString, max: 1 });
+      const admin = database.pool({ max: 1 });
       const ac = new AbortController();
       const dropped = source
         .subscribe(stream.id, ac.signal)
@@ -557,7 +545,6 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
         await dropped.return?.();
         await otherStream.return?.();
         await again.return?.();
-        await admin.end();
       }
     }));
 });

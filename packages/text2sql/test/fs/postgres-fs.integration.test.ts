@@ -1,7 +1,6 @@
 import { Postgres } from '@zukhruf/testing/postgres';
 import * as assert from 'node:assert';
 import { describe, it } from 'node:test';
-import pg from 'pg';
 
 import { PostgresFs } from '@deepagents/text2sql';
 
@@ -16,7 +15,7 @@ describe('PostgresFs', () => {
       const results = await Promise.allSettled(
         Array.from({ length: 3 }, () =>
           PostgresFs.create({
-            pool: container.connectionString,
+            pool: container.pool(),
             schema,
             root: '/workspace/project',
           }),
@@ -43,7 +42,7 @@ describe('PostgresFs', () => {
       await using container = await testPostgres.database();
       const schema = `fs_${crypto.randomUUID().replaceAll('-', '_')}`;
       const initial = await PostgresFs.create({
-        pool: container.connectionString,
+        pool: container.pool(),
         schema,
         root: '/',
       });
@@ -52,7 +51,7 @@ describe('PostgresFs', () => {
       const results = await Promise.allSettled(
         Array.from({ length: 3 }, () =>
           PostgresFs.create({
-            pool: container.connectionString,
+            pool: container.pool(),
             schema,
             root: '/workspace/project',
           }),
@@ -82,7 +81,7 @@ describe('PostgresFs', () => {
 
       const chunkSize = 1024;
       const fs = await PostgresFs.create({
-        pool: container.connectionString,
+        pool: container.pool(),
         root: '/',
         chunkSize,
       });
@@ -109,7 +108,7 @@ describe('PostgresFs', () => {
       await using container = await testPostgres.database();
 
       const fs = await PostgresFs.create({
-        pool: container.connectionString,
+        pool: container.pool(),
         root: '/',
       });
       try {
@@ -128,7 +127,7 @@ describe('PostgresFs', () => {
       await using container = await testPostgres.database();
 
       const fs = await PostgresFs.create({
-        pool: container.connectionString,
+        pool: container.pool(),
         root: '/',
       });
       try {
@@ -154,7 +153,7 @@ describe('PostgresFs', () => {
       await using container = await testPostgres.database();
 
       const fs = await PostgresFs.create({
-        pool: container.connectionString,
+        pool: container.pool(),
         root: '/prefix',
       });
       try {
@@ -181,7 +180,7 @@ describe('PostgresFs', () => {
       await using container = await testPostgres.database();
 
       const fs = await PostgresFs.create({
-        pool: container.connectionString,
+        pool: container.pool(),
         root: '/chat/123/results',
       });
       try {
@@ -201,24 +200,18 @@ describe('PostgresFs', () => {
     it('should isolate two instances with different roots', async () => {
       await using container = await testPostgres.database();
 
-      const pool = new pg.Pool({
-        connectionString: container.connectionString,
-      });
-      try {
-        const fs1 = await PostgresFs.create({ pool, root: '/chat-1' });
-        const fs2 = await PostgresFs.create({ pool, root: '/chat-2' });
+      const pool = container.pool();
+      const fs1 = await PostgresFs.create({ pool, root: '/chat-1' });
+      const fs2 = await PostgresFs.create({ pool, root: '/chat-2' });
 
-        await fs1.writeFile('/data.json', '{"chat": 1}');
-        await fs2.writeFile('/data.json', '{"chat": 2}');
+      await fs1.writeFile('/data.json', '{"chat": 1}');
+      await fs2.writeFile('/data.json', '{"chat": 2}');
 
-        assert.strictEqual(await fs1.readFile('/data.json'), '{"chat": 1}');
-        assert.strictEqual(await fs2.readFile('/data.json'), '{"chat": 2}');
+      assert.strictEqual(await fs1.readFile('/data.json'), '{"chat": 1}');
+      assert.strictEqual(await fs2.readFile('/data.json'), '{"chat": 2}');
 
-        await fs1.close();
-        await fs2.close();
-      } finally {
-        await pool.end();
-      }
+      await fs1.close();
+      await fs2.close();
     });
   });
 
@@ -226,43 +219,31 @@ describe('PostgresFs', () => {
     it('should accept a pre-existing Pool', async () => {
       await using container = await testPostgres.database();
 
-      const pool = new pg.Pool({
-        connectionString: container.connectionString,
-      });
+      const pool = container.pool();
+      const fs = await PostgresFs.create({ pool, root: '/' });
       try {
-        const fs = await PostgresFs.create({ pool, root: '/' });
-        try {
-          await fs.writeFile('/pool-test.txt', 'injected pool');
+        await fs.writeFile('/pool-test.txt', 'injected pool');
 
-          const content = await fs.readFile('/pool-test.txt');
-          assert.strictEqual(content, 'injected pool');
-        } finally {
-          await fs.close();
-        }
-
-        const result = await pool.query('SELECT 1 AS val');
-        assert.strictEqual(result.rows[0].val, 1);
+        const content = await fs.readFile('/pool-test.txt');
+        assert.strictEqual(content, 'injected pool');
       } finally {
-        await pool.end();
+        await fs.close();
       }
+
+      const result = await pool.query('SELECT 1 AS val');
+      assert.strictEqual(result.rows[0].val, 1);
     });
 
     it('should not close external pool on close()', async () => {
       await using container = await testPostgres.database();
 
-      const pool = new pg.Pool({
-        connectionString: container.connectionString,
-      });
-      try {
-        const fs = await PostgresFs.create({ pool, root: '/' });
-        await fs.writeFile('/no-close.txt', 'data');
-        await fs.close();
+      const pool = container.pool();
+      const fs = await PostgresFs.create({ pool, root: '/' });
+      await fs.writeFile('/no-close.txt', 'data');
+      await fs.close();
 
-        const result = await pool.query('SELECT 1 AS val');
-        assert.strictEqual(result.rows[0].val, 1);
-      } finally {
-        await pool.end();
-      }
+      const result = await pool.query('SELECT 1 AS val');
+      assert.strictEqual(result.rows[0].val, 1);
     });
   });
 
@@ -271,7 +252,7 @@ describe('PostgresFs', () => {
       await using container = await testPostgres.database();
 
       const fs = await PostgresFs.create({
-        pool: container.connectionString,
+        pool: container.pool(),
         root: '/',
         schema: 'custom_fs_schema',
       });
@@ -281,25 +262,18 @@ describe('PostgresFs', () => {
         const content = await fs.readFile('/schema-test.txt');
         assert.strictEqual(content, 'custom schema data');
 
-        const pool = new pg.Pool({
-          connectionString: container.connectionString,
-        });
-        try {
-          const result = await pool.query(`
-              SELECT table_schema, table_name
-              FROM information_schema.tables
-              WHERE table_schema = 'custom_fs_schema'
-            `);
-          assert.ok(result.rows.length > 0);
-          assert.ok(
-            result.rows.every(
-              (r: { table_schema: string }) =>
-                r.table_schema === 'custom_fs_schema',
-            ),
-          );
-        } finally {
-          await pool.end();
-        }
+        const result = await container.pool().query(`
+            SELECT table_schema, table_name
+            FROM information_schema.tables
+            WHERE table_schema = 'custom_fs_schema'
+          `);
+        assert.ok(result.rows.length > 0);
+        assert.ok(
+          result.rows.every(
+            (r: { table_schema: string }) =>
+              r.table_schema === 'custom_fs_schema',
+          ),
+        );
       } finally {
         await fs.close();
       }
@@ -308,7 +282,7 @@ describe('PostgresFs', () => {
     it('should handle idempotent initialization', async () => {
       await using container = await testPostgres.database();
       const options = {
-        pool: container.connectionString,
+        pool: container.pool(),
         root: '/',
         schema: 'idempotent_fs_schema',
       };
@@ -330,27 +304,17 @@ describe('PostgresFs', () => {
       await using container = await testPostgres.database();
 
       const fs = await PostgresFs.create({
-        pool: container.connectionString,
+        pool: container.pool(),
         root: '/',
         schema: 'ddl_created_fs_schema',
       });
       try {
-        const pool = new pg.Pool({
-          connectionString: container.connectionString,
-        });
-        try {
-          const result = await pool.query(`
-              SELECT schema_name FROM information_schema.schemata
-              WHERE schema_name = 'ddl_created_fs_schema'
-            `);
-          assert.strictEqual(result.rows.length, 1);
-          assert.strictEqual(
-            result.rows[0].schema_name,
-            'ddl_created_fs_schema',
-          );
-        } finally {
-          await pool.end();
-        }
+        const result = await container.pool().query(`
+            SELECT schema_name FROM information_schema.schemata
+            WHERE schema_name = 'ddl_created_fs_schema'
+          `);
+        assert.strictEqual(result.rows.length, 1);
+        assert.strictEqual(result.rows[0].schema_name, 'ddl_created_fs_schema');
       } finally {
         await fs.close();
       }

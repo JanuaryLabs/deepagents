@@ -4,6 +4,7 @@ import { Postgres } from '@zukhruf/testing/postgres';
 import { type UIMessageChunk, simulateReadableStream } from 'ai';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
+import type pg from 'pg';
 
 import {
   PollingChangeSource,
@@ -60,7 +61,7 @@ async function withStore<T>(
   await using container = await testPostgres.database();
 
   const schema = testSchema();
-  const store = await openStoreWithRetry(container.connectionString, schema);
+  const store = await openStoreWithRetry(container.pool(), schema);
   try {
     return await fn(store);
   } finally {
@@ -69,18 +70,15 @@ async function withStore<T>(
 }
 
 function openStoreWithRetry(
-  connectionString: string,
+  pool: pg.Pool,
   schema: string,
 ): Promise<PostgresStreamStore> {
-  return retryUntilReady(
-    () => PostgresStreamStore.create({ pool: connectionString, schema }),
-    {
-      retries: 9,
-      minTimeout: 100,
-      maxRetryTime: Number.POSITIVE_INFINITY,
-      shouldRetry: ({ error }) => isTransientPostgresStartupError(error),
-    },
-  );
+  return retryUntilReady(() => PostgresStreamStore.create({ pool, schema }), {
+    retries: 9,
+    minTimeout: 100,
+    maxRetryTime: Number.POSITIVE_INFINITY,
+    shouldRetry: ({ error }) => isTransientPostgresStartupError(error),
+  });
 }
 
 function isTransientPostgresStartupError(error: unknown): boolean {
@@ -101,7 +99,7 @@ describe('PostgreSQL StreamStore Integration', () => {
     const results = await Promise.allSettled(
       Array.from({ length: 3 }, () =>
         PostgresStreamStore.create({
-          pool: container.connectionString,
+          pool: container.pool(),
           schema,
         }),
       ),

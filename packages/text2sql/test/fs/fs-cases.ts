@@ -35,7 +35,7 @@ export const fsCases: readonly FsCase[] = [
       await using stack = new AsyncDisposableStack();
       const database = stack.use(await postgres.database());
       const fs = await PostgresFs.create({
-        pool: database.connectionString,
+        pool: database.pool(),
         root: '/',
       });
       stack.defer(() => fs.close());

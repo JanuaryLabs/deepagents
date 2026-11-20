@@ -4,7 +4,6 @@ import { Sqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import pg from 'pg';
 
 import {
   type InterAgentCommunication,
@@ -73,10 +72,7 @@ async function postgresBacking(): Promise<MailboxBacking> {
   const database = resources.use(await testPostgres.database());
   return backing(resources.move(), (connections) =>
     PostgresMailboxStore.create({
-      pool: connections.adopt(
-        new pg.Pool({ connectionString: database.connectionString }),
-        (pool) => pool.end(),
-      ),
+      pool: connections.adopt(database.pool(), (pool) => pool.end()),
     }),
   );
 }
@@ -380,10 +376,7 @@ describe('PostgresMailboxStore', () => {
   it('keeps the mail of stores on different schemas apart in one database', async () => {
     await using resources = new AsyncDisposableStack();
     const database = resources.use(await testPostgres.database());
-    const pool = resources.adopt(
-      new pg.Pool({ connectionString: database.connectionString }),
-      (value) => value.end(),
-    );
+    const pool = database.pool();
     const tenantA = await PostgresMailboxStore.create({
       pool,
       schema: 'tenant_a',

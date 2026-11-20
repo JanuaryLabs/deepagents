@@ -5,7 +5,6 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test, { type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { Pool } from 'pg';
 import {
   type Db,
   PgBoss,
@@ -596,7 +595,7 @@ test('real PostgreSQL initializes while other instances initialize at the same t
   await using testDatabase = await testPostgres.database();
   const { connectionString } = testDatabase;
 
-  const pool = new Pool({ connectionString });
+  const pool = testDatabase.pool();
   const bosses = Array.from(
     { length: 3 },
     () => new PgBoss({ connectionString, schedule: false }),
@@ -657,7 +656,6 @@ test('real PostgreSQL initializes while other instances initialize at the same t
     );
   } finally {
     await Promise.all(bosses.map((boss) => boss.stop({ graceful: false })));
-    await pool.end();
   }
 });
 
@@ -665,7 +663,7 @@ test('real PostgreSQL competing workers launch one execution for one run', async
   await using testDatabase = await testPostgres.database();
   const { connectionString } = testDatabase;
 
-  const pool = new Pool({ connectionString });
+  const pool = testDatabase.pool();
   const firstBoss = new PgBoss({ connectionString, schedule: false });
   const secondBoss = new PgBoss({ connectionString, schedule: false });
   firstBoss.on('error', () => {});
@@ -730,7 +728,6 @@ test('real PostgreSQL competing workers launch one execution for one run', async
   } finally {
     await secondBoss.stop({ graceful: false });
     await firstBoss.stop({ graceful: false });
-    await pool.end();
   }
 });
 
@@ -738,7 +735,7 @@ test('real PostgreSQL commits duplicate management calls as one schedule and run
   await using testDatabase = await testPostgres.database();
   const { connectionString } = testDatabase;
 
-  const pool = new Pool({ connectionString });
+  const pool = testDatabase.pool();
   const boss = new PgBoss({ connectionString, schedule: false });
   boss.on('error', () => {});
   await boss.start();
@@ -803,7 +800,6 @@ test('real PostgreSQL commits duplicate management calls as one schedule and run
     );
   } finally {
     await boss.stop({ graceful: false });
-    await pool.end();
   }
 });
 

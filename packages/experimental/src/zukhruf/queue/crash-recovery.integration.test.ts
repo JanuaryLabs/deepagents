@@ -154,10 +154,10 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
     await using container = await testPostgres.database();
 
     const streamStore = await PostgresStreamStore.create({
-      pool: container.connectionString,
+      pool: container.pool(),
     });
     const store = await PostgresContextStore.create({
-      pool: container.connectionString,
+      pool: container.pool(),
     });
 
     const boss = new PgBoss({
