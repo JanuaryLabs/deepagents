@@ -24,6 +24,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 
+import { ControlledAgentStorage } from '../../testing/controlled-agent-storage.fixture.ts';
 import { textResult } from '../../testing/stream-results.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
@@ -86,7 +87,10 @@ test('one setup creates independent ready hosts with plugins, HTTP, and queued t
   };
   const stack = defineStack(async (resources) => {
     const instance = ++opens;
-    return { ...(await adapters(resources)), bindings: [value.bind(instance)] };
+    return {
+      storage: new ControlledAgentStorage(await adapters(resources)),
+      bindings: [value.bind(instance)],
+    };
   });
   const setup = new AgentRuntime(defineAgent({ ...root, plugins: [plugin] }));
   assert.equal(opens, 0);
@@ -165,7 +169,9 @@ test('stack failure rolls back in reverse order and does not poison the setup', 
   assert.deepEqual(closed, ['second', 'first']);
   await assert.rejects(setup.initialize(stack), SuppressedError);
   assert.deepEqual(closed, ['second', 'first', 'second', 'first']);
-  const validStack = defineStack(adapters);
+  const validStack = defineStack(async (resources) => ({
+    storage: new ControlledAgentStorage(await adapters(resources)),
+  }));
   await using host = await setup.initialize(validStack);
   assert.equal(host.info.root, root.name);
 });
@@ -197,7 +203,7 @@ test('plugin initialization failure closes contributions before stack resources'
     resources.defer(() => {
       closed.push('stack');
     });
-    return adapters(resources);
+    return { storage: new ControlledAgentStorage(await adapters(resources)) };
   });
   await assert.rejects(setup.initialize(stack), /plugin failed/);
   assert.deepEqual(closed, ['plugin', 'stack']);
@@ -236,7 +242,7 @@ test('a ready host waits for worker startup, then closes workers before plugins 
     });
     entered.resolve();
     await release.promise;
-    return adapters(resources);
+    return { storage: new ControlledAgentStorage(await adapters(resources)) };
   });
   const opening = setup.initialize(stack);
   await entered.promise;
@@ -260,7 +266,9 @@ test('borrowed adapters survive their initialized host', async () => {
   const setup = new AgentRuntime(root);
   await using resources = new AsyncDisposableStack();
   const options = await adapters(resources);
-  const stack = defineStack(async () => options);
+  const stack = defineStack(async () => ({
+    storage: new ControlledAgentStorage(options),
+  }));
   const host = await setup.initialize(stack);
   assert.equal(host.info.root, root.name);
   await host.createSession(conversation);
@@ -320,7 +328,7 @@ for (const ownership of ['owned', 'borrowed']) {
       options = await adapters(
         ownership === 'owned' ? resources : sharedResources,
       );
-      return options;
+      return { storage: new ControlledAgentStorage(options) };
     });
     const host = await setup.initialize(stack);
     let disposing: Promise<void> | undefined;

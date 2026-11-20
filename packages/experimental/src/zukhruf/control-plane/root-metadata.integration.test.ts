@@ -19,6 +19,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import { ControlledAgentStorage } from '../../testing/controlled-agent-storage.fixture.ts';
 import { ControlledTurnQueue } from '../../testing/controlled-turn-queue.fixture.ts';
 import { textResult } from '../../testing/stream-results.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
@@ -92,10 +93,12 @@ test('enqueue only queues; worker execution initializes root metadata', async ()
     }),
   );
   const runtimeStack = defineStack(async () => ({
-    store,
-    streams: streamsFor(streamStore),
-    mailboxStore,
-    queue,
+    storage: new ControlledAgentStorage({
+      store,
+      streams: streamsFor(streamStore),
+      mailboxStore,
+      queue,
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack);
 
@@ -158,10 +161,12 @@ test('an existing chat can only be used by its stored owner', async () => {
     }),
   );
   const runtimeStack2 = defineStack(async () => ({
-    store,
-    streams: streamsFor(streamStore),
-    mailboxStore,
-    queue,
+    storage: new ControlledAgentStorage({
+      store,
+      streams: streamsFor(streamStore),
+      mailboxStore,
+      queue,
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack2);
   const intruder = { chatId: 'shared-chat', userId: 'bob' };
@@ -201,10 +206,12 @@ test('caller turn ids are scoped to their owning conversation', async () => {
     }),
   );
   const runtimeStack3 = defineStack(async () => ({
-    store,
-    streams: streamsFor(streamStore),
-    mailboxStore,
-    queue,
+    storage: new ControlledAgentStorage({
+      store,
+      streams: streamsFor(streamStore),
+      mailboxStore,
+      queue,
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack3);
 
@@ -240,10 +247,12 @@ test('explicit cancellation rejects a stream owned by another conversation', asy
     }),
   );
   const runtimeStack4 = defineStack(async () => ({
-    store,
-    streams: streamsFor(streamStore),
-    mailboxStore,
-    queue,
+    storage: new ControlledAgentStorage({
+      store,
+      streams: streamsFor(streamStore),
+      mailboxStore,
+      queue,
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack4);
   const alice = await runtime.enqueue(
@@ -289,10 +298,12 @@ test('reserved but malformed agent metadata fails closed at enqueue', async () =
     }),
   );
   const runtimeStack5 = defineStack(async () => ({
-    store,
-    streams: streamsFor(streamStore),
-    mailboxStore,
-    queue,
+    storage: new ControlledAgentStorage({
+      store,
+      streams: streamsFor(streamStore),
+      mailboxStore,
+      queue,
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack5);
 
@@ -326,10 +337,12 @@ test('enqueue rejects an empty conversation before registering a stream', async 
     }),
   );
   const runtimeStack6 = defineStack(async () => ({
-    store,
-    streams: streamsFor(streamStore),
-    mailboxStore,
-    queue,
+    storage: new ControlledAgentStorage({
+      store,
+      streams: streamsFor(streamStore),
+      mailboxStore,
+      queue,
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack6);
 
@@ -380,10 +393,12 @@ test('root initialization preserves a concurrent host metadata write', async () 
     }),
   );
   const runtimeStack7 = defineStack(async () => ({
-    store,
-    streams: streamsFor(streamStore),
-    mailboxStore,
-    queue,
+    storage: new ControlledAgentStorage({
+      store,
+      streams: streamsFor(streamStore),
+      mailboxStore,
+      queue,
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack7);
   await runtime.enqueue(
@@ -445,10 +460,12 @@ test('a child must point to the immediate ancestor of its canonical path', async
     }),
   );
   const runtimeStack8 = defineStack(async () => ({
-    store,
-    streams: streamsFor(streamStore),
-    mailboxStore,
-    queue,
+    storage: new ControlledAgentStorage({
+      store,
+      streams: streamsFor(streamStore),
+      mailboxStore,
+      queue,
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack8);
 
@@ -483,10 +500,12 @@ test('host delivery rejects a recipient that does not own the stored chat', asyn
     }),
   );
   const runtimeStack9 = defineStack(async () => ({
-    store,
-    streams: streamsFor(streamStore),
-    mailboxStore,
-    queue,
+    storage: new ControlledAgentStorage({
+      store,
+      streams: streamsFor(streamStore),
+      mailboxStore,
+      queue,
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack9);
   const recipient = { chatId: 'shared-chat', userId: 'bob' };
@@ -530,10 +549,12 @@ test('explicit cancellation rejects a conversation that does not own the stored 
     }),
   );
   const runtimeStack10 = defineStack(async () => ({
-    store,
-    streams: streamsFor(streamStore),
-    mailboxStore,
-    queue,
+    storage: new ControlledAgentStorage({
+      store,
+      streams: streamsFor(streamStore),
+      mailboxStore,
+      queue,
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack10);
   const alice = await runtime.enqueue(
@@ -595,10 +616,12 @@ test('cancelling during sandbox setup prevents model sampling', async (t) => {
     }),
   );
   const runtimeStack11 = defineStack(async () => ({
-    store,
-    streams: streamsFor(streamStore),
-    mailboxStore,
-    queue,
+    storage: new ControlledAgentStorage({
+      store,
+      streams: streamsFor(streamStore),
+      mailboxStore,
+      queue,
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack11);
   const conversation = { chatId: 'cancel-setup', userId: 'user-1' };
@@ -662,10 +685,12 @@ test('cancellation that wins the execution claim prevents model sampling', async
     }),
   );
   const runtimeStack12 = defineStack(async () => ({
-    store,
-    streams: streamsFor(streamStore),
-    mailboxStore,
-    queue,
+    storage: new ControlledAgentStorage({
+      store,
+      streams: streamsFor(streamStore),
+      mailboxStore,
+      queue,
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack12);
   const conversation = { chatId: 'cancel-claim', userId: 'user-1' };
@@ -722,10 +747,12 @@ test('cancellation after execution claim aborts pending provider setup', async (
     }),
   );
   const runtimeStack13 = defineStack(async () => ({
-    store,
-    streams: streamsFor(streamStore),
-    mailboxStore,
-    queue,
+    storage: new ControlledAgentStorage({
+      store,
+      streams: streamsFor(streamStore),
+      mailboxStore,
+      queue,
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack13);
   const conversation = { chatId: 'cancel-provider', userId: 'user-1' };

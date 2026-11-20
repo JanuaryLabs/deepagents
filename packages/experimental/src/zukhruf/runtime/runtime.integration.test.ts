@@ -68,6 +68,7 @@ import {
 } from '@deepagents/experimental/zukhruf/schedules';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import { ControlledAgentStorage } from '../../testing/controlled-agent-storage.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
 import { usage } from '../../testing/usage.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
@@ -590,10 +591,12 @@ async function harness(
       : root,
   );
   const stack = defineStack(async () => ({
-    store,
-    streams,
-    queue: runtimeQueue,
-    mailboxStore,
+    storage: new ControlledAgentStorage({
+      store,
+      streams,
+      queue: runtimeQueue,
+      mailboxStore,
+    }),
     ...(composition?.bindings ? { bindings: composition.bindings } : {}),
     ...options?.runtime?.({ boss }),
   }));
@@ -2459,10 +2462,12 @@ describe('zukhruf runtime — background executor', () => {
       await h.runtime[Symbol.asyncDispose]();
       await using resumed = await new AgentRuntime(root).initialize(
         defineStack(async () => ({
-          store: h.store,
-          streams: h.streams,
-          queue: h.queue,
-          mailboxStore: h.mailboxStore,
+          storage: new ControlledAgentStorage({
+            store: h.store,
+            streams: h.streams,
+            queue: h.queue,
+            mailboxStore: h.mailboxStore,
+          }),
         })),
       );
       await resumed.work();
@@ -3484,10 +3489,12 @@ describe('zukhruf runtime — cross-process conversation status', () => {
     });
     const observerSetup = new AgentRuntime(declaration(model));
     const observerStack = defineStack(async () => ({
-      store: h.store,
-      streams: h.streams,
-      queue: observerQueue,
-      mailboxStore: h.mailboxStore,
+      storage: new ControlledAgentStorage({
+        store: h.store,
+        streams: h.streams,
+        queue: observerQueue,
+        mailboxStore: h.mailboxStore,
+      }),
       conversationStatusChanges: new PgBossConversationStatusChangeSource(
         h.boss,
       ),

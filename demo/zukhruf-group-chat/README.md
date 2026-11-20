@@ -34,7 +34,7 @@ results held by the root.
   `agent.ts` also installs the run's telemetry plugin.
 - `subagents/participant/` owns the shared parameterized participant
   declaration, instructions, and read-only sandbox.
-- `stack.ts` defines the lazy in-memory stores and PGlite queue.
+- `stack.ts` opens an `EmbeddedAgentStorage` in the demo directory.
 - `run.ts` composes the runtime, starts its worker, and executes the scenario.
 - `environment.ts` holds run-local paths.
 - `channels/`, `connections/`, `schedules/`, `skills/`, and `tools/` are

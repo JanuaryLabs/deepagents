@@ -1,23 +1,17 @@
-import { PGlite } from '@electric-sql/pglite';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
-import { PgBoss, fromPglite } from 'pg-boss';
 
-import {
-  InMemoryContextStore,
-  PollingChangeSource,
-  SqliteStreamStore,
-  StreamManager,
-  createVirtualSandbox,
-} from '@deepagents/context';
+import { createVirtualSandbox } from '@deepagents/context';
 import declaration from '@deepagents/demo-zukhruf-self-extending-agent-tree';
 import {
   AgentRuntime,
-  PgBossTurnQueue,
-  SqliteMailboxStore,
+  EmbeddedAgentStorage,
   defineSandbox,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
@@ -137,33 +131,11 @@ test('authors a missing skill before a fresh general task agent uses it', async 
   };
 
   await using resources = new AsyncDisposableStack();
-  const database = resources.adopt(new PGlite(), (database) =>
-    database.close(),
-  );
-  const boss = resources.adopt(
-    new PgBoss({ db: fromPglite(database), backend: 'pglite' }),
-    (boss) => boss.stop({ graceful: false }),
-  );
-  boss.on('error', () => {});
-  await boss.start();
-  const queue = await PgBossTurnQueue.create(boss, {
-    pollingIntervalSeconds: 0.5,
-    schema: 'pgboss',
-  });
-  const streamStore = resources.adopt(
-    new SqliteStreamStore(':memory:'),
-    (store) => store.close(),
-  );
+  const directory = await mkdtemp(join(tmpdir(), 'zukhruf-demo-test-'));
+  resources.defer(() => rm(directory, { recursive: true, force: true }));
+  const storage = resources.use(await EmbeddedAgentStorage.open({ directory }));
   const runtime = new AgentRuntime(root);
-  const stack = defineStack(async () => ({
-    store: new InMemoryContextStore(),
-    streams: new StreamManager({
-      store: streamStore,
-      changeSource: new PollingChangeSource({ reads: streamStore }),
-    }),
-    queue,
-    mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
-  }));
+  const stack = defineStack(async () => ({ storage }));
   const host = resources.use(await runtime.initialize(stack));
   resources.use(await host.work({ concurrency: 4 }));
 

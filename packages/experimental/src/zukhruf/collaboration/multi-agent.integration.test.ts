@@ -23,6 +23,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import { ControlledAgentStorage } from '../../testing/controlled-agent-storage.fixture.ts';
 import { ControlledTurnQueue } from '../../testing/controlled-turn-queue.fixture.ts';
 import {
   textResult,
@@ -130,7 +131,7 @@ test('host config injects root guidance, spawn guidance, namespace, and wait bou
     }),
   );
   const runtimeStack = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     multiAgent: {
       rootAgentUsageHintText: 'ROOT COLLABORATION GUIDANCE',
       subagentUsageHintText: 'CHILD COLLABORATION GUIDANCE',
@@ -229,10 +230,12 @@ test('wait_agent clamps a below-minimum timeout and reports it to the model', as
       }),
     );
     const runtimeStack2 = defineStack(async () => ({
-      store,
-      streams,
-      mailboxStore,
-      queue,
+      storage: new ControlledAgentStorage({
+        store,
+        streams,
+        mailboxStore,
+        queue,
+      }),
       multiAgent: {
         minWaitTimeoutMs: 50,
         defaultWaitTimeoutMs: 75,
@@ -288,7 +291,7 @@ test('subagent guidance replaces root guidance on a child turn', async () => {
     }),
   );
   const runtimeStack3 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     multiAgent: {
       rootAgentUsageHintText: 'ROOT COLLABORATION GUIDANCE',
       subagentUsageHintText: 'CHILD COLLABORATION GUIDANCE',
@@ -365,7 +368,9 @@ test('spawn output is the canonical task name without agent_path', async () => {
       subagents: [child],
     }),
   );
-  const runtimeStack = defineStack(async () => ({ ...h }));
+  const runtimeStack = defineStack(async () => ({
+    storage: new ControlledAgentStorage(h),
+  }));
   const runtime = await runtimeSetup.initialize(runtimeStack);
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
@@ -422,7 +427,7 @@ test('plugin-contributed subagent uses AI SDK code mode collaboration', async ()
     }),
   );
   const runtimeStack4 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     multiAgent: { nonCodeModeOnly: false },
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack4);
@@ -481,7 +486,9 @@ test('interrupt_agent reports not_found for a missing target', async () => {
       instructions: [],
     }),
   );
-  const runtimeStack = defineStack(async () => ({ ...h }));
+  const runtimeStack = defineStack(async () => ({
+    storage: new ControlledAgentStorage(h),
+  }));
   const runtime = await runtimeSetup.initialize(runtimeStack);
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
@@ -514,7 +521,7 @@ test('host config rejects invalid namespaces and wait bounds', async () => {
   try {
     const reservedNamespaceSetup = new AgentRuntime(declaration);
     const reservedNamespaceStack = defineStack(async () => ({
-      ...h,
+      storage: new ControlledAgentStorage(h),
       multiAgent: { toolNamespace: 'functions' },
     }));
     await assert.rejects(
@@ -523,7 +530,7 @@ test('host config rejects invalid namespaces and wait bounds', async () => {
     );
     const paddedNamespaceSetup = new AgentRuntime(declaration);
     const paddedNamespaceStack = defineStack(async () => ({
-      ...h,
+      storage: new ControlledAgentStorage(h),
       multiAgent: { toolNamespace: ' agents ' },
     }));
     await assert.rejects(
@@ -532,7 +539,7 @@ test('host config rejects invalid namespaces and wait bounds', async () => {
     );
     const invalidWaitBoundsSetup = new AgentRuntime(declaration);
     const invalidWaitBoundsStack = defineStack(async () => ({
-      ...h,
+      storage: new ControlledAgentStorage(h),
       multiAgent: {
         minWaitTimeoutMs: 50,
         defaultWaitTimeoutMs: 40,
@@ -545,7 +552,7 @@ test('host config rejects invalid namespaces and wait bounds', async () => {
     );
     const invalidConcurrencySetup = new AgentRuntime(declaration);
     const invalidConcurrencyStack = defineStack(async () => ({
-      ...h,
+      storage: new ControlledAgentStorage(h),
       multiAgent: { maxConcurrentThreadsPerSession: 0 },
     }));
     await assert.rejects(
@@ -583,7 +590,9 @@ test('default guidance tells root and child agents the Codex concurrency slots',
       subagents: [child],
     }),
   );
-  const runtimeStack = defineStack(async () => ({ ...h }));
+  const runtimeStack = defineStack(async () => ({
+    storage: new ControlledAgentStorage(h),
+  }));
   const runtime = await runtimeSetup.initialize(runtimeStack);
   await h.store.createChat({
     id: 'root-chat',

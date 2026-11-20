@@ -21,14 +21,7 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
 import type { BashToolkit } from '@deepagents/context';
-import {
-  InMemoryContextStore,
-  PollingChangeSource,
-  SqliteStreamStore,
-  StreamManager,
-  createBashTool,
-  createVirtualSandbox,
-} from '@deepagents/context';
+import { createBashTool, createVirtualSandbox } from '@deepagents/context';
 import {
   FileTraceAdapter,
   fileTelemetry,
@@ -38,12 +31,7 @@ import {
   type AgentDeclaration,
   type AgentHost,
   AgentRuntime,
-  type ConsumeContext,
-  type ConsumeOptions,
-  SqliteMailboxStore,
-  type TurnActivity,
-  TurnQueue,
-  type TurnRef,
+  EmbeddedAgentStorage,
   defineAgent,
   defineStack,
   defineTool,
@@ -68,100 +56,21 @@ async function unusedSandbox(): Promise<BashToolkit> {
   });
 }
 
-class ControlledTurnQueue extends TurnQueue {
-  readonly #turns: TurnRef[] = [];
-  readonly #running = new Map<
-    string,
-    { turn: TurnRef; abort: AbortController }
-  >();
-  readonly #consumers = new Set<{
-    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
-    options: ConsumeOptions;
-  }>();
-
-  push(turn: TurnRef): Promise<void> {
-    this.#turns.push(turn);
-    return Promise.resolve();
-  }
-
-  getTurnActivity(): Promise<TurnActivity> {
-    return Promise.resolve(
-      this.#running.size > 0
-        ? 'running'
-        : this.#turns.length === 0
-          ? 'idle'
-          : 'queued',
-    );
-  }
-
-  getCurrentTurn(): Promise<TurnRef | undefined> {
-    return Promise.resolve(
-      this.#running.values().next().value?.turn ?? this.#turns[0],
-    );
-  }
-
-  cancel(streamId: string): Promise<void> {
-    this.#running.get(streamId)?.abort.abort();
-    const index = this.#turns.findIndex((turn) => turn.streamId === streamId);
-    if (index >= 0) this.#turns.splice(index, 1);
-    return Promise.resolve();
-  }
-
-  consume(
-    handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
-    options: ConsumeOptions,
-  ): Promise<AsyncDisposable> {
-    const consumer = { handler, options };
-    this.#consumers.add(consumer);
-    return Promise.resolve({
-      [Symbol.asyncDispose]: () => {
-        this.#consumers.delete(consumer);
-        return Promise.resolve();
-      },
-    });
-  }
-
-  resumeParked(): Promise<void> {
-    return Promise.resolve();
-  }
-
-  async runNext(): Promise<void> {
-    const turn = this.#turns.shift();
-    assert(turn, 'expected a queued turn');
-    const [consumer] = this.#consumers;
-    assert(consumer, 'expected a running queue consumer');
-    const abort = new AbortController();
-    this.#running.set(turn.streamId, { turn, abort });
-    try {
-      await consumer.handler(turn, {
-        signal: abort.signal,
-        park: () => Promise.resolve(),
-      });
-      await consumer.options.onSettled?.(turn);
-    } catch (error) {
-      await consumer.options.onOrphaned(
-        turn,
-        Error.isError(error) ? error.message : String(error),
-      );
-    } finally {
-      this.#running.delete(turn.streamId);
-    }
-  }
+function openStorage(directory: string) {
+  return EmbeddedAgentStorage.open({ directory: join(directory, 'storage') });
 }
 
-function createStores(resources: AsyncDisposableStack) {
-  const streamStore = resources.adopt(
-    new SqliteStreamStore(':memory:'),
-    (value) => value.close(),
+/** Waits until the conversation's turns have left the queue: the worker has finished each one. */
+async function turnsSettled(
+  storage: EmbeddedAgentStorage,
+  conversation: { chatId: string; userId: string },
+  signal: AbortSignal,
+) {
+  await waitFor(
+    async () =>
+      assert.equal(await storage.queue.getTurnActivity(conversation), 'idle'),
+    { signal, interval: 50 },
   );
-  return {
-    store: new InMemoryContextStore(),
-    streams: new StreamManager({
-      store: streamStore,
-      changeSource: new PollingChangeSource({ reads: streamStore }),
-    }),
-    mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
-  };
 }
 
 function createHost(runtime: AgentHost, ...projections: HttpProjection[]) {
@@ -266,13 +175,12 @@ function createDeclaration(
   });
 }
 
-test('fileTelemetry() composes plugin integrations with agent policy and serves owner-scoped trace reads from one real AgentRuntime turn', async () => {
+test('fileTelemetry() composes plugin integrations with agent policy and serves owner-scoped trace reads from one real AgentRuntime turn', async (t) => {
   await using directory = await new TemporaryFiles().directory(
     'deepagents-traces-',
   );
   const telemetry = join(directory.path, 'telemetry.jsonl');
-  await using resources = new AsyncDisposableStack();
-  const stores = createStores(resources);
+  await using storage = await openStorage(directory.path);
   let observedStarts = 0;
   const traceTelemetry = fileTelemetry({ path: telemetry });
   const root = createDeclaration(
@@ -305,9 +213,8 @@ test('fileTelemetry() composes plugin integrations with agent policy and serves 
       },
     },
   );
-  const queue = new ControlledTurnQueue();
   const runtimeSetup = new AgentRuntime(root);
-  const stack = defineStack(async () => ({ ...stores, queue }));
+  const stack = defineStack(async () => ({ storage }));
   const runtime = await runtimeSetup.initialize(stack);
   assert.equal(root.telemetry?.includeRuntimeContext, undefined);
   const worker = await runtime.work();
@@ -321,7 +228,7 @@ test('fileTelemetry() composes plugin integrations with agent policy and serves 
     },
     trigger: 'submit-message',
   });
-  await queue.runNext();
+  await turnsSettled(storage, conversation, t.signal);
   assert.equal(
     (await runtime.observe(conversation).status(turn.id))?.status,
     'completed',
@@ -443,7 +350,7 @@ test('fileTelemetry() composes plugin integrations with agent policy and serves 
     },
     trigger: 'submit-message',
   });
-  await queue.runNext();
+  await turnsSettled(storage, conversation, t.signal);
   assert.equal(
     (await runtime.observe(conversation).status(failedTurn.id))?.status,
     'failed',
@@ -508,10 +415,7 @@ test('fileTelemetry() composes plugin integrations with agent policy and serves 
   await worker[Symbol.asyncDispose]();
 
   const restartedSetup = new AgentRuntime(root);
-  const restartedStack = defineStack(async () => ({
-    ...stores,
-    queue: new ControlledTurnQueue(),
-  }));
+  const restartedStack = defineStack(async () => ({ storage }));
   const restarted = await restartedSetup.initialize(restartedStack);
   const restartedWorker = await restarted.work();
   const restartedResponse = await createHost(
@@ -530,12 +434,10 @@ test('fileTelemetry() preserves cancellation and recording policy in exported tr
   await using directory = await new TemporaryFiles().directory(
     'deepagents-traces-',
   );
-  await using resources = new AsyncDisposableStack();
-  const stores = createStores(resources);
+  await using storage = await openStorage(directory.path);
   const traceTelemetry = fileTelemetry({
     path: join(directory.path, 'telemetry.jsonl'),
   });
-  const queue = new ControlledTurnQueue();
   let started = false;
   const runtimeSetup = new AgentRuntime(
     createDeclaration(
@@ -556,7 +458,7 @@ test('fileTelemetry() preserves cancellation and recording policy in exported tr
       { model: createSlowTraceModel() },
     ),
   );
-  const stack = defineStack(async () => ({ ...stores, queue }));
+  const stack = defineStack(async () => ({ storage }));
   const runtime = await runtimeSetup.initialize(stack);
   const worker = await runtime.work();
   const conversation = { chatId: 'chat-abort', userId: 'user-1' };
@@ -569,11 +471,10 @@ test('fileTelemetry() preserves cancellation and recording policy in exported tr
     },
     trigger: 'submit-message',
   });
-  // Drive and cancel the real queued turn after AI SDK telemetry has started.
-  const run = queue.runNext();
+  // Cancel the real turn after AI SDK telemetry has started.
   await waitFor(() => assert(started), { signal: t.signal });
   await runtime.observe(conversation).cancel(turn.id);
-  await run;
+  await turnsSettled(storage, conversation, t.signal);
 
   const reader = runtime.plugin(traceTelemetry).traces;
   let trace: Awaited<ReturnType<typeof reader.list>>[number] | undefined;
@@ -654,8 +555,7 @@ test('fileTelemetry() advertises an empty file, omits absent telemetry, and reje
   await using directory = await new TemporaryFiles().directory(
     'deepagents-traces-',
   );
-  await using resources = new AsyncDisposableStack();
-  const stores = createStores(resources);
+  await using storage = await openStorage(directory.path);
   const conversation = { chatId: 'chat-1', userId: 'user-1' };
 
   const emptyTelemetry = fileTelemetry({
@@ -664,10 +564,7 @@ test('fileTelemetry() advertises an empty file, omits absent telemetry, and reje
   const emptyRuntimeSetup = new AgentRuntime(
     createDeclaration([emptyTelemetry]),
   );
-  const emptyStack = defineStack(async () => ({
-    ...stores,
-    queue: new ControlledTurnQueue(),
-  }));
+  const emptyStack = defineStack(async () => ({ storage }));
   const emptyRuntime = await emptyRuntimeSetup.initialize(emptyStack);
   await emptyRuntime.createSession(conversation);
   const emptyHost = createHost(emptyRuntime, tracesHttp(emptyTelemetry));
@@ -682,10 +579,7 @@ test('fileTelemetry() advertises an empty file, omits absent telemetry, and reje
   assert.deepEqual(await emptyList.json(), []);
 
   const absentRuntimeSetup = new AgentRuntime(createDeclaration());
-  const absentStack = defineStack(async () => ({
-    ...stores,
-    queue: new ControlledTurnQueue(),
-  }));
+  const absentStack = defineStack(async () => ({ storage }));
   const absentRuntime = await absentRuntimeSetup.initialize(absentStack);
   const absentHost = createHost(absentRuntime);
   const absent = await readCapabilities(absentHost, 'user-1');
@@ -701,10 +595,7 @@ test('fileTelemetry() advertises an empty file, omits absent telemetry, and reje
   const duplicateRuntimeSetup = new AgentRuntime(
     createDeclaration([first, second]),
   );
-  const duplicateStack = defineStack(async () => ({
-    ...stores,
-    queue: new ControlledTurnQueue(),
-  }));
+  const duplicateStack = defineStack(async () => ({ storage }));
   const duplicateRuntime =
     await duplicateRuntimeSetup.initialize(duplicateStack);
   assert.throws(

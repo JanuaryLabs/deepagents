@@ -13,6 +13,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import { ControlledAgentStorage } from '../../testing/controlled-agent-storage.fixture.ts';
 import { ControlledTurnQueue } from '../../testing/controlled-turn-queue.fixture.ts';
 import {
   textResult,
@@ -116,10 +117,12 @@ async function spawnAfter(options: {
     }),
   );
   const runtimeStack = defineStack(async () => ({
-    store,
-    streams: streamsFor(streamStore),
-    mailboxStore,
-    queue,
+    storage: new ControlledAgentStorage({
+      store,
+      streams: streamsFor(streamStore),
+      mailboxStore,
+      queue,
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack);
   await using workerHandle = await runtime.work();

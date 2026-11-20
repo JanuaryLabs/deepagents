@@ -14,6 +14,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 import { mcp } from '@deepagents/experimental/zukhruf/mcp';
 
+import { ControlledAgentStorage } from '../../../testing/controlled-agent-storage.fixture.ts';
 import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 import { UnusedTurnQueue } from '../../../testing/unused-turn-queue.fixture.ts';
 
@@ -125,7 +126,9 @@ test('MCP uses real HTTP clients per runtime and closes them on failure or dispo
     },
     plugins: [connection],
   });
-  const stack = defineStack(async (resources) => adapters(resources));
+  const stack = defineStack(async (resources) => ({
+    storage: new ControlledAgentStorage(adapters(resources)),
+  }));
   const firstSetup = new AgentRuntime(root);
   await using first = await firstSetup.initialize(stack);
   const secondSetup = new AgentRuntime(root);

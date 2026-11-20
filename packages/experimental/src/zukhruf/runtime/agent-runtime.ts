@@ -20,7 +20,6 @@ import {
   assertConversationOwner,
 } from '../control-plane/conversation-not-found-error.ts';
 import { MailboxCoordinator } from '../mailbox/coordinator.ts';
-import type { MailboxStore } from '../mailbox/store.ts';
 import type {
   ConversationId,
   InterAgentCommunication,
@@ -31,6 +30,7 @@ import {
   resolveMultiAgentHostConfig,
 } from '../multi-agent-config.ts';
 import type { TurnQueue, TurnRef, TurnRequest } from '../queue/turn-queue.ts';
+import type { AgentStorage } from '../storage/agent-storage.ts';
 import type { ZukhrufToolSet } from '../tool.ts';
 import { AgentTurnExecutor } from './agent-turn-executor.ts';
 import { ApprovalController } from './approval-controller.ts';
@@ -296,12 +296,11 @@ export class AgentObservation {
 
 /** A reusable recipe. Register only resources the returned host should own. */
 export type AgentStack = (resources: AsyncDisposableStack) => Promise<{
-  store: ContextStore;
-  /** Stream subsystem backed by the adapters composed in this recipe. */
-  streams: StreamManager;
-  queue: TurnQueue;
-  /** Durable pending inter-agent input. Distinct from the TurnQueue scheduler. */
-  mailboxStore: MailboxStore;
+  /**
+   * Conversations, streams, turns and mail on one database. The host
+   * borrows it: register a storage the host should close on `resources`.
+   */
+  storage: AgentStorage;
   /** Codex-compatible multi-agent host guidance and tool configuration. */
   multiAgent?: MultiAgentHostConfig;
   /** Host implementations for capabilities required by root-owned plugins. */
@@ -373,38 +372,39 @@ class RuntimeHost implements AsyncDisposable {
       new PluginManager(root, options.bindings, multiAgent),
     );
     const declarations = plugins.declarations;
-    const directory = new AgentDirectory(options.store);
-    const streams = options.streams;
+    const { storage } = options;
+    const directory = new AgentDirectory(storage.store);
+    const streams = storage.streams;
     // Status reads go to the raw queue; every push through the decorated
     // queue publishes the target conversation's status.
     const conversationStatus = new ConversationStatusProjector({
-      store: options.store,
+      store: storage.store,
       streams,
-      queue: options.queue,
+      queue: storage.queue,
       directory,
       changeSource: options.conversationStatusChanges,
     });
-    const queue = new StatusPublishingTurnQueue(options.queue, (conversation) =>
+    const queue = new StatusPublishingTurnQueue(storage.queue, (conversation) =>
       conversationStatus.publish(conversation),
     );
     const mailbox = new MailboxCoordinator({
-      store: options.mailboxStore,
+      store: storage.mailboxStore,
       queue,
       streams,
     });
     const approvals = new ApprovalController({
-      store: options.store,
+      store: storage.store,
       queue,
     });
     const statusProjector = new AgentStatusProjector({
-      store: options.store,
+      store: storage.store,
       streams,
       queue,
       mailbox,
       directory,
       approvals,
     });
-    const historyForker = new AgentHistoryForker(options.store);
+    const historyForker = new AgentHistoryForker(storage.store);
     const controlPlane = new AgentControlPlane({
       root: declarations.root,
       streams,
@@ -418,7 +418,7 @@ class RuntimeHost implements AsyncDisposable {
         conversationStatus.recordActivity(thread, activity),
       maxConcurrentThreadsPerSession: multiAgent.maxConcurrentThreadsPerSession,
     });
-    this.#store = options.store;
+    this.#store = storage.store;
     this.#queue = queue;
     this.#streams = streams;
     this.#mailbox = mailbox;
@@ -449,7 +449,7 @@ class RuntimeHost implements AsyncDisposable {
     // Registered before the workers, so it is disposed after they stop.
     const sandboxes = resources.use(new ConversationSandboxes());
     this.#executor = new AgentTurnExecutor({
-      store: options.store,
+      store: storage.store,
       streams,
       controlPlane,
       mailbox,

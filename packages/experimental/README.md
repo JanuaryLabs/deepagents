@@ -87,12 +87,32 @@ and injected collaboration-tool implementations are internal wiring. See
 [`BUGS.md`](./src/zukhruf/BUGS.md) for known residue.
 
 Compose infrastructure in a reusable `defineStack(async (resources) => ...)`
-recipe returning `{ store, streams, queue, mailboxStore }`, plus any plugin
-`bindings` or host options. The callback receives JavaScript's native
-`AsyncDisposableStack`: use `resources.use()` for disposable adapters and
-`resources.adopt()` for adapters exposing a cleanup method. Backend choices
-and startup calls stay explicit; see
-[`demo/zukhruf-simple/stack.ts`](../../demo/zukhruf-simple/stack.ts).
+recipe returning `{ storage }`, plus any plugin `bindings` or host options.
+`storage` is an `AgentStorage`: the context store, stream manager, turn queue
+and mailbox store on one database, and `admit(tree, work)`, which runs `work`
+with all four bound to one unit under a per-tree lock. On PostgreSQL,
+`PostgresAgentStorage.create({ pool, boss })` builds the stores on the host's
+pool and the turn queue on PgBoss, refuses a PgBoss on another database with
+`AgentStorageDatabaseMismatchError`, and admits in one transaction under a
+per-tree advisory lock. It borrows the pool and PgBoss; register it with
+`resources.use()` so the host closes the stream change source it opened.
+For one process, `EmbeddedAgentStorage.open({ directory })` keeps the stores in
+`<directory>/zukhruf.sqlite` and pg-boss on PGlite in `<directory>/zukhruf.queue`,
+and closes both. Its admissions run one at a time in one SQLite `BEGIN
+IMMEDIATE` transaction; a turn pushed inside one is an outbox row of that
+transaction, which a relay pushes to pg-boss after the commit, and `open`
+pushes the rows a killed process left. Work inside `admit` uses its scope: a
+call to the storage itself there rejects with `AdmissionScopeError`. The
+callback receives JavaScript's native `AsyncDisposableStack`: use
+`resources.use()` for disposable adapters and `resources.adopt()` for adapters
+exposing a cleanup method. Backend choices and startup calls stay explicit.
+
+```ts
+const stack = defineStack(async (resources) => ({
+  storage: resources.use(await PostgresAgentStorage.create({ pool, boss })),
+  multiAgent: { maxConcurrentThreadsPerSession: 4 },
+}));
+```
 
 ```ts
 import declaration from './agent.ts';
@@ -194,10 +214,7 @@ const root = defineAgent({
 });
 
 const stack = defineStack(async () => ({
-  store,
-  streams,
-  queue,
-  mailboxStore,
+  storage,
   bindings: [
     schedulesCapabilities.boss.bind(boss),
     schedulesCapabilities.transaction.bind(transaction),

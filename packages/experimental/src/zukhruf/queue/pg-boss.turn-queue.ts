@@ -7,6 +7,7 @@ import { type PostgresTransaction, isRecord } from '@deepagents/context';
 import {
   type ConsumeContext,
   type ConsumeOptions,
+  type TransactionalTurnQueue,
   type TurnActivity,
   TurnQueue,
   type TurnRef,
@@ -28,12 +29,6 @@ export interface PgBossTurnQueueOptions {
 
 /** A `<schema>.queue` catalog row, selected as `table_name AS "table"`. */
 const queueCatalogRowSchema = z.object({ table: z.string() });
-
-/** The part of the queue that writes and reads inside a caller's transaction. */
-export type TransactionalTurnQueue = Pick<
-  TurnQueue,
-  'push' | 'getTurnActivity'
->;
 
 /** Options after defaults and checks, as the queue opens with them. */
 interface PgBossTurnQueueSettings {
@@ -247,19 +242,33 @@ export class PgBossTurnQueue extends TurnQueue {
     return this.#getTurnActivity(conversation, undefined);
   }
 
+  /**
+   * Pushes `turn` as the job `id`, a UUID. While pg-boss holds a job with that
+   * id, a second push of it adds nothing. Ids that grow with push order (UUIDv7)
+   * keep FIFO across timestamp ties.
+   */
+  async pushAs(id: string, turn: TurnRef): Promise<void> {
+    await this.#send(id, turn, undefined);
+  }
+
   async #push(turn: TurnRef, db: Db | undefined): Promise<void> {
     // pg-boss fetches `ORDER BY priority desc, created_on, id`. A monotonic
     // UUIDv7 job id makes the id tiebreak follow push order, so FIFO survives
     // created_on timestamp ties (millisecond-resolution clocks like PGlite).
     const jobId = uuidv7();
+    if (!(await this.#send(jobId, turn, db))) {
+      throw new Error(`PgBossTurnQueue job id collision: ${jobId}`);
+    }
+  }
+
+  /** Whether pg-boss inserted the job: it skips an id it already holds. */
+  async #send(id: string, turn: TurnRef, db: Db | undefined): Promise<boolean> {
     const inserted = await this.#boss.send(this.#queue, turn, {
-      id: jobId,
+      id,
       singletonKey: turn.chatId,
       db,
     });
-    if (inserted === null) {
-      throw new Error(`PgBossTurnQueue job id collision: ${jobId}`);
-    }
+    return inserted !== null;
   }
 
   async #getTurnActivity(

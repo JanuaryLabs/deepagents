@@ -24,6 +24,7 @@ import {
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
 
 import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
+import { ControlledAgentStorage } from '../../../testing/controlled-agent-storage.fixture.ts';
 import {
   ControlledTurnQueue,
   type TurnConsumer,
@@ -165,10 +166,12 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
     }),
   );
   const runtimeAStack = defineStack(async () => ({
-    store,
-    streams: streamsFor(streamStoreA),
-    queue: queueA,
-    mailboxStore: mailboxStoreA,
+    storage: new ControlledAgentStorage({
+      store,
+      streams: streamsFor(streamStoreA),
+      queue: queueA,
+      mailboxStore: mailboxStoreA,
+    }),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(schedulerA),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -186,10 +189,12 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
     }),
   );
   const runtimeBStack = defineStack(async () => ({
-    store,
-    streams: streamsFor(streamStoreB),
-    queue: queueB,
-    mailboxStore: mailboxStoreB,
+    storage: new ControlledAgentStorage({
+      store,
+      streams: streamsFor(streamStoreB),
+      queue: queueB,
+      mailboxStore: mailboxStoreB,
+    }),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(schedulerB),
       conversationSchedulingCapabilities.timezone.bind('UTC'),

@@ -27,6 +27,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 
+import { ControlledAgentStorage } from '../../../testing/controlled-agent-storage.fixture.ts';
 import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 import { usage } from '../../../testing/usage.fixture.ts';
 
@@ -130,12 +131,14 @@ test('POST /session answers 429 for an idle sub-agent while its tree has no free
       }),
     ).initialize(
       defineStack(async () => ({
-        store: new SqliteContextStore(resources.use(open(':memory:'))),
-        streams: streamsFor(
-          new SqliteStreamStore(resources.use(open(':memory:'))),
-        ),
-        queue,
-        mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
+        storage: new ControlledAgentStorage({
+          store: new SqliteContextStore(resources.use(open(':memory:'))),
+          streams: streamsFor(
+            new SqliteStreamStore(resources.use(open(':memory:'))),
+          ),
+          queue,
+          mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
+        }),
         multiAgent: { maxConcurrentThreadsPerSession: 2 },
       })),
     ),

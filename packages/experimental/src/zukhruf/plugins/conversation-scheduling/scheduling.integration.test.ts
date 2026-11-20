@@ -42,6 +42,7 @@ import {
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
 
 import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
+import { ControlledAgentStorage } from '../../../testing/controlled-agent-storage.fixture.ts';
 import {
   ControlledTurnQueue,
   type TurnConsumer,
@@ -447,7 +448,7 @@ test('configured runtime injects top-level Claude-compatible scheduling tools', 
     }),
   );
   const runtimeStack = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     multiAgent: { toolNamespace: 'agents' },
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
@@ -503,7 +504,7 @@ test('CronCreate, CronList, and CronDelete run through the model loop in one con
     }),
   );
   const runtimeStack2 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('Asia/Amman'),
@@ -584,7 +585,7 @@ test('CronCreate reports the exact next run and timezone for a one-shot cron', a
     }),
   );
   const runtimeStack3 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('Asia/Amman'),
@@ -635,7 +636,7 @@ test('CronCreate with a day of month and an nth weekday runs on whichever comes 
     }),
   ).initialize(
     defineStack(async () => ({
-      ...h,
+      storage: new ControlledAgentStorage(h),
       bindings: [
         conversationSchedulingCapabilities.scheduler.bind(scheduler),
         conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -760,7 +761,7 @@ test('parallel model tool calls preserve concurrent cron creates and deletes', a
     }),
   );
   const runtimeStack4 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -809,7 +810,7 @@ test('ScheduleWakeup fires an ask and persists scheduled provenance', async () =
     }),
   );
   const runtimeStack5 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -891,7 +892,7 @@ test('ScheduleWakeup rejects delays outside its supported window', async () => {
     }),
   );
   const runtimeStack6 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -941,7 +942,7 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
     }),
   );
   const runtimeStack7 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -1058,7 +1059,9 @@ test('unconfigured runtime exposes no scheduling tools', async () => {
       instructions: [],
     }),
   );
-  const runtimeStack = defineStack(async () => ({ ...h }));
+  const runtimeStack = defineStack(async () => ({
+    storage: new ControlledAgentStorage(h),
+  }));
   const runtime = await runtimeSetup.initialize(runtimeStack);
   await runtime.enqueue(
     { chatId: 'no-scheduling', userId: 'user-1' },
@@ -1089,7 +1092,7 @@ test('runtime rejects an invalid scheduling timezone during initialization', asy
     }),
   );
   const runtimeStack = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('Not/A_Timezone'),
@@ -1116,13 +1119,13 @@ test('one conversation-scheduling definition creates a fresh instance per runtim
 
   const firstSetup = new AgentRuntime(declaration);
   const firstStack = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: schedulingBindings(scheduler, 'UTC'),
   }));
   await using first = await firstSetup.initialize(firstStack);
   const secondSetup = new AgentRuntime(declaration);
   const secondStack = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: schedulingBindings(scheduler, 'UTC'),
   }));
   await using second = await secondSetup.initialize(secondStack);
@@ -1164,7 +1167,9 @@ test('conversation availability reaches every plugin before reporting failures',
       ],
     }),
   );
-  const runtimeStack = defineStack(async () => ({ ...h }));
+  const runtimeStack = defineStack(async () => ({
+    storage: new ControlledAgentStorage(h),
+  }));
   const runtime = await runtimeSetup.initialize(runtimeStack);
 
   await runtime.enqueue(
@@ -1199,7 +1204,7 @@ test('failed wake insertion does not commit a cron definition', async () => {
     }),
   );
   const runtimeStack8 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -1243,7 +1248,7 @@ test('retrying a completed CronCreate tool call reuses its definition and wake',
   const conversation = { chatId: 'create-response-gap', userId: 'user-1' };
   const firstRuntimeSetup = new AgentRuntime(root(toolModel(commands, [])));
   const firstRuntimeStack = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: schedulingBindings(scheduler, 'UTC'),
   }));
   const firstRuntime = await firstRuntimeSetup.initialize(firstRuntimeStack);
@@ -1254,7 +1259,7 @@ test('retrying a completed CronCreate tool call reuses its definition and wake',
 
   const retriedRuntimeSetup = new AgentRuntime(root(toolModel(commands, [])));
   const retriedRuntimeStack = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: schedulingBindings(scheduler, 'UTC'),
   }));
   const retriedRuntime =
@@ -1300,7 +1305,7 @@ test('retry after enqueue-before-dispatch-clear executes one scheduled turn', as
     }),
   );
   const runtimeStack9 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -1380,7 +1385,7 @@ test('retry after claim-before-enqueue executes one scheduled turn', async () =>
     }),
   );
   const runtimeStack10 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -1429,7 +1434,7 @@ test('deleting a claimed cron before materialization prevents its scheduled ask'
     }),
   );
   const runtimeStack11 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -1485,7 +1490,7 @@ test('deleting a claimed cron during successor insertion prevents its scheduled 
     }),
   );
   const runtimeStack12 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -1546,7 +1551,7 @@ test('failed successor insertion leaves the current cron retryable', async () =>
     }),
   );
   const runtimeStack13 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -1610,7 +1615,7 @@ test('pg-boss can retry successor insertion through a prolonged outage', async (
     }),
   );
   const runtimeStack14 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -1685,7 +1690,7 @@ test('ScheduleWakeup replacement and stop leave cron definitions active', async 
     }),
   );
   const runtimeStack15 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -1754,7 +1759,7 @@ test('a queued scheduled turn can be cancelled through AgentObservation', async 
     }),
   );
   const runtimeStack16 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -1799,7 +1804,7 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
     }),
   );
   const runtimeStack17 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -1864,7 +1869,7 @@ test('an overdue occurrence waits for approval before materializing', async () =
     }),
   );
   const runtimeStack18 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -1919,7 +1924,7 @@ test('a non-recurring cron fires once and removes its definition', async () => {
     }),
   );
   const runtimeStack19 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -1967,7 +1972,7 @@ test('recurrence keeps the timezone persisted at creation across runtime restart
   const conversation = { chatId: 'timezone-stability', userId: 'user-1' };
   const firstRuntimeSetup = new AgentRuntime(declaration);
   const firstRuntimeStack2 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: schedulingBindings(scheduler, 'Asia/Amman'),
   }));
   const firstRuntime = await firstRuntimeSetup.initialize(firstRuntimeStack2);
@@ -1978,7 +1983,7 @@ test('recurrence keeps the timezone persisted at creation across runtime restart
 
   const restartedSetup = new AgentRuntime(declaration);
   const restartedStack = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: schedulingBindings(scheduler, 'UTC'),
   }));
   const restarted = await restartedSetup.initialize(restartedStack);
@@ -2016,7 +2021,7 @@ test('cron definitions are isolated by conversation and user across runtimes', a
   });
   const runtimeSetup = new AgentRuntime(declaration);
   const runtimeStack20 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: schedulingBindings(scheduler, 'UTC'),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack20);
@@ -2031,7 +2036,7 @@ test('cron definitions are isolated by conversation and user across runtimes', a
 
   const otherRuntimeSetup = new AgentRuntime(declaration);
   const otherRuntimeStack = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: schedulingBindings(scheduler, 'UTC'),
   }));
   const otherRuntime = await otherRuntimeSetup.initialize(otherRuntimeStack);
@@ -2102,7 +2107,7 @@ test('scheduling tools bind to the current root, child, and sibling conversation
     }),
   );
   const runtimeStack21 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -2172,7 +2177,7 @@ test('resume ignores scheduling metadata while scheduling tools fail closed', as
     }),
   );
   const runtimeStack22 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -2236,7 +2241,7 @@ test('CronCreate rejects six-field and unreachable expressions', async () => {
     }),
   );
   const runtimeStack23 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -2279,7 +2284,7 @@ test('CronCreate enforces the 50-definition conversation cap', async () => {
     }),
   );
   const runtimeStack24 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -2363,7 +2368,7 @@ test('a dynamic wake remains usable across a context-store restart', async () =>
   const conversation = { chatId: 'dynamic-file-restart', userId: 'user-1' };
   const firstRuntimeSetup = new AgentRuntime(declaration);
   const firstRuntimeStack3 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: schedulingBindings(scheduler, 'UTC'),
   }));
   const firstRuntime = await firstRuntimeSetup.initialize(firstRuntimeStack3);
@@ -2380,8 +2385,10 @@ test('a dynamic wake remains usable across a context-store restart', async () =>
   using secondDatabase = open(databasePath);
   const restartedSetup = new AgentRuntime(declaration);
   const restartedStack2 = defineStack(async () => ({
-    ...h,
-    store: new SqliteContextStore(secondDatabase),
+    storage: new ControlledAgentStorage({
+      ...h,
+      store: new SqliteContextStore(secondDatabase),
+    }),
     bindings: schedulingBindings(scheduler, 'UTC'),
   }));
   const restarted = await restartedSetup.initialize(restartedStack2);
@@ -2422,7 +2429,7 @@ test('a cron wake remains usable across a context-store restart', async () => {
   const conversation = { chatId: 'file-restart', userId: 'user-1' };
   const firstRuntimeSetup = new AgentRuntime(declaration);
   const firstRuntimeStack4 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: schedulingBindings(scheduler, 'UTC'),
   }));
   const firstRuntime = await firstRuntimeSetup.initialize(firstRuntimeStack4);
@@ -2435,8 +2442,10 @@ test('a cron wake remains usable across a context-store restart', async () => {
   const restartedStore = new SqliteContextStore(restartedDatabase);
   const restartedSetup = new AgentRuntime(declaration);
   const restartedStack3 = defineStack(async () => ({
-    ...h,
-    store: restartedStore,
+    storage: new ControlledAgentStorage({
+      ...h,
+      store: restartedStore,
+    }),
     bindings: schedulingBindings(scheduler, 'UTC'),
   }));
   const restarted = await restartedSetup.initialize(restartedStack3);
@@ -2480,7 +2489,7 @@ test('a recurring cron does not fire when its first occurrence is beyond its sev
     }),
   );
   const runtimeStack25 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -2540,14 +2549,16 @@ test('duplicate wake delivery across runtimes advances PostgreSQL state once', a
   });
   const firstRuntimeSetup = new AgentRuntime(declaration);
   const firstRuntimeStack5 = defineStack(async () => ({
-    ...h,
+    storage: new ControlledAgentStorage(h),
     bindings: schedulingBindings(scheduler, 'UTC'),
   }));
   const firstRuntime = await firstRuntimeSetup.initialize(firstRuntimeStack5);
   const secondRuntimeSetup = new AgentRuntime(declaration);
   const secondRuntimeStack = defineStack(async () => ({
-    ...h,
-    store: secondStore,
+    storage: new ControlledAgentStorage({
+      ...h,
+      store: secondStore,
+    }),
     bindings: schedulingBindings(scheduler, 'UTC'),
   }));
   const secondRuntime = await secondRuntimeSetup.initialize(secondRuntimeStack);

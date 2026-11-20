@@ -34,6 +34,7 @@ import {
   uploadsHttp,
 } from '@deepagents/experimental/zukhruf/uploads/http';
 
+import { ControlledAgentStorage } from '../../../testing/controlled-agent-storage.fixture.ts';
 import {
   ControlledTurnQueue,
   type TurnConsumer,
@@ -189,10 +190,12 @@ async function harness(
     }),
   );
   const stack = defineStack(async () => ({
-    store: new InMemoryContextStore(),
-    streams: streamsFor(streamStore),
-    queue,
-    mailboxStore,
+    storage: new ControlledAgentStorage({
+      store: new InMemoryContextStore(),
+      streams: streamsFor(streamStore),
+      queue,
+      mailboxStore,
+    }),
   }));
   const runtime = await runtimeSetup.initialize(stack);
   resources.use(await runtime.work());

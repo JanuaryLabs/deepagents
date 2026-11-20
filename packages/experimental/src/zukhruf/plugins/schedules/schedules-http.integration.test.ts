@@ -37,6 +37,7 @@ import {
 } from '@deepagents/experimental/zukhruf/schedules/http';
 
 import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
+import { ControlledAgentStorage } from '../../../testing/controlled-agent-storage.fixture.ts';
 import {
   ControlledTurnQueue,
   type TurnConsumer,
@@ -131,10 +132,12 @@ async function harness(options: { withSchedules?: boolean } = {}) {
     }),
   );
   const stack = defineStack(async () => ({
-    store: new InMemoryContextStore(),
-    streams: streamsFor(streamStore),
-    queue,
-    mailboxStore,
+    storage: new ControlledAgentStorage({
+      store: new InMemoryContextStore(),
+      streams: streamsFor(streamStore),
+      queue,
+      mailboxStore,
+    }),
     bindings: [
       schedulesCapabilities.boss.bind(boss),
       schedulesCapabilities.transaction.bind((operation) =>

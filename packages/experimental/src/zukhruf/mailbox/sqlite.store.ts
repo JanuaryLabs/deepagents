@@ -33,9 +33,9 @@ const mailboxItemRowsSchema = z.array(
 export class SqliteMailboxStore extends MailboxStore implements Disposable {
   #database: DatabaseSync;
 
-  constructor(path: string) {
+  constructor(pathOrDb: string | DatabaseSync) {
     super();
-    this.#database = open(path);
+    this.#database = typeof pathOrDb === 'string' ? open(pathOrDb) : pathOrDb;
     this.#database.exec(SETUP);
     tables.apply(this.#database);
   }

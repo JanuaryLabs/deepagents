@@ -1,18 +1,12 @@
-import { PGlite } from '@electric-sql/pglite';
 import { randomUUID } from 'node:crypto';
-import { PgBoss, fromPglite } from 'pg-boss';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import {
-  InMemoryContextStore,
-  PollingChangeSource,
-  SqliteStreamStore,
-  StreamManager,
-} from '@deepagents/context';
 import {
   type AgentHost,
   AgentRuntime,
-  PgBossTurnQueue,
-  SqliteMailboxStore,
+  EmbeddedAgentStorage,
 } from '@deepagents/experimental/zukhruf';
 
 import createParticipantAgent, { type WhatsAppParticipant } from './agent.ts';
@@ -82,39 +76,23 @@ export class WhatsAppGroup implements AsyncDisposable {
     WhatsAppGroup.#validate(options);
 
     await using resources = new AsyncDisposableStack();
-    const database = resources.use(new PGlite());
-    const boss = resources.adopt(
-      new PgBoss({ db: fromPglite(database), backend: 'pglite' }),
-      (boss) => boss.stop({ graceful: false }),
-    );
-    boss.on('error', (error) => console.error('[queue error]', error));
-    const streamStore = resources.adopt(
-      new SqliteStreamStore(':memory:'),
-      (store) => store.close(),
-    );
-    const streams = new StreamManager({
-      store: streamStore,
-      changeSource: new PollingChangeSource({ reads: streamStore }),
-    });
-    const mailboxStore = resources.use(new SqliteMailboxStore(':memory:'));
-    const store = new InMemoryContextStore();
+    const directory = await mkdtemp(join(tmpdir(), 'zukhruf-whatsapp-'));
+    resources.defer(() => rm(directory, { recursive: true, force: true }));
     const replies = new ReplyInbox();
     const participants: RunningParticipant[] = [];
 
-    await boss.start();
     for (const [index, participant] of options.participants.entries()) {
-      const queue = await PgBossTurnQueue.create(boss, {
-        queue: `zukhruf-whatsapp-${index}`,
-        pollingIntervalSeconds: 0.5,
-        schema: 'pgboss',
-      });
-
+      const storage = resources.use(
+        await EmbeddedAgentStorage.open({
+          directory: join(directory, `participant-${index}`),
+        }),
+      );
       const runtime = new AgentRuntime(
         createParticipantAgent(participant, (message) =>
           replies.post(participant.name, message),
         ),
       );
-      const stack = participantStack({ store, streams, queue, mailboxStore });
+      const stack = participantStack(storage);
       const host = resources.use(await runtime.initialize(stack));
 
       participants.push({

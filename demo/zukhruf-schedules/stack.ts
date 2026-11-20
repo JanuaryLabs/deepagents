@@ -1,55 +1,21 @@
-import { PGlite } from '@electric-sql/pglite';
-import { open } from '@zukhruf/sqlite-open';
-import { join } from 'node:path';
-import { PgBoss, fromPglite } from 'pg-boss';
+import { fromPglite } from 'pg-boss';
 
 import {
-  PollingChangeSource,
-  SqliteContextStore,
-  SqliteStreamStore,
-  StreamManager,
-} from '@deepagents/context';
-import {
-  PgBossTurnQueue,
-  SqliteMailboxStore,
+  EmbeddedAgentStorage,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
 import { schedulesCapabilities } from '@deepagents/experimental/zukhruf/schedules';
 
 export default defineStack(async (resources) => {
-  const database = resources.use(
-    new PGlite(join(import.meta.dirname, 'zukhruf.queue')),
-  );
-  const boss = resources.adopt(
-    new PgBoss({ db: fromPglite(database), backend: 'pglite' }),
-    (boss) => boss.stop({ graceful: false }),
-  );
-  boss.on('error', (error) => console.error('[queue error]', error));
-  await boss.start();
-  const queue = await PgBossTurnQueue.create(boss, {
-    pollingIntervalSeconds: 0.5,
-    schema: 'pgboss',
-  });
-  const mailboxStore = resources.use(
-    new SqliteMailboxStore(join(import.meta.dirname, 'zukhruf.mailbox.sqlite')),
-  );
-  const streamStore = new SqliteStreamStore(
-    resources.use(open(join(import.meta.dirname, 'zukhruf.streams.sqlite'))),
+  const storage = resources.use(
+    await EmbeddedAgentStorage.open({ directory: import.meta.dirname }),
   );
   return {
-    store: new SqliteContextStore(
-      resources.use(open(join(import.meta.dirname, 'zukhruf.sqlite'))),
-    ),
-    streams: new StreamManager({
-      store: streamStore,
-      changeSource: new PollingChangeSource({ reads: streamStore }),
-    }),
-    queue,
-    mailboxStore,
+    storage,
     bindings: [
-      schedulesCapabilities.boss.bind(boss),
+      schedulesCapabilities.boss.bind(storage.boss),
       schedulesCapabilities.transaction.bind((operation) =>
-        database.transaction((transaction) =>
+        storage.queueDatabase.transaction((transaction) =>
           operation(fromPglite(transaction)),
         ),
       ),

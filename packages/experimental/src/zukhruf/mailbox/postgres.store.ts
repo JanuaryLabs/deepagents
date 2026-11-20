@@ -13,6 +13,7 @@ import {
   type MailboxEndTurnResult,
   type MailboxEnqueueResult,
   MailboxStore,
+  type TransactionalMailboxStore,
 } from './store.ts';
 import {
   type ConversationId,
@@ -37,12 +38,6 @@ export interface PostgresMailboxStoreOptions {
 }
 
 /** PostgreSQL-backed mailbox that every worker on the database shares. */
-/** The part of the mailbox that writes inside a caller's transaction. */
-export type TransactionalMailboxStore = Pick<
-  MailboxStore,
-  'enqueue' | 'beginTurn' | 'hasPendingTriggerTurn'
->;
-
 export class PostgresMailboxStore extends MailboxStore {
   readonly #database: PostgresStoreDatabase;
 

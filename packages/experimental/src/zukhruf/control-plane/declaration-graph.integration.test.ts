@@ -12,6 +12,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import { ControlledAgentStorage } from '../../testing/controlled-agent-storage.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
 import { UnusedTurnQueue } from '../../testing/unused-turn-queue.fixture.ts';
 
@@ -41,9 +42,9 @@ test('AgentRuntime rejects duplicate names anywhere in the declaration graph', a
   ]);
 
   const duplicateNamesSetup = new AgentRuntime(root);
-  const duplicateNamesStack = defineStack(async (resources) =>
-    adapters(resources),
-  );
+  const duplicateNamesStack = defineStack(async (resources) => ({
+    storage: new ControlledAgentStorage(adapters(resources)),
+  }));
   await assert.rejects(
     duplicateNamesSetup.initialize(duplicateNamesStack),
     /duplicate agent declaration name "worker"/,
@@ -54,7 +55,9 @@ test('AgentRuntime rejects blank declaration names', async () => {
   const root = declaration('root', [declaration('  ')]);
 
   const blankNameSetup = new AgentRuntime(root);
-  const blankNameStack = defineStack(async (resources) => adapters(resources));
+  const blankNameStack = defineStack(async (resources) => ({
+    storage: new ControlledAgentStorage(adapters(resources)),
+  }));
   await assert.rejects(
     blankNameSetup.initialize(blankNameStack),
     /agent declaration name cannot be empty/,
@@ -65,7 +68,9 @@ test('AgentRuntime rejects declaration names with surrounding whitespace', async
   const root = declaration('root', [declaration(' researcher ')]);
 
   const paddedNameSetup = new AgentRuntime(root);
-  const paddedNameStack = defineStack(async (resources) => adapters(resources));
+  const paddedNameStack = defineStack(async (resources) => ({
+    storage: new ControlledAgentStorage(adapters(resources)),
+  }));
   await assert.rejects(
     paddedNameSetup.initialize(paddedNameStack),
     /agent declaration name " researcher " must not contain surrounding whitespace/,

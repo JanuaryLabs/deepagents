@@ -6,15 +6,10 @@ import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { PgBoss } from 'pg-boss';
 
-import {
-  PostgresContextStore,
-  PostgresStreamStore,
-  createVirtualSandbox,
-} from '@deepagents/context';
+import { createVirtualSandbox } from '@deepagents/context';
 import {
   AgentRuntime,
-  PgBossTurnQueue,
-  PostgresMailboxStore,
+  PostgresAgentStorage,
   defineAgent,
   defineSandbox,
   defineStack,
@@ -24,7 +19,6 @@ import {
   textResult,
   toolCallResult,
 } from '../../testing/stream-results.fixture.ts';
-import { streamsFor } from '../../testing/streams-for.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 const testPostgres = new Postgres({ environment: process.env });
@@ -76,18 +70,15 @@ test("a child's FINAL_ANSWER reaches its parent's wait_agent on a PostgreSQL sta
       }),
     ],
   });
-  const stack = defineStack(async (stackResources) => {
-    const store = await PostgresContextStore.create({ pool });
-    const streamStore = await PostgresStreamStore.create({ pool });
-    return {
-      store,
-      streams: streamsFor(streamStore),
-      queue: await PgBossTurnQueue.create(boss, {
-        pollingIntervalSeconds: 0.5,
+  const stack = defineStack(async (stackResources) => ({
+    storage: stackResources.use(
+      await PostgresAgentStorage.create({
+        pool,
+        boss,
+        queue: { pollingIntervalSeconds: 0.5 },
       }),
-      mailboxStore: await PostgresMailboxStore.create({ pool }),
-    };
-  });
+    ),
+  }));
 
   {
     await using host = await new AgentRuntime(root).initialize(stack);

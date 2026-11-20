@@ -35,3 +35,9 @@ export abstract class MailboxStore {
   /** Draining is consumption: removes and returns all pending mail in FIFO order. */
   abstract drain(recipient: ConversationId): Promise<InterAgentCommunication[]>;
 }
+
+/** The part of the mailbox that writes inside a caller's transaction. */
+export type TransactionalMailboxStore = Pick<
+  MailboxStore,
+  'enqueue' | 'beginTurn' | 'hasPendingTriggerTurn'
+>;

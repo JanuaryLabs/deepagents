@@ -37,6 +37,7 @@ import {
   http,
 } from '@deepagents/experimental/zukhruf/http';
 
+import { ControlledAgentStorage } from '../../testing/controlled-agent-storage.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
 import { usage } from '../../testing/usage.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
@@ -219,7 +220,7 @@ test(
       const options = { store, streams, queue, mailboxStore };
       const runtimeSetup = new AgentRuntime(root);
       const stack = defineStack(async () => ({
-        ...options,
+        storage: new ControlledAgentStorage(options),
         conversationStatusChanges: new PgBossConversationStatusChangeSource(
           boss,
         ),
@@ -228,8 +229,10 @@ test(
       // This host never executes a turn: every push must cross the database notification seam.
       const observerSetup = new AgentRuntime(root);
       const observerStack = defineStack(async () => ({
-        ...options,
-        store: observerStore,
+        storage: new ControlledAgentStorage({
+          ...options,
+          store: observerStore,
+        }),
         conversationStatusChanges: new PgBossConversationStatusChangeSource(
           boss,
         ),
@@ -504,8 +507,10 @@ test(
       const freshStore = new SqliteContextStore(freshDb);
       const freshRuntimeSetup = new AgentRuntime(root);
       const freshRuntimeStack = defineStack(async () => ({
-        ...options,
-        store: freshStore,
+        storage: new ControlledAgentStorage({
+          ...options,
+          store: freshStore,
+        }),
       }));
       const freshRuntime =
         await freshRuntimeSetup.initialize(freshRuntimeStack);

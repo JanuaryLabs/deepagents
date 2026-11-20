@@ -9,21 +9,19 @@ import { describe, it } from 'node:test';
 import { PgBoss } from 'pg-boss';
 
 import {
-  PostgresContextStore,
+  PollingChangeSource,
   PostgresStreamStore,
   type StreamPart,
 } from '@deepagents/context';
 import {
   type AgentDeclaration,
   AgentRuntime,
-  PgBossTurnQueue,
-  SqliteMailboxStore,
+  PostgresAgentStorage,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 import { textResult } from '../../testing/stream-results.fixture.ts';
-import { streamsFor } from '../../testing/streams-for.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 const testPostgres = new Postgres({ environment: process.env });
@@ -153,12 +151,8 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
   it('heartbeat lapse fails the job; the DLQ reconciler flips the stream and unblocks the chat', async (t) => {
     await using container = await testPostgres.database();
 
-    const streamStore = await PostgresStreamStore.create({
-      pool: container.pool(),
-    });
-    const store = await PostgresContextStore.create({
-      pool: container.pool(),
-    });
+    const pool = container.pool();
+    const streamStore = await PostgresStreamStore.create({ pool });
 
     const boss = new PgBoss({
       connectionString: container.connectionString,
@@ -167,21 +161,17 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
     });
     boss.on('error', () => {});
     await boss.start();
-    const queue = await PgBossTurnQueue.create(boss, {
-      heartbeatSeconds: 10,
-      pollingIntervalSeconds: 0.5,
+    await using storage = await PostgresAgentStorage.create({
+      pool,
+      boss,
+      queue: { heartbeatSeconds: 10, pollingIntervalSeconds: 0.5 },
+      changeSource: new PollingChangeSource({ reads: streamStore }),
     });
+    const { queue } = storage;
 
     const calls: string[] = [];
-    const mailboxStore = new SqliteMailboxStore(':memory:');
-    const streams = streamsFor(streamStore);
     const runtimeSetup = new AgentRuntime(declaration(fastModel(calls)));
-    const stack = defineStack(async () => ({
-      store,
-      streams,
-      queue,
-      mailboxStore,
-    }));
+    const stack = defineStack(async () => ({ storage }));
     const runtime = await runtimeSetup.initialize(stack);
     const conversation = { chatId: 'crash-chat', userId: 'u1' };
 
@@ -242,17 +232,20 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
       );
       assert.equal(await streamStore.getStreamStatus(first.id), 'failed');
 
-      const remaining = await boss.findJobs(queue.queue, {
-        key: 'crash-chat',
-      });
-      assert.deepStrictEqual(
-        remaining.map((j) => j.state),
-        [],
-        'DLQ reconciler deleted the crashed source job and the successor was GC-ed on commit — no orphan job accumulates in the main queue',
+      // pg-boss deletes the successor's job after its handler returns, which is after its stream completes.
+      await waitFor(
+        async () =>
+          assert.deepStrictEqual(
+            (await boss.findJobs(queue.queue, { key: 'crash-chat' })).map(
+              (j) => j.state,
+            ),
+            [],
+            'DLQ reconciler deleted the crashed source job and the successor was GC-ed on commit — no orphan job accumulates in the main queue',
+          ),
+        { signal: AbortSignal.any([t.signal, AbortSignal.timeout(10_000)]) },
       );
     } finally {
       await boss.stop({ graceful: false });
-      mailboxStore.close();
     }
   });
 });

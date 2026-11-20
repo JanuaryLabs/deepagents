@@ -24,6 +24,7 @@ import {
   defineStack,
 } from '@deepagents/experimental/zukhruf';
 
+import { ControlledAgentStorage } from '../../testing/controlled-agent-storage.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
 import { usage } from '../../testing/usage.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
@@ -40,13 +41,15 @@ const stack = defineStack(async (resources) => {
   await boss.start();
   const store = new SqliteStreamStore(resources.use(open(':memory:')));
   return {
-    queue: await PgBossTurnQueue.create(boss, {
-      pollingIntervalSeconds: 0.5,
-      schema: 'pgboss',
+    storage: new ControlledAgentStorage({
+      queue: await PgBossTurnQueue.create(boss, {
+        pollingIntervalSeconds: 0.5,
+        schema: 'pgboss',
+      }),
+      store: new SqliteContextStore(resources.use(open(':memory:'))),
+      streams: streamsFor(store),
+      mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
     }),
-    store: new SqliteContextStore(resources.use(open(':memory:'))),
-    streams: streamsFor(store),
-    mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
   };
 });
 

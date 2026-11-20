@@ -20,4 +20,8 @@ export type * from './runtime/conversation-status/child-progress.ts';
 export * from './runtime/conversation-status/pg-boss-change-source.ts';
 export type * from './runtime/conversation-status/projector.ts';
 export * from './sandbox/define.ts';
+export * from './storage/agent-storage.ts';
+export * from './storage/embedded-agent-storage.ts';
+export { AdmissionScopeError } from './storage/sqlite-admission-gate.ts';
+export * from './storage/postgres-agent-storage.ts';
 export * from './tool.ts';

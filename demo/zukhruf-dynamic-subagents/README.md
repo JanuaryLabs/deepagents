@@ -63,5 +63,5 @@ nx run @deepagents/demo-zukhruf-dynamic-subagents:typecheck
 nx run @deepagents/demo-zukhruf-dynamic-subagents:test
 ```
 
-`stack.ts` declares the lazy PGlite queue and in-memory stores. `run.ts` owns
+`stack.ts` opens an `EmbeddedAgentStorage` in the demo directory. `run.ts` owns
 `runtime = new AgentRuntime(root)`, initializes `host`, and starts its worker explicitly.

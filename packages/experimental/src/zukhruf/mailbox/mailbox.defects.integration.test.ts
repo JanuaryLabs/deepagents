@@ -22,6 +22,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import { ControlledAgentStorage } from '../../testing/controlled-agent-storage.fixture.ts';
 import {
   ControlledTurnQueue,
   type TurnConsumer,
@@ -148,10 +149,12 @@ async function runtimeHarness(options?: {
     toolApproval: options?.toolApproval,
   });
   const runtimeStack = defineStack(async () => ({
-    store: contextStore,
-    streams: streamsFor(streamStore),
-    queue,
-    mailboxStore,
+    storage: new ControlledAgentStorage({
+      store: contextStore,
+      streams: streamsFor(streamStore),
+      queue,
+      mailboxStore,
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack);
 
@@ -335,7 +338,9 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
       mailboxStore,
       queue,
     };
-    const runtimeStack = defineStack(async () => ({ ...runtimeOptions }));
+    const runtimeStack = defineStack(async () => ({
+      storage: new ControlledAgentStorage(runtimeOptions),
+    }));
     const agent = declaration(model);
     const workerRuntimeSetup = new AgentRuntime(agent);
     const workerRuntime = await workerRuntimeSetup.initialize(runtimeStack);
@@ -400,7 +405,9 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
       mailboxStore,
       queue,
     };
-    const runtimeStack = defineStack(async () => ({ ...runtimeOptions }));
+    const runtimeStack = defineStack(async () => ({
+      storage: new ControlledAgentStorage(runtimeOptions),
+    }));
     const agent = declaration(model);
     const workerRuntimeSetup = new AgentRuntime(agent);
     const workerRuntime = await workerRuntimeSetup.initialize(runtimeStack);
@@ -450,7 +457,9 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
       queue,
     };
     const agent = declaration(textModel());
-    const runtimeStack = defineStack(async () => runtimeOptions);
+    const runtimeStack = defineStack(async () => ({
+      storage: new ControlledAgentStorage(runtimeOptions),
+    }));
     const workerRuntimeSetup = new AgentRuntime(agent);
     const workerRuntime = await workerRuntimeSetup.initialize(runtimeStack);
     const senderRuntimeSetup = new AgentRuntime(agent);

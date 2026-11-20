@@ -145,3 +145,9 @@ export abstract class TurnQueue {
 
   abstract resumeParked(chatId: string): Promise<void>;
 }
+
+/** The part of the queue that writes and reads inside a caller's transaction. */
+export type TransactionalTurnQueue = Pick<
+  TurnQueue,
+  'push' | 'getTurnActivity'
+>;

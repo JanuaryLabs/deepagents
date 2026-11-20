@@ -37,6 +37,7 @@ import {
   defineStack,
 } from '@deepagents/experimental/zukhruf';
 
+import { ControlledAgentStorage } from '../../testing/controlled-agent-storage.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
 
@@ -672,10 +673,12 @@ test('Zukhruf executes a host tool and persists history across queued turns', as
     });
     const streamStore = new SqliteStreamStore(resources.use(open(':memory:')));
     return {
-      store: new SqliteContextStore(resources.use(open(':memory:'))),
-      streams: streamsFor(streamStore),
-      queue,
-      mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
+      storage: new ControlledAgentStorage({
+        store: new SqliteContextStore(resources.use(open(':memory:'))),
+        streams: streamsFor(streamStore),
+        queue,
+        mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
+      }),
     };
   });
   await using runtime = await runtimeSetup.initialize(stack);

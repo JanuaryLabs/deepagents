@@ -58,5 +58,5 @@ The demo creates and reuses `workspace/` and `skills/` beside `run.ts`. The root
 Linux with KVM. The runnable demo uses `gpt-5.6-terra` for all three roles and
 permits four concurrent turns so Root can wait while a child works.
 
-`stack.ts` declares the lazy PGlite queue and in-memory stores. `run.ts` owns
+`stack.ts` opens an `EmbeddedAgentStorage` in the demo directory. `run.ts` owns
 `runtime = new AgentRuntime(root)`, initializes `host`, and starts its worker explicitly.

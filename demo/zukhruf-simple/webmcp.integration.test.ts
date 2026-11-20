@@ -1,25 +1,19 @@
-import { PGlite } from '@electric-sql/pglite';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
-import { PgBoss, fromPglite } from 'pg-boss';
 
-import {
-  InMemoryContextStore,
-  PollingChangeSource,
-  SqliteStreamStore,
-  StreamManager,
-  createVirtualSandbox,
-} from '@deepagents/context';
+import { createVirtualSandbox } from '@deepagents/context';
 import declaration from '@deepagents/demo-zukhruf-simple';
 import {
   AgentRuntime,
-  PgBossTurnQueue,
-  SqliteMailboxStore,
+  EmbeddedAgentStorage,
   defineAgent,
   defineSandbox,
   defineStack,
@@ -136,24 +130,15 @@ test('SimpleAgent discovers and executes a website tool through native WebMCP', 
   });
 
   await using resources = new AsyncDisposableStack();
-  const database = resources.adopt(new PGlite(), (database) =>
-    database.close(),
-  );
-  const boss = resources.adopt(
-    new PgBoss({ db: fromPglite(database), backend: 'pglite' }),
-    (boss) => boss.stop({ graceful: false }),
-  );
-  boss.on('error', (error) => assert.fail(String(error)));
-  await boss.start();
-  const queue = await PgBossTurnQueue.create(boss, {
-    pollingIntervalSeconds: 0.5,
-    schema: 'pgboss',
+  const warnings: Error[] = [];
+  const onWarning = (warning: Error) => warnings.push(warning);
+  process.on('warning', onWarning);
+  resources.defer(() => {
+    process.off('warning', onWarning);
   });
-  const streamStore = resources.adopt(
-    new SqliteStreamStore(':memory:'),
-    (store) => store.close(),
-  );
-  const mailboxStore = resources.use(new SqliteMailboxStore(':memory:'));
+  const directory = await mkdtemp(join(tmpdir(), 'zukhruf-demo-test-'));
+  resources.defer(() => rm(directory, { recursive: true, force: true }));
+  const storage = resources.use(await EmbeddedAgentStorage.open({ directory }));
   const browser = declaration.plugins.find(
     (plugin) => plugin.name === 'browser',
   );
@@ -168,15 +153,7 @@ test('SimpleAgent discovers and executes a website tool through native WebMCP', 
       ),
     }),
   );
-  const stack = defineStack(async () => ({
-    store: new InMemoryContextStore(),
-    streams: new StreamManager({
-      store: streamStore,
-      changeSource: new PollingChangeSource({ reads: streamStore }),
-    }),
-    queue,
-    mailboxStore,
-  }));
+  const stack = defineStack(async () => ({ storage }));
   const host = resources.use(await runtime.initialize(stack));
   resources.use(await host.work());
   const { stream } = await host.enqueue(
@@ -206,4 +183,6 @@ test('SimpleAgent discovers and executes a website tool through native WebMCP', 
     'list_webmcp_tools',
     'execute_webmcp_tool',
   ]);
+  // The storage reports queue and relay failures as process warnings.
+  assert.deepStrictEqual(warnings, []);
 });

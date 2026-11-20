@@ -28,6 +28,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
+import { ControlledAgentStorage } from '../../../testing/controlled-agent-storage.fixture.ts';
 import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 import { UnusedTurnQueue } from '../../../testing/unused-turn-queue.fixture.ts';
 
@@ -48,7 +49,9 @@ const tool = defineTool({
   inputSchema: z.object({}).strict(),
   execute: () => Promise.resolve({ ok: true }),
 });
-const stack = defineStack(async (resources) => adapters(resources));
+const stack = defineStack(async (resources) => ({
+  storage: new ControlledAgentStorage(adapters(resources)),
+}));
 
 function plugin<Running extends object>(
   name: string,
@@ -85,13 +88,13 @@ test('one exported definition materializes fresh bound plugin instances per host
   const agent = declaration([stateful]);
   const firstSetup = new AgentRuntime(agent);
   const firstStack = defineStack(async (resources) => ({
-    ...adapters(resources),
+    storage: new ControlledAgentStorage(adapters(resources)),
     bindings: [value.bind('first')],
   }));
   await using first = await firstSetup.initialize(firstStack);
   const secondSetup = new AgentRuntime(agent);
   const secondStack = defineStack(async (resources) => ({
-    ...adapters(resources),
+    storage: new ControlledAgentStorage(adapters(resources)),
     bindings: [value.bind('second')],
   }));
   await using second = await secondSetup.initialize(secondStack);
@@ -125,7 +128,7 @@ test('AgentRuntime validates capability bindings during initialization', async (
   );
   const duplicateBindingRuntime = new AgentRuntime(agent);
   const duplicateBindingRuntimeStack = defineStack(async (resources) => ({
-    ...adapters(resources),
+    storage: new ControlledAgentStorage(adapters(resources)),
     bindings: [required.bind('one'), required.bind('two')],
   }));
   await assert.rejects(
@@ -134,7 +137,7 @@ test('AgentRuntime validates capability bindings during initialization', async (
   );
   const unusedBindingRuntime = new AgentRuntime(agent);
   const unusedBindingRuntimeStack = defineStack(async (resources) => ({
-    ...adapters(resources),
+    storage: new ControlledAgentStorage(adapters(resources)),
     bindings: [required.bind('value'), unknown.bind('unused')],
   }));
   await assert.rejects(
@@ -164,7 +167,7 @@ test('one binding may satisfy several plugins requiring one capability', async (
   const value = {};
   const runtimeSetup = new AgentRuntime(declaration([first, second]));
   const stack = defineStack(async (resources) => ({
-    ...adapters(resources),
+    storage: new ControlledAgentStorage(adapters(resources)),
     bindings: [shared.bind(value)],
   }));
   await using runtime = await runtimeSetup.initialize(stack);
@@ -223,7 +226,7 @@ test('AgentRuntime rejects conflicting capability identities and undeclared acce
     ]),
   );
   const undeclaredCapabilityRuntimeStack = defineStack(async (resources) => ({
-    ...adapters(resources),
+    storage: new ControlledAgentStorage(adapters(resources)),
     bindings: [declared.bind('value')],
   }));
   await assert.rejects(
@@ -375,7 +378,7 @@ test('code_mode is reserved only when code mode is enabled', async () => {
   await using host = await runtime.initialize(stack);
   const codeModeRuntime = new AgentRuntime(declaration([custom]));
   const codeModeRuntimeStack = defineStack(async (resources) => ({
-    ...adapters(resources),
+    storage: new ControlledAgentStorage(adapters(resources)),
     multiAgent: { nonCodeModeOnly: false },
   }));
   await assert.rejects(

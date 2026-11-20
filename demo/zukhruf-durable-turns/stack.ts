@@ -1,49 +1,10 @@
-import { PGlite } from '@electric-sql/pglite';
-import { open } from '@zukhruf/sqlite-open';
-import { PgBoss, fromPglite } from 'pg-boss';
-
 import {
-  PollingChangeSource,
-  SqliteContextStore,
-  SqliteStreamStore,
-  StreamManager,
-} from '@deepagents/context';
-import {
-  PgBossTurnQueue,
-  SqliteMailboxStore,
+  EmbeddedAgentStorage,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
 
-export default defineStack(async (resources) => {
-  const database = resources.use(new PGlite('./zukhruf.queue'));
-  const boss = resources.adopt(
-    new PgBoss({
-      db: fromPglite(database),
-      backend: 'pglite',
-    }),
-    (boss) => boss.stop({ graceful: false }),
-  );
-  boss.on('error', (error) => console.error('[queue error]', error));
-  await boss.start();
-  const queue = await PgBossTurnQueue.create(boss, {
-    pollingIntervalSeconds: 0.5,
-    schema: 'pgboss',
-  });
-  const mailboxStore = resources.use(
-    new SqliteMailboxStore('./zukhruf.mailbox.sqlite'),
-  );
-  const streamStore = new SqliteStreamStore(
-    resources.use(open('./zukhruf.streams.sqlite')),
-  );
-  const streams = new StreamManager({
-    store: streamStore,
-    changeSource: new PollingChangeSource({ reads: streamStore }),
-  });
-
-  return {
-    store: new SqliteContextStore(resources.use(open('./zukhruf.sqlite'))),
-    streams,
-    queue,
-    mailboxStore,
-  };
-});
+export default defineStack(async (resources) => ({
+  storage: resources.use(
+    await EmbeddedAgentStorage.open({ directory: import.meta.dirname }),
+  ),
+}));

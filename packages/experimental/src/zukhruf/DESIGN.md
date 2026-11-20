@@ -376,10 +376,10 @@ explicitly. A pending item is an `InterAgentCommunication` envelope with an auth
 optional other recipients, explicit `MESSAGE | NEW_TASK | FINAL_ANSWER` type, content, metadata,
 stable ID, and a `triggerTurn` bit.
 
-`AgentRuntime.initialize()` requires `mailboxStore`; the returned `AgentHost` exposes
+`AgentRuntime.initialize()` reads the mailbox from the stack's `storage.mailboxStore`; the returned `AgentHost` exposes
 `deliver(communication, mode)` as the host-facing entry point. The store contract is deliberately small: begin/end the target's active-turn boundary,
 idempotent append, pending check, leading queue-only drain, and full FIFO drain. Borrowed mailbox lifetime
-remains caller-owned; a stack recipe may register its mailbox store for host-owned disposal.
+remains caller-owned; a stack recipe may register its storage for host-owned disposal.
 
 The receive contract follows Codex's multi-agent contract:
 
@@ -731,10 +731,7 @@ const root = defineAgent({
   plugins: [scheduling],
 });
 const stack = defineStack(async () => ({
-  store,
-  streams,
-  queue,
-  mailboxStore,
+  storage,
   bindings: [
     conversationSchedulingCapabilities.scheduler.bind(wakes),
     conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -887,11 +884,33 @@ const traceTelemetry: AgentPluginDefinition<TracePlugin> = {
   and returns a snapshot. `PluginManager` publishes each snapshot after validation succeeds.
   Different agents may reuse local tool names. These checks run during construction for static
   tools and during initialization for discovered tools.
-- `defineStack(async (resources) => options)` is an explicit infrastructure recipe. The native
-  `AsyncDisposableStack` passed to it owns registered resources. Constructing
-  `new AgentRuntime(root)` acquires nothing; each `runtime.initialize(stack)` creates one ready
-  host and rolls back failed startup. Shared adapters returned without registering them
-  in the scope remain caller-owned.
+- `defineStack(async (resources) => options)` is an explicit infrastructure recipe. It returns
+  `{ storage, multiAgent?, bindings?, conversationStatusChanges? }`. `storage` is an
+  `AgentStorage` (`storage/agent-storage.ts`): `store`, `streams`, `queue` and `mailboxStore` on
+  one database, plus `admit(tree, work)`, which runs `work` with the four parts bound to one unit
+  (`AdmissionScope`) while no other admission to the tree runs. `PostgresAgentStorage.create({
+pool, boss, schema?, queue?, changeSource? })` builds the stores on the host pool and the turn
+  queue on PgBoss, throws `AgentStorageDatabaseMismatchError` when `current_database()` or
+  `pg_control_system().system_identifier` differ between the pool and `boss.getDb()`, and admits
+  in one `postgresTransaction` under `pg_advisory_xact_lock(hashtextextended('zukhruf:agent-tree:'
+  - [schema, userId, treeId]))`, so a session that dies mid-admission leaves nothing. It borrows
+the pool and PgBoss and is `AsyncDisposable`only for the`PostgresNotifyChangeSource`it opens
+when no`changeSource`is given. The control plane does not admit through it yet (#2287). `EmbeddedAgentStorage.open({ directory, queue? })`owns its parts for one process: the
+context, stream and mailbox stores and a`zukhruf_turn_outbox` table on one SQLite connection
+(`zukhruf.sqlite`), and pg-boss on PGlite (`zukhruf.queue`). Its `admit`is one`BEGIN IMMEDIATE`on that connection; the scope's stores are the raw SQLite stores and its`queue.push` inserts an
+outbox row (`getTurnActivity`reports`queued` while one waits). Every call through the storage's
+own parts takes turns with admissions on the connection (`SqliteAdmissionGate`), because a
+statement run during an open transaction belongs to it; a call from inside its own admission
+rejects with `AdmissionScopeError`instead of waiting for itself. Admissions therefore run one at
+a time across trees (SQLite has one writer). After the commit`OutboxRelay`pushes each row with`PgBossTurnQueue.pushAs(outbox job id, turn)`and then deletes it;`open`drains leftovers, so a
+crash between the commit and the push loses nothing and one between the push and the delete
+re-pushes the same job id, which pg-boss skips while it holds that job.`storage.queue.push`goes through the outbox too, so a chat's turns reach pg-boss in push order. A relay push that
+fails keeps its row for the next drain and, like pg-boss's own`error`events, is reported with`process.emitWarning`. The open storage holds a `FileLock` (`@zukhruf/fs`) on `zukhruf.lock`, a
+lock the kernel frees when its holder dies, so a second open of the directory, in any process,
+rejects with `EmbeddedAgentStorageInUseError` until the first is disposed. The
+native`AsyncDisposableStack`passed to the recipe owns registered resources. Constructing`new AgentRuntime(root)`acquires nothing; each`runtime.initialize(stack)` creates one ready
+    host and rolls back failed startup. Shared adapters returned without registering them
+    in the scope remain caller-owned.
 - `await using host = await runtime.initialize(stack)` owns workers and plugin
   resources. `await using worker = await host.work()` controls worker lifetime independently.
   Host shutdown waits for pending worker startup. All workers drain active handlers before
@@ -1019,6 +1038,8 @@ work({concurrency?}) → AsyncDisposable }`.
   lookup and stream cancellation. The latter two are architecture-forced adapter capabilities for
   model-facing interruption: pg-boss must free a strict-FIFO key and signal an active worker, while
   an actor host may absorb both capabilities (see the executor section).
+- `storage/` — the `AgentStorage` port (the four parts and `admit`), `PostgresAgentStorage`, and
+  `EmbeddedAgentStorage` (SQLite + PGlite pg-boss, admission gate, turn outbox and relay).
 - `demo/zukhruf-durable-turns/agent.ts`, `instructions.ts`, and sandbox factories are pure
   declarations (no top-level await; importing spins no container or agent turn).
 - `runtime/conversation-status/projector.ts` — Codex `thread/status/changed` for hosts. `ConversationStatus`
@@ -1061,9 +1082,7 @@ work({concurrency?}) → AsyncDisposable }`.
   (self-contained, no server), concurrent in-process `work()`, detach/resume a root turn that calls
   nonblocking `spawn_agent` and then `wait_agent` until the specialist's queue-only `FINAL_ANSWER`
   lands in the same turn, while the host prints conversation status changes for the root and the
-  specialist. Uses
-  `SqliteContextStore('./zukhruf.sqlite')` + `SqliteStreamStore('./zukhruf.streams.sqlite')` +
-  `SqliteMailboxStore('./zukhruf.mailbox.sqlite')` + `PGlite('./zukhruf.queue')`.
+  specialist. Uses `EmbeddedAgentStorage.open({ directory: import.meta.dirname })`.
 - Integration suites cover enqueue/work/observe durability, ownership and stream isolation,
   topology validation, approval continuation and sibling-decision races, failed-continuation
   settlement and parked-turn revival, cancellation during setup and the atomic execution-claim

@@ -21,6 +21,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import { ControlledAgentStorage } from '../../testing/controlled-agent-storage.fixture.ts';
 import { textResult } from '../../testing/stream-results.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
 import { usage } from '../../testing/usage.fixture.ts';
@@ -73,10 +74,12 @@ async function runtimeHarness(
   const streamStore = new SqliteStreamStore(':memory:');
   const runtimeSetup = new AgentRuntime(declaration);
   const runtimeStack = defineStack(async () => ({
-    store: new InMemoryContextStore(),
-    streams: streamsFor(streamStore),
-    queue: runtimeQueue,
-    mailboxStore,
+    storage: new ControlledAgentStorage({
+      store: new InMemoryContextStore(),
+      streams: streamsFor(streamStore),
+      queue: runtimeQueue,
+      mailboxStore,
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack);
   return {

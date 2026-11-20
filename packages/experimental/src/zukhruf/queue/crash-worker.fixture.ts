@@ -8,17 +8,14 @@ import { MockLanguageModelV4 } from 'ai/test';
 import pg from 'pg';
 import { PgBoss } from 'pg-boss';
 
-import { PostgresContextStore, PostgresStreamStore } from '@deepagents/context';
 import {
   type AgentDeclaration,
   AgentRuntime,
-  PgBossTurnQueue,
-  SqliteMailboxStore,
+  PostgresAgentStorage,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
-import { streamsFor } from '../../testing/streams-for.fixture.ts';
 import { usage } from '../../testing/usage.fixture.ts';
 
 const connectionString = process.argv[2];
@@ -54,24 +51,16 @@ const declaration: AgentDeclaration = {
 const boss = new PgBoss(connectionString);
 boss.on('error', () => {});
 await boss.start();
-const queue = await PgBossTurnQueue.create(boss, {
-  heartbeatSeconds: 10,
-  pollingIntervalSeconds: 0.5,
-});
-
 // Never ended: the pool ends with this process, which the parent kills.
 const pool = new pg.Pool({ connectionString });
-const streamStore = await PostgresStreamStore.create({ pool });
-const store = await PostgresContextStore.create({ pool });
-const streams = streamsFor(streamStore);
+const storage = await PostgresAgentStorage.create({
+  pool,
+  boss,
+  queue: { heartbeatSeconds: 10, pollingIntervalSeconds: 0.5 },
+});
 
 const runtime = new AgentRuntime(declaration);
-const stack = defineStack(async () => ({
-  store,
-  streams,
-  queue,
-  mailboxStore: new SqliteMailboxStore(':memory:'),
-}));
+const stack = defineStack(async () => ({ storage }));
 const host = await runtime.initialize(stack);
 await host.work();
 console.log('WORKER READY');

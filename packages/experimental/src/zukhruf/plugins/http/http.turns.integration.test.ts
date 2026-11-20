@@ -25,6 +25,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 
+import { ControlledAgentStorage } from '../../../testing/controlled-agent-storage.fixture.ts';
 import { textResult } from '../../../testing/stream-results.fixture.ts';
 import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 
@@ -67,10 +68,12 @@ async function serve(resources: AsyncDisposableStack) {
       }),
     ).initialize(
       defineStack(async () => ({
-        store: new SqliteContextStore(resources.use(open(':memory:'))),
-        streams: streamsFor(streamStore),
-        queue,
-        mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
+        storage: new ControlledAgentStorage({
+          store: new SqliteContextStore(resources.use(open(':memory:'))),
+          streams: streamsFor(streamStore),
+          queue,
+          mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
+        }),
       })),
     ),
   );

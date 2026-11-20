@@ -13,6 +13,7 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import { ControlledAgentStorage } from '../../testing/controlled-agent-storage.fixture.ts';
 import { ControlledTurnQueue } from '../../testing/controlled-turn-queue.fixture.ts';
 import {
   textResult,
@@ -114,10 +115,12 @@ test('concurrent identical spawn_agent calls reserve one canonical child path', 
   });
   const runtimeSetup = new AgentRuntime(root);
   const runtimeStack = defineStack(async () => ({
-    store,
-    streams: streamsFor(streamStore),
-    mailboxStore,
-    queue,
+    storage: new ControlledAgentStorage({
+      store,
+      streams: streamsFor(streamStore),
+      mailboxStore,
+      queue,
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack);
 
@@ -188,10 +191,12 @@ test('spawn_agent retries an enqueue gap but does not restart a completed child 
   });
   const runtimeSetup = new AgentRuntime(root);
   const runtimeStack2 = defineStack(async () => ({
-    store,
-    streams: streamsFor(streamStore),
-    mailboxStore,
-    queue,
+    storage: new ControlledAgentStorage({
+      store,
+      streams: streamsFor(streamStore),
+      mailboxStore,
+      queue,
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack2);
   await using _worker = await runtime.work();

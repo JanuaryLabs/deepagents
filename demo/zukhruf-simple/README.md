@@ -10,7 +10,7 @@ The smallest complete Zukhruf deployable unit.
 - `skills/<name>/SKILL.md` declares skills discovered from that sandbox once per
   conversation. Only each skill's name, description, and model-visible path are
   persisted; its files remain in the sandbox.
-- `stack.ts` defines the lazy queue and store composition.
+- `stack.ts` opens an `EmbeddedAgentStorage` in the demo directory.
 - `run.ts` constructs and exports `runtime`; `server.ts` initializes its disposable `host` from the stack.
 - `server.ts` is the top-level process: it initializes the runtime, starts its
   worker, mounts the authenticated Zukhruf protocol at `/zukhruf/v1` and the

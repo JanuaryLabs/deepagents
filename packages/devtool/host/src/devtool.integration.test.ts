@@ -16,54 +16,16 @@ import test from 'node:test';
 import { z } from 'zod';
 
 import type { BashToolkit } from '@deepagents/context';
-import {
-  InMemoryContextStore,
-  PollingChangeSource,
-  SqliteStreamStore,
-  StreamManager,
-  createBashTool,
-  createVirtualSandbox,
-} from '@deepagents/context';
+import { createBashTool, createVirtualSandbox } from '@deepagents/context';
 import { devtool } from '@deepagents/devtool';
 import { fileTelemetry, tracesHttp } from '@deepagents/devtool/traces';
 import {
   AgentRuntime,
-  SqliteMailboxStore,
-  type TurnActivity,
-  TurnQueue,
-  type TurnRef,
+  EmbeddedAgentStorage,
   defineAgent,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
-
-class AcceptingTurnQueue extends TurnQueue {
-  push(_turn: TurnRef): Promise<void> {
-    return Promise.resolve();
-  }
-
-  getTurnActivity(): Promise<TurnActivity> {
-    return Promise.resolve('idle');
-  }
-
-  getCurrentTurn(): Promise<undefined> {
-    return Promise.resolve(undefined);
-  }
-
-  cancel(): Promise<void> {
-    return Promise.resolve();
-  }
-
-  consume(): Promise<AsyncDisposable> {
-    return Promise.resolve({
-      [Symbol.asyncDispose]: () => Promise.resolve(),
-    });
-  }
-
-  resumeParked(): Promise<void> {
-    return Promise.resolve();
-  }
-}
 
 const DEVTOOL_PREFIX = '/devtool';
 const USER_HEADER = 'x-test-user';
@@ -116,13 +78,9 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
   );
   const telemetry = join(directory.path, 'telemetry.jsonl');
   const conversation = { chatId: 'chat-1', userId: 'user-1' };
-  await using resources = new AsyncDisposableStack();
-  const streamStore = resources.adopt(
-    new SqliteStreamStore(':memory:'),
-    (value) => value.close(),
-  );
-  const mailboxStore = resources.use(new SqliteMailboxStore(':memory:'));
-  const store = new InMemoryContextStore();
+  await using storage = await EmbeddedAgentStorage.open({
+    directory: join(directory.path, 'storage'),
+  });
   const traceTelemetry = fileTelemetry({ path: telemetry });
   const runtime = new AgentRuntime(
     defineAgent({
@@ -133,18 +91,10 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
       plugins: [traceTelemetry],
     }),
   );
-  const stack = defineStack(async () => ({
-    store,
-    streams: new StreamManager({
-      store: streamStore,
-      changeSource: new PollingChangeSource({ reads: streamStore }),
-    }),
-    queue: new AcceptingTurnQueue(),
-    mailboxStore,
-  }));
+  const stack = defineStack(async () => ({ storage }));
   await using host = await runtime.initialize(stack);
   await host.createSession(conversation);
-  await store.updateChat(conversation.chatId, () => ({
+  await storage.store.updateChat(conversation.chatId, () => ({
     title: 'First conversation',
   }));
   const turn = await host.enqueue(conversation, {
@@ -156,7 +106,6 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
     trigger: 'submit-message',
   });
   await writeFile(telemetry, telemetryRecords(conversation, turn.id));
-  resources.use(await host.work());
 
   const app = new Hono<HttpEnv>();
   app.use(`${ZUKHRUF_MOUNT_PATH}/*`, (context, next) => {
@@ -194,7 +143,8 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
     .parse(await history.json());
   assert.equal(entry.chatId, conversation.chatId);
   assert.equal(entry.title, 'First conversation');
-  assert.deepEqual(entry.status, { type: 'idle' });
+  // No worker runs, since the mock model has no stream to answer with: the turn waits in the queue, so its conversation is active.
+  assert.deepEqual(entry.status, { type: 'active', activeFlags: [] });
 
   const traceList = await app.request(
     `${ZUKHRUF_MOUNT_PATH}/traces/${conversation.chatId}`,
