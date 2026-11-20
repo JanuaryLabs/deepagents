@@ -1,3 +1,10 @@
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@zukhruf/shadcn';
 import { cn } from 'cn';
 import {
   AlertCircleIcon,
@@ -146,6 +153,12 @@ export function TracesView({
   }, [conversation, href, traceId]);
 
   const activeDetail = detail?.id === traceId ? detail : undefined;
+  const traceItems = traces.map((trace, index) => ({
+    value: trace.id,
+    label: `${index === 0 ? 'Latest · ' : ''}${
+      trace.startedAt ? formatTimestamp(trace.startedAt) : 'Starting'
+    } · ${formatDuration(trace)} · ${capitalize(trace.status)}`,
+  }));
   const selectedSpan = activeDetail?.spans.find(
     ({ id }) => id === selectedSpanId,
   );
@@ -174,23 +187,30 @@ export function TracesView({
         >
           Trace
         </label>
-        <select
+        <Select
           id="trace-selector"
-          value={traceId ?? ''}
+          items={traceItems}
+          value={traceId ?? null}
           disabled={traces.length === 0}
-          onChange={(event) => onTraceId(event.target.value, false)}
-          className="bg-background max-w-xl min-w-0 flex-1 rounded-md border px-3 py-1.5 font-mono text-xs"
+          onValueChange={(id) => {
+            if (id !== null) onTraceId(id, false);
+          }}
         >
-          {traces.map((trace, index) => (
-            <option key={trace.id} value={trace.id}>
-              {index === 0 ? 'Latest · ' : ''}
-              {trace.startedAt
-                ? formatTimestamp(trace.startedAt)
-                : 'Starting'}{' '}
-              · {formatDuration(trace)} · {capitalize(trace.status)}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger className="max-w-xl min-w-0 flex-1 font-mono text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {traceItems.map((item) => (
+              <SelectItem
+                key={item.value}
+                value={item.value}
+                className="font-mono text-xs"
+              >
+                {item.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       {loading ? (
         <TraceState icon={<Loader2Icon className="size-4 animate-spin" />}>

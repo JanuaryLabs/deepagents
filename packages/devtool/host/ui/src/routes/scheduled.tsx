@@ -23,8 +23,11 @@ import {
   FieldDescription,
   FieldLabel,
   Input,
-  NativeSelect,
-  NativeSelectOption,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Skeleton,
   Textarea,
   buttonVariants,
@@ -246,6 +249,10 @@ function TaskDetail({
   }
   const cron = isCron(task.recurrence);
   const archived = task.status === 'archived';
+  const chats = history.map((entry) => ({
+    value: entry.chatId,
+    label: entry.title ?? entry.chatId,
+  }));
   const update = (definition: Partial<ScheduleDefinitionInput>) =>
     command.mutate({ kind: 'update', taskId, definition });
 
@@ -304,15 +311,15 @@ function TaskDetail({
             />
           </Row>
           <Row label="Runs in">
-            <RowSelect
-              aria-label="Runs in"
+            <Select
+              items={targetKinds}
               disabled={archived}
               value={task.target.kind}
-              onChange={(event) => {
+              onValueChange={(kind) => {
                 const [conversation] = history;
                 update({
                   target:
-                    event.target.value === 'new-conversation' || !conversation
+                    kind === 'new-conversation' || !conversation
                       ? { kind: 'new-conversation' }
                       : {
                           kind: 'existing-conversation',
@@ -321,38 +328,49 @@ function TaskDetail({
                 });
               }}
             >
-              <NativeSelectOption value="new-conversation">
-                New chat
-              </NativeSelectOption>
-              <NativeSelectOption
-                value="existing-conversation"
-                disabled={history.length === 0}
-              >
-                Existing chat
-              </NativeSelectOption>
-            </RowSelect>
+              <RowSelectTrigger aria-label="Runs in">
+                <SelectValue />
+              </RowSelectTrigger>
+              <SelectContent>
+                {targetKinds.map((kind) => (
+                  <SelectItem
+                    key={kind.value}
+                    value={kind.value}
+                    disabled={
+                      kind.value === 'existing-conversation' &&
+                      history.length === 0
+                    }
+                  >
+                    {kind.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Row>
           {task.target.kind === 'existing-conversation' ? (
             <Row label="Chat">
-              <RowSelect
-                aria-label="Chat"
+              <Select
+                items={chats}
                 disabled={archived}
                 value={task.target.chatId}
-                onChange={(event) =>
+                onValueChange={(chatId) => {
+                  if (chatId === null) return;
                   update({
-                    target: {
-                      kind: 'existing-conversation',
-                      chatId: event.target.value,
-                    },
-                  })
-                }
+                    target: { kind: 'existing-conversation', chatId },
+                  });
+                }}
               >
-                {history.map((entry) => (
-                  <NativeSelectOption key={entry.chatId} value={entry.chatId}>
-                    {entry.title ?? entry.chatId}
-                  </NativeSelectOption>
-                ))}
-              </RowSelect>
+                <RowSelectTrigger aria-label="Chat">
+                  <SelectValue />
+                </RowSelectTrigger>
+                <SelectContent>
+                  {chats.map((chat) => (
+                    <SelectItem key={chat.value} value={chat.value}>
+                      {chat.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </Row>
           ) : null}
         </Group>
@@ -678,6 +696,13 @@ function CreateTaskDialog({
     newSubmission(blankDefinition()),
   );
   const draft = submission.definition;
+  const targets = [
+    { value: 'new-conversation', label: 'New chat for every run' },
+    ...history.map((entry) => ({
+      value: entry.chatId,
+      label: entry.title ?? entry.chatId,
+    })),
+  ];
   const patch = (values: Partial<ScheduleDefinitionInput>) =>
     setSubmission((current) =>
       newSubmission({ ...current.definition, ...values }),
@@ -737,34 +762,35 @@ function CreateTaskDialog({
           </div>
           <Field>
             <FieldLabel htmlFor="schedule-target">Runs in</FieldLabel>
-            <NativeSelect
+            <Select
               id="schedule-target"
+              items={targets}
               value={
                 draft.target.kind === 'new-conversation'
                   ? 'new-conversation'
                   : draft.target.chatId
               }
-              onChange={(event) =>
+              onValueChange={(value) => {
+                if (value === null) return;
                 patch({
                   target:
-                    event.target.value === 'new-conversation'
+                    value === 'new-conversation'
                       ? { kind: 'new-conversation' }
-                      : {
-                          kind: 'existing-conversation',
-                          chatId: event.target.value,
-                        },
-                })
-              }
+                      : { kind: 'existing-conversation', chatId: value },
+                });
+              }}
             >
-              <NativeSelectOption value="new-conversation">
-                New chat for every run
-              </NativeSelectOption>
-              {history.map((entry) => (
-                <NativeSelectOption key={entry.chatId} value={entry.chatId}>
-                  {entry.title ?? entry.chatId}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {targets.map((target) => (
+                  <SelectItem key={target.value} value={target.value}>
+                    {target.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
         </div>
         <DialogFooter>
@@ -949,11 +975,16 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function RowSelect(props: React.ComponentProps<typeof NativeSelect>) {
+const targetKinds = [
+  { value: 'new-conversation', label: 'New chat' },
+  { value: 'existing-conversation', label: 'Existing chat' },
+] as const;
+
+function RowSelectTrigger(props: React.ComponentProps<typeof SelectTrigger>) {
   return (
-    <NativeSelect
+    <SelectTrigger
       {...props}
-      className="w-auto border-0 bg-transparent text-right shadow-none"
+      className="w-auto border-0 bg-transparent shadow-none dark:bg-transparent"
     />
   );
 }
