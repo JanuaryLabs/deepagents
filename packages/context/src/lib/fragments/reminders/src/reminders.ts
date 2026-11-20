@@ -1,3 +1,4 @@
+import { isRecord } from '@ai-sdk/provider-utils';
 import { type UIMessage, generateId } from 'ai';
 
 import { type ContextFragment, isFragment } from '../../../fragments.ts';
@@ -180,9 +181,7 @@ export function stripReminders(message: UIMessage): UIMessage {
   return nextMessage;
 }
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+export { isRecord };
 
 function assertReminderText(text: string) {
   if (text.trim().length === 0) {

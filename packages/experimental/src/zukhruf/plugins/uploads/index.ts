@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import z from 'zod';
 
-import { reminder } from '@deepagents/context';
+import { isRecord, reminder, shellQuote } from '@deepagents/context';
 
 import type { ZukhrufSandbox } from '../../agent.ts';
 import type {
@@ -358,10 +358,6 @@ function normalizePublicUrl(publicUrl: string | undefined): string | undefined {
   return parsed.href.replace(/\/+$/, '');
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
-}
-
 function assertPathSegment(name: string, value: string): void {
   if (
     value.length === 0 ||
@@ -395,8 +391,4 @@ function isAttachedUpload(value: unknown): value is AttachedUpload {
 /** `path` is already normalized (no `.`/`..` segments) and names something below `scope`. */
 function isBelow(scope: string, path: string): boolean {
   return posix.normalize(path) === path && path.startsWith(`${scope}/`);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

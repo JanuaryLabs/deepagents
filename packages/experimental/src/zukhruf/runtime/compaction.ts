@@ -18,7 +18,11 @@ import {
   compact,
   estimateTokens,
 } from '@deepagents/compaction';
-import type { ContextEngine, ContextStore } from '@deepagents/context';
+import {
+  type ContextEngine,
+  type ContextStore,
+  isRecord,
+} from '@deepagents/context';
 
 import type { AgentCompaction } from '../agent.ts';
 
@@ -77,10 +81,6 @@ const inputUsageSchema = cacheObservationSchema
 
 function jsonDigest(value: unknown): string {
   return hash('sha256', JSON.stringify(value));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** Resolve policy from the provider's request metadata after model middleware. */

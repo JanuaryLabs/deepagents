@@ -1,3 +1,5 @@
+import { isRecord } from '@deepagents/context';
+
 import type { ConversationId } from '../mailbox/types.ts';
 import { AgentPath } from './agent-path.ts';
 
@@ -65,7 +67,7 @@ export class AgentThread {
   ): AgentThread | undefined {
     const treeId = metadata?.zukhrufTreeId;
     const zukhruf = metadata?.zukhruf;
-    if (typeof treeId !== 'string' || !AgentThread.#isRecord(zukhruf)) {
+    if (typeof treeId !== 'string' || !isRecord(zukhruf)) {
       return undefined;
     }
 
@@ -115,9 +117,7 @@ export class AgentThread {
   toMetadata(
     metadata: Record<string, unknown> | undefined,
   ): Record<string, unknown> {
-    const existing = AgentThread.#isRecord(metadata?.zukhruf)
-      ? metadata.zukhruf
-      : {};
+    const existing = isRecord(metadata?.zukhruf) ? metadata.zukhruf : {};
     return {
       ...metadata,
       zukhrufTreeId: this.treeId,
@@ -131,10 +131,6 @@ export class AgentThread {
           : { lastTurnId: this.lastTurnId }),
       },
     };
-  }
-
-  static #isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   static #assertTopology(options: AgentThreadOptions): void {

@@ -1,9 +1,11 @@
 import { type UIMessage, validateUIMessages } from 'ai';
+import { isDeepStrictEqual } from 'node:util';
 import { v5 as uuidv5 } from 'uuid';
 
 import {
   type ContextStore,
   type MessageData,
+  isRecord,
   isSyntheticReminderMessage,
 } from '@deepagents/context';
 
@@ -192,7 +194,7 @@ export class AgentHistoryForker {
       child,
       selected.map(({ stored }) => stored.id),
     );
-    return arraysEqual(
+    return isDeepStrictEqual(
       sourceMessageIds,
       selected.map(({ stored }) => stored.id),
     )
@@ -412,10 +414,6 @@ function isForkTurns(value: unknown): value is ForkTurns {
   );
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function isEmptyAssistantPlaceholder(value: unknown): boolean {
   return (
     isRecord(value) &&
@@ -423,12 +421,5 @@ function isEmptyAssistantPlaceholder(value: unknown): boolean {
     value.role === 'assistant' &&
     Array.isArray(value.parts) &&
     value.parts.length === 0
-  );
-}
-
-function arraysEqual(left: string[], right: string[]): boolean {
-  return (
-    left.length === right.length &&
-    left.every((value, index) => value === right[index])
   );
 }

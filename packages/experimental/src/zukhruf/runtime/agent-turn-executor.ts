@@ -16,6 +16,7 @@ import {
   agent,
   assistant,
   chat,
+  isRecord,
   role,
   user,
 } from '@deepagents/context';
@@ -595,8 +596,4 @@ function isSkill(value: unknown): value is AvailableSkill {
     typeof value.description === 'string' &&
     typeof value.path === 'string'
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
