@@ -1,8 +1,8 @@
 /// <reference types='vitest' />
 import babel from '@rolldown/plugin-babel';
+import sdkIt from '@sdk-it/vite';
 import tailwindcss from '@tailwindcss/vite';
 import react, { reactCompilerPreset } from '@vitejs/plugin-react';
-import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 
 export default defineConfig(() => {
@@ -25,18 +25,11 @@ export default defineConfig(() => {
     define: {
       'process.env': {},
     },
-    resolve: {
-      alias: {
-        '@evals/client': resolve(
-          __dirname,
-          '../../../.evals-sdk-it/src/index.ts',
-        ),
-      },
-    },
     plugins: [
       react(),
       babel({ presets: [reactCompilerPreset()] }),
       tailwindcss(),
+      sdkIt.imports(),
     ],
     base: './',
     build: {

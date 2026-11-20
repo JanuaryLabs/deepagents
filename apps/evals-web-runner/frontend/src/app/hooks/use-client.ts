@@ -1,4 +1,3 @@
-import { type ClientEndpoints as Endpoints, createClient } from '@evals/client';
 import {
   type UseMutationOptions,
   type UseMutationResult,
@@ -9,6 +8,10 @@ import {
   useQuery,
 } from '@tanstack/react-query';
 
+import {
+  type EvalsEndpoints as Endpoints,
+  createEvals,
+} from '../../evals.openapi';
 import { queryClient } from './query-client.ts';
 
 export type { Endpoints };
@@ -25,7 +28,7 @@ function getBaseUrl(): string {
   const basePath = baseHref.replace(/\/$/, '');
   return `${window.location.origin}${basePath}/api`;
 }
-export const client = createClient({ baseUrl: getBaseUrl() });
+export const client = createEvals({ baseUrl: getBaseUrl() });
 
 type DataEndpoints = {
   [K in keyof Endpoints]: K extends `${'GET'} ${string}` ? K : never;

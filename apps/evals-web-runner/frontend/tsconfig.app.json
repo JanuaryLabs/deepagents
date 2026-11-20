@@ -8,9 +8,6 @@
     "jsx": "react-jsx",
     "lib": ["ES2020", "DOM", "ESNext"],
     "moduleResolution": "bundler",
-    "paths": {
-      "@evals/client": ["../../../.evals-sdk-it/dist/index.d.ts"]
-    },
     "types": [
       "node",
       "@nx/react/typings/cssmodule.d.ts",
@@ -38,6 +35,15 @@
     "vitest.config.ts",
     "vitest.config.mts"
   ],
-  "include": ["src/**/*.js", "src/**/*.jsx", "src/**/*.ts", "src/**/*.tsx"],
+  "include": [
+    "src/**/*.js",
+    "src/**/*.jsx",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "src/**/*.openapi"
+  ],
+  "contentMappers": [
+    { "package": "@sdk-it/content-mapper", "extensions": [".openapi"] }
+  ],
   "references": []
 }

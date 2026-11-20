@@ -5,50 +5,24 @@
   "projectType": "application",
   "tags": [],
   "targets": {
-    "generate-sdk": {
-      "executor": "nx:run-commands",
-      "dependsOn": [
-        {
-          "projects": ["backend"],
-          "target": "openapi"
-        }
-      ],
-      "inputs": [
-        "{workspaceRoot}/apps/evals-web-runner/generate-sdk.ts",
-        "{workspaceRoot}/.evals-sdk-it/openapi.json",
-        {
-          "externalDependencies": [
-            "@sdk-it/spec",
-            "@sdk-it/typescript",
-            "typescript"
-          ]
-        }
-      ],
-      "outputs": [
-        "{workspaceRoot}/.evals-sdk-it/package.json",
-        "{workspaceRoot}/.evals-sdk-it/tsconfig.json",
-        "{workspaceRoot}/.evals-sdk-it/src",
-        "{workspaceRoot}/.evals-sdk-it/dist"
-      ],
-      "options": {
-        "command": "node apps/evals-web-runner/generate-sdk.ts"
-      }
-    },
     "build": {
-      "dependsOn": ["^build", "generate-sdk"],
+      "dependsOn": ["^build", "backend:openapi"],
       "inputs": ["...", { "dependentTasksOutputFiles": "**/*" }]
     },
     "typecheck": {
-      "dependsOn": ["^typecheck", "generate-sdk"],
+      "options": { "args": ["--runExternalCode"] },
+      "dependsOn": ["^typecheck", "backend:openapi"],
       "inputs": ["...", { "dependentTasksOutputFiles": "**/*" }]
     },
     "dev": {
-      "dependsOn": ["^build", "generate-sdk"]
+      "dependsOn": ["^build", "backend:openapi"]
     },
     "serve": {
-      "dependsOn": ["generate-sdk"]
+      "dependsOn": ["backend:openapi"]
     },
     "test": {
+      "dependsOn": ["...", "backend:openapi"],
+      "inputs": ["...", { "dependentTasksOutputFiles": "**/*" }],
       "outputs": [
         "{projectRoot}/{options.coverage.reportsDirectory}",
         "{projectRoot}/test-output/vitest/coverage"

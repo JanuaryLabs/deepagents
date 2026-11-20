@@ -96,7 +96,6 @@ __pycache__/
 artifacts/
 agent-sandbox-test
 .evals
-.evals-sdk-it
 .playwright-mcp/
 harvard-metrics
 runs

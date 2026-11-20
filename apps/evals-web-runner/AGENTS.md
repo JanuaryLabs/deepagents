@@ -39,14 +39,22 @@ throw new HTTPException(400, {
 
 ### Generating the client
 
-The frontend calls the backend through a generated client, `@evals/client`. The `frontend:generate-sdk` target makes it in two steps:
+The frontend has no generated client package. `backend:openapi` writes the OpenAPI spec of the backend routes to `frontend/src/evals.openapi` (gitignored). Every frontend target (`build`, `typecheck`, `dev`, `serve`, `test`) runs it first.
 
-1. `backend:openapi` writes the OpenAPI spec of the backend routes to `.evals-sdk-it/openapi.json`.
-2. The generator writes the client from that spec to `.evals-sdk-it`.
+The frontend imports the document as a module. Its names come from the file name:
 
-The frontend `build` and `typecheck` targets run `generate-sdk` for you. To run it alone, use `NX_DAEMON=false nx run frontend:generate-sdk`.
+```ts
+import {
+  type EvalsClient,
+  type EvalsEndpoints,
+  createEvals,
+} from '../../evals.openapi';
+```
 
-Do not edit the generated client. Change the backend route, then generate the client again.
+- Types come from the TypeScript 7.1 content mapper (`@sdk-it/content-mapper`, `contentMappers` in `frontend/tsconfig.app.json`). `tsc` needs `--runExternalCode`, which the `typecheck` target passes. The project is composite, so the document must be in `include` (`src/**/*.openapi`), or tsc fails with TS6307. The editor's TS 7.1 language server needs `runExternalCode` in its initialization options.
+- At runtime, `sdkIt.imports()` from `@sdk-it/vite` (`frontend/vite.config.ts`) renders the same document in Vite, in dev and build.
+
+The document changes only when `backend:openapi` runs. After you change a backend route, run `NX_DAEMON=false npx nx run backend:openapi`; the dev server then reloads the module. Do not edit `evals.openapi` by hand.
 
 ### API input validation
 

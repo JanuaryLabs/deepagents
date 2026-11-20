@@ -8,7 +8,9 @@
     "openapi": {
       "dependsOn": ["^build"],
       "executor": "nx:run-commands",
-      "outputs": ["{workspaceRoot}/.evals-sdk-it/openapi.json"],
+      "outputs": [
+        "{workspaceRoot}/apps/evals-web-runner/frontend/src/evals.openapi"
+      ],
       "options": {
         "command": "node apps/evals-web-runner/backend/openapi.ts"
       }
@@ -24,7 +26,6 @@
         "main": "apps/evals-web-runner/backend/src/server.ts",
         "tsConfig": "apps/evals-web-runner/backend/tsconfig.app.json",
         "assets": [
-          "./openapi.json",
           {
             "input": "apps/evals-web-runner/backend/src/core/agents/skills",
             "glob": "**",

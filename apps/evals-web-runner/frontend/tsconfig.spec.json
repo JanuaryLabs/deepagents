@@ -12,8 +12,12 @@
       "vitest"
     ]
   },
+  "contentMappers": [
+    { "package": "@sdk-it/content-mapper", "extensions": [".openapi"] }
+  ],
   "references": [{ "path": "./tsconfig.app.json" }],
   "include": [
+    "src/**/*.openapi",
     "vite.config.ts",
     "vite.config.mts",
     "vitest.config.ts",

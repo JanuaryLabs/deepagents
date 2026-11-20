@@ -3,10 +3,9 @@ import { defaultTypesMap } from '@sdk-it/core/deriver.js';
 import { openAnalysisProject } from '@sdk-it/core/program.js';
 import { analyze } from '@sdk-it/generic';
 import { responseAnalyzer } from '@sdk-it/hono';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { cwd } from 'node:process';
-import { fileURLToPath } from 'node:url';
 
 using project = openAnalysisProject(
   'apps/evals-web-runner/backend/tsconfig.app.json',
@@ -60,11 +59,7 @@ const spec: OpenAPIDocument = {
   },
 };
 
-const outputDirectory = fileURLToPath(
-  new URL('../../../.evals-sdk-it/', import.meta.url),
-);
-await mkdir(outputDirectory, { recursive: true });
 await writeFile(
-  join(outputDirectory, 'openapi.json'),
+  new URL('../frontend/src/evals.openapi', import.meta.url),
   JSON.stringify(spec, null, 2),
 );
