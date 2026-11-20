@@ -80,6 +80,7 @@ deepsearch.sqlite*
 zukhruf*.sqlite*
 simple*.sqlite*
 zukhruf.queue/
+zukhruf.lock
 zukhruf-research.queue/
 animated_svg_output.svg
 store.db*
