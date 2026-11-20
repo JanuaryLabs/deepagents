@@ -1620,6 +1620,18 @@ describe('Composer slash and mention behavior', () => {
     ).toBeInTheDocument();
   });
 
+  it('announces an inline error to assistive technology', async () => {
+    const { user, prompt } = renderRichInput();
+
+    await user.click(prompt);
+    await user.keyboard('/unknown inspect this patch');
+    await user.keyboard('{Enter}');
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /unrecognized command: \/unknown/i,
+    );
+  });
+
   it('submits slash command args with accepted mentions as structured items', async () => {
     const { user, prompt, submissions } = renderRichInput();
 

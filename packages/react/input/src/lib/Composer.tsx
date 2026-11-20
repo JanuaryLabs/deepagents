@@ -1896,6 +1896,7 @@ function ComposerError({ className, ...props }: ComposerErrorProps) {
   }
   return (
     <div
+      role="alert"
       className={cn(
         'border-primary/30 bg-primary/10 text-primary rounded-md border px-3 py-2 text-xs',
         className,
