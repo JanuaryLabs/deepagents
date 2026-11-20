@@ -330,10 +330,12 @@ export class AgentControlPlane {
     const target = await this.#directory.find(actor.thread, input.target);
     if (!target) return { previous_status: 'not_found' };
     if (target.path.isRoot) {
-      throw new Error('interrupt_agent: the root agent cannot be interrupted');
+      throw new Error('root is not a spawned agent');
     }
     if (target.path.equals(actor.thread.path)) {
-      throw new Error('interrupt_agent: an agent cannot interrupt itself');
+      throw new Error(
+        'an agent cannot interrupt itself; return your result and let the parent interrupt you if needed',
+      );
     }
 
     const previous = await this.#statusProjector.projectListedAgent(
@@ -402,9 +404,7 @@ export class AgentControlPlane {
   ): Promise<{ target: string }> {
     const target = await this.#directory.resolve(actor.thread, input.target);
     if (options.rejectRoot && target.path.isRoot) {
-      throw new Error(
-        'followup_task: the root agent cannot receive a follow-up',
-      );
+      throw new Error("Follow-up tasks can't target the root agent");
     }
     const message = createInterAgentCommunication({
       type: options.type,

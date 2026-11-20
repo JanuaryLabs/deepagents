@@ -2536,8 +2536,11 @@ test('interrupt_agent rejects root and self targets', async () => {
   await queue.runNextFor('caller-chat');
 
   const prompt = JSON.stringify(finalPrompt);
-  assert.match(prompt, /root agent cannot be interrupted/);
-  assert.match(prompt, /agent cannot interrupt itself/);
+  assert.match(prompt, /"Error: root is not a spawned agent"/);
+  assert.match(
+    prompt,
+    /"Error: an agent cannot interrupt itself; return your result and let the parent interrupt you if needed"/,
+  );
 });
 
 test('interrupt_agent leaves terminal and approval-paused children unchanged', async () => {
@@ -3389,7 +3392,7 @@ test('followup_task rejects the root agent without storing mail or scheduling a 
   assert.equal(calls, 2);
   assert.match(
     JSON.stringify(promptAfterTool),
-    /root agent cannot receive a follow-up/,
+    /"Error: Follow-up tasks can't target the root agent"/,
   );
   assert.equal(queue.turns.length, 0);
   assert.equal(
