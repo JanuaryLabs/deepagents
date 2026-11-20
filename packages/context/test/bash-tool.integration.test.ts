@@ -297,6 +297,53 @@ describe('bash toolkit', () => {
       },
     ]);
   });
+
+  it('returns a BashException from onBeforeBashCall as the tool result without running the command', async () => {
+    class Blocked extends BashException {
+      format(): CommandResult {
+        return { stdout: '', stderr: `${this.message}\n`, exitCode: 9 };
+      }
+    }
+    const fs = new InMemoryFs();
+    const { bash } = await createBashTool({
+      sandbox: await createVirtualSandbox({ fs }),
+      workingDirectory: '/workspace',
+      onBeforeBashCall: () => {
+        throw new Blocked('command blocked');
+      },
+    });
+
+    const result = await executeBash(
+      bash,
+      { command: 'echo ran > ran.txt', reasoning: 'hit the hook refusal' },
+      'hook-refused',
+    );
+
+    assert.deepStrictEqual(result, {
+      stdout: '',
+      stderr: 'command blocked\n',
+      exitCode: 9,
+    });
+    assert.strictEqual(await fs.exists('/workspace/ran.txt'), false);
+  });
+
+  it('rejects the tool call when onBeforeBashCall throws an error that is not a BashException', async () => {
+    const { bash } = await createBashTool({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      onBeforeBashCall: () => {
+        throw new Error('hook crashed');
+      },
+    });
+
+    await assert.rejects(
+      executeBash(
+        bash,
+        { command: 'true', reasoning: 'hit the hook crash' },
+        'hook-crashed',
+      ),
+      /hook crashed/,
+    );
+  });
 });
 
 describe('session-backed toolkit', () => {

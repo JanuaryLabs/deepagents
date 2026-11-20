@@ -191,29 +191,29 @@ export async function createBashTool(
       executionOptions,
     ): Promise<BashToolResult> => {
       let command = originalCommand;
-      const before = options.onBeforeBashCall?.({ command });
-      if (before?.command !== undefined) command = before.command;
-
-      let script = command;
       let teeFiles: CommandResult['teeFiles'];
-      if (experimentalTeeTransform) {
-        const pipeline = new BashTransformPipeline().use(
-          new TeePlugin({ outputDir: TEE_OUTPUT_DIR }),
-        );
-        const transformed = pipeline.transform(command);
-        script = `mkdir -p ${shellQuote(TEE_OUTPUT_DIR)} && ${makeTeeScriptPortable(transformed.script)}`;
-        teeFiles = transformed.metadata.teeFiles.map(
-          (file: { command: string; stdoutFile: string }) => ({
-            command: file.command,
-            stdoutFile: file.stdoutFile,
-          }),
-        );
-      }
-
       const { abortSignal } = executionOptions;
       const startedAt = performance.now();
       let result: CommandResult;
       try {
+        const before = options.onBeforeBashCall?.({ command });
+        if (before?.command !== undefined) command = before.command;
+
+        let script = command;
+        if (experimentalTeeTransform) {
+          const pipeline = new BashTransformPipeline().use(
+            new TeePlugin({ outputDir: TEE_OUTPUT_DIR }),
+          );
+          const transformed = pipeline.transform(command);
+          script = `mkdir -p ${shellQuote(TEE_OUTPUT_DIR)} && ${makeTeeScriptPortable(transformed.script)}`;
+          teeFiles = transformed.metadata.teeFiles.map(
+            (file: { command: string; stdoutFile: string }) => ({
+              command: file.command,
+              stdoutFile: file.stdoutFile,
+            }),
+          );
+        }
+
         result = await sandbox.run({
           command: script,
           ...(workingDirectory !== undefined ? { workingDirectory } : {}),
