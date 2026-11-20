@@ -698,6 +698,80 @@ test('POST /session/:sessionId/uploads rejects anything but a supported media ty
   }
 });
 
+test('POST /session/:sessionId/uploads answers 415 to a malformed Content-Type before the route reads it', async () => {
+  await using h = await harness();
+  const sessionId = randomUUID();
+
+  for (const contentType of [
+    'not a type',
+    'image',
+    'image /png',
+    'image/png, image/jpeg',
+    'image/png; foo',
+    'image/png; =x',
+    'image/png; a="unterminated',
+  ]) {
+    const response = await upload(h.app, sessionId, {
+      contentType,
+      filename: 'pixel.png',
+    });
+
+    assert.deepStrictEqual(
+      {
+        status: response.status,
+        code: errorBodySchema.parse(await response.json()).cause.code,
+      },
+      { status: 415, code: 'api/unsupported-media-type' },
+      contentType,
+    );
+  }
+});
+
+test('POST /session/:sessionId/uploads stores the essence of a Content-Type whatever its case and parameters', async () => {
+  await using h = await harness();
+  const sessionId = randomUUID();
+
+  for (const contentType of [
+    'Image/PNG',
+    'IMAGE/PNG; Charset=Binary',
+    'image/png ; charset=binary',
+    'image/png;charset="bin ary"',
+    'image/png; a=b; a=c',
+  ]) {
+    const response = await upload(h.app, sessionId, {
+      contentType,
+      filename: 'pixel.png',
+    });
+
+    assert.deepStrictEqual(
+      {
+        status: response.status,
+        mediaType: receiptSchema.parse(await response.json()).mediaType,
+      },
+      { status: 201, mediaType: 'image/png' },
+      contentType,
+    );
+  }
+});
+
+test('POST /session/:sessionId/uploads reads an empty parameter list as the WHATWG MIME type parser does', async () => {
+  await using h = await harness();
+  const sessionId = randomUUID();
+
+  const response = await upload(h.app, sessionId, {
+    contentType: 'image/png;',
+    filename: 'pixel.png',
+  });
+
+  assert.deepStrictEqual(
+    {
+      status: response.status,
+      mediaType: receiptSchema.parse(await response.json()).mediaType,
+    },
+    { status: 201, mediaType: 'image/png' },
+  );
+});
+
 test('POST /session/:sessionId/uploads rejects declared and streamed oversized bodies', async () => {
   await using h = await harness();
   const sessionId = randomUUID();

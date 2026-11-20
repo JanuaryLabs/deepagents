@@ -1,8 +1,8 @@
 import { validate } from '@sdk-it/hono/runtime';
-import { safeParse as parseContentType } from 'fast-content-type-parse';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
+import { MIMEType } from 'node:util';
 import z from 'zod';
 
 import type { AgentPluginDefinition } from '../../runtime/agent-runtime.ts';
@@ -108,11 +108,7 @@ function uploadRoutes(uploads: Uploads, maxBytes: number) {
     })),
     async (context) => {
       const { sessionId, name } = context.var.input;
-      const contentType = context.req.header('content-type');
-      const mediaType =
-        contentType === undefined
-          ? undefined
-          : parseContentType(contentType).type;
+      const mediaType = essenceOf(context.req.header('content-type'));
       if (mediaType === undefined || !isUploadMediaType(mediaType)) {
         throw new HTTPException(415, {
           message: 'Unsupported Media Type',
@@ -252,4 +248,22 @@ function methodNotAllowed(
       detail: `This endpoint only accepts ${allow} requests`,
     },
   });
+}
+
+function essenceOf(contentType: string | undefined): string | undefined {
+  if (contentType === undefined) {
+    return undefined;
+  }
+  try {
+    return new MIMEType(contentType).essence;
+  } catch (error) {
+    if (
+      error instanceof TypeError &&
+      'code' in error &&
+      error.code === 'ERR_INVALID_MIME_SYNTAX'
+    ) {
+      return undefined;
+    }
+    throw error;
+  }
 }
