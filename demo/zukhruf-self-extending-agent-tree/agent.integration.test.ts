@@ -1,10 +1,8 @@
+import { TemporaryFiles } from '@zukhruf/fs';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import test from 'node:test';
 
 import { createVirtualSandbox } from '@deepagents/context';
@@ -131,9 +129,12 @@ test('authors a missing skill before a fresh general task agent uses it', async 
   };
 
   await using resources = new AsyncDisposableStack();
-  const directory = await mkdtemp(join(tmpdir(), 'zukhruf-demo-test-'));
-  resources.defer(() => rm(directory, { recursive: true, force: true }));
-  const storage = resources.use(await EmbeddedAgentStorage.open({ directory }));
+  const directory = resources.use(
+    await new TemporaryFiles().directory('zukhruf-demo-test-'),
+  );
+  const storage = resources.use(
+    await EmbeddedAgentStorage.open({ directory: directory.path }),
+  );
   const runtime = new AgentRuntime(root);
   const stack = defineStack(async () => ({ storage }));
   const host = resources.use(await runtime.initialize(stack));

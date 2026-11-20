@@ -1,6 +1,5 @@
+import { TemporaryFiles } from '@zukhruf/fs';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
@@ -76,15 +75,16 @@ export class WhatsAppGroup implements AsyncDisposable {
     WhatsAppGroup.#validate(options);
 
     await using resources = new AsyncDisposableStack();
-    const directory = await mkdtemp(join(tmpdir(), 'zukhruf-whatsapp-'));
-    resources.defer(() => rm(directory, { recursive: true, force: true }));
+    const directory = resources.use(
+      await new TemporaryFiles().directory('zukhruf-whatsapp-'),
+    );
     const replies = new ReplyInbox();
     const participants: RunningParticipant[] = [];
 
     for (const [index, participant] of options.participants.entries()) {
       const storage = resources.use(
         await EmbeddedAgentStorage.open({
-          directory: join(directory, `participant-${index}`),
+          directory: join(directory.path, `participant-${index}`),
         }),
       );
       const runtime = new AgentRuntime(

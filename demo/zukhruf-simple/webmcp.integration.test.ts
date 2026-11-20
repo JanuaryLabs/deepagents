@@ -1,12 +1,10 @@
+import { TemporaryFiles } from '@zukhruf/fs';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import test from 'node:test';
 
 import { createVirtualSandbox } from '@deepagents/context';
@@ -136,9 +134,12 @@ test('SimpleAgent discovers and executes a website tool through native WebMCP', 
   resources.defer(() => {
     process.off('warning', onWarning);
   });
-  const directory = await mkdtemp(join(tmpdir(), 'zukhruf-demo-test-'));
-  resources.defer(() => rm(directory, { recursive: true, force: true }));
-  const storage = resources.use(await EmbeddedAgentStorage.open({ directory }));
+  const directory = resources.use(
+    await new TemporaryFiles().directory('zukhruf-demo-test-'),
+  );
+  const storage = resources.use(
+    await EmbeddedAgentStorage.open({ directory: directory.path }),
+  );
   const browser = declaration.plugins.find(
     (plugin) => plugin.name === 'browser',
   );
