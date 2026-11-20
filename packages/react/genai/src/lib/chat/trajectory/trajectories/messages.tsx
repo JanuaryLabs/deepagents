@@ -23,6 +23,7 @@ import {
   useMessagesContext,
   useMessagesStatus,
 } from '../messages-context.ts';
+import { isCommentaryTextPart } from '../segments/index.tsx';
 import { ToolLabelInline } from '../tool-label.tsx';
 import { CollapsibleDisclosure } from './collapsible-disclosure.tsx';
 import {
@@ -113,7 +114,7 @@ function AssistantPart({ part }: { part: UIMessage['parts'][number] }) {
   const debugMode = useShowDebug();
 
   if (part.type === 'text') {
-    if (part.providerMetadata?.openai?.phase === 'commentary') {
+    if (isCommentaryTextPart(part)) {
       return null;
     }
     return <AssistantTextPart text={part.text} elements={elements} />;

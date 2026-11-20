@@ -290,6 +290,20 @@ describe('Messages.Thinking', () => {
 
     mockUseAgentStatus.mockReturnValue({ status: 'ready' });
   });
+
+  it('shows nothing while streaming before any message exists', () => {
+    mockUseAgentStatus.mockReturnValue({ status: 'streaming' });
+    try {
+      render(
+        <Messages.Root messages={[]}>
+          <Messages.Thinking />
+        </Messages.Root>,
+      );
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    } finally {
+      mockUseAgentStatus.mockReturnValue({ status: 'ready' });
+    }
+  });
 });
 
 describe('Messages.Error', () => {

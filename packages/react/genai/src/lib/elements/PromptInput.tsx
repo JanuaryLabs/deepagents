@@ -54,6 +54,7 @@ import {
   use,
   useCallback,
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
@@ -185,20 +186,16 @@ export function PromptInputProvider({
     });
   }, []);
 
-  // Keep a ref to attachments for cleanup on unmount (avoids stale closure)
-  const attachmentsRef = useRef(attachmentFiles);
-  attachmentsRef.current = attachmentFiles;
+  const revokeAttachmentUrls = useEffectEvent(() => {
+    for (const f of attachmentFiles) {
+      if (f.url) {
+        URL.revokeObjectURL(f.url);
+      }
+    }
+  });
 
   // Cleanup blob URLs on unmount to prevent memory leaks
-  useEffect(() => {
-    return () => {
-      for (const f of attachmentsRef.current) {
-        if (f.url) {
-          URL.revokeObjectURL(f.url);
-        }
-      }
-    };
-  }, []);
+  useEffect(() => () => revokeAttachmentUrls(), []);
 
   const openFileDialog = useCallback(() => {
     openRef.current?.();
@@ -464,9 +461,11 @@ export const PromptInput = ({
   const [items, setItems] = useState<(FileUIPart & { id: string })[]>([]);
   const files = usingProvider ? controller.attachments.files : items;
 
-  // Keep a ref to files for cleanup on unmount (avoids stale closure)
-  const filesRef = useRef(files);
-  filesRef.current = files;
+  const revokeLocalFileUrls = useEffectEvent(() => {
+    for (const f of files) {
+      if (f.url) URL.revokeObjectURL(f.url);
+    }
+  });
 
   const openFileDialogLocal = useCallback(() => {
     inputRef.current?.click();
@@ -637,12 +636,9 @@ export const PromptInput = ({
   useEffect(
     () => () => {
       if (!usingProvider) {
-        for (const f of filesRef.current) {
-          if (f.url) URL.revokeObjectURL(f.url);
-        }
+        revokeLocalFileUrls();
       }
     },
-
     [usingProvider],
   );
 

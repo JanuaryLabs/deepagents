@@ -208,7 +208,7 @@ export function formatUsageBreakdown(usage: UsageDisplay): string {
   ];
 
   if (usage.totalTokens !== null) {
-    parts.push(`· ${usage.totalTokens.toLocaleString()} tokens`);
+    parts.push(`· ${formatNullableNumber(usage.totalTokens)} tokens`);
   }
 
   if (usage.cachedInputTokens !== null && usage.cachedInputTokens > 0) {

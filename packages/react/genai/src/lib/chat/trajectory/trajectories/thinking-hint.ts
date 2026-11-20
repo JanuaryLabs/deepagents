@@ -3,7 +3,9 @@ import { isReasoningUIPart, isTextUIPart, isToolUIPart } from 'ai';
 
 import { isRecord } from '@deepagents/context/browser';
 
-export function thinking(status: ChatStatus, message: UIMessage) {
+import { isCommentaryTextPart } from '../segments/index.tsx';
+
+export function thinking(status: ChatStatus, message: UIMessage | undefined) {
   if (status === 'error' || status === 'ready') {
     return null;
   }
@@ -15,11 +17,7 @@ export function thinking(status: ChatStatus, message: UIMessage) {
   }
   for (let i = message.parts.length - 1; i >= 0; i--) {
     const part = message.parts[i];
-    if (
-      isTextUIPart(part) &&
-      part.text &&
-      part.providerMetadata?.openai?.phase === 'commentary'
-    ) {
+    if (isTextUIPart(part) && isCommentaryTextPart(part) && part.text) {
       return part.text;
     }
   }
