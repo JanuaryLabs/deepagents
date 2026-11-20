@@ -4,7 +4,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 /**
  * Waits until the context store's full-text catalogs stop populating, so a
  * CONTAINSTABLE query sees every row. A server without catalogs (Azure SQL
- * Edge) returns at once: the store then searches with LIKE.
+ * Edge) returns at once: the store then searches with LIKE. Throws when the
+ * catalogs are still populating after maxWaitMs.
  */
 export async function waitForFtsReady(
   connectionString: string,
@@ -13,8 +14,8 @@ export async function waitForFtsReady(
 ): Promise<void> {
   const pool = await sql.connect(connectionString);
   try {
-    const start = Date.now();
-    while (Date.now() - start < maxWaitMs) {
+    const start = performance.now();
+    while (performance.now() - start < maxWaitMs) {
       const result = await pool.request().query(`
         SELECT FULLTEXTCATALOGPROPERTY(name, 'PopulateStatus') AS status
         FROM sys.fulltext_catalogs
@@ -24,6 +25,9 @@ export async function waitForFtsReady(
         return;
       await sleep(pollIntervalMs);
     }
+    throw new Error(
+      `Full-text catalogs matching '%context_store_catalog' were still populating after ${maxWaitMs}ms`,
+    );
   } finally {
     await pool.close();
   }

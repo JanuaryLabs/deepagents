@@ -107,11 +107,11 @@ export class MailboxCoordinator {
     recipient: ConversationId,
     options: { timeoutMs: number; signal?: AbortSignal },
   ): Promise<boolean> {
-    const deadline = Date.now() + options.timeoutMs;
+    const deadline = performance.now() + options.timeoutMs;
     while (true) {
       options.signal?.throwIfAborted();
       if (await this.#store.hasPending(recipient)) return true;
-      const remaining = deadline - Date.now();
+      const remaining = deadline - performance.now();
       if (remaining <= 0) return false;
       await delay(Math.min(WAIT_POLL_INTERVAL_MS, remaining), undefined, {
         signal: options.signal,
