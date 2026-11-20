@@ -3358,6 +3358,31 @@ describe('Composer link and paste behavior', () => {
     expect(submissions()).toHaveTextContent('item:@report.csv');
   });
 
+  it('drops a DownloadURL without a mime:name prefix as the bare URL', async () => {
+    const { user, prompt, submissions } = renderRichInput();
+
+    await user.click(prompt);
+    fireEvent.drop(prompt, {
+      dataTransfer: {
+        files: [],
+        getData: (type: string) =>
+          type === 'DownloadURL' ? 'https://example.test/report' : '',
+      },
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('region', { name: /rich composer snapshot/i }),
+      ).toHaveTextContent('Draft: https://example.test/report');
+    });
+
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter' });
+
+    expect(submissions()).toHaveTextContent(
+      'link:https://example.test/report:https://example.test/report',
+    );
+  });
+
   it('turns browser pastes over the large-paste threshold into paste atoms', async () => {
     const { prompt, submissions } = renderRichInput();
     const pasted = 'A'.repeat(1001);

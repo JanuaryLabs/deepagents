@@ -25,6 +25,7 @@ import {
   type ComposerPreparedPayload,
   attachmentMediaOf,
   attachmentPlaceholder,
+  characterCount,
   createComposerDraftSource,
   createDraftFromSource,
   createDraftFromState,
@@ -35,7 +36,9 @@ import {
   pushComposerHistory,
   selectedRemoteImageIndex,
   shouldNavigateHistory,
+  stableId,
   unknownSlashCommand,
+  wrapIndex,
 } from './ComposerCore.ts';
 import { readStoredDraft, writeStoredDraft } from './ComposerDraft.ts';
 import {
@@ -73,7 +76,6 @@ import {
   type ComposerTiptapKillBuffer,
   activeEditorToken,
   atomNodeContent,
-  characterCount,
   contentFromStateOrText,
   createComposerTiptapExtensions,
   deleteAtomAtSelectionEdge,
@@ -96,8 +98,6 @@ import {
   removeImageAttachmentAtom,
   renumberImageAttachmentAtoms,
   serializeTiptapContent,
-  stableId,
-  wrapIndex,
 } from './tiptap/ComposerTiptapDomain.ts';
 
 export type ComposerRootProps = {
@@ -2097,8 +2097,7 @@ function ComposerShortcuts({ className, ...props }: ComposerShortcutsProps) {
 }
 
 function ComposerFooter({ className, ...props }: ComposerFooterProps) {
-  const { activePopup, state, commandTriggers } =
-    useComposerContext('Composer.Footer');
+  const { activePopup, state } = useComposerContext('Composer.Footer');
   if (state.reverseSearch !== null) {
     return (
       <div
@@ -2121,35 +2120,28 @@ function ComposerFooter({ className, ...props }: ComposerFooterProps) {
     );
   }
 
-  const hints =
-    activePopup !== null && commandTriggers.includes(activePopup.trigger)
-      ? [
-          ['Enter', 'insert'],
-          ['Tab', 'insert'],
-          ['Esc', 'dismiss'],
-        ]
-      : activePopup
-        ? [
-            ['Enter', 'insert'],
-            ['Tab', 'insert'],
-            ['Esc', 'dismiss'],
-          ]
-        : [
-            [
-              'Enter',
-              state.isTaskRunning || state.queueSubmissions ? 'queue' : 'send',
-            ],
-            ['Shift Enter', 'newline'],
-            ['Alt Enter', 'newline'],
-            ['Ctrl J/M', 'newline'],
-            ['Ctrl P/N', 'history'],
-            ['Ctrl E', 'line end'],
-            ['Ctrl K', 'kill'],
-            ['Ctrl U', 'kill back'],
-            ['Ctrl W', 'word kill'],
-            ['Alt B/F', 'word move'],
-            ['Ctrl Y', 'yank'],
-          ];
+  const hints = activePopup
+    ? [
+        ['Enter', 'insert'],
+        ['Tab', 'insert'],
+        ['Esc', 'dismiss'],
+      ]
+    : [
+        [
+          'Enter',
+          state.isTaskRunning || state.queueSubmissions ? 'queue' : 'send',
+        ],
+        ['Shift Enter', 'newline'],
+        ['Alt Enter', 'newline'],
+        ['Ctrl J/M', 'newline'],
+        ['Ctrl P/N', 'history'],
+        ['Ctrl E', 'line end'],
+        ['Ctrl K', 'kill'],
+        ['Ctrl U', 'kill back'],
+        ['Ctrl W', 'word kill'],
+        ['Alt B/F', 'word move'],
+        ['Ctrl Y', 'yank'],
+      ];
 
   return (
     <div

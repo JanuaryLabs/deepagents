@@ -1,5 +1,3 @@
-import { escapeRegExp } from 'lodash-es';
-
 import {
   serializePersistedPromptLink,
   tokenizePersistedPrompt,
@@ -683,7 +681,7 @@ function elementForLabel(
   };
 }
 
-function sortElements(elements: ComposerTextElement[]) {
+export function sortElements(elements: ComposerTextElement[]) {
   return [...elements].sort((a, b) => a.range.start - b.range.start);
 }
 
@@ -741,55 +739,6 @@ export function selectedRemoteImageIndex(
 
 export function characterCount(text: string) {
   return Array.from(text).length;
-}
-
-export function isFileReference(path: string) {
-  return (
-    path.startsWith('file://') ||
-    path.startsWith('/') ||
-    path.startsWith('./') ||
-    path.startsWith('../') ||
-    /^[A-Za-z]:[\\/]/.test(path)
-  );
-}
-
-export function normalizeFileReference(path: string) {
-  const trimmed = path.trim();
-  if (!trimmed.startsWith('file://')) {
-    return trimmed;
-  }
-  try {
-    return decodeURI(new URL(trimmed).pathname);
-  } catch {
-    return trimmed;
-  }
-}
-
-export function fileMentionLabel(path: string) {
-  const normalized = path.replace(/[\\/]+$/, '');
-  const label = normalized.split(/[\\/]/).filter(Boolean).pop();
-  return label ? decodeURIComponent(label) : path;
-}
-
-export function isDirectoryReference(path: string) {
-  return /[\\/]$/.test(path);
-}
-
-export function firstUriListItem(uriList: string) {
-  return (
-    uriList
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find((line) => line && !line.startsWith('#')) ?? ''
-  );
-}
-
-export function downloadUrlItem(downloadUrl: string) {
-  const line = firstUriListItem(downloadUrl);
-  if (!line) {
-    return '';
-  }
-  return line.split(':').slice(2).join(':').trim();
 }
 
 export function createDraftFromState(
@@ -1016,10 +965,7 @@ function slashCommandScanPattern(slashCommands: ComposerItemEntry[]) {
   if (triggers.length === 0) {
     return null;
   }
-  return new RegExp(
-    `(?:${triggers.map(escapeRegExp).join('|')})[A-Za-z0-9_:-]+`,
-    'g',
-  );
+  return new RegExp(`(?:${triggerAlternation(triggers)})[A-Za-z0-9_:-]+`, 'g');
 }
 
 function commandTriggerLength(

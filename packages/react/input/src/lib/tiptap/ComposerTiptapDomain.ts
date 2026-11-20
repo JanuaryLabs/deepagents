@@ -22,11 +22,14 @@ import {
   attachmentMediaFromAttr,
   attachmentMediaOf,
   attachmentPlaceholder,
+  characterCount,
   createComposerState,
   createDraftFromPersistedText,
   decodeComposerTextLinkHref,
   nextWordEnd,
   previousWordStart,
+  sortElements,
+  stableId,
 } from '../ComposerCore.ts';
 import { findSlashCommandByName } from '../ComposerSlashCommands.ts';
 import {
@@ -1644,10 +1647,6 @@ export function isPopupDownKey(event: PopupKeyEvent) {
   );
 }
 
-function sortElements(elements: ComposerTextElement[]) {
-  return [...elements].sort((a, b) => a.range.start - b.range.start);
-}
-
 function dedupeElements(elements: ComposerTextElement[]) {
   const byRange = new Map<string, ComposerTextElement>();
   for (const element of elements) {
@@ -1661,10 +1660,6 @@ function dedupeElements(elements: ComposerTextElement[]) {
 
 function normalizePastedText(text: string) {
   return text.replace(/\r\n?/g, '\n');
-}
-
-export function characterCount(text: string) {
-  return Array.from(text).length;
 }
 
 function isFileReference(path: string) {
@@ -1732,12 +1727,4 @@ function isProbablyUrl(text: string) {
 
 function normalizeLinkHref(text: string) {
   return decodeComposerTextLinkHref(text.trim());
-}
-
-export function wrapIndex(index: number, size: number) {
-  return ((index % size) + size) % size;
-}
-
-export function stableId(kind: string, label: string, start: number) {
-  return `${kind}:${start}:${label}`;
 }
