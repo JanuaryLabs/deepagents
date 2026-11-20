@@ -4,7 +4,6 @@ import tailwindcss from '@tailwindcss/vite';
 import react, { reactCompilerPreset } from '@vitejs/plugin-react';
 import path from 'node:path';
 import { defineConfig } from 'vite';
-import dts from 'vite-plugin-dts';
 import { configDefaults } from 'vitest/config';
 
 export default defineConfig(() => ({
@@ -14,16 +13,12 @@ export default defineConfig(() => ({
     react(),
     babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
-    dts({
-      entryRoot: 'src',
-      tsconfigPath: path.join(import.meta.dirname, 'tsconfig.lib.json'),
-    }),
   ],
   oxc: { jsx: { development: false } },
   assetsInclude: ['**/*.css'],
   build: {
     outDir: './dist',
-    emptyOutDir: true,
+    emptyOutDir: false,
     reportCompressedSize: true,
     sourcemap: true,
     commonjsOptions: {

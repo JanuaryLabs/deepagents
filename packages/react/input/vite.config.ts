@@ -3,24 +3,16 @@ import babel from '@rolldown/plugin-babel';
 import react, { reactCompilerPreset } from '@vitejs/plugin-react';
 import path from 'node:path';
 import { defineConfig } from 'vite';
-import dts from 'vite-plugin-dts';
 
 export default defineConfig(() => ({
   root: import.meta.dirname,
   cacheDir: '../../../node_modules/.vite/packages/react/input',
-  plugins: [
-    react(),
-    babel({ presets: [reactCompilerPreset()] }),
-    dts({
-      entryRoot: 'src',
-      tsconfigPath: path.join(import.meta.dirname, 'tsconfig.lib.json'),
-    }),
-  ],
+  plugins: [react(), babel({ presets: [reactCompilerPreset()] })],
   oxc: { jsx: { development: false } },
   assetsInclude: ['**/*.css'],
   build: {
     outDir: './dist',
-    emptyOutDir: true,
+    emptyOutDir: false,
     reportCompressedSize: true,
     sourcemap: true,
     commonjsOptions: {

@@ -9,6 +9,7 @@
       "outputs": ["{options.outputPath}"],
       "dependsOn": [
         "^build",
+        "build-types",
         {
           "projects": ["@deepagents/devtool-ui"],
           "target": "build"
