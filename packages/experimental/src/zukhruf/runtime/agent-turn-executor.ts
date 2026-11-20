@@ -270,65 +270,60 @@ export class AgentTurnExecutor {
     };
 
     const abort = new AbortController();
-    const onWorkerAbort = () => abort.abort();
-    signal.addEventListener('abort', onWorkerAbort, { once: true });
-    try {
-      let writer: UIMessageStreamWriter;
-      const compaction = declaration.compaction
-        ? createCompaction<
-            ReturnType<
-              typeof agent<typeof modelTools, ZukhrufSandbox['tools']>
-            >['tools']
-          >(declaration.compaction, engine, this.#store, abort.signal, (data) =>
-            writer.write({
-              type: 'data-compaction',
-              id: `${data.id}:${data.status}`,
-              data,
-            }),
-          )
-        : undefined;
-      const { toolApproval } = declaration;
-      const stream = await chat(
-        agent({
-          ...agentOptions,
-          tools: modelTools,
-          // The declaration's dynamic policy also sees injected runtime tools;
-          // the call re-types it for this turn's tool set.
-          toolApproval:
-            typeof toolApproval === 'function'
-              ? (options) => toolApproval(options)
-              : toolApproval,
-          prepareStep: compaction?.prepareStep,
-        }),
-        {
-          onStream: (streamWriter) => {
-            writer = streamWriter;
-          },
-          abortSignal: abort.signal,
-          onStart: compaction?.onStart,
-          onStepStart: compaction?.onStepStart,
-          onStepEnd: compaction?.onStepEnd,
-          include: compaction?.include,
-          toolsContext: collaborationToolsContext,
-          ...(elements.length > 0
-            ? { transform: [elementsStreamTransform] }
-            : {}),
+    const turnSignal = AbortSignal.any([signal, abort.signal]);
+    let writer: UIMessageStreamWriter;
+    const compaction = declaration.compaction
+      ? createCompaction<
+          ReturnType<
+            typeof agent<typeof modelTools, ZukhrufSandbox['tools']>
+          >['tools']
+        >(declaration.compaction, engine, this.#store, turnSignal, (data) =>
+          writer.write({
+            type: 'data-compaction',
+            id: `${data.id}:${data.status}`,
+            data,
+          }),
+        )
+      : undefined;
+    const { toolApproval } = declaration;
+    const stream = await chat(
+      agent({
+        ...agentOptions,
+        tools: modelTools,
+        // The declaration's dynamic policy also sees injected runtime tools;
+        // the call re-types it for this turn's tool set.
+        toolApproval:
+          typeof toolApproval === 'function'
+            ? (options) => toolApproval(options)
+            : toolApproval,
+        prepareStep: compaction?.prepareStep,
+      }),
+      {
+        onStream: (streamWriter) => {
+          writer = streamWriter;
         },
-      );
-      await this.#streams.persist(stream, turn.streamId, {
-        preclaimed: true,
-        onCancelDetected: () => abort.abort(),
-      });
-      if (
-        turn.kind === 'recovery' ||
-        (turn.kind === 'message' && turn.message.role === 'assistant')
-      ) {
-        await this.#reconcileTerminalContinuation(turn);
-      }
-      await this.#controlPlane.projectTerminal(turn, thread);
-    } finally {
-      signal.removeEventListener('abort', onWorkerAbort);
+        abortSignal: turnSignal,
+        onStart: compaction?.onStart,
+        onStepStart: compaction?.onStepStart,
+        onStepEnd: compaction?.onStepEnd,
+        include: compaction?.include,
+        toolsContext: collaborationToolsContext,
+        ...(elements.length > 0
+          ? { transform: [elementsStreamTransform] }
+          : {}),
+      },
+    );
+    await this.#streams.persist(stream, turn.streamId, {
+      preclaimed: true,
+      onCancelDetected: () => abort.abort(),
+    });
+    if (
+      turn.kind === 'recovery' ||
+      (turn.kind === 'message' && turn.message.role === 'assistant')
+    ) {
+      await this.#reconcileTerminalContinuation(turn);
     }
+    await this.#controlPlane.projectTerminal(turn, thread);
   }
 
   async #projectSkippedTerminalTurn(turn: TurnRef): Promise<boolean> {
