@@ -708,9 +708,9 @@ test('real PostgreSQL competing workers launch one execution for one run', async
   await first.initialize();
   await second.initialize();
   try {
-    await using _firstWorker = await first.work(FAST_POLLING);
+    await using _firstWorker = await first.work(FAST_POLLING, true);
     void _firstWorker;
-    await using _secondWorker = await second.work(FAST_POLLING);
+    await using _secondWorker = await second.work(FAST_POLLING, true);
     void _secondWorker;
     const task = await first.create('owner-1', {
       idempotencyKey: 'competing-workers',
