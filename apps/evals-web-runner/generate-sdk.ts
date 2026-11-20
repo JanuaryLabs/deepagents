@@ -20,7 +20,9 @@ await Promise.all(
     }),
   ),
 );
-await generate(await loadSpec(openapi), {
+const { spec } = await loadSpec(openapi);
+await generate(spec, {
+  name: 'Client',
   mode: 'full',
   output,
   packageName: '@evals/client',

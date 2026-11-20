@@ -1,4 +1,6 @@
-import { type OpenAPIDocument, defaultTypesMap } from '@sdk-it/core';
+import type { OpenAPIDocument } from '@sdk-it/core';
+import { defaultTypesMap } from '@sdk-it/core/deriver.js';
+import { openAnalysisProject } from '@sdk-it/core/program.js';
 import { analyze } from '@sdk-it/generic';
 import { responseAnalyzer } from '@sdk-it/hono';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -6,26 +8,26 @@ import { join } from 'node:path';
 import { cwd } from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-const { paths, components, tags } = await analyze(
+using project = openAnalysisProject(
   'apps/evals-web-runner/backend/tsconfig.app.json',
-  {
-    responseAnalyzer,
-    imports: [
-      {
-        import: 'inputs',
-        from: join(cwd(), 'apps/evals-web-runner/backend/src/core/inputs.ts'),
-      },
-    ],
-    typesMap: {
-      ...defaultTypesMap,
-      Decimal: 'string',
-      UIMessage: '#/components/schemas/JsonObject',
-      JsonValue: '#/components/schemas/JsonValue',
-      JsonObject: '#/components/schemas/JsonObject',
-      JsonArray: '#/components/schemas/JsonArray',
-    },
-  },
 );
+const { paths, components, tags } = await analyze(project, {
+  responseAnalyzer,
+  imports: [
+    {
+      import: 'inputs',
+      from: join(cwd(), 'apps/evals-web-runner/backend/src/core/inputs.ts'),
+    },
+  ],
+  typesMap: {
+    ...defaultTypesMap,
+    Decimal: 'string',
+    UIMessage: '#/components/schemas/JsonObject',
+    JsonValue: '#/components/schemas/JsonValue',
+    JsonObject: '#/components/schemas/JsonObject',
+    JsonArray: '#/components/schemas/JsonArray',
+  },
+});
 
 const spec: OpenAPIDocument = {
   openapi: '3.1.0',

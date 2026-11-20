@@ -113,7 +113,7 @@
     "@iarna/toml": "^2.2.5",
     "@napi-rs/keyring": "^2.1.0",
     "@opencoredev/loginwithchatgpt-core": "^0.2.0",
-    "@sdk-it/hono": "^0.46.7",
+    "@sdk-it/hono": "^0.48.1",
     "@zukhruf/async": "^0.8.41",
     "@zukhruf/fs": "^0.8.41",
     "@zukhruf/mutex": "^0.8.41",

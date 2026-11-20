@@ -1,4 +1,4 @@
-import { Client, type Endpoints } from '@evals/client';
+import { type ClientEndpoints as Endpoints, createClient } from '@evals/client';
 import {
   type UseMutationOptions,
   type UseMutationResult,
@@ -25,7 +25,7 @@ function getBaseUrl(): string {
   const basePath = baseHref.replace(/\/$/, '');
   return `${window.location.origin}${basePath}/api`;
 }
-export const client = new Client({ baseUrl: getBaseUrl() });
+export const client = createClient({ baseUrl: getBaseUrl() });
 
 type DataEndpoints = {
   [K in keyof Endpoints]: K extends `${'GET'} ${string}` ? K : never;
@@ -56,13 +56,13 @@ export function useData<E extends DataEndpoints>(
   input: Endpoints[E]['input'],
   options?: Omit<
     UseQueryOptions<
-      Endpoints[E]['output'],
+      Endpoints[E]['result'],
       Endpoints[E]['error'],
-      Endpoints[E]['output']
+      Endpoints[E]['result']
     >,
     'queryFn' | 'meta' | 'queryKey'
   >,
-): UseQueryResult<Endpoints[E]['output'], Endpoints[E]['error']> {
+): UseQueryResult<Endpoints[E]['result'], Endpoints[E]['error']> {
   return useQuery({
     queryKey: [endpoint, JSON.stringify(input)],
     ...options,
@@ -77,9 +77,9 @@ export function usePolling<E extends DataEndpoints>(
   options: {
     interval: number;
     enabled?: boolean;
-    shouldStop: (data: Endpoints[E]['output'] | undefined) => boolean;
+    shouldStop: (data: Endpoints[E]['result'] | undefined) => boolean;
   },
-): UseQueryResult<Endpoints[E]['output'], Endpoints[E]['error']> {
+): UseQueryResult<Endpoints[E]['result'], Endpoints[E]['error']> {
   const enabled = options.enabled ?? true;
 
   return useData(endpoint, input, {
@@ -94,7 +94,7 @@ export function usePolling<E extends DataEndpoints>(
 
 type ActionOptions<E extends keyof Endpoints> = Omit<
   UseMutationOptions<
-    Endpoints[E]['output'],
+    Endpoints[E]['result'],
     Endpoints[E]['error'],
     Endpoints[E]['input']
   >,
@@ -104,7 +104,7 @@ type ActionOptions<E extends keyof Endpoints> = Omit<
 };
 
 export type UseAction<E extends MutationEndpoints> = UseMutationResult<
-  Endpoints[E]['output'],
+  Endpoints[E]['result'],
   Endpoints[E]['error'],
   Endpoints[E]['input']
 >;
@@ -131,7 +131,7 @@ export function useAction<E extends MutationEndpoints>(
   options?: ActionOptions<E>,
 ): UseAction<E> {
   return useMutation<
-    Endpoints[E]['output'],
+    Endpoints[E]['result'],
     Endpoints[E]['error'],
     Endpoints[E]['input'],
     unknown
@@ -163,13 +163,13 @@ export function fetchData<E extends DataEndpoints>(
   input: Endpoints[E]['input'],
   options?: Omit<
     UseQueryOptions<
-      Endpoints[E]['output'],
+      Endpoints[E]['result'],
       Endpoints[E]['error'],
-      Endpoints[E]['output']
+      Endpoints[E]['result']
     >,
     'queryFn' | 'meta' | 'queryKey'
   >,
-): Promise<Endpoints[E]['output']> {
+): Promise<Endpoints[E]['result']> {
   return queryClient.fetchQuery({
     queryKey: [endpoint, JSON.stringify(input)],
     ...options,
