@@ -94,6 +94,17 @@ function userMessage(text: string): UIMessage {
   };
 }
 
+// A turn whose model call fails ends with AI_NoOutputGeneratedError after its error chunk.
+async function streamedUntilFailure(stream: AsyncIterable<UIMessageChunk>) {
+  const chunks: UIMessageChunk[] = [];
+  try {
+    for await (const chunk of stream) chunks.push(chunk);
+  } catch {
+    // The chunks already delivered are what the client renders.
+  }
+  return chunks;
+}
+
 function setup(mockText?: string) {
   const store = new InMemoryContextStore();
   const context = new ContextEngine({
@@ -468,6 +479,59 @@ describe('chat() title generation', () => {
       messages.map((message) => message.role),
       ['user'],
       `failed turn must not leak an assistant into the prompt: ${JSON.stringify(messages)}`,
+    );
+  });
+
+  it('streams a plain Error as a generic message instead of {} or its internal text', async () => {
+    const context = new ContextEngine({
+      store: new InMemoryContextStore(),
+      chatId: 'masked-error-chat',
+      userId: 'test-user',
+    });
+    const model = new MockLanguageModelV4({
+      doStream: async () => {
+        throw new Error('budget exceeded: secret internals');
+      },
+    });
+    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
+    await context.continue(userMessage('hello?'));
+
+    const chunks = await streamedUntilFailure(await chat(chatAgent));
+
+    assert.deepStrictEqual(
+      chunks.flatMap((chunk) =>
+        chunk.type === 'error' ? [chunk.errorText] : [],
+      ),
+      ['An error occurred.'],
+    );
+  });
+
+  it('lets onError turn a plain Error into the streamed error text', async () => {
+    const context = new ContextEngine({
+      store: new InMemoryContextStore(),
+      chatId: 'readable-error-chat',
+      userId: 'test-user',
+    });
+    const model = new MockLanguageModelV4({
+      doStream: async () => {
+        throw new Error('summarizer failed');
+      },
+    });
+    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
+    await context.continue(userMessage('hello?'));
+
+    const chunks = await streamedUntilFailure(
+      await chat(chatAgent, {
+        onError: (error) =>
+          Error.isError(error) ? error.message : 'not an Error',
+      }),
+    );
+
+    assert.deepStrictEqual(
+      chunks.flatMap((chunk) =>
+        chunk.type === 'error' ? [chunk.errorText] : [],
+      ),
+      ['summarizer failed'],
     );
   });
 
