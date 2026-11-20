@@ -14,6 +14,6 @@ Two copies of `@genui/voice` exist: text2sql `packages/genui/voice` and blackboa
 
 ## Consequences
 
-- `Composer.Dictate` reads the cursor, the insertion and the disabled state from the composer that it is rendered in, as `Composer.AttachFiles` does.
+- The composer owns the dictation next to the cursor, the insertion, the submit and the disabled state that it needs (ADR 0002).
 - The two copies move only after #3158 moves their apps to `@deepagents/react-input`.
 - A plain form field (Meddit) needs a hook outside the composer. That hook is later, when Meddit needs it.

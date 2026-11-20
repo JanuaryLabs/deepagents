@@ -12,10 +12,11 @@ text2sql's copy refuses a new recording while `useAgentStatus()` of `@workspace/
 
 ## Decision
 
-- `Composer.Dictate` gives the dictation state, its error codes and `data-status`, and no words or icons.
-- `ChatComposer.Dictate` is `Composer.Dictate` with a `ChatActionButton`, lucide icons and English labels. It passes `disabled` while `useAgentStatus()` is `streaming` or `submitted`.
+- `Composer.Dictate`, `Composer.CancelDictation` and `useComposerDictation` give the dictation state, its error codes and `data-status`, and no words or icons.
+- `ChatComposer.Dictate` renders `Composer.Dictate` and, while a dictation is active, `Composer.CancelDictation`, each as a `ChatActionButton` with lucide icons and English labels. The labels follow ChatGPT's ("Stop dictation", "Cancel dictation", "Cancel transcription", "Transcribing…"). It passes `disabled` while `useAgentStatus()` is `streaming` or `submitted`.
+- The send button stays the app's. It reads `useComposerDictation()` to say "Transcribe and send" while a dictation is active.
 
 ## Consequences
 
-- An app with its own words composes `Composer.Dictate`.
+- An app with its own words composes the react-input parts.
 - `lucide-react` stays a dependency of `@deepagents/react-genai` only, where it already is.
