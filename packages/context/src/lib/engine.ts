@@ -344,15 +344,24 @@ export type PrepareStepInputProvider = () =>
   | Promise<Array<UIMessage & { role: 'user' }> | undefined>;
 
 /**
- * Per-stream reminder state. The session object is closure-local to each
- * createPrepareStep() call; the engine keeps only a `#writeAssistant` bound to
- * it, so prepareStep can persist model-visible splits before delivery and
- * writeAssistantSegment can fill their reserved assistant segments.
+ * One model stream's reminder hooks, from {@link ContextEngine.createReminderSession}.
+ * `prepareStep` persists model-visible reminder splits before delivery, and
+ * `writeAssistantSegment` fills the assistant segments that same `prepareStep`
+ * reserved.
  *
- * Guardrail retries reuse the same prepare hook and session.
- * Running two concurrent streams on ONE engine instance is unsupported.
+ * Guardrail retries reuse the same session. Running two concurrent streams on
+ * ONE engine instance is unsupported: they share the engine's pending messages
+ * and chain head.
  */
-interface ReminderSession {
+export interface ReminderSession {
+  readonly prepareStep: <TOOLS extends Record<string, Tool>>(
+    ...args: Parameters<PrepareStepFunction<TOOLS>>
+  ) => ReturnType<PrepareStepFunction<TOOLS>>;
+  writeAssistantSegment(message: UIMessage): Promise<void>;
+}
+
+/** Per-stream reminder state behind one {@link ReminderSession}. */
+interface ReminderSessionState {
   /** Durable once-ids fired in this stream. */
   firedOnceIds: Set<string>;
   /** Completed tool calls in the current assistant segment. */
@@ -883,19 +892,11 @@ export class ContextEngine {
   }
 
   /**
-   * Writes the streamed assistant message: the whole message to the reserved
-   * head, until createPrepareStep() binds a reminder session's segments.
-   */
-  #writeAssistant: (headId: string, message: UIMessage) => Promise<void> = (
-    headId,
-    message,
-  ) => this.#writeWholeAssistant(headId, message);
-
-  /**
-   * Build the `prepareStep` hook that injects reminders between model steps.
-   * Tool-output reminders are evaluated against the preceding step's completed
-   * tool results and appended after the SDK's tool-result message. Steer
-   * reminders share the same synthetic user message when both fire together.
+   * Open the reminder session of one model stream. Its `prepareStep` injects
+   * reminders between model steps: tool-output reminders are evaluated against
+   * the preceding step's completed tool results and appended after the SDK's
+   * tool-result message, and steer reminders share the same synthetic user
+   * message when both fire together.
    *
    * Each eligible boundary evaluates its reminders independently. A predicate
    * that remains true fires at every boundary; compose `once()` when a durable
@@ -903,21 +904,18 @@ export class ContextEngine {
    * subsequent steps.
    *
    * Each injected input is persisted with a following assistant placeholder
-   * before prepareStep returns. writeAssistantSegment fills that placeholder,
-   * so process loss cannot make a delivered reminder eligible again and later
-   * requests reproduce the exact prompt prefix the model saw.
+   * before `prepareStep` returns. The session's `writeAssistantSegment` fills
+   * that placeholder, so process loss cannot make a delivered reminder eligible
+   * again and later requests reproduce the exact prompt prefix the model saw.
    */
-  public createPrepareStep<
-    TOOLS extends Record<string, Tool> = Record<string, Tool>,
-  >(
+  public createReminderSession(
     options: {
       steer?: boolean;
       additionalInput?: PrepareStepInputProvider;
       sandbox?: AgentSandbox;
     } = {},
-  ): PrepareStepFunction<TOOLS> {
-    const enableSteer = options.steer ?? true;
-    const session: ReminderSession = {
+  ): ReminderSession {
+    const session: ReminderSessionState = {
       firedOnceIds: new Set(),
       terminalToolParts: new Map(),
       segments: [],
@@ -925,10 +923,13 @@ export class ContextEngine {
       stepOffset: 0,
       lastStepNumber: null,
     };
-    this.#writeAssistant = (headId, message) =>
-      this.#writeSessionSegment(session, headId, message);
+    const enableSteer = options.steer ?? true;
 
-    return async ({ steps, stepNumber, messages }) => {
+    const prepareStep: ReminderSession['prepareStep'] = async ({
+      steps,
+      stepNumber,
+      messages,
+    }) => {
       if (stepNumber === 0 && session.lastStepNumber !== null) {
         session.stepOffset += session.lastStepNumber + 1;
       }
@@ -1011,17 +1012,11 @@ export class ContextEngine {
         const inputModel = await convertToModelMessages(inputs, {
           ignoreIncompleteToolCalls: true,
         });
-        const head = await this.headMessage();
-        if (head?.name !== 'assistant') {
-          throw new Error(
-            'createPrepareStep: expected an assistant message at chain head.',
-          );
-        }
-        const currentSegmentId = head.id;
+        const currentSegmentId = await this.#assistantHeadId('prepareStep');
         const currentSegment = await this.#store.getMessage(currentSegmentId);
         if (!currentSegment || currentSegment.name !== 'assistant') {
           throw new Error(
-            'createPrepareStep: expected the open assistant segment to be persisted.',
+            'prepareStep: expected the open assistant segment to be persisted.',
           );
         }
         requireUIMessage(
@@ -1057,37 +1052,39 @@ export class ContextEngine {
 
       return undefined;
     };
+
+    return {
+      prepareStep,
+      writeAssistantSegment: async (message) => {
+        const headId = await this.#assistantHeadId('writeAssistantSegment');
+        await this.#writeSessionSegment(session, headId, message);
+      },
+    };
   }
 
   /**
-   * Persist the streamed assistant message into its reserved segment.
-   *
-   * Called from chat()'s onStepEnd/onEnd (and the guardrail path) with the
-   * cumulative response message. prepareStep has already persisted reminder
-   * boundaries and reserved the open segment id, so this only updates that
-   * segment in place with the cumulative prefix removed. With no fired reminder
-   * it writes the whole message to the original reserved head.
+   * Persist a streamed assistant message, whole, into the reserved head. A
+   * stream whose reminders split the assistant writes through its
+   * {@link ReminderSession}'s `writeAssistantSegment` instead.
    */
   public async writeAssistantSegment(message: UIMessage): Promise<void> {
-    const head = await this.headMessage();
-    if (head?.name !== 'assistant') {
-      throw new Error(
-        'writeAssistantSegment: expected an assistant message at chain head.',
-      );
-    }
-    await this.#writeAssistant(head.id, message);
-  }
-
-  async #writeWholeAssistant(
-    headId: string,
-    message: UIMessage,
-  ): Promise<void> {
+    const headId = await this.#assistantHeadId('writeAssistantSegment');
     this.set(assistant({ ...message, id: headId }));
     await this.save({ branch: false });
   }
 
+  async #assistantHeadId(caller: string): Promise<string> {
+    const head = await this.headMessage();
+    if (head?.name !== 'assistant') {
+      throw new Error(
+        `${caller}: expected an assistant message at chain head.`,
+      );
+    }
+    return head.id;
+  }
+
   async #writeSessionSegment(
-    session: ReminderSession,
+    session: ReminderSessionState,
     headId: string,
     message: UIMessage,
   ): Promise<void> {
@@ -1276,7 +1273,7 @@ export class ContextEngine {
    */
   #steerWhenCtx(
     chain: ChainSummary,
-    session: ReminderSession,
+    session: ReminderSessionState,
     sandbox?: AgentSandbox,
   ): WhenContext {
     const currentMessage = chain.lastMessage;
@@ -1303,7 +1300,7 @@ export class ContextEngine {
 
   async #evaluateToolOutputReminders(
     outcomes: ToolOutcome[],
-    session: ReminderSession,
+    session: ReminderSessionState,
     chain: ChainSummary,
     sandbox?: AgentSandbox,
   ): Promise<{ texts: string[]; onceIds: string[] }> {

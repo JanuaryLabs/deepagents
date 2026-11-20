@@ -276,4 +276,4 @@ const visibleMessages = messages
   .map(stripReminders);
 ```
 
-`synthesizeReminderMessage(text, firedAt, onceIds?)` builds the same synthetic user message for advanced host integrations. Normal `agent()` + `chat()` users do not need to call it: the agent creates the messages and `chat()` persists the matching assistant/reminder split. Direct AI SDK integrations that call `createPrepareStep()` own assistant persistence and must pair the hook with `writeAssistantSegment()` if they need prompt/store parity.
+`synthesizeReminderMessage(text, firedAt, onceIds?)` builds the same synthetic user message for advanced host integrations. Normal `agent()` + `chat()` users do not need to call it: the agent creates the messages and `chat()` persists the matching assistant/reminder split. Direct AI SDK integrations that call `createReminderSession()` own assistant persistence and must write through the same session's `writeAssistantSegment()` if they need prompt/store parity.

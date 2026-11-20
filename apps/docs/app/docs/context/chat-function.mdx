@@ -89,15 +89,16 @@ interface ChatStreamResult {
   readonly result: {
     readonly usage: PromiseLike<LanguageModelUsage | undefined>;
   };
+  readonly reminders?: ReminderSession;
 }
 ```
 
-| Property   | Type            | Required | Description                                                              |
-| ---------- | --------------- | -------- | ------------------------------------------------------------------------ |
-| `context`  | `ContextEngine` | Yes      | The context engine scoped to the current chat                            |
-| `model`    | `AgentModel`    | No       | Required for AI-generated titles. If absent, only static titles are used |
-| `sandbox`  | `AgentSandbox`  | Yes      | Sandbox passed to context resolution by the agent                        |
-| `stream()` | Function        | Yes      | Resolves context and returns a `ChatStreamResult`                        |
+| Property   | Type            | Required | Description                                                                                                                                             |
+| ---------- | --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `context`  | `ContextEngine` | Yes      | The context engine scoped to the current chat                                                                                                           |
+| `model`    | `AgentModel`    | No       | Required for AI-generated titles. If absent, only static titles are used                                                                                |
+| `sandbox`  | `AgentSandbox`  | Yes      | Sandbox passed to context resolution by the agent                                                                                                       |
+| `stream()` | Function        | Yes      | Resolves context and returns a `ChatStreamResult`. Its `reminders`, when present, is the reminder session the stream used; `agent()` always returns one |
 
 ## ChatOptions
 
@@ -154,9 +155,10 @@ precondition keeps message ownership in `ContextEngine`.
 ### 2. Step-finish saves
 
 After each streaming step completes (for example, after a tool call),
-`chat()` passes the intermediate assistant message to
-`context.writeAssistantSegment()`. Completed steps remain saved if a later
-step is interrupted.
+`chat()` passes the intermediate assistant message to the `writeAssistantSegment()`
+of the reminder session the stream returned as `reminders`, or to
+`context.writeAssistantSegment()` when the stream returned none. Completed
+steps remain saved if a later step is interrupted.
 
 ### 3. Final save
 
@@ -164,7 +166,7 @@ When the stream finishes:
 
 1. Unfinished tool parts are sanitized if the stream was aborted
 2. The `finalAssistantMetadata` callback attaches custom metadata, if provided
-3. `context.writeAssistantSegment()` saves the final assistant message
+3. The same `writeAssistantSegment()` saves the final assistant message
 4. `context.trackUsage()` records usage when the model returned it
 
 `writeAssistantSegment()` updates the reserved assistant message in place.

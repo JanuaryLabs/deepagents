@@ -100,7 +100,7 @@ const safeBoundaryStep: StepResult<ToolSet> = {
 };
 
 async function evaluateBoundary(context: ContextEngine): Promise<boolean> {
-  const prepareStep = context.createPrepareStep();
+  const { prepareStep } = context.createReminderSession();
   const result = await prepareStep({
     steps: [safeBoundaryStep],
     stepNumber: 1,

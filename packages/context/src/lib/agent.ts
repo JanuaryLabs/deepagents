@@ -42,6 +42,7 @@ import {
 import {
   type ContextEngine,
   type PrepareStepInputProvider,
+  type ReminderSession,
   XmlRenderer,
 } from '../index.ts';
 import {
@@ -141,6 +142,11 @@ export type StreamOptions<TOOLS extends ToolSet = ToolSet> = Pick<
 export interface AgentStream<TOOLS extends ToolSet> {
   /** The first model call. A guardrail retry starts a new call, which this result does not include. */
   readonly result: ReturnType<typeof streamText<TOOLS>>;
+  /**
+   * The reminder session of this stream. Its `writeAssistantSegment` writes the
+   * assistant segments that this stream's reminders reserved.
+   */
+  readonly reminders: ReminderSession;
   toUIMessageStream(
     options?: UIMessageStreamOptions<UIMessage>,
   ): ReadableStream<UIMessageChunk>;
@@ -259,10 +265,10 @@ class Agent<TOOLS extends ToolSet, SANDBOX_TOOLS extends SandboxTools> {
       }),
       stopWhen: this.#options.stopWhen ?? DEFAULT_STOP_WHEN,
       prepareStep: this.#withPrepareStep(
-        this.#options.context.createPrepareStep({
+        this.#options.context.createReminderSession({
           steer: false,
           sandbox: this.#options.sandbox,
-        }),
+        }).prepareStep,
       ),
       experimental_sandbox: this.#options.sandbox.sandbox,
       tools: this.tools,
@@ -303,12 +309,11 @@ class Agent<TOOLS extends ToolSet, SANDBOX_TOOLS extends SandboxTools> {
       throw new Error(`Agent ${this.#options.name} is missing a model.`);
     }
 
-    const prepareStep = this.#withPrepareStep(
-      this.#options.context.createPrepareStep({
-        additionalInput: this.#options.prepareStepInput,
-        sandbox: this.#options.sandbox,
-      }),
-    );
+    const reminders = this.#options.context.createReminderSession({
+      additionalInput: this.#options.prepareStepInput,
+      sandbox: this.#options.sandbox,
+    });
+    const prepareStep = this.#withPrepareStep(reminders.prepareStep);
     const result = await this.#createRawStream(
       options?.toolsContext,
       options,
@@ -318,6 +323,7 @@ class Agent<TOOLS extends ToolSet, SANDBOX_TOOLS extends SandboxTools> {
     if (this.#guardrails.length === 0) {
       return {
         result,
+        reminders,
         toUIMessageStream: (uiOptions) =>
           toUIMessageStream({
             stream: result.stream,
@@ -329,11 +335,13 @@ class Agent<TOOLS extends ToolSet, SANDBOX_TOOLS extends SandboxTools> {
 
     return {
       result,
+      reminders,
       toUIMessageStream: this.#guardedUIMessageStream(
         result,
         options?.toolsContext,
-        options,
+        reminders,
         prepareStep,
+        options,
       ),
     };
   }
@@ -358,8 +366,8 @@ class Agent<TOOLS extends ToolSet, SANDBOX_TOOLS extends SandboxTools> {
    */
   async #createRawStream(
     toolsContext: AgentToolsContext<TOOLS, SANDBOX_TOOLS>,
-    config?: StreamOptions<AgentModelTools<TOOLS, SANDBOX_TOOLS>>,
-    prepareStep?: PrepareStepFunction<AgentModelTools<TOOLS, SANDBOX_TOOLS>>,
+    config: StreamOptions<AgentModelTools<TOOLS, SANDBOX_TOOLS>> | undefined,
+    prepareStep: PrepareStepFunction<AgentModelTools<TOOLS, SANDBOX_TOOLS>>,
   ) {
     const context = this.#options.context;
     if (!context) {
@@ -400,11 +408,7 @@ class Agent<TOOLS extends ToolSet, SANDBOX_TOOLS extends SandboxTools> {
       }),
       repairToolCall: createRepairToolCall(model, config?.abortSignal),
       stopWhen: this.#options.stopWhen ?? DEFAULT_STOP_WHEN,
-      prepareStep:
-        prepareStep ??
-        context.createPrepareStep<AgentModelTools<TOOLS, SANDBOX_TOOLS>>({
-          sandbox: this.#options.sandbox,
-        }),
+      prepareStep,
       experimental_transform: config?.transform ?? smoothStream(),
       experimental_sandbox: this.#options.sandbox.sandbox,
       tools: this.tools,
@@ -425,8 +429,9 @@ class Agent<TOOLS extends ToolSet, SANDBOX_TOOLS extends SandboxTools> {
   #guardedUIMessageStream(
     result: StreamTextResult<AgentModelTools<TOOLS, SANDBOX_TOOLS>, any, any>,
     toolsContext: AgentToolsContext<TOOLS, SANDBOX_TOOLS>,
+    reminders: ReminderSession,
+    prepareStep: PrepareStepFunction<AgentModelTools<TOOLS, SANDBOX_TOOLS>>,
     config?: StreamOptions<AgentModelTools<TOOLS, SANDBOX_TOOLS>>,
-    prepareStep?: PrepareStepFunction<AgentModelTools<TOOLS, SANDBOX_TOOLS>>,
   ): AgentStream<AgentModelTools<TOOLS, SANDBOX_TOOLS>>['toUIMessageStream'] {
     const maxRetries =
       config?.maxRetries ?? this.#options.maxGuardrailRetries ?? 3;
@@ -445,12 +450,13 @@ class Agent<TOOLS extends ToolSet, SANDBOX_TOOLS extends SandboxTools> {
           if (!stepSaved) return;
 
           // When chat() reserved an assistant head (the steer-capable path),
-          // route through writeAssistantSegment so reminder splits are honored and
-          // we stay idempotent with chat()'s own onStepEnd. For direct
-          // guardrail usage with no reserved placeholder, append a fresh assistant.
+          // write through this stream's reminder session so reminder splits are
+          // honored and we stay idempotent with chat()'s own onStepEnd. For
+          // direct guardrail usage with no reserved placeholder, append a fresh
+          // assistant.
           const head = await context.headMessage();
           if (head?.name === 'assistant') {
-            await context.writeAssistantSegment(responseMessage);
+            await reminders.writeAssistantSegment(responseMessage);
           } else {
             const message = assistantMsgId
               ? { ...responseMessage, id: assistantMsgId }

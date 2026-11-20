@@ -15,7 +15,7 @@ import {
 
 import type { AgentModel } from './advisor.ts';
 import type { StreamOptions, ToolCallArguments } from './agent.ts';
-import type { ContextEngine } from './engine.ts';
+import type { ContextEngine, ReminderSession } from './engine.ts';
 import { isRecord } from './fragments/reminders/index.ts';
 import type { AgentSandbox } from './sandbox/types.ts';
 import { TitleGenerator } from './title.ts';
@@ -46,6 +46,12 @@ export interface ChatStreamResult {
     /** AI SDK v7 can settle an aborted stream without usage data. */
     readonly usage: PromiseLike<LanguageModelUsage | undefined>;
   };
+  /**
+   * The reminder session the stream used. `chat()` writes the turn's assistant
+   * segments through it; without one, it writes the whole assistant message to
+   * the reserved head.
+   */
+  readonly reminders?: ReminderSession;
 }
 
 export interface ChatAgentLike<TOOLS extends ToolSet = {}> {
@@ -117,13 +123,15 @@ export async function chat<const TOOLS extends ToolSet>(
   const uiMessages = await context.getMessages();
 
   let result: Awaited<ReturnType<typeof agent.stream>> | undefined;
+  const writeAssistantSegment = (message: UIMessage) =>
+    (result?.reminders ?? context).writeAssistantSegment(message);
 
   return createUIMessageStream({
     originalMessages: uiMessages,
     generateId: () => initialAssistantMsgId,
     onError: options?.onError ?? formatChatError,
     onStepEnd: async ({ responseMessage }) => {
-      await context.writeAssistantSegment(responseMessage);
+      await writeAssistantSegment(responseMessage);
     },
     onEnd: async ({ responseMessage, isAborted }) => {
       const settled = isAborted
@@ -160,7 +168,7 @@ export async function chat<const TOOLS extends ToolSet>(
           ? { ...settled, metadata: mergedMetadata }
           : settled;
 
-      await context.writeAssistantSegment(message);
+      await writeAssistantSegment(message);
       const usage = await result?.result.usage;
       // The provider may never have emitted a finish chunk.
       if (usage !== undefined) {

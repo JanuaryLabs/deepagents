@@ -429,7 +429,7 @@ During streamed `chat()` turns, persisting that synthetic user message preserves
 the exact `tool result → synthetic user message → next assistant` prefix across
 later requests for prompt caching. Multiple tool-output and steer reminders
 firing at one boundary share one synthetic message. `once(id)` is durable for
-all three reminder targets. Bare `createPrepareStep()` integrations and
+all three reminder targets. Bare `createReminderSession()` integrations and
 `agent.generate()` inject the reminder but own persistence of their generated
 assistant history.
 

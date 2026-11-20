@@ -7,6 +7,7 @@ import type {
 import {
   type ToolSet,
   type UIMessage,
+  type UIMessageChunk,
   generateId,
   isStepCount,
   isToolUIPart,
@@ -23,6 +24,7 @@ import { describe, it } from 'node:test';
 import { z } from 'zod';
 
 import {
+  type ChatAgentLike,
   ContextEngine,
   InMemoryContextStore,
   afterTurn,
@@ -795,6 +797,54 @@ describe('tool-output reminders', () => {
     );
   });
 
+  it("writes a session-less agent's turn to its own head after a reminder turn on the same engine", async () => {
+    const context = new ContextEngine({
+      store: new InMemoryContextStore(),
+      chatId: 'session-less-after-reminder',
+      userId: 'u1',
+    });
+    const model = scriptedModel([{ tool: 'noop' }, { text: 'first answer' }]);
+    const chatAgent = await makeAgent(
+      context,
+      model,
+      'session-less-after-reminder',
+    );
+    context.set(
+      reminder('CHECK', { when: afterTurn(0), target: 'tool-output' }),
+    );
+    await context.continue(userMessage('first turn'));
+    await drain(await chat(chatAgent));
+    const firstTurn = await context.getMessages();
+
+    const sessionLessAgent: ChatAgentLike = {
+      context,
+      sandbox: chatAgent.sandbox,
+      stream: async () => ({
+        toUIMessageStream: () =>
+          simulateReadableStream<UIMessageChunk>({
+            chunks: [
+              { type: 'start-step' },
+              { type: 'text-start', id: 't1' },
+              { type: 'text-delta', id: 't1', delta: 'second answer' },
+              { type: 'text-end', id: 't1' },
+              { type: 'finish-step' },
+              { type: 'finish' },
+            ],
+          }),
+        result: { usage: Promise.resolve(undefined) },
+      }),
+    };
+    await context.continue(userMessage('second turn'));
+    await drain(await chat(sessionLessAgent));
+
+    const messages = await context.getMessages();
+    assert.deepStrictEqual(messages.slice(0, firstTurn.length), firstTurn);
+    assert.deepStrictEqual(
+      messages.at(-1)?.parts.filter((part) => part.type === 'text'),
+      [{ type: 'text', text: 'second answer', state: 'done' }],
+    );
+  });
+
   it('latches once-gated tool-output reminders across an engine restart', async () => {
     const store = new InMemoryContextStore();
     let context = new ContextEngine({
@@ -1115,7 +1165,7 @@ describe('tool-output reminders', () => {
         noop: { type: 'denied', reason: 'blocked by policy' },
       },
       stopWhen: isStepCount(200),
-      prepareStep: context.createPrepareStep(),
+      prepareStep: context.createReminderSession().prepareStep,
     });
     await result.consumeStream();
 
@@ -1150,7 +1200,7 @@ describe('tool-output reminders', () => {
       messages: [{ role: 'user', content: 'call the required tool' }],
       tools: { requiredInputTool },
       stopWhen: isStepCount(200),
-      prepareStep: context.createPrepareStep(),
+      prepareStep: context.createReminderSession().prepareStep,
     });
     await result.consumeStream();
 

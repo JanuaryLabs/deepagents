@@ -126,46 +126,49 @@ Each message becomes a node with `parentId` pointing to the previous message. Th
 
 If there are no pending messages, `save()` returns the current head without modifying the graph.
 
-#### createPrepareStep(options?)
+#### createReminderSession(options?)
 
-Build the AI SDK v7 `prepareStep` hook used by Context agents. The hook evaluates
-terminal tool outcomes before the next model generation and, by default,
-evaluates steer reminders after the first completed model step.
+Open the reminder session of one model stream. Its `prepareStep` is the AI SDK
+v7 hook used by Context agents: it evaluates terminal tool outcomes before the
+next model generation and, by default, evaluates steer reminders after the
+first completed model step. Its `writeAssistantSegment(message)` persists a
+cumulative streamed assistant `UIMessage` into the assistant head reserved by
+`continue()`; when that session's `prepareStep` fired model-only reminders, it
+stores the corresponding `assistant → synthetic reminder → assistant` segments.
 
 ```typescript
-const prepareStep = context.createPrepareStep();
+const reminders = context.createReminderSession();
 
 const result = streamText({
   model,
   messages,
   tools,
-  prepareStep,
+  prepareStep: reminders.prepareStep,
+});
+
+const stream = createUIMessageStream({
+  execute: ({ writer }) => writer.merge(result.toUIMessageStream()),
+  onStepEnd: ({ responseMessage }) =>
+    reminders.writeAssistantSegment(responseMessage),
 });
 ```
 
 Pass `{ steer: false }` to disable steer evaluation while retaining tool-output
 reminders. Returned message overrides carry forward to later AI SDK steps.
+Open one session per stream; two concurrent streams on one engine are
+unsupported.
 
-`agent()` wires this hook automatically. Direct AI SDK users are responsible
-for persisting generated assistant messages; use `writeAssistantSegment()` when
-the stored chain must reproduce the reminder boundaries sent to the model.
+`agent()` and `chat()` open and use a session automatically. Direct AI SDK users
+are responsible for persisting generated assistant messages through the
+session when the stored chain must reproduce the reminder boundaries sent to
+the model.
 
-#### writeAssistantSegment(message, options?)
+#### writeAssistantSegment(message)
 
-Persist a cumulative streamed assistant `UIMessage` into the assistant head
-reserved by `continue()`. When `createPrepareStep()` fired model-only reminders,
-this method stores the corresponding
-`assistant → synthetic reminder → assistant` segments. `chat()` calls it
-automatically; it is primarily exposed for custom stream integrations.
-
-In `onEnd`, abort, and failure cleanup, pass `{ final: true }`. This persists a
-reminder that was already sent to the model even when the provider terminates
-before emitting the following step marker. A failure handler should pass the
-latest cumulative assistant message it retained from the stream.
-
-```typescript
-await context.writeAssistantSegment(responseMessage, { final: true });
-```
+Persist a streamed assistant `UIMessage`, whole, into the assistant head
+reserved by `continue()`. A stream whose reminders split the assistant writes
+through its reminder session's `writeAssistantSegment` instead. `chat()` uses
+this path when the stream result of a `ChatAgentLike` carries no `reminders`.
 
 #### render(renderer)
 
