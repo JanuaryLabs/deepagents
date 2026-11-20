@@ -2,6 +2,8 @@ import { PGlite } from '@electric-sql/pglite';
 import { untilAborted } from '@zukhruf/async';
 import { waitFor as pollFor } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
+import { type UIMessage, isTextUIPart, isToolUIPart } from 'ai';
+import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { type TestContext, suite, test } from 'node:test';
@@ -18,11 +20,26 @@ import {
 import { z } from 'zod';
 
 import type {
+  AgentDeclaration,
+  AgentHost,
   PgBossTurnQueueOptions,
   TurnQueue,
   TurnRef,
 } from '@deepagents/experimental/zukhruf';
-import { PgBossTurnQueue } from '@deepagents/experimental/zukhruf';
+import {
+  AgentRuntime,
+  PgBossTurnQueue,
+  PostgresAgentStorage,
+  defineStack,
+  defineTool,
+} from '@deepagents/experimental/zukhruf';
+
+import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import {
+  textResult,
+  toolCallResult,
+} from '../../testing/stream-results.fixture.ts';
+import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 const testPostgres = new Postgres({ environment: process.env });
 
@@ -710,7 +727,159 @@ for (const contract of turnQueueContracts) {
   });
 }
 
+/** One worker process: its own PgBoss and pool on the shared database; disposal is its shutdown. */
+async function agentProcess(
+  database: Awaited<ReturnType<typeof testPostgres.database>>,
+  agent: AgentDeclaration,
+): Promise<AgentHost> {
+  return new AgentRuntime(agent).initialize(
+    defineStack(async (resources) => {
+      const boss = new PgBoss({ connectionString: database.connectionString });
+      boss.on('error', () => {});
+      await boss.start();
+      resources.defer(() => boss.stop({ graceful: false }));
+      return {
+        storage: resources.use(
+          await PostgresAgentStorage.create({
+            pool: database.pool(),
+            boss,
+            queue: { pollingIntervalSeconds: 0.5 },
+          }),
+        ),
+      };
+    }),
+  );
+}
+
 suite('PgBossTurnQueue real PostgreSQL scheduler regressions', () => {
+  test('an approval continuation queued across worker restarts runs before the later ask', async (t) => {
+    await using database = await testPostgres.database();
+    const calls: string[] = [];
+    let toolRuns = 0;
+    const agent: AgentDeclaration = {
+      name: 'approval-restart',
+      sandbox: buildSandbox,
+      instructions: [],
+      toolApproval: { sendEmail: 'user-approval' },
+      tools: {
+        sendEmail: defineTool({
+          description: 'Send an email',
+          inputSchema: z.object({ to: z.string() }),
+          execute: async ({ to }) => {
+            toolRuns++;
+            return `sent:${to}`;
+          },
+        }),
+      },
+      model: new MockLanguageModelV4({
+        doStream: async ({ prompt }) => {
+          const text =
+            prompt
+              .flatMap((message) => (message.role === 'user' ? [message] : []))
+              .at(-1)
+              ?.content.flatMap((part) =>
+                part.type === 'text' ? [part.text] : [],
+              )
+              .join('') ?? '';
+          calls.push(text);
+          if (text !== 'send it') return textResult(`reply:${text}`);
+          if (calls.filter((call) => call === text).length === 1) {
+            return toolCallResult({
+              toolCallId: 'send-1',
+              toolName: 'sendEmail',
+              input: JSON.stringify({ to: 'a@b.c' }),
+            });
+          }
+          return textResult(
+            JSON.stringify(prompt).includes('sent:a@b.c')
+              ? 'done:send it'
+              : 'denied:send it',
+          );
+        },
+      }),
+    };
+    const conversation = { chatId: 'approval-restart', userId: 'u1' };
+
+    const first = await agentProcess(database, agent);
+    let ask: Awaited<ReturnType<AgentHost['enqueue']>>;
+    let paused: UIMessage | undefined;
+    try {
+      await using _worker = await first.work();
+      void _worker;
+      ask = await first.enqueue(
+        conversation,
+        userTurn(crypto.randomUUID(), 'send it'),
+      );
+      await Array.fromAsync(ask.stream);
+      paused = (await first.observe(conversation).engine.getMessages()).at(-1);
+    } finally {
+      await first[Symbol.asyncDispose]();
+    }
+    assert.ok(paused?.role === 'assistant');
+    assert.deepStrictEqual(
+      paused.parts.filter(isToolUIPart).map((part) => part.state),
+      ['approval-requested'],
+    );
+    assert.equal(toolRuns, 0);
+
+    const workerless = await agentProcess(database, agent);
+    let later: Awaited<ReturnType<AgentHost['enqueue']>>;
+    try {
+      await workerless.enqueue(conversation, {
+        message: {
+          ...paused,
+          role: 'assistant',
+          parts: paused.parts.map((part) =>
+            isToolUIPart(part) && part.state === 'approval-requested'
+              ? {
+                  ...part,
+                  state: 'approval-responded',
+                  approval: { ...part.approval, approved: true },
+                }
+              : part,
+          ),
+        },
+        trigger: 'submit-message',
+      });
+      later = await workerless.enqueue(
+        conversation,
+        userTurn(crypto.randomUUID(), 'after approval'),
+      );
+    } finally {
+      await workerless[Symbol.asyncDispose]();
+    }
+
+    await using restarted = await agentProcess(database, agent);
+    await using _worker = await restarted.work();
+    void _worker;
+    await pollFor(
+      async () =>
+        assert.equal(
+          (await restarted.observe(conversation).status(later.id))?.status,
+          'completed',
+        ),
+      { signal: t.signal, interval: 100 },
+    );
+
+    assert.deepStrictEqual(calls, ['send it', 'send it', 'after approval']);
+    assert.equal(toolRuns, 1);
+    assert.equal(
+      (await restarted.observe(conversation).status(ask.id))?.status,
+      'completed',
+    );
+    assert.deepStrictEqual(
+      (await restarted.observe(conversation).engine.getMessages())
+        .filter((message) => message.role === 'assistant')
+        .map((message) =>
+          message.parts
+            .filter(isTextUIPart)
+            .map((part) => part.text)
+            .join(''),
+        ),
+      ['done:send it', 'reply:after approval'],
+    );
+  });
+
   test('preserves each chat insertion order under concurrent consumption', async (t) => {
     await using h = await postgresQueueHarness();
     const chatIds = Array.from(
