@@ -1,6 +1,6 @@
 # The composer owns the pending request through useActionState
 
-Status: the ownership was ruled by Ezz on 2026-11-20; `useActionState` is this design's choice (design for review).
+Status: the ownership was ruled by Ezz on 2026-11-20; `useActionState` is this design's choice. Shipped.
 
 ## Context
 
@@ -12,7 +12,7 @@ The copies keep the latest `transcribe` and `onTranscription` in refs, so that a
 
 - The composer runs the request as the action of `useActionState`. Its `isPending` is the `finishing` status, and the state that the action gives is the failure. The `isTranscribing` prop goes.
 - The composer calls the action in a transition, because the recorder's `stop` event is not one.
-- `useEffectEvent` reads the latest `dictation.transcribe`, in place of the refs.
+- A latest-value ref, the convention of `Composer.tsx` (`onSubmitRef`), reads the newest `dictation.transcribe`, `insertTranscript` and `submitDraft`. The first draft of this ADR named `useEffectEvent`: the request outlives the render that started it, and React allows an effect event only inside an effect.
 
 ## Consequences
 

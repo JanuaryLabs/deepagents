@@ -1,6 +1,6 @@
 # Dictation is a capability of Composer.Root, and the host passes the transport there
 
-Status: ruled by Ezz on 2026-11-20 (design for review). It replaces the first ruling of the same day, which kept the transport and the state in `Composer.Dictate`.
+Status: ruled by Ezz on 2026-11-20 (shipped). It replaces the first ruling of the same day, which kept the transport and the state in `Composer.Dictate`.
 
 ## Context
 

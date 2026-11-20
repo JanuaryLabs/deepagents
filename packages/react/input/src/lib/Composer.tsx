@@ -60,6 +60,15 @@ import type {
   ComposerSubmission,
 } from './ComposerTypes.ts';
 import {
+  type ComposerDictation,
+  ComposerDictationContext,
+} from './dictation/ComposerDictationContext.ts';
+import {
+  ComposerCancelDictation,
+  ComposerDictate,
+} from './dictation/ComposerDictationParts.tsx';
+import { useDictationController } from './dictation/useDictationController.ts';
+import {
   type ComposerAttachImageFile,
   type ComposerTiptapKillBuffer,
   activeEditorToken,
@@ -102,6 +111,7 @@ export type ComposerRootProps = {
   editorAriaLabel?: string;
   className?: string;
   children?: ReactNode;
+  dictation?: ComposerDictation;
   validateSubmission?: (event: ComposerSubmission) => string | null;
   onSubmit?: (
     event: ComposerSubmission,
@@ -193,6 +203,7 @@ function ComposerRootInner({
   editorAriaLabel = 'Rich prompt composer',
   className,
   children,
+  dictation,
   validateSubmission,
   onSubmit,
   onStateChange,
@@ -1039,7 +1050,22 @@ function ComposerRootInner({
     return true;
   }
 
+  function insertTranscript(transcript: string) {
+    const current = currentStateFromEditor();
+    const beforeCursor = current.text.slice(0, current.cursor);
+    insertText(
+      beforeCursor && !/\s$/.test(beforeCursor) ? ` ${transcript}` : transcript,
+    );
+  }
+
   function submit() {
+    if (dictationController?.endWithSend()) {
+      return;
+    }
+    submitDraft();
+  }
+
+  function submitDraft() {
     if (disabled) {
       return;
     }
@@ -1709,6 +1735,13 @@ function ComposerRootInner({
     });
   }
 
+  const dictationController = useDictationController({
+    dictation,
+    disabled,
+    insertTranscript,
+    submitDraft,
+  });
+
   const contextValue: ComposerContextValue = {
     state: composer,
     disabled,
@@ -1739,23 +1772,25 @@ function ComposerRootInner({
 
   return (
     <ComposerContext value={contextValue}>
-      <section
-        data-slot="composer"
-        className={cn(
-          'border-border bg-card relative border font-[inherit]',
-          className,
-        )}
-      >
-        <div
-          onKeyDownCapture={onEditorKeyDown}
-          onMouseDownCapture={onComposerMouseDown}
-        >
-          {children}
-          {collectedRegistry.hasLayoutChildren ? null : (
-            <ComposerDefaultLayout />
+      <ComposerDictationContext value={dictationController?.api ?? null}>
+        <section
+          data-slot="composer"
+          className={cn(
+            'border-border bg-card relative border font-[inherit]',
+            className,
           )}
-        </div>
-      </section>
+        >
+          <div
+            onKeyDownCapture={onEditorKeyDown}
+            onMouseDownCapture={onComposerMouseDown}
+          >
+            {children}
+            {collectedRegistry.hasLayoutChildren ? null : (
+              <ComposerDefaultLayout />
+            )}
+          </div>
+        </section>
+      </ComposerDictationContext>
     </ComposerContext>
   );
 }
@@ -2367,6 +2402,8 @@ export const Composer = {
   AddRemoteImage: ComposerAddRemoteImage,
   InsertPaste: ComposerInsertPaste,
   InsertRichLink: ComposerInsertRichLink,
+  Dictate: ComposerDictate,
+  CancelDictation: ComposerCancelDictation,
   Submit: ComposerSubmit,
   Reset: ComposerReset,
 } as const;

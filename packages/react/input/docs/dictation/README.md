@@ -1,6 +1,8 @@
 # Dictation in the composer
 
-> **Design for review.** No code exists yet. This folder is the API on paper of dictation in `Composer` of `@deepagents/react-input/browser`, and of `ChatComposer.Dictate` in `@deepagents/react-genai`. Each decision has an ADR in [`adr/`](./adr). The words have one meaning each; see [CONTEXT.md](./CONTEXT.md). Backlog #4920 holds the history and the rulings.
+> Dictation in `Composer` of `@deepagents/react-input/browser`, and `ChatComposer.Dictate` in `@deepagents/react-genai`. Each decision has an ADR in [`adr/`](./adr). The words have one meaning each; see [CONTEXT.md](./CONTEXT.md). Backlog #4920 holds the history and the rulings.
+>
+> **Tests.** `src/lib/ComposerDictation.test.tsx` covers what happy-dom runs for real: no `MediaRecorder` gives `unavailable`, a host's `start()` then does nothing, and the parts throw without `dictation`. Everything that needs a microphone (the three ends, the space rule, the errors of `getUserMedia`, the permission) has no test: Ezz ruled on 2026-11-20 against vitest browser mode and against a hand-written `MediaRecorder`.
 
 The user starts a dictation and speaks. The dictation ends one of three ways, as in the ChatGPT and Codex desktop apps:
 
@@ -142,15 +144,15 @@ type ChatComposerDictateProps = Pick<ComposerDictateProps, 'disabled'>;
 
 ## The dictation state
 
-| Status                | Means                                                                               | `Composer.Dictate` | `Composer.CancelDictation`         | Submit                    |
-| --------------------- | ----------------------------------------------------------------------------------- | ------------------ | ---------------------------------- | ------------------------- |
-| `unavailable`         | `unsupported`: no `MediaRecorder`. `blocked`: the microphone permission is `denied` | disabled           | disabled                           | submits the draft         |
-| `idle`                | ready                                                                               | starts             | disabled                           | submits the draft         |
-| `starting`            | the browser opens the microphone                                                    | disabled           | ends with `abort`                  | ends with `send`          |
-| `recording`           | the clip is being recorded                                                          | ends with `insert` | ends with `abort`                  | ends with `send`          |
-| `finishing`, `insert` | the clip closes and the host transcribes it                                         | disabled           | ends with `abort`                  | changes the end to `send` |
-| `finishing`, `send`   | the same, and the draft goes when the text is in                                    | disabled           | ends with `abort`; nothing is sent | disabled                  |
-| `failed`              | the last dictation failed; `error.code` says how                                    | starts again       | disabled                           | submits the draft         |
+| Status                | Means                                                                               | `Composer.Dictate` | `Composer.CancelDictation`         | Submit                                                           |
+| --------------------- | ----------------------------------------------------------------------------------- | ------------------ | ---------------------------------- | ---------------------------------------------------------------- |
+| `unavailable`         | `unsupported`: no `MediaRecorder`. `blocked`: the microphone permission is `denied` | disabled           | disabled                           | submits the draft                                                |
+| `idle`                | ready                                                                               | starts             | disabled                           | submits the draft                                                |
+| `starting`            | the browser opens the microphone                                                    | disabled           | ends with `abort`                  | cancels the start and submits the draft: nothing is recorded yet |
+| `recording`           | the clip is being recorded                                                          | ends with `insert` | ends with `abort`                  | ends with `send`                                                 |
+| `finishing`, `insert` | the clip closes and the host transcribes it                                         | disabled           | ends with `abort`                  | changes the end to `send`                                        |
+| `finishing`, `send`   | the same, and the draft goes when the text is in                                    | disabled           | ends with `abort`; nothing is sent | disabled                                                         |
+| `failed`              | the last dictation failed; `error.code` says how                                    | starts again       | disabled                           | submits the draft                                                |
 
 `disabled` on `Composer.Dictate` refuses a start and never an end. A disabled `Composer.Root` refuses a start too.
 
@@ -183,12 +185,12 @@ Any other `getUserMedia` rejection (a `TypeError` for bad constraints, a `Securi
 
 ## React APIs it uses
 
-| API                                               | Replaces in the copies                                                                                                                    |
-| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `useSyncExternalStore` over the `Recording` class | `VoiceRecorderController`: its command ids and the `suppressStopRef` that kept React Strict Mode from dropping the clip                   |
-| `useActionState`                                  | The `isTranscribing` prop that each host kept in step with its request, and the separate error state                                      |
-| `useEffectEvent`                                  | The latest-value refs: `transcribeRef` and `onTranscriptionRef` in the hook, `startRecordingRef` and `stopRecordingRef` in the controller |
-| `ref` as a prop                                   | `forwardRef`                                                                                                                              |
+| API                                               | Replaces in the copies                                                                                                                     |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `useSyncExternalStore` over the `Recording` class | `VoiceRecorderController`: its command ids and the `suppressStopRef` that kept React Strict Mode from dropping the clip                    |
+| `useActionState`                                  | The `isTranscribing` prop that each host kept in step with its request, and the separate error state                                       |
+| An `onClip` event of the `Recording`              | The `startRecordingRef` and `stopRecordingRef` of the controller: the click handler makes the recording, and the recording pushes its clip |
+| `ref` as a prop                                   | `forwardRef`                                                                                                                               |
 
 ## Moving the two copies
 

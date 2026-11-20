@@ -1,6 +1,6 @@
 # Dictation glossary
 
-> **Design for review.** These words belong to the design in [README.md](./README.md).
+> These words belong to dictation in the composer; see [README.md](./README.md).
 
 **Dictation.** The user speaks, and the text goes into the composer. Here it is batch: one recording, then one transcription. ChatGPT, Codex and assistant-ui use the same word.
 

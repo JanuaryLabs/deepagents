@@ -1,6 +1,6 @@
 # react-input ships no words or icons, and react-genai ships ChatComposer.Dictate
 
-Status: ruled by Ezz on 2026-11-20 (design for review).
+Status: ruled by Ezz on 2026-11-20 (shipped).
 
 ## Context
 

@@ -8,6 +8,21 @@ export type {
   ComposerMeta,
 } from './lib/ComposerContext.ts';
 export type { ComposerAttachmentsProps } from './lib/ComposerAttachments.tsx';
+export { useComposerDictation } from './lib/dictation/ComposerDictationContext.ts';
+export type {
+  ComposerDictation,
+  ComposerDictationApi,
+  DictationEnd,
+  DictationState,
+} from './lib/dictation/ComposerDictationContext.ts';
+export type {
+  ComposerCancelDictationProps,
+  ComposerDictateProps,
+} from './lib/dictation/ComposerDictationParts.tsx';
+export {
+  DictationError,
+  type DictationErrorCode,
+} from './lib/dictation/DictationError.ts';
 export { ComposerTokenText } from './lib/ComposerTokenText.tsx';
 export { PersistedPromptText } from './lib/PersistedPromptText.tsx';
 export { reconstructPersistedPromptSelection } from './lib/persisted-prompt-selection.ts';

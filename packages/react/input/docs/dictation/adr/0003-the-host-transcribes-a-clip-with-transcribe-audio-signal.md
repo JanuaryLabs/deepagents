@@ -1,6 +1,6 @@
 # The host transcribes a clip with transcribe(audio, { signal })
 
-Status: ruled by Ezz on 2026-11-20 (design for review).
+Status: ruled by Ezz on 2026-11-20 (shipped).
 
 ## Context
 

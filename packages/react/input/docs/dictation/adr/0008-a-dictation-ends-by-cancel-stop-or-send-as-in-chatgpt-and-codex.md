@@ -1,6 +1,6 @@
 # A dictation ends by cancel, stop or send, as in ChatGPT and Codex
 
-Status: ruled by Ezz on 2026-11-20 ("we need to follow chatgpt/codex app"; design for review).
+Status: ruled by Ezz on 2026-11-20 ("we need to follow chatgpt/codex app"; shipped).
 
 ## Context
 
@@ -20,7 +20,7 @@ Once an end is pending, the stop control is disabled. The send stays enabled whi
 
 - `Composer.Dictate` starts a dictation, and in `recording` it stops it with the end `insert`.
 - `Composer.CancelDictation` ends it with `abort` in `starting`, `recording` and `finishing`.
-- The composer's submit (`actions.submit`, which `Composer.Submit` calls, `Composer.tsx:2216-2218`) ends an active dictation with `send`: it stops the recording, waits for the text, inserts it (ADR 0006), and then submits the draft. A submit during `finishing` with the end `insert` changes the end to `send`. A submit during the end `send` does nothing.
+- The composer's submit (`actions.submit`, which `Composer.Submit` calls, `Composer.tsx:2216-2218`) ends an active dictation with `send`: it stops the recording, waits for the text, inserts it (ADR 0006), and then submits the draft. A submit during `finishing` with the end `insert` changes the end to `send`. A submit during the end `send` does nothing. A submit during `starting` cancels the start and submits the draft as it is, because nothing is recorded yet.
 - When the transcription fails during the end `send`, the draft is not sent, and the state is `failed`.
 
 ## Consequences
