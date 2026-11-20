@@ -620,6 +620,29 @@ describe('Composer compound API', () => {
     ).toBeInTheDocument();
   });
 
+  it('relabels the editor when editorAriaLabel changes', async () => {
+    const view = render(
+      <Composer.Root editorAriaLabel="Message">
+        <Composer.Editor />
+      </Composer.Root>,
+      { wrapper: FakeClock },
+    );
+    await screen.findByRole('textbox', { name: 'Message' });
+
+    view.rerender(
+      <Composer.Root editorAriaLabel="Reply">
+        <Composer.Editor />
+      </Composer.Root>,
+    );
+
+    expect(
+      await screen.findByRole('textbox', { name: 'Reply' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('textbox', { name: 'Message' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('supports render action triggers while honoring prevented clicks', async () => {
     const user = userEvent.setup();
     render(<RichCompoundActionScenario />, { wrapper: FakeClock });
@@ -2645,6 +2668,38 @@ describe('Composer task running behavior', () => {
 });
 
 describe('Composer disabled guard', () => {
+  it('follows the disabled prop on rerender', async () => {
+    const view = render(
+      <Composer.Root editorAriaLabel="Message">
+        <Composer.Editor />
+      </Composer.Root>,
+      { wrapper: FakeClock },
+    );
+    const prompt = await screen.findByRole('textbox', { name: 'Message' });
+    expect(prompt).toHaveAttribute('aria-disabled', 'false');
+    expect(prompt).toHaveAttribute('contenteditable', 'true');
+
+    view.rerender(
+      <Composer.Root editorAriaLabel="Message" disabled>
+        <Composer.Editor />
+      </Composer.Root>,
+    );
+    await waitFor(() =>
+      expect(prompt).toHaveAttribute('aria-disabled', 'true'),
+    );
+    expect(prompt).toHaveAttribute('contenteditable', 'false');
+
+    view.rerender(
+      <Composer.Root editorAriaLabel="Message">
+        <Composer.Editor />
+      </Composer.Root>,
+    );
+    await waitFor(() =>
+      expect(prompt).toHaveAttribute('aria-disabled', 'false'),
+    );
+    expect(prompt).toHaveAttribute('contenteditable', 'true');
+  });
+
   it('blocks typing, paste, toolbar actions, and keyboard submit while disabled', async () => {
     const { user, prompt, submissions } = renderRichInput({ disabled: true });
 
@@ -4931,6 +4986,32 @@ describe('Composer host clock', () => {
       new Date(Date.UTC(2020, 0, 1, 9, 30, 15)).toLocaleTimeString(),
       new Date(Date.UTC(2020, 0, 1, 9, 31, 20)).toLocaleTimeString(),
     ]);
+  });
+
+  it('reports later state changes only to the current onStateChange', async () => {
+    const user = userEvent.setup();
+    const first = vi.fn();
+    const second = vi.fn();
+    const view = render(
+      <Composer.Root editorAriaLabel="Message" onStateChange={first}>
+        <Composer.Editor />
+      </Composer.Root>,
+      { wrapper: FakeClock },
+    );
+    const prompt = await screen.findByRole('textbox', { name: 'Message' });
+    view.rerender(
+      <Composer.Root editorAriaLabel="Message" onStateChange={second}>
+        <Composer.Editor />
+      </Composer.Root>,
+    );
+    first.mockClear();
+
+    await user.click(prompt);
+    await user.keyboard('hi');
+
+    expect(first).not.toHaveBeenCalled();
+    const [state] = second.mock.lastCall ?? [];
+    expect(state.text).toBe('hi');
   });
 
   it('names an added remote image from the time of the host clock', async () => {

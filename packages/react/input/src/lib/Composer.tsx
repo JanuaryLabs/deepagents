@@ -9,6 +9,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
@@ -289,7 +290,11 @@ function ComposerRootInner({
   const historyCursorRef = useRef<number | null>(null);
   const pendingHistoryDraftRef = useRef<ComposerInitialDraft | null>(null);
   const reverseSearchStartRef = useRef<ComposerState | null>(null);
-  const onStateChangeRef = useRef(onStateChange);
+  const reportStateChange = useEffectEvent(
+    (state: ComposerState, prepared: ComposerPreparedPayload) => {
+      onStateChange?.(state, prepared);
+    },
+  );
   const validateSubmissionRef = useRef(validateSubmission);
   const onSubmitRef = useRef(onSubmit);
   const attachedImagesRef = useRef(new Map<string, File>());
@@ -393,10 +398,6 @@ function ComposerRootInner({
   }, [activePopup, composer]);
 
   useEffect(() => {
-    onStateChangeRef.current = onStateChange;
-  }, [onStateChange]);
-
-  useEffect(() => {
     validateSubmissionRef.current = validateSubmission;
   }, [validateSubmission]);
 
@@ -409,18 +410,13 @@ function ComposerRootInner({
       return;
     }
     editor.setEditable(!disabled);
-    editor.view.dom.setAttribute('aria-disabled', disabled ? 'true' : 'false');
     if (disabled) {
       setActivePopup(null);
     }
   }, [disabled, editor]);
 
   useEffect(() => {
-    editor?.view.dom.setAttribute('aria-label', editorAriaLabel);
-  }, [editor, editorAriaLabel]);
-
-  useEffect(() => {
-    onStateChangeRef.current?.(composer, preparedPayload);
+    reportStateChange(composer, preparedPayload);
     if (draftKey === undefined) {
       return;
     }
