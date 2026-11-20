@@ -204,49 +204,33 @@ acquire the write lock before reading the current value.
 
 The `PostgresContextStore` uses the `pg` package for PostgreSQL persistence.
 
-### Pool-based connections
+### A borrowed pool
 
-Pass a connection string, `PoolConfig` object, or existing `pg.Pool` instance as
-`options.pool`. Open the store with `await PostgresContextStore.create(options)`;
-it initializes the schema before returning.
+The host creates the `pg.Pool` and passes it as `options.pool`; the store
+borrows it and never ends it. Open the store with
+`await PostgresContextStore.create(options)`; it initializes the schema before
+returning.
 
 ```typescript
-import type { Pool, PoolConfig } from 'pg';
+import type { Pool } from 'pg';
 
 import { lockSchemaDDL } from '@deepagents/context';
 
 class PostgresContextStore extends ContextStore {
   #pool: Pool;
   #schema: string;
-  #ownsPool: boolean;
 
   private constructor(options: PostgresStoreOptions) {
     super();
-    const schema = options.schema ?? 'public';
-    this.#schema = schema;
-    const pg = PostgresContextStore.#requirePg();
-    if (options.pool instanceof pg.Pool) {
-      this.#pool = options.pool;
-      this.#ownsPool = false;
-    } else {
-      this.#pool =
-        typeof options.pool === 'string'
-          ? new pg.Pool({ connectionString: options.pool })
-          : new pg.Pool(options.pool);
-      this.#ownsPool = true;
-    }
+    this.#schema = options.schema ?? 'public';
+    this.#pool = options.pool;
   }
 
   static async create(
     options: PostgresStoreOptions,
   ): Promise<PostgresContextStore> {
     const store = new PostgresContextStore(options);
-    try {
-      await store.#initialize();
-    } catch (error) {
-      await store.close();
-      throw error;
-    }
+    await store.#initialize();
     return store;
   }
 
@@ -264,7 +248,7 @@ lock keyed by the schema. The store sends both as one parameterless query, so
 concurrent initializations of the same schema run one at a time. The lock is
 released when that transaction commits or rolls back.
 
-When an existing `Pool` is passed, `close()` does not end the pool (the caller retains ownership). When the store creates its own pool, `close()` ends it.
+The store has no `close()`: it owns no connection, so the host ends the pool once every store that borrows it is done.
 
 **Source:** `#initialize` in `packages/context/src/lib/store/postgres.store.ts` and `packages/context/src/lib/store/postgres-schema-lock.ts`.
 

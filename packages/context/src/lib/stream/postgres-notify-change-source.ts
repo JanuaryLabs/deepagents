@@ -1,7 +1,6 @@
 import { EventEmitter, on } from 'node:events';
-import { createRequire } from 'node:module';
 import pMemoize from 'p-memoize';
-import type { Notification, Pool, PoolClient, PoolConfig } from 'pg';
+import type { Notification, Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 
 import { parseJson } from '../store/columns.ts';
@@ -13,7 +12,8 @@ import {
 } from './ddl.stream.postgres-notify.ts';
 
 export interface PostgresNotifyChangeSourceOptions {
-  pool: Pool | PoolConfig | string;
+  /** The host's pool; the source borrows it and never ends it. */
+  pool: Pool;
   schema?: string;
   channel?: string;
 }
@@ -79,7 +79,6 @@ export class PostgresNotifyChangeSource implements StreamChangeSource {
   readonly #pool: Pool;
   readonly #schema: string;
   readonly #channel: string;
-  readonly #ownsPool: boolean;
   /** Aborts when close() starts: every subscription ends, and no LISTEN connection opens. */
   readonly #closed = new AbortController();
   /** Emits `stream:<id>` with a ChangeDelivery; `error` fails every subscription. */
@@ -112,29 +111,7 @@ export class PostgresNotifyChangeSource implements StreamChangeSource {
     assertIdentifier(channel, 'channel');
     this.#schema = schema;
     this.#channel = channel;
-
-    const pg = PostgresNotifyChangeSource.#requirePg();
-    if (options.pool instanceof pg.Pool) {
-      this.#pool = options.pool;
-      this.#ownsPool = false;
-    } else {
-      this.#pool =
-        typeof options.pool === 'string'
-          ? new pg.Pool({ connectionString: options.pool })
-          : new pg.Pool(options.pool);
-      this.#ownsPool = true;
-    }
-  }
-
-  static #requirePg(): typeof import('pg') {
-    try {
-      const require = createRequire(import.meta.url);
-      return require('pg');
-    } catch {
-      throw new Error(
-        'PostgresNotifyChangeSource requires the "pg" package. Install it with: npm install pg',
-      );
-    }
+    this.#pool = options.pool;
   }
 
   /** Opens the source: installs the notify triggers before it returns. */
@@ -142,17 +119,12 @@ export class PostgresNotifyChangeSource implements StreamChangeSource {
     options: PostgresNotifyChangeSourceOptions,
   ): Promise<PostgresNotifyChangeSource> {
     const source = new PostgresNotifyChangeSource(options);
-    try {
-      await source.#pool.query(
-        lockSchemaDDL(
-          postgresStreamNotifyDDL(source.#schema, source.#channel),
-          source.#schema,
-        ),
-      );
-    } catch (error) {
-      await source.close();
-      throw error;
-    }
+    await source.#pool.query(
+      lockSchemaDDL(
+        postgresStreamNotifyDDL(source.#schema, source.#channel),
+        source.#schema,
+      ),
+    );
     return source;
   }
 
@@ -199,10 +171,6 @@ export class PostgresNotifyChangeSource implements StreamChangeSource {
       // Listener setup already released the failed client.
     }
     await this.#releaseListener();
-
-    if (this.#ownsPool) {
-      await this.#pool.end();
-    }
   }
 
   async #ensureListening(): Promise<void> {

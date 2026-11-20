@@ -52,27 +52,11 @@ automatically repopulate the search table from those messages.
 Production-ready persistence with PostgreSQL.
 
 ```typescript
+import pg from 'pg';
+
 import { ContextEngine, PostgresContextStore } from '@deepagents/context';
 
-// Connection string
-const store = await PostgresContextStore.create({
-  pool: 'postgresql://user:password@localhost:5432/mydb',
-});
-
-// Or PoolConfig object
-const store = await PostgresContextStore.create({
-  pool: {
-    host: 'localhost',
-    port: 5432,
-    user: 'postgres',
-    password: 'secret',
-    database: 'mydb',
-  },
-});
-
-// Or pass an existing pg.Pool instance
-import pg from 'pg';
-const pool = new pg.Pool({ connectionString: 'postgresql://...' });
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const store = await PostgresContextStore.create({ pool });
 
 const context = new ContextEngine({
@@ -81,8 +65,8 @@ const context = new ContextEngine({
   userId: 'user-001',
 });
 
-// Close connection when done
-await store.close();
+// The pool is yours: end it after the last store that uses it is done.
+await pool.end();
 ```
 
 **Requirements:**
@@ -103,10 +87,7 @@ await store.close();
 Scope all tables under a specific PostgreSQL schema for multi-tenant isolation:
 
 ```typescript
-const store = await PostgresContextStore.create({
-  pool: 'postgresql://user:password@localhost:5432/mydb',
-  schema: 'tenant_one',
-});
+const store = await PostgresContextStore.create({ pool, schema: 'tenant_one' });
 ```
 
 The store creates the schema if it does not exist and qualifies all table and index names with the schema prefix.
@@ -116,16 +97,14 @@ The store creates the schema if it does not exist and qualifies all table and in
 Open the store with `PostgresContextStore.create()`. It creates the schema
 objects before it returns, so the store is ready to use. A transaction-scoped
 advisory lock serializes initialization for callers opening the same schema.
-If initialization fails, the factory closes any pool it created and rejects
-with the error.
+If initialization fails, the factory rejects with the error.
 
-```typescript
-const store = await PostgresContextStore.create({ pool: '...' });
-```
+### The pool is the host's
 
-### Pool ownership
-
-When you pass an existing `pg.Pool` instance, the store does not close the pool on `store.close()`. When the store creates its own pool (from a connection string or config object), it closes the pool on `store.close()`.
+The store takes only a `pg.Pool` you create, borrows it, and never ends it, so
+several stores can share one pool and your shutdown ends it once. It never
+creates a pool of its own, which also means a pool from another copy of `pg`
+(a linked workspace, a test harness's pool) is used as is.
 
 </Tab>
 <Tab value="SQL Server">
@@ -755,7 +734,7 @@ One database, multiple users. You can isolate tenants with the `schema` option:
 
 ```typescript
 const store = await PostgresContextStore.create({
-  pool: process.env.DATABASE_URL,
+  pool, // the host's pg.Pool
   schema: `tenant_${tenantId}`,
 });
 
@@ -773,7 +752,7 @@ Or use a single schema with user-scoped chat IDs:
 
 ```typescript
 const store = await PostgresContextStore.create({
-  pool: process.env.DATABASE_URL,
+  pool, // the host's pg.Pool
 });
 
 const context = new ContextEngine({

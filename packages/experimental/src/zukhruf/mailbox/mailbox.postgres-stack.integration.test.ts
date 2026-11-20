@@ -78,9 +78,7 @@ test("a child's FINAL_ANSWER reaches its parent's wait_agent on a PostgreSQL sta
   });
   const stack = defineStack(async (stackResources) => {
     const store = await PostgresContextStore.create({ pool });
-    stackResources.defer(() => store.close());
     const streamStore = await PostgresStreamStore.create({ pool });
-    stackResources.defer(() => streamStore.close());
     return {
       store,
       streams: streamsFor(streamStore),

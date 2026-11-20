@@ -62,11 +62,7 @@ async function withStore<T>(
 
   const schema = testSchema();
   const store = await openStoreWithRetry(container.pool(), schema);
-  try {
-    return await fn(store);
-  } finally {
-    await store.close();
-  }
+  return await fn(store);
 }
 
 function openStoreWithRetry(
@@ -107,19 +103,15 @@ describe('PostgreSQL StreamStore Integration', () => {
     const stores = results.flatMap((result) =>
       result.status === 'fulfilled' ? [result.value] : [],
     );
-    try {
-      assert.deepStrictEqual(
-        results.map((result) =>
-          result.status === 'fulfilled' ? 'opened' : result.reason.code,
-        ),
-        ['opened', 'opened', 'opened'],
-      );
-      const stream = createStream();
-      await stores[0].createStream(stream);
-      assert.deepStrictEqual(await stores[2].getStream(stream.id), stream);
-    } finally {
-      await Promise.all(stores.map((store) => store.close()));
-    }
+    assert.deepStrictEqual(
+      results.map((result) =>
+        result.status === 'fulfilled' ? 'opened' : result.reason.code,
+      ),
+      ['opened', 'opened', 'opened'],
+    );
+    const stream = createStream();
+    await stores[0].createStream(stream);
+    assert.deepStrictEqual(await stores[2].getStream(stream.id), stream);
   });
 
   it('should create, upsert, retrieve, update, and list streams', async () =>

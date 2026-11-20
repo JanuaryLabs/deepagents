@@ -38,7 +38,6 @@ export const fsCases: readonly FsCase[] = [
         pool: database.pool(),
         root: '/',
       });
-      stack.defer(() => fs.close());
       const owned = stack.move();
       return { fs, [Symbol.asyncDispose]: () => owned.disposeAsync() };
     },

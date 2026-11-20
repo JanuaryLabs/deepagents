@@ -1,5 +1,4 @@
-import { createRequire } from 'node:module';
-import type { Pool, PoolConfig } from 'pg';
+import type { Pool } from 'pg';
 import { z } from 'zod';
 
 import { bigintColumn, jsonObject } from './columns.ts';
@@ -183,11 +182,8 @@ function toMessage(row: z.output<typeof messageColumns>): MessageData {
 }
 
 export interface PostgresStoreOptions {
-  /**
-   * PostgreSQL connection pool configuration.
-   * Can be a connection string, PoolConfig object, or existing Pool instance.
-   */
-  pool: Pool | PoolConfig | string;
+  /** The host's pool; the store borrows it and never ends it. */
+  pool: Pool;
   /**
    * PostgreSQL schema to scope all tables under.
    * Defaults to 'public'.
@@ -198,18 +194,12 @@ export interface PostgresStoreOptions {
 /**
  * PostgreSQL-based context store using graph model.
  *
- * Uses pg Pool for connection management.
- * Messages are stored as nodes in a DAG with parentId links.
- *
- * Requires `pg` package to be installed:
- * ```
- * npm install pg
- * ```
+ * Messages are stored as nodes in a DAG with parentId links. The host creates
+ * the `pg` Pool and ends it after its last store is done.
  */
 export class PostgresContextStore extends ContextStore {
   #pool: Pool;
   #schema: string;
-  #ownsPool: boolean;
 
   private constructor(options: PostgresStoreOptions) {
     super();
@@ -218,28 +208,7 @@ export class PostgresContextStore extends ContextStore {
       throw new Error(`Invalid schema name: "${schema}"`);
     }
     this.#schema = schema;
-    const pg = PostgresContextStore.#requirePg();
-    if (options.pool instanceof pg.Pool) {
-      this.#pool = options.pool;
-      this.#ownsPool = false;
-    } else {
-      this.#pool =
-        typeof options.pool === 'string'
-          ? new pg.Pool({ connectionString: options.pool })
-          : new pg.Pool(options.pool);
-      this.#ownsPool = true;
-    }
-  }
-
-  static #requirePg(): typeof import('pg') {
-    try {
-      const require = createRequire(import.meta.url);
-      return require('pg');
-    } catch {
-      throw new Error(
-        'PostgresContextStore requires the "pg" package. Install it with: npm install pg',
-      );
-    }
+    this.#pool = options.pool;
   }
 
   #t(name: string): string {
@@ -251,12 +220,7 @@ export class PostgresContextStore extends ContextStore {
     options: PostgresStoreOptions,
   ): Promise<PostgresContextStore> {
     const store = new PostgresContextStore(options);
-    try {
-      await store.#initialize();
-    } catch (error) {
-      await store.close();
-      throw error;
-    }
+    await store.#initialize();
     return store;
   }
 
@@ -281,16 +245,6 @@ export class PostgresContextStore extends ContextStore {
     params?: unknown[],
   ): Promise<z.output<Row>[]> {
     return z.array(row).parse(await this.#query(sql, params));
-  }
-
-  /**
-   * Close the pool connection.
-   * Call this when done with the store.
-   */
-  async close(): Promise<void> {
-    if (this.#ownsPool) {
-      await this.#pool.end();
-    }
   }
 
   // ==========================================================================

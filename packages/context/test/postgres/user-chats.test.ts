@@ -24,47 +24,43 @@ describe('User Chat Management', () => {
       const store = await PostgresContextStore.create({
         pool: container.pool(),
       });
-      try {
-        const aliceChat1 = new ContextEngine({
-          store,
-          chatId: 'alice-list-1',
-          userId: 'alice-list',
-        });
-        await aliceChat1.resolve({
-          renderer,
-          sandbox: await buildSandbox(),
-        });
+      const aliceChat1 = new ContextEngine({
+        store,
+        chatId: 'alice-list-1',
+        userId: 'alice-list',
+      });
+      await aliceChat1.resolve({
+        renderer,
+        sandbox: await buildSandbox(),
+      });
 
-        const aliceChat2 = new ContextEngine({
-          store,
-          chatId: 'alice-list-2',
-          userId: 'alice-list',
-        });
-        await aliceChat2.resolve({
-          renderer,
-          sandbox: await buildSandbox(),
-        });
+      const aliceChat2 = new ContextEngine({
+        store,
+        chatId: 'alice-list-2',
+        userId: 'alice-list',
+      });
+      await aliceChat2.resolve({
+        renderer,
+        sandbox: await buildSandbox(),
+      });
 
-        const bobChat = new ContextEngine({
-          store,
-          chatId: 'bob-list-1',
-          userId: 'bob-list',
-        });
-        await bobChat.resolve({
-          renderer,
-          sandbox: await buildSandbox(),
-        });
+      const bobChat = new ContextEngine({
+        store,
+        chatId: 'bob-list-1',
+        userId: 'bob-list',
+      });
+      await bobChat.resolve({
+        renderer,
+        sandbox: await buildSandbox(),
+      });
 
-        const aliceChats = await store.listChats({ userId: 'alice-list' });
-        assert.strictEqual(aliceChats.length, 2);
-        assert.ok(aliceChats.every((c) => c.userId === 'alice-list'));
+      const aliceChats = await store.listChats({ userId: 'alice-list' });
+      assert.strictEqual(aliceChats.length, 2);
+      assert.ok(aliceChats.every((c) => c.userId === 'alice-list'));
 
-        const bobChats = await store.listChats({ userId: 'bob-list' });
-        assert.strictEqual(bobChats.length, 1);
-        assert.strictEqual(bobChats[0].userId, 'bob-list');
-      } finally {
-        await store.close();
-      }
+      const bobChats = await store.listChats({ userId: 'bob-list' });
+      assert.strictEqual(bobChats.length, 1);
+      assert.strictEqual(bobChats[0].userId, 'bob-list');
     });
 
     it('should return empty array for user with no chats', async () => {
@@ -73,14 +69,10 @@ describe('User Chat Management', () => {
       const store = await PostgresContextStore.create({
         pool: container.pool(),
       });
-      try {
-        const noChats = await store.listChats({
-          userId: 'nonexistent-user-xyz',
-        });
-        assert.strictEqual(noChats.length, 0);
-      } finally {
-        await store.close();
-      }
+      const noChats = await store.listChats({
+        userId: 'nonexistent-user-xyz',
+      });
+      assert.strictEqual(noChats.length, 0);
     });
   });
 
@@ -91,36 +83,32 @@ describe('User Chat Management', () => {
       const store = await PostgresContextStore.create({
         pool: container.pool(),
       });
-      try {
-        const aliceEngine = new ContextEngine({
-          store,
-          chatId: 'alice-iso-private',
-          userId: 'alice-iso',
-        });
+      const aliceEngine = new ContextEngine({
+        store,
+        chatId: 'alice-iso-private',
+        userId: 'alice-iso',
+      });
 
-        aliceEngine.set(user('Hello, this is Alice'));
-        aliceEngine.set(assistantText('Hi Alice!'));
-        await aliceEngine.save();
+      aliceEngine.set(user('Hello, this is Alice'));
+      aliceEngine.set(assistantText('Hi Alice!'));
+      await aliceEngine.save();
 
-        const bobEngine = new ContextEngine({
-          store,
-          chatId: 'bob-iso-private',
-          userId: 'bob-iso',
-        });
-        bobEngine.set(user('Hey, Bob here'));
-        bobEngine.set(assistantText('Hello Bob!'));
-        await bobEngine.save();
+      const bobEngine = new ContextEngine({
+        store,
+        chatId: 'bob-iso-private',
+        userId: 'bob-iso',
+      });
+      bobEngine.set(user('Hey, Bob here'));
+      bobEngine.set(assistantText('Hello Bob!'));
+      await bobEngine.save();
 
-        const aliceChats = await store.listChats({ userId: 'alice-iso' });
-        assert.strictEqual(aliceChats.length, 1);
-        assert.strictEqual(aliceChats[0].messageCount, 2);
+      const aliceChats = await store.listChats({ userId: 'alice-iso' });
+      assert.strictEqual(aliceChats.length, 1);
+      assert.strictEqual(aliceChats[0].messageCount, 2);
 
-        const bobChats = await store.listChats({ userId: 'bob-iso' });
-        assert.strictEqual(bobChats.length, 1);
-        assert.strictEqual(bobChats[0].messageCount, 2);
-      } finally {
-        await store.close();
-      }
+      const bobChats = await store.listChats({ userId: 'bob-iso' });
+      assert.strictEqual(bobChats.length, 1);
+      assert.strictEqual(bobChats[0].messageCount, 2);
     });
 
     it('should include userId in ChatInfo when listing', async () => {
@@ -129,18 +117,14 @@ describe('User Chat Management', () => {
       const store = await PostgresContextStore.create({
         pool: container.pool(),
       });
-      try {
-        await new ContextEngine({
-          store,
-          chatId: 'chatinfo-test',
-          userId: 'user-abc-info',
-        }).resolve({ renderer, sandbox: await buildSandbox() });
+      await new ContextEngine({
+        store,
+        chatId: 'chatinfo-test',
+        userId: 'user-abc-info',
+      }).resolve({ renderer, sandbox: await buildSandbox() });
 
-        const chats = await store.listChats({ userId: 'user-abc-info' });
-        assert.strictEqual(chats[0].userId, 'user-abc-info');
-      } finally {
-        await store.close();
-      }
+      const chats = await store.listChats({ userId: 'user-abc-info' });
+      assert.strictEqual(chats[0].userId, 'user-abc-info');
     });
   });
 
@@ -151,23 +135,19 @@ describe('User Chat Management', () => {
       const store = await PostgresContextStore.create({
         pool: container.pool(),
       });
-      try {
-        const specialUserIds = [
-          'user@example.com',
-          'user-with-dashes',
-          'user_with_underscores',
-          'user.with.dots',
-          'uuid-550e8400-e29b-41d4-a716-446655440000',
-        ];
+      const specialUserIds = [
+        'user@example.com',
+        'user-with-dashes',
+        'user_with_underscores',
+        'user.with.dots',
+        'uuid-550e8400-e29b-41d4-a716-446655440000',
+      ];
 
-        for (const userId of specialUserIds) {
-          await store.upsertChat({ id: `special-chat-${userId}`, userId });
-          const chats = await store.listChats({ userId });
-          assert.strictEqual(chats.length, 1, `Failed for userId: ${userId}`);
-          assert.strictEqual(chats[0].userId, userId);
-        }
-      } finally {
-        await store.close();
+      for (const userId of specialUserIds) {
+        await store.upsertChat({ id: `special-chat-${userId}`, userId });
+        const chats = await store.listChats({ userId });
+        assert.strictEqual(chats.length, 1, `Failed for userId: ${userId}`);
+        assert.strictEqual(chats[0].userId, userId);
       }
     });
 
@@ -177,21 +157,17 @@ describe('User Chat Management', () => {
       const store = await PostgresContextStore.create({
         pool: container.pool(),
       });
-      try {
-        const unicodeUserIds = ['用户123', 'пользователь', 'المستخدم'];
+      const unicodeUserIds = ['用户123', 'пользователь', 'المستخدم'];
 
-        for (const userId of unicodeUserIds) {
-          await store.upsertChat({ id: `unicode-chat-${userId}`, userId });
-          const chats = await store.listChats({ userId });
-          assert.strictEqual(
-            chats.length,
-            1,
-            `Failed for unicode userId: ${userId}`,
-          );
-          assert.strictEqual(chats[0].userId, userId);
-        }
-      } finally {
-        await store.close();
+      for (const userId of unicodeUserIds) {
+        await store.upsertChat({ id: `unicode-chat-${userId}`, userId });
+        const chats = await store.listChats({ userId });
+        assert.strictEqual(
+          chats.length,
+          1,
+          `Failed for unicode userId: ${userId}`,
+        );
+        assert.strictEqual(chats[0].userId, userId);
       }
     });
   });
@@ -203,17 +179,13 @@ describe('User Chat Management', () => {
       const store = await PostgresContextStore.create({
         pool: container.pool(),
       });
-      try {
-        const longUserId = 'u'.repeat(200);
+      const longUserId = 'u'.repeat(200);
 
-        await store.upsertChat({ id: 'long-user-chat', userId: longUserId });
+      await store.upsertChat({ id: 'long-user-chat', userId: longUserId });
 
-        const chats = await store.listChats({ userId: longUserId });
-        assert.strictEqual(chats.length, 1);
-        assert.strictEqual(chats[0].userId, longUserId);
-      } finally {
-        await store.close();
-      }
+      const chats = await store.listChats({ userId: longUserId });
+      assert.strictEqual(chats.length, 1);
+      assert.strictEqual(chats[0].userId, longUserId);
     });
 
     it('should handle pagination correctly with userId filter', async () => {
@@ -222,49 +194,45 @@ describe('User Chat Management', () => {
       const store = await PostgresContextStore.create({
         pool: container.pool(),
       });
-      try {
-        for (let i = 0; i < 10; i++) {
-          await store.upsertChat({
-            id: `page-alice-${i}`,
-            userId: 'page-alice',
-          });
-        }
-        for (let i = 0; i < 5; i++) {
-          await store.upsertChat({ id: `page-bob-${i}`, userId: 'page-bob' });
-        }
-
-        const page1 = await store.listChats({
+      for (let i = 0; i < 10; i++) {
+        await store.upsertChat({
+          id: `page-alice-${i}`,
           userId: 'page-alice',
-          limit: 3,
-          offset: 0,
         });
-        const page2 = await store.listChats({
-          userId: 'page-alice',
-          limit: 3,
-          offset: 3,
-        });
-        const page3 = await store.listChats({
-          userId: 'page-alice',
-          limit: 3,
-          offset: 6,
-        });
-        const page4 = await store.listChats({
-          userId: 'page-alice',
-          limit: 3,
-          offset: 9,
-        });
-
-        assert.strictEqual(page1.length, 3);
-        assert.strictEqual(page2.length, 3);
-        assert.strictEqual(page3.length, 3);
-        assert.strictEqual(page4.length, 1);
-
-        const allPages = [...page1, ...page2, ...page3, ...page4];
-        assert.strictEqual(allPages.length, 10);
-        assert.ok(allPages.every((c) => c.userId === 'page-alice'));
-      } finally {
-        await store.close();
       }
+      for (let i = 0; i < 5; i++) {
+        await store.upsertChat({ id: `page-bob-${i}`, userId: 'page-bob' });
+      }
+
+      const page1 = await store.listChats({
+        userId: 'page-alice',
+        limit: 3,
+        offset: 0,
+      });
+      const page2 = await store.listChats({
+        userId: 'page-alice',
+        limit: 3,
+        offset: 3,
+      });
+      const page3 = await store.listChats({
+        userId: 'page-alice',
+        limit: 3,
+        offset: 6,
+      });
+      const page4 = await store.listChats({
+        userId: 'page-alice',
+        limit: 3,
+        offset: 9,
+      });
+
+      assert.strictEqual(page1.length, 3);
+      assert.strictEqual(page2.length, 3);
+      assert.strictEqual(page3.length, 3);
+      assert.strictEqual(page4.length, 1);
+
+      const allPages = [...page1, ...page2, ...page3, ...page4];
+      assert.strictEqual(allPages.length, 10);
+      assert.ok(allPages.every((c) => c.userId === 'page-alice'));
     });
   });
 
@@ -275,37 +243,33 @@ describe('User Chat Management', () => {
       const store = await PostgresContextStore.create({
         pool: container.pool(),
       });
-      try {
-        const users = [
-          'conc-user-a',
-          'conc-user-b',
-          'conc-user-c',
-          'conc-user-d',
-          'conc-user-e',
-        ];
-        const createPromises = users.flatMap((userId, userIndex) =>
-          Array.from({ length: 5 }, (_, i) =>
-            store.upsertChat({
-              id: `multi-conc-${userId}-${i}`,
-              userId,
-              title: `Chat ${userIndex}-${i}`,
-            }),
-          ),
+      const users = [
+        'conc-user-a',
+        'conc-user-b',
+        'conc-user-c',
+        'conc-user-d',
+        'conc-user-e',
+      ];
+      const createPromises = users.flatMap((userId, userIndex) =>
+        Array.from({ length: 5 }, (_, i) =>
+          store.upsertChat({
+            id: `multi-conc-${userId}-${i}`,
+            userId,
+            title: `Chat ${userIndex}-${i}`,
+          }),
+        ),
+      );
+
+      await Promise.all(createPromises);
+
+      for (const userId of users) {
+        const userChats = await store.listChats({ userId });
+        assert.strictEqual(
+          userChats.length,
+          5,
+          `User ${userId} should have 5 chats`,
         );
-
-        await Promise.all(createPromises);
-
-        for (const userId of users) {
-          const userChats = await store.listChats({ userId });
-          assert.strictEqual(
-            userChats.length,
-            5,
-            `User ${userId} should have 5 chats`,
-          );
-          assert.ok(userChats.every((c) => c.userId === userId));
-        }
-      } finally {
-        await store.close();
+        assert.ok(userChats.every((c) => c.userId === userId));
       }
     });
   });
@@ -318,39 +282,35 @@ describe('Message Upsert', () => {
     const store = await PostgresContextStore.create({
       pool: container.pool(),
     });
-    try {
-      await store.upsertChat({ id: 'upsert-fts-chat', userId: 'user-1' });
+    await store.upsertChat({ id: 'upsert-fts-chat', userId: 'user-1' });
 
-      await store.addMessage({
-        id: 'upsert-fts-msg',
-        chatId: 'upsert-fts-chat',
-        parentId: null,
-        name: 'user',
-        type: 'message',
-        data: 'original searchable content',
-        createdAt: 1000,
-      });
+    await store.addMessage({
+      id: 'upsert-fts-msg',
+      chatId: 'upsert-fts-chat',
+      parentId: null,
+      name: 'user',
+      type: 'message',
+      data: 'original searchable content',
+      createdAt: 1000,
+    });
 
-      let results = await store.searchMessages('upsert-fts-chat', 'original');
-      assert.strictEqual(results.length, 1);
+    let results = await store.searchMessages('upsert-fts-chat', 'original');
+    assert.strictEqual(results.length, 1);
 
-      await store.addMessage({
-        id: 'upsert-fts-msg',
-        chatId: 'upsert-fts-chat',
-        parentId: null,
-        name: 'user',
-        type: 'message',
-        data: 'updated searchable content',
-        createdAt: 1000,
-      });
+    await store.addMessage({
+      id: 'upsert-fts-msg',
+      chatId: 'upsert-fts-chat',
+      parentId: null,
+      name: 'user',
+      type: 'message',
+      data: 'updated searchable content',
+      createdAt: 1000,
+    });
 
-      results = await store.searchMessages('upsert-fts-chat', 'original');
-      assert.strictEqual(results.length, 0);
+    results = await store.searchMessages('upsert-fts-chat', 'original');
+    assert.strictEqual(results.length, 0);
 
-      results = await store.searchMessages('upsert-fts-chat', 'updated');
-      assert.strictEqual(results.length, 1);
-    } finally {
-      await store.close();
-    }
+    results = await store.searchMessages('upsert-fts-chat', 'updated');
+    assert.strictEqual(results.length, 1);
   });
 });

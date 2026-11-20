@@ -14,30 +14,26 @@ describe('Branching', () => {
       const store = await PostgresContextStore.create({
         pool: container.pool(),
       });
-      try {
-        const engine = new ContextEngine({
-          userId: 'test-user',
-          store,
-          chatId: 'test-rewind-5',
-        });
+      const engine = new ContextEngine({
+        userId: 'test-user',
+        store,
+        chatId: 'test-rewind-5',
+      });
 
-        engine.set(
-          user({
-            id: 'rw5-msg-1',
-            role: 'user',
-            parts: [{ type: 'text', text: 'Hello' }],
-          }),
-        );
-        await engine.save();
+      engine.set(
+        user({
+          id: 'rw5-msg-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        }),
+      );
+      await engine.save();
 
-        assert.strictEqual(engine.branch, 'main');
+      assert.strictEqual(engine.branch, 'main');
 
-        await engine.rewind('rw5-msg-1');
+      await engine.rewind('rw5-msg-1');
 
-        assert.ok(engine.branch.startsWith('main-v'));
-      } finally {
-        await store.close();
-      }
+      assert.ok(engine.branch.startsWith('main-v'));
     });
   });
 });

@@ -7,9 +7,8 @@ import type {
   MkdirOptions,
   RmOptions,
 } from 'just-bash';
-import { createRequire } from 'node:module';
 import * as path from 'node:path';
-import type { Pool, PoolClient, PoolConfig, QueryResult } from 'pg';
+import type { Pool, PoolClient, QueryResult } from 'pg';
 import z from 'zod';
 
 import { lockSchemaDDL } from '@deepagents/context';
@@ -33,7 +32,8 @@ interface DirentEntry {
 }
 
 export interface PostgresFsOptions {
-  pool: Pool | PoolConfig | string;
+  /** The host's pool; the file system borrows it and never ends it. */
+  pool: Pool;
   root: string;
   chunkSize?: number;
   schema?: string;
@@ -90,7 +90,6 @@ export class PostgresFs implements IFileSystem {
   #chunkSize: number;
   #root: string;
   #schema: string;
-  #ownsPool: boolean;
 
   private constructor(options: PostgresFsOptions) {
     this.#chunkSize = options.chunkSize ?? 1024 * 1024;
@@ -101,29 +100,7 @@ export class PostgresFs implements IFileSystem {
     this.#schema = schema;
     const normalizedRoot = this.#normalizeRoot(options.root);
     this.#root = normalizedRoot === '/' ? '' : normalizedRoot;
-
-    const pg = PostgresFs.#requirePg();
-    if (options.pool instanceof pg.Pool) {
-      this.#pool = options.pool;
-      this.#ownsPool = false;
-    } else {
-      this.#pool =
-        typeof options.pool === 'string'
-          ? new pg.Pool({ connectionString: options.pool })
-          : new pg.Pool(options.pool);
-      this.#ownsPool = true;
-    }
-  }
-
-  static #requirePg(): typeof import('pg') {
-    try {
-      const require = createRequire(import.meta.url);
-      return require('pg');
-    } catch {
-      throw new Error(
-        'PostgresFs requires the "pg" package. Install it with: npm install pg',
-      );
-    }
+    this.#pool = options.pool;
   }
 
   #t(name: string): string {
@@ -133,12 +110,7 @@ export class PostgresFs implements IFileSystem {
   /** Opens the file system: creates its tables and its root directories. */
   static async create(options: PostgresFsOptions): Promise<PostgresFs> {
     const fs = new PostgresFs(options);
-    try {
-      await fs.#initialize();
-    } catch (error) {
-      await fs.close();
-      throw error;
-    }
+    await fs.#initialize();
     return fs;
   }
 
@@ -345,12 +317,6 @@ export class PostgresFs implements IFileSystem {
       return content;
     }
     return new Uint8Array(Buffer.from(content, encoding ?? 'utf8'));
-  }
-
-  async close(): Promise<void> {
-    if (this.#ownsPool) {
-      await this.#pool.end();
-    }
   }
 
   // ============================================================================

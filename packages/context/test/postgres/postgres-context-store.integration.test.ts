@@ -65,7 +65,6 @@ describe('PostgreSQL ContextStore Integration', () => {
         pool: container.pool(),
         schema,
       });
-      await initial.close();
 
       // Reopening an existing schema deadlocks only when the openers' DDL
       // overlaps, so six openers make the overlap dependable.
@@ -80,21 +79,17 @@ describe('PostgreSQL ContextStore Integration', () => {
       const stores = results.flatMap((result) =>
         result.status === 'fulfilled' ? [result.value] : [],
       );
-      try {
-        assert.deepStrictEqual(
-          results.map((result) =>
-            result.status === 'fulfilled' ? 'opened' : result.reason.code,
-          ),
-          Array.from({ length: 6 }, () => 'opened'),
-        );
-        await stores[0].createChat({ id: 'chat-open', userId: 'user-1' });
-        assert.strictEqual(
-          (await stores[5].getChat('chat-open'))?.id,
-          'chat-open',
-        );
-      } finally {
-        await Promise.all(stores.map((store) => store.close()));
-      }
+      assert.deepStrictEqual(
+        results.map((result) =>
+          result.status === 'fulfilled' ? 'opened' : result.reason.code,
+        ),
+        Array.from({ length: 6 }, () => 'opened'),
+      );
+      await stores[0].createChat({ id: 'chat-open', userId: 'user-1' });
+      assert.strictEqual(
+        (await stores[5].getChat('chat-open'))?.id,
+        'chat-open',
+      );
     });
 
     it('creates a new schema while other stores create it at the same time', async () => {
@@ -112,21 +107,14 @@ describe('PostgreSQL ContextStore Integration', () => {
       const stores = results.flatMap((result) =>
         result.status === 'fulfilled' ? [result.value] : [],
       );
-      try {
-        assert.deepStrictEqual(
-          results.map((result) =>
-            result.status === 'fulfilled' ? 'opened' : result.reason.code,
-          ),
-          ['opened', 'opened', 'opened'],
-        );
-        await stores[0].createChat({ id: 'chat-new', userId: 'user-1' });
-        assert.strictEqual(
-          (await stores[2].getChat('chat-new'))?.id,
-          'chat-new',
-        );
-      } finally {
-        await Promise.all(stores.map((store) => store.close()));
-      }
+      assert.deepStrictEqual(
+        results.map((result) =>
+          result.status === 'fulfilled' ? 'opened' : result.reason.code,
+        ),
+        ['opened', 'opened', 'opened'],
+      );
+      await stores[0].createChat({ id: 'chat-new', userId: 'user-1' });
+      assert.strictEqual((await stores[2].getChat('chat-new'))?.id, 'chat-new');
     });
   });
 
@@ -144,24 +132,19 @@ describe('PostgreSQL ContextStore Integration', () => {
       const second = await PostgresContextStore.create({
         pool: container.pool(),
       });
-      try {
-        await first.createChat({ id: 'chat-cas', userId: 'user-1' });
-        await Promise.all([
-          first.updateChat('chat-cas', (chat) => ({
-            metadata: { ...chat.metadata, firstKey: 'first' },
-          })),
-          second.updateChat('chat-cas', (chat) => ({
-            metadata: { ...chat.metadata, secondKey: 'second' },
-          })),
-        ]);
-        assert.deepStrictEqual((await first.getChat('chat-cas'))?.metadata, {
-          firstKey: 'first',
-          secondKey: 'second',
-        });
-      } finally {
-        await first.close();
-        await second.close();
-      }
+      await first.createChat({ id: 'chat-cas', userId: 'user-1' });
+      await Promise.all([
+        first.updateChat('chat-cas', (chat) => ({
+          metadata: { ...chat.metadata, firstKey: 'first' },
+        })),
+        second.updateChat('chat-cas', (chat) => ({
+          metadata: { ...chat.metadata, secondKey: 'second' },
+        })),
+      ]);
+      assert.deepStrictEqual((await first.getChat('chat-cas'))?.metadata, {
+        firstKey: 'first',
+        secondKey: 'second',
+      });
     });
   });
 
@@ -177,29 +160,25 @@ describe('PostgreSQL ContextStore Integration', () => {
         const store = await PostgresContextStore.create({
           pool: container.pool(),
         });
-        try {
-          await store.createChat({
-            id: 'chat-meta-string',
-            userId: 'user-meta-test',
-            metadata: { category: 'support' },
-          });
+        await store.createChat({
+          id: 'chat-meta-string',
+          userId: 'user-meta-test',
+          metadata: { category: 'support' },
+        });
 
-          await store.createChat({
-            id: 'chat-meta-string-2',
-            userId: 'user-meta-test',
-            metadata: { category: 'sales' },
-          });
+        await store.createChat({
+          id: 'chat-meta-string-2',
+          userId: 'user-meta-test',
+          metadata: { category: 'sales' },
+        });
 
-          const results = await store.listChats({
-            userId: 'user-meta-test',
-            metadata: { key: 'category', value: 'support' },
-          });
+        const results = await store.listChats({
+          userId: 'user-meta-test',
+          metadata: { key: 'category', value: 'support' },
+        });
 
-          assert.strictEqual(results.length, 1);
-          assert.strictEqual(results[0].id, 'chat-meta-string');
-        } finally {
-          await store.close();
-        }
+        assert.strictEqual(results.length, 1);
+        assert.strictEqual(results[0].id, 'chat-meta-string');
       });
 
       it('should filter by boolean metadata value', async () => {
@@ -208,37 +187,33 @@ describe('PostgreSQL ContextStore Integration', () => {
         const store = await PostgresContextStore.create({
           pool: container.pool(),
         });
-        try {
-          await store.createChat({
-            id: 'chat-meta-bool-true',
-            userId: 'user-bool-test',
-            metadata: { active: true },
-          });
+        await store.createChat({
+          id: 'chat-meta-bool-true',
+          userId: 'user-bool-test',
+          metadata: { active: true },
+        });
 
-          await store.createChat({
-            id: 'chat-meta-bool-false',
-            userId: 'user-bool-test',
-            metadata: { active: false },
-          });
+        await store.createChat({
+          id: 'chat-meta-bool-false',
+          userId: 'user-bool-test',
+          metadata: { active: false },
+        });
 
-          const activeChats = await store.listChats({
-            userId: 'user-bool-test',
-            metadata: { key: 'active', value: true },
-          });
+        const activeChats = await store.listChats({
+          userId: 'user-bool-test',
+          metadata: { key: 'active', value: true },
+        });
 
-          assert.strictEqual(activeChats.length, 1);
-          assert.strictEqual(activeChats[0].id, 'chat-meta-bool-true');
+        assert.strictEqual(activeChats.length, 1);
+        assert.strictEqual(activeChats[0].id, 'chat-meta-bool-true');
 
-          const inactiveChats = await store.listChats({
-            userId: 'user-bool-test',
-            metadata: { key: 'active', value: false },
-          });
+        const inactiveChats = await store.listChats({
+          userId: 'user-bool-test',
+          metadata: { key: 'active', value: false },
+        });
 
-          assert.strictEqual(inactiveChats.length, 1);
-          assert.strictEqual(inactiveChats[0].id, 'chat-meta-bool-false');
-        } finally {
-          await store.close();
-        }
+        assert.strictEqual(inactiveChats.length, 1);
+        assert.strictEqual(inactiveChats[0].id, 'chat-meta-bool-false');
       });
 
       it('should filter by number metadata value', async () => {
@@ -247,29 +222,25 @@ describe('PostgreSQL ContextStore Integration', () => {
         const store = await PostgresContextStore.create({
           pool: container.pool(),
         });
-        try {
-          await store.createChat({
-            id: 'chat-meta-num-1',
-            userId: 'user-num-test',
-            metadata: { priority: 1 },
-          });
+        await store.createChat({
+          id: 'chat-meta-num-1',
+          userId: 'user-num-test',
+          metadata: { priority: 1 },
+        });
 
-          await store.createChat({
-            id: 'chat-meta-num-2',
-            userId: 'user-num-test',
-            metadata: { priority: 2 },
-          });
+        await store.createChat({
+          id: 'chat-meta-num-2',
+          userId: 'user-num-test',
+          metadata: { priority: 2 },
+        });
 
-          const results = await store.listChats({
-            userId: 'user-num-test',
-            metadata: { key: 'priority', value: 1 },
-          });
+        const results = await store.listChats({
+          userId: 'user-num-test',
+          metadata: { key: 'priority', value: 1 },
+        });
 
-          assert.strictEqual(results.length, 1);
-          assert.strictEqual(results[0].id, 'chat-meta-num-1');
-        } finally {
-          await store.close();
-        }
+        assert.strictEqual(results.length, 1);
+        assert.strictEqual(results[0].id, 'chat-meta-num-1');
       });
     });
   });

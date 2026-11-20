@@ -153,22 +153,23 @@ Use `PollingChangeSource` for SQLite/local polling. For Postgres deployments
 that use LISTEN/NOTIFY, swap in `PostgresNotifyChangeSource`:
 
 ```typescript
+import pg from 'pg';
+
 import {
   PostgresNotifyChangeSource,
   PostgresStreamStore,
   StreamManager,
 } from '@deepagents/context';
 
-const store = await PostgresStreamStore.create({
-  pool: process.env.DATABASE_URL!,
-});
-
-const changeSource = await PostgresNotifyChangeSource.create({
-  pool: process.env.DATABASE_URL!,
-});
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const store = await PostgresStreamStore.create({ pool });
+const changeSource = await PostgresNotifyChangeSource.create({ pool });
 
 const manager = new StreamManager({ store, changeSource });
 ```
+
+Both borrow your `pg.Pool` and never end it. `changeSource.close()` releases its
+LISTEN connection; end the pool yourself at shutdown.
 
 ### register(streamId)
 

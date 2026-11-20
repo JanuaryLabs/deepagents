@@ -253,8 +253,6 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
     } finally {
       await boss.stop({ graceful: false });
       mailboxStore.close();
-      await streamStore.close();
-      await store.close();
     }
   });
 });

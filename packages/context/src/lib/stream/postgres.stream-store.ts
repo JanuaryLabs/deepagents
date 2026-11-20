@@ -1,5 +1,4 @@
-import { createRequire } from 'node:module';
-import type { Pool, PoolConfig } from 'pg';
+import type { Pool } from 'pg';
 import { z } from 'zod';
 
 import { bigintColumn } from '../store/columns.ts';
@@ -18,7 +17,8 @@ import type {
 import { StreamStore, collectStreamFailures } from './stream-store.ts';
 
 export interface PostgresStreamStoreOptions {
-  pool: Pool | PoolConfig | string;
+  /** The host's pool; the store borrows it and never ends it. */
+  pool: Pool;
   schema?: string;
 }
 
@@ -59,36 +59,13 @@ const chunkRow = z.object({
 export class PostgresStreamStore extends StreamStore {
   #pool: Pool;
   #schema: string;
-  #ownsPool: boolean;
 
   private constructor(options: PostgresStreamStoreOptions) {
     super();
     const schema = options.schema ?? 'public';
     assertIdentifier(schema, 'schema');
     this.#schema = schema;
-
-    const pg = PostgresStreamStore.#requirePg();
-    if (options.pool instanceof pg.Pool) {
-      this.#pool = options.pool;
-      this.#ownsPool = false;
-    } else {
-      this.#pool =
-        typeof options.pool === 'string'
-          ? new pg.Pool({ connectionString: options.pool })
-          : new pg.Pool(options.pool);
-      this.#ownsPool = true;
-    }
-  }
-
-  static #requirePg(): typeof import('pg') {
-    try {
-      const require = createRequire(import.meta.url);
-      return require('pg');
-    } catch {
-      throw new Error(
-        'PostgresStreamStore requires the "pg" package. Install it with: npm install pg',
-      );
-    }
+    this.#pool = options.pool;
   }
 
   #t(name: string): string {
@@ -100,12 +77,7 @@ export class PostgresStreamStore extends StreamStore {
     options: PostgresStreamStoreOptions,
   ): Promise<PostgresStreamStore> {
     const store = new PostgresStreamStore(options);
-    try {
-      await store.#initialize();
-    } catch (error) {
-      await store.close();
-      throw error;
-    }
+    await store.#initialize();
     return store;
   }
 
@@ -113,12 +85,6 @@ export class PostgresStreamStore extends StreamStore {
     await this.#pool.query(
       lockSchemaDDL(postgresStreamDDL(this.#schema), this.#schema),
     );
-  }
-
-  async close(): Promise<void> {
-    if (this.#ownsPool && !this.#pool.ending) {
-      await this.#pool.end();
-    }
   }
 
   async #query(sql: string, params?: unknown[]): Promise<unknown[]> {

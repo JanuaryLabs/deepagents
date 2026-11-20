@@ -235,7 +235,8 @@ const postgres = new Postgres({ docker });
 
 it('stores a record', async () => {
   await using database = await postgres.database();
-  // Use database.connectionString. Close application clients before scope exit.
+  // Hand Postgres stores database.pool(); the handle ends that pool before the drop.
+  // Close any other application clients before scope exit.
 });
 ```
 

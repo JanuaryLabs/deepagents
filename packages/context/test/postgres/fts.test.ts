@@ -14,30 +14,26 @@ describe('Full-Text Search', () => {
       const store = await PostgresContextStore.create({
         pool: container.pool(),
       });
-      try {
-        const engine1 = new ContextEngine({
-          store,
-          chatId: 'fts-chat-1',
-          userId: 'alice',
-        });
-        engine1.set(user('Apple banana cherry'));
-        await engine1.save();
+      const engine1 = new ContextEngine({
+        store,
+        chatId: 'fts-chat-1',
+        userId: 'alice',
+      });
+      engine1.set(user('Apple banana cherry'));
+      await engine1.save();
 
-        const engine2 = new ContextEngine({
-          store,
-          chatId: 'fts-chat-2',
-          userId: 'alice',
-        });
-        engine2.set(user('Apple dragonfruit elderberry'));
-        await engine2.save();
+      const engine2 = new ContextEngine({
+        store,
+        chatId: 'fts-chat-2',
+        userId: 'alice',
+      });
+      engine2.set(user('Apple dragonfruit elderberry'));
+      await engine2.save();
 
-        await store.deleteChat('fts-chat-1');
+      await store.deleteChat('fts-chat-1');
 
-        const results = await store.searchMessages('fts-chat-2', 'apple');
-        assert.strictEqual(results.length, 1);
-      } finally {
-        await store.close();
-      }
+      const results = await store.searchMessages('fts-chat-2', 'apple');
+      assert.strictEqual(results.length, 1);
     });
   });
 });

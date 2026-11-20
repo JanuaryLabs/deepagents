@@ -77,7 +77,6 @@ async function withNotifySource<T>(
     return await fn(store, source, container);
   } finally {
     await source.close();
-    await store.close();
   }
 }
 
@@ -142,7 +141,6 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
     } finally {
       ac.abort();
       await Promise.all(sources.map((source) => source.close()));
-      await store.close();
     }
   });
 
@@ -200,7 +198,6 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
     } finally {
       ac.abort();
       await Promise.all(sources.map((source) => source.close()));
-      await store.close();
     }
   });
 
@@ -303,7 +300,6 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
         ac.abort();
         await iterator.return?.();
         await otherSource.close();
-        await otherStore.close();
       }
     }));
 
@@ -364,7 +360,6 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       ac.abort();
       await iterator.return?.();
       await source.close();
-      await store.close();
     }
   });
 
@@ -405,7 +400,6 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       }
       await iterator.return?.();
       await source.close();
-      await store.close();
     }
   });
 
@@ -480,7 +474,6 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       await failing.return?.();
       await retried.return?.();
       await source.close();
-      await store.close();
     }
   });
 

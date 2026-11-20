@@ -2582,7 +2582,5 @@ test('duplicate wake delivery across runtimes advances PostgreSQL state once', a
   } finally {
     await secondWorker?.[Symbol.asyncDispose]();
     await firstWorker[Symbol.asyncDispose]();
-    await secondStore.close();
-    await firstStore.close();
   }
 });
