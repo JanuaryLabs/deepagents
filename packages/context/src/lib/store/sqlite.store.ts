@@ -601,15 +601,18 @@ export class SqliteContextStore extends ContextStore {
   }
 
   async setActiveBranch(chatId: string, branchId: string): Promise<void> {
-    // Deactivate all branches for this chat
-    this.#db
-      .prepare('UPDATE branches SET isActive = 0 WHERE chatId = ?')
-      .run(chatId);
-
-    // Activate the specified branch
-    this.#db
-      .prepare('UPDATE branches SET isActive = 1 WHERE id = ?')
-      .run(branchId);
+    transaction(
+      this.#db,
+      () => {
+        this.#db
+          .prepare('UPDATE branches SET isActive = 0 WHERE chatId = ?')
+          .run(chatId);
+        this.#db
+          .prepare('UPDATE branches SET isActive = 1 WHERE id = ?')
+          .run(branchId);
+      },
+      { mode: 'deferred' },
+    );
   }
 
   async updateBranchHead(
