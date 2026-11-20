@@ -123,6 +123,22 @@ export class SqliteMailboxStore extends MailboxStore implements Disposable {
     return this.#hasPending(recipient);
   }
 
+  override async hasPendingTriggerTurn(
+    recipient: ConversationId,
+  ): Promise<boolean> {
+    const row = this.#database
+      .prepare(
+        `SELECT 1
+           FROM zukhruf_mailbox_items
+          WHERE recipient_chat_id = ?
+            AND recipient_user_id = ?
+            AND json_extract(communication, '$.triggerTurn') = 1
+          LIMIT 1`,
+      )
+      .get(recipient.chatId, recipient.userId);
+    return row !== undefined;
+  }
+
   #hasPending(recipient: ConversationId): boolean {
     const row = this.#database
       .prepare(

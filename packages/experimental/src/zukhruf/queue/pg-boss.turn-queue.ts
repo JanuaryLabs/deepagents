@@ -1,8 +1,8 @@
-import type { JobWithMetadata, PgBoss } from 'pg-boss';
+import type { Db, JobWithMetadata, PgBoss } from 'pg-boss';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
 
-import { isRecord } from '@deepagents/context';
+import { type PostgresTransaction, isRecord } from '@deepagents/context';
 
 import {
   type ConsumeContext,
@@ -28,6 +28,12 @@ export interface PgBossTurnQueueOptions {
 
 /** A `<schema>.queue` catalog row, selected as `table_name AS "table"`. */
 const queueCatalogRowSchema = z.object({ table: z.string() });
+
+/** The part of the queue that writes and reads inside a caller's transaction. */
+export type TransactionalTurnQueue = Pick<
+  TurnQueue,
+  'push' | 'getTurnActivity'
+>;
 
 /** Options after defaults and checks, as the queue opens with them. */
 interface PgBossTurnQueueSettings {
@@ -113,6 +119,10 @@ export class PgBossTurnQueue extends TurnQueue {
   ): Promise<PgBossTurnQueue> {
     const settings = PgBossTurnQueue.#settings(boss, options);
     const opened = await PgBossTurnQueue.#openQueue(boss, settings);
+    // pg-boss looks up queue metadata on its own database before it honors a
+    // transaction's `db`; a cache miss inside `bind(tx)` would wait for a
+    // pool connection the transaction may be holding. Fill the cache now.
+    await boss.findJobs(settings.queue, { id: uuidv7() });
     return new PgBossTurnQueue(boss, settings, opened);
   }
 
@@ -211,7 +221,33 @@ export class PgBossTurnQueue extends TurnQueue {
     return deadLetterQueueOf(this.#queue);
   }
 
-  async push(turn: TurnRef): Promise<void> {
+  /**
+   * A view whose `push` and `getTurnActivity` run inside `tx`: a pushed turn
+   * reaches workers only if `tx` commits, and activity counts what `tx` has
+   * pushed so far. `tx` must be on the database PgBoss uses.
+   */
+  bind(tx: PostgresTransaction): TransactionalTurnQueue {
+    const db: Db = {
+      executeSql: (text, values) => tx.query(text, values),
+    };
+    return {
+      push: (turn) => this.#push(turn, db),
+      getTurnActivity: (conversation) =>
+        this.#getTurnActivity(conversation, db),
+    };
+  }
+
+  push(turn: TurnRef): Promise<void> {
+    return this.#push(turn, undefined);
+  }
+
+  override getTurnActivity(
+    conversation: Pick<TurnRef, 'chatId' | 'userId'>,
+  ): Promise<TurnActivity> {
+    return this.#getTurnActivity(conversation, undefined);
+  }
+
+  async #push(turn: TurnRef, db: Db | undefined): Promise<void> {
     // pg-boss fetches `ORDER BY priority desc, created_on, id`. A monotonic
     // UUIDv7 job id makes the id tiebreak follow push order, so FIFO survives
     // created_on timestamp ties (millisecond-resolution clocks like PGlite).
@@ -219,17 +255,20 @@ export class PgBossTurnQueue extends TurnQueue {
     const inserted = await this.#boss.send(this.#queue, turn, {
       id: jobId,
       singletonKey: turn.chatId,
+      db,
     });
     if (inserted === null) {
       throw new Error(`PgBossTurnQueue job id collision: ${jobId}`);
     }
   }
 
-  override async getTurnActivity(
+  async #getTurnActivity(
     conversation: Pick<TurnRef, 'chatId' | 'userId'>,
+    db: Db | undefined,
   ): Promise<TurnActivity> {
     const jobs = await this.#boss.findJobs<TurnRef>(this.#queue, {
       key: conversation.chatId,
+      db,
     });
     const conversationJobs = jobs.filter(
       (job) =>

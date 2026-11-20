@@ -27,6 +27,7 @@ export * from './lib/skills/index.ts';
 export * from './lib/soul/fragments.ts';
 export * from './lib/store/memory.store.ts';
 export * from './lib/store/postgres-schema-lock.ts';
+export * from './lib/store/postgres-store-database.ts';
 export * from './lib/store/postgres-transaction.ts';
 export * from './lib/store/postgres.store.ts';
 export * from './lib/store/sqlite.store.ts';

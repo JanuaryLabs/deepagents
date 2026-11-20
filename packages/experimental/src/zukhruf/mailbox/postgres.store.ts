@@ -2,9 +2,9 @@ import type { Pool } from 'pg';
 import { z } from 'zod';
 
 import {
+  PostgresStoreDatabase,
   type PostgresTransaction,
   lockSchemaDDL,
-  postgresTransaction,
 } from '@deepagents/context';
 
 import { communicationSchema } from './communication-schema.ts';
@@ -37,27 +37,38 @@ export interface PostgresMailboxStoreOptions {
 }
 
 /** PostgreSQL-backed mailbox that every worker on the database shares. */
-export class PostgresMailboxStore extends MailboxStore {
-  readonly #pool: Pool;
-  readonly #schema: string;
+/** The part of the mailbox that writes inside a caller's transaction. */
+export type TransactionalMailboxStore = Pick<
+  MailboxStore,
+  'enqueue' | 'beginTurn' | 'hasPendingTriggerTurn'
+>;
 
-  private constructor(pool: Pool, schema: string) {
+export class PostgresMailboxStore extends MailboxStore {
+  readonly #database: PostgresStoreDatabase;
+
+  private constructor(database: PostgresStoreDatabase) {
     super();
-    this.#pool = pool;
-    this.#schema = schema;
+    this.#database = database;
   }
 
   /** Opens the store: creates its schema objects before it returns. */
   static async create(
     options: PostgresMailboxStoreOptions,
   ): Promise<PostgresMailboxStore> {
-    const schema = options.schema ?? 'public';
-    await options.pool.query(lockSchemaDDL(mailboxDDL(schema), schema));
-    return new PostgresMailboxStore(options.pool, schema);
+    const database = new PostgresStoreDatabase(options.pool, options.schema);
+    await database.query(
+      lockSchemaDDL(mailboxDDL(database.schema), database.schema),
+    );
+    return new PostgresMailboxStore(database);
   }
 
-  #t(name: string): string {
-    return `"${this.#schema}"."${name}"`;
+  /**
+   * A view of this store whose reads and writes run inside `tx`. Each of its
+   * writes takes the recipient's lock in a savepoint of `tx`, and the lock is
+   * held until `tx` ends.
+   */
+  bind(tx: PostgresTransaction): TransactionalMailboxStore {
+    return new PostgresMailboxStore(this.#database.bind(tx));
   }
 
   /**
@@ -69,9 +80,9 @@ export class PostgresMailboxStore extends MailboxStore {
     recipient: ConversationId,
     fn: (tx: PostgresTransaction) => Promise<T>,
   ): Promise<T> {
-    return postgresTransaction(this.#pool, async (tx) => {
+    return this.#database.transaction(async (tx) => {
       await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
-        `zukhruf:mailbox:${JSON.stringify([this.#schema, recipient.chatId, recipient.userId])}`,
+        `zukhruf:mailbox:${JSON.stringify([this.#database.schema, recipient.chatId, recipient.userId])}`,
       ]);
       return fn(tx);
     });
@@ -83,7 +94,7 @@ export class PostgresMailboxStore extends MailboxStore {
   ): Promise<void> {
     await this.#forRecipient(recipient, (client) =>
       client.query(
-        `INSERT INTO ${this.#t('zukhruf_mailbox_activity')}
+        `INSERT INTO ${this.#database.table('zukhruf_mailbox_activity')}
            (recipient_chat_id, recipient_user_id, turn_id)
          VALUES ($1, $2, $3)
          ON CONFLICT (recipient_chat_id, recipient_user_id)
@@ -103,13 +114,13 @@ export class PostgresMailboxStore extends MailboxStore {
         (await this.#exists(
           client,
           `SELECT EXISTS (
-             SELECT 1 FROM ${this.#t('zukhruf_mailbox_consumed_terminal_ids')}
+             SELECT 1 FROM ${this.#database.table('zukhruf_mailbox_consumed_terminal_ids')}
               WHERE communication_id = $1)`,
           [communication.id],
         ));
       if (!consumedTerminal) {
         await client.query(
-          `INSERT INTO ${this.#t('zukhruf_mailbox_items')}
+          `INSERT INTO ${this.#database.table('zukhruf_mailbox_items')}
              (communication_id, recipient_chat_id, recipient_user_id, communication)
            VALUES ($1, $2, $3, $4::jsonb)
            ON CONFLICT (communication_id) DO NOTHING`,
@@ -131,7 +142,7 @@ export class PostgresMailboxStore extends MailboxStore {
   ): Promise<MailboxEndTurnResult> {
     return this.#forRecipient(recipient, async (client) => {
       const ended = await client.query(
-        `DELETE FROM ${this.#t('zukhruf_mailbox_activity')}
+        `DELETE FROM ${this.#database.table('zukhruf_mailbox_activity')}
           WHERE recipient_chat_id = $1
             AND recipient_user_id = $2
             AND turn_id = $3`,
@@ -145,7 +156,19 @@ export class PostgresMailboxStore extends MailboxStore {
   }
 
   override hasPending(recipient: ConversationId): Promise<boolean> {
-    return this.#hasPending(this.#pool, recipient);
+    return this.#hasPending(this.#database, recipient);
+  }
+
+  override hasPendingTriggerTurn(recipient: ConversationId): Promise<boolean> {
+    return this.#exists(
+      this.#database,
+      `SELECT EXISTS (
+         SELECT 1 FROM ${this.#database.table('zukhruf_mailbox_items')}
+          WHERE recipient_chat_id = $1
+            AND recipient_user_id = $2
+            AND communication @> '{"triggerTurn": true}')`,
+      [recipient.chatId, recipient.userId],
+    );
   }
 
   override drain(
@@ -169,7 +192,7 @@ export class PostgresMailboxStore extends MailboxStore {
         (
           await client.query(
             `SELECT sequence, communication
-               FROM ${this.#t('zukhruf_mailbox_items')}
+               FROM ${this.#database.table('zukhruf_mailbox_items')}
               WHERE recipient_chat_id = $1
                 AND recipient_user_id = $2
               ORDER BY sequence`,
@@ -186,7 +209,7 @@ export class PostgresMailboxStore extends MailboxStore {
       // Only terminal ids get durable tombstones: ordinary random-id mail
       // needs no permanent dedup state once it is consumed in FIFO order.
       await client.query(
-        `INSERT INTO ${this.#t('zukhruf_mailbox_consumed_terminal_ids')} (communication_id)
+        `INSERT INTO ${this.#database.table('zukhruf_mailbox_consumed_terminal_ids')} (communication_id)
          SELECT unnest($1::text[])
          ON CONFLICT (communication_id) DO NOTHING`,
         [
@@ -198,7 +221,7 @@ export class PostgresMailboxStore extends MailboxStore {
         ],
       );
       await client.query(
-        `DELETE FROM ${this.#t('zukhruf_mailbox_items')}
+        `DELETE FROM ${this.#database.table('zukhruf_mailbox_items')}
           WHERE sequence = ANY($1::bigint[])`,
         [consumed.map(({ sequence }) => sequence)],
       );
@@ -213,7 +236,7 @@ export class PostgresMailboxStore extends MailboxStore {
     return this.#exists(
       queryable,
       `SELECT EXISTS (
-         SELECT 1 FROM ${this.#t('zukhruf_mailbox_items')}
+         SELECT 1 FROM ${this.#database.table('zukhruf_mailbox_items')}
           WHERE recipient_chat_id = $1 AND recipient_user_id = $2)`,
       [recipient.chatId, recipient.userId],
     );
@@ -226,7 +249,7 @@ export class PostgresMailboxStore extends MailboxStore {
     return this.#exists(
       client,
       `SELECT EXISTS (
-         SELECT 1 FROM ${this.#t('zukhruf_mailbox_activity')}
+         SELECT 1 FROM ${this.#database.table('zukhruf_mailbox_activity')}
           WHERE recipient_chat_id = $1 AND recipient_user_id = $2)`,
       [recipient.chatId, recipient.userId],
     );

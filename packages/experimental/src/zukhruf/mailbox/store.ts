@@ -24,6 +24,9 @@ export abstract class MailboxStore {
 
   abstract hasPending(recipient: ConversationId): Promise<boolean>;
 
+  /** Whether undelivered mail sent with `MessageDeliveryModes.TriggerTurn` waits for the recipient. */
+  abstract hasPendingTriggerTurn(recipient: ConversationId): Promise<boolean>;
+
   /** Consumes the contiguous queue-only prefix, stopping before the first trigger. */
   abstract drainLeadingQueueOnly(
     recipient: ConversationId,

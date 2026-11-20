@@ -115,6 +115,64 @@ for (const backing of backings) {
       );
     });
 
+    it('reports pending trigger-turn mail only while undelivered trigger-turn mail waits for that recipient', async () => {
+      await using mailbox = await backing.create();
+      const store = await mailbox.open();
+      const pendingTrigger = async () => ({
+        researcher: await store.hasPendingTriggerTurn(researcher),
+        reviewer: await store.hasPendingTriggerTurn(reviewer),
+        researcherOfAnotherUser: await store.hasPendingTriggerTurn({
+          ...researcher,
+          userId: 'user-2',
+        }),
+      });
+
+      const empty = await pendingTrigger();
+      await store.enqueue(mail('queued only'));
+      const queueOnly = await pendingTrigger();
+      await store.enqueue({
+        ...mail('trigger'),
+        type: InterAgentCommunicationTypes.NewTask,
+        triggerTurn: true,
+      });
+      const triggered = await pendingTrigger();
+      await store.drainLeadingQueueOnly(researcher);
+      const afterQueueOnlyDrain = await pendingTrigger();
+      await store.drain(researcher);
+      const afterDrain = await pendingTrigger();
+
+      assert.deepStrictEqual(
+        { empty, queueOnly, triggered, afterQueueOnlyDrain, afterDrain },
+        {
+          empty: {
+            researcher: false,
+            reviewer: false,
+            researcherOfAnotherUser: false,
+          },
+          queueOnly: {
+            researcher: false,
+            reviewer: false,
+            researcherOfAnotherUser: false,
+          },
+          triggered: {
+            researcher: true,
+            reviewer: false,
+            researcherOfAnotherUser: false,
+          },
+          afterQueueOnlyDrain: {
+            researcher: true,
+            reviewer: false,
+            researcherOfAnotherUser: false,
+          },
+          afterDrain: {
+            researcher: false,
+            reviewer: false,
+            researcherOfAnotherUser: false,
+          },
+        },
+      );
+    });
+
     it('drains one writer’s mail in the order it was enqueued', async () => {
       await using mailbox = await backing.create();
       const store = await mailbox.open();

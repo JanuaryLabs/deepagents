@@ -3,10 +3,8 @@ import { z } from 'zod';
 
 import { bigintColumn } from '../store/columns.ts';
 import { lockSchemaDDL } from '../store/postgres-schema-lock.ts';
-import {
-  PostgresTransaction,
-  postgresTransaction,
-} from '../store/postgres-transaction.ts';
+import { PostgresStoreDatabase } from '../store/postgres-store-database.ts';
+import type { PostgresTransaction } from '../store/postgres-transaction.ts';
 import { postgresStreamDDL } from './ddl.stream.postgres.ts';
 import { streamStatus, toStreamPart } from './rows.ts';
 import type {
@@ -60,60 +58,32 @@ const chunkRow = z.object({
 });
 
 export class PostgresStreamStore extends StreamStore {
-  #db: Pool | PostgresTransaction;
-  #schema: string;
+  readonly #database: PostgresStoreDatabase;
 
-  private constructor(db: Pool | PostgresTransaction, schema: string) {
+  private constructor(database: PostgresStoreDatabase) {
     super();
-    assertIdentifier(schema, 'schema');
-    this.#schema = schema;
-    this.#db = db;
-  }
-
-  #t(name: string): string {
-    return `"${this.#schema}"."${name}"`;
+    this.#database = database;
   }
 
   /** Opens the store: creates its tables before it returns. */
   static async create(
     options: PostgresStreamStoreOptions,
   ): Promise<PostgresStreamStore> {
-    const store = new PostgresStreamStore(
-      options.pool,
-      options.schema ?? 'public',
+    const database = new PostgresStoreDatabase(options.pool, options.schema);
+    await database.query(
+      lockSchemaDDL(postgresStreamDDL(database.schema), database.schema),
     );
-    await store.#initialize(options.pool);
-    return store;
+    return new PostgresStreamStore(database);
   }
 
   /** A view of this store whose reads and writes run inside `tx`. */
   bind(tx: PostgresTransaction): PostgresStreamStore {
-    return new PostgresStreamStore(tx, this.#schema);
-  }
-
-  async #initialize(pool: Pool): Promise<void> {
-    await pool.query(
-      lockSchemaDDL(postgresStreamDDL(this.#schema), this.#schema),
-    );
-  }
-
-  async #query(sql: string, params?: unknown[]): Promise<unknown[]> {
-    const db: Pick<PostgresTransaction, 'query'> = this.#db;
-    const result = await db.query(sql, params);
-    return result.rows;
-  }
-
-  async #rows<Row extends z.ZodType>(
-    row: Row,
-    sql: string,
-    params?: unknown[],
-  ): Promise<z.output<Row>[]> {
-    return z.array(row).parse(await this.#query(sql, params));
+    return new PostgresStreamStore(this.#database.bind(tx));
   }
 
   async createStream(stream: StreamData): Promise<void> {
-    await this.#query(
-      `INSERT INTO ${this.#t('streams')}
+    await this.#database.query(
+      `INSERT INTO ${this.#database.table('streams')}
        (id, status, created_at, started_at, finished_at, cancel_requested_at, error)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       streamParams(stream),
@@ -123,9 +93,9 @@ export class PostgresStreamStore extends StreamStore {
   async upsertStream(
     stream: StreamData,
   ): Promise<{ stream: StreamData; created: boolean }> {
-    const [created] = await this.#rows(
+    const [created] = await this.#database.rows(
       storedStream,
-      `INSERT INTO ${this.#t('streams')}
+      `INSERT INTO ${this.#database.table('streams')}
        (id, status, created_at, started_at, finished_at, cancel_requested_at, error)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT(id) DO NOTHING
@@ -147,18 +117,18 @@ export class PostgresStreamStore extends StreamStore {
   }
 
   async getStream(streamId: string): Promise<StreamData | undefined> {
-    const [found] = await this.#rows(
+    const [found] = await this.#database.rows(
       storedStream,
-      `SELECT * FROM ${this.#t('streams')} WHERE id = $1`,
+      `SELECT * FROM ${this.#database.table('streams')} WHERE id = $1`,
       [streamId],
     );
     return found;
   }
 
   async getStreamStatus(streamId: string): Promise<StreamStatus | undefined> {
-    const rows = await this.#rows(
+    const rows = await this.#database.rows(
       statusRow,
-      `SELECT status FROM ${this.#t('streams')} WHERE id = $1`,
+      `SELECT status FROM ${this.#database.table('streams')} WHERE id = $1`,
       [streamId],
     );
     return rows[0]?.status;
@@ -166,7 +136,7 @@ export class PostgresStreamStore extends StreamStore {
 
   async listStreamIds(options?: ListStreamIdsOptions): Promise<string[]> {
     const params: unknown[] = [];
-    let sql = `SELECT id FROM ${this.#t('streams')}`;
+    let sql = `SELECT id FROM ${this.#database.table('streams')}`;
 
     if (options?.status) {
       params.push(options.status);
@@ -175,7 +145,7 @@ export class PostgresStreamStore extends StreamStore {
 
     sql += ' ORDER BY created_at ASC, id ASC';
 
-    const rows = await this.#rows(idRow, sql, params);
+    const rows = await this.#database.rows(idRow, sql, params);
     return rows.map((row) => row.id);
   }
 
@@ -183,9 +153,9 @@ export class PostgresStreamStore extends StreamStore {
     streamId: string,
     update: StreamUpdater,
   ): Promise<StreamUpdateResult> {
-    return postgresTransaction(this.#db, async (tx) => {
+    return this.#database.transaction(async (tx) => {
       const selected = await tx.query(
-        `SELECT * FROM ${this.#t('streams')} WHERE id = $1 FOR UPDATE`,
+        `SELECT * FROM ${this.#database.table('streams')} WHERE id = $1 FOR UPDATE`,
         [streamId],
       );
       const stream = storedStream.optional().parse(selected.rows[0]);
@@ -216,7 +186,7 @@ export class PostgresStreamStore extends StreamStore {
 
       params.push(streamId);
       const updated = await tx.query(
-        `UPDATE ${this.#t('streams')}
+        `UPDATE ${this.#database.table('streams')}
             SET ${setClauses.join(', ')}
           WHERE id = $${params.length}
           RETURNING *`,
@@ -234,40 +204,40 @@ export class PostgresStreamStore extends StreamStore {
     const now = Date.now();
     switch (status) {
       case 'running':
-        await this.#query(
-          `UPDATE ${this.#t('streams')}
+        await this.#database.query(
+          `UPDATE ${this.#database.table('streams')}
            SET status = $1, started_at = $2
            WHERE id = $3 AND status = 'queued'`,
           [status, now, streamId],
         );
         break;
       case 'completed':
-        await this.#query(
-          `UPDATE ${this.#t('streams')}
+        await this.#database.query(
+          `UPDATE ${this.#database.table('streams')}
            SET status = $1, finished_at = $2
            WHERE id = $3 AND status IN ('queued', 'running')`,
           [status, now, streamId],
         );
         break;
       case 'failed':
-        await this.#query(
-          `UPDATE ${this.#t('streams')}
+        await this.#database.query(
+          `UPDATE ${this.#database.table('streams')}
            SET status = $1, finished_at = $2, error = $3
            WHERE id = $4 AND status IN ('queued', 'running')`,
           [status, now, options?.error ?? null, streamId],
         );
         break;
       case 'cancelled':
-        await this.#query(
-          `UPDATE ${this.#t('streams')}
+        await this.#database.query(
+          `UPDATE ${this.#database.table('streams')}
            SET status = $1, cancel_requested_at = $2, finished_at = $3
            WHERE id = $4 AND status IN ('queued', 'running')`,
           [status, now, now, streamId],
         );
         break;
       default:
-        await this.#query(
-          `UPDATE ${this.#t('streams')}
+        await this.#database.query(
+          `UPDATE ${this.#database.table('streams')}
            SET status = $1
            WHERE id = $2 AND status = 'queued'`,
           [status, streamId],
@@ -284,30 +254,30 @@ export class PostgresStreamStore extends StreamStore {
       created_at: chunk.createdAt,
     }));
     const params = [JSON.stringify(rows)];
-    const insertSql = `INSERT INTO ${this.#t('stream_chunks')} (stream_id, seq, data, created_at)
+    const insertSql = `INSERT INTO ${this.#database.table('stream_chunks')} (stream_id, seq, data, created_at)
        SELECT stream_id, seq, data, created_at
        FROM jsonb_to_recordset($1::jsonb)
          AS rows(stream_id TEXT, seq INTEGER, data JSONB, created_at BIGINT)`;
 
     const failures = collectStreamFailures(chunks);
     if (failures.length === 0) {
-      await this.#query(insertSql, params);
+      await this.#database.query(insertSql, params);
       return;
     }
 
-    await postgresTransaction(this.#db, async (tx) => {
+    await this.#database.transaction(async (tx) => {
       await tx.query(insertSql, params);
       const failedAt = Date.now();
       for (const failure of failures) {
         const result = await tx.query(
-          `UPDATE ${this.#t('streams')}
+          `UPDATE ${this.#database.table('streams')}
            SET status = $1, finished_at = $2, error = $3
            WHERE id = $4 AND status IN ('queued', 'running')`,
           ['failed', failedAt, failure.error, failure.streamId],
         );
         if (result.rowCount !== 1) {
           const existing = await tx.query(
-            `SELECT id FROM ${this.#t('streams')} WHERE id = $1`,
+            `SELECT id FROM ${this.#database.table('streams')} WHERE id = $1`,
             [failure.streamId],
           );
           if (existing.rowCount !== 1) {
@@ -324,7 +294,7 @@ export class PostgresStreamStore extends StreamStore {
     limit?: number,
   ): Promise<StreamChunkData[]> {
     const params: unknown[] = [streamId];
-    let sql = `SELECT * FROM ${this.#t('stream_chunks')} WHERE stream_id = $1`;
+    let sql = `SELECT * FROM ${this.#database.table('stream_chunks')} WHERE stream_id = $1`;
 
     if (fromSeq !== undefined) {
       params.push(fromSeq);
@@ -338,7 +308,7 @@ export class PostgresStreamStore extends StreamStore {
       sql += ` LIMIT $${params.length}`;
     }
 
-    const rows = await this.#rows(chunkRow, sql, params);
+    const rows = await this.#database.rows(chunkRow, sql, params);
     return Promise.all(
       rows.map(async (row): Promise<StreamChunkData> => ({
         streamId: row.stream_id,
@@ -350,15 +320,16 @@ export class PostgresStreamStore extends StreamStore {
   }
 
   async deleteStream(streamId: string): Promise<void> {
-    await this.#query(`DELETE FROM ${this.#t('streams')} WHERE id = $1`, [
-      streamId,
-    ]);
+    await this.#database.query(
+      `DELETE FROM ${this.#database.table('streams')} WHERE id = $1`,
+      [streamId],
+    );
   }
 
   async reopenStream(streamId: string): Promise<StreamData> {
-    return postgresTransaction(this.#db, async (tx) => {
+    return this.#database.transaction(async (tx) => {
       const result = await tx.query(
-        `SELECT * FROM ${this.#t('streams')} WHERE id = $1 FOR UPDATE`,
+        `SELECT * FROM ${this.#database.table('streams')} WHERE id = $1 FOR UPDATE`,
         [streamId],
       );
       const row = statusRow.optional().parse(result.rows[0]);
@@ -371,9 +342,10 @@ export class PostgresStreamStore extends StreamStore {
         );
       }
 
-      await tx.query(`DELETE FROM ${this.#t('streams')} WHERE id = $1`, [
-        streamId,
-      ]);
+      await tx.query(
+        `DELETE FROM ${this.#database.table('streams')} WHERE id = $1`,
+        [streamId],
+      );
 
       const now = Date.now();
       const stream: StreamData = {
@@ -387,7 +359,7 @@ export class PostgresStreamStore extends StreamStore {
       };
 
       await tx.query(
-        `INSERT INTO ${this.#t('streams')}
+        `INSERT INTO ${this.#database.table('streams')}
          (id, status, created_at, started_at, finished_at, cancel_requested_at, error)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         streamParams(stream),
@@ -412,10 +384,4 @@ function streamParams(stream: StreamData): unknown[] {
 
 function isTerminal(status: StreamStatus): boolean {
   return status !== 'queued' && status !== 'running';
-}
-
-function assertIdentifier(value: string, label: string): void {
-  if (!/^[a-zA-Z_]\w*$/.test(value)) {
-    throw new Error(`Invalid ${label} name: "${value}"`);
-  }
 }

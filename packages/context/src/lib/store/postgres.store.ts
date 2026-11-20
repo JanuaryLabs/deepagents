@@ -4,10 +4,8 @@ import { z } from 'zod';
 import { bigintColumn, jsonObject } from './columns.ts';
 import { storeDDL } from './ddl.postgres.ts';
 import { lockSchemaDDL } from './postgres-schema-lock.ts';
-import {
-  PostgresTransaction,
-  postgresTransaction,
-} from './postgres-transaction.ts';
+import { PostgresStoreDatabase } from './postgres-store-database.ts';
+import type { PostgresTransaction } from './postgres-transaction.ts';
 import type {
   BranchData,
   BranchInfo,
@@ -201,55 +199,27 @@ export interface PostgresStoreOptions {
  * the `pg` Pool and ends it after its last store is done.
  */
 export class PostgresContextStore extends ContextStore {
-  #db: Pool | PostgresTransaction;
-  #schema: string;
+  readonly #database: PostgresStoreDatabase;
 
-  private constructor(db: Pool | PostgresTransaction, schema: string) {
+  private constructor(database: PostgresStoreDatabase) {
     super();
-    if (!/^[a-zA-Z_]\w*$/.test(schema)) {
-      throw new Error(`Invalid schema name: "${schema}"`);
-    }
-    this.#schema = schema;
-    this.#db = db;
-  }
-
-  #t(name: string): string {
-    return `"${this.#schema}"."${name}"`;
+    this.#database = database;
   }
 
   /** Opens the store: creates its schema objects before it returns. */
   static async create(
     options: PostgresStoreOptions,
   ): Promise<PostgresContextStore> {
-    const store = new PostgresContextStore(
-      options.pool,
-      options.schema ?? 'public',
+    const database = new PostgresStoreDatabase(options.pool, options.schema);
+    await database.query(
+      lockSchemaDDL(storeDDL(database.schema), database.schema),
     );
-    await store.#initialize(options.pool);
-    return store;
+    return new PostgresContextStore(database);
   }
 
   /** A view of this store whose reads and writes run inside `tx`. */
   bind(tx: PostgresTransaction): PostgresContextStore {
-    return new PostgresContextStore(tx, this.#schema);
-  }
-
-  async #initialize(pool: Pool): Promise<void> {
-    await pool.query(lockSchemaDDL(storeDDL(this.#schema), this.#schema));
-  }
-
-  async #query(sql: string, params?: unknown[]): Promise<unknown[]> {
-    const db: Pick<PostgresTransaction, 'query'> = this.#db;
-    const result = await db.query(sql, params);
-    return result.rows;
-  }
-
-  async #rows<Row extends z.ZodType>(
-    row: Row,
-    sql: string,
-    params?: unknown[],
-  ): Promise<z.output<Row>[]> {
-    return z.array(row).parse(await this.#query(sql, params));
+    return new PostgresContextStore(this.#database.bind(tx));
   }
 
   // ==========================================================================
@@ -257,9 +227,9 @@ export class PostgresContextStore extends ContextStore {
   // ==========================================================================
 
   async createChat(chat: ChatData): Promise<StoredChatData> {
-    return postgresTransaction(this.#db, async (tx) => {
+    return this.#database.transaction(async (tx) => {
       const result = await tx.query(
-        `INSERT INTO ${this.#t('chats')} (id, userId, title, metadata)
+        `INSERT INTO ${this.#database.table('chats')} (id, userId, title, metadata)
          VALUES ($1, $2, $3, $4)
          RETURNING *`,
         [
@@ -272,7 +242,7 @@ export class PostgresContextStore extends ContextStore {
       const created = storedChat.parse(result.rows[0]);
 
       await tx.query(
-        `INSERT INTO ${this.#t('branches')} (id, chatId, name, headMessageId, isActive, createdAt)
+        `INSERT INTO ${this.#database.table('branches')} (id, chatId, name, headMessageId, isActive, createdAt)
          VALUES ($1, $2, 'main', NULL, TRUE, $3)`,
         [crypto.randomUUID(), chat.id, Date.now()],
       );
@@ -282,9 +252,9 @@ export class PostgresContextStore extends ContextStore {
   }
 
   async upsertChat(chat: ChatData): Promise<StoredChatData> {
-    return postgresTransaction(this.#db, async (tx) => {
+    return this.#database.transaction(async (tx) => {
       const result = await tx.query(
-        `INSERT INTO ${this.#t('chats')} (id, userId, title, metadata)
+        `INSERT INTO ${this.#database.table('chats')} (id, userId, title, metadata)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT(id) DO UPDATE SET id = EXCLUDED.id
          RETURNING *`,
@@ -298,7 +268,7 @@ export class PostgresContextStore extends ContextStore {
       const upserted = storedChat.parse(result.rows[0]);
 
       await tx.query(
-        `INSERT INTO ${this.#t('branches')} (id, chatId, name, headMessageId, isActive, createdAt)
+        `INSERT INTO ${this.#database.table('branches')} (id, chatId, name, headMessageId, isActive, createdAt)
          VALUES ($1, $2, 'main', NULL, TRUE, $3)
          ON CONFLICT(chatId, name) DO NOTHING`,
         [crypto.randomUUID(), chat.id, Date.now()],
@@ -309,9 +279,9 @@ export class PostgresContextStore extends ContextStore {
   }
 
   async getChat(chatId: string): Promise<StoredChatData | undefined> {
-    const [chat] = await this.#rows(
+    const [chat] = await this.#database.rows(
       storedChat,
-      `SELECT * FROM ${this.#t('chats')} WHERE id = $1`,
+      `SELECT * FROM ${this.#database.table('chats')} WHERE id = $1`,
       [chatId],
     );
     return chat;
@@ -321,9 +291,9 @@ export class PostgresContextStore extends ContextStore {
     chatId: string,
     update: ChatUpdater,
   ): Promise<StoredChatData> {
-    return postgresTransaction(this.#db, async (tx) => {
+    return this.#database.transaction(async (tx) => {
       const result = await tx.query(
-        `SELECT * FROM ${this.#t('chats')} WHERE id = $1 FOR UPDATE`,
+        `SELECT * FROM ${this.#database.table('chats')} WHERE id = $1 FOR UPDATE`,
         [chatId],
       );
       const current = storedChat.optional().parse(result.rows[0]);
@@ -350,7 +320,7 @@ export class PostgresContextStore extends ContextStore {
       params.push(chatId);
 
       const updated = await tx.query(
-        `UPDATE ${this.#t('chats')} SET ${setClauses.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+        `UPDATE ${this.#database.table('chats')} SET ${setClauses.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
         params,
       );
       return storedChat.parse(updated.rows[0]);
@@ -388,7 +358,7 @@ export class PostgresContextStore extends ContextStore {
       }
     }
 
-    return this.#rows(
+    return this.#database.rows(
       chatInfo,
       `SELECT
         c.id,
@@ -399,9 +369,9 @@ export class PostgresContextStore extends ContextStore {
         c.updatedAt,
         COUNT(DISTINCT m.id) as messageCount,
         COUNT(DISTINCT b.id) as branchCount
-      FROM ${this.#t('chats')} c
-      LEFT JOIN ${this.#t('messages')} m ON m.chatId = c.id
-      LEFT JOIN ${this.#t('branches')} b ON b.chatId = c.id
+      FROM ${this.#database.table('chats')} c
+      LEFT JOIN ${this.#database.table('messages')} m ON m.chatId = c.id
+      LEFT JOIN ${this.#database.table('branches')} b ON b.chatId = c.id
       ${whereClause}
       GROUP BY c.id
       ORDER BY c.updatedAt DESC${limitClause}`,
@@ -413,8 +383,8 @@ export class PostgresContextStore extends ContextStore {
     chatId: string,
     options?: DeleteChatOptions,
   ): Promise<boolean> {
-    return postgresTransaction(this.#db, async (tx) => {
-      let sql = `DELETE FROM ${this.#t('chats')} WHERE id = $1`;
+    return this.#database.transaction(async (tx) => {
+      let sql = `DELETE FROM ${this.#database.table('chats')} WHERE id = $1`;
       const params: unknown[] = [chatId];
 
       if (options?.userId !== undefined) {
@@ -436,9 +406,9 @@ export class PostgresContextStore extends ContextStore {
       throw new Error(`Message ${message.id} cannot be its own parent`);
     }
 
-    await postgresTransaction(this.#db, async (tx) => {
+    await this.#database.transaction(async (tx) => {
       await tx.query(
-        `INSERT INTO ${this.#t('messages')} (id, chatId, parentId, name, type, data, createdAt)
+        `INSERT INTO ${this.#database.table('messages')} (id, chatId, parentId, name, type, data, createdAt)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT(id) DO UPDATE SET
            name = EXCLUDED.name,
@@ -461,7 +431,7 @@ export class PostgresContextStore extends ContextStore {
           : JSON.stringify(message.data);
 
       await tx.query(
-        `INSERT INTO ${this.#t('messages_fts')} (messageId, chatId, name, content)
+        `INSERT INTO ${this.#database.table('messages_fts')} (messageId, chatId, name, content)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT(messageId) DO UPDATE SET
            chatId = EXCLUDED.chatId,
@@ -479,9 +449,9 @@ export class PostgresContextStore extends ContextStore {
     if (parentId === messageId) {
       throw new Error(`Message ${messageId} cannot be its own parent`);
     }
-    const rows = await this.#rows(
+    const rows = await this.#database.rows(
       idRow,
-      `UPDATE ${this.#t('messages')} SET parentId = $1 WHERE id = $2 RETURNING id`,
+      `UPDATE ${this.#database.table('messages')} SET parentId = $1 WHERE id = $2 RETURNING id`,
       [parentId, messageId],
     );
     if (rows.length === 0) {
@@ -490,21 +460,21 @@ export class PostgresContextStore extends ContextStore {
   }
 
   async getMessage(messageId: string): Promise<MessageData | undefined> {
-    const [message] = await this.#rows(
+    const [message] = await this.#database.rows(
       storedMessage,
-      `SELECT * FROM ${this.#t('messages')} WHERE id = $1`,
+      `SELECT * FROM ${this.#database.table('messages')} WHERE id = $1`,
       [messageId],
     );
     return message;
   }
 
   async getMessageChain(headId: string): Promise<MessageData[]> {
-    return this.#rows(
+    return this.#database.rows(
       storedMessage,
       `WITH RECURSIVE chain AS (
-        SELECT *, 0 as depth FROM ${this.#t('messages')} WHERE id = $1
+        SELECT *, 0 as depth FROM ${this.#database.table('messages')} WHERE id = $1
         UNION ALL
-        SELECT m.*, c.depth + 1 FROM ${this.#t('messages')} m
+        SELECT m.*, c.depth + 1 FROM ${this.#database.table('messages')} m
         INNER JOIN chain c ON m.id = c.parentId
         WHERE c.depth < 10000
       )
@@ -515,9 +485,9 @@ export class PostgresContextStore extends ContextStore {
   }
 
   async hasChildren(messageId: string): Promise<boolean> {
-    const [row] = await this.#rows(
+    const [row] = await this.#database.rows(
       existsRow,
-      `SELECT EXISTS(SELECT 1 FROM ${this.#t('messages')} WHERE parentId = $1) as exists`,
+      `SELECT EXISTS(SELECT 1 FROM ${this.#database.table('messages')} WHERE parentId = $1) as exists`,
       [messageId],
     );
     return row.exists;
@@ -542,8 +512,8 @@ export class PostgresContextStore extends ContextStore {
   // ==========================================================================
 
   async createBranch(branch: BranchData): Promise<void> {
-    await this.#query(
-      `INSERT INTO ${this.#t('branches')} (id, chatId, name, headMessageId, isActive, createdAt)
+    await this.#database.query(
+      `INSERT INTO ${this.#database.table('branches')} (id, chatId, name, headMessageId, isActive, createdAt)
        VALUES ($1, $2, $3, $4, $5, $6)`,
       [
         branch.id,
@@ -560,32 +530,32 @@ export class PostgresContextStore extends ContextStore {
     chatId: string,
     name: string,
   ): Promise<BranchData | undefined> {
-    const [branch] = await this.#rows(
+    const [branch] = await this.#database.rows(
       storedBranch,
-      `SELECT * FROM ${this.#t('branches')} WHERE chatId = $1 AND name = $2`,
+      `SELECT * FROM ${this.#database.table('branches')} WHERE chatId = $1 AND name = $2`,
       [chatId, name],
     );
     return branch;
   }
 
   async getActiveBranch(chatId: string): Promise<BranchData | undefined> {
-    const [branch] = await this.#rows(
+    const [branch] = await this.#database.rows(
       storedBranch,
-      `SELECT * FROM ${this.#t('branches')} WHERE chatId = $1 AND isActive = TRUE`,
+      `SELECT * FROM ${this.#database.table('branches')} WHERE chatId = $1 AND isActive = TRUE`,
       [chatId],
     );
     return branch;
   }
 
   async setActiveBranch(chatId: string, branchId: string): Promise<void> {
-    await postgresTransaction(this.#db, async (tx) => {
+    await this.#database.transaction(async (tx) => {
       await tx.query(
-        `UPDATE ${this.#t('branches')} SET isActive = FALSE WHERE chatId = $1`,
+        `UPDATE ${this.#database.table('branches')} SET isActive = FALSE WHERE chatId = $1`,
         [chatId],
       );
 
       await tx.query(
-        `UPDATE ${this.#t('branches')} SET isActive = TRUE WHERE id = $1`,
+        `UPDATE ${this.#database.table('branches')} SET isActive = TRUE WHERE id = $1`,
         [branchId],
       );
     });
@@ -596,9 +566,9 @@ export class PostgresContextStore extends ContextStore {
     messageId: string | null,
     expectedHeadMessageId: string | null,
   ): Promise<boolean> {
-    const rows = await this.#rows(
+    const rows = await this.#database.rows(
       idRow,
-      `UPDATE ${this.#t('branches')} SET headMessageId = $1
+      `UPDATE ${this.#database.table('branches')} SET headMessageId = $1
        WHERE id = $2 AND headMessageId IS NOT DISTINCT FROM $3
        RETURNING id`,
       [messageId, branchId, expectedHeadMessageId],
@@ -607,7 +577,7 @@ export class PostgresContextStore extends ContextStore {
   }
 
   async listBranches(chatId: string): Promise<BranchInfo[]> {
-    const branches = await this.#rows(
+    const branches = await this.#database.rows(
       branchRow,
       `SELECT
         id,
@@ -615,7 +585,7 @@ export class PostgresContextStore extends ContextStore {
         headMessageId,
         isActive,
         createdAt
-      FROM ${this.#t('branches')}
+      FROM ${this.#database.table('branches')}
       WHERE chatId = $1
       ORDER BY createdAt ASC`,
       [chatId],
@@ -639,12 +609,12 @@ export class PostgresContextStore extends ContextStore {
   }
 
   async #countChain(headMessageId: string): Promise<number> {
-    const [row] = await this.#rows(
+    const [row] = await this.#database.rows(
       countRow,
       `WITH RECURSIVE chain AS (
-        SELECT id, parentId FROM ${this.#t('messages')} WHERE id = $1
+        SELECT id, parentId FROM ${this.#database.table('messages')} WHERE id = $1
         UNION ALL
-        SELECT m.id, m.parentId FROM ${this.#t('messages')} m
+        SELECT m.id, m.parentId FROM ${this.#database.table('messages')} m
         INNER JOIN chain c ON m.id = c.parentId
       )
       SELECT COUNT(*) as count FROM chain`,
@@ -658,8 +628,8 @@ export class PostgresContextStore extends ContextStore {
   // ==========================================================================
 
   async createCheckpoint(checkpoint: CheckpointData): Promise<void> {
-    await this.#query(
-      `INSERT INTO ${this.#t('checkpoints')} (id, chatId, name, messageId, createdAt)
+    await this.#database.query(
+      `INSERT INTO ${this.#database.table('checkpoints')} (id, chatId, name, messageId, createdAt)
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT(chatId, name) DO UPDATE SET
          messageId = EXCLUDED.messageId,
@@ -678,19 +648,19 @@ export class PostgresContextStore extends ContextStore {
     chatId: string,
     name: string,
   ): Promise<CheckpointData | undefined> {
-    const [checkpoint] = await this.#rows(
+    const [checkpoint] = await this.#database.rows(
       storedCheckpoint,
-      `SELECT * FROM ${this.#t('checkpoints')} WHERE chatId = $1 AND name = $2`,
+      `SELECT * FROM ${this.#database.table('checkpoints')} WHERE chatId = $1 AND name = $2`,
       [chatId, name],
     );
     return checkpoint;
   }
 
   async listCheckpoints(chatId: string): Promise<CheckpointInfo[]> {
-    return this.#rows(
+    return this.#database.rows(
       checkpointInfo,
       `SELECT id, name, messageId, createdAt
-       FROM ${this.#t('checkpoints')}
+       FROM ${this.#database.table('checkpoints')}
        WHERE chatId = $1
        ORDER BY createdAt DESC`,
       [chatId],
@@ -698,8 +668,8 @@ export class PostgresContextStore extends ContextStore {
   }
 
   async deleteCheckpoint(chatId: string, name: string): Promise<void> {
-    await this.#query(
-      `DELETE FROM ${this.#t('checkpoints')} WHERE chatId = $1 AND name = $2`,
+    await this.#database.query(
+      `DELETE FROM ${this.#database.table('checkpoints')} WHERE chatId = $1 AND name = $2`,
       [chatId, name],
     );
   }
@@ -728,8 +698,8 @@ export class PostgresContextStore extends ContextStore {
         ts_rank(fts.content_vector, plainto_tsquery('english', $2)) as rank,
         ts_headline('english', fts.content, plainto_tsquery('english', $2),
           'StartSel=<mark>, StopSel=</mark>, MaxWords=32, MinWords=5, MaxFragments=1') as snippet
-      FROM ${this.#t('messages_fts')} fts
-      JOIN ${this.#t('messages')} m ON m.id = fts.messageId
+      FROM ${this.#database.table('messages_fts')} fts
+      JOIN ${this.#database.table('messages')} m ON m.id = fts.messageId
       WHERE fts.content_vector @@ plainto_tsquery('english', $2)
         AND fts.chatId = $1
     `;
@@ -746,7 +716,7 @@ export class PostgresContextStore extends ContextStore {
     sql += ` ORDER BY rank DESC LIMIT $${paramIndex}`;
     params.push(limit);
 
-    return this.#rows(searchResult, sql, params);
+    return this.#database.rows(searchResult, sql, params);
   }
 
   // ==========================================================================
@@ -754,10 +724,10 @@ export class PostgresContextStore extends ContextStore {
   // ==========================================================================
 
   async getGraph(chatId: string): Promise<GraphData> {
-    const messageRows = await this.#rows(
+    const messageRows = await this.#database.rows(
       graphMessageRow,
       `SELECT id, parentId, name, data, createdAt
-       FROM ${this.#t('messages')}
+       FROM ${this.#database.table('messages')}
        WHERE chatId = $1
        ORDER BY createdAt ASC`,
       [chatId],
@@ -775,19 +745,19 @@ export class PostgresContextStore extends ContextStore {
       };
     });
 
-    const branches = await this.#rows(
+    const branches = await this.#database.rows(
       graphBranch,
       `SELECT name, headMessageId, isActive
-       FROM ${this.#t('branches')}
+       FROM ${this.#database.table('branches')}
        WHERE chatId = $1
        ORDER BY createdAt ASC`,
       [chatId],
     );
 
-    const checkpoints = await this.#rows(
+    const checkpoints = await this.#database.rows(
       graphCheckpoint,
       `SELECT name, messageId
-       FROM ${this.#t('checkpoints')}
+       FROM ${this.#database.table('checkpoints')}
        WHERE chatId = $1
        ORDER BY createdAt ASC`,
       [chatId],
