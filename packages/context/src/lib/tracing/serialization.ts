@@ -1,6 +1,6 @@
+import { isRecord } from '@ai-sdk/provider-utils';
 import type { LanguageModelUsage } from 'ai';
 
-import { isRecord } from '../telemetry/redact-telemetry-event.ts';
 import type { GenerationUsageData, OpenAISpanError } from './types.ts';
 
 export function normalizeForJson(value: unknown): unknown {

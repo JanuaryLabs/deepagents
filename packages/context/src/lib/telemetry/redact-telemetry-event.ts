@@ -1,3 +1,5 @@
+import { isRecord } from '@ai-sdk/provider-utils';
+
 const REDACTED = '[Redacted]';
 
 const INPUT_FIELDS = [
@@ -137,8 +139,4 @@ function redactStepInputs(value: unknown): unknown {
   const redacted = { ...value };
   redactFields(redacted, INPUT_FIELDS);
   return redacted;
-}
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

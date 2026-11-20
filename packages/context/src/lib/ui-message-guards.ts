@@ -1,8 +1,5 @@
+import { isRecord } from '@ai-sdk/provider-utils';
 import type { UIMessage } from 'ai';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 export function isUIMessage(value: unknown): value is UIMessage {
   return (
