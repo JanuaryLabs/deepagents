@@ -3089,6 +3089,35 @@ describe('Composer link and paste behavior', () => {
     );
   });
 
+  it('pastes an image URL as a text link, not a bytes-less image atom', async () => {
+    const { prompt, submissions } = renderRichInput();
+
+    prompt.focus();
+    fireEvent.paste(prompt, {
+      clipboardData: clipboardText('https://example.test/x.png'),
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('link', { name: 'https://example.test/x.png' }),
+      ).toHaveAttribute('href', 'https://example.test/x.png');
+    });
+    expect(
+      screen.queryByRole('img', { name: '[Image #1]' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter' });
+
+    expect(submissions()).toHaveTextContent(
+      'Text: [https://example.test/x.png](https://example.test/x.png)',
+    );
+    expect(submissions()).toHaveTextContent(
+      'link:https://example.test/x.png:https://example.test/x.png',
+    );
+    expect(submissions()).not.toHaveTextContent('[Image #1]');
+    expect(submissions()).not.toHaveTextContent('image:');
+  });
+
   it('replaces a linked selection with non-URL pasted text and clears stale link metadata', async () => {
     const { prompt, submissions } = renderRichInput({
       initialText: 'open docs',
