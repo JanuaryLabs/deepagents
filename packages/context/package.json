@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/context",
-  "version": "7.8.1",
+  "version": "7.8.2",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -69,7 +69,7 @@
     "@ai-sdk/provider": "^4.0.37",
     "@ai-sdk/provider-utils": "^5.0.76",
     "@ai-sdk/sandbox-just-bash": "^1.0.177",
-    "@deepagents/agent": "7.8.1",
+    "@deepagents/agent": "7.8.2",
     "@zukhruf/async": "^0.8.41",
     "@zukhruf/docker": "^0.8.41",
     "@zukhruf/fs": "^0.8.41",
