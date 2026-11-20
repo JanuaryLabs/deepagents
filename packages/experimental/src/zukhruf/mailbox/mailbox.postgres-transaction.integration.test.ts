@@ -108,7 +108,7 @@ test("a bound store holds the recipient's lock until its transaction ends, so an
         assert.equal(rows[0]?.waiting, 1);
       },
       {
-        signal: AbortSignal.any([t.signal, AbortSignal.timeout(10_000)]),
+        signal: t.signal,
         interval: 25,
       },
     );

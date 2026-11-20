@@ -430,7 +430,7 @@ test("a turn whose push fails because the queue's database is gone is reported a
   await storage.boss.stop({ graceful: false });
   await storage.queueDatabase.close();
   const warning = once(process, 'warning', {
-    signal: AbortSignal.any([t.signal, AbortSignal.timeout(10_000)]),
+    signal: t.signal,
   });
 
   await storage.admit({ userId: 'user-1', treeId: 'root' }, (scope) =>
@@ -447,11 +447,7 @@ test("a turn whose push fails because the queue's database is gone is reported a
     {
       reported: String(reported),
       // A turn the reopened storage never pushes would wait for the whole test timeout.
-      deliveries: await deliveries(
-        reopened,
-        turn,
-        AbortSignal.any([t.signal, AbortSignal.timeout(10_000)]),
-      ),
+      deliveries: await deliveries(reopened, turn, t.signal),
     },
     {
       reported: 'Error: PGlite is closed',
@@ -468,7 +464,7 @@ test("a failure of the queue's pg-boss with no caller to take it is reported as 
     directory: directory.path,
   });
   const warning = once(process, 'warning', {
-    signal: AbortSignal.any([t.signal, AbortSignal.timeout(10_000)]),
+    signal: t.signal,
   });
 
   // Platform setup no storage operation exposes: the database closes under

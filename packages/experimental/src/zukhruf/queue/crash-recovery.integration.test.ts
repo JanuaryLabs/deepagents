@@ -242,7 +242,7 @@ describe('zukhruf crash recovery — worker process killed mid-turn', () => {
             [],
             'DLQ reconciler deleted the crashed source job and the successor was GC-ed on commit — no orphan job accumulates in the main queue',
           ),
-        { signal: AbortSignal.any([t.signal, AbortSignal.timeout(10_000)]) },
+        { signal: t.signal },
       );
     } finally {
       await boss.stop({ graceful: false });
