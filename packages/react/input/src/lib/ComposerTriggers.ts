@@ -1,7 +1,5 @@
-import { escapeRegExp } from 'lodash-es';
-
 export function triggerAlternation(triggers: string[]) {
-  return triggers.map(escapeRegExp).join('|');
+  return triggers.map(RegExp.escape).join('|');
 }
 
 export function commandTokenPattern(commandTriggers: string[]) {
