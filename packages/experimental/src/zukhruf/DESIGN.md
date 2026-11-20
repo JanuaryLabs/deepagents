@@ -547,8 +547,7 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
   recovery can retry without duplicating a delivered completion. Projection reads the assistant
   message whose id matches the terminal stream, never a newer conversation head. An approval pause is not terminal:
   projection waits for continuation, guaranteeing one final answer. A failed or cancelled
-  continuation overrides that pause and is projected immediately. Child progress UI remains
-  deferred.
+  continuation overrides that pause and is projected immediately.
   This matches Codex (`openai/codex` `bdfd769`): `forward_child_completion_to_parent` builds the
   envelope with `trigger_turn: false`, and the parent's `inter_agent_communication` handler starts
   a turn only for trigger mail or a durable-sleep extension. **An idle parent is not woken by a
