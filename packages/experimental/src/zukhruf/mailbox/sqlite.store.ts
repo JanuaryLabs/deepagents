@@ -5,7 +5,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 
 import { communicationSchema } from './communication-schema.ts';
-import { SETUP, statements } from './ddl.sqlite.ts';
+import { statements } from './ddl.sqlite.ts';
 import {
   type MailboxEndTurnResult,
   type MailboxEnqueueResult,
@@ -36,7 +36,6 @@ export class SqliteMailboxStore extends MailboxStore implements Disposable {
   constructor(pathOrDb: string | DatabaseSync) {
     super();
     this.#database = typeof pathOrDb === 'string' ? open(pathOrDb) : pathOrDb;
-    this.#database.exec(SETUP);
     tables.apply(this.#database);
   }
 

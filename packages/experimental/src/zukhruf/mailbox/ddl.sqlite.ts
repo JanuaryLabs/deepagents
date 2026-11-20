@@ -2,11 +2,6 @@
 // @zukhruf/sqlite-drift compares it, so the text after each object name must
 // stay byte-identical to what earlier releases wrote, indentation included.
 
-// Session-level PRAGMAs, run on each connection before the schema is applied.
-export const SETUP = `
-PRAGMA synchronous = NORMAL;
-`;
-
 export const statements = [
   `CREATE TABLE zukhruf_mailbox_items (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
