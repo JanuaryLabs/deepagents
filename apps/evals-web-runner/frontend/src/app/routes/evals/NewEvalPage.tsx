@@ -10,6 +10,7 @@ import {
   Label,
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -373,11 +374,13 @@ export default function NewEvalPage() {
                         <SelectValue placeholder="Select a prompt..." />
                       </SelectTrigger>
                       <SelectContent>
-                        {sortedPrompts.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.name} (v{p.version})
-                          </SelectItem>
-                        ))}
+                        <SelectGroup>
+                          {sortedPrompts.map((p) => (
+                            <SelectItem key={p.id} value={p.id}>
+                              {p.name} (v{p.version})
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
                       </SelectContent>
                     </Select>
                   </div>
@@ -438,11 +441,13 @@ export default function NewEvalPage() {
                 <SelectValue placeholder="Select a dataset..." />
               </SelectTrigger>
               <SelectContent>
-                {datasets.map((ds) => (
-                  <SelectItem key={ds.name} value={ds.name}>
-                    {ds.name} ({ds.extension})
-                  </SelectItem>
-                ))}
+                <SelectGroup>
+                  {datasets.map((ds) => (
+                    <SelectItem key={ds.name} value={ds.name}>
+                      {ds.name} ({ds.extension})
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               </SelectContent>
             </Select>
           )}
@@ -460,11 +465,13 @@ export default function NewEvalPage() {
                     <SelectValue placeholder="input" />
                   </SelectTrigger>
                   <SelectContent>
-                    {datasetColumns.map((col) => (
-                      <SelectItem key={col} value={col}>
-                        {col}
-                      </SelectItem>
-                    ))}
+                    <SelectGroup>
+                      {datasetColumns.map((col) => (
+                        <SelectItem key={col} value={col}>
+                          {col}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
               </div>
@@ -480,11 +487,13 @@ export default function NewEvalPage() {
                     <SelectValue placeholder="expected" />
                   </SelectTrigger>
                   <SelectContent>
-                    {datasetColumns.map((col) => (
-                      <SelectItem key={col} value={col}>
-                        {col}
-                      </SelectItem>
-                    ))}
+                    <SelectGroup>
+                      {datasetColumns.map((col) => (
+                        <SelectItem key={col} value={col}>
+                          {col}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
               </div>

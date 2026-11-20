@@ -1,6 +1,7 @@
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -200,15 +201,17 @@ export function TracesView({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {traceItems.map((item) => (
-              <SelectItem
-                key={item.value}
-                value={item.value}
-                className="font-mono text-xs"
-              >
-                {item.label}
-              </SelectItem>
-            ))}
+            <SelectGroup>
+              {traceItems.map((item) => (
+                <SelectItem
+                  key={item.value}
+                  value={item.value}
+                  className="font-mono text-xs"
+                >
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
           </SelectContent>
         </Select>
       </div>

@@ -25,6 +25,7 @@ import {
   Input,
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -332,18 +333,20 @@ function TaskDetail({
                 <SelectValue />
               </RowSelectTrigger>
               <SelectContent>
-                {targetKinds.map((kind) => (
-                  <SelectItem
-                    key={kind.value}
-                    value={kind.value}
-                    disabled={
-                      kind.value === 'existing-conversation' &&
-                      history.length === 0
-                    }
-                  >
-                    {kind.label}
-                  </SelectItem>
-                ))}
+                <SelectGroup>
+                  {targetKinds.map((kind) => (
+                    <SelectItem
+                      key={kind.value}
+                      value={kind.value}
+                      disabled={
+                        kind.value === 'existing-conversation' &&
+                        history.length === 0
+                      }
+                    >
+                      {kind.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               </SelectContent>
             </Select>
           </Row>
@@ -364,11 +367,13 @@ function TaskDetail({
                   <SelectValue />
                 </RowSelectTrigger>
                 <SelectContent>
-                  {chats.map((chat) => (
-                    <SelectItem key={chat.value} value={chat.value}>
-                      {chat.label}
-                    </SelectItem>
-                  ))}
+                  <SelectGroup>
+                    {chats.map((chat) => (
+                      <SelectItem key={chat.value} value={chat.value}>
+                        {chat.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
                 </SelectContent>
               </Select>
             </Row>
@@ -784,11 +789,13 @@ function CreateTaskDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {targets.map((target) => (
-                  <SelectItem key={target.value} value={target.value}>
-                    {target.label}
-                  </SelectItem>
-                ))}
+                <SelectGroup>
+                  {targets.map((target) => (
+                    <SelectItem key={target.value} value={target.value}>
+                      {target.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               </SelectContent>
             </Select>
           </Field>

@@ -8,6 +8,7 @@ import {
   Button,
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -117,11 +118,13 @@ export default function DatasetDetailPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {allDatasets.map((ds) => (
-                  <SelectItem key={ds.name} value={ds.name}>
-                    {ds.name}
-                  </SelectItem>
-                ))}
+                <SelectGroup>
+                  {allDatasets.map((ds) => (
+                    <SelectItem key={ds.name} value={ds.name}>
+                      {ds.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               </SelectContent>
             </Select>
           )}

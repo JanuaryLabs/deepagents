@@ -2,6 +2,7 @@ import {
   Button,
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -85,11 +86,13 @@ export default function ComparePage() {
               <SelectValue placeholder="Select a run..." />
             </SelectTrigger>
             <SelectContent>
-              {runItems.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
+              <SelectGroup>
+                {runItems.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
             </SelectContent>
           </Select>
         </div>
@@ -110,11 +113,13 @@ export default function ComparePage() {
               <SelectValue placeholder="Select a run..." />
             </SelectTrigger>
             <SelectContent>
-              {runItems.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
+              <SelectGroup>
+                {runItems.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
             </SelectContent>
           </Select>
         </div>
