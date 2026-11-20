@@ -1008,3 +1008,81 @@ test('GET /zukhruf/v1/events publishes ready again after a source reconnects', a
     .map((frame) => JSON.parse(frame.slice('data: '.length)));
   assert.deepEqual(events, [{ type: 'ready' }, { type: 'ready' }]);
 });
+
+test('GET /zukhruf/v1/events keeps concurrent source frames and heartbeats whole and in source order', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  const count = 200;
+  const heartbeats = 4;
+  const largePayload = 'x'.repeat(70_000);
+  const runtime = createRuntime({
+    async subscribeConversationStatus() {
+      return {
+        async *[Symbol.asyncIterator]() {
+          for (let index = 0; index < count; index++) {
+            yield {
+              type: 'change' as const,
+              conversation: {
+                chatId: `conversation-${index}`,
+                userId: 'user-1',
+              },
+              status: { type: 'idle' as const },
+            };
+          }
+        },
+      };
+    },
+  });
+  const projection: HttpProjection = {
+    project: () => ({
+      capabilities: {},
+      events: async () => ({
+        async *[Symbol.asyncIterator]() {
+          for (let index = 0; index < count; index++) {
+            if (index % (count / heartbeats) === count / heartbeats / 2) {
+              t.mock.timers.tick(15_000);
+            }
+            yield {
+              type: 'change' as const,
+              resource: 'schedule-task',
+              id: `task-${index}`,
+              ...(index % 10 === 0 ? { payload: largePayload } : {}),
+            };
+          }
+        },
+      }),
+    }),
+  };
+
+  const response = await createApp(runtime, projection).request(
+    mounted('/events'),
+  );
+  const frames = (await response.text()).split('\n\n');
+
+  assert.equal(frames.pop(), '');
+  assert.equal(
+    frames.filter((frame) => frame === ': heartbeat').length,
+    heartbeats,
+  );
+  const events = frames
+    .filter((frame) => frame !== ': heartbeat')
+    .map((frame) => {
+      assert.ok(frame.startsWith('data: '), frame.slice(0, 80));
+      return JSON.parse(frame.slice('data: '.length));
+    });
+  assert.deepEqual(events[0], { type: 'ready' });
+  assert.deepEqual(
+    events
+      .filter(({ resource }) => resource === 'conversation')
+      .map(({ id }) => id),
+    Array.from({ length: count }, (_, index) => `conversation-${index}`),
+  );
+  const tasks = events.filter(({ resource }) => resource === 'schedule-task');
+  assert.deepEqual(
+    tasks.map(({ id }) => id),
+    Array.from({ length: count }, (_, index) => `task-${index}`),
+  );
+  assert.equal(
+    tasks.filter(({ payload }) => payload === largePayload).length,
+    count / 10,
+  );
+});

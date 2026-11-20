@@ -1,5 +1,4 @@
 import { validate } from '@sdk-it/hono/runtime';
-import { Lock } from '@zukhruf/async';
 import {
   type JSONSchema7,
   type UIMessage,
@@ -491,20 +490,10 @@ export function http(
     context.header('cache-control', 'no-store');
     return streamSSE(context, async (stream) => {
       stream.onAbort(abortRequest);
-      const writes = new Lock();
       const write = (event: OwnerEvent) =>
-        writes.run(() => stream.writeSSE({ data: JSON.stringify(event) }), {
-          signal: undefined,
-        });
+        stream.writeSSE({ data: JSON.stringify(event) });
       const heartbeat = setInterval(() => {
-        writes
-          .run(
-            async () => {
-              await stream.write(': heartbeat\n\n');
-            },
-            { signal: undefined },
-          )
-          .catch(() => {});
+        void stream.write(': heartbeat\n\n');
       }, 15_000);
       try {
         const subscriptions = await Promise.all(
