@@ -93,9 +93,11 @@ it('follows the live conversation status in the run list and the conversation ba
 
     expect(await screen.findByText('idle')).toBeTruthy();
     expect(screen.getByLabelText('idle')).toBeTruthy();
-    expect(FakeEventSource.instances.map((source) => source.url)).toEqual([
-      eventsHref,
-    ]);
+    await waitFor(() =>
+      expect(FakeEventSource.instances.map((source) => source.url)).toEqual([
+        eventsHref,
+      ]),
+    );
     const source = FakeEventSource.instances[0];
 
     act(() =>
@@ -196,6 +198,11 @@ it('invalidates only the schedule queries named by owner events', async () => {
       schedules: { href: '/zukhruf/v1/schedules' },
     });
     await screen.findByText('idle');
+    await waitFor(() =>
+      expect(FakeEventSource.instances.map((source) => source.url)).toEqual([
+        eventsHref,
+      ]),
+    );
     const source = FakeEventSource.instances[0];
 
     act(() =>
