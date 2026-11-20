@@ -1,4 +1,5 @@
 import { createUIMessageStream } from 'ai';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import {
   type PersistedWriterOptions,
@@ -458,17 +459,9 @@ export class StreamManager {
 }
 
 function waitForDelay(ms: number, signal: AbortSignal): Promise<boolean> {
-  if (signal.aborted) return Promise.resolve(false);
-  return new Promise((resolve) => {
-    const timeout = globalThis.setTimeout(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve(true);
-    }, ms);
-    const onAbort = () => {
-      globalThis.clearTimeout(timeout);
-      resolve(false);
-    };
-    signal.addEventListener('abort', onAbort, { once: true });
+  return delay(ms, true, { signal }).catch((err: unknown) => {
+    if (signal.aborted) return false;
+    throw err;
   });
 }
 
