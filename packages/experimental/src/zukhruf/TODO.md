@@ -176,10 +176,12 @@
       `conversationScheduling()` and documented in `SCHEDULING_PLAN.md`.
 - [x] Keep runtime-owned wiring classes and injected collaboration-tool implementations internal.
       Customers compose through `AgentRuntime`, the DSL, and the store/queue adapters.
-- [ ] Add a host-configurable per-tree agent/residency limit that counts the root, rejects unbounded
-      growth deterministically, and unloads only idle terminal/interrupted children with no pending
-      mail. Reuse persisted ContextStore history for reload; do not add close/resume model tools.
-      Start with Codex's spawn residency reservation (`reserve_spawn_slot`): agent-backlog #2287.
+- [x] Per-tree residency limit (Codex V2 `reserve_spawn_slot`, agent-backlog #2287):
+      `maxConcurrentThreadsPerSession - 1` resident sub-agents (queued or running turn, trigger mail
+      waiting, or a paused head), counted and admitted in one `AgentStorage.admit` unit for every
+      turn push, so it holds across workers and a dead admission leaves nothing.
+- [ ] Unload idle terminal/interrupted children with no pending mail (Codex LRU unloading). Reuse
+      persisted ContextStore history for reload; do not add close/resume model tools.
 - [ ] Per-chat sandbox GC policy (nothing reclaims dead chats' containers). Tracked as
       agent-backlog #4771, including multi-worker Daytona deletion.
 - [x] Queued-turn visibility for observers: `resume()` reads the head through

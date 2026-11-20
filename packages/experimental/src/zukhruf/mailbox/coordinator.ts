@@ -1,10 +1,13 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import pMemoize from 'p-memoize';
 
-import type { StreamManager } from '@deepagents/context';
-
+import type {
+  Admission,
+  AgentResidency,
+} from '../control-plane/agent-residency.ts';
+import { AgentThreadLimitError } from '../control-plane/agent-thread-limit-error.ts';
 import { AgentTurnId } from '../control-plane/agent-turn-id.ts';
-import type { TurnQueue, TurnRef } from '../queue/turn-queue.ts';
+import type { TurnRef } from '../queue/turn-queue.ts';
 import type { MailboxStore } from './store.ts';
 import {
   type ConversationId,
@@ -17,8 +20,7 @@ import {
 
 export interface MailboxCoordinatorOptions {
   store: MailboxStore;
-  queue: Pick<TurnQueue, 'push'>;
-  streams: StreamManager;
+  residency: AgentResidency;
 }
 
 const WAIT_POLL_INTERVAL_MS = 50;
@@ -26,15 +28,18 @@ const WAIT_POLL_INTERVAL_MS = 50;
 /** Owns durable mail delivery and the serialized turns that wake recipients. */
 export class MailboxCoordinator {
   readonly #store: MailboxStore;
-  readonly #queue: Pick<TurnQueue, 'push'>;
-  readonly #streams: StreamManager;
+  readonly #residency: AgentResidency;
 
   constructor(options: MailboxCoordinatorOptions) {
     this.#store = options.store;
-    this.#queue = options.queue;
-    this.#streams = options.streams;
+    this.#residency = options.residency;
   }
 
+  /**
+   * Writes the mail and, in the same admission, the wake it needs. Trigger
+   * mail to a sub-agent with no resident slot rejects with
+   * `AgentThreadLimitError` and writes nothing.
+   */
   async deliver(
     communication: InterAgentCommunication,
     mode: MessageDeliveryMode,
@@ -49,12 +54,26 @@ export class MailboxCoordinator {
     };
     assertCommunication(delivered);
 
-    const { recipientActive } = await this.#store.enqueue(delivered);
-    if (delivered.triggerTurn || recipientActive) {
+    const { recipient } = delivered;
+    await this.#residency.admit(recipient, async (admission) => {
+      if (delivered.triggerTurn) {
+        if (!(await admission.admits(recipient))) {
+          throw new AgentThreadLimitError();
+        }
+        await admission.mailboxStore.enqueue(delivered);
+        await MailboxCoordinator.#wake(admission, recipient);
+        return;
+      }
+      const { recipientActive } =
+        await admission.mailboxStore.enqueue(delivered);
       // Queue-only mail sent during an active turn gets a serialized fallback
       // in case sampling has already crossed its final safe drain boundary.
-      await this.#scheduleWake(delivered.recipient);
-    }
+      // Codex queue-only mail starts no turn, so a recipient without a
+      // resident slot gets none.
+      if (recipientActive && (await admission.admits(recipient))) {
+        await MailboxCoordinator.#wake(admission, recipient);
+      }
+    });
   }
 
   beginTurn(turn: TurnRef): Promise<void> {
@@ -102,29 +121,33 @@ export class MailboxCoordinator {
 
   /**
    * Coalesces only concurrent wake requests in this process. A settled request
-   * is not kept, because another process may consume the wake.
+   * is not kept, because another process may consume the wake. A recipient
+   * left with only queue-only mail and no resident slot gets no wake.
    */
   readonly #scheduleWake = pMemoize(
-    async (target: ConversationId): Promise<void> => {
-      const wakeId = AgentTurnId.random(target).toString();
-      await this.#streams.register(wakeId);
-      try {
-        await this.#queue.push({
-          kind: 'mailbox',
-          streamId: wakeId,
-          chatId: target.chatId,
-          userId: target.userId,
-        } satisfies TurnRef);
-      } catch (error) {
-        await this.#streams.store.updateStreamStatus(wakeId, 'failed', {
-          error: Error.isError(error) ? error.message : String(error),
-        });
-        throw error;
-      }
-    },
+    (target: ConversationId): Promise<void> =>
+      this.#residency.admit(target, async (admission) => {
+        if (await admission.admits(target)) {
+          await MailboxCoordinator.#wake(admission, target);
+        }
+      }),
     {
       cacheKey: ([target]) => JSON.stringify([target.chatId, target.userId]),
       cache: false,
     },
   );
+
+  static async #wake(
+    admission: Admission,
+    target: ConversationId,
+  ): Promise<void> {
+    const wakeId = AgentTurnId.random(target).toString();
+    await admission.registerStream(wakeId);
+    await admission.queue.push({
+      kind: 'mailbox',
+      streamId: wakeId,
+      chatId: target.chatId,
+      userId: target.userId,
+    } satisfies TurnRef);
+  }
 }

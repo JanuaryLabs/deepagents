@@ -165,25 +165,8 @@ export class ConversationStatusProjector {
         await this.#store.updateChat(thread.conversation.chatId, (chat) => {
           if (chat.userId !== thread.conversation.userId)
             throw new Error('Child activity owner mismatch');
-          const metadata = childActivityMetadataSchema.parse(
-            chat.metadata?.zukhruf,
-          );
-          const activities = metadata.childActivities;
-          const previous = activities[activity.type];
-          if (
-            previous?.id === activity.id ||
-            (previous && previous.at > activity.at)
-          )
-            return undefined;
-          return {
-            metadata: {
-              ...chat.metadata,
-              zukhruf: {
-                ...metadata,
-                childActivities: { ...activities, [activity.type]: activity },
-              },
-            },
-          };
+          const metadata = withChildActivity(chat.metadata, activity);
+          return metadata && { metadata };
         });
       } catch {
         // Observability must not turn an already accepted operation into a failed turn.
@@ -381,6 +364,29 @@ export class ConversationStatusProjector {
   static #key({ chatId, userId }: ConversationId): string {
     return JSON.stringify([chatId, userId]);
   }
+}
+
+/**
+ * `metadata` with `activity` as the receipt of its kind, or `undefined` when
+ * the chat already holds it or a later one.
+ */
+export function withChildActivity(
+  metadata: Record<string, unknown> | undefined,
+  activity: ChildActivity,
+): Record<string, unknown> | undefined {
+  const zukhruf = childActivityMetadataSchema.parse(metadata?.zukhruf);
+  const activities = zukhruf.childActivities;
+  const previous = activities[activity.type];
+  if (previous?.id === activity.id || (previous && previous.at > activity.at)) {
+    return undefined;
+  }
+  return {
+    ...metadata,
+    zukhruf: {
+      ...zukhruf,
+      childActivities: { ...activities, [activity.type]: activity },
+    },
+  };
 }
 
 function activeFlagsOf(message: UIMessage): ConversationActiveFlag[] {

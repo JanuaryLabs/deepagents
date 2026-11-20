@@ -111,6 +111,18 @@ export class AgentDirectory {
     );
   }
 
+  /** The conversation a child of `parent` at `taskName` has, whether or not it exists yet. */
+  childConversation(parent: AgentThread, taskName: string): ConversationId {
+    return {
+      chatId: AgentDirectory.#childChatId(
+        parent.conversation.userId,
+        parent.treeId,
+        parent.path.resolve(taskName).toString(),
+      ),
+      userId: parent.conversation.userId,
+    };
+  }
+
   async createChild(options: {
     parent: AgentThread;
     taskName: string;
@@ -118,14 +130,10 @@ export class AgentDirectory {
   }): Promise<AgentThread> {
     const path = options.parent.path.resolve(options.taskName);
     const pathString = path.toString();
-    const conversation = {
-      chatId: AgentDirectory.#childChatId(
-        options.parent.conversation.userId,
-        options.parent.treeId,
-        pathString,
-      ),
-      userId: options.parent.conversation.userId,
-    };
+    const conversation = this.childConversation(
+      options.parent,
+      options.taskName,
+    );
     const occupied = (await this.listTree(options.parent)).find((thread) =>
       thread.path.equals(path),
     );

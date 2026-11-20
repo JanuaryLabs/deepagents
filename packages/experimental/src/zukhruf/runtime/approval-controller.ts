@@ -12,6 +12,8 @@ import {
   assistant,
 } from '@deepagents/context';
 
+import type { AgentResidency } from '../control-plane/agent-residency.ts';
+import { AgentThreadLimitError } from '../control-plane/agent-thread-limit-error.ts';
 import type { ConversationId } from '../mailbox/types.ts';
 import type { TurnQueue, TurnRef } from '../queue/turn-queue.ts';
 import type { ZukhrufToolSet } from '../tool.ts';
@@ -19,6 +21,7 @@ import type { ZukhrufToolSet } from '../tool.ts';
 export interface ApprovalControllerOptions {
   store: ContextStore;
   queue: TurnQueue;
+  residency: AgentResidency;
 }
 
 type ApprovalToolPart = DynamicToolUIPart | ToolUIPart;
@@ -41,27 +44,36 @@ export function hasPendingClientInput(message: UIMessage): boolean {
   );
 }
 
+const SETTLED_TOOL_STATES = new Set([
+  'output-available',
+  'output-error',
+  'output-denied',
+]);
+
+/** The head is an assistant message with a tool call that has not settled: it waits on the host or a client. */
+export function isPausedHead(message: UIMessage | undefined): boolean {
+  return (
+    message?.role === 'assistant' &&
+    message.parts.some(
+      (part) => isToolUIPart(part) && !SETTLED_TOOL_STATES.has(part.state),
+    )
+  );
+}
+
 /** Durable approval-response and continuation state machine. */
 export class ApprovalController {
-  static readonly #settledToolStates = new Set([
-    'output-available',
-    'output-error',
-    'output-denied',
-  ]);
-
   readonly #store: ContextStore;
   readonly #queue: TurnQueue;
+  readonly #residency: AgentResidency;
 
   constructor(options: ApprovalControllerOptions) {
     this.#store = options.store;
     this.#queue = options.queue;
+    this.#residency = options.residency;
   }
 
   isPaused(message: UIMessage | undefined): boolean {
-    return (
-      message?.role === 'assistant' &&
-      this.#pendingToolPart(message) !== undefined
-    );
+    return isPausedHead(message);
   }
 
   async isConversationPaused(conversation: ConversationId): Promise<boolean> {
@@ -186,7 +198,7 @@ export class ApprovalController {
       });
     if (!retryable) return false;
 
-    await this.#queue.push({
+    await this.#pushRecovery({
       kind: 'recovery',
       streamId,
       chatId: conversation.chatId,
@@ -212,7 +224,7 @@ export class ApprovalController {
       return false;
     }
 
-    await this.#queue.push({
+    await this.#pushRecovery({
       kind: 'recovery',
       streamId,
       chatId: turn.chatId,
@@ -222,12 +234,15 @@ export class ApprovalController {
     return true;
   }
 
-  #pendingToolPart(message: UIMessage) {
-    return message.parts.find(
-      (part) =>
-        isToolUIPart(part) &&
-        !ApprovalController.#settledToolStates.has(part.state),
-    );
+  /**
+   * A head with a responded approval has not settled, so its conversation is
+   * resident and holds its own slot: the recovery is admitted at the limit.
+   */
+  #pushRecovery(turn: TurnRef & { kind: 'recovery' }): Promise<void> {
+    return this.#residency.admit(turn, async (admission) => {
+      if (!(await admission.admits(turn))) throw new AgentThreadLimitError();
+      await admission.queue.push(turn);
+    });
   }
 
   #engineFor({ chatId, userId }: ConversationId): ContextEngine {

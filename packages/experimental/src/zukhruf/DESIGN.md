@@ -560,14 +560,29 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
 Parity means matching Codex's model-facing collaboration contract where the same capability exists,
 not copying its process-local implementation:
 
-- **Execution capacity (Codex `AgentExecutionLimiter`):** `multiAgent.maxConcurrentThreadsPerSession`
-  (default 4, root included, zero rejected) caps in-flight sub-agent turns per tree at N minus one;
-  the root implicitly holds one slot. The count is read from the queue (`running` activity of every
-  non-root tree member), so it is correct from any process; queued turns count zero as in Codex.
-  Checked at `spawn_agent` (`collab spawn failed: agent thread limit reached`), at `followup_task`
-  when the target has no turn in flight (`collab tool failed: agent thread limit reached`), and at
-  host `enqueue` on a sub-agent conversation (`agent thread limit reached`); `send_message` is never
-  checked. Both default hints end with Codex's sentence: "There are N available concurrency slots,
+- **Residency (Codex V2 `reserve_spawn_slot`, `residency.rs` `is_unloadable`):**
+  `multiAgent.maxConcurrentThreadsPerSession` (default 4, root included, zero rejected) caps the
+  tree's resident sub-agents at N minus one; the root implicitly holds one slot and is never
+  limited. A sub-agent is resident while it has a queued or running turn, trigger-turn mail waiting
+  (`MailboxStore.hasPendingTriggerTurn`), or a head paused on an unsettled tool call
+  (`isPausedHead`); an idle child holds nothing. Codex's execution limiter counts only running
+  turns, and queued turns count zero there because Codex starts a turn at once; on pg-boss a turn
+  can wait, so Zukhruf counts it at admission, and the execution cap follows (a running turn is
+  resident). Every `TurnQueue.push` goes through `AgentResidency.admit`
+  (`control-plane/agent-residency.ts`), which runs in one `AgentStorage.admit` unit: it lists the
+  tree and counts the resident members other than the target through the unit's own parts, then
+  writes the turn in the same unit, so concurrent admissions on any worker cannot overshoot and a
+  session that dies mid-admission leaves nothing. A push to an already-resident target is admitted
+  without counting. The unit holds: `spawn_agent` (child chat, forked history, spawn activity
+  receipt, initial stream, job; refused with `collab spawn failed: agent thread limit reached` and
+  nothing written; a retry of a child whose initial turn is still scheduled returns its path and
+  writes nothing), `followup_task` and host `deliver` of trigger mail (mail, wake stream, job;
+  refused with `collab tool failed: agent thread limit reached` / `AgentThreadLimitError`), host
+  `enqueue` on a sub-agent (`AgentThreadLimitError`, HTTP 429), the mailbox wakes (end-of-turn and
+  the queue-only fallback during an active turn, which is skipped when the recipient has no slot:
+  Codex queue-only mail starts no turn), and both approval-recovery pushes (their paused head makes
+  the target resident). `send_message` mail is always accepted. Conversation status is published
+  after the unit commits. Unloading idle children is not built. Both default hints end with Codex's sentence: "There are N available concurrency slots,
   meaning that up to N agents can be active at once, including you." The worker pool
   (`work({concurrency})`, default 1) is a separate host knob: Codex has no pool, so a host that
   wants N agents active must size the pool itself.
@@ -579,7 +594,7 @@ not copying its process-local implementation:
   identity and listing, deterministic terminal tombstones, and queue-backed wait/interrupt/follow-up
   behavior.
 - **Parity work:** current spawn context inheritance.
-- **Production hardening:** bounded tree residency/concurrency, startup orphan reconciliation,
+- **Production hardening:** unloading idle children, startup orphan reconciliation,
   external-Postgres multi-worker evidence, sandbox reclamation, queued observer visibility, and
   blocking CI.
 
@@ -895,7 +910,7 @@ pool, boss, schema?, queue?, changeSource? })` builds the stores on the host poo
   in one `postgresTransaction` under `pg_advisory_xact_lock(hashtextextended('zukhruf:agent-tree:'
   - [schema, userId, treeId]))`, so a session that dies mid-admission leaves nothing. It borrows
 the pool and PgBoss and is `AsyncDisposable`only for the`PostgresNotifyChangeSource`it opens
-when no`changeSource`is given. The control plane does not admit through it yet (#2287). `EmbeddedAgentStorage.open({ directory, queue? })`owns its parts for one process: the
+when no`changeSource`is given. Every turn push admits through it (see Residency in the parity section). `EmbeddedAgentStorage.open({ directory, queue? })`owns its parts for one process: the
 context, stream and mailbox stores and a`zukhruf_turn_outbox` table on one SQLite connection
 (`zukhruf.sqlite`), and pg-boss on PGlite (`zukhruf.queue`). Its `admit`is one`BEGIN IMMEDIATE`on that connection; the scope's stores are the raw SQLite stores and its`queue.push` inserts an
 outbox row (`getTurnActivity`reports`queued` while one waits). Every call through the storage's
@@ -1047,9 +1062,9 @@ work({concurrency?}) → AsyncDisposable }`.
   from durable state (queue activity, unsettled tool parts at a completed chain head, the latest
   stream's status), so `observe(conv).conversationStatus()` is correct from any process.
   `subscribeConversationStatus(signal)` resolves only after its cross-process listener is live, then
-  yields the changes this process observes: every durable
-  `push` (`runtime/conversation-status/status-publishing-turn-queue.ts` decorates the `TurnQueue`, so host asks, spawns,
-  mailbox wakes, and recovery pushes all count), the executor's stream claim, approval parking, queue
+  yields the changes this process observes: every committed admission
+  (`AgentResidency.admit` publishes each conversation it pushed to, so host asks, spawns, mailbox
+  wakes, and recovery pushes all count), the executor's stream claim, approval parking, queue
   settle (`onSettled` is always wired now; status publishes before plugin availability
   reconciliation), and `observe().cancel()`. Each signal re-reads and dedupes, so duplicates are free
   and a publish never rejects into `onSettled`. Cross-process push is opt-in through
@@ -1111,9 +1126,9 @@ work({concurrency?}) → AsyncDisposable }`.
 - **General pause vs cancel** — approval parking is built, while arbitrary suspend/resume of a
   running model turn remains undecided. Cancel is terminal for queued/running streams.
 - **Per-turn bounds** — step / token / wall-clock / no-progress caps as automatic terminals.
-- **Multi-agent capacity / residency** — there is no per-tree agent cap or Codex-style LRU unloading
-  for idle terminal/interrupted children. Worker concurrency limits execution but does not bound
-  persisted tree growth or loaded resources.
+- **Multi-agent unloading** — the resident-children cap is built (atomic admission, see the parity
+  section); Codex-style LRU unloading of idle terminal/interrupted children is not, so idle children
+  stay persisted and listed.
 - **Per-chat sandbox GC** — the host releases its per-chat sandbox handles when it ends, following
   each backend's disposal policy. Reclaiming retained environments for deleted or idle chats still
   needs a policy (chat deletion hook, idle TTL, or host policy).

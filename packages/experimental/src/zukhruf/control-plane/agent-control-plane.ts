@@ -17,9 +17,11 @@ import {
 } from '../mailbox/types.ts';
 import type { TurnQueue, TurnRef, TurnRequest } from '../queue/turn-queue.ts';
 import type { ChildActivity } from '../runtime/conversation-status/child-progress.ts';
+import { withChildActivity } from '../runtime/conversation-status/projector.ts';
 import { AgentDeclarationRegistry } from './agent-declaration-registry.ts';
 import { AgentDirectory } from './agent-directory.ts';
 import { AgentHistoryForker } from './agent-history-forker.ts';
+import type { AgentResidency } from './agent-residency.ts';
 import {
   type AgentStatusProjector,
   type ListedAgent,
@@ -39,13 +41,11 @@ export interface AgentControlPlaneOptions {
   declarations: AgentDeclarationRegistry;
   directory: AgentDirectory;
   statusProjector: AgentStatusProjector;
-  historyForker: AgentHistoryForker;
+  residency: AgentResidency;
   recordActivity: (
     thread: AgentThread,
     activity: ChildActivity,
   ) => Promise<void>;
-  /** Codex `max_concurrent_threads_per_session`, root included. */
-  maxConcurrentThreadsPerSession: number;
 }
 
 export interface AgentActor {
@@ -79,9 +79,8 @@ export class AgentControlPlane {
   readonly #declarations: AgentDeclarationRegistry;
   readonly #directory: AgentDirectory;
   readonly #statusProjector: AgentStatusProjector;
-  readonly #historyForker: AgentHistoryForker;
+  readonly #residency: AgentResidency;
   readonly #recordActivity: AgentControlPlaneOptions['recordActivity'];
-  readonly #maxConcurrentThreadsPerSession: number;
 
   constructor(options: AgentControlPlaneOptions) {
     this.#root = options.root;
@@ -91,10 +90,8 @@ export class AgentControlPlane {
     this.#declarations = options.declarations;
     this.#directory = options.directory;
     this.#statusProjector = options.statusProjector;
-    this.#historyForker = options.historyForker;
+    this.#residency = options.residency;
     this.#recordActivity = options.recordActivity;
-    this.#maxConcurrentThreadsPerSession =
-      options.maxConcurrentThreadsPerSession;
   }
 
   async resolve(conversation: ConversationId): Promise<{
@@ -121,47 +118,48 @@ export class AgentControlPlane {
     const message = turn.message;
     if (!message.id.trim()) throw new Error('enqueue: message id is required');
     await this.#directory.assertOwnerIfExists(conversation);
-    // Codex checks capacity on every turn submission of a sub-agent thread
-    // that has no turn in flight; the root is never limited.
-    const thread = await this.#directory.load(conversation);
-    if (
-      thread &&
-      !thread.path.isRoot &&
-      (await this.#queue.getTurnActivity(conversation)) !== 'running' &&
-      !(await this.#hasExecutionCapacity(thread))
-    ) {
-      throw new AgentThreadLimitError();
-    }
+    return this.#residency.admit(conversation, async (admission) => {
+      const streamId =
+        message.role === 'assistant'
+          ? await AgentControlPlane.#continuationStreamId(
+              admission.directory,
+              conversation,
+              message,
+            )
+          : AgentTurnId.fromRequest(conversation, message.id).toString();
 
-    const streamId =
-      message.role === 'assistant'
-        ? await this.#continuationStreamId(conversation, message)
-        : AgentTurnId.fromRequest(conversation, message.id).toString();
-
-    if (message.role === 'assistant' || turn.trigger === 'regenerate-message') {
-      const status = await this.#streams.store.getStreamStatus(streamId);
-      if (status === undefined) throw new TurnNotFoundError(streamId);
-      if (status === 'queued' || status === 'running') return streamId;
-      await this.#streams.reopen(streamId);
-    } else {
-      await this.#streams.register(streamId);
-    }
-
-    await this.#queue.push({
-      kind: 'message',
-      streamId,
-      chatId: conversation.chatId,
-      userId: conversation.userId,
-      ...turn,
+      const continues =
+        message.role === 'assistant' || turn.trigger === 'regenerate-message';
+      if (continues) {
+        const status = await admission.streams.getStreamStatus(streamId);
+        if (status === undefined) throw new TurnNotFoundError(streamId);
+        if (status === 'queued' || status === 'running') return streamId;
+      }
+      if (!(await admission.admits(conversation))) {
+        throw new AgentThreadLimitError();
+      }
+      if (continues) {
+        await admission.streams.reopenStream(streamId);
+      } else {
+        await admission.registerStream(streamId);
+      }
+      await admission.queue.push({
+        kind: 'message',
+        streamId,
+        chatId: conversation.chatId,
+        userId: conversation.userId,
+        ...turn,
+      });
+      return streamId;
     });
-    return streamId;
   }
 
-  async #continuationStreamId(
+  static async #continuationStreamId(
+    directory: AgentDirectory,
     conversation: ConversationId,
     message: UIMessage,
   ): Promise<string> {
-    const streamId = (await this.#directory.load(conversation))?.lastTurnId;
+    const streamId = (await directory.load(conversation))?.lastTurnId;
     if (message.id !== streamId) throw new StaleTurnError(message.id);
     return streamId;
   }
@@ -197,60 +195,90 @@ export class AgentControlPlane {
         `spawn_agent: agent type "${input.agentType}" is not a subagent of "${actor.declaration.name}"`,
       );
     }
-    if (!(await this.#hasExecutionCapacity(actor.thread))) {
-      throw new Error('collab spawn failed: agent thread limit reached');
-    }
 
-    let child: AgentThread;
-    try {
-      child = await this.#directory.createChild({
-        parent: actor.thread,
-        taskName: input.taskName,
-        declarationName: childDeclaration.name,
+    return this.#residency.admit(actor.thread, async (admission) => {
+      const conversation = await AgentControlPlane.#spawnStep(() =>
+        admission.directory.childConversation(actor.thread, input.taskName),
+      );
+      const requestId = AgentControlPlane.#initialTurnId(conversation.chatId);
+      const streamId = AgentTurnId.fromRequest(
+        conversation,
+        requestId,
+      ).toString();
+      const childPath = actor.thread.path.resolve(input.taskName).toString();
+      const status = await admission.streams.getStreamStatus(streamId);
+      if (
+        status === 'completed' ||
+        status === 'failed' ||
+        status === 'cancelled'
+      ) {
+        throw new Error(
+          `spawn_agent: agent path "${childPath}" already finished with status "${status}"`,
+        );
+      }
+      // A retried spawn of a child whose initial turn is still scheduled
+      // writes nothing again.
+      if (
+        status !== undefined &&
+        (await admission.queue.getTurnActivity(conversation)) !== 'idle'
+      ) {
+        return { task_name: childPath };
+      }
+      if (!(await admission.admits(conversation))) {
+        throw new Error('collab spawn failed: agent thread limit reached');
+      }
+
+      const child = await AgentControlPlane.#spawnStep(() =>
+        admission.directory.createChild({
+          parent: actor.thread,
+          taskName: input.taskName,
+          declarationName: childDeclaration.name,
+        }),
+      );
+      await new AgentHistoryForker(admission.store).fork(
+        actor.thread,
+        child,
+        input.forkTurns,
+      );
+      const activity: ChildActivity = {
+        id: `spawn:${streamId}`,
+        type: 'spawn',
+        at: Date.now(),
+        actorPath: actor.thread.path.toString(),
+        targetPath: childPath,
+        streamId,
+      };
+      await admission.store.updateChat(child.conversation.chatId, (chat) => {
+        const metadata = withChildActivity(chat.metadata, activity);
+        return metadata && { metadata };
       });
+      await admission.registerStream(streamId);
+      await admission.queue.push({
+        kind: 'message',
+        streamId,
+        chatId: child.conversation.chatId,
+        userId: child.conversation.userId,
+        message: {
+          id: requestId,
+          role: 'user',
+          parts: [{ type: 'text', text: input.message }],
+        },
+        trigger: 'submit-message',
+      });
+      return { task_name: childPath };
+    });
+  }
+
+  /** Runs one spawn step, naming the tool in an invalid or occupied agent path. */
+  static async #spawnStep<T>(step: () => T | Promise<T>): Promise<T> {
+    try {
+      return await step();
     } catch (error) {
       if (Error.isError(error) && error.message.startsWith('agent path ')) {
         throw new Error(`spawn_agent: ${error.message}`, { cause: error });
       }
       throw error;
     }
-
-    const childPath = child.path.toString();
-    const requestId = AgentControlPlane.#initialTurnId(
-      child.conversation.chatId,
-    );
-    const streamId = AgentTurnId.fromRequest(
-      child.conversation,
-      requestId,
-    ).toString();
-    const status = await this.#streams.store.getStreamStatus(streamId);
-    if (
-      status === 'completed' ||
-      status === 'failed' ||
-      status === 'cancelled'
-    ) {
-      throw new Error(
-        `spawn_agent: agent path "${childPath}" already finished with status "${status}"`,
-      );
-    }
-    await this.#historyForker.fork(actor.thread, child, input.forkTurns);
-    await this.enqueue(child.conversation, {
-      message: {
-        id: requestId,
-        role: 'user',
-        parts: [{ type: 'text', text: input.message }],
-      },
-      trigger: 'submit-message',
-    });
-    await this.#recordActivity(child, {
-      id: `spawn:${streamId}`,
-      type: 'spawn',
-      at: Date.now(),
-      actorPath: actor.thread.path.toString(),
-      targetPath: childPath,
-      streamId,
-    });
-    return { task_name: childPath };
   }
 
   async sendMessage(
@@ -378,15 +406,6 @@ export class AgentControlPlane {
         'followup_task: the root agent cannot receive a follow-up',
       );
     }
-    // Codex checks capacity only for mail that starts a turn, and skips the
-    // check when the target already has one in flight.
-    if (
-      options.mode === MessageDeliveryModes.TriggerTurn &&
-      (await this.#queue.getTurnActivity(target.conversation)) !== 'running' &&
-      !(await this.#hasExecutionCapacity(actor.thread))
-    ) {
-      throw new Error('collab tool failed: agent thread limit reached');
-    }
     const message = createInterAgentCommunication({
       type: options.type,
       author: actor.thread.conversation,
@@ -397,7 +416,17 @@ export class AgentControlPlane {
         recipientPath: target.path.toString(),
       },
     });
-    await this.#mailbox.deliver(message, options.mode);
+    try {
+      await this.#mailbox.deliver(message, options.mode);
+    } catch (error) {
+      // Codex checks the limit only for mail that starts a turn.
+      if (error instanceof AgentThreadLimitError) {
+        throw new Error('collab tool failed: agent thread limit reached', {
+          cause: error,
+        });
+      }
+      throw error;
+    }
     await this.#recordActivity(target.path.isRoot ? actor.thread : target, {
       id: message.id,
       type:
@@ -410,22 +439,6 @@ export class AgentControlPlane {
       streamId: actor.turn.streamId,
     });
     return { target: target.path.toString() };
-  }
-
-  /**
-   * Codex `AgentExecutionLimiter`: one slot per in-flight sub-agent turn in
-   * the tree; the root holds one of the configured slots implicitly, so the
-   * cap on sub-agents is the configured total minus one.
-   */
-  async #hasExecutionCapacity(thread: AgentThread): Promise<boolean> {
-    const members = await this.#directory.listTree(thread);
-    const activity = await Promise.all(
-      members
-        .filter((member) => !member.path.isRoot)
-        .map((member) => this.#queue.getTurnActivity(member.conversation)),
-    );
-    const inFlight = activity.filter((state) => state === 'running').length;
-    return inFlight < this.#maxConcurrentThreadsPerSession - 1;
   }
 
   static #initialTurnId(chatId: string): string {

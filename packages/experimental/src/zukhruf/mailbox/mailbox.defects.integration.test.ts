@@ -96,16 +96,6 @@ function declaration(model: AgentDeclaration['model']): AgentDeclaration {
 }
 
 class ManualTurnQueue extends ControlledTurnQueue {
-  readonly attempted: TurnRef[] = [];
-  readonly pushFaults: Error[] = [];
-
-  override async push(turn: TurnRef) {
-    this.attempted.push(turn);
-    const fault = this.pushFaults.shift();
-    if (fault) throw fault;
-    await super.push(turn);
-  }
-
   protected override async park(): Promise<void> {}
 
   protected override async deliver(
@@ -504,28 +494,6 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
         'runtime consumption does not expose its destructive mailbox store',
       );
       assert.equal('deliver' in h.runtime, true);
-    } finally {
-      h.close();
-    }
-  });
-
-  it('does not leave a permanently queued stream receipt when wake scheduling fails', async () => {
-    const queue = new ManualTurnQueue();
-    queue.pushFaults.push(new Error('simulated queue push failure'));
-    const h = await runtimeHarness({ queue });
-    try {
-      await assert.rejects(
-        h.runtime.deliver(mail('wake me'), MessageDeliveryModes.TriggerTurn),
-        /simulated queue push failure/,
-      );
-
-      const failedWake = queue.attempted[0];
-      assert.ok(failedWake);
-      assert.equal(
-        await h.streamStore.getStreamStatus(failedWake.streamId),
-        'failed',
-        'a failed wake receipt is terminal instead of orphaned forever',
-      );
     } finally {
       h.close();
     }

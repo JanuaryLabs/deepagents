@@ -9,7 +9,9 @@ import { PgBoss } from 'pg-boss';
 import { createVirtualSandbox } from '@deepagents/context';
 import {
   AgentRuntime,
+  MessageDeliveryModes,
   PostgresAgentStorage,
+  createInterAgentCommunication,
   defineAgent,
   defineSandbox,
   defineStack,
@@ -112,6 +114,79 @@ test("a child's FINAL_ANSWER reaches its parent's wait_agent on a PostgreSQL sta
       childResultVisible: true,
       consumedFinalAnswers: 1,
       poolOpen: [{ alive: 1 }],
+    },
+  );
+});
+
+test('a trigger delivery whose wake push fails leaves no mail and no wake stream, and a retry delivers both', async () => {
+  await using resources = new AsyncDisposableStack();
+  const database = resources.use(await testPostgres.database());
+  const pool = database.pool();
+  const boss = new PgBoss({ connectionString: database.connectionString });
+  boss.on('error', () => {});
+  await boss.start();
+  resources.defer(() => boss.stop({ graceful: false }));
+  const storage = resources.use(
+    await PostgresAgentStorage.create({ pool, boss }),
+  );
+  const sandbox = defineSandbox(async () =>
+    createVirtualSandbox({ fs: new InMemoryFs() }),
+  );
+  await using host = await new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      sandbox,
+      instructions: [],
+      model: new MockLanguageModelV4({
+        doStream: async () => textResult('unused'),
+      }),
+    }),
+  ).initialize(defineStack(async () => ({ storage })));
+  const recipient = { chatId: randomUUID(), userId: 'user-1' };
+  const mail = createInterAgentCommunication({
+    author: { chatId: randomUUID(), userId: 'user-1' },
+    recipient,
+    content: 'wake me',
+  });
+  // Platform setup no storage operation exposes: every job insert fails
+  // inside the delivery's transaction.
+  await pool.query(`CREATE FUNCTION fail_job_insert() RETURNS trigger
+    LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'simulated queue push failure'; END $$`);
+  await pool.query(`CREATE TRIGGER fail_push BEFORE INSERT ON pgboss.job
+    FOR EACH ROW EXECUTE FUNCTION fail_job_insert()`);
+
+  const failure = await host
+    .deliver(mail, MessageDeliveryModes.TriggerTurn)
+    .then(
+      () => 'delivered',
+      (error: unknown) => (Error.isError(error) ? error.message : 'unknown'),
+    );
+  const afterFailure = {
+    failure,
+    mail: await storage.mailboxStore.hasPending(recipient),
+    streams: await storage.streams.store.listStreamIds(),
+    turn: await storage.queue.getTurnActivity(recipient),
+  };
+  await pool.query('DROP TRIGGER fail_push ON pgboss.job');
+  await host.deliver(mail, MessageDeliveryModes.TriggerTurn);
+
+  assert.deepStrictEqual(
+    {
+      afterFailure,
+      afterRetry: {
+        mail: await storage.mailboxStore.hasPendingTriggerTurn(recipient),
+        streams: (await storage.streams.store.listStreamIds()).length,
+        turn: await storage.queue.getTurnActivity(recipient),
+      },
+    },
+    {
+      afterFailure: {
+        failure: 'simulated queue push failure',
+        mail: false,
+        streams: [],
+        turn: 'idle',
+      },
+      afterRetry: { mail: true, streams: 1, turn: 'queued' },
     },
   );
 });

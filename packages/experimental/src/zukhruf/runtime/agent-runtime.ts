@@ -11,7 +11,7 @@ import {
 import type { AgentDeclaration, ZukhrufSandbox } from '../agent.ts';
 import { AgentControlPlane } from '../control-plane/agent-control-plane.ts';
 import { AgentDirectory } from '../control-plane/agent-directory.ts';
-import { AgentHistoryForker } from '../control-plane/agent-history-forker.ts';
+import { AgentResidency } from '../control-plane/agent-residency.ts';
 import { AgentStatusProjector } from '../control-plane/agent-status-projector.ts';
 import { AgentThread } from '../control-plane/agent-thread.ts';
 import { AgentTurnId } from '../control-plane/agent-turn-id.ts';
@@ -42,7 +42,6 @@ import {
   type ConversationStatusEvent,
   ConversationStatusProjector,
 } from './conversation-status/projector.ts';
-import { StatusPublishingTurnQueue } from './conversation-status/status-publishing-turn-queue.ts';
 import { PluginManager } from './plugin/plugin-manager.ts';
 
 export interface AgentPluginToolContext extends Readonly<
@@ -375,8 +374,6 @@ class RuntimeHost implements AsyncDisposable {
     const { storage } = options;
     const directory = new AgentDirectory(storage.store);
     const streams = storage.streams;
-    // Status reads go to the raw queue; every push through the decorated
-    // queue publishes the target conversation's status.
     const conversationStatus = new ConversationStatusProjector({
       store: storage.store,
       streams,
@@ -384,17 +381,23 @@ class RuntimeHost implements AsyncDisposable {
       directory,
       changeSource: options.conversationStatusChanges,
     });
-    const queue = new StatusPublishingTurnQueue(storage.queue, (conversation) =>
-      conversationStatus.publish(conversation),
-    );
+    const queue = storage.queue;
+    // Every turn pushed to a conversation is admitted here, and publishes the
+    // conversation's status once its admission commits.
+    const residency = new AgentResidency({
+      storage,
+      directory,
+      maxConcurrentThreadsPerSession: multiAgent.maxConcurrentThreadsPerSession,
+      publish: (conversation) => conversationStatus.publish(conversation),
+    });
     const mailbox = new MailboxCoordinator({
       store: storage.mailboxStore,
-      queue,
-      streams,
+      residency,
     });
     const approvals = new ApprovalController({
       store: storage.store,
       queue,
+      residency,
     });
     const statusProjector = new AgentStatusProjector({
       store: storage.store,
@@ -404,7 +407,6 @@ class RuntimeHost implements AsyncDisposable {
       directory,
       approvals,
     });
-    const historyForker = new AgentHistoryForker(storage.store);
     const controlPlane = new AgentControlPlane({
       root: declarations.root,
       streams,
@@ -413,10 +415,9 @@ class RuntimeHost implements AsyncDisposable {
       declarations,
       directory,
       statusProjector,
-      historyForker,
+      residency,
       recordActivity: (thread, activity) =>
         conversationStatus.recordActivity(thread, activity),
-      maxConcurrentThreadsPerSession: multiAgent.maxConcurrentThreadsPerSession,
     });
     this.#store = storage.store;
     this.#queue = queue;
