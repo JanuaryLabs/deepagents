@@ -5,6 +5,7 @@ import {
   readUIMessageStream,
   stepCountIs,
   streamText,
+  toUIMessageStream,
   tool,
 } from 'ai';
 import assert from 'node:assert';
@@ -208,11 +209,10 @@ describe('an OpenAI reasoning item streamed with store: false', () => {
     };
     let streamed: UIMessage | undefined;
     for await (const message of readUIMessageStream({
-      stream: streamText({
-        model,
-        prompt: 'think twice',
-        providerOptions,
-      }).toUIMessageStream(),
+      stream: toUIMessageStream({
+        stream: streamText({ model, prompt: 'think twice', providerOptions })
+          .stream,
+      }),
     })) {
       streamed = message;
     }
@@ -367,19 +367,23 @@ describe('an OpenAI reasoning item streamed with store: false across a tool roun
       openai: { store: false, include: ['reasoning.encrypted_content'] },
     };
     let streamed: UIMessage | undefined;
+    const tools = {
+      lookup: tool({
+        inputSchema: z.object({}),
+        execute: async () => 'found',
+      }),
+    };
     for await (const message of readUIMessageStream({
-      stream: streamText({
-        model,
-        prompt: 'look it up',
-        tools: {
-          lookup: tool({
-            inputSchema: z.object({}),
-            execute: async () => 'found',
-          }),
-        },
-        stopWhen: stepCountIs(2),
-        providerOptions,
-      }).toUIMessageStream(),
+      stream: toUIMessageStream({
+        stream: streamText({
+          model,
+          prompt: 'look it up',
+          tools,
+          stopWhen: stepCountIs(2),
+          providerOptions,
+        }).stream,
+        tools,
+      }),
     })) {
       streamed = message;
     }
