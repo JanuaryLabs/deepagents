@@ -27,7 +27,10 @@ import {
 import {
   type AgentHost,
   AgentRuntime,
+  DirectTools,
   SqliteMailboxStore,
+  Team,
+  ToolNamespace,
   type TurnRef,
   defineAgent,
   defineStack,
@@ -449,7 +452,9 @@ test('configured runtime injects top-level Claude-compatible scheduling tools', 
   );
   const runtimeStack = defineStack(async () => ({
     storage: new ControlledAgentStorage(h),
-    multiAgent: { toolNamespace: 'agents' },
+    multiAgent: Team.codex({
+      exposure: new DirectTools(new ToolNamespace('agents')),
+    }),
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),

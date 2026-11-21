@@ -20,6 +20,7 @@ import {
   type MailboxEnqueueResult,
   MessageDeliveryModes,
   SqliteMailboxStore,
+  Team,
   TurnQueue,
   type TurnRef,
   createInterAgentCommunication,
@@ -4075,7 +4076,7 @@ test('spawn_agent is rejected with the Codex limit error while the tree has no f
     },
   ]);
   const parts = { store, streams: streamsFor(streamStore), mailboxStore };
-  const multiAgent = { maxConcurrentThreadsPerSession: 2 };
+  const multiAgent = Team.codex({ maxConcurrentThreads: 2 });
   const rootRuntimeSetup = new AgentRuntime(root);
   const rootRuntimeStack2 = defineStack(async () => ({
     storage: new ControlledAgentStorage({ ...parts, queue: rootQueue }),
@@ -4219,7 +4220,7 @@ test('followup_task is rejected with the Codex limit error while send_message st
     },
   ]);
   const parts = { store, streams: streamsFor(streamStore), mailboxStore };
-  const multiAgent = { maxConcurrentThreadsPerSession: 2 };
+  const multiAgent = Team.codex({ maxConcurrentThreads: 2 });
   const rootRuntimeSetup = new AgentRuntime(root);
   const rootRuntimeStack3 = defineStack(async () => ({
     storage: new ControlledAgentStorage({ ...parts, queue: rootQueue }),
@@ -4339,7 +4340,7 @@ test('a settled child frees its execution slot for the next spawn', async () => 
       mailboxStore,
       queue,
     }),
-    multiAgent: { maxConcurrentThreadsPerSession: 2 },
+    multiAgent: Team.codex({ maxConcurrentThreads: 2 }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack32);
   await using _worker = await runtime.work();
@@ -4442,7 +4443,7 @@ test('a host cannot start a sub-agent turn while the tree has no free execution 
       mailboxStore,
       queue: childQueue,
     }),
-    multiAgent: { maxConcurrentThreadsPerSession: 2 },
+    multiAgent: Team.codex({ maxConcurrentThreads: 2 }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack33);
   await using _worker = await runtime.work();

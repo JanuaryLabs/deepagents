@@ -54,7 +54,6 @@ test('the customer barrel hides runtime wiring and injected tool implementations
     'AgentStatusProjector',
     'AgentTurnExecutor',
     'ApprovalController',
-    'resolveMultiAgentHostConfig',
     'MailboxCoordinator',
     'spawnAgentTool',
     'sendMessageTool',

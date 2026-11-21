@@ -9,6 +9,7 @@ import {
 } from '@deepagents/context';
 
 import type { AgentDeclaration, ZukhrufSandbox } from '../agent.ts';
+import { Team } from '../collaboration/team.ts';
 import { AgentControlPlane } from '../control-plane/agent-control-plane.ts';
 import { AgentDirectory } from '../control-plane/agent-directory.ts';
 import { AgentResidency } from '../control-plane/agent-residency.ts';
@@ -25,10 +26,6 @@ import type {
   InterAgentCommunication,
   MessageDeliveryMode,
 } from '../mailbox/types.ts';
-import {
-  type MultiAgentHostConfig,
-  resolveMultiAgentHostConfig,
-} from '../multi-agent-config.ts';
 import type { TurnQueue, TurnRef, TurnRequest } from '../queue/turn-queue.ts';
 import type { AgentStorage } from '../storage/agent-storage.ts';
 import type { ZukhrufToolSet } from '../tool.ts';
@@ -300,8 +297,8 @@ export type AgentStack = (resources: AsyncDisposableStack) => Promise<{
    * borrows it: register a storage the host should close on `resources`.
    */
   storage: AgentStorage;
-  /** Codex-compatible multi-agent host guidance and tool configuration. */
-  multiAgent?: MultiAgentHostConfig;
+  /** The collaboration tools and guidance every agent gets. Defaults to `Team.codex()`. */
+  multiAgent?: Team;
   /** Host implementations for capabilities required by root-owned plugins. */
   bindings?: readonly AgentPluginBinding[];
   /**
@@ -366,7 +363,7 @@ class RuntimeHost implements AsyncDisposable {
     resources: AsyncDisposableStack,
   ) {
     this.#resources = resources;
-    const team = resolveMultiAgentHostConfig(options.multiAgent);
+    const team = options.multiAgent ?? Team.codex();
     const plugins = resources.use(
       new PluginManager(root, options.bindings, team),
     );

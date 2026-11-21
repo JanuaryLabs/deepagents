@@ -19,8 +19,10 @@ import {
   type AgentPluginDefinition,
   type AgentPluginHost,
   AgentRuntime,
+  CodeModeTools,
   type SandboxContext,
   SqliteMailboxStore,
+  Team,
   defineAgent,
   defineSandbox,
   defineStack,
@@ -379,7 +381,7 @@ test('code_mode is reserved only when code mode is enabled', async () => {
   const codeModeRuntime = new AgentRuntime(declaration([custom]));
   const codeModeRuntimeStack = defineStack(async (resources) => ({
     storage: new ControlledAgentStorage(adapters(resources)),
-    multiAgent: { nonCodeModeOnly: false },
+    multiAgent: Team.codex({ exposure: new CodeModeTools() }),
   }));
   await assert.rejects(
     codeModeRuntime.initialize(codeModeRuntimeStack),

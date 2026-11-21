@@ -21,6 +21,7 @@ import {
   AgentRuntime,
   PgBossTurnQueue,
   SqliteMailboxStore,
+  Team,
   defineAgent,
   defineSandbox,
   defineStack,
@@ -139,7 +140,7 @@ test('POST /session answers 429 for an idle sub-agent while its tree has no free
           queue,
           mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
         }),
-        multiAgent: { maxConcurrentThreadsPerSession: 2 },
+        multiAgent: Team.codex({ maxConcurrentThreads: 2 }),
       })),
     ),
   );

@@ -110,9 +110,12 @@ exposing a cleanup method. Backend choices and startup calls stay explicit.
 ```ts
 const stack = defineStack(async (resources) => ({
   storage: resources.use(await PostgresAgentStorage.create({ pool, boss })),
-  multiAgent: { maxConcurrentThreadsPerSession: 4 },
+  multiAgent: Team.codex({ maxConcurrentThreads: 4 }),
 }));
 ```
+
+`multiAgent` takes a `Team`, the collaboration tools and guidance every agent
+of the tree gets; omitted, it is `Team.codex()`, all six tools.
 
 ```ts
 import declaration from './agent.ts';
@@ -267,6 +270,6 @@ notifications where specialists volunteer public replies),
 skill discovered at startup).
 Every `spawn_agent` call chooses all parent turns, no parent turns, or a bounded
 number of recent user-turn boundaries through its required `fork_turns` input.
-Collaboration tools stay on the direct model surface by default; set
-`multiAgent.nonCodeModeOnly: false` to expose them through AI SDK code mode
-instead.
+Collaboration tools stay on the direct model surface by default; pass
+`Team.codex({ exposure: new CodeModeTools() })` as `multiAgent` to expose them
+through AI SDK code mode instead.

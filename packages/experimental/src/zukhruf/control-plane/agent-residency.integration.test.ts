@@ -18,6 +18,7 @@ import {
   type ConversationId,
   EmbeddedAgentStorage,
   SqliteMailboxStore,
+  Team,
   defineAgent,
   defineStack,
   defineTool,
@@ -157,7 +158,9 @@ async function controlledHost(
           mailboxStore,
           queue,
         }),
-        multiAgent: { maxConcurrentThreadsPerSession },
+        multiAgent: Team.codex({
+          maxConcurrentThreads: maxConcurrentThreadsPerSession,
+        }),
       })),
     ),
   );
@@ -561,7 +564,7 @@ test('on EmbeddedAgentStorage, a turn for an idle child is refused with AgentThr
     await using runtime = await new AgentRuntime(root).initialize(
       defineStack(async () => ({
         storage,
-        multiAgent: { maxConcurrentThreadsPerSession: 3 },
+        multiAgent: Team.codex({ maxConcurrentThreads: 3 }),
       })),
     );
     await using worker = await runtime.work();
@@ -583,7 +586,7 @@ test('on EmbeddedAgentStorage, a turn for an idle child is refused with AgentThr
   await using runtime = await new AgentRuntime(root).initialize(
     defineStack(async () => ({
       storage,
-      multiAgent: { maxConcurrentThreadsPerSession: 2 },
+      multiAgent: Team.codex({ maxConcurrentThreads: 2 }),
     })),
   );
   const children = new Map(

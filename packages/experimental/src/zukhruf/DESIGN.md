@@ -466,21 +466,29 @@ The control plane deliberately reuses declarations, `ContextStore`, mailbox stor
 instead of introducing a Runner or separate thread database:
 
 - `defineAgent({name, subagents})` requires a stable declaration name and declares which agent types
-  the current agent may spawn. `AgentTurnExecutor` injects the direct AI SDK `spawn_agent`,
-  `send_message`, `followup_task`, `list_agents`, `wait_agent`, and `interrupt_agent` tools for every
-  turn.
-- The stack recipe’s `multiAgent` field is the host configuration surface for Codex-compatible
-  collaboration guidance and tool exposure. Root and subagent usage hints are separate complete
-  overrides; empty strings disable them. The selected hint is injected as a non-persisted role
-  fragment, so forked transcript history never copies a parent's hint into a child. `usageHintText`
-  appends guidance to `spawn_agent`. `toolNamespace` applies a validated native OpenAI Responses
-  namespace to all six collaboration tools. Reserved, padded, non-ASCII, and over-64-character
-  namespaces fail during host initialization. Current upstream Codex also injects a dedicated
-  subagent developer instruction and inherits the spawning turn's ready-step environment. Zukhruf
-  does not yet expose equivalents; they are tracked in TODO.md.
-- Collaboration tools are direct-model-only by default, matching Codex's
-  `non_code_mode_only = true`. Setting `nonCodeModeOnly: false` exposes them through the AI SDK's
-  provider-agnostic code-mode tool and removes them from the direct model surface.
+  the current agent may spawn. `AgentTurnExecutor` injects the team's collaboration tools for every
+  turn; by default those are the AI SDK `spawn_agent`, `send_message`, `followup_task`,
+  `wait_agent`, `interrupt_agent`, and `list_agents` tools.
+- The stack recipe’s `multiAgent` field takes a `Team` (`collaboration/team.ts`), the collaboration
+  capabilities a tree of agents shares; omitted, it is `Team.codex()`. A team always has `Spawning`
+  (`spawn_agent`), since every other capability acts on spawned agents. `.with()` returns a team
+  that also has `DirectMessaging` (`send_message`, `followup_task`), `Waiting` (`wait_agent`, within
+  its `WaitBounds`) or `Supervision` (`interrupt_agent`, `list_agents`); a second tool of one name
+  throws. `Team.codex({ usageHintText?, waitBounds?, maxConcurrentThreads?, exposure?, guidance? })`
+  composes all four in Codex order. Each capability writes only its own guidance sentences, so a
+  role's guidance names only the team's tools. `guidance: { root?, subagent? }` rewrites a role's
+  composed guidance; returning `undefined` gives that role none. The selected guidance is injected
+  as a non-persisted role fragment, so forked transcript history never copies a parent's hint into
+  a child. `usageHintText` appends guidance to `spawn_agent`. `new DirectTools(new
+ToolNamespace(name))` applies a validated native OpenAI Responses namespace to all of the team's
+  tools; a reserved, padded, non-ASCII, or over-64-character name throws when the `ToolNamespace`
+  is built. Current upstream Codex also injects a dedicated subagent developer instruction and
+  inherits the spawning turn's ready-step environment. Zukhruf does not yet expose equivalents;
+  they are tracked in TODO.md.
+- Collaboration tools are direct-model-only by default (`DirectTools`), matching Codex's
+  `non_code_mode_only = true`. `exposure: new CodeModeTools()` exposes them through the AI SDK's
+  provider-agnostic code-mode tool and removes them from the direct model surface; it takes no
+  namespace.
 - `runtime.initialize(options)` recursively compiles declarations by unique canonical names
   without surrounding whitespace. Each worker turn loads the chat's reserved Zukhruf metadata and
   selects the matching declaration.
@@ -561,7 +569,7 @@ Parity means matching Codex's model-facing collaboration contract where the same
 not copying its process-local implementation:
 
 - **Residency (Codex V2 `reserve_spawn_slot`, `residency.rs` `is_unloadable`):**
-  `multiAgent.maxConcurrentThreadsPerSession` (default 4, root included, zero rejected) caps the
+  the team's `maxConcurrentThreads` (default 4, root included, zero rejected) caps the
   tree's resident sub-agents at N minus one; the root implicitly holds one slot and is never
   limited. A sub-agent is resident while it has a queued or running turn, trigger-turn mail waiting
   (`MailboxStore.hasPendingTriggerTurn`), or a head paused on an unsettled tool call

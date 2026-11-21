@@ -15,6 +15,7 @@ import {
   AgentThreadLimitError,
   type ConversationId,
   PostgresAgentStorage,
+  Team,
   defineAgent,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
@@ -132,7 +133,9 @@ async function hostOn(
     await new AgentRuntime(root).initialize(
       defineStack(async () => ({
         storage,
-        multiAgent: { maxConcurrentThreadsPerSession },
+        multiAgent: Team.codex({
+          maxConcurrentThreads: maxConcurrentThreadsPerSession,
+        }),
       })),
     ),
   );

@@ -128,7 +128,7 @@
 - [x] Port Codex host configuration for separate root/subagent guidance, spawn usage text,
       validated OpenAI Responses tool namespaces, and wait bounds. `fork_turns` is optional
       (`all` by default, or `none`). Keep collaboration tools on the direct model surface by default and expose them
-      through native AI SDK code mode when `nonCodeModeOnly` is false.
+      through native AI SDK code mode with `CodeModeTools`.
 - [ ] Add explicit spawn-context contracts for dedicated subagent developer instructions and the
       current turn's host execution context/environment. Reuse existing Zukhruf declaration,
       instruction-fragment, sandbox, and fork-snapshot primitives; do not copy Codex's Rust

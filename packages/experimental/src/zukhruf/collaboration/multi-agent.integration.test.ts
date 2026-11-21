@@ -15,8 +15,13 @@ import {
 import {
   type AgentHost,
   AgentRuntime,
+  CodeModeTools,
+  DirectTools,
   MessageDeliveryModes,
   SqliteMailboxStore,
+  Team,
+  ToolNamespace,
+  WaitBounds,
   createInterAgentCommunication,
   defineAgent,
   defineStack,
@@ -98,7 +103,7 @@ function harness() {
   };
 }
 
-test('host config injects root guidance, spawn guidance, namespace, and wait bounds', async () => {
+test('a team injects root guidance, spawn guidance, namespace, and wait bounds', async () => {
   using h = harness();
   let request: { prompt: unknown; tools: unknown } | undefined;
   const model = new MockLanguageModelV4({
@@ -132,16 +137,15 @@ test('host config injects root guidance, spawn guidance, namespace, and wait bou
   );
   const runtimeStack = defineStack(async () => ({
     storage: new ControlledAgentStorage(h),
-    multiAgent: {
-      rootAgentUsageHintText: 'ROOT COLLABORATION GUIDANCE',
-      subagentUsageHintText: 'CHILD COLLABORATION GUIDANCE',
+    multiAgent: Team.codex({
       usageHintText: 'Prefer delegation for independent work.',
-      toolNamespace: 'agents',
-      minWaitTimeoutMs: 111,
-      defaultWaitTimeoutMs: 222,
-      maxWaitTimeoutMs: 333,
-      nonCodeModeOnly: true,
-    },
+      waitBounds: new WaitBounds({ minMs: 111, defaultMs: 222, maxMs: 333 }),
+      exposure: new DirectTools(new ToolNamespace('agents')),
+      guidance: {
+        root: () => 'ROOT COLLABORATION GUIDANCE',
+        subagent: () => 'CHILD COLLABORATION GUIDANCE',
+      },
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack);
   await runtime.enqueue(
@@ -236,11 +240,9 @@ test('wait_agent clamps a below-minimum timeout and reports it to the model', as
         mailboxStore,
         queue,
       }),
-      multiAgent: {
-        minWaitTimeoutMs: 50,
-        defaultWaitTimeoutMs: 75,
-        maxWaitTimeoutMs: 100,
-      },
+      multiAgent: Team.codex({
+        waitBounds: new WaitBounds({ minMs: 50, defaultMs: 75, maxMs: 100 }),
+      }),
     }));
     runtime = await runtimeSetup.initialize(runtimeStack2);
     await runtime.enqueue(conversation, userTurn('short-wait', 'Wait briefly'));
@@ -292,10 +294,12 @@ test('subagent guidance replaces root guidance on a child turn', async () => {
   );
   const runtimeStack3 = defineStack(async () => ({
     storage: new ControlledAgentStorage(h),
-    multiAgent: {
-      rootAgentUsageHintText: 'ROOT COLLABORATION GUIDANCE',
-      subagentUsageHintText: 'CHILD COLLABORATION GUIDANCE',
-    },
+    multiAgent: Team.codex({
+      guidance: {
+        root: () => 'ROOT COLLABORATION GUIDANCE',
+        subagent: () => 'CHILD COLLABORATION GUIDANCE',
+      },
+    }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack3);
   await h.store.createChat({
@@ -428,7 +432,7 @@ test('plugin-contributed subagent uses AI SDK code mode collaboration', async ()
   );
   const runtimeStack4 = defineStack(async () => ({
     storage: new ControlledAgentStorage(h),
-    multiAgent: { nonCodeModeOnly: false },
+    multiAgent: Team.codex({ exposure: new CodeModeTools() }),
   }));
   const runtime = await runtimeSetup.initialize(runtimeStack4);
 
@@ -501,68 +505,23 @@ test('interrupt_agent reports not_found for a missing target', async () => {
   assert.match(JSON.stringify(prompt), /"previous_status":"not_found"/);
 });
 
-test('host config rejects invalid namespaces and wait bounds', async () => {
-  const sandbox = buildSandbox;
-  const declaration = defineAgent({
-    name: 'root',
-    model: new MockLanguageModelV4({
-      doStream: async () => textResult('done'),
-    }),
-    sandbox,
-    instructions: [],
-  });
-  const streamStore = new SqliteStreamStore(':memory:');
-  const h = {
-    store: new InMemoryContextStore(),
-    streams: streamsFor(streamStore),
-    mailboxStore: new SqliteMailboxStore(':memory:'),
-    queue: new ControlledTurnQueue(),
-  };
-  try {
-    const reservedNamespaceSetup = new AgentRuntime(declaration);
-    const reservedNamespaceStack = defineStack(async () => ({
-      storage: new ControlledAgentStorage(h),
-      multiAgent: { toolNamespace: 'functions' },
-    }));
-    await assert.rejects(
-      reservedNamespaceSetup.initialize(reservedNamespaceStack),
-      /reserved tool namespace/,
-    );
-    const paddedNamespaceSetup = new AgentRuntime(declaration);
-    const paddedNamespaceStack = defineStack(async () => ({
-      storage: new ControlledAgentStorage(h),
-      multiAgent: { toolNamespace: ' agents ' },
-    }));
-    await assert.rejects(
-      paddedNamespaceSetup.initialize(paddedNamespaceStack),
-      /cannot be empty or padded/,
-    );
-    const invalidWaitBoundsSetup = new AgentRuntime(declaration);
-    const invalidWaitBoundsStack = defineStack(async () => ({
-      storage: new ControlledAgentStorage(h),
-      multiAgent: {
-        minWaitTimeoutMs: 50,
-        defaultWaitTimeoutMs: 40,
-        maxWaitTimeoutMs: 100,
-      },
-    }));
-    await assert.rejects(
-      invalidWaitBoundsSetup.initialize(invalidWaitBoundsStack),
-      /defaultWaitTimeoutMs.*minWaitTimeoutMs/,
-    );
-    const invalidConcurrencySetup = new AgentRuntime(declaration);
-    const invalidConcurrencyStack = defineStack(async () => ({
-      storage: new ControlledAgentStorage(h),
-      multiAgent: { maxConcurrentThreadsPerSession: 0 },
-    }));
-    await assert.rejects(
-      invalidConcurrencySetup.initialize(invalidConcurrencyStack),
-      /maxConcurrentThreadsPerSession must be a positive integer/,
-    );
-  } finally {
-    streamStore.close();
-    h.mailboxStore.close();
-  }
+test('team parts reject invalid namespaces, wait bounds, and concurrency', () => {
+  assert.throws(
+    () => new ToolNamespace('functions'),
+    /reserved tool namespace/,
+  );
+  assert.throws(
+    () => new ToolNamespace(' agents '),
+    /cannot be empty or padded/,
+  );
+  assert.throws(
+    () => new WaitBounds({ minMs: 50, defaultMs: 40, maxMs: 100 }),
+    /defaultMs must be at least minMs/,
+  );
+  assert.throws(
+    () => Team.codex({ maxConcurrentThreads: 0 }),
+    /maxConcurrentThreads must be a positive integer/,
+  );
 });
 
 test('default guidance tells root and child agents the Codex concurrency slots', async () => {
@@ -639,10 +598,7 @@ test('default guidance tells root and child agents the Codex concurrency slots',
   );
 });
 
-async function guidanceFor(multiAgent: {
-  toolNamespace?: string;
-  nonCodeModeOnly?: boolean;
-}) {
+async function guidanceFor(multiAgent: Team) {
   using h = harness();
   const requests: Record<string, { prompt: unknown; tools: unknown }> = {};
   const capturing = (name: string) =>
@@ -716,7 +672,7 @@ async function guidanceFor(multiAgent: {
 }
 
 test('direct collaboration tools: root and subagent receive the full default guidance and tools in request order', async () => {
-  const actual = await guidanceFor({});
+  const actual = await guidanceFor(Team.codex());
 
   assert.deepStrictEqual(actual, {
     root: [
@@ -775,7 +731,9 @@ test('direct collaboration tools: root and subagent receive the full default gui
 });
 
 test('namespaced collaboration tools: root and subagent receive the full default guidance and tools in request order', async () => {
-  const actual = await guidanceFor({ toolNamespace: 'agents' });
+  const actual = await guidanceFor(
+    Team.codex({ exposure: new DirectTools(new ToolNamespace('agents')) }),
+  );
 
   assert.deepStrictEqual(actual, {
     root: [
@@ -834,7 +792,9 @@ test('namespaced collaboration tools: root and subagent receive the full default
 });
 
 test('code-mode collaboration tools: root and subagent receive the full default guidance and tools in request order', async () => {
-  const actual = await guidanceFor({ nonCodeModeOnly: false });
+  const actual = await guidanceFor(
+    Team.codex({ exposure: new CodeModeTools() }),
+  );
 
   assert.deepStrictEqual(actual, {
     root: [

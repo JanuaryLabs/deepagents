@@ -21,9 +21,7 @@ export class ToolNamespace {
 
   constructor(name: string) {
     if (name.length === 0 || name.trim() !== name) {
-      throw new Error(
-        'AgentRuntime: multiAgent.toolNamespace cannot be empty or padded',
-      );
+      throw new Error('AgentRuntime: ToolNamespace cannot be empty or padded');
     }
     if (
       name.length > 64 ||
@@ -33,7 +31,7 @@ export class ToolNamespace {
       RESERVED_TOOL_NAMESPACES.has(name)
     ) {
       throw new Error(
-        `AgentRuntime: multiAgent.toolNamespace "${name}" is a reserved tool namespace or invalid`,
+        `AgentRuntime: ToolNamespace "${name}" is a reserved tool namespace or invalid`,
       );
     }
     this.name = name;

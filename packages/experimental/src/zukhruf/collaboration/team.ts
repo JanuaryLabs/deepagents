@@ -82,7 +82,7 @@ export class Team<
       maxConcurrentThreads < 1
     ) {
       throw new Error(
-        'AgentRuntime: multiAgent.maxConcurrentThreadsPerSession must be a positive integer',
+        'AgentRuntime: Team maxConcurrentThreads must be a positive integer',
       );
     }
     this.maxConcurrentThreads = maxConcurrentThreads;
@@ -114,7 +114,7 @@ export class Team<
     for (const name of Object.keys(capability.tools)) {
       if (Object.hasOwn(this.#members.tools, name)) {
         throw new Error(
-          `AgentRuntime: multiAgent already has the "${name}" collaboration tool`,
+          `AgentRuntime: the team already has the "${name}" collaboration tool`,
         );
       }
     }

@@ -9,22 +9,20 @@ export class WaitBounds {
     defaultMs = 30_000,
     maxMs = 3_600_000,
   }: { minMs?: number; defaultMs?: number; maxMs?: number } = {}) {
-    assertTimeout('minWaitTimeoutMs', minMs);
-    assertTimeout('defaultWaitTimeoutMs', defaultMs);
-    assertTimeout('maxWaitTimeoutMs', maxMs);
+    assertTimeout('minMs', minMs);
+    assertTimeout('defaultMs', defaultMs);
+    assertTimeout('maxMs', maxMs);
     if (minMs > maxMs) {
-      throw new Error(
-        'AgentRuntime: multiAgent.minWaitTimeoutMs must be at most maxWaitTimeoutMs',
-      );
+      throw new Error('AgentRuntime: WaitBounds minMs must be at most maxMs');
     }
     if (defaultMs < minMs) {
       throw new Error(
-        'AgentRuntime: multiAgent.defaultWaitTimeoutMs must be at least minWaitTimeoutMs',
+        'AgentRuntime: WaitBounds defaultMs must be at least minMs',
       );
     }
     if (defaultMs > maxMs) {
       throw new Error(
-        'AgentRuntime: multiAgent.defaultWaitTimeoutMs must be at most maxWaitTimeoutMs',
+        'AgentRuntime: WaitBounds defaultMs must be at most maxMs',
       );
     }
     this.minMs = minMs;
@@ -36,7 +34,7 @@ export class WaitBounds {
 function assertTimeout(name: string, value: number): void {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new Error(
-      `AgentRuntime: multiAgent.${name} must be a non-negative safe integer`,
+      `AgentRuntime: WaitBounds ${name} must be a non-negative safe integer`,
     );
   }
 }
