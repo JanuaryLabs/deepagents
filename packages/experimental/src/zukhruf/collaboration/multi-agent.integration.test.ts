@@ -638,3 +638,242 @@ test('default guidance tells root and child agents the Codex concurrency slots',
     `child guidance carries the concurrency sentence:\n${systemText(prompts.worker)}`,
   );
 });
+
+async function guidanceFor(multiAgent: {
+  toolNamespace?: string;
+  nonCodeModeOnly?: boolean;
+}) {
+  using h = harness();
+  const requests: Record<string, { prompt: unknown; tools: unknown }> = {};
+  const capturing = (name: string) =>
+    new MockLanguageModelV4({
+      doStream: async ({ prompt, tools }) => {
+        requests[name] = { prompt, tools };
+        return textResult('done');
+      },
+    });
+  const child = defineAgent({
+    name: 'worker',
+    model: capturing('worker'),
+    sandbox: buildSandbox,
+    instructions: [],
+  });
+  const runtimeSetup = new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: capturing('root'),
+      sandbox: child.sandbox,
+      instructions: [],
+      subagents: [child],
+    }),
+  );
+  const runtimeStack = defineStack(async () => ({
+    storage: new ControlledAgentStorage(h),
+    multiAgent,
+  }));
+  const runtime = await runtimeSetup.initialize(runtimeStack);
+  await h.store.createChat({
+    id: 'root-chat',
+    userId: 'user-1',
+    metadata: {
+      zukhrufTreeId: 'root-chat',
+      zukhruf: { path: '/root', parentChatId: null, declarationName: 'root' },
+    },
+  });
+  await h.store.createChat({
+    id: 'child-chat',
+    userId: 'user-1',
+    metadata: {
+      zukhrufTreeId: 'root-chat',
+      zukhruf: {
+        path: '/root/worker',
+        parentChatId: 'root-chat',
+        declarationName: 'worker',
+      },
+    },
+  });
+  await runtime.enqueue(
+    { chatId: 'root-chat', userId: 'user-1' },
+    userTurn('root-turn', 'work'),
+  );
+  await runtime.enqueue(
+    { chatId: 'child-chat', userId: 'user-1' },
+    userTurn('child-turn', 'work'),
+  );
+  await using worker = await runtime.work();
+  void worker;
+  await h.queue.runNext();
+  await h.queue.runNext();
+
+  return {
+    root: systemText(requests.root?.prompt),
+    subagent: systemText(requests.worker?.prompt),
+    rootTools: functionTools(requests.root?.tools).map(({ name }) => name),
+    subagentTools: functionTools(requests.worker?.tools).map(
+      ({ name }) => name,
+    ),
+  };
+}
+
+test('direct collaboration tools: root and subagent receive the full default guidance and tools in request order', async () => {
+  const actual = await guidanceFor({});
+
+  assert.deepStrictEqual(actual, {
+    root: [
+      '<role>',
+      '  You are `/root`, the primary agent in a team of agents collaborating to fulfill the user&apos;s goals.',
+      '  ',
+      '  At the start of your turn, you are the active agent. You can spawn sub-agents to handle subtasks, and those agents can recursively spawn their own declared sub-agents. All agents are equally capable and receive the tools declared for their agent type.',
+      '  ',
+      '  Use `spawn_agent` to create an agent, `followup_task` to assign a new task and trigger a turn, and `send_message` to queue a message without triggering a turn. You can decide how much context you want to propagate to your sub-agents with the `fork_turns` parameter.',
+      '  ',
+      '  Child messages arrive as `MESSAGE` or `FINAL_ANSWER` mailbox envelopes with their task name, sender, and payload preserved.',
+      '  ',
+      '  Call `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, `list_agents` directly. They are intentionally unavailable inside nested code execution.',
+      '  ',
+      '  All agents share the same workspace, current working directory, and filesystem.',
+      '  ',
+      '  When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.',
+      '  ',
+      '  There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.',
+      '</role>',
+    ].join('\n'),
+    subagent: [
+      '<role>',
+      '  You are an agent in a team collaborating to complete a task.',
+      '  ',
+      '  You can spawn declared sub-agents recursively. All agents are equally capable and receive the tools declared for their agent type. Use `spawn_agent` to create one, `followup_task` to assign a new task and trigger a turn, and `send_message` to queue a message for another agent.',
+      '  ',
+      '  Your final response is delivered automatically to your parent agent. Mailbox messages arrive as `NEW_TASK`, `MESSAGE`, or `FINAL_ANSWER` envelopes with their task name, sender, and payload preserved.',
+      '  ',
+      '  Call `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, `list_agents` directly. They are intentionally unavailable inside nested code execution.',
+      '  ',
+      '  All agents share the same workspace, current working directory, and filesystem.',
+      '  ',
+      '  When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.',
+      '  ',
+      '  There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.',
+      '</role>',
+    ].join('\n'),
+    rootTools: [
+      'spawn_agent',
+      'send_message',
+      'followup_task',
+      'list_agents',
+      'wait_agent',
+      'interrupt_agent',
+    ],
+    subagentTools: [
+      'spawn_agent',
+      'send_message',
+      'followup_task',
+      'list_agents',
+      'wait_agent',
+      'interrupt_agent',
+    ],
+  });
+});
+
+test('namespaced collaboration tools: root and subagent receive the full default guidance and tools in request order', async () => {
+  const actual = await guidanceFor({ toolNamespace: 'agents' });
+
+  assert.deepStrictEqual(actual, {
+    root: [
+      '<role>',
+      '  You are `/root`, the primary agent in a team of agents collaborating to fulfill the user&apos;s goals.',
+      '  ',
+      '  At the start of your turn, you are the active agent. You can spawn sub-agents to handle subtasks, and those agents can recursively spawn their own declared sub-agents. All agents are equally capable and receive the tools declared for their agent type.',
+      '  ',
+      '  Use `agents.spawn_agent` to create an agent, `agents.followup_task` to assign a new task and trigger a turn, and `agents.send_message` to queue a message without triggering a turn. You can decide how much context you want to propagate to your sub-agents with the `fork_turns` parameter.',
+      '  ',
+      '  Child messages arrive as `MESSAGE` or `FINAL_ANSWER` mailbox envelopes with their task name, sender, and payload preserved.',
+      '  ',
+      '  Call `agents.spawn_agent`, `agents.send_message`, `agents.followup_task`, `agents.wait_agent`, `agents.interrupt_agent`, `agents.list_agents` directly. They are intentionally unavailable inside nested code execution.',
+      '  ',
+      '  All agents share the same workspace, current working directory, and filesystem.',
+      '  ',
+      '  When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.',
+      '  ',
+      '  There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.',
+      '</role>',
+    ].join('\n'),
+    subagent: [
+      '<role>',
+      '  You are an agent in a team collaborating to complete a task.',
+      '  ',
+      '  You can spawn declared sub-agents recursively. All agents are equally capable and receive the tools declared for their agent type. Use `agents.spawn_agent` to create one, `agents.followup_task` to assign a new task and trigger a turn, and `agents.send_message` to queue a message for another agent.',
+      '  ',
+      '  Your final response is delivered automatically to your parent agent. Mailbox messages arrive as `NEW_TASK`, `MESSAGE`, or `FINAL_ANSWER` envelopes with their task name, sender, and payload preserved.',
+      '  ',
+      '  Call `agents.spawn_agent`, `agents.send_message`, `agents.followup_task`, `agents.wait_agent`, `agents.interrupt_agent`, `agents.list_agents` directly. They are intentionally unavailable inside nested code execution.',
+      '  ',
+      '  All agents share the same workspace, current working directory, and filesystem.',
+      '  ',
+      '  When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.',
+      '  ',
+      '  There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.',
+      '</role>',
+    ].join('\n'),
+    rootTools: [
+      'spawn_agent',
+      'send_message',
+      'followup_task',
+      'list_agents',
+      'wait_agent',
+      'interrupt_agent',
+    ],
+    subagentTools: [
+      'spawn_agent',
+      'send_message',
+      'followup_task',
+      'list_agents',
+      'wait_agent',
+      'interrupt_agent',
+    ],
+  });
+});
+
+test('code-mode collaboration tools: root and subagent receive the full default guidance and tools in request order', async () => {
+  const actual = await guidanceFor({ nonCodeModeOnly: false });
+
+  assert.deepStrictEqual(actual, {
+    root: [
+      '<role>',
+      '  You are `/root`, the primary agent in a team of agents collaborating to fulfill the user&apos;s goals.',
+      '  ',
+      '  At the start of your turn, you are the active agent. You can spawn sub-agents to handle subtasks, and those agents can recursively spawn their own declared sub-agents. All agents are equally capable and receive the tools declared for their agent type.',
+      '  ',
+      '  Use `tools.spawn_agent` to create an agent, `tools.followup_task` to assign a new task and trigger a turn, and `tools.send_message` to queue a message without triggering a turn. You can decide how much context you want to propagate to your sub-agents with the `fork_turns` parameter.',
+      '  ',
+      '  Child messages arrive as `MESSAGE` or `FINAL_ANSWER` mailbox envelopes with their task name, sender, and payload preserved.',
+      '  ',
+      '  Call `tools.spawn_agent`, `tools.send_message`, `tools.followup_task`, `tools.wait_agent`, `tools.interrupt_agent`, `tools.list_agents` from `code_mode`.',
+      '  ',
+      '  All agents share the same workspace, current working directory, and filesystem.',
+      '  ',
+      '  When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.',
+      '  ',
+      '  There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.',
+      '</role>',
+    ].join('\n'),
+    subagent: [
+      '<role>',
+      '  You are an agent in a team collaborating to complete a task.',
+      '  ',
+      '  You can spawn declared sub-agents recursively. All agents are equally capable and receive the tools declared for their agent type. Use `tools.spawn_agent` to create one, `tools.followup_task` to assign a new task and trigger a turn, and `tools.send_message` to queue a message for another agent.',
+      '  ',
+      '  Your final response is delivered automatically to your parent agent. Mailbox messages arrive as `NEW_TASK`, `MESSAGE`, or `FINAL_ANSWER` envelopes with their task name, sender, and payload preserved.',
+      '  ',
+      '  Call `tools.spawn_agent`, `tools.send_message`, `tools.followup_task`, `tools.wait_agent`, `tools.interrupt_agent`, `tools.list_agents` from `code_mode`.',
+      '  ',
+      '  All agents share the same workspace, current working directory, and filesystem.',
+      '  ',
+      '  When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.',
+      '  ',
+      '  There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.',
+      '</role>',
+    ].join('\n'),
+    rootTools: ['code_mode'],
+    subagentTools: ['code_mode'],
+  });
+});
