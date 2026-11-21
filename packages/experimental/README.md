@@ -117,6 +117,15 @@ const stack = defineStack(async (resources) => ({
 `multiAgent` takes a `Team`, the collaboration tools and guidance every agent
 of the tree gets; omitted, it is `Team.codex()`, all six tools.
 
+Direct messaging: a team without `DirectMessaging` has no `send_message` or
+`followup_task`, and its guidance does not mention them. Agents still spawn,
+wait, and get each child's final answer, as with Codex's
+`disable_direct_message`.
+
+```ts
+multiAgent: new Team(new Spawning()).with(new Supervision()).with(new Waiting()),
+```
+
 ```ts
 import declaration from './agent.ts';
 import stack from './stack.ts';

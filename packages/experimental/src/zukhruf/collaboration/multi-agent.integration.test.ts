@@ -18,10 +18,13 @@ import {
   CodeModeTools,
   DirectTools,
   MessageDeliveryModes,
+  Spawning,
   SqliteMailboxStore,
+  Supervision,
   Team,
   ToolNamespace,
   WaitBounds,
+  Waiting,
   createInterAgentCommunication,
   defineAgent,
   defineStack,
@@ -836,4 +839,135 @@ test('code-mode collaboration tools: root and subagent receive the full default 
     rootTools: ['code_mode'],
     subagentTools: ['code_mode'],
   });
+});
+
+const withoutDirectMessaging = (options?: { exposure: CodeModeTools }) =>
+  new Team(new Spawning(), options).with(new Supervision()).with(new Waiting());
+
+test('a team without direct messaging offers neither its tools nor their guidance', async () => {
+  const actual = await guidanceFor(withoutDirectMessaging());
+
+  assert.deepStrictEqual(
+    {
+      rootTools: actual.rootTools,
+      subagentTools: actual.subagentTools,
+      rootMentionsMessaging: /send_message|followup_task/.test(actual.root),
+      subagentMentionsMessaging: /send_message|followup_task/.test(
+        actual.subagent,
+      ),
+      rootUses: actual.root.includes(
+        'Use `spawn_agent` to create an agent. You can decide',
+      ),
+      subagentUses: actual.subagent.includes(
+        'Use `spawn_agent` to create one.\n',
+      ),
+    },
+    {
+      rootTools: [
+        'spawn_agent',
+        'interrupt_agent',
+        'list_agents',
+        'wait_agent',
+      ],
+      subagentTools: [
+        'spawn_agent',
+        'interrupt_agent',
+        'list_agents',
+        'wait_agent',
+      ],
+      rootMentionsMessaging: false,
+      subagentMentionsMessaging: false,
+      rootUses: true,
+      subagentUses: true,
+    },
+  );
+});
+
+test('a code-mode team without direct messaging gives the missing tools no caller', async () => {
+  const team = withoutDirectMessaging({ exposure: new CodeModeTools() });
+  const actual = await guidanceFor(team);
+
+  assert.deepStrictEqual(
+    {
+      rootTools: actual.rootTools,
+      subagentTools: actual.subagentTools,
+      rootMentionsMessaging: /send_message|followup_task/.test(actual.root),
+      subagentMentionsMessaging: /send_message|followup_task/.test(
+        actual.subagent,
+      ),
+      rootUses: actual.root.includes(
+        'Use `tools.spawn_agent` to create an agent. You can decide',
+      ),
+      calledFromCodeMode: Object.keys(team.surface.toolCallers ?? {}),
+    },
+    {
+      rootTools: ['code_mode'],
+      subagentTools: ['code_mode'],
+      rootMentionsMessaging: false,
+      subagentMentionsMessaging: false,
+      rootUses: true,
+      calledFromCodeMode: [
+        'spawn_agent',
+        'interrupt_agent',
+        'list_agents',
+        'wait_agent',
+      ],
+    },
+  );
+});
+
+test("a child's FINAL_ANSWER reaches the root of a team without direct messaging", async () => {
+  using h = harness();
+  const rootPrompts: unknown[] = [];
+  const root = defineAgent({
+    name: 'root',
+    model: new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        rootPrompts.push(prompt);
+        return rootPrompts.length === 1
+          ? toolCallResponse('spawn_agent', {
+              agent_type: 'worker',
+              task_name: 'research',
+              message: 'Find the answer',
+              fork_turns: 'none',
+            })
+          : textResult('root done');
+      },
+    }),
+    sandbox: buildSandbox,
+    instructions: [],
+    subagents: [
+      defineAgent({
+        name: 'worker',
+        model: new MockLanguageModelV4({
+          doStream: async () => textResult('child result'),
+        }),
+        sandbox: buildSandbox,
+        instructions: [],
+      }),
+    ],
+  });
+  const runtime = await new AgentRuntime(root).initialize(
+    defineStack(async () => ({
+      storage: new ControlledAgentStorage(h),
+      multiAgent: withoutDirectMessaging(),
+    })),
+  );
+  await runtime.enqueue(
+    { chatId: 'root-chat', userId: 'user-1' },
+    userTurn('root-turn', 'delegate'),
+  );
+  await using worker = await runtime.work();
+  void worker;
+  await h.queue.runNext();
+  await h.queue.runNext();
+  await runtime.enqueue(
+    { chatId: 'root-chat', userId: 'user-1' },
+    userTurn('root-turn-2', 'report'),
+  );
+  await h.queue.runNext();
+
+  const lastRootPrompt = JSON.stringify(rootPrompts.at(-1));
+  assert.match(lastRootPrompt, /Message Type: FINAL_ANSWER/);
+  assert.match(lastRootPrompt, /child result/);
 });

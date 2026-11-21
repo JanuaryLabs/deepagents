@@ -20,9 +20,13 @@ import {
   type AgentPluginHost,
   AgentRuntime,
   CodeModeTools,
+  DirectMessaging,
   type SandboxContext,
+  Spawning,
   SqliteMailboxStore,
+  Supervision,
   Team,
+  Waiting,
   defineAgent,
   defineSandbox,
   defineStack,
@@ -386,6 +390,27 @@ test('code_mode is reserved only when code mode is enabled', async () => {
   await assert.rejects(
     codeModeRuntime.initialize(codeModeRuntimeStack),
     /plugin tool "code_mode" from "custom" conflicts with the runtime/,
+  );
+});
+
+test('send_message is reserved only when the team has direct messaging', async () => {
+  const custom = plugin('custom', () => ({ tools: { send_message: tool } }));
+  const withoutMessagingStack = defineStack(async (resources) => ({
+    storage: new ControlledAgentStorage(adapters(resources)),
+    multiAgent: new Team(new Spawning())
+      .with(new Supervision())
+      .with(new Waiting()),
+  }));
+  await using host = await new AgentRuntime(declaration([custom])).initialize(
+    withoutMessagingStack,
+  );
+  const withMessagingStack = defineStack(async (resources) => ({
+    storage: new ControlledAgentStorage(adapters(resources)),
+    multiAgent: new Team(new Spawning()).with(new DirectMessaging()),
+  }));
+  await assert.rejects(
+    new AgentRuntime(declaration([custom])).initialize(withMessagingStack),
+    /plugin tool "send_message" from "custom" conflicts with the runtime/,
   );
 });
 

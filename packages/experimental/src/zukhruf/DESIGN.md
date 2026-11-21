@@ -489,6 +489,12 @@ ToolNamespace(name))` applies a validated native OpenAI Responses namespace to a
   `non_code_mode_only = true`. `exposure: new CodeModeTools()` exposes them through the AI SDK's
   provider-agnostic code-mode tool and removes them from the direct model surface; it takes no
   namespace.
+- Direct messaging is optional. A team without `DirectMessaging`
+  (`new Team(new Spawning()).with(new Supervision()).with(new Waiting())`) has no `send_message` or
+  `followup_task` tool, tool caller, reserved name or guidance clause, so a plugin may own those
+  names; spawning and the automatic `FINAL_ANSWER` of a child to its parent stay. This matches
+  Codex's `disable_direct_message` (`codex-rs/core/src/tools/spec_plan.rs:798`), except that Codex's
+  `resolve_usage_hints` still names the hidden tools, while a team's guidance names only its own.
 - `runtime.initialize(options)` recursively compiles declarations by unique canonical names
   without surrounding whitespace. Each worker turn loads the chat's reserved Zukhruf metadata and
   selects the matching declaration.
