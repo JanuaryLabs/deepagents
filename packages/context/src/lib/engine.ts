@@ -463,8 +463,10 @@ class OpenChat {
 export class ContextEngine {
   /** Non-message fragments (role, hints, etc.) - not persisted in graph */
   #fragments: ContextFragment[] = [];
-  /** Pending message fragments to be added to graph */
+  /** Message fragments not yet committed to the graph, including those a save() is writing */
   #pendingMessages: ContextFragment[] = [];
+  /** Pending fragments an in-flight save() is writing; they stay pending until it commits */
+  readonly #savingMessages = new Set<ContextFragment>();
   #store: ContextStore;
   #chatId: string;
   #userId: string;
@@ -717,13 +719,13 @@ export class ContextEngine {
   public async getMessages(): Promise<UIMessage[]> {
     const open = await this.#open();
 
+    const headMessageId = open.branch.headMessageId;
+    const pending = [...this.#pendingMessages];
     const messages: UIMessage[] = [];
     const indexById = new Map<string, number>();
 
-    if (open.branch.headMessageId) {
-      const chain = await this.#store.getMessageChain(
-        open.branch.headMessageId,
-      );
+    if (headMessageId) {
+      const chain = await this.#store.getMessageChain(headMessageId);
       for (const msg of chain) {
         const data = requireUIMessage(msg.data, `Stored message "${msg.id}"`);
         if (isEmptyAssistantPlaceholder(data)) continue;
@@ -731,7 +733,7 @@ export class ContextEngine {
       }
     }
 
-    for (const fragment of this.#pendingMessages) {
+    for (const fragment of pending) {
       if (!fragment.codec) {
         throw new Error(`Fragment "${fragment.name}" is missing codec.`);
       }
@@ -859,6 +861,9 @@ export class ContextEngine {
    * Each message is added as a node with parentId pointing to the previous message.
    * The branch head is updated to point to the last message.
    *
+   * The messages stay pending until the head commits, so `getMessages()`
+   * during the save still returns them; a failed save leaves them pending.
+   *
    * @example
    * ```ts
    * context.set(user('Hello'));
@@ -870,12 +875,15 @@ export class ContextEngine {
   public async save(options?: { branch?: boolean }): Promise<SaveResult> {
     const open = await this.#open();
 
-    if (this.#pendingMessages.length === 0) {
+    const taken = this.#pendingMessages.filter(
+      (fragment) => !this.#savingMessages.has(fragment),
+    );
+    if (taken.length === 0) {
       return { headMessageId: open.branch.headMessageId ?? undefined };
     }
 
-    const pending = this.#pendingMessages;
-    this.#pendingMessages = [];
+    for (const fragment of taken) this.#savingMessages.add(fragment);
+    const pending = [...taken];
     const pipeline = new SavePipeline(
       this.#asSavePipelineEngine(open),
       pending,
@@ -884,10 +892,14 @@ export class ContextEngine {
     try {
       await pipeline.applyUpdateBranching();
       await this.#foldUserReminders(pending);
-      return await pipeline.persist();
-    } catch (error) {
-      this.#pendingMessages.unshift(...pending);
-      throw error;
+      const result = await pipeline.persist();
+      const committed = new Set(taken);
+      this.#pendingMessages = this.#pendingMessages.filter(
+        (fragment) => !committed.has(fragment),
+      );
+      return result;
+    } finally {
+      for (const fragment of taken) this.#savingMessages.delete(fragment);
     }
   }
 
