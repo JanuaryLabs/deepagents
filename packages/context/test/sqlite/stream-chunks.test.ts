@@ -3,7 +3,12 @@ import { open } from '@zukhruf/sqlite-open';
 import { waitFor } from '@zukhruf/testing/async';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import { StreamHarness } from '@zukhruf/testing/streams';
-import { type UIMessageChunk, simulateReadableStream } from 'ai';
+import {
+  type UIMessageChunk,
+  type UIMessageStreamWriter,
+  createUIMessageStream,
+  simulateReadableStream,
+} from 'ai';
 import assert from 'node:assert';
 import { type TestContext, describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -20,6 +25,7 @@ import {
   type StreamStatus,
   StreamStore,
   type StreamWatchTelemetryEvent,
+  persistedWriter,
 } from '@deepagents/context';
 
 const sqlite = new Sqlite();
@@ -64,6 +70,28 @@ class FlakyFlushStore extends SqliteStreamStore {
   override async appendChunks(chunks: StreamChunkData[]): Promise<void> {
     const fault = this.#appendFaults.shift();
     if (fault) throw fault;
+    return super.appendChunks(chunks);
+  }
+}
+
+class HeldAppendStore extends SqliteStreamStore {
+  readonly batches: number[][] = [];
+  readonly #entered: Latch[] = [];
+  readonly #released: Latch<Error | undefined>[] = [];
+
+  entered(call: number): Promise<void> {
+    return (this.#entered[call] ??= new Latch()).wait();
+  }
+
+  release(call: number, error?: Error): void {
+    (this.#released[call] ??= new Latch()).open(error);
+  }
+
+  override async appendChunks(chunks: StreamChunkData[]): Promise<void> {
+    const call = this.batches.push(chunks.map(({ seq }) => seq)) - 1;
+    (this.#entered[call] ??= new Latch()).open();
+    const error = await (this.#released[call] ??= new Latch()).wait();
+    if (error) throw error;
     return super.appendChunks(chunks);
   }
 }
@@ -380,6 +408,202 @@ describe('Stream Chunks', () => {
       } finally {
         source[Symbol.dispose]();
         await persisted;
+      }
+    });
+
+    it('delivers each chunk to a watcher before the producer sends the next', async (t) => {
+      using database = open(':memory:');
+      const store = new SqliteStreamStore(database);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
+      const parts: UIMessageChunk[] = [
+        { type: 'start', messageId: 'answer' },
+        { type: 'text-start', id: 'text-1' },
+        { type: 'text-delta', id: 'text-1', delta: 'Hel' },
+        { type: 'text-delta', id: 'text-1', delta: 'lo' },
+        { type: 'text-end', id: 'text-1' },
+      ];
+      using source = streamHarness.source<UIMessageChunk>();
+      const persisted = streams.persist(source.stream, streamId);
+      await using watcher = streamHarness.reader(streams.watch(streamId));
+      try {
+        for (const part of parts) {
+          source.enqueue(part);
+          assert.deepStrictEqual(await untilAborted(watcher.read(), t.signal), {
+            done: false,
+            value: part,
+          });
+        }
+        source.close();
+        await persisted;
+        assert.deepStrictEqual(await watcher.read(), {
+          done: true,
+          value: undefined,
+        });
+      } finally {
+        source[Symbol.dispose]();
+        await persisted.catch(() => undefined);
+      }
+    });
+
+    it('appends chunks that arrive during an in-flight append as the next batch', async (t) => {
+      const store = new HeldAppendStore(':memory:');
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
+      const parts = [0, 1, 2, 3, 4].map((seq) => textDeltaChunk(seq));
+      const allTaken = new Latch();
+      let pulls = 0;
+      const source = new ReadableStream<UIMessageChunk>(
+        {
+          pull(controller) {
+            if (pulls < parts.length) {
+              controller.enqueue(parts[pulls]);
+            } else {
+              controller.close();
+              allTaken.open();
+            }
+            pulls++;
+          },
+        },
+        { highWaterMark: 0 },
+      );
+
+      const persisted = streams.persist(source, streamId);
+      try {
+        await untilAborted(allTaken.wait(), t.signal);
+        assert.deepStrictEqual(store.batches, [[0]]);
+
+        store.release(0);
+        await untilAborted(store.entered(1), t.signal);
+        assert.deepStrictEqual(store.batches, [[0], [1, 2, 3, 4]]);
+
+        store.release(1);
+        await persisted;
+        assert.deepStrictEqual(store.batches, [[0], [1, 2, 3, 4]]);
+        assert.strictEqual(await store.getStreamStatus(streamId), 'completed');
+        assert.deepStrictEqual(
+          (await store.getChunks(streamId)).map(({ data }) => data),
+          parts,
+        );
+      } finally {
+        store.release(0);
+        store.release(1);
+        await persisted.catch(() => undefined);
+        store.close();
+      }
+    });
+
+    it('resolves a write only once the batch holding its chunk commits', async (t) => {
+      const store = new HeldAppendStore(':memory:');
+      const stream = createStream({ status: 'running', startedAt: Date.now() });
+      await store.createStream(stream);
+      const parts = [0, 1, 2, 3].map((seq) => textDeltaChunk(seq));
+      const writerReady = Promise.withResolvers<UIMessageStreamWriter>();
+      const producerDone = Promise.withResolvers<void>();
+      await using output = streamHarness.reader(
+        createUIMessageStream({
+          execute: async ({ writer }) => {
+            writerReady.resolve(writer);
+            await producerDone.promise;
+          },
+        }),
+      );
+      try {
+        const pw = await persistedWriter({
+          writer: await writerReady.promise,
+          store,
+          streamId: stream.id,
+        });
+
+        const committed: number[] = [];
+        const writes = parts.map((part, index) =>
+          pw.writer.write(part).then(() => {
+            committed.push(index);
+          }),
+        );
+        await untilAborted(store.entered(0), t.signal);
+        assert.deepStrictEqual(store.batches, [[0]]);
+
+        store.release(0);
+        await untilAborted(store.entered(1), t.signal);
+        await writes[0];
+        assert.deepStrictEqual(store.batches, [[0], [1, 2, 3]]);
+        assert.deepStrictEqual(committed, [0]);
+
+        store.release(1);
+        await Promise.all(writes);
+        assert.deepStrictEqual(committed, [0, 1, 2, 3]);
+        assert.deepStrictEqual(
+          (await store.getChunks(stream.id)).map(({ data }) => data),
+          parts,
+        );
+
+        producerDone.resolve();
+        assert.deepStrictEqual(await output.collectUntilError(), {
+          status: 'completed',
+          chunks: parts,
+        });
+      } finally {
+        store.release(0);
+        store.release(1);
+        producerDone.resolve();
+        store.close();
+      }
+    });
+
+    it('should fail the stream and reject persist when an append fails', async () => {
+      const store = new FlakyFlushStore(':memory:');
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
+      try {
+        await assert.rejects(
+          streams.persist(
+            simulateReadableStream<UIMessageChunk>({
+              chunks: [
+                { type: 'text-start', id: 'part-1' },
+                { type: 'text-delta', id: 'part-1', delta: 'hello' },
+                { type: 'text-end', id: 'part-1' },
+              ],
+            }),
+            streamId,
+          ),
+          /flush failed once/,
+        );
+
+        const stream = await store.getStream(streamId);
+        assert.strictEqual(stream?.status, 'failed');
+        assert.strictEqual(stream?.error, 'flush failed once');
+      } finally {
+        store.close();
+      }
+    });
+
+    it('should reject when the append in flight at cancellation fails', async (t) => {
+      const store = new HeldAppendStore(':memory:');
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
+      const cancelDetected = new Latch();
+      using source = streamHarness.source<UIMessageChunk>();
+      source.enqueue({ type: 'text-start', id: 'part-1' });
+      const persisted = streams.persist(source.stream, streamId, {
+        onCancelDetected: () => cancelDetected.open(),
+      });
+      try {
+        await untilAborted(store.entered(0), t.signal);
+        await streams.cancel(streamId);
+        await untilAborted(cancelDetected.wait(), t.signal);
+
+        store.release(0, new Error('append failed after cancel'));
+        await assert.rejects(persisted, /append failed after cancel/);
+        assert.strictEqual(await store.getStreamStatus(streamId), 'cancelled');
+      } finally {
+        store.release(0);
+        await persisted.catch(() => undefined);
+        store.close();
       }
     });
 
@@ -2182,9 +2406,7 @@ describe('Stream Chunks', () => {
         chunkDelayInMs: 25,
       });
 
-      const persistPromise = streams.persist(source, streamId, {
-        strategy: 'immediate',
-      });
+      const persistPromise = streams.persist(source, streamId);
 
       await waitForStatus(t, store, streamId, 'failed');
       await persistPromise;
@@ -2233,7 +2455,7 @@ describe('Stream Chunks', () => {
         chunkDelayInMs: null,
       });
 
-      await streams.persist(source, streamId, { strategy: 'immediate' });
+      await streams.persist(source, streamId);
 
       const updated = await store.getStream(streamId);
       assert.ok(updated);
@@ -2546,7 +2768,7 @@ describe('Stream Chunks', () => {
         },
       });
 
-      await streams.persist(newStream, streamId, { strategy: 'immediate' });
+      await streams.persist(newStream, streamId);
 
       const after = await store.getStream(streamId);
       assert.ok(after);

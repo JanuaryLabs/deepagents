@@ -7,18 +7,18 @@ import {
 } from './stream/stream-store.ts';
 import type { StreamPart } from './stream/types.ts';
 
+/**
+ * Chunks a merged stream may queue behind the in-flight append before the
+ * writer stops reading it. It caps the next batch at the size of one
+ * `watch()` page (`StreamManager`'s default `chunkPageSize`), so a reader
+ * catches up on a batch in one read.
+ */
+const MAX_QUEUED_CHUNKS = 128;
+
 export interface PersistedWriterOptions {
   writer: UIMessageStreamWriter;
   store: StreamStore;
   streamId: string;
-  /**
-   * How chunks are persisted relative to the stream:
-   * - 'buffered' (default): batch up to `flushSize` chunks; data events flush promptly
-   * - 'immediate': persist each chunk before forwarding (higher latency, no data loss)
-   */
-  strategy?: 'buffered' | 'immediate';
-  /** For buffered strategy: flush after this many chunks (default: 20) */
-  flushSize?: number;
 }
 
 /**
@@ -39,69 +39,117 @@ export interface PersistedWriter {
   cleanup(): Promise<void>;
 }
 
+interface QueuedChunk {
+  chunk: StreamChunkData;
+  committed(): void;
+  failed(error: unknown): void;
+}
+
+/**
+ * Persists each chunk before forwarding it. The first chunk is appended at
+ * once; chunks that arrive while an append is in flight go into the next
+ * append together, so batches grow with the store's latency and a live reader
+ * waits at most one store round trip.
+ */
 export async function persistedWriter(
   options: PersistedWriterOptions,
 ): Promise<PersistedWriter> {
-  const {
-    writer,
-    store,
-    streamId,
-    strategy = 'buffered',
-    flushSize = 20,
-  } = options;
+  const { writer, store, streamId } = options;
 
   let seq = 0;
-  let buffer: StreamChunkData[] = [];
+  let queue: QueuedChunk[] = [];
+  let appending: Promise<void> | undefined;
+  let appendSettled: Promise<void> = Promise.resolve();
+  let failure: { error: unknown } | undefined;
   let failedByChunk = false;
   let abortedByChunk = false;
 
-  async function flush() {
-    if (buffer.length === 0) return;
-    const batch = buffer;
-    buffer = [];
-    await appendBatch(batch);
-  }
-
-  function makeChunk(part: StreamPart): StreamChunkData {
-    return {
-      streamId,
-      seq: seq++,
-      data: part,
-      createdAt: Date.now(),
-    };
-  }
-
-  async function appendBatch(batch: StreamChunkData[]) {
-    await store.appendChunks(batch);
-    failedByChunk ||= collectStreamFailures(batch).length > 0;
-  }
-
-  async function persistChunk(chunk: StreamChunkData) {
-    if (chunk.data.type === 'abort') {
-      abortedByChunk = true;
+  function enqueue(
+    part: StreamPart,
+    committed: () => void,
+    failed: (error: unknown) => void,
+  ) {
+    if (failure) {
+      failed(failure.error);
+      return;
     }
-    if (strategy === 'immediate') {
-      await appendBatch([chunk]);
-    } else {
-      buffer.push(chunk);
-      // Custom data carries progress even while model output is paused.
-      if (buffer.length >= flushSize || chunk.data.type.startsWith('data-')) {
-        await flush();
+    queue.push({
+      chunk: { streamId, seq: seq++, data: part, createdAt: Date.now() },
+      committed,
+      failed,
+    });
+    appending ??= appendQueued();
+  }
+
+  async function appendQueued() {
+    while (queue.length > 0) {
+      const batch = queue;
+      queue = [];
+      const chunks = batch.map(({ chunk }) => chunk);
+      const append = Promise.try(() => store.appendChunks(chunks));
+      appendSettled = append.then(
+        () => undefined,
+        () => undefined,
+      );
+      try {
+        await append;
+      } catch (error) {
+        failure = { error };
+        const rejected = [...batch, ...queue];
+        queue = [];
+        for (const entry of rejected) entry.failed(error);
+        break;
       }
+      failedByChunk ||= collectStreamFailures(chunks).length > 0;
+      abortedByChunk ||= chunks.some(({ data }) => data.type === 'abort');
+      for (const entry of batch) entry.committed();
     }
+    appending = undefined;
+  }
+
+  async function settle() {
+    while (appending) await appending;
+  }
+
+  async function flush() {
+    await settle();
+    if (failure) throw failure.error;
   }
 
   const wrappedWriter: PersistedStreamWriter = {
     onError: writer.onError,
-    async write(part: StreamPart) {
-      await persistChunk(makeChunk(part));
-      writer.write(part);
+    write(part: StreamPart) {
+      const { promise, resolve, reject } = Promise.withResolvers<void>();
+      enqueue(
+        part,
+        () => {
+          writer.write(part);
+          resolve();
+        },
+        reject,
+      );
+      return promise;
     },
     merge(stream: ReadableStream<StreamPart>) {
+      let cancelled = false;
       const transform = new TransformStream<StreamPart, StreamPart>({
-        async transform(chunk, controller) {
-          await persistChunk(makeChunk(chunk));
-          controller.enqueue(chunk);
+        async transform(part, controller) {
+          enqueue(
+            part,
+            () => {
+              if (!cancelled) controller.enqueue(part);
+            },
+            (error) => {
+              if (!cancelled) controller.error(error);
+            },
+          );
+          while (queue.length >= MAX_QUEUED_CHUNKS && !failure) {
+            await appendSettled;
+          }
+        },
+        flush: () => flush(),
+        cancel() {
+          cancelled = true;
         },
       });
       writer.merge(stream.pipeThrough(transform));
@@ -121,7 +169,7 @@ export async function persistedWriter(
       );
     },
     async fail(error?: string) {
-      await flush();
+      await settle();
       if (failedByChunk) return;
       await store.updateStreamStatus(streamId, 'failed', { error });
     },

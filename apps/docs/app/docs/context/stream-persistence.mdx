@@ -26,7 +26,7 @@ Four layers handle this:
 - **StreamStore** — abstract storage interface for streams and chunks
 - **StreamChangeSource** — how `StreamManager` learns that chunks/status changed
 - **StreamManager** — high-level lifecycle: register, persist, watch, cancel, cleanup
-- **persistedWriter** — low-level writer wrapper that intercepts chunks and buffers them to the store
+- **persistedWriter** — low-level writer wrapper that persists each chunk to the store before forwarding it
 
 ## StreamStore
 
@@ -203,19 +203,15 @@ const uiStream = createUIMessageStream({
 });
 
 await manager.persist(uiStream, 'stream-abc', {
-  strategy: 'buffered',
-  flushSize: 20,
   onCancelDetected: ({ streamId, latencyMs }) => {
     console.log('cancel detected', streamId, latencyMs);
   },
 });
 ```
 
-| Option             | Type                                                 | Default      | Description                                                                                 |
-| ------------------ | ---------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------- |
-| `strategy`         | `'buffered' \| 'immediate'`                          | `'buffered'` | `buffered` batches chunks for throughput; `immediate` persists each chunk before forwarding |
-| `flushSize`        | `number`                                             | `20`         | For buffered strategy: flush after this many chunks                                         |
-| `onCancelDetected` | `({ streamId, latencyMs }) => void \| Promise<void>` | `undefined`  | Optional callback when cancellation is detected                                             |
+| Option             | Type                                                 | Default     | Description                                     |
+| ------------------ | ---------------------------------------------------- | ----------- | ----------------------------------------------- |
+| `onCancelDetected` | `({ streamId, latencyMs }) => void \| Promise<void>` | `undefined` | Optional callback when cancellation is detected |
 
 If the stream is already in a terminal status (`completed`, `failed`, `cancelled`), `persist` returns immediately without re-running.
 
@@ -347,8 +343,6 @@ const uiStream = createUIMessageStream({
       writer,
       store,
       streamId: 'stream-abc',
-      strategy: 'buffered',
-      flushSize: 20,
     });
 
     await pw.writer.write({ type: 'text-delta', id: 'text-1', delta: 'Hello' });
@@ -365,27 +359,33 @@ const uiStream = createUIMessageStream({
 
 ### Options
 
-| Option      | Type                        | Default      | Description                                               |
-| ----------- | --------------------------- | ------------ | --------------------------------------------------------- |
-| `writer`    | `UIMessageStreamWriter`     | required     | The original writer to wrap                               |
-| `store`     | `StreamStore`               | required     | Where to persist chunks                                   |
-| `streamId`  | `string`                    | required     | Stream identifier                                         |
-| `strategy`  | `'buffered' \| 'immediate'` | `'buffered'` | Persistence strategy                                      |
-| `flushSize` | `number`                    | `20`         | Chunks to buffer before flushing (buffered strategy only) |
+| Option     | Type                    | Default  | Description                 |
+| ---------- | ----------------------- | -------- | --------------------------- |
+| `writer`   | `UIMessageStreamWriter` | required | The original writer to wrap |
+| `store`    | `StreamStore`           | required | Where to persist chunks     |
+| `streamId` | `string`                | required | Stream identifier           |
 
 ### PersistedWriter methods
 
 | Method         | Description                                                                                                                        |
 | -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `flush()`      | Force-flush the buffer to the store                                                                                                |
+| `flush()`      | Wait until every queued chunk is appended to the store                                                                             |
 | `complete()`   | Flush remaining chunks and mark stream as `completed` (unless an `error` chunk already marked it `failed`)                         |
 | `fail(error?)` | Flush remaining chunks and mark stream as `failed` with optional error message (unless an `error` chunk already set failure state) |
 | `cleanup()`    | Delete the stream and all chunks from the store                                                                                    |
 
 The returned `writer` property wraps `UIMessageStreamWriter`. Both `write()`
-and `merge()` are intercepted. With `immediate`, each chunk is persisted before
-forwarding; with `buffered`, chunks are forwarded as they arrive and persisted
-when the buffer is flushed.
+and `merge()` are intercepted, and every chunk is persisted before it is
+forwarded. The first chunk is appended at once. Chunks that arrive while an
+append is in flight go into the next `appendChunks()` call together, so batches
+grow with the store's latency and a live `watch()` reader waits at most one
+store round trip. `write()` resolves once the batch holding its chunk commits.
+A merged stream is read ahead of the store until 128 chunks are queued, then it
+waits for the in-flight append.
+
+If an append fails, the writer stops: queued and later writes reject with the
+store's error, `flush()` and `complete()` reject with it, and `persist()` marks
+the stream `failed` and rethrows.
 
 ## Reconnectable stream pattern
 
@@ -580,7 +580,7 @@ async function handleChatTurn(
     await manager.reopen(streamId);
   }
 
-  manager.persist(chatStream, streamId, { strategy: 'immediate' });
+  manager.persist(chatStream, streamId);
 
   return manager.watch(streamId);
 }
@@ -601,14 +601,13 @@ async function handleChatRequest(streamId: string, chatStream: ReadableStream) {
     await manager.reopen(streamId);
   }
 
-  manager.persist(chatStream, streamId, { strategy: 'immediate' });
+  manager.persist(chatStream, streamId);
   return manager.watch(streamId);
 }
 ```
 
 ## Best practices
 
-- Use `buffered` strategy (the default) for throughput-sensitive workloads. Switch to `immediate` when you cannot tolerate any chunk loss on crash.
 - Treat `type: 'error'` chunks as terminal failure signals. Emit them only for unrecoverable stream failures.
 - Always call `cleanup()` after you no longer need a stream. Chunks accumulate and are not automatically garbage-collected.
 - Tune `PollingChangeSource.config` and `StreamManager.chunkPageSize` for your latency and DB-load budget. Lower intervals reduce latency but increase polling cost.

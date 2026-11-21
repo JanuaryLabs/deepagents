@@ -1,6 +1,7 @@
 import { Backoff, untilAborted } from '@zukhruf/async';
 import { retryUntilReady, waitFor } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
+import { StreamHarness } from '@zukhruf/testing/streams';
 import { type UIMessageChunk, simulateReadableStream } from 'ai';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -17,6 +18,7 @@ import {
 const POSTGRES_18 = { image: 'postgres:18-alpine' };
 
 const testPostgres = new Postgres({ ...POSTGRES_18, environment: process.env });
+const streamHarness = new StreamHarness();
 
 function testSchema(): string {
   return `stream_test_${crypto.randomUUID().replaceAll('-', '_')}`;
@@ -441,6 +443,53 @@ describe('PostgreSQL StreamStore Integration', () => {
       assert.deepStrictEqual(received, [textDeltaChunk(0), textDeltaChunk(1)]);
     }));
 
+  it('delivers each PostgreSQL chunk to a watcher before the producer sends the next', async (t) =>
+    await withStore(async (store) => {
+      const streamId = crypto.randomUUID();
+      const manager = new StreamManager({
+        store,
+        changeSource: new PollingChangeSource({
+          reads: store,
+          backoff: new Backoff({
+            initial: 5,
+            multiplier: 1,
+            max: 5,
+            jitter: { kind: 'none' },
+          }),
+          statusCheckEvery: 1,
+        }),
+      });
+      await manager.register(streamId);
+      const parts: UIMessageChunk[] = [
+        { type: 'start', messageId: 'answer' },
+        { type: 'text-start', id: 'text-1' },
+        { type: 'text-delta', id: 'text-1', delta: 'Hel' },
+        { type: 'text-delta', id: 'text-1', delta: 'lo' },
+        { type: 'text-end', id: 'text-1' },
+      ];
+      using source = streamHarness.source<UIMessageChunk>();
+      const persisted = manager.persist(source.stream, streamId);
+      await using watcher = streamHarness.reader(manager.watch(streamId));
+      try {
+        for (const part of parts) {
+          source.enqueue(part);
+          assert.deepStrictEqual(await untilAborted(watcher.read(), t.signal), {
+            done: false,
+            value: part,
+          });
+        }
+        source.close();
+        await persisted;
+        assert.deepStrictEqual(await watcher.read(), {
+          done: true,
+          value: undefined,
+        });
+      } finally {
+        source[Symbol.dispose]();
+        await persisted.catch(() => undefined);
+      }
+    }));
+
   it('should fail a PostgreSQL persisted stream when a top-level error chunk is persisted', async (t) =>
     await withStore(async (store) => {
       const streamId = crypto.randomUUID();
@@ -471,9 +520,7 @@ describe('PostgreSQL StreamStore Integration', () => {
         chunkDelayInMs: 25,
       });
 
-      const persistPromise = manager.persist(source, streamId, {
-        strategy: 'immediate',
-      });
+      const persistPromise = manager.persist(source, streamId);
 
       await waitFor(
         async () =>
@@ -565,7 +612,7 @@ describe('PostgreSQL StreamStore Integration', () => {
         chunkDelayInMs: null,
       });
 
-      await manager.persist(source, streamId, { strategy: 'immediate' });
+      await manager.persist(source, streamId);
 
       const updated = await store.getStream(streamId);
       assert.ok(updated);

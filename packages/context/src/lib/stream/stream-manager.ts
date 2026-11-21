@@ -2,10 +2,7 @@ import { Backoff } from '@zukhruf/async';
 import { createUIMessageStream } from 'ai';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import {
-  type PersistedWriterOptions,
-  persistedWriter,
-} from '../stream-buffer.ts';
+import { persistedWriter } from '../stream-buffer.ts';
 import type { StreamChange, StreamChangeSource } from './change-source.ts';
 import type {
   ListStreamIdsOptions,
@@ -27,10 +24,7 @@ function isTerminal(status: StreamStatus) {
   return status !== 'queued' && status !== 'running';
 }
 
-export interface PersistStreamOptions extends Pick<
-  PersistedWriterOptions,
-  'strategy' | 'flushSize'
-> {
+export interface PersistStreamOptions {
   /** @internal The caller already won the queued-to-running transition. */
   preclaimed?: boolean;
   onCancelDetected?: (info: {
@@ -184,8 +178,6 @@ export class StreamManager {
           writer,
           store: this.#store,
           streamId,
-          strategy: options?.strategy,
-          flushSize: options?.flushSize,
         });
         pw.writer.merge(stream);
       },
