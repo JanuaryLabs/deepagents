@@ -1,15 +1,16 @@
 import { Button } from '@zukhruf/shadcn';
-import { type ToolUIPart } from 'ai';
+import { type ToolUIPart, getStaticToolName } from 'ai';
 import { Loader } from 'lucide-react';
 
 import { useAgent, useAgentMessages } from '../chat/agent-context.tsx';
 import { ToolOutput } from '../elements/Tool.tsx';
+import { resolveToolEntry } from '../tools/helpers.ts';
 
 function ToolApproval({ part }: { part: ToolUIPart }) {
   const { addToolApprovalResponse } = useAgentMessages();
   if (part.state !== 'approval-requested') return null;
 
-  const name = part.title ?? part.type.slice('tool-'.length);
+  const name = part.title ?? getStaticToolName(part);
 
   return (
     <div
@@ -70,7 +71,7 @@ export function RenderPart({ part }: { part: ToolUIPart }) {
 
   if (!registry) return approval;
 
-  const customRenderer = registry[part.type.replace('tool-', '')];
+  const { toolEntry: customRenderer } = resolveToolEntry(part, registry);
   if (customRenderer) {
     const Renderer = customRenderer.component;
     return (

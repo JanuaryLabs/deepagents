@@ -1,5 +1,5 @@
 import type { ToolUIPart } from 'ai';
-import { isStaticToolUIPart } from 'ai';
+import { getStaticToolName, isStaticToolUIPart } from 'ai';
 import { cn } from 'cn';
 import { Activity, type PropsWithChildren, useMemo } from 'react';
 
@@ -26,8 +26,7 @@ export function useActivePendingToolInput(): ActivePendingTool | null {
       if (!isStaticToolUIPart(part)) return [];
       if (part.state !== 'input-available') return [];
 
-      const toolKey = part.type.replace('tool-', '');
-      const entry = registry[toolKey];
+      const entry = registry[getStaticToolName(part)];
       if (!entry || entry.static !== false) return [];
       if (!entry.requiresUserInput) return [];
 

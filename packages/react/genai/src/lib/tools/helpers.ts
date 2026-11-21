@@ -1,5 +1,5 @@
 import type { ToolUIPart, UIMessage } from 'ai';
-import { isToolUIPart } from 'ai';
+import { getStaticToolName, isToolUIPart } from 'ai';
 
 import type { ComponentRegistry } from './registry.ts';
 
@@ -18,10 +18,10 @@ export function subagentDisplayName(part: ToolUIPart) {
 }
 
 export function resolveToolEntry(
-  part: Pick<UIMessage['parts'][number], 'type'>,
+  part: ToolUIPart,
   registry: ComponentRegistry | undefined,
 ) {
-  const toolKey = part.type.replace('tool-', '');
+  const toolKey = getStaticToolName(part);
   const toolEntry = registry?.[toolKey];
   return { toolKey, toolEntry };
 }

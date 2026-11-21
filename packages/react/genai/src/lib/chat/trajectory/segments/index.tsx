@@ -4,7 +4,7 @@ import {
   CollapsibleTrigger,
 } from '@zukhruf/shadcn';
 import type { ToolUIPart, UIMessage } from 'ai';
-import { isStaticToolUIPart } from 'ai';
+import { getStaticToolName, isStaticToolUIPart } from 'ai';
 import { type ReactNode, createContext, use, useMemo } from 'react';
 import { Fragment } from 'react/jsx-runtime';
 
@@ -185,15 +185,15 @@ function SegmentTool({
 }) {
   const agent = useAgent();
   const status = useMessagesStatus();
-  const { toolEntry } = resolveToolEntry(segment.part, agent.registry);
   const { part: toolPart } = segment;
   if (!isStaticToolUIPart(toolPart)) return null;
+  const { toolEntry } = resolveToolEntry(toolPart, agent.registry);
   const activeClientInput = isActiveClientInputTool(toolEntry, toolPart.state);
   const aborted = !activeClientInput && isToolAborted(toolPart, status);
   const baseLabel = toolEntry?.label?.(toolPart);
   const label = aborted
     ? {
-        ...(baseLabel ?? { name: toolPart.type.replace('tool-', '') }),
+        ...(baseLabel ?? { name: getStaticToolName(toolPart) }),
         isError: true,
         detail: 'Cancelled by user',
       }

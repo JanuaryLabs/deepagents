@@ -14,11 +14,7 @@ export function ToolDebug({ part }: { part: ToolUIPart }) {
 
   return (
     <Tool data-copy-exclude="assistant-snapshot">
-      <ToolHeader
-        title={`Executing ${toolName}`}
-        state={part.state}
-        type={part.type}
-      />
+      <ToolHeader title={`Executing ${toolName}`} part={part} />
       <ToolContent>
         <ToolInput input={part.input} />
         <ToolOutput
@@ -38,12 +34,7 @@ export function ToolDebug({ part }: { part: ToolUIPart }) {
 export function DynamicToolDebug({ part }: { part: DynamicToolUIPart }) {
   return (
     <Tool data-copy-exclude="assistant-snapshot">
-      <ToolHeader
-        title={`Executing ${part.toolName}`}
-        state={part.state}
-
-        type={part.type}
-      />
+      <ToolHeader title={`Executing ${part.toolName}`} part={part} />
       <ToolContent>
         <ToolInput input={part.input} />
         <ToolOutput

@@ -4,7 +4,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@zukhruf/shadcn';
-import type { DynamicToolUIPart, ToolUIPart } from 'ai';
+import { type DynamicToolUIPart, type ToolUIPart, getToolName } from 'ai';
 import { cn } from 'cn';
 import {
   CheckCircleIcon,
@@ -30,8 +30,7 @@ export const Tool = ({ className, ...props }: ToolProps) => (
 
 export type ToolHeaderProps = {
   title?: string;
-  type: ToolUIPart['type'] | DynamicToolUIPart['type'];
-  state: ToolUIPart['state'];
+  part: ToolUIPart | DynamicToolUIPart;
   className?: string;
 };
 
@@ -79,8 +78,7 @@ const getStatusBadge = (status: ToolUIPart['state']) => {
 export const ToolHeader = ({
   className,
   title,
-  type,
-  state,
+  part,
   ...props
 }: ToolHeaderProps) => (
   <CollapsibleTrigger
@@ -92,10 +90,8 @@ export const ToolHeader = ({
   >
     <div className="flex items-center gap-2">
       <WrenchIcon className="text-muted-foreground size-4" />
-      <span className="text-sm font-medium">
-        {title ?? type.split('-').slice(1).join('-')}
-      </span>
-      {getStatusBadge(state)}
+      <span className="text-sm font-medium">{title ?? getToolName(part)}</span>
+      {getStatusBadge(part.state)}
     </div>
     <ChevronDownIcon className="text-muted-foreground size-4 transition-transform group-data-[panel-open]:rotate-180" />
   </CollapsibleTrigger>
