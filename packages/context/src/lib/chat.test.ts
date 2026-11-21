@@ -94,17 +94,6 @@ function userMessage(text: string): UIMessage {
   };
 }
 
-// A turn whose model call fails ends with AI_NoOutputGeneratedError after its error chunk.
-async function streamedUntilFailure(stream: AsyncIterable<UIMessageChunk>) {
-  const chunks: UIMessageChunk[] = [];
-  try {
-    for await (const chunk of stream) chunks.push(chunk);
-  } catch {
-    // The chunks already delivered are what the client renders.
-  }
-  return chunks;
-}
-
 function setup(mockText?: string) {
   const store = new InMemoryContextStore();
   const context = new ContextEngine({
@@ -472,7 +461,7 @@ describe('chat() title generation', () => {
     const stream = await chat(chatAgent, {
       generateTitle: true,
     });
-    await drain(stream).catch(() => {});
+    await drain(stream);
 
     const messages = await context.getMessages();
     assert.deepStrictEqual(
@@ -496,7 +485,32 @@ describe('chat() title generation', () => {
     const chatAgent = agent({ sandbox, name: 'assistant', context, model });
     await context.continue(userMessage('hello?'));
 
-    const chunks = await streamedUntilFailure(await chat(chatAgent));
+    const chunks = await drain(await chat(chatAgent));
+
+    assert.deepStrictEqual(
+      chunks.flatMap((chunk) =>
+        chunk.type === 'error' ? [chunk.errorText] : [],
+      ),
+      ['An error occurred.'],
+    );
+  });
+
+  it('ends the stream normally after the error chunk when the model call fails', async () => {
+    const context = new ContextEngine({
+      store: new InMemoryContextStore(),
+      chatId: 'failed-turn-ends-cleanly-chat',
+      userId: 'test-user',
+    });
+    const model = new MockLanguageModelV4({
+      doStream: async () => {
+        throw new Error('model unavailable');
+      },
+    });
+    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
+    await context.continue(userMessage('hello?'));
+    const stream = await chat(chatAgent);
+
+    const chunks = await Array.fromAsync(stream);
 
     assert.deepStrictEqual(
       chunks.flatMap((chunk) =>
@@ -520,7 +534,7 @@ describe('chat() title generation', () => {
     const chatAgent = agent({ sandbox, name: 'assistant', context, model });
     await context.continue(userMessage('hello?'));
 
-    const chunks = await streamedUntilFailure(
+    const chunks = await drain(
       await chat(chatAgent, {
         onError: (error) =>
           Error.isError(error) ? error.message : 'not an Error',

@@ -2,6 +2,7 @@ import {
   APICallError,
   InvalidToolInputError,
   type LanguageModelUsage,
+  NoOutputGeneratedError,
   NoSuchToolError,
   ToolCallRepairError,
   type ToolSet,
@@ -169,7 +170,14 @@ export async function chat<const TOOLS extends ToolSet>(
           : settled;
 
       await writeAssistantSegment(message);
-      const usage = await result?.result.usage;
+      // A failed model call has no usage: the SDK rejects it with
+      // NoOutputGeneratedError, and the error chunk already reported the failure.
+      const usage = await Promise.resolve(result?.result.usage).catch(
+        (error: unknown) => {
+          if (NoOutputGeneratedError.isInstance(error)) return undefined;
+          throw error;
+        },
+      );
       // The provider may never have emitted a finish chunk.
       if (usage !== undefined) {
         await context.trackUsage(usage);
