@@ -69,6 +69,7 @@
     "@ai-sdk/provider": "^4.0.37",
     "@ai-sdk/provider-utils": "^5.0.76",
     "@ai-sdk/sandbox-just-bash": "^1.0.177",
+    "@ai-sdk/tool-bash": "^1.0.20",
     "@deepagents/agent": "7.9.0",
     "@zukhruf/async": "^0.8.41",
     "@zukhruf/docker": "^0.8.41",
@@ -90,7 +91,6 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@ai-sdk/tool-bash": "^1.0.20",
     "@daytona/sdk": "2.0.0-alpha.13",
     "@sinonjs/fake-timers": "^15.4.0",
     "@types/debug": "^4.1.13",

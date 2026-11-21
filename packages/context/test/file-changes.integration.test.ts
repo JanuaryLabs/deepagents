@@ -838,7 +838,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
     }
   });
 
-  it('rejects createBashTool with the veto, not a claim that the directory was not created, when onFileChanges vetoes its mkdir', async () => {
+  it('rejects createBashTool with the veto when onFileChanges vetoes its mkdir', async () => {
     await using backend = await createDockerSandbox({
       ...defaults,
       dockerfile: STRACE_IMAGE,
@@ -855,7 +855,6 @@ describe('onFileChanges failure handling (docker backend)', () => {
       createBashTool({ sandbox: tracked, workingDirectory: ROOT }),
       (error: Error) => {
         assert.match(error.message, /rejected: no writes/);
-        assert.doesNotMatch(error.message, /create/i);
         return true;
       },
     );

@@ -1,3 +1,4 @@
+import { experimental_createBashTool } from '@ai-sdk/tool-bash';
 import { tool } from 'ai';
 import fg from 'fast-glob';
 import { BashTransformPipeline, TeePlugin } from 'just-bash';
@@ -123,29 +124,6 @@ async function uploadInitialFiles(
   }
 }
 
-function createBashDescription(options: {
-  workingDirectory: string | undefined;
-  sandboxDescription: string;
-  extraInstructions: string | undefined;
-  experimentalTeeTransform: boolean;
-}): string {
-  return [
-    'Run Bash commands in the sandbox. ' +
-      (options.workingDirectory !== undefined
-        ? `Every command starts in ${options.workingDirectory}. `
-        : "Commands run in the sandbox's default working directory. ") +
-      'Use ls to discover files and commands such as cat, grep, sort, awk, and jq to inspect and transform them. ' +
-      'Pipes and redirections are supported. Returns stdout, stderr, and exitCode; long output is truncated.',
-    options.sandboxDescription,
-    options.experimentalTeeTransform &&
-      `Pipeline stdout is captured under ${TEE_OUTPUT_DIR}/. Use the returned teeFiles paths to inspect full intermediate output.`,
-    options.extraInstructions,
-    REASONING_INSTRUCTION,
-  ]
-    .filter(Boolean)
-    .join('\n\n');
-}
-
 /**
  * Build the DeepAgents-owned bash/readFile/writeFile toolkit around a sandbox.
  * The sandbox provides isolation and execution; these tools only translate AI
@@ -157,27 +135,24 @@ export async function createBashTool(
   const { workingDirectory, sandbox } = options;
   const initialFiles = await listInitialFiles(options);
 
-  if (workingDirectory !== undefined) {
-    const created = await sandbox.run({
-      command: `mkdir -p -- ${shellQuote(workingDirectory)}`,
-    });
-    if (created.exitCode !== 0) {
-      throw new Error(
-        `Could not set up working directory ${workingDirectory}: ${created.stderr}`,
-      );
-    }
-  }
+  const aiSdkBash = await experimental_createBashTool({
+    sandbox,
+    workingDirectory,
+  });
   await uploadInitialFiles(sandbox, workingDirectory, initialFiles);
 
   const experimentalTeeTransform = options.experimentalTeeTransform ?? false;
 
   const bash: WrappedBashTool = tool({
-    description: createBashDescription({
-      workingDirectory,
-      sandboxDescription: sandbox.description,
-      extraInstructions: options.extraInstructions,
-      experimentalTeeTransform,
-    }),
+    description: [
+      aiSdkBash.description,
+      experimentalTeeTransform &&
+        `Pipeline stdout is captured under ${TEE_OUTPUT_DIR}/. Use the returned teeFiles paths to inspect full intermediate output.`,
+      options.extraInstructions,
+      REASONING_INSTRUCTION,
+    ]
+      .filter(Boolean)
+      .join('\n\n'),
     inputSchema: z.object({
       command: z.string().describe('The bash command to execute'),
       reasoning: z

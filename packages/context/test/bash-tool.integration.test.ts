@@ -1,7 +1,7 @@
 import type { LanguageModelV4Prompt } from '@ai-sdk/provider';
 import type { ToolResultOutput } from '@ai-sdk/provider-utils';
 import { TemporaryFiles } from '@zukhruf/fs';
-import { asSchema, generateText, isStepCount } from 'ai';
+import { InvalidArgumentError, asSchema, generateText, isStepCount } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs, MountableFs, OverlayFs } from 'just-bash';
 import assert from 'node:assert/strict';
@@ -370,7 +370,7 @@ describe('session-backed toolkit', () => {
         sandbox: await createVirtualSandbox({ fs }),
         workingDirectory: '/readonly/work',
       }),
-      /Could not set up working directory \/readonly\/work: .*(EROFS|read-only)/s,
+      /Failed to create working directory: .*(EROFS|read-only)/s,
     );
   });
 
@@ -537,6 +537,52 @@ describe('session-backed toolkit', () => {
       /Available tools|Available files|Common operations|data\.json/,
     );
     assert.doesNotMatch(commands.join('\n'), /\bls\b/);
+  });
+
+  it('gives the model the exact bash description in both working-directory modes', async () => {
+    const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+    const commonText =
+      'Use ls to discover files and commands such as cat, grep, sort, awk, and jq to inspect and transform them. ' +
+      'Pipes and redirections are supported. Returns stdout, stderr, and exitCode; long output is truncated.';
+    const reasoningText =
+      'Every bash tool call must include a brief non-empty "reasoning" input explaining why the command is needed.';
+
+    const { bash: inDirectory } = await createBashTool({
+      sandbox: backend,
+      workingDirectory: '/workspace',
+      extraInstructions: 'Prefer small commands.',
+      experimentalTeeTransform: true,
+    });
+    const { bash: inDefault } = await createBashTool({ sandbox: backend });
+
+    assert.strictEqual(
+      inDirectory.description,
+      `Run Bash commands in the sandbox. Every command starts in /workspace. ${commonText}\n` +
+        `${backend.description}\n\n` +
+        'Pipeline stdout is captured under /tmp/bash-tool/. Use the returned teeFiles paths to inspect full intermediate output.\n\n' +
+        `Prefer small commands.\n\n${reasoningText}`,
+    );
+    assert.strictEqual(
+      inDefault.description,
+      `Run Bash commands in the sandbox. Commands run in the sandbox's default working directory. ${commonText}\n` +
+        `${backend.description}\n\n${reasoningText}`,
+    );
+  });
+
+  it('rejects a relative working directory without creating it', async () => {
+    const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+    const { stdout } = await backend.run({ command: 'pwd' });
+
+    await assert.rejects(
+      createBashTool({ sandbox: backend, workingDirectory: 'work' }),
+      (error: unknown) =>
+        InvalidArgumentError.isInstance(error) &&
+        error.parameter === 'workingDirectory',
+    );
+    assert.strictEqual(
+      await backend.stat({ path: `${stdout.trim()}/work` }),
+      null,
+    );
   });
 
   it('returns a BashException from the sandbox as the tool result and rethrows other errors', async () => {
