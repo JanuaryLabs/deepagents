@@ -16,22 +16,6 @@
   background: var(--color-background);
 }
 
-[data-slot="composer"] [data-slot="composer-placeholder"] {
-  box-sizing: border-box;
-  min-height: var(--composer-min-height);
-  width: 100%;
-  padding: var(--composer-padding);
-  font-size: var(--composer-font-size);
-  line-height: var(--composer-line-height);
-  white-space: pre-wrap;
-  word-break: break-word;
-  pointer-events: none;
-  user-select: none;
-  position: absolute;
-  inset: 0;
-  color: var(--color-muted-foreground);
-}
-
 [data-slot="composer"] [data-slot="composer-frame"]:focus-within {
   border-color: color-mix(in srgb, var(--color-primary) 80%, transparent);
   box-shadow: 0 0 0 3px
@@ -94,8 +78,8 @@
   margin-top: var(--composer-line-height);
 }
 
-[data-slot="composer"] [data-slot="composer-editor"] .is-empty::before {
-  content: attr(data-placeholder);
+[data-slot="composer"] [data-slot="composer-editor"] .is-editor-empty::before {
+  content: attr(data-placeholder) / "";
   float: left;
   height: 0;
   pointer-events: none;

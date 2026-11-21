@@ -65,7 +65,7 @@ function ChatComposerEditor({ className, ...props }: ComposerEditorProps) {
   return (
     <Composer.Editor
       className={cn(
-        '!min-h-15 !rounded-none !border-0 !bg-transparent !shadow-none **:data-[slot=composer-editor]:!p-0 **:data-[slot=composer-placeholder]:!p-0',
+        '!min-h-15 !rounded-none !border-0 !bg-transparent !shadow-none **:data-[slot=composer-editor]:!p-0',
         className,
       )}
       {...props}

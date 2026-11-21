@@ -44,6 +44,7 @@
     "@base-ui/react": "^1.7.0",
     "@tiptap/core": "^3.27.1",
     "@tiptap/extension-link": "^3.27.1",
+    "@tiptap/extensions": "^3.30.5",
     "@tiptap/pm": "^3.27.1",
     "@tiptap/react": "^3.27.1",
     "@tiptap/starter-kit": "^3.27.1",

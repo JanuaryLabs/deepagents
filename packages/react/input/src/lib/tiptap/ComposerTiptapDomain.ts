@@ -6,6 +6,7 @@ import {
   mergeAttributes,
 } from '@tiptap/core';
 import Link from '@tiptap/extension-link';
+import { Placeholder } from '@tiptap/extensions';
 import {
   type MarkType,
   type Node as ProseMirrorNode,
@@ -77,9 +78,14 @@ type ComposerClipboardOptions = {
   attachImageFile: ComposerAttachImageFile;
 };
 
-export function createComposerTiptapExtensions(
-  options: ComposerClipboardOptions,
-) {
+type ComposerTiptapExtensionsOptions = ComposerClipboardOptions & {
+  getPlaceholder: () => string;
+};
+
+export function createComposerTiptapExtensions({
+  getPlaceholder,
+  ...clipboardOptions
+}: ComposerTiptapExtensionsOptions) {
   return [
     StarterKit.configure({
       link: false,
@@ -95,7 +101,11 @@ export function createComposerTiptapExtensions(
     ComposerSlashMark,
     ComposerMentionNode,
     ComposerAtomNode,
-    createComposerClipboardExtension(options),
+    Placeholder.configure({
+      placeholder: getPlaceholder,
+      showOnlyWhenEditable: false,
+    }),
+    createComposerClipboardExtension(clipboardOptions),
   ];
 }
 

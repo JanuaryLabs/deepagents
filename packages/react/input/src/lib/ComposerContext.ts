@@ -57,6 +57,7 @@ export type ComposerContextValue = {
   activePopup: ActivePopup | null;
   suggestions: ComposerSuggestion[];
   attachedImages: ReadonlyMap<string, File>;
+  setEditorPlaceholder: (placeholder: string) => void;
   actions: ComposerActions;
   meta: ComposerEditorMeta;
 };

@@ -760,6 +760,98 @@ function OrphanRichConsumer() {
   return null;
 }
 
+describe('Composer placeholder', () => {
+  it('shows the placeholder in the empty editor and exposes it as aria-placeholder', async () => {
+    render(
+      <Composer.Root editorAriaLabel="Message">
+        <Composer.Editor placeholder="Ask anything" />
+      </Composer.Root>,
+      { wrapper: FakeClock },
+    );
+
+    const prompt = await screen.findByRole('textbox', { name: 'Message' });
+    expect(prompt).toHaveAttribute('aria-placeholder', 'Ask anything');
+    await waitFor(() =>
+      expect(prompt.querySelector('[data-placeholder]')).toHaveAttribute(
+        'data-placeholder',
+        'Ask anything',
+      ),
+    );
+    expect(prompt).toHaveTextContent(/^$/);
+  });
+
+  it('hides the placeholder once the user types', async () => {
+    const user = userEvent.setup();
+    render(
+      <Composer.Root editorAriaLabel="Message">
+        <Composer.Editor placeholder="Ask anything" />
+      </Composer.Root>,
+      { wrapper: FakeClock },
+    );
+    const prompt = await screen.findByRole('textbox', { name: 'Message' });
+    await waitFor(() =>
+      expect(prompt.querySelector('[data-placeholder]')).not.toBeNull(),
+    );
+
+    await user.click(prompt);
+    await user.keyboard('hello');
+
+    await waitFor(() =>
+      expect(prompt.querySelector('[data-placeholder]')).toBeNull(),
+    );
+    expect(prompt).toHaveTextContent('hello');
+  });
+
+  it('updates the placeholder when the placeholder prop changes', async () => {
+    const view = render(
+      <Composer.Root editorAriaLabel="Message">
+        <Composer.Editor placeholder="Ask anything" />
+      </Composer.Root>,
+      { wrapper: FakeClock },
+    );
+    const prompt = await screen.findByRole('textbox', { name: 'Message' });
+    await waitFor(() =>
+      expect(prompt.querySelector('[data-placeholder]')).toHaveAttribute(
+        'data-placeholder',
+        'Ask anything',
+      ),
+    );
+
+    view.rerender(
+      <Composer.Root editorAriaLabel="Message">
+        <Composer.Editor placeholder="Reply to the thread" />
+      </Composer.Root>,
+    );
+
+    await waitFor(() =>
+      expect(prompt).toHaveAttribute('aria-placeholder', 'Reply to the thread'),
+    );
+    await waitFor(() =>
+      expect(prompt.querySelector('[data-placeholder]')).toHaveAttribute(
+        'data-placeholder',
+        'Reply to the thread',
+      ),
+    );
+  });
+
+  it('keeps the placeholder on a disabled editor', async () => {
+    render(
+      <Composer.Root editorAriaLabel="Message" disabled>
+        <Composer.Editor placeholder="Ask anything" />
+      </Composer.Root>,
+      { wrapper: FakeClock },
+    );
+
+    const prompt = await screen.findByRole('textbox', { name: 'Message' });
+    await waitFor(() =>
+      expect(prompt.querySelector('[data-placeholder]')).toHaveAttribute(
+        'data-placeholder',
+        'Ask anything',
+      ),
+    );
+  });
+});
+
 describe('Composer empty prompt', () => {
   it('submits an empty prompt for the host to decide', async () => {
     const user = userEvent.setup();

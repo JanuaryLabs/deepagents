@@ -10,6 +10,7 @@ import {
   type ReactNode,
   useEffect,
   useEffectEvent,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -310,9 +311,14 @@ function ComposerRootInner({
     (event: KeyboardEvent) => boolean
   >(() => false);
 
+  const [editorPlaceholder, setEditorPlaceholder] = useState('');
+  const editorPlaceholderRef = useRef(editorPlaceholder);
+  editorPlaceholderRef.current = editorPlaceholder;
+
   const editorExtensions = useMemo(
     () =>
       createComposerTiptapExtensions({
+        getPlaceholder: () => editorPlaceholderRef.current,
         getMentionTrigger: () => mentionTriggersRef.current[0] ?? '@',
         getRemoteImageCount: () => remoteImagesRef.current.length,
         attachImageFile: (file) => attachImageFileRef.current(file),
@@ -329,6 +335,7 @@ function ComposerRootInner({
         'data-slot': 'composer-editor',
         role: 'textbox',
         'aria-label': editorAriaLabel,
+        'aria-placeholder': editorPlaceholder,
         'aria-disabled': disabled ? 'true' : 'false',
         dir: 'auto',
         spellcheck: 'false',
@@ -1745,6 +1752,7 @@ function ComposerRootInner({
     activePopup,
     suggestions,
     attachedImages: attachedImagesRef.current,
+    setEditorPlaceholder,
     actions: {
       acceptSuggestion,
       toggleSlashMenu,
@@ -1858,8 +1866,11 @@ function ComposerEditor({
   placeholder = 'Type a message or / for commands',
   ...props
 }: ComposerEditorProps) {
-  const { state, disabled, meta, actions } =
+  const { disabled, meta, actions, setEditorPlaceholder } =
     useComposerContext('Composer.Editor');
+  useLayoutEffect(() => {
+    setEditorPlaceholder(placeholder);
+  }, [placeholder, setEditorPlaceholder]);
   return (
     <div
       data-slot="composer-frame"
@@ -1877,9 +1888,6 @@ function ComposerEditor({
       }}
       {...props}
     >
-      {state.text.length === 0 ? (
-        <div data-slot="composer-placeholder">{placeholder}</div>
-      ) : null}
       <EditorContent editor={meta.editor} />
     </div>
   );
