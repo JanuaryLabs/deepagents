@@ -568,7 +568,15 @@ class DockerContainer implements EngineContainer {
       // Stop returns while the engine still removes an AutoRemove container,
       // which holds its volumes and bind mounts until then.
       if (this.#autoRemove) {
-        await this.#container.wait({ condition: 'removed' });
+        const { Error: failure } = await this.#container.wait({
+          condition: 'removed',
+        });
+        if (failure?.Message) {
+          throw new DockerSandboxError(
+            `Failed to remove container "${this.name}": ${failure.Message}`,
+            this.name,
+          );
+        }
       }
     } catch (error) {
       // The container is gone: AutoRemove removed it, or something outside the

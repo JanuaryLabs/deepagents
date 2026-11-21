@@ -1426,6 +1426,51 @@ await createDockerSandbox({ ...options, dockerfile }).then(
         );
       });
 
+      it('dispose rejects with the engine message when the engine fails to remove the container', async () => {
+        const name = `dispose-unremovable-${crypto.randomUUID()}`;
+        const containerName = `sandbox-${name}`;
+        const client = await testbed.client();
+        const sandbox = await createDockerSandbox({
+          ...withContainer({ HostConfig: { CapAdd: ['LINUX_IMMUTABLE'] } }),
+          name,
+        });
+        // /etc/hosts is a bind of a file in the engine's directory of the
+        // container, so an immutable flag makes the engine's removal fail.
+        const info = await client.containers.inspect(containerName);
+        const hostsPath = info?.HostsPath;
+        assert.ok(hostsPath);
+        try {
+          const lock = await sandbox.run({ command: 'chattr +i /etc/hosts' });
+          assert.strictEqual(lock.exitCode, 0, lock.stderr);
+
+          await assert.rejects(sandbox.dispose(), (error: unknown) => {
+            assert.ok(error instanceof DockerSandboxError);
+            assert.deepStrictEqual(
+              {
+                name: error.name,
+                message: error.message,
+                containerId: error.containerId,
+              },
+              {
+                name: 'DockerSandboxError',
+                message: `Failed to remove container "${containerName}": unable to remove filesystem: unlinkat ${hostsPath}: operation not permitted`,
+                containerId: containerName,
+              },
+            );
+            return true;
+          });
+        } finally {
+          await testbed.run({
+            ...defaults.container,
+            Image: 'bash:5.3-alpine3.24',
+            Cmd: ['nsenter', '-t', '1', '-m', '--', 'chattr', '-i', hostsPath],
+            HostConfig: { Privileged: true, PidMode: 'host' },
+          });
+          const leftover = await client.containers.find(containerName);
+          await leftover?.remove({ force: true });
+        }
+      });
+
       it('dispose leaves a container it attached to by name running', async () => {
         const name = `dispose-borrowed-${crypto.randomUUID()}`;
         await using container = await testbed.start(
