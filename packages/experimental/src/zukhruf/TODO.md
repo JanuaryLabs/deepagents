@@ -126,8 +126,8 @@
       returns the previous status, and leaves the target reusable. Terminal and approval-paused
       targets no-op; no broader close/resume/shutdown lifecycle was added.
 - [x] Port Codex host configuration for separate root/subagent guidance, spawn usage text,
-      validated OpenAI Responses tool namespaces, and wait bounds. Require every spawn to choose
-      `fork_turns`. Keep collaboration tools on the direct model surface by default and expose them
+      validated OpenAI Responses tool namespaces, and wait bounds. `fork_turns` is optional
+      (`all` by default, or `none`). Keep collaboration tools on the direct model surface by default and expose them
       through native AI SDK code mode when `nonCodeModeOnly` is false.
 - [ ] Add explicit spawn-context contracts for dedicated subagent developer instructions and the
       current turn's host execution context/environment. Reuse existing Zukhruf declaration,

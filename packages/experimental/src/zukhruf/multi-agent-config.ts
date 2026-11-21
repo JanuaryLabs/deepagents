@@ -196,7 +196,7 @@ function defaultRootUsageHint(
 
 At the start of your turn, you are the active agent. You can spawn sub-agents to handle subtasks, and those agents can recursively spawn their own declared sub-agents. All agents are equally capable and receive the tools declared for their agent type.
 
-Use \`${tool('spawn_agent')}\` to create an agent, \`${tool('followup_task')}\` to assign a new task and trigger a turn, and \`${tool('send_message')}\` to queue a message without triggering a turn. Every spawn must set \`fork_turns\` to \`none\`, \`all\`, or a positive count of recent turns.
+Use \`${tool('spawn_agent')}\` to create an agent, \`${tool('followup_task')}\` to assign a new task and trigger a turn, and \`${tool('send_message')}\` to queue a message without triggering a turn. You can decide how much context you want to propagate to your sub-agents with the \`fork_turns\` parameter.
 
 Child messages arrive as \`MESSAGE\` or \`FINAL_ANSWER\` mailbox envelopes with their task name, sender, and payload preserved.
 

@@ -1,4 +1,4 @@
-import { type ToolSet, type UIMessage, tool } from 'ai';
+import { type ToolSet, type UIMessage, isToolUIPart, tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -22,7 +22,7 @@ import {
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
 
-function spawnResponse(forkTurns?: string) {
+function spawnResponse(forkTurns?: unknown) {
   return toolCallResult({
     toolCallId: 'spawn-worker',
     toolName: 'spawn_agent',
@@ -55,7 +55,7 @@ function textOf(messages: UIMessage[]): string {
 
 async function spawnAfter(options: {
   history: Array<{ input: string; answer: string }>;
-  forkTurns?: string;
+  forkTurns?: unknown;
   rootResponses?: Array<
     | ReturnType<typeof textResult>
     | ReturnType<typeof spawnResponse>
@@ -173,14 +173,21 @@ async function spawnAfter(options: {
   };
 }
 
-test('spawn_agent rejects omitted fork_turns before creating a child', async () => {
+test('spawn_agent without fork_turns forks the full parent history', async () => {
   const result = await spawnAfter({
-    history: [{ input: 'first question', answer: 'first answer' }],
-    expectSpawn: false,
+    history: [
+      { input: 'old question', answer: 'old answer' },
+      { input: 'recent question', answer: 'recent answer' },
+    ],
   });
 
-  assert.equal(result.tree.length, 1);
-  assert.match(JSON.stringify(result.parentHistory), /"state":"output-error"/);
+  const history = textOf(result.forkedHistory);
+  assert.match(history, /old question/);
+  assert.match(history, /old answer/);
+  assert.match(history, /recent question/);
+  assert.match(history, /recent answer/);
+  assert.match(history, /delegate current request/);
+  assert.match(JSON.stringify(result.childChat?.metadata), /"forkTurns":"all"/);
 });
 
 test('spawn_agent fork_turns none starts the child with no parent history', async () => {
@@ -194,23 +201,6 @@ test('spawn_agent fork_turns none starts the child with no parent history', asyn
   assert.doesNotMatch(prompt, /private parent question/);
   assert.doesNotMatch(prompt, /private answer/);
   assert.match(prompt, /child task/);
-});
-
-test('spawn_agent fork_turns N keeps the latest N user turns', async () => {
-  const result = await spawnAfter({
-    history: [
-      { input: 'old question', answer: 'old answer' },
-      { input: 'recent question', answer: 'recent answer' },
-    ],
-    forkTurns: '2',
-  });
-
-  const history = textOf(result.forkedHistory);
-  assert.doesNotMatch(history, /old question/);
-  assert.doesNotMatch(history, /old answer/);
-  assert.match(history, /recent question/);
-  assert.match(history, /recent answer/);
-  assert.match(history, /delegate current request/);
 });
 
 test('forked history keeps final assistant content without tool traffic', async () => {
@@ -236,16 +226,20 @@ test('forked history keeps final assistant content without tool traffic', async 
   assert.doesNotMatch(history, /private tool result/);
 });
 
-test('spawn_agent rejects invalid fork_turns before creating a child', async () => {
-  const result = await spawnAfter({
-    history: [],
-    forkTurns: '0',
-    expectSpawn: false,
-  });
+for (const forkTurns of ['2', 3, 'recent']) {
+  test(`spawn_agent rejects fork_turns ${JSON.stringify(forkTurns)} before creating a child`, async () => {
+    const result = await spawnAfter({
+      history: [{ input: 'first question', answer: 'first answer' }],
+      forkTurns,
+      expectSpawn: false,
+    });
 
-  assert.equal(result.tree.length, 1);
-  assert.match(
-    JSON.stringify(result.parentHistory),
-    /"fork_turns":"0".*"state":"output-error"|"state":"output-error".*"fork_turns":"0"/,
-  );
-});
+    assert.equal(result.tree.length, 1);
+    const spawn = result.parentHistory
+      .flatMap((message) => message.parts)
+      .filter(isToolUIPart)
+      .find((part) => part.type === 'tool-spawn_agent');
+    assert.ok(spawn?.state === 'output-error', JSON.stringify(spawn));
+    assert.match(spawn.errorText, /fork_turns must be `none` or `all`/);
+  });
+}

@@ -51,7 +51,7 @@ const threadMetadataSchema = z.looseObject({
     lastTurnId: z.string().optional(),
     historyFork: z
       .object({
-        forkTurns: z.union([z.enum(['none', 'all']), z.number()]),
+        forkTurns: z.enum(['none', 'all']),
         parentChatId: z.string(),
         parentHeadMessageId: z.string().nullable(),
         sourceMessageIds: z.array(z.string()).optional(),

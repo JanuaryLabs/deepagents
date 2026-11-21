@@ -187,7 +187,7 @@ export class AgentHistoryForker {
     }
 
     const source = await this.#sourceMessages(parent, record);
-    const selected = this.#select(source, record.forkTurns)
+    const selected = source
       .map((entry) => this.#keepHistoryMessage(entry))
       .filter((entry): entry is SourceMessage => entry !== undefined);
     const sourceMessageIds = await this.#claimSelection(
@@ -275,22 +275,12 @@ export class AgentHistoryForker {
     return sourceMessageIds;
   }
 
-  #select(source: SourceMessage[], forkTurns: Exclude<ForkTurns, 'none'>) {
-    if (forkTurns === 'all') return source;
-
-    const boundaries = source.flatMap((entry, index) =>
-      isForkTurnBoundary(entry.message) ? [index] : [],
-    );
-    const start = boundaries.at(-forkTurns) ?? boundaries[0];
-    return start === undefined ? [] : source.slice(start);
-  }
-
   #keepHistoryMessage(entry: SourceMessage): SourceMessage | undefined {
     const { message } = entry;
     if (message.role === 'user') {
       if (
         isSyntheticReminderMessage(message) ||
-        interAgentCommunication(message) !== undefined
+        isInterAgentCommunication(message)
       ) {
         return undefined;
       }
@@ -350,19 +340,10 @@ export class AgentHistoryForker {
   }
 }
 
-function isForkTurnBoundary(message: UIMessage): boolean {
-  if (message.role !== 'user' || isSyntheticReminderMessage(message)) {
-    return false;
-  }
-  return interAgentCommunication(message)?.triggerTurn ?? true;
-}
-
-function interAgentCommunication(
-  message: UIMessage,
-): { triggerTurn: boolean } | undefined {
-  if (!isRecord(message.metadata)) return undefined;
+function isInterAgentCommunication(message: UIMessage): boolean {
+  if (!isRecord(message.metadata)) return false;
   if (!Object.hasOwn(message.metadata, 'interAgentCommunication')) {
-    return undefined;
+    return false;
   }
   const communication = message.metadata.interAgentCommunication;
   if (
@@ -373,7 +354,7 @@ function interAgentCommunication(
       `spawn_agent: message "${message.id}" has invalid inter-agent metadata`,
     );
   }
-  return { triggerTurn: communication.triggerTurn };
+  return true;
 }
 
 function parseHistoryForkRecord(value: unknown): HistoryForkRecord {
@@ -407,11 +388,7 @@ function parseHistoryForkRecord(value: unknown): HistoryForkRecord {
 }
 
 function isForkTurns(value: unknown): value is ForkTurns {
-  return (
-    value === 'none' ||
-    value === 'all' ||
-    (typeof value === 'number' && Number.isSafeInteger(value) && value > 0)
-  );
+  return value === 'none' || value === 'all';
 }
 
 function isEmptyAssistantPlaceholder(value: unknown): boolean {

@@ -492,8 +492,8 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
   preserving concurrent host metadata. Terminal reconciliation updates only the state it observes
   under the row lock, so duplicate or stale callbacks cannot rewind a successor.
   `spawn_agent` creates a separate child chat with its own path, parent, declaration name, context
-  history, stream, mailbox, and TurnQueue key. Its required `fork_turns` string controls the initial
-  history snapshot: `all`, `none`, or a positive number of recent user-turn boundaries. The
+  history, stream, mailbox, and TurnQueue key. Its optional `fork_turns` string controls the initial
+  history snapshot: `all` (the default) or `none`, as Codex accepts; any other value is rejected. The
   selected `agent_type` still determines the child declaration independently.
 - Reserved metadata fails closed. Every non-root thread must name an existing same-user,
   same-tree parent whose canonical path is the immediate ancestor; self-parenting and skipped

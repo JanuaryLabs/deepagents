@@ -1,13 +1,11 @@
-export type ForkTurns = 'none' | 'all' | number;
+export type ForkTurns = 'none' | 'all';
 
-export const forkTurnsError =
-  'fork_turns must be `none`, `all`, or a positive integer string';
+export const forkTurnsError = 'fork_turns must be `none` or `all`';
 
-export function parseForkTurns(value: string): ForkTurns | undefined {
-  const normalized = value.trim().toLowerCase();
-  if (normalized === 'none' || normalized === 'all') return normalized;
-  if (!/^\d+$/.test(normalized)) return undefined;
-
-  const turns = Number(normalized);
-  return Number.isSafeInteger(turns) && turns > 0 ? turns : undefined;
+/** Omitted or blank `fork_turns` forks the full parent history. */
+export function parseForkTurns(
+  value: string | undefined,
+): ForkTurns | undefined {
+  const normalized = value?.trim().toLowerCase() || 'all';
+  return normalized === 'none' || normalized === 'all' ? normalized : undefined;
 }

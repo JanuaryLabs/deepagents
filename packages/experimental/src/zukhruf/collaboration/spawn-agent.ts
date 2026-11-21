@@ -24,11 +24,11 @@ const spawnAgentInputSchema = z.object({
     .refine((value) => value.trim().length > 0, 'message cannot be empty')
     .describe('The initial task for the spawned agent.'),
   fork_turns: z
-    .string()
-    .trim()
+    .string({ error: forkTurnsError })
+    .optional()
     .refine((value) => parseForkTurns(value) !== undefined, forkTurnsError)
     .describe(
-      'Required number of parent turns to fork. Use `none`, `all`, or a positive integer string such as `3`.',
+      'Parent history to inherit. Defaults to `all`; use `none` to start without parent history. Only `all` and `none` are supported.',
     ),
 });
 
