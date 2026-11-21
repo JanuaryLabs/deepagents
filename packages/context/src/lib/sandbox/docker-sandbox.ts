@@ -455,6 +455,19 @@ class DockerContainer implements EngineContainer {
     }
   }
 
+  async #isLinkOrUnstatable(
+    path: string,
+    signal: AbortSignal | undefined,
+  ): Promise<boolean> {
+    try {
+      const stat = await this.#container.stat(path, { signal });
+      return stat !== undefined && stat.linkTarget !== '';
+    } catch (error) {
+      if (isUnexplainedFailure(error)) return true;
+      throw this.#notFound(error);
+    }
+  }
+
   async readFile(
     path: string,
     signal: AbortSignal | undefined,
@@ -516,7 +529,12 @@ class DockerContainer implements EngineContainer {
     signal: AbortSignal | undefined,
   ): Promise<void> {
     const target = this.#resolve(path);
-    if (this.#isExecOnly(target)) {
+    // Predicting check, not EAFP: the archive PUT silently replaces a symbolic
+    // link, while shell redirection writes through it.
+    if (
+      this.#isExecOnly(target) ||
+      (await this.#isLinkOrUnstatable(target, signal))
+    ) {
       return writeFileOverExec(this, target, content, signal);
     }
     try {

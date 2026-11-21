@@ -40,6 +40,12 @@ interface Backend {
    * normally.
    */
   stderrAfterStdoutCancel: 'flows' | 'errors';
+  /**
+   * What a write to a symbolic link does. Like Node's fs.writeFile and shell
+   * redirection, a session writes through it to its target. just-bash's
+   * InMemoryFs.writeFile replaces the link with a file.
+   */
+  linkWrite: 'through' | 'replaces';
   open: (sandboxName?: string) => Promise<DisposableSandbox>;
   /** Whether the engine holds the named sandbox. Absent when a backend holds nothing. */
   holds?: (sandboxName: string) => Promise<boolean>;
@@ -121,6 +127,7 @@ const backends: Backend[] = [
     writableStdin: false,
     runAbort: 'resolves',
     stderrAfterStdoutCancel: 'errors',
+    linkWrite: 'replaces',
     open: () => createVirtualSandbox({ fs: new InMemoryFs() }),
   },
   {
@@ -128,6 +135,7 @@ const backends: Backend[] = [
     writableStdin: true,
     runAbort: 'rejects',
     stderrAfterStdoutCancel: 'flows',
+    linkWrite: 'through',
     open: (name) => createDockerSandbox({ ...dockerDefaults, name }),
     holds: async (name) => {
       const client = await testbed.client();
@@ -140,6 +148,7 @@ const backends: Backend[] = [
     writableStdin: true,
     runAbort: 'rejects',
     stderrAfterStdoutCancel: 'flows',
+    linkWrite: 'through',
     open: (name) => createAppleContainerSandbox({ name }),
     holds: async (name) => {
       try {
@@ -165,6 +174,7 @@ const backends: Backend[] = [
     writableStdin: true,
     runAbort: 'rejects',
     stderrAfterStdoutCancel: 'flows',
+    linkWrite: 'through',
     open: (name) => createMicrosandboxSandbox({ name }),
     // A named sandbox keeps its disk when it stops, so the released VM is the
     // one that is no longer running.
@@ -183,6 +193,7 @@ const backends: Backend[] = [
     writableStdin: true,
     runAbort: 'rejects',
     stderrAfterStdoutCancel: 'flows',
+    linkWrite: 'through',
     open: async (name) => {
       const client = await daytonaClient();
       if (!name) return createDaytonaSandbox(client);
@@ -225,6 +236,7 @@ for (const {
   writableStdin,
   runAbort,
   stderrAfterStdoutCancel,
+  linkWrite,
   holds,
   forget,
 } of backends) {
@@ -745,6 +757,48 @@ for (const {
         assert.deepEqual(fileLink, { type: 'file', size: 2 });
         assert.equal(directoryLink?.type, 'directory');
         assert.equal(await sandbox.stat({ path: 'missing' }), null);
+      });
+
+      it(`${linkWrite === 'through' ? 'writes through a link to its target and creates the target of a dangling link' : 'replaces a link with a file on write'}`, async () => {
+        await using sandbox = await open();
+        await sandbox.writeTextFile({ path: 'target.txt', content: 'old' });
+        await sandbox.run({
+          command: 'ln -s target.txt link.txt; ln -s created.txt dangling.txt',
+        });
+
+        await sandbox.writeTextFile({ path: 'link.txt', content: 'new' });
+        await sandbox.writeTextFile({ path: 'dangling.txt', content: 'made' });
+
+        const entries = await sandbox.listDirectory({ path: '.' });
+        const files = entries
+          ?.filter((entry) => entry.name.endsWith('.txt'))
+          .toSorted((a, b) => a.name.localeCompare(b.name));
+        if (linkWrite === 'through') {
+          assert.equal(
+            await sandbox.readTextFile({ path: 'target.txt' }),
+            'new',
+          );
+          assert.equal(
+            await sandbox.readTextFile({ path: 'created.txt' }),
+            'made',
+          );
+          assert.deepEqual(files, [
+            { name: 'created.txt', type: 'file' },
+            { name: 'dangling.txt', type: 'symlink' },
+            { name: 'link.txt', type: 'symlink' },
+            { name: 'target.txt', type: 'file' },
+          ]);
+        } else {
+          assert.equal(
+            await sandbox.readTextFile({ path: 'target.txt' }),
+            'old',
+          );
+          assert.deepEqual(files, [
+            { name: 'dangling.txt', type: 'file' },
+            { name: 'link.txt', type: 'file' },
+            { name: 'target.txt', type: 'file' },
+          ]);
+        }
       });
 
       it('lists one directory level with entry types, reporting links as links', async () => {
