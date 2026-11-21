@@ -504,14 +504,26 @@ class RuntimeHost implements AsyncDisposable {
     return this.#plugins.get(definition);
   }
 
+  /** Creates the root chat, or keeps it when this runtime already owns it; any other chat reads as absent. */
   async createSession(conversation: ConversationId): Promise<void> {
-    await this.#controlPlane.resolve(conversation);
+    const thread =
+      (await this.#directory.load(conversation)) ??
+      (await this.#controlPlane.resolve(conversation)).thread;
+    if (!this.#ownsRoot(thread)) {
+      throw new ConversationNotFoundError(conversation.chatId);
+    }
   }
 
   async sessionExists(conversation: ConversationId): Promise<boolean> {
     const chat = await this.#store.getChat(conversation.chatId);
     if (!chat || chat.userId !== conversation.userId) return false;
-    return (await this.#directory.load(conversation))?.path.isRoot ?? false;
+    const thread = await this.#directory.load(conversation);
+    return thread !== undefined && this.#ownsRoot(thread);
+  }
+
+  /** A root thread this runtime's root declaration started. */
+  #ownsRoot(thread: AgentThread): boolean {
+    return thread.path.isRoot && thread.declarationName === this.info.root;
   }
 
   async enqueue(conversation: ConversationId, turn: TurnRequest) {
@@ -596,9 +608,7 @@ class RuntimeHost implements AsyncDisposable {
         }
         return [];
       }
-      return thread.path.isRoot && thread.declarationName === this.info.root
-        ? [{ chat, conversation }]
-        : [];
+      return this.#ownsRoot(thread) ? [{ chat, conversation }] : [];
     });
 
     return Promise.all(

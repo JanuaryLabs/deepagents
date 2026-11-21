@@ -25,7 +25,10 @@ import {
 } from '@deepagents/experimental/zukhruf';
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 
-import { ControlledAgentStorage } from '../../../testing/controlled-agent-storage.fixture.ts';
+import {
+  ControlledAgentStorage,
+  type ControlledAgentStorageParts,
+} from '../../../testing/controlled-agent-storage.fixture.ts';
 import { textResult } from '../../../testing/stream-results.fixture.ts';
 import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 
@@ -42,6 +45,12 @@ const errorBodySchema = z.looseObject({
 });
 
 async function serve(resources: AsyncDisposableStack) {
+  return serveAgent(resources, 'turns', await storageParts(resources));
+}
+
+async function storageParts(
+  resources: AsyncDisposableStack,
+): Promise<ControlledAgentStorageParts> {
   const database = resources.use(new PGlite());
   const boss = resources.adopt(
     new PgBoss({ db: fromPglite(database), backend: 'pglite' }),
@@ -54,10 +63,23 @@ async function serve(resources: AsyncDisposableStack) {
     schema: 'pgboss',
   });
   const streamStore = new SqliteStreamStore(resources.use(open(':memory:')));
+  return {
+    store: new SqliteContextStore(resources.use(open(':memory:'))),
+    streams: streamsFor(streamStore),
+    queue,
+    mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
+  };
+}
+
+async function serveAgent(
+  resources: AsyncDisposableStack,
+  name: string,
+  parts: ControlledAgentStorageParts,
+) {
   const runtime = resources.use(
     await new AgentRuntime(
       defineAgent({
-        name: 'turns',
+        name,
         model: new MockLanguageModelV4({
           doStream: async () => textResult('done'),
         }),
@@ -68,18 +90,13 @@ async function serve(resources: AsyncDisposableStack) {
       }),
     ).initialize(
       defineStack(async () => ({
-        storage: new ControlledAgentStorage({
-          store: new SqliteContextStore(resources.use(open(':memory:'))),
-          streams: streamsFor(streamStore),
-          queue,
-          mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
-        }),
+        storage: new ControlledAgentStorage(parts),
       })),
     ),
   );
   const app = new Hono<HttpEnv>();
   app.use(`${MOUNT}/*`, (context, next) => {
-    context.set('userId', 'user-1');
+    context.set('userId', context.req.header('x-user-id') ?? 'user-1');
     return next();
   });
   app.route(MOUNT, http(runtime));
@@ -335,4 +352,103 @@ test('the turn routes answer 400 for an id that is not a turn id, one defect at 
     ),
     answers.map(() => ({ status: 400, code: 'api/validation-failed' })),
   );
+});
+
+test('the session routes answer 404 for a chat another agent runtime created on the same storage, as they do for another user', async () => {
+  await using resources = new AsyncDisposableStack();
+  const parts = await storageParts(resources);
+  const owner = await serveAgent(resources, 'owner', parts);
+  const other = await serveAgent(resources, 'other', parts);
+  const sessionId = randomUUID();
+  const turnId = await startTurn(owner.app, sessionId);
+  const routes = [
+    `${MOUNT}/session/${sessionId}`,
+    `${MOUNT}/session/${sessionId}/turn/${turnId}`,
+  ];
+  const answer = async (app: Hono<HttpEnv>, path: string, userId: string) => {
+    const response = await app.request(path, {
+      headers: { 'x-user-id': userId },
+    });
+    return { status: response.status, body: await response.json() };
+  };
+  const notFound = {
+    status: 404,
+    body: {
+      error: 'Session not found',
+      cause: {
+        code: 'zukhruf/session-not-found',
+        detail: `Session ${sessionId} does not exist`,
+      },
+    },
+  };
+
+  const answers = await Promise.all(
+    routes.map(async (path) => ({
+      otherRuntime: await answer(other.app, path, 'user-1'),
+      otherUser: await answer(owner.app, path, 'user-2'),
+      owner: (await answer(owner.app, path, 'user-1')).status,
+    })),
+  );
+
+  assert.deepStrictEqual(
+    answers,
+    routes.map(() => ({
+      otherRuntime: notFound,
+      otherUser: notFound,
+      owner: 200,
+    })),
+  );
+});
+
+test('POST /session for a chat another agent runtime created on the same storage answers 404 as it does for another user, and leaves that chat to its owner', async () => {
+  await using resources = new AsyncDisposableStack();
+  const parts = await storageParts(resources);
+  const owner = await serveAgent(resources, 'owner', parts);
+  const other = await serveAgent(resources, 'other', parts);
+  const sessionId = randomUUID();
+  await startTurn(owner.app, sessionId);
+  const read = async (app: Hono<HttpEnv>, path: string) => {
+    const response = await app.request(`${MOUNT}${path}`);
+    return { status: response.status, body: await response.json() };
+  };
+  const ownerView = async () => ({
+    session: await read(owner.app, `/session/${sessionId}`),
+    history: await read(owner.app, '/history'),
+  });
+  const post = async (app: Hono<HttpEnv>, userId: string) => {
+    const response = await app.request(`${MOUNT}/session/${sessionId}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-user-id': userId },
+      body: JSON.stringify({
+        sessionId,
+        message: {
+          id: `message-${randomUUID()}`,
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        },
+        trigger: 'submit-message',
+      }),
+    });
+    return { status: response.status, body: await response.json() };
+  };
+  const before = await ownerView();
+
+  const otherRuntime = await post(other.app, 'user-1');
+  const otherUser = await post(owner.app, 'user-2');
+
+  assert.deepStrictEqual(
+    {
+      otherRuntime,
+      ownerView: await ownerView(),
+      otherSession: (await read(other.app, `/session/${sessionId}`)).status,
+      otherHistory: (await read(other.app, '/history')).body,
+    },
+    {
+      otherRuntime: otherUser,
+      ownerView: before,
+      otherSession: 404,
+      otherHistory: [],
+    },
+  );
+  assert.equal(otherUser.status, 404);
 });
