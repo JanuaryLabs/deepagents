@@ -30,14 +30,9 @@ const COMMAND_TIMEOUT_EXIT_CODE = 124;
 const REASONING_INSTRUCTION =
   'Every bash tool call must include a brief non-empty "reasoning" input explaining why the command is needed.';
 
-function truncateOutput(
-  output: string,
-  maxLength: number,
-  streamName: 'stdout' | 'stderr',
-): string {
+function truncateOutput(output: string, maxLength: number): string {
   if (output.length <= maxLength) return output;
-  const removed = output.length - maxLength;
-  return `${output.slice(0, maxLength)}\n\n[${streamName} truncated: ${removed} characters removed]`;
+  return `${output.slice(0, maxLength)}\n[Output truncated: ${output.length - maxLength} characters omitted.]`;
 }
 
 function makeTeeScriptPortable(script: string): string {
@@ -211,8 +206,8 @@ export async function createBashTool(
         options.maxOutputLength ?? DEFAULT_MAX_OUTPUT_LENGTH;
       result = {
         ...result,
-        stdout: truncateOutput(result.stdout, maxOutputLength, 'stdout'),
-        stderr: truncateOutput(result.stderr, maxOutputLength, 'stderr'),
+        stdout: truncateOutput(result.stdout, maxOutputLength),
+        stderr: truncateOutput(result.stderr, maxOutputLength),
         ...(teeFiles ? { teeFiles } : {}),
       };
 

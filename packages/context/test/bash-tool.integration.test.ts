@@ -227,8 +227,14 @@ describe('bash toolkit', () => {
           command,
           'printf 123456; printf abcdef >&2; echo final > ran.txt',
         );
-        assert.match(result.stdout, /^123\n\n\[stdout truncated:/);
-        assert.match(result.stderr, /^abc\n\n\[stderr truncated:/);
+        assert.strictEqual(
+          result.stdout,
+          '123\n[Output truncated: 3 characters omitted.]',
+        );
+        assert.strictEqual(
+          result.stderr,
+          'abc\n[Output truncated: 3 characters omitted.]',
+        );
         return {
           result: {
             stdout: 'hooked\n',
