@@ -245,15 +245,13 @@ retains partial output and sets the stream status to `failed`. It does not
 automatically retry the partial response. User cancellation sets the stream
 status to `cancelled`.
 
-### Tool call repair
+### Invalid tool calls
 
-The wrapper repairs invalid tool arguments with the agent's model. For direct
-AI SDK calls, `@deepagents/context` also exports
-`createRepairToolCall(model, abortSignal?)` from `@deepagents/agent`; pass its
-result as the SDK's `repairToolCall` option. The helper awaits the tool's input
-schema and skips unknown tools. It uses the SDK's repair abort signal when
-provided, falling back to the signal passed to the helper, so cancellation
-and execution timeouts also stop the repair request.
+The wrapper does not repair tool calls itself. When the model names a tool
+that does not exist, or sends input that fails the tool's schema, the AI SDK
+returns the call to the model as a tool error on the next step: the error names
+the available tools, or carries the validation message. The model corrects
+itself within the agent's step budget (`stopWhen`).
 
 ## Instance properties
 

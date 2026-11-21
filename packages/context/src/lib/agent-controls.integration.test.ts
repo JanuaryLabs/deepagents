@@ -281,59 +281,6 @@ for (const mode of [
   });
 }
 
-it('native total timeout also cancels a tool-call repair request', async () => {
-  let repairSignal: AbortSignal | undefined;
-  let toolRuns = 0;
-  const model: MockLanguageModelV4 = new MockLanguageModelV4({
-    doGenerate: async ({ abortSignal }) => {
-      if (model.doGenerateCalls.length === 1)
-        return {
-          content: [
-            {
-              type: 'tool-call',
-              toolCallId: 'invalid',
-              toolName: 'lookup',
-              input: '{"id":42}',
-            },
-          ],
-          finishReason: { unified: 'tool-calls', raw: undefined },
-          usage,
-          warnings: [],
-        };
-      repairSignal = abortSignal;
-      await setTimeout(80, undefined, { signal: abortSignal });
-      return {
-        content: [{ type: 'text', text: '{"id":"42"}' }],
-        finishReason: { unified: 'stop', raw: undefined },
-        usage,
-        warnings: [],
-      };
-    },
-  });
-  const assistant = agent({
-    name: 'repair-timeout',
-    model,
-    timeout: { totalMs: 20 },
-    context: new ContextEngine({
-      store: new InMemoryContextStore(),
-      chatId: 'repair-timeout',
-      userId: 'user',
-    }).set(user('Lookup.')),
-    sandbox: await buildSandbox(),
-    tools: {
-      lookup: tool({
-        inputSchema: z.object({ id: z.string() }),
-        execute: () => ++toolRuns,
-      }),
-    },
-  });
-
-  await assert.rejects(assistant.generate(), /timeout/i);
-
-  assert.equal(repairSignal?.aborted, true);
-  assert.equal(toolRuns, 0);
-});
-
 it('native tool timeout aborts execution and returns a tool error to the next model step', async () => {
   let toolAborted = false;
   const model: MockLanguageModelV4 = new MockLanguageModelV4({

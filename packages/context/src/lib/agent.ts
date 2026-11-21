@@ -35,7 +35,6 @@ import z from 'zod';
 
 import {
   type AgentControls,
-  createRepairToolCall,
   withHostOnlyToolMetadata,
 } from '@deepagents/agent';
 
@@ -274,10 +273,6 @@ class Agent<TOOLS extends ToolSet, SANDBOX_TOOLS extends SandboxTools> {
       tools: this.tools,
       toolsContext: options?.toolsContext,
       experimental_toolCallers: this.#options.experimental_toolCallers,
-      repairToolCall: createRepairToolCall(
-        this.#options.model,
-        options?.abortSignal,
-      ),
       toolChoice: this.#options.toolChoice,
     });
   }
@@ -406,7 +401,6 @@ class Agent<TOOLS extends ToolSet, SANDBOX_TOOLS extends SandboxTools> {
         ignoreIncompleteToolCalls: true,
         tools: this.tools,
       }),
-      repairToolCall: createRepairToolCall(model, config?.abortSignal),
       stopWhen: this.#options.stopWhen ?? DEFAULT_STOP_WHEN,
       prepareStep,
       experimental_transform: config?.transform ?? smoothStream(),
@@ -863,10 +857,6 @@ export function structuredOutput<
           tools,
         }),
         stopWhen: options.stopWhen ?? DEFAULT_STOP_WHEN,
-        repairToolCall: createRepairToolCall(
-          options.model,
-          callOptions?.abortSignal,
-        ),
         toolsContext: callOptions?.toolsContext,
         output: Output.object({ schema: options.schema }),
         tools,
@@ -910,10 +900,6 @@ export function structuredOutput<
         telemetry: options.telemetry,
         model: options.model,
         instructions: systemPrompt,
-        repairToolCall: createRepairToolCall(
-          options.model,
-          callOptions?.abortSignal,
-        ),
         messages: await convertToModelMessages(messages, {
           ignoreIncompleteToolCalls: true,
           tools,
