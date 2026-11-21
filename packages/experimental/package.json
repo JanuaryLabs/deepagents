@@ -124,6 +124,7 @@
     "atomically": "^2.1.1",
     "cron-parser": "^5.10.6",
     "cronstrue": "^3.24.0",
+    "fast-content-type-parse": "^4.0.1",
     "hono": "^4.12.33",
     "just-bash": "^3.6.0",
     "p-memoize": "^8.0.0",

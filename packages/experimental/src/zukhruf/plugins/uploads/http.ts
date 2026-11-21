@@ -1,8 +1,8 @@
 import { validate } from '@sdk-it/hono/runtime';
+import { safeParse } from 'fast-content-type-parse';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
-import { MIMEType } from 'node:util';
 import z from 'zod';
 
 import type { AgentPluginDefinition } from '../../runtime/agent-runtime.ts';
@@ -254,16 +254,5 @@ function essenceOf(contentType: string | undefined): string | undefined {
   if (contentType === undefined) {
     return undefined;
   }
-  try {
-    return new MIMEType(contentType).essence;
-  } catch (error) {
-    if (
-      error instanceof TypeError &&
-      'code' in error &&
-      error.code === 'ERR_INVALID_MIME_SYNTAX'
-    ) {
-      return undefined;
-    }
-    throw error;
-  }
+  return safeParse(contentType).type || undefined;
 }

@@ -754,7 +754,7 @@ test('POST /session/:sessionId/uploads stores the essence of a Content-Type what
   }
 });
 
-test('POST /session/:sessionId/uploads reads an empty parameter list as the WHATWG MIME type parser does', async () => {
+test('POST /session/:sessionId/uploads reads an empty parameter list as the media type alone', async () => {
   await using h = await harness();
   const sessionId = randomUUID();
 
