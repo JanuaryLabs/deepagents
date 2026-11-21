@@ -32,6 +32,8 @@ import {
   useSandbox,
 } from '@deepagents/context';
 
+import { readFirstChunk } from './helpers/read-first-chunk.ts';
+
 const temporaryFiles = new TemporaryFiles();
 const execFileAsync = promisify(execFile);
 
@@ -1037,6 +1039,70 @@ describe('Docker Sandbox', () => {
 
         assert.strictEqual(new TextDecoder().decode(value), 'started');
         assert.notStrictEqual((await child.wait()).exitCode, 0);
+      });
+
+      for (const [setup, HostConfig] of [
+        ['without /dev/shm', { IpcMode: 'none' }],
+        ['on a read-only rootfs with /dev/shm', { ReadonlyRootfs: true }],
+      ] as const) {
+        it(`stops the process tree of an aborted spawn ${setup}`, async () => {
+          await using sandbox = await createDockerSandbox(
+            withContainer({ HostConfig }),
+          );
+          const controller = new AbortController();
+          const reason = new Error('stop');
+
+          const child = await sandbox.spawn({
+            command: 'printf started; sleep 300 & sleep 301',
+            abortSignal: controller.signal,
+          });
+          const started = await readFirstChunk(child.stdout);
+          controller.abort(reason);
+
+          assert.strictEqual(started, 'started');
+          await assert.rejects(
+            Promise.resolve(child.wait()),
+            (error) => error === reason,
+          );
+          // PID 1 is not an init, so killed processes stay as zombies.
+          const live = await sandbox.run({
+            command: `ps -o stat,comm | awk '$2 == "sleep" && $1 !~ /^Z/'`,
+          });
+          assert.deepStrictEqual(live, { stdout: '', stderr: '', exitCode: 0 });
+        });
+      }
+
+      it('does not run a spawned command when neither /dev/shm nor /tmp is writable', async () => {
+        await using sandbox = await createDockerSandbox(
+          withContainer({
+            HostConfig: {
+              IpcMode: 'none',
+              ReadonlyRootfs: true,
+              Tmpfs: { '/workspace': '' },
+            },
+          }),
+        );
+
+        const child = await sandbox.spawn({ command: 'touch /workspace/ran' });
+        const [stdout, stderr, { exitCode }] = await Promise.all([
+          text(child.stdout),
+          text(child.stderr),
+          child.wait(),
+        ]);
+
+        assert.deepStrictEqual(
+          { stdout, stderr, exitCode },
+          {
+            stdout: '',
+            stderr:
+              'Cannot start the command: neither /dev/shm nor /tmp is writable for the file that lets the sandbox stop it\n',
+            exitCode: 1,
+          },
+        );
+        assert.strictEqual(
+          await sandbox.stat({ path: '/workspace/ran' }),
+          null,
+        );
       });
 
       it('reaches tmpfs and kernel paths through an exec, with null for a missing one', async () => {

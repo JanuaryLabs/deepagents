@@ -232,6 +232,12 @@ async function deleteFileOverExec(
   return true;
 }
 
+/**
+ * Where a managed command keeps its kill-control file, in order. `/dev/shm` is
+ * missing with Compose `ipc: none`; `/tmp` is read-only on a read-only rootfs.
+ */
+const CONTROL_DIRECTORIES = ['/dev/shm', '/tmp'];
+
 /** Reads a process to its end. */
 export async function collectOutput(
   process: EngineProcess,
@@ -246,18 +252,23 @@ export async function collectOutput(
 
 /**
  * Wraps `command` so the sandbox can stop it: no engine has a request that stops
- * an exec. The wrapper writes the command's process group to `controlPath` for a
- * later exec to kill, and enforces `commandTimeout` itself.
+ * an exec. The wrapper writes the command's process group to `controlFile` in the
+ * first writable directory of {@link CONTROL_DIRECTORIES} for a later exec to
+ * kill, and enforces `commandTimeout` itself. When no directory is writable, the
+ * command does not run.
  */
 function managedCommand(
   command: string,
-  controlPath: string,
+  controlFile: string,
   commandTimeout: number | undefined,
 ): string {
   return [
     'set -m',
-    `control=${shellQuote(controlPath)}`,
-    ': > "$control" || exit 1',
+    'control=',
+    `for dir in ${CONTROL_DIRECTORIES.join(' ')}; do`,
+    `  if { : > "$dir/"${shellQuote(controlFile)}; } 2>/dev/null; then control="$dir/"${shellQuote(controlFile)}; break; fi`,
+    'done',
+    `[ -n "$control" ] || { echo ${shellQuote(`Cannot start the command: neither ${CONTROL_DIRECTORIES.join(' nor ')} is writable for the file that lets the sandbox stop it`)} >&2; exit 1; }`,
     'timer=',
     'trap \'if [ -n "$timer" ]; then kill -TERM "$timer" 2>/dev/null || :; wait "$timer" 2>/dev/null || :; fi; rm -f "$control" "$control.timeout"\' EXIT',
     `bash -lc ${shellQuote(command)} &`,
@@ -292,7 +303,7 @@ function managedCommand(
  */
 async function terminate(
   container: EngineContainer,
-  controlPath: string,
+  controlFile: string,
   exitCode: Promise<number>,
 ): Promise<void> {
   const exited = exitCode.then(
@@ -300,7 +311,10 @@ async function terminate(
     () => true,
   );
   const killGroup = [
-    `IFS= read -r pid < ${shellQuote(controlPath)} || exit 0`,
+    `for dir in ${CONTROL_DIRECTORIES.join(' ')}; do`,
+    `  { IFS= read -r pid < "$dir/"${shellQuote(controlFile)}; } 2>/dev/null && break`,
+    '  pid=',
+    'done',
     '[ -n "$pid" ] || exit 0',
     'printf found',
     'kill -KILL -- "-$pid" 2>/dev/null || exit 0',
@@ -373,18 +387,18 @@ export function containerSession(
   > {
     const { command, abortSignal, stdin } = options;
     abortSignal?.throwIfAborted();
-    const controlPath = `/dev/shm/deepagents-exec-${randomUUID()}.pid`;
+    const controlFile = `deepagents-exec-${randomUUID()}.pid`;
     const process = await container.spawn(
       [
         'bash',
         '-c',
-        managedCommand(command, controlPath, container.commandTimeout),
+        managedCommand(command, controlFile, container.commandTimeout),
       ],
       { ...scope(options), stdin },
     );
     const control = controlProcess({
       exitCode: process.exitCode,
-      kill: () => terminate(container, controlPath, process.exitCode),
+      kill: () => terminate(container, controlFile, process.exitCode),
       abortSignal,
     });
     return {
