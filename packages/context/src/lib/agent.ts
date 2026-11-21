@@ -5,9 +5,11 @@ import type {
   ToolExecutionOptions,
 } from '@ai-sdk/provider-utils';
 import {
+  type AssistantModelMessage,
   type FlexibleSchema,
   type GenerateTextResult,
   type InferSchema,
+  type ModelMessage,
   Output,
   type PrepareStepFunction,
   type StreamTextResult,
@@ -258,10 +260,7 @@ class Agent<TOOLS extends ToolSet, SANDBOX_TOOLS extends SandboxTools> {
       runtimeContext: this.#options.runtimeContext,
       model: this.#options.model,
       instructions: systemPrompt,
-      messages: await convertToModelMessages(messages, {
-        ignoreIncompleteToolCalls: true,
-        tools: this.tools,
-      }),
+      messages: await toModelPrompt(messages, this.tools),
       stopWhen: this.#options.stopWhen ?? DEFAULT_STOP_WHEN,
       prepareStep: this.#withPrepareStep(
         this.#options.context.createReminderSession({
@@ -397,10 +396,7 @@ class Agent<TOOLS extends ToolSet, SANDBOX_TOOLS extends SandboxTools> {
       runtimeContext: this.#options.runtimeContext,
       model,
       instructions: systemPrompt,
-      messages: await convertToModelMessages(messages, {
-        ignoreIncompleteToolCalls: true,
-        tools: this.tools,
-      }),
+      messages: await toModelPrompt(messages, this.tools),
       stopWhen: this.#options.stopWhen ?? DEFAULT_STOP_WHEN,
       prepareStep,
       experimental_transform: config?.transform ?? smoothStream(),
@@ -852,10 +848,7 @@ export function structuredOutput<
         telemetry: options.telemetry,
         model: options.model,
         instructions: systemPrompt,
-        messages: await convertToModelMessages(messages, {
-          ignoreIncompleteToolCalls: true,
-          tools,
-        }),
+        messages: await toModelPrompt(messages, tools),
         stopWhen: options.stopWhen ?? DEFAULT_STOP_WHEN,
         toolsContext: callOptions?.toolsContext,
         output: Output.object({ schema: options.schema }),
@@ -900,10 +893,7 @@ export function structuredOutput<
         telemetry: options.telemetry,
         model: options.model,
         instructions: systemPrompt,
-        messages: await convertToModelMessages(messages, {
-          ignoreIncompleteToolCalls: true,
-          tools,
-        }),
+        messages: await toModelPrompt(messages, tools),
         stopWhen: options.stopWhen ?? DEFAULT_STOP_WHEN,
         experimental_transform: callOptions?.transform ?? smoothStream(),
         toolsContext: callOptions?.toolsContext,
@@ -912,6 +902,65 @@ export function structuredOutput<
       });
     },
   };
+}
+
+async function toModelPrompt(
+  messages: UIMessage[],
+  tools: ToolSet | undefined,
+): Promise<ModelMessage[]> {
+  return withReasoningItemsOnce(
+    await convertToModelMessages(messages, {
+      ignoreIncompleteToolCalls: true,
+      tools,
+    }),
+  );
+}
+
+/**
+ * The same OpenAI reasoning item can be stored in two assistant messages, and
+ * the Responses API rejects a request that sends it twice ("Duplicate item
+ * found with id rs_..."). `@ai-sdk/openai`'s `convertToOpenAIResponsesInput`
+ * merges an item's parts only within one assistant message, so every later
+ * part is moved next to the item's last part in the first message that holds
+ * it, where the provider merges it the same way: summaries appended, the
+ * latest encrypted content kept.
+ *
+ * Delete this once `@ai-sdk/openai` de-duplicates reasoning items across the
+ * whole request: https://github.com/vercel/ai/issues/7883
+ */
+function withReasoningItemsOnce(messages: ModelMessage[]): ModelMessage[] {
+  const contentByItemId = new Map<string, AssistantPart[]>();
+  return messages.flatMap((message) => {
+    if (message.role !== 'assistant' || typeof message.content === 'string') {
+      return [message];
+    }
+    const content: AssistantPart[] = [];
+    for (const part of message.content) {
+      const itemId = reasoningItemIdOf(part);
+      const owner =
+        itemId === undefined ? undefined : contentByItemId.get(itemId);
+      if (itemId === undefined) {
+        content.push(part);
+      } else if (owner === undefined) {
+        contentByItemId.set(itemId, content);
+        content.push(part);
+      } else {
+        const lastOfItem = owner.findLastIndex(
+          (other) => reasoningItemIdOf(other) === itemId,
+        );
+        owner.splice(lastOfItem + 1, 0, part);
+      }
+    }
+    return content.length === 0 ? [] : [{ ...message, content }];
+  });
+}
+
+type AssistantPart = Exclude<AssistantModelMessage['content'], string>[number];
+
+function reasoningItemIdOf(part: AssistantPart): string | undefined {
+  if (part.type !== 'reasoning') return undefined;
+  const itemId = part.providerOptions?.openai?.itemId;
+  return typeof itemId === 'string' ? itemId : undefined;
 }
 
 /**

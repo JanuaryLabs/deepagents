@@ -17,6 +17,7 @@ import {
   type ContextStore,
   InMemoryContextStore,
   XmlRenderer,
+  agent,
   assistant,
   user,
 } from '@deepagents/context';
@@ -420,6 +421,113 @@ describe('an OpenAI reasoning item streamed with store: false across a tool roun
           summary: [
             { type: 'summary_text', text: 'Before the tool.' },
             { type: 'summary_text', text: 'After the tool.' },
+          ],
+        },
+      ],
+    );
+  });
+});
+
+// The April canary (agent-backlog #568): the same reasoning item id was stored
+// in two different assistant messages, and the Responses API answered the next
+// request with 400 "Duplicate item found with id rs_...".
+function assistantTurnWithReasoning(
+  id: string,
+  summary: string,
+  encrypted: string,
+): UIMessage {
+  return {
+    id,
+    role: 'assistant',
+    parts: [
+      { type: 'step-start' },
+      {
+        type: 'reasoning',
+        text: summary,
+        state: 'done',
+        providerMetadata: {
+          openai: {
+            itemId: 'rs_stored_in_two_messages',
+            reasoningEncryptedContent: encrypted,
+          },
+        },
+      },
+      { type: 'text', text: `${id} answer.` },
+    ],
+  };
+}
+
+async function requestInputOf(providerOptions?: {
+  openai: { store: boolean; include: string[] };
+}) {
+  const engine = new ContextEngine({
+    store: new InMemoryContextStore(),
+    chatId: 'reasoning-dup-across-messages',
+    userId: 'test-user',
+  });
+  engine.set(user('first question'));
+  engine.set(assistant(assistantTurnWithReasoning('a1', 'First.', 'enc-1')));
+  engine.set(user('second question'));
+  engine.set(assistant(assistantTurnWithReasoning('a2', 'Second.', 'enc-2')));
+  engine.set(user('third question'));
+
+  const requests: Array<{ input: Array<{ type: string; id?: string }> }> = [];
+  const sut = agent({
+    name: 'reasoning-replay',
+    sandbox: await buildSandbox(),
+    context: engine,
+    providerOptions,
+    model: createOpenAI({
+      apiKey: 'fixture',
+      fetch: async (_url, init) => {
+        requests.push(JSON.parse(String(init?.body)));
+        return Response.json({
+          id: 'resp_1',
+          created_at: 0,
+          model: 'gpt-6.1-sol',
+          output: [
+            {
+              type: 'message',
+              id: 'msg_1',
+              role: 'assistant',
+              status: 'completed',
+              content: [{ type: 'output_text', text: 'ok', annotations: [] }],
+            },
+          ],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        });
+      },
+    }).responses('gpt-6.1-sol'),
+  });
+  await sut.generate();
+  return requests[0]?.input ?? [];
+}
+
+describe('one OpenAI reasoning item stored in two assistant messages', () => {
+  it('is referenced once in the next request', async () => {
+    const input = await requestInputOf();
+
+    assert.deepStrictEqual(
+      input.filter((item) => item.id === 'rs_stored_in_two_messages'),
+      [{ type: 'item_reference', id: 'rs_stored_in_two_messages' }],
+    );
+  });
+
+  it('is sent once with store: false, carrying both summaries and the later encrypted reasoning', async () => {
+    const input = await requestInputOf({
+      openai: { store: false, include: ['reasoning.encrypted_content'] },
+    });
+
+    assert.deepStrictEqual(
+      input.filter((item) => item.type === 'reasoning'),
+      [
+        {
+          type: 'reasoning',
+          id: 'rs_stored_in_two_messages',
+          encrypted_content: 'enc-2',
+          summary: [
+            { type: 'summary_text', text: 'First.' },
+            { type: 'summary_text', text: 'Second.' },
           ],
         },
       ],
