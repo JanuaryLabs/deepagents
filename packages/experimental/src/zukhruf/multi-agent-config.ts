@@ -31,23 +31,13 @@ export interface MultiAgentHostConfig {
 }
 
 /** Temporary adapter from the host config to the team it describes (#4775). */
-export interface ResolvedMultiAgentHostConfig {
-  maxConcurrentThreadsPerSession: number;
-  rootAgentUsageHintText?: string;
-  subagentUsageHintText?: string;
-  exposure: ToolExposure;
-  team: ReturnType<typeof Team.codex>;
-}
-
-export function resolveMultiAgentHostConfig(
-  input: MultiAgentHostConfig = {},
-): ResolvedMultiAgentHostConfig {
+export function resolveMultiAgentHostConfig(input: MultiAgentHostConfig = {}) {
   const waitBounds = new WaitBounds({
     minMs: input.minWaitTimeoutMs,
     defaultMs: input.defaultWaitTimeoutMs,
     maxMs: input.maxWaitTimeoutMs,
   });
-  const team = Team.codex({
+  return Team.codex({
     usageHintText: nonEmptyText(input.usageHintText),
     waitBounds,
     maxConcurrentThreads: input.maxConcurrentThreadsPerSession,
@@ -57,13 +47,6 @@ export function resolveMultiAgentHostConfig(
       subagent: override(input.subagentUsageHintText),
     },
   });
-  return {
-    maxConcurrentThreadsPerSession: team.maxConcurrentThreads,
-    rootAgentUsageHintText: team.guidance('root'),
-    subagentUsageHintText: team.guidance('subagent'),
-    exposure: team.exposure,
-    team,
-  };
 }
 
 function toolExposure(input: MultiAgentHostConfig): ToolExposure {

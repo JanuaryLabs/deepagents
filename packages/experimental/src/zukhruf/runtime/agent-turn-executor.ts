@@ -27,13 +27,13 @@ import {
 
 import type { ZukhrufSandbox } from '../agent.ts';
 import type { AgentToolContext } from '../collaboration/agent-tool-context.ts';
+import type { Team } from '../collaboration/team.ts';
 import type { AgentControlPlane } from '../control-plane/agent-control-plane.ts';
 import type { MailboxCoordinator } from '../mailbox/coordinator.ts';
 import type {
   ConversationId,
   InterAgentCommunication,
 } from '../mailbox/types.ts';
-import type { ResolvedMultiAgentHostConfig } from '../multi-agent-config.ts';
 import type { ConsumeContext, TurnRef } from '../queue/turn-queue.ts';
 import type { AgentPluginToolContext } from './agent-runtime.ts';
 import type { ApprovalController } from './approval-controller.ts';
@@ -48,11 +48,7 @@ import type { PluginManager } from './plugin/plugin-manager.ts';
 
 type TurnPlugins = Pick<
   PluginManager,
-  | 'collaboration'
-  | 'tools'
-  | 'skillsByAgent'
-  | 'runtimeContext'
-  | 'configureTelemetry'
+  'tools' | 'skillsByAgent' | 'runtimeContext' | 'configureTelemetry'
 >;
 
 export interface AgentTurnExecutorOptions {
@@ -61,7 +57,7 @@ export interface AgentTurnExecutorOptions {
   controlPlane: AgentControlPlane;
   mailbox: MailboxCoordinator;
   approvals: ApprovalController;
-  multiAgent: ResolvedMultiAgentHostConfig;
+  team: Team;
   plugins: TurnPlugins;
   /** The sandbox of each conversation, which a turn borrows. */
   sandboxes: ConversationSandboxes;
@@ -80,7 +76,7 @@ export class AgentTurnExecutor {
   readonly #controlPlane: AgentControlPlane;
   readonly #mailbox: MailboxCoordinator;
   readonly #approvals: ApprovalController;
-  readonly #multiAgent: ResolvedMultiAgentHostConfig;
+  readonly #team: Team;
   readonly #plugins: TurnPlugins;
   readonly #sandboxes: ConversationSandboxes;
   readonly #publishConversationStatus: AgentTurnExecutorOptions['publishConversationStatus'];
@@ -91,7 +87,7 @@ export class AgentTurnExecutor {
     this.#controlPlane = options.controlPlane;
     this.#mailbox = options.mailbox;
     this.#approvals = options.approvals;
-    this.#multiAgent = options.multiAgent;
+    this.#team = options.team;
     this.#plugins = options.plugins;
     this.#sandboxes = options.sandboxes;
     this.#publishConversationStatus = options.publishConversationStatus;
@@ -128,9 +124,9 @@ export class AgentTurnExecutor {
     if (await this.#projectSkippedTerminalTurn(turn)) return;
 
     const { declaration, thread } = await this.#controlPlane.resolve(turn);
-    const usageHint = thread.path.isRoot
-      ? this.#multiAgent.rootAgentUsageHintText
-      : this.#multiAgent.subagentUsageHintText;
+    const usageHint = this.#team.guidance(
+      thread.path.isRoot ? 'root' : 'subagent',
+    );
     const engine = this.#engineFor(turn).set(
       ...declaration.instructions,
       ...(usageHint === undefined ? [] : [role(usageHint)]),
@@ -226,7 +222,7 @@ export class AgentTurnExecutor {
         },
       },
       prepareStepInput: () => this.#prepareStepInput(turn, mailboxState),
-      experimental_toolCallers: this.#plugins.collaboration.toolCallers,
+      experimental_toolCallers: this.#team.surface.toolCallers,
     };
     const modelTools = {
       ...(turn.kind === 'message'
@@ -241,17 +237,11 @@ export class AgentTurnExecutor {
           )
         : {}),
       ...declaration.tools,
-      ...this.#plugins.collaboration.tools,
+      ...this.#team.surface.tools,
       ...this.#plugins.tools,
     };
-    const collaborationToolsContext = {
-      spawn_agent: agentContext,
-      send_message: agentContext,
-      followup_task: agentContext,
-      list_agents: agentContext,
-      wait_agent: agentContext,
-      interrupt_agent: agentContext,
-      ...this.#multiAgent.exposure.callerContext(agentContext),
+    const toolsContext = {
+      ...this.#team.contextFor(agentContext),
       ...Object.fromEntries(
         Object.keys(this.#plugins.tools).map((name) => [name, pluginContext]),
       ),
@@ -295,7 +285,7 @@ export class AgentTurnExecutor {
         onStepStart: compaction?.onStepStart,
         onStepEnd: compaction?.onStepEnd,
         include: compaction?.include,
-        toolsContext: collaborationToolsContext,
+        toolsContext,
         ...(elements.length > 0
           ? { transform: [elementsStreamTransform] }
           : {}),

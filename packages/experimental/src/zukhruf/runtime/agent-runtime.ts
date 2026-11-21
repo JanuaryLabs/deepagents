@@ -366,9 +366,9 @@ class RuntimeHost implements AsyncDisposable {
     resources: AsyncDisposableStack,
   ) {
     this.#resources = resources;
-    const multiAgent = resolveMultiAgentHostConfig(options.multiAgent);
+    const team = resolveMultiAgentHostConfig(options.multiAgent);
     const plugins = resources.use(
-      new PluginManager(root, options.bindings, multiAgent),
+      new PluginManager(root, options.bindings, team),
     );
     const declarations = plugins.declarations;
     const { storage } = options;
@@ -387,7 +387,7 @@ class RuntimeHost implements AsyncDisposable {
     const residency = new AgentResidency({
       storage,
       directory,
-      maxConcurrentThreadsPerSession: multiAgent.maxConcurrentThreadsPerSession,
+      maxConcurrentThreadsPerSession: team.maxConcurrentThreads,
       publish: (conversation) => conversationStatus.publish(conversation),
     });
     const mailbox = new MailboxCoordinator({
@@ -455,7 +455,7 @@ class RuntimeHost implements AsyncDisposable {
       controlPlane,
       mailbox,
       approvals,
-      multiAgent,
+      team,
       plugins,
       sandboxes,
       publishConversationStatus: (conversation) =>

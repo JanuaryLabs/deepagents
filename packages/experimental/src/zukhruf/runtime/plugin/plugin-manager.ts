@@ -1,10 +1,9 @@
 import type { Telemetry } from 'ai';
 
 import type { AgentDeclaration } from '../../agent.ts';
-import { createCollaborationSurface } from '../../collaboration/collaboration-tools.ts';
+import type { Team } from '../../collaboration/team.ts';
 import type { AgentDeclarationRegistry } from '../../control-plane/agent-declaration-registry.ts';
 import type { ConversationId } from '../../mailbox/types.ts';
-import type { ResolvedMultiAgentHostConfig } from '../../multi-agent-config.ts';
 import type { ZukhrufToolSet } from '../../tool.ts';
 import type {
   AgentPluginBinding,
@@ -45,7 +44,6 @@ function initializedFrom<Running extends object>(
 
 /** Owns plugin instances, their composed contributions, and initialization resources. */
 export class PluginManager implements AsyncDisposable {
-  readonly collaboration: ReturnType<typeof createCollaborationSurface>;
   readonly declarations: AgentDeclarationRegistry;
   readonly agentOwners: ReadonlyMap<string, string>;
   readonly tools: ZukhrufToolSet;
@@ -60,7 +58,7 @@ export class PluginManager implements AsyncDisposable {
   constructor(
     root: AgentDeclaration,
     bindings: readonly AgentPluginBinding[] | undefined,
-    multiAgent: ResolvedMultiAgentHostConfig,
+    team: Team,
   ) {
     let configuredRoot = root;
     const pluginBindings = new PluginBindings(root.plugins, bindings);
@@ -75,10 +73,7 @@ export class PluginManager implements AsyncDisposable {
     }
     const pluginSkills = new PluginSkillComposition();
     const pluginContext = new PluginContextComposition();
-    const collaboration = createCollaborationSurface(multiAgent);
-    const toolComposition = new PluginToolComposition(
-      collaboration.reservedToolNames,
-    );
+    const toolComposition = new PluginToolComposition(team.reservedToolNames);
     for (const { definition, instance } of plugins) {
       if (instance.tools) {
         toolComposition.add(definition.name, instance.tools);
@@ -101,7 +96,6 @@ export class PluginManager implements AsyncDisposable {
     const pluginSkillsByAgent = pluginSkills.compose(declarations.values());
     const pluginTools = toolComposition.compose(declarations.values());
     this.#plugins = plugins;
-    this.collaboration = collaboration;
     this.declarations = declarations;
     this.agentOwners = pluginAgents.owners;
     this.tools = pluginTools;

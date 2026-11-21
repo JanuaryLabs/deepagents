@@ -40,6 +40,11 @@ function concurrencySlotsText(maxConcurrency: number): string {
   return `There are ${maxConcurrency} available concurrency slots, meaning that up to ${maxConcurrency} agents can be active at once, including you.`;
 }
 
+/** The tools context of a team's tools, each acting as one agent. */
+export type TeamToolsContext<TOOLS extends ToolSet> = {
+  [NAME in keyof TOOLS]: AgentToolContext;
+} & { code_mode?: AgentToolContext };
+
 export interface TeamOptions {
   /**
    * Codex `max_concurrent_threads_per_session`: how many agents of one tree
@@ -61,6 +66,8 @@ export class Team<
 > {
   readonly maxConcurrentThreads: number;
   readonly exposure: ToolExposure;
+  /** What a turn's model request carries for the team's tools. */
+  readonly surface: ToolSurface<TOOLS>;
   readonly #members: Capability & { readonly tools: TOOLS };
   readonly #options: TeamOptions;
 
@@ -82,6 +89,7 @@ export class Team<
     this.exposure = options.exposure ?? new DirectTools();
     this.#members = spawning;
     this.#options = options;
+    this.surface = this.exposure.surface(this.tools);
   }
 
   /** Every capability, in Codex order. */
@@ -131,23 +139,19 @@ export class Team<
     return tools;
   }
 
-  get surface(): ToolSurface<TOOLS> {
-    return this.exposure.surface(this.tools);
-  }
-
   /** Names a plugin tool cannot take. */
   get reservedToolNames(): readonly string[] {
     return this.surface.reservedToolNames;
   }
 
   /** The tools context of every tool that acts as `agent`. */
-  contextFor(agent: AgentToolContext): Record<string, AgentToolContext> {
-    return {
-      ...Object.fromEntries(
-        Object.keys(this.#members.tools).map((name) => [name, agent]),
-      ),
-      ...this.exposure.callerContext(agent),
-    };
+  contextFor(agent: AgentToolContext): TeamToolsContext<TOOLS> {
+    const context: Record<string, AgentToolContext> = {};
+    for (const name of Object.keys(this.#members.tools)) context[name] = agent;
+    if (!coversEveryTool(this.#members.tools, context)) {
+      throw new Error('AgentRuntime: a collaboration tool has no context');
+    }
+    return { ...context, ...this.exposure.callerContext(agent) };
   }
 
   /** The role's collaboration guidance, or `undefined` for none. */
@@ -215,6 +219,14 @@ class Joined<
       outro: joined([first.outro, second.outro], '\n\n'),
     };
   }
+}
+
+/** Whether `context` gives every tool of `tools` a context. */
+function coversEveryTool<TOOLS extends ToolSet>(
+  tools: TOOLS,
+  context: Record<string, AgentToolContext>,
+): context is { [NAME in keyof TOOLS]: AgentToolContext } {
+  return Object.keys(tools).every((name) => Object.hasOwn(context, name));
 }
 
 function joined(
