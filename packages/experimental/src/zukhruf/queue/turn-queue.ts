@@ -70,8 +70,6 @@ export interface ConsumeContext {
 export interface ConsumeOptions {
   /** Max turns processed concurrently by this consumer (across chats). */
   concurrency?: number;
-  /** Wait for active handlers and settlement on disposal; otherwise only stop new claims. */
-  waitForActive?: boolean;
   /**
    * Fires for a turn whose handler crashed or whose worker died mid-turn.
    * After it resolves, the turn's chat is unblocked and its next queued
@@ -103,6 +101,8 @@ export type TurnActivity = 'idle' | 'queued' | 'running';
  * - After a non-parked job releases its FIFO ownership, `consume` invokes the
  *   optional `onSettled` hook before considering that delivery complete.
  * - Turns from different chats may run concurrently.
+ * - Disposing a consumer stops new claims and resolves only after every
+ *   handler it is running has exited and settled.
  * - `getTurnActivity` distinguishes queued from active scheduler work for
  *   status inspection; adapters must not silently fall back to stale history.
  * - `getCurrentTurn` returns the active turn, or otherwise the oldest eligible

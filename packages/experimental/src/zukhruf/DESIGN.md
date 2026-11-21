@@ -245,7 +245,8 @@ abstract class TurnQueue {
 }
 ```
 
-Contract: per chat at most ONE active handler, strict FIFO per chat, cross-chat concurrency; a
+Contract: per chat at most ONE active handler, strict FIFO per chat, cross-chat concurrency;
+disposing a consumer stops new claims and waits for its running handlers to exit; a
 crashed handler/worker surfaces once through `onOrphaned` (no retry), then the chat unblocks.
 User submissions, regeneration, client tool output, and approval responses all arrive as AI SDK
 `UIMessage` requests. `recovery` and `mailbox` are internal work, not alternate client protocols.

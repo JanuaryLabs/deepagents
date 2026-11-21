@@ -432,11 +432,11 @@ export class PgBossTurnQueue extends TurnQueue {
         disposal.abort();
         await this.#boss.offWork(this.#queue, {
           id: turnWorkerId,
-          wait: options.waitForActive,
+          wait: true,
         });
         await this.#boss.offWork(this.deadLetterQueue, {
           id: deadWorkerId,
-          wait: options.waitForActive,
+          wait: true,
         });
       },
     };

@@ -647,35 +647,41 @@ for (const contract of turnQueueContracts) {
       assert.deepStrictEqual(settled, [first.streamId, second.streamId]);
     });
 
-    test('disposal returns during active work and stops new claims', async (t) => {
+    test('disposal stops new claims and waits for the active handler to exit', async (t) => {
       await using h = await contract.makeQueue();
       const active = ref('dispose-active', 1);
       const queued = ref('dispose-queued', 1);
       const activeStarted = Promise.withResolvers<void>();
       const releaseActive = Promise.withResolvers<void>();
       const seen: string[] = [];
-      let consumer: AsyncDisposable | undefined;
       let disposing: Promise<void> | undefined;
       let replacement: AsyncDisposable | undefined;
 
       try {
         await h.queue.push(active);
-        consumer = await h.queue.consume(async (turn) => {
+        const consumer = await h.queue.consume(async (turn) => {
           seen.push(turn.streamId);
           activeStarted.resolve();
           await releaseActive.promise;
         }, noOrphans);
-        await activeStarted.promise;
+        await untilAborted(activeStarted.promise, t.signal);
         await h.queue.push(queued);
 
-        disposing = Promise.resolve(consumer[Symbol.asyncDispose]());
-        await untilAborted(disposing, t.signal);
-        consumer = undefined;
-        await sleep(500);
+        const disposal = Promise.resolve(consumer[Symbol.asyncDispose]());
+        disposing = disposal;
+        const whileActive = await Promise.race([
+          disposal.then(() => 'disposed' as const),
+          sleep(1000, 'active' as const),
+        ]);
+        assert.equal(
+          whileActive,
+          'active',
+          'disposal waits while the handler runs',
+        );
         assert.deepStrictEqual(
           seen,
           [active.streamId],
-          'the stopped consumer does not claim queued work',
+          'the stopping consumer does not claim queued work',
         );
         assert.equal(
           await h.queue.getTurnActivity(active),
@@ -684,6 +690,7 @@ for (const contract of turnQueueContracts) {
         );
 
         releaseActive.resolve();
+        await untilAborted(disposal, t.signal);
 
         replacement = await h.queue.consume(async (turn) => {
           seen.push(turn.streamId);
@@ -697,7 +704,6 @@ for (const contract of turnQueueContracts) {
       } finally {
         releaseActive.resolve();
         await disposing;
-        await consumer?.[Symbol.asyncDispose]();
         await replacement?.[Symbol.asyncDispose]();
       }
     });
@@ -1446,10 +1452,11 @@ test('a consumer disposed while its claim is in flight hands the claimed turn to
       disposedRuns++;
     }, noOrphans);
     await claimInFlight.promise;
-    await disposed[Symbol.asyncDispose]();
+    const disposing = Promise.resolve(disposed[Symbol.asyncDispose]());
     await queue.push(ref('claim-after-dispose', 1));
     releaseClaim.resolve();
     await claimDone.promise;
+    await untilAborted(disposing, t.signal);
 
     next = await queue.consume(async () => {
       nextRuns++;

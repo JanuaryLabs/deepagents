@@ -636,7 +636,6 @@ class RuntimeHost implements AsyncDisposable {
     workers.use(
       await this.#queue.consume(this.#executor.execute.bind(this.#executor), {
         concurrency: options?.concurrency,
-        waitForActive: true,
         onOrphaned: this.#onOrphaned.bind(this),
         onSettled: async ({ chatId, userId }) => {
           // Status first: a plugin reconciliation failure must not hide
