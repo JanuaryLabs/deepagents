@@ -35,8 +35,9 @@ export function hasUnansweredApprovals(message: UIMessage): boolean {
 
 /**
  * The head assistant message holds a tool call whose output must come from
- * outside the runtime. Every server-side tool executes before its turn
- * completes, so `input-available` at a completed head is a client tool.
+ * outside the runtime. A turn writes its assistant message at each step's
+ * end, after the step's server-side tools executed, so `input-available` at
+ * a head whose turn is not running is a client tool.
  */
 export function hasPendingClientInput(message: UIMessage): boolean {
   return message.parts.some(
@@ -74,12 +75,6 @@ export class ApprovalController {
 
   isPaused(message: UIMessage | undefined): boolean {
     return isPausedHead(message);
-  }
-
-  async isConversationPaused(conversation: ConversationId): Promise<boolean> {
-    return this.isPaused(
-      (await this.#engineFor(conversation).getMessages()).at(-1),
-    );
   }
 
   async settleDeniedApprovals(

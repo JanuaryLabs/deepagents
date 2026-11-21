@@ -554,12 +554,12 @@ class RuntimeHost implements AsyncDisposable {
     return this.#conversationStatus.subscribe(signal);
   }
 
+  /** Available unless its status is `active`: a failed latest turn is no reason to hold work back. */
   async #isConversationAvailable(
     conversation: ConversationId,
   ): Promise<boolean> {
     return (
-      (await this.#queue.getTurnActivity(conversation)) === 'idle' &&
-      !(await this.#approvals.isConversationPaused(conversation))
+      (await this.#conversationStatus.read(conversation)).type !== 'active'
     );
   }
 

@@ -1058,8 +1058,11 @@ work({concurrency?}) → AsyncDisposable }`.
   declarations (no top-level await; importing spins no container or agent turn).
 - `runtime/conversation-status/projector.ts` — Codex `thread/status/changed` for hosts. `ConversationStatus`
   is `idle | active{activeFlags: waitingOnApproval | waitingOnUserInput} | systemError`, derived
-  from durable state (queue activity, unsettled tool parts at a completed chain head, the latest
-  stream's status), so `observe(conv).conversationStatus()` is correct from any process.
+  from durable state (queue activity, unsettled tool parts at the chain head unless the head's own
+  stream is still queued or running — so a cancelled approval continuation waits again — and the
+  latest stream's status; active beats systemError beats idle), so
+  `observe(conv).conversationStatus()` is correct from any process. Availability for host enqueues
+  is the same projection: a conversation is available unless it is `active`.
   `subscribeConversationStatus(signal)` resolves only after its cross-process listener is live, then
   yields the changes this process observes: every committed admission
   (`AgentResidency.admit` publishes each conversation it pushed to, so host asks, spawns, mailbox

@@ -44,6 +44,7 @@ import {
   type AgentHost,
   type AgentPluginBinding,
   type AgentPluginDefinition,
+  type AgentPluginHost,
   AgentRuntime,
   type AgentStack,
   AgentThread,
@@ -3434,6 +3435,181 @@ describe('zukhruf runtime — conversation status', () => {
       abort.abort();
       await done;
     }
+  });
+
+  it('reports waitingOnApproval again after its queued continuation is cancelled', async (t) => {
+    const { track, agent, model } = approvalSetup();
+    await using h = await harness(model, { declaration: agent });
+    const conversation = {
+      chatId: 'status-cancelled-continuation',
+      userId: 'u1',
+    };
+    const abort = new AbortController();
+    const { seen, done } = recordStatuses(
+      h.runtime,
+      conversation,
+      abort.signal,
+    );
+    try {
+      const pausing = await h.runtime.work();
+      const paused = await h.runtime.enqueue(conversation, turn('send it'));
+      assert.equal(await collectText(paused.stream), 'working ');
+      await pausing[Symbol.asyncDispose]();
+      const { part } = await pausedToolCall(h.runtime, conversation);
+
+      await submitApprovalResponses(h.runtime, conversation, {
+        toolCallId: part.toolCallId,
+        approved: true,
+      });
+      assert.deepStrictEqual(
+        await h.runtime.observe(conversation).conversationStatus(),
+        active(),
+        'the queued continuation carries the answer',
+      );
+      await h.runtime.observe(conversation).cancel();
+      assert.equal(await h.streamStore.getStreamStatus(paused.id), 'cancelled');
+
+      assert.deepStrictEqual(
+        await h.runtime.observe(conversation).conversationStatus(),
+        active('waitingOnApproval'),
+      );
+      assert.deepStrictEqual(
+        (await h.runtime.listHistory(conversation.userId)).find(
+          ({ chatId }) => chatId === conversation.chatId,
+        )?.status,
+        active('waitingOnApproval'),
+      );
+      await waitFor(
+        () => assert.deepStrictEqual(seen.at(-1), active('waitingOnApproval')),
+        { interval: 25, signal: t.signal },
+      );
+      assert.deepStrictEqual(seen, [
+        active(),
+        active('waitingOnApproval'),
+        active(),
+        active('waitingOnApproval'),
+      ]);
+
+      await using _worker = await h.runtime.work();
+      void _worker;
+      await submitApprovalResponses(h.runtime, conversation, {
+        toolCallId: part.toolCallId,
+        approved: true,
+      });
+      await waitForText(h.runtime, conversation, 'done:send it', t.signal);
+      await waitFor(() => assert.deepStrictEqual(seen.at(-1), idle), {
+        interval: 25,
+        signal: t.signal,
+      });
+      assert.equal(track.toolRuns, 1);
+    } finally {
+      abort.abort();
+      await done;
+    }
+  });
+
+  function capturePluginHost() {
+    const hosts: AgentPluginHost[] = [];
+    const definition: AgentPluginDefinition = {
+      name: 'host-capture',
+      create: () => ({
+        initialize: async (host) => {
+          hosts.push(host);
+        },
+      }),
+    };
+    return {
+      definition,
+      host: () => {
+        const [host] = hosts;
+        assert.ok(host, 'the plugin was initialized');
+        return host;
+      },
+    };
+  }
+
+  it('plugins see a conversation as unavailable while an approval is unanswered, including after a cancelled continuation', async (t) => {
+    const { agent, model } = approvalSetup();
+    const capture = capturePluginHost();
+    await using h = await harness(model, {
+      declaration: agent,
+      composition: () => ({ definitions: [capture.definition] }),
+    });
+    const host = capture.host();
+    const conversation = { chatId: 'availability-approval', userId: 'u1' };
+    const observed = async () => ({
+      available: await host.isConversationAvailable(conversation),
+      status: await h.runtime.observe(conversation).conversationStatus(),
+    });
+
+    const pausing = await h.runtime.work();
+    const paused = await h.runtime.enqueue(conversation, turn('send it'));
+    await collectText(paused.stream);
+    await pausing[Symbol.asyncDispose]();
+    assert.deepStrictEqual(await observed(), {
+      available: false,
+      status: active('waitingOnApproval'),
+    });
+
+    const { part } = await pausedToolCall(h.runtime, conversation);
+    await submitApprovalResponses(h.runtime, conversation, {
+      toolCallId: part.toolCallId,
+      approved: true,
+    });
+    assert.deepStrictEqual(await observed(), {
+      available: false,
+      status: active(),
+    });
+
+    await h.runtime.observe(conversation).cancel();
+    assert.deepStrictEqual(await observed(), {
+      available: false,
+      status: active('waitingOnApproval'),
+    });
+
+    await using _worker = await h.runtime.work();
+    void _worker;
+    await submitApprovalResponses(h.runtime, conversation, {
+      toolCallId: part.toolCallId,
+      approved: true,
+    });
+    await waitForText(h.runtime, conversation, 'done:send it', t.signal);
+    await waitFor(
+      async () =>
+        assert.deepStrictEqual(await observed(), {
+          available: true,
+          status: idle,
+        }),
+      { interval: 25, signal: t.signal },
+    );
+  });
+
+  it('plugins see a conversation whose latest turn failed as available', async (t) => {
+    const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
+    const capture = capturePluginHost();
+    await using h = await harness(scriptedModel(track), {
+      composition: () => ({ definitions: [capture.definition] }),
+    });
+    await using _worker = await h.runtime.work();
+    void _worker;
+    const conversation = { chatId: 'availability-failed', userId: 'u1' };
+
+    const crashed = await h.runtime.enqueue(conversation, turn('boom'));
+    await waitForStatus(h.streamStore, crashed.id, ['failed'], t.signal);
+
+    await waitFor(
+      async () =>
+        assert.deepStrictEqual(
+          {
+            available: await capture
+              .host()
+              .isConversationAvailable(conversation),
+            status: await h.runtime.observe(conversation).conversationStatus(),
+          },
+          { available: true, status: systemError },
+        ),
+      { interval: 25, signal: t.signal },
+    );
   });
 
   it('returns to idle after the running turn is cancelled', async (t) => {

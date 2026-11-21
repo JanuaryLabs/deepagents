@@ -132,10 +132,12 @@ export class ConversationStatusProjector {
     const stream = streamId
       ? await this.#streams.store.getStream(streamId)
       : undefined;
+    // A queued or running continuation carries the host's answer; once it
+    // ends, however it ended, the head's open tool calls wait again.
+    const continuing =
+      stream?.status === 'queued' || stream?.status === 'running';
     const activeFlags =
-      stream?.status === 'completed' && head?.role === 'assistant'
-        ? activeFlagsOf(head)
-        : [];
+      !continuing && head?.role === 'assistant' ? activeFlagsOf(head) : [];
     if (activity === 'queued' || activeFlags.length > 0) {
       return { type: 'active', activeFlags };
     }
