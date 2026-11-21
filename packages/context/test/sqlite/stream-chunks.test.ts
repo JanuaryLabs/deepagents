@@ -1,4 +1,4 @@
-import { Latch, untilAborted } from '@zukhruf/async';
+import { Backoff, Latch, untilAborted } from '@zukhruf/async';
 import { open } from '@zukhruf/sqlite-open';
 import { waitFor } from '@zukhruf/testing/async';
 import { Sqlite } from '@zukhruf/testing/sqlite';
@@ -20,9 +20,6 @@ import {
   type StreamStatus,
   StreamStore,
   type StreamWatchTelemetryEvent,
-  type WatchPollingConfig,
-  createAdaptivePollingState,
-  nextAdaptivePollingDelay,
 } from '@deepagents/context';
 
 const sqlite = new Sqlite();
@@ -105,13 +102,12 @@ class TestChangeSource implements StreamChangeSource {
   }
 }
 
-const FAST_WATCH_POLLING: WatchPollingConfig = {
-  minMs: 20,
-  maxMs: 20,
+const FAST_WATCH_BACKOFF = new Backoff({
+  initial: 20,
   multiplier: 2,
-  jitterRatio: 0,
-  statusCheckEvery: 1,
-};
+  max: 20,
+  jitter: { kind: 'none' },
+});
 
 class FailFirstThenPollingChangeSource implements StreamChangeSource {
   attempts = 0;
@@ -121,7 +117,8 @@ class FailFirstThenPollingChangeSource implements StreamChangeSource {
   constructor(store: StreamStore) {
     this.#delegate = new PollingChangeSource({
       reads: store,
-      config: FAST_WATCH_POLLING,
+      backoff: FAST_WATCH_BACKOFF,
+      statusCheckEvery: 1,
     });
   }
 
@@ -185,7 +182,8 @@ class FailNextStreamReadStore extends SqliteStreamStore {
 }
 
 interface ManagerHelperOptions {
-  config?: Partial<WatchPollingConfig>;
+  backoff?: Backoff;
+  statusCheckEvery?: number;
   chunkPageSize?: number;
   onPoll?: (event: PollingTelemetryEvent) => void;
   onWatchEvent?: (event: StreamWatchTelemetryEvent) => void;
@@ -215,7 +213,8 @@ function makeManager(
 ): StreamManager {
   const changeSource = new PollingChangeSource({
     reads: store,
-    config: options?.config ?? FAST_WATCH_POLLING,
+    backoff: options?.backoff ?? FAST_WATCH_BACKOFF,
+    statusCheckEvery: options?.statusCheckEvery ?? 1,
     onPoll: options?.onPoll,
   });
   return new StreamManager({
@@ -451,22 +450,6 @@ describe('Stream Chunks', () => {
       );
 
       assert.strictEqual(await store.getStreamStatus(streamId), 'cancelled');
-    });
-
-    it('should keep adaptive jitter delay within configured bounds', (t) => {
-      t.mock.method(Math, 'random', () => 1);
-      const state = createAdaptivePollingState({
-        minMs: 100,
-        maxMs: 200,
-        multiplier: 2,
-        jitterRatio: 0.5,
-      });
-      nextAdaptivePollingDelay(state);
-      const delay = nextAdaptivePollingDelay(state);
-      assert.ok(
-        delay <= 200,
-        `delay should stay within max bound, got ${delay}`,
-      );
     });
 
     it('should expose explicit close() for sqlite stream store lifecycle', () => {
@@ -1167,13 +1150,13 @@ describe('Stream Chunks', () => {
             throw new TypeError('reads exploded');
           },
         },
-        config: {
-          minMs: 1,
-          maxMs: 1,
+        backoff: new Backoff({
+          initial: 1,
           multiplier: 1,
-          jitterRatio: 0,
-          statusCheckEvery: 1,
-        },
+          max: 1,
+          jitter: { kind: 'none' },
+        }),
+        statusCheckEvery: 1,
       });
       const ac = new AbortController();
       try {
@@ -1189,6 +1172,50 @@ describe('Stream Chunks', () => {
         });
       } finally {
         ac.abort();
+      }
+    });
+
+    it('should wait longer before each poll up to the max, and start again from the first wait when the stream starts running', async (t) => {
+      const statuses: StreamStatus[] = [
+        'queued',
+        'queued',
+        'queued',
+        'running',
+        'running',
+        'completed',
+      ];
+      const idleDelays: number[] = [];
+      const source = new PollingChangeSource({
+        reads: {
+          async getStreamStatus() {
+            return statuses.shift();
+          },
+        },
+        backoff: new Backoff({
+          initial: 1,
+          multiplier: 2,
+          max: 4,
+          jitter: { kind: 'none' },
+        }),
+        statusCheckEvery: 1,
+        onPoll: (event) => {
+          if (event.type === 'idle') idleDelays.push(event.delayMs);
+        },
+      });
+
+      await Array.fromAsync(source.subscribe('s1', t.signal));
+
+      assert.deepStrictEqual(idleDelays, [1, 2, 4, 1, 2]);
+    });
+
+    it('should throw a RangeError when statusCheckEvery is not a positive integer', () => {
+      const reads = { getStreamStatus: async () => 'running' as const };
+      for (const statusCheckEvery of [0, -1, 1.5, Number.NaN]) {
+        assert.throws(
+          () => new PollingChangeSource({ reads, statusCheckEvery }),
+          RangeError,
+          `statusCheckEvery=${statusCheckEvery}`,
+        );
       }
     });
   });
@@ -1510,13 +1537,13 @@ describe('Stream Chunks', () => {
       const store = new SqliteStreamStore(database.connection);
       const pollEvents: PollingTelemetryEvent[] = [];
       const streams = makeManager(store, {
-        config: {
-          minMs: 10,
-          maxMs: 40,
+        backoff: new Backoff({
+          initial: 10,
           multiplier: 2,
-          jitterRatio: 0,
-          statusCheckEvery: 1,
-        },
+          max: 40,
+          jitter: { kind: 'none' },
+        }),
+        statusCheckEvery: 1,
         onPoll: (event) => {
           pollEvents.push(event);
         },
@@ -1556,7 +1583,7 @@ describe('Stream Chunks', () => {
       const max = Math.max(...idleDelays);
       assert.ok(
         max >= 20,
-        `expected backoff to ramp past minMs; observed delays: ${idleDelays.join(',')}`,
+        `expected backoff to ramp past the initial wait; observed delays: ${idleDelays.join(',')}`,
       );
     });
 
@@ -1565,13 +1592,13 @@ describe('Stream Chunks', () => {
       const store = new SqliteStreamStore(database.connection);
       const pollEvents: PollingTelemetryEvent[] = [];
       const streams = makeManager(store, {
-        config: {
-          minMs: 10,
-          maxMs: 40,
+        backoff: new Backoff({
+          initial: 10,
           multiplier: 2,
-          jitterRatio: 0,
-          statusCheckEvery: 1,
-        },
+          max: 40,
+          jitter: { kind: 'none' },
+        }),
+        statusCheckEvery: 1,
         onPoll: (event) => {
           pollEvents.push(event);
         },
@@ -1623,7 +1650,7 @@ describe('Stream Chunks', () => {
       assert.ok(nextIdle && nextIdle.type === 'idle');
       assert.ok(
         nextIdle.delayMs <= 20,
-        `expected reset after running transition (delay ≤ minMs*multiplier=20); got ${nextIdle.delayMs}`,
+        `expected reset after running transition (delay ≤ initial*multiplier=20); got ${nextIdle.delayMs}`,
       );
     });
 
@@ -1632,13 +1659,13 @@ describe('Stream Chunks', () => {
       const store = new SqliteStreamStore(database.connection);
       const watchEvents: StreamWatchTelemetryEvent[] = [];
       const streams = makeManager(store, {
-        config: {
-          minMs: 5,
-          maxMs: 5,
+        backoff: new Backoff({
+          initial: 5,
           multiplier: 2,
-          jitterRatio: 0,
-          statusCheckEvery: 1,
-        },
+          max: 5,
+          jitter: { kind: 'none' },
+        }),
+        statusCheckEvery: 1,
         chunkPageSize: 32,
         onWatchEvent: (event) => {
           watchEvents.push(event);
@@ -1758,13 +1785,13 @@ describe('Stream Chunks', () => {
       const store = new SqliteStreamStore(database.connection);
       const watcherSleeping = Promise.withResolvers<void>();
       const streams = makeManager(store, {
-        config: {
-          minMs: 1_000,
-          maxMs: 1_000,
+        backoff: new Backoff({
+          initial: 1_000,
           multiplier: 2,
-          jitterRatio: 0,
-          statusCheckEvery: 1,
-        },
+          max: 1_000,
+          jitter: { kind: 'none' },
+        }),
+        statusCheckEvery: 1,
         onPoll: (event) => {
           if (event.type === 'idle') watcherSleeping.resolve();
         },
@@ -2315,13 +2342,13 @@ describe('Stream Chunks', () => {
       await using database = await sqlite.database();
       const store = new SqliteStreamStore(database.connection);
       const streams = makeManager(store, {
-        config: {
-          minMs: 600_000,
-          maxMs: 600_000,
+        backoff: new Backoff({
+          initial: 600_000,
           multiplier: 2,
-          jitterRatio: 0,
-          statusCheckEvery: 1,
-        },
+          max: 600_000,
+          jitter: { kind: 'none' },
+        }),
+        statusCheckEvery: 1,
       });
       const streamId = crypto.randomUUID();
       await streams.register(streamId);

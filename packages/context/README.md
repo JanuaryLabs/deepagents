@@ -586,6 +586,8 @@ The package includes durable stream persistence utilities:
 - `persistedWriter` (low-level writer wrapper)
 
 ```typescript
+import { Backoff } from '@zukhruf/async';
+
 import {
   PollingChangeSource,
   SqliteStreamStore,
@@ -595,13 +597,13 @@ import {
 const store = new SqliteStreamStore('./streams.db');
 const changeSource = new PollingChangeSource({
   reads: store,
-  config: {
-    minMs: 25,
-    maxMs: 500,
+  backoff: new Backoff({
+    initial: 25,
     multiplier: 2,
-    jitterRatio: 0.15,
-    statusCheckEvery: 3,
-  },
+    max: 500,
+    jitter: { kind: 'ratio', ratio: 0.15 },
+  }),
+  statusCheckEvery: 3,
 });
 const manager = new StreamManager({
   store,

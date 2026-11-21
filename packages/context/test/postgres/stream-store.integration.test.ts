@@ -1,4 +1,4 @@
-import { untilAborted } from '@zukhruf/async';
+import { Backoff, untilAborted } from '@zukhruf/async';
 import { retryUntilReady, waitFor } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { type UIMessageChunk, simulateReadableStream } from 'ai';
@@ -422,13 +422,13 @@ describe('PostgreSQL StreamStore Integration', () => {
         store,
         changeSource: new PollingChangeSource({
           reads: store,
-          config: {
-            minMs: 5,
-            maxMs: 5,
+          backoff: new Backoff({
+            initial: 5,
             multiplier: 1,
-            jitterRatio: 0,
-            statusCheckEvery: 1,
-          },
+            max: 5,
+            jitter: { kind: 'none' },
+          }),
+          statusCheckEvery: 1,
         }),
       });
 
@@ -448,13 +448,13 @@ describe('PostgreSQL StreamStore Integration', () => {
         store,
         changeSource: new PollingChangeSource({
           reads: store,
-          config: {
-            minMs: 5,
-            maxMs: 5,
+          backoff: new Backoff({
+            initial: 5,
             multiplier: 1,
-            jitterRatio: 0,
-            statusCheckEvery: 1,
-          },
+            max: 5,
+            jitter: { kind: 'none' },
+          }),
+          statusCheckEvery: 1,
         }),
       });
       await manager.register(streamId);
@@ -534,13 +534,13 @@ describe('PostgreSQL StreamStore Integration', () => {
         store,
         changeSource: new PollingChangeSource({
           reads: store,
-          config: {
-            minMs: 5,
-            maxMs: 5,
+          backoff: new Backoff({
+            initial: 5,
             multiplier: 1,
-            jitterRatio: 0,
-            statusCheckEvery: 1,
-          },
+            max: 5,
+            jitter: { kind: 'none' },
+          }),
+          statusCheckEvery: 1,
         }),
       });
       await manager.register(streamId);

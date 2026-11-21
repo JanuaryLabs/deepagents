@@ -1,14 +1,7 @@
+import { Backoff } from '@zukhruf/async';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import type { StreamChange, StreamChangeSource } from './change-source.ts';
-import {
-  DEFAULT_WATCH_POLLING,
-  type WatchPollingConfig,
-  createAdaptivePollingState,
-  nextAdaptivePollingDelay,
-  normalizeWatchPolling,
-  resetAdaptivePolling,
-} from './polling-policy.ts';
 import type { StreamStatus } from './stream-store.ts';
 
 export type PollingTelemetryEvent =
@@ -30,18 +23,35 @@ export interface PollingChangeSourceReads {
 
 export interface PollingChangeSourceOptions {
   reads: PollingChangeSourceReads;
-  config?: Partial<WatchPollingConfig>;
+  /** The wait before each poll. The default is 25 ms, doubled up to 500 ms, ±15 %. */
+  backoff?: Backoff;
+  /** Reads the stream status every this many polls. A positive integer; the default is 3. */
+  statusCheckEvery?: number;
   onPoll?: (event: PollingTelemetryEvent) => void;
 }
 
 export class PollingChangeSource implements StreamChangeSource {
   #reads: PollingChangeSourceReads;
-  #config: WatchPollingConfig;
+  #backoff: Backoff;
+  #statusCheckEvery: number;
   #onPoll?: (event: PollingTelemetryEvent) => void;
 
   constructor(options: PollingChangeSourceOptions) {
+    const statusCheckEvery = options.statusCheckEvery ?? 3;
+    if (!(Number.isInteger(statusCheckEvery) && statusCheckEvery >= 1))
+      throw new RangeError(
+        `statusCheckEvery must be a positive integer, not ${statusCheckEvery}`,
+      );
     this.#reads = options.reads;
-    this.#config = normalizeWatchPolling(options.config, DEFAULT_WATCH_POLLING);
+    this.#backoff =
+      options.backoff ??
+      new Backoff({
+        initial: 25,
+        multiplier: 2,
+        max: 500,
+        jitter: { kind: 'ratio', ratio: 0.15 },
+      });
+    this.#statusCheckEvery = statusCheckEvery;
     this.#onPoll = options.onPoll;
   }
 
@@ -58,19 +68,18 @@ export class PollingChangeSource implements StreamChangeSource {
 
     if (isTerminal(initialStatus)) return;
 
-    const delayState = createAdaptivePollingState(this.#config);
+    let retries = 0;
     let pollsSinceStatus = 0;
     let lastStatus: StreamStatus = initialStatus;
 
     while (!signal.aborted) {
-      const delayMs = nextAdaptivePollingDelay(delayState);
+      const delayMs = this.#backoff.duration(retries++);
       this.#emit({ type: 'idle', streamId, delayMs });
 
       if (!(await waitForDelay(delayMs, signal))) return;
 
       pollsSinceStatus += 1;
-      const shouldCheckStatus =
-        pollsSinceStatus >= this.#config.statusCheckEvery;
+      const shouldCheckStatus = pollsSinceStatus >= this.#statusCheckEvery;
 
       if (!shouldCheckStatus) {
         yield { kind: 'chunks' };
@@ -92,7 +101,7 @@ export class PollingChangeSource implements StreamChangeSource {
       }
 
       if (status === 'running' && lastStatus !== 'running') {
-        resetAdaptivePolling(delayState);
+        retries = 0;
       }
       lastStatus = status;
 

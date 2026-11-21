@@ -124,6 +124,8 @@ store.close();
 Orchestrates the full stream lifecycle.
 
 ```typescript
+import { Backoff } from '@zukhruf/async';
+
 import {
   PollingChangeSource,
   SqliteStreamStore,
@@ -133,13 +135,13 @@ import {
 const store = new SqliteStreamStore('./streams.db');
 const changeSource = new PollingChangeSource({
   reads: store,
-  config: {
-    minMs: 25,
-    maxMs: 500,
+  backoff: new Backoff({
+    initial: 25,
     multiplier: 2,
-    jitterRatio: 0.15,
-    statusCheckEvery: 3,
-  },
+    max: 500,
+    jitter: { kind: 'ratio', ratio: 0.15 },
+  }),
+  statusCheckEvery: 3,
 });
 
 const manager = new StreamManager({
@@ -272,19 +274,21 @@ Event types:
 Use `PollingChangeSource.onPoll` to tune poll cadence:
 
 ```typescript
+import { Backoff } from '@zukhruf/async';
+
 import { PollingChangeSource, SqliteStreamStore } from '@deepagents/context';
 
 const store = new SqliteStreamStore('./streams.db');
 
 const changeSource = new PollingChangeSource({
   reads: store,
-  config: {
-    minMs: 25,
-    maxMs: 500,
+  backoff: new Backoff({
+    initial: 25,
     multiplier: 2,
-    jitterRatio: 0.15,
-    statusCheckEvery: 3,
-  },
+    max: 500,
+    jitter: { kind: 'ratio', ratio: 0.15 },
+  }),
+  statusCheckEvery: 3,
   onPoll: (event) => {
     if (event.type === 'idle') {
       console.debug('idle delay', event.delayMs);

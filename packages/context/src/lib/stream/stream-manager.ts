@@ -1,3 +1,4 @@
+import { Backoff } from '@zukhruf/async';
 import { createUIMessageStream } from 'ai';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -6,12 +7,6 @@ import {
   persistedWriter,
 } from '../stream-buffer.ts';
 import type { StreamChange, StreamChangeSource } from './change-source.ts';
-import {
-  DEFAULT_CANCEL_POLLING,
-  createAdaptivePollingState,
-  nextAdaptivePollingDelay,
-  resetAdaptivePolling,
-} from './polling-policy.ts';
 import type {
   ListStreamIdsOptions,
   StreamData,
@@ -19,6 +14,14 @@ import type {
   StreamStore,
 } from './stream-store.ts';
 import type { StreamPart } from './types.ts';
+
+const CANCEL_WATCHER_RETRY_MAX_MS = 500;
+const CANCEL_WATCHER_RETRY = new Backoff({
+  initial: 50,
+  multiplier: 2,
+  max: CANCEL_WATCHER_RETRY_MAX_MS,
+  jitter: { kind: 'ratio', ratio: 0.15 },
+});
 
 function isTerminal(status: StreamStatus) {
   return status !== 'queued' && status !== 'running';
@@ -234,7 +237,7 @@ export class StreamManager {
       ac.abort();
       await this.#notifyCancellation(streamId, options);
     };
-    const retryState = createAdaptivePollingState(DEFAULT_CANCEL_POLLING);
+    let retries = 0;
     const listeners =
       this.#localCancellationListeners.get(streamId) ?? new Set();
     listeners.add(detect);
@@ -261,9 +264,9 @@ export class StreamManager {
           )) {
             if (
               !subscriptionStabilized &&
-              Date.now() - subscribedAt >= DEFAULT_CANCEL_POLLING.maxMs
+              Date.now() - subscribedAt >= CANCEL_WATCHER_RETRY_MAX_MS
             ) {
-              resetAdaptivePolling(retryState);
+              retries = 0;
               subscriptionStabilized = true;
             }
             if (change.kind === 'chunks') continue;
@@ -284,10 +287,13 @@ export class StreamManager {
 
         // A notification source can fail or end during a reconnect. Keep the
         // cancellation watcher alive for the lifetime of persist(). Reuse the
-        // bounded adaptive policy so a storage outage cannot create one fixed-
-        // rate retry loop per active stream.
+        // capped back-off so a storage outage cannot create one fixed-rate
+        // retry loop per active stream.
         if (
-          !(await waitForDelay(nextAdaptivePollingDelay(retryState), ac.signal))
+          !(await waitForDelay(
+            CANCEL_WATCHER_RETRY.duration(retries++),
+            ac.signal,
+          ))
         ) {
           return;
         }
