@@ -19,6 +19,7 @@ import {
   type InstallerContext,
   MissingRuntimeError,
   PackageInstallError,
+  SandboxNotFoundError,
   VolumeCreateError,
   VolumeInspectError,
   VolumePathError,
@@ -1572,6 +1573,52 @@ await createDockerSandbox({ ...options, dockerfile }).then(
           await a.dispose();
         } finally {
           await removeContainer(containerId);
+        }
+      });
+
+      it('rejects every operation with SandboxNotFoundError once its container is removed outside the sandbox', async () => {
+        const name = uniqueName();
+        try {
+          await using sandbox = await createDockerSandbox({
+            ...defaults,
+            name,
+          });
+          await removeContainer(`sandbox-${name}`);
+          const operations = {
+            run: () => sandbox.run({ command: 'true' }),
+            'run with a signal': () =>
+              sandbox.run({
+                command: 'true',
+                abortSignal: new AbortController().signal,
+              }),
+            spawn: () => sandbox.spawn({ command: 'true' }),
+            readFile: () => sandbox.readBinaryFile({ path: '/etc/hostname' }),
+            writeFile: () =>
+              sandbox.writeTextFile({ path: 'note.txt', content: 'note' }),
+          };
+
+          const outcomes: Record<string, string> = {};
+          for (const [operation, call] of Object.entries(operations)) {
+            outcomes[operation] = await Promise.resolve(call()).then(
+              (value) => `resolved ${JSON.stringify(value)}`,
+              (error: Error) =>
+                error instanceof SandboxNotFoundError
+                  ? 'SandboxNotFoundError'
+                  : `${error.name}: ${error.message}`,
+            );
+          }
+
+          assert.deepStrictEqual(
+            outcomes,
+            Object.fromEntries(
+              Object.keys(operations).map((operation) => [
+                operation,
+                'SandboxNotFoundError',
+              ]),
+            ),
+          );
+        } finally {
+          await removeContainer(`sandbox-${name}`);
         }
       });
 

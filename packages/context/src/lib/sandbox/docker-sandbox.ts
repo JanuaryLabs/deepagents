@@ -65,7 +65,11 @@ import {
   createInstallerContext,
 } from './installers/installer.ts';
 import { createByteReadable } from './session.ts';
-import type { CommandResult, DisposableSandbox } from './types.ts';
+import {
+  type CommandResult,
+  type DisposableSandbox,
+  SandboxNotFoundError,
+} from './types.ts';
 
 export type {
   SandboxBindVolume as DockerBindVolume,
@@ -372,6 +376,13 @@ class DockerContainer implements EngineContainer {
     this.#autoRemove = autoRemove;
   }
 
+  /** A removed container is a sandbox that no longer exists, whichever request finds it. */
+  #notFound(error: unknown): unknown {
+    return error instanceof ContainerNotFoundError
+      ? new SandboxNotFoundError(this.name, { cause: error })
+      : error;
+  }
+
   #config(
     argv: string[],
     { workingDirectory, env = {} }: EngineProcessOptions,
@@ -394,6 +405,9 @@ class DockerContainer implements EngineContainer {
       );
       return { stdout, stderr, exitCode };
     } catch (error) {
+      if (error instanceof ContainerNotFoundError) {
+        throw this.#notFound(error);
+      }
       if (!(error instanceof DockerError)) throw error;
       // As with `docker exec`: a command the engine cannot run is a failed
       // command, not a thrown error.
@@ -405,11 +419,15 @@ class DockerContainer implements EngineContainer {
     argv: string[],
     options: EngineSpawnOptions,
   ): Promise<EngineProcess> {
-    return engineProcess(
-      await this.#container.spawn(this.#config(argv, options), {
-        stdin: options.stdin,
-      }),
-    );
+    try {
+      return engineProcess(
+        await this.#container.spawn(this.#config(argv, options), {
+          stdin: options.stdin,
+        }),
+      );
+    } catch (error) {
+      throw this.#notFound(error);
+    }
   }
 
   #resolve(path: string): string {
@@ -438,6 +456,17 @@ class DockerContainer implements EngineContainer {
   }
 
   async readFile(
+    path: string,
+    signal: AbortSignal | undefined,
+  ): Promise<Uint8Array | null> {
+    try {
+      return await this.#readFile(path, signal);
+    } catch (error) {
+      throw this.#notFound(error);
+    }
+  }
+
+  async #readFile(
     path: string,
     signal: AbortSignal | undefined,
   ): Promise<Uint8Array | null> {
@@ -496,6 +525,7 @@ class DockerContainer implements EngineContainer {
         copyUIDGID: true,
       });
     } catch (error) {
+      if (error instanceof ContainerNotFoundError) throw this.#notFound(error);
       throw new Error(`Failed to write file "${path}": ${messageOf(error)}`, {
         cause: error,
       });

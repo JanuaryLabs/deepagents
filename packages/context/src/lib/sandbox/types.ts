@@ -35,6 +35,18 @@ export interface DisposableSandbox
 }
 
 /**
+ * The environment behind a sandbox no longer exists (its container was
+ * removed), so every operation of that sandbox rejects with this error until
+ * its owner acquires a new one by name. A failed command is not this error.
+ */
+export class SandboxNotFoundError extends Error {
+  constructor(sandbox: string, options?: ErrorOptions) {
+    super(`The sandbox "${sandbox}" no longer exists.`, options);
+    this.name = 'SandboxNotFoundError';
+  }
+}
+
+/**
  * Readiness option accepted by every sandbox factory. Readiness is workload
  * policy supplied by the caller — the hook runs once after boot and gates the
  * factory's return; on failure the sandbox is disposed and the error

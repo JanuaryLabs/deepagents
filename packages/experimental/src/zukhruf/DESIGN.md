@@ -1147,8 +1147,12 @@ work({concurrency?}) → AsyncDisposable }`.
   section); Codex-style LRU unloading of idle terminal/interrupted children is not, so idle children
   stay persisted and listed.
 - **Per-chat sandbox GC** — the host releases its per-chat sandbox handles when it ends, following
-  each backend's disposal policy. Reclaiming retained environments for deleted or idle chats still
-  needs a policy (chat deletion hook, idle TTL, or host policy).
+  each backend's disposal policy. Before a turn borrows a held handle it runs `true` in it; a
+  handle whose environment was removed outside it (`SandboxNotFoundError`) is disposed and the
+  turn acquires the sandbox again by name. Reclaiming retained environments is decided but not built:
+  deleting a chat removes its container (#5135), the runtime stops a chat's container, keeping its
+  files, once the chat has been idle for a time the host sets (#5132), and files that must outlive
+  the container live in a volume the app chooses.
 - **Queued-turn visibility** — `resume()` only sees executing/executed turns (the chain mutates at
   execution time). `conversationStatus()` reports a queued turn as `active`, but a reconnecting
   client still can't stream a turn that is queued but unstarted; folds into the observe/reconnect
