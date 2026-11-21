@@ -759,17 +759,17 @@ test('direct collaboration tools: root and subagent receive the full default gui
       'spawn_agent',
       'send_message',
       'followup_task',
-      'list_agents',
       'wait_agent',
       'interrupt_agent',
+      'list_agents',
     ],
     subagentTools: [
       'spawn_agent',
       'send_message',
       'followup_task',
-      'list_agents',
       'wait_agent',
       'interrupt_agent',
+      'list_agents',
     ],
   });
 });
@@ -818,17 +818,17 @@ test('namespaced collaboration tools: root and subagent receive the full default
       'spawn_agent',
       'send_message',
       'followup_task',
-      'list_agents',
       'wait_agent',
       'interrupt_agent',
+      'list_agents',
     ],
     subagentTools: [
       'spawn_agent',
       'send_message',
       'followup_task',
-      'list_agents',
       'wait_agent',
       'interrupt_agent',
+      'list_agents',
     ],
   });
 });

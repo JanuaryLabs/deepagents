@@ -17,7 +17,6 @@ export function createCollaborationTools(config: ResolvedMultiAgentHostConfig) {
     ),
     send_message: configureTool(sendMessageTool, config),
     followup_task: configureTool(followupTaskTool, config),
-    list_agents: configureTool(listAgentsTool, config),
     wait_agent: configureTool(
       createWaitAgentTool({
         minTimeoutMs: config.minWaitTimeoutMs,
@@ -27,6 +26,7 @@ export function createCollaborationTools(config: ResolvedMultiAgentHostConfig) {
       config,
     ),
     interrupt_agent: configureTool(interruptAgentTool, config),
+    list_agents: configureTool(listAgentsTool, config),
   } satisfies ToolSet;
 }
 
