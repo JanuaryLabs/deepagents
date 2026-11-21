@@ -1,7 +1,7 @@
 import type { Telemetry } from 'ai';
 
 import type { AgentDeclaration } from '../../agent.ts';
-import { createCollaborationTools } from '../../collaboration/collaboration-tools.ts';
+import { createCollaborationSurface } from '../../collaboration/collaboration-tools.ts';
 import type { AgentDeclarationRegistry } from '../../control-plane/agent-declaration-registry.ts';
 import type { ConversationId } from '../../mailbox/types.ts';
 import type { ResolvedMultiAgentHostConfig } from '../../multi-agent-config.ts';
@@ -45,7 +45,7 @@ function initializedFrom<Running extends object>(
 
 /** Owns plugin instances, their composed contributions, and initialization resources. */
 export class PluginManager implements AsyncDisposable {
-  readonly collaborationTools: ReturnType<typeof createCollaborationTools>;
+  readonly collaboration: ReturnType<typeof createCollaborationSurface>;
   readonly declarations: AgentDeclarationRegistry;
   readonly agentOwners: ReadonlyMap<string, string>;
   readonly tools: ZukhrufToolSet;
@@ -75,10 +75,10 @@ export class PluginManager implements AsyncDisposable {
     }
     const pluginSkills = new PluginSkillComposition();
     const pluginContext = new PluginContextComposition();
-    const collaborationTools = createCollaborationTools(multiAgent);
-    const reservedToolNames = Object.keys(collaborationTools);
-    if (multiAgent.codeMode) reservedToolNames.push('code_mode');
-    const toolComposition = new PluginToolComposition(reservedToolNames);
+    const collaboration = createCollaborationSurface(multiAgent);
+    const toolComposition = new PluginToolComposition(
+      collaboration.reservedToolNames,
+    );
     for (const { definition, instance } of plugins) {
       if (instance.tools) {
         toolComposition.add(definition.name, instance.tools);
@@ -101,7 +101,7 @@ export class PluginManager implements AsyncDisposable {
     const pluginSkillsByAgent = pluginSkills.compose(declarations.values());
     const pluginTools = toolComposition.compose(declarations.values());
     this.#plugins = plugins;
-    this.collaborationTools = collaborationTools;
+    this.collaboration = collaboration;
     this.declarations = declarations;
     this.agentOwners = pluginAgents.owners;
     this.tools = pluginTools;

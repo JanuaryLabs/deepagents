@@ -1,4 +1,3 @@
-import { experimental_codeModeTool } from '@ai-sdk/code-mode';
 import {
   type UIMessage,
   type UIMessageStreamWriter,
@@ -49,7 +48,7 @@ import type { PluginManager } from './plugin/plugin-manager.ts';
 
 type TurnPlugins = Pick<
   PluginManager,
-  | 'collaborationTools'
+  | 'collaboration'
   | 'tools'
   | 'skillsByAgent'
   | 'runtimeContext'
@@ -227,16 +226,7 @@ export class AgentTurnExecutor {
         },
       },
       prepareStepInput: () => this.#prepareStepInput(turn, mailboxState),
-      ...(this.#multiAgent.codeMode
-        ? {
-            experimental_toolCallers: Object.fromEntries(
-              Object.keys(this.#plugins.collaborationTools).map((name) => [
-                name,
-                ['code_mode'] as const,
-              ]),
-            ),
-          }
-        : {}),
+      experimental_toolCallers: this.#plugins.collaboration.toolCallers,
     };
     const modelTools = {
       ...(turn.kind === 'message'
@@ -251,10 +241,7 @@ export class AgentTurnExecutor {
           )
         : {}),
       ...declaration.tools,
-      ...this.#plugins.collaborationTools,
-      ...(this.#multiAgent.codeMode
-        ? { code_mode: experimental_codeModeTool() }
-        : {}),
+      ...this.#plugins.collaboration.tools,
       ...this.#plugins.tools,
     };
     const collaborationToolsContext = {
@@ -264,7 +251,7 @@ export class AgentTurnExecutor {
       list_agents: agentContext,
       wait_agent: agentContext,
       interrupt_agent: agentContext,
-      ...(this.#multiAgent.codeMode ? { code_mode: agentContext } : {}),
+      ...this.#multiAgent.exposure.callerContext(agentContext),
       ...Object.fromEntries(
         Object.keys(this.#plugins.tools).map((name) => [name, pluginContext]),
       ),

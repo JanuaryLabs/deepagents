@@ -1,3 +1,6 @@
+import { CodeModeTools } from './collaboration/code-mode-tools.ts';
+import { DirectTools } from './collaboration/direct-tools.ts';
+import type { ToolExposure } from './collaboration/tool-exposure.ts';
 import { ToolNamespace } from './collaboration/tool-namespace.ts';
 import { WaitBounds } from './collaboration/wait-bounds.ts';
 
@@ -45,8 +48,7 @@ export interface ResolvedMultiAgentHostConfig {
   usageHintText?: string;
   rootAgentUsageHintText?: string;
   subagentUsageHintText?: string;
-  toolNamespace?: string;
-  codeMode: boolean;
+  exposure: ToolExposure;
 }
 
 export function resolveMultiAgentHostConfig(
@@ -68,29 +70,15 @@ export function resolveMultiAgentHostConfig(
       'AgentRuntime: multiAgent.maxConcurrentThreadsPerSession must be a positive integer',
     );
   }
-  const toolNamespace =
-    input.toolNamespace === undefined
-      ? undefined
-      : new ToolNamespace(input.toolNamespace);
-
-  const codeMode = input.nonCodeModeOnly === false;
-  const tool = (name: string) =>
-    codeMode ? `tools.${name}` : (toolNamespace?.qualify(name) ?? name);
-  const collaborationTools = [
+  const exposure = toolExposure(input);
+  const shared = `${exposure.callLine([
     'spawn_agent',
     'send_message',
     'followup_task',
     'wait_agent',
     'interrupt_agent',
     'list_agents',
-  ]
-    .map((name) => `\`${tool(name)}\``)
-    .join(', ');
-  const shared = codeMode
-    ? `Call ${collaborationTools} from \`code_mode\`.
-
-All agents share the same workspace, current working directory, and filesystem.`
-    : `Call ${collaborationTools} directly. They are intentionally unavailable inside nested code execution.
+  ])}
 
 All agents share the same workspace, current working directory, and filesystem.`;
 
@@ -102,15 +90,32 @@ All agents share the same workspace, current working directory, and filesystem.`
     usageHintText: nonEmptyText(input.usageHintText),
     rootAgentUsageHintText:
       input.rootAgentUsageHintText === undefined
-        ? defaultRootUsageHint(tool, shared, maxConcurrentThreadsPerSession)
+        ? defaultRootUsageHint(exposure, shared, maxConcurrentThreadsPerSession)
         : nonEmptyText(input.rootAgentUsageHintText),
     subagentUsageHintText:
       input.subagentUsageHintText === undefined
-        ? defaultSubagentUsageHint(tool, shared, maxConcurrentThreadsPerSession)
+        ? defaultSubagentUsageHint(
+            exposure,
+            shared,
+            maxConcurrentThreadsPerSession,
+          )
         : nonEmptyText(input.subagentUsageHintText),
-    toolNamespace: toolNamespace?.name,
-    codeMode,
+    exposure,
   };
+}
+
+function toolExposure(input: MultiAgentHostConfig): ToolExposure {
+  const namespace =
+    input.toolNamespace === undefined
+      ? undefined
+      : new ToolNamespace(input.toolNamespace);
+  if (input.nonCodeModeOnly !== false) return new DirectTools(namespace);
+  if (namespace !== undefined) {
+    throw new Error(
+      'AgentRuntime: multiAgent.toolNamespace cannot be combined with nonCodeModeOnly: false',
+    );
+  }
+  return new CodeModeTools();
 }
 
 function nonEmptyText(value: string | undefined): string | undefined {
@@ -119,7 +124,7 @@ function nonEmptyText(value: string | undefined): string | undefined {
 }
 
 function defaultRootUsageHint(
-  tool: (name: string) => string,
+  exposure: ToolExposure,
   shared: string,
   maxConcurrency: number,
 ): string {
@@ -127,7 +132,7 @@ function defaultRootUsageHint(
 
 At the start of your turn, you are the active agent. You can spawn sub-agents to handle subtasks, and those agents can recursively spawn their own declared sub-agents. All agents are equally capable and receive the tools declared for their agent type.
 
-Use \`${tool('spawn_agent')}\` to create an agent, \`${tool('followup_task')}\` to assign a new task and trigger a turn, and \`${tool('send_message')}\` to queue a message without triggering a turn. You can decide how much context you want to propagate to your sub-agents with the \`fork_turns\` parameter.
+Use \`${exposure.toolName('spawn_agent')}\` to create an agent, \`${exposure.toolName('followup_task')}\` to assign a new task and trigger a turn, and \`${exposure.toolName('send_message')}\` to queue a message without triggering a turn. You can decide how much context you want to propagate to your sub-agents with the \`fork_turns\` parameter.
 
 Child messages arrive as \`MESSAGE\` or \`FINAL_ANSWER\` mailbox envelopes with their task name, sender, and payload preserved.
 
@@ -139,13 +144,13 @@ ${concurrencySlotsText(maxConcurrency)}`;
 }
 
 function defaultSubagentUsageHint(
-  tool: (name: string) => string,
+  exposure: ToolExposure,
   shared: string,
   maxConcurrency: number,
 ): string {
   return `You are an agent in a team collaborating to complete a task.
 
-You can spawn declared sub-agents recursively. All agents are equally capable and receive the tools declared for their agent type. Use \`${tool('spawn_agent')}\` to create one, \`${tool('followup_task')}\` to assign a new task and trigger a turn, and \`${tool('send_message')}\` to queue a message for another agent.
+You can spawn declared sub-agents recursively. All agents are equally capable and receive the tools declared for their agent type. Use \`${exposure.toolName('spawn_agent')}\` to create one, \`${exposure.toolName('followup_task')}\` to assign a new task and trigger a turn, and \`${exposure.toolName('send_message')}\` to queue a message for another agent.
 
 Your final response is delivered automatically to your parent agent. Mailbox messages arrive as \`NEW_TASK\`, \`MESSAGE\`, or \`FINAL_ANSWER\` envelopes with their task name, sender, and payload preserved.
 
