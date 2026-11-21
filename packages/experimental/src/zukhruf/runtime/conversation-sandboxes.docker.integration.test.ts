@@ -1,5 +1,6 @@
 import { TemporaryFiles } from '@zukhruf/fs';
 import { DockerTestbed } from '@zukhruf/testing/docker';
+import type { UIMessageChunk } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -41,16 +42,20 @@ function hostnameEveryTurn() {
 }
 
 /** The bash tool's settled output in a turn's stream. */
-async function bashOutput(turn: { stream: ReadableStream<unknown> }) {
-  const chunks = (await Array.fromAsync(turn.stream)) as {
-    type: string;
-    output?: unknown;
-    errorText?: string;
-  }[];
-  return chunks.find(
-    ({ type }) =>
-      type === 'tool-output-available' || type === 'tool-output-error',
-  );
+async function bashOutput(turn: { stream: ReadableStream<UIMessageChunk> }) {
+  for (const chunk of await Array.fromAsync(turn.stream)) {
+    if (chunk.type === 'tool-output-available') {
+      return { type: chunk.type, output: chunk.output, errorText: undefined };
+    }
+    if (chunk.type === 'tool-output-error') {
+      return {
+        type: chunk.type,
+        output: undefined,
+        errorText: chunk.errorText,
+      };
+    }
+  }
+  return undefined;
 }
 
 test('a chat whose container was removed between turns runs its next turn in a new container of the same name', async () => {
