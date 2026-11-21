@@ -24,6 +24,7 @@ import type {
   FunctionSpanData,
   GenerationSpanData,
   OpenAISpan,
+  OpenAISpanError,
   OpenAITrace,
 } from './types.ts';
 
@@ -31,16 +32,14 @@ interface TraceRunState {
   callId: string;
   trace: OpenAITrace;
   rootSpan: OpenAISpan;
-  responseIds: Set<string>;
   stepSpans: string[];
   spansById: Map<string, OpenAISpan>;
   toolCallSpans: Map<string, string>;
 }
 
-interface ResolvableEvent {
-  callId?: string;
-  response?: { id?: string };
-  toolCall?: { toolCallId: string };
+interface GenerationErrorEvent {
+  callId: string;
+  error: unknown;
 }
 
 export interface OpenAITracesIntegrationOptions {
@@ -89,10 +88,7 @@ export function createOpenAITracesIntegration(
   const includeSensitive =
     options.includeSensitiveData ??
     process.env.OPENAI_AGENTS_TRACE_INCLUDE_SENSITIVE_DATA !== '0';
-  const openRuns: TraceRunState[] = [];
-  const callIdToRun = new Map<string, TraceRunState>();
-  const responseIdToRun = new Map<string, TraceRunState>();
-  const toolCallIdToRun = new Map<string, TraceRunState>();
+  const runs = new Map<string, TraceRunState>();
 
   void processor.start?.();
 
@@ -131,21 +127,19 @@ export function createOpenAITracesIntegration(
         callId: event.callId,
         trace,
         rootSpan,
-        responseIds: new Set(),
         stepSpans: [],
         spansById: new Map([[rootSpan.id, rootSpan]]),
         toolCallSpans: new Map(),
       };
 
-      openRuns.push(state);
-      callIdToRun.set(event.callId, state);
+      runs.set(event.callId, state);
 
       await processor.onTraceStart?.(trace);
       await processor.onSpanStart?.(rootSpan);
     },
 
     onStepStart: async (event) => {
-      const state = resolveRunState(event);
+      const state = runs.get(event.callId);
       if (state == null) {
         return;
       }
@@ -178,7 +172,7 @@ export function createOpenAITracesIntegration(
     },
 
     onToolExecutionStart: async (event) => {
-      const state = resolveRunState(event);
+      const state = runs.get(event.callId);
       if (state == null) {
         return;
       }
@@ -201,16 +195,13 @@ export function createOpenAITracesIntegration(
       };
 
       state.toolCallSpans.set(event.toolCall.toolCallId, span.id);
-      toolCallIdToRun.set(event.toolCall.toolCallId, state);
       state.spansById.set(span.id, span);
 
       await processor.onSpanStart?.(span);
     },
 
     onToolExecutionEnd: async (event) => {
-      const state =
-        toolCallIdToRun.get(event.toolCall.toolCallId) ??
-        resolveRunState(event);
+      const state = runs.get(event.callId);
       if (state == null) {
         return;
       }
@@ -221,7 +212,6 @@ export function createOpenAITracesIntegration(
       }
 
       state.toolCallSpans.delete(event.toolCall.toolCallId);
-      toolCallIdToRun.delete(event.toolCall.toolCallId);
 
       const span = state.spansById.get(id);
       if (span == null) {
@@ -247,7 +237,7 @@ export function createOpenAITracesIntegration(
     },
 
     onStepEnd: async (event) => {
-      const state = resolveRunState(event);
+      const state = runs.get(event.callId);
       if (state == null) {
         return;
       }
@@ -271,11 +261,6 @@ export function createOpenAITracesIntegration(
         }
         data.usage = normalizeUsage(event.usage);
       }
-      if (event.response.id != null) {
-        state.responseIds.add(event.response.id);
-        responseIdToRun.set(event.response.id, state);
-      }
-
       await processor.onSpanEnd?.(span);
     },
 
@@ -284,93 +269,106 @@ export function createOpenAITracesIntegration(
         return;
       }
 
-      const state = resolveRunState(event);
+      const state = runs.get(event.callId);
       if (state == null) {
         return;
       }
 
-      try {
-        while (state.stepSpans.length > 0) {
-          const openStepId = state.stepSpans.pop();
-          if (openStepId == null) {
-            continue;
-          }
+      state.trace.metadata = normalizeMetadata({
+        ...state.trace.metadata,
+        total_usage: normalizeUsage(event.usage),
+        steps: event.steps.length,
+        finish_reason: event.finishReason,
+      });
+      await endRun(state);
+    },
 
-          const openStep = state.spansById.get(openStepId);
-          if (openStep == null || openStep.ended_at != null) {
-            continue;
-          }
-
-          openStep.ended_at = now();
-          await processor.onSpanEnd?.(openStep);
-        }
-
-        state.rootSpan.ended_at = now();
-        state.trace.metadata = normalizeMetadata({
-          ...state.trace.metadata,
-          total_usage: normalizeUsage(event.usage),
-          steps: event.steps.length,
-          finish_reason: event.finishReason,
-        });
-
-        await processor.onSpanEnd?.(state.rootSpan);
-        await processor.onTraceEnd?.(state.trace);
-        await processor.forceFlush?.();
-      } finally {
-        closeRunState(state);
+    onStepError: async (event) => {
+      const state = runs.get(event.callId);
+      const id = state?.stepSpans.pop();
+      const span = id == null ? undefined : state?.spansById.get(id);
+      if (span == null) {
+        return;
       }
+
+      span.ended_at = now();
+      span.error = errorToSpanError(event.error);
+      await processor.onSpanEnd?.(span);
+    },
+
+    onAbort: async (event) => {
+      const state = runs.get(event.callId);
+      if (state == null) {
+        return;
+      }
+
+      await endRun(
+        state,
+        event.reason === undefined
+          ? { message: 'Aborted' }
+          : errorToSpanError(event.reason),
+      );
+    },
+
+    onError: async (event) => {
+      if (!isGenerationErrorEvent(event)) {
+        return;
+      }
+
+      const state = runs.get(event.callId);
+      if (state == null) {
+        return;
+      }
+
+      await endRun(state, errorToSpanError(event.error));
     },
   };
 
   return integration;
 
-  function resolveRunState(event: ResolvableEvent): TraceRunState | undefined {
-    if (event.callId != null) {
-      const state = callIdToRun.get(event.callId);
-      if (state != null) {
-        return state;
+  async function endRun(
+    state: TraceRunState,
+    error?: OpenAISpanError,
+  ): Promise<void> {
+    try {
+      const openSpanIds = [
+        ...state.toolCallSpans.values(),
+        ...state.stepSpans.toReversed(),
+      ];
+      for (const id of openSpanIds) {
+        const span = state.spansById.get(id);
+        if (span == null || span.ended_at != null) {
+          continue;
+        }
+
+        span.ended_at = now();
+        if (error != null) {
+          span.error = error;
+        }
+        await processor.onSpanEnd?.(span);
       }
-    }
 
-    if (event.response?.id != null) {
-      const state = responseIdToRun.get(event.response.id);
-      if (state != null) {
-        return state;
+      state.rootSpan.ended_at = now();
+      if (error != null) {
+        state.rootSpan.error = error;
       }
-    }
-
-    if (event.toolCall?.toolCallId != null) {
-      const state = toolCallIdToRun.get(event.toolCall.toolCallId);
-      if (state != null) {
-        return state;
-      }
-    }
-
-    if (openRuns.length === 0) {
-      return undefined;
-    }
-    if (openRuns.length === 1) {
-      return openRuns[0];
-    }
-
-    return undefined;
-  }
-
-  function closeRunState(state: TraceRunState): void {
-    callIdToRun.delete(state.callId);
-    const index = openRuns.indexOf(state);
-    if (index >= 0) {
-      openRuns.splice(index, 1);
-    }
-
-    for (const responseId of state.responseIds) {
-      responseIdToRun.delete(responseId);
-    }
-
-    for (const toolCallId of state.toolCallSpans.keys()) {
-      toolCallIdToRun.delete(toolCallId);
+      await processor.onSpanEnd?.(state.rootSpan);
+      await processor.onTraceEnd?.(state.trace);
+      await processor.forceFlush?.();
+    } finally {
+      runs.delete(state.callId);
     }
   }
+}
+
+function isGenerationErrorEvent(event: unknown): event is GenerationErrorEvent {
+  return (
+    event != null &&
+    typeof event === 'object' &&
+    'callId' in event &&
+    typeof event.callId === 'string' &&
+    'error' in event
+  );
 }
 
 function isGenerateTextStartEvent(

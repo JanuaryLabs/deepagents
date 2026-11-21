@@ -118,7 +118,7 @@ export class BatchTraceProcessor implements TracingProcessor {
 
   start(): void {
     this.#phase = this.#phase.start(this.#clock, this.#scheduleDelayMs, () => {
-      void this.forceFlush();
+      void this.#flushInBackground();
     });
   }
 
@@ -147,7 +147,16 @@ export class BatchTraceProcessor implements TracingProcessor {
     this.#phase.admit(this.#queue, item);
 
     if (this.#queue.length >= this.#flushThreshold) {
-      void this.forceFlush();
+      void this.#flushInBackground();
+    }
+  }
+
+  /** A failed batch stays queued for the next flush, and the error is logged as the OpenAI Agents SDK's BatchTraceProcessor logs it. */
+  async #flushInBackground(): Promise<void> {
+    try {
+      await this.forceFlush();
+    } catch (error) {
+      console.error('Tracing exporter failed to export batch', error);
     }
   }
 

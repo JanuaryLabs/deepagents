@@ -733,6 +733,161 @@ describe('OpenAI Traces Integration', () => {
       });
     });
 
+    it('exports a streamText run aborted mid-stream with its open spans ended as errored', async (t) => {
+      const { streamText } = await import('ai');
+      using captured = captureIngestRequests();
+      const integration = createOpenAITracesIntegration({
+        clock: createClock(),
+        apiKey: 'test-key',
+        workflowName: 'aborted-workflow',
+        batch: { scheduleDelayMs: 60_000 },
+      });
+      const controller = new AbortController();
+
+      const aborted = streamText({
+        model: new MockLanguageModelV4({
+          doStream: {
+            stream: new ReadableStream<LanguageModelV4StreamPart>({
+              start(stream) {
+                stream.enqueue({ type: 'text-start', id: 'text-1' });
+                stream.enqueue({
+                  type: 'text-delta',
+                  id: 'text-1',
+                  delta: 'Hel',
+                });
+              },
+            }),
+          },
+        }),
+        prompt: 'Say hello',
+        abortSignal: controller.signal,
+        telemetry: { isEnabled: true, integrations: [integration] },
+      });
+      for await (const part of aborted.stream) {
+        if (part.type === 'text-delta') {
+          controller.abort(new Error('user cancelled'));
+        }
+      }
+      await tracesExported(t, captured);
+
+      const [abortedTrace] = captured[0].data.filter(
+        (item) => item.object === 'trace',
+      );
+      assert.ok(abortedTrace);
+      const abortedSpans = captured[0].data
+        .filter((item) => item.object === 'trace.span')
+        .map((span) => ({
+          type: span.span_data.type,
+          traceId: span.trace_id,
+          ended: span.ended_at != null,
+          error: span.error?.message,
+        }));
+      assert.deepStrictEqual(
+        abortedSpans.toSorted((a, b) => a.type.localeCompare(b.type)),
+        [
+          {
+            type: 'agent',
+            traceId: abortedTrace.id,
+            ended: true,
+            error: 'user cancelled',
+          },
+          {
+            type: 'generation',
+            traceId: abortedTrace.id,
+            ended: true,
+            error: 'user cancelled',
+          },
+        ],
+      );
+
+      const next = streamText({
+        model: createMockModel('Next'),
+        prompt: 'Next',
+        telemetry: { isEnabled: true, integrations: [integration] },
+      });
+      await next.consumeStream();
+      await tracesExported(t, captured, 2);
+
+      assert.strictEqual(captured.length, 2);
+      const [nextTrace] = captured[1].data.filter(
+        (item) => item.object === 'trace',
+      );
+      assert.ok(nextTrace);
+      assert.notStrictEqual(nextTrace.id, abortedTrace.id);
+      assert.deepStrictEqual(
+        captured[1].data
+          .filter((item) => item.object === 'trace.span')
+          .map((span) => ({ traceId: span.trace_id, error: span.error })),
+        [
+          { traceId: nextTrace.id, error: undefined },
+          { traceId: nextTrace.id, error: undefined },
+        ],
+      );
+    });
+
+    it('exports a generateText run aborted mid-step with its spans ended as errored', async (t) => {
+      const { generateText } = await import('ai');
+      using captured = captureIngestRequests();
+      const integration = createOpenAITracesIntegration({
+        clock: createClock(),
+        apiKey: 'test-key',
+        workflowName: 'aborted-generate-workflow',
+        batch: { scheduleDelayMs: 60_000 },
+      });
+      const controller = new AbortController();
+      const generating = Promise.withResolvers<void>();
+
+      const run = generateText({
+        model: new MockLanguageModelV4({
+          doGenerate: ({ abortSignal }) => {
+            generating.resolve();
+            return new Promise((_resolve, reject) => {
+              abortSignal?.addEventListener('abort', () =>
+                reject(abortSignal.reason),
+              );
+            });
+          },
+        }),
+        prompt: 'Say hello',
+        abortSignal: controller.signal,
+        telemetry: { isEnabled: true, integrations: [integration] },
+      });
+      await generating.promise;
+      controller.abort(new Error('user cancelled'));
+      await assert.rejects(run, { message: 'user cancelled' });
+      await tracesExported(t, captured);
+
+      const [trace] = captured[0].data.filter(
+        (item) => item.object === 'trace',
+      );
+      assert.ok(trace);
+      assert.deepStrictEqual(
+        captured[0].data
+          .filter((item) => item.object === 'trace.span')
+          .map((span) => ({
+            type: span.span_data.type,
+            traceId: span.trace_id,
+            ended: span.ended_at != null,
+            error: span.error?.message,
+          }))
+          .toSorted((a, b) => a.type.localeCompare(b.type)),
+        [
+          {
+            type: 'agent',
+            traceId: trace.id,
+            ended: true,
+            error: 'user cancelled',
+          },
+          {
+            type: 'generation',
+            traceId: trace.id,
+            ended: true,
+            error: 'user cancelled',
+          },
+        ],
+      );
+    });
+
     it('respects includeSensitiveData=false for generation and function spans', async (t) => {
       const { streamText, tool } = await import('ai');
       using captured = captureIngestRequests();
@@ -907,6 +1062,102 @@ describe('OpenAI Traces Integration', () => {
         exported.map((batch) => batch.map((item) => item.id)),
         [['span_1', 'span_2'], ['trace_1']],
       );
+    });
+
+    it('logs a failed scheduled flush instead of rejecting, and exports the batch on the next tick', async (t) => {
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => unhandled.push(reason);
+      process.on('unhandledRejection', onUnhandled);
+      try {
+        const failure = new Error('ingest endpoint down');
+        let attempts = 0;
+        const exported: string[][] = [];
+        const exporter: TracingExporter = {
+          async export(items) {
+            attempts += 1;
+            if (attempts === 1) {
+              throw failure;
+            }
+            exported.push(items.map((item) => item.id));
+          },
+        };
+        const logged = t.mock.method(console, 'error', () => undefined);
+        const clock = createClock();
+        const processor = new BatchTraceProcessor(exporter, {
+          clock,
+          scheduleDelayMs: 1000,
+        });
+        processor.start();
+        processor.onSpanEnd({
+          object: 'trace.span',
+          id: 'span_1',
+          trace_id: 'trace_1',
+          started_at: new Date().toISOString(),
+          ended_at: new Date().toISOString(),
+          span_data: { type: 'agent', name: 'workflow' },
+        });
+
+        await clock.tickAsync(1000);
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.deepStrictEqual(unhandled, []);
+        assert.deepStrictEqual(
+          logged.mock.calls.map((call) => call.arguments),
+          [['Tracing exporter failed to export batch', failure]],
+        );
+
+        await clock.tickAsync(1000);
+        assert.deepStrictEqual(exported, [['span_1']]);
+        await processor.shutdown();
+      } finally {
+        process.off('unhandledRejection', onUnhandled);
+      }
+    });
+
+    it('logs a failed threshold flush instead of rejecting, and exports the batch on the next flush', async (t) => {
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => unhandled.push(reason);
+      process.on('unhandledRejection', onUnhandled);
+      try {
+        const failure = new Error('ingest endpoint down');
+        let attempts = 0;
+        const exported: string[][] = [];
+        const exporter: TracingExporter = {
+          async export(items) {
+            attempts += 1;
+            if (attempts === 1) {
+              throw failure;
+            }
+            exported.push(items.map((item) => item.id));
+          },
+        };
+        const logged = t.mock.method(console, 'error', () => undefined);
+        const processor = new BatchTraceProcessor(exporter, {
+          clock: createClock(),
+          maxQueueSize: 2,
+          exportTriggerRatio: 0.5,
+          scheduleDelayMs: 60_000,
+        });
+        processor.onSpanEnd({
+          object: 'trace.span',
+          id: 'span_1',
+          trace_id: 'trace_1',
+          started_at: new Date().toISOString(),
+          ended_at: new Date().toISOString(),
+          span_data: { type: 'agent', name: 'workflow' },
+        });
+
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.deepStrictEqual(unhandled, []);
+        assert.deepStrictEqual(
+          logged.mock.calls.map((call) => call.arguments),
+          [['Tracing exporter failed to export batch', failure]],
+        );
+
+        await processor.forceFlush();
+        assert.deepStrictEqual(exported, [['span_1']]);
+      } finally {
+        process.off('unhandledRejection', onUnhandled);
+      }
     });
 
     it('drops spans and traces that end after shutdown', async () => {
