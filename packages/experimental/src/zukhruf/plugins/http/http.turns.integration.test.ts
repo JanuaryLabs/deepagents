@@ -16,6 +16,7 @@ import {
   createVirtualSandbox,
 } from '@deepagents/context';
 import {
+  type AgentDeclaration,
   AgentRuntime,
   PgBossTurnQueue,
   SqliteMailboxStore,
@@ -29,7 +30,10 @@ import {
   ControlledAgentStorage,
   type ControlledAgentStorageParts,
 } from '../../../testing/controlled-agent-storage.fixture.ts';
-import { textResult } from '../../../testing/stream-results.fixture.ts';
+import {
+  textResult,
+  toolCallResult,
+} from '../../../testing/stream-results.fixture.ts';
 import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 
 const MOUNT = '/zukhruf/v1';
@@ -40,6 +44,18 @@ const turnStatusSchema = z.looseObject({
   turnId: z.string(),
   status: z.string(),
 });
+const historySchema = z.array(
+  z.looseObject({
+    chatId: z.string(),
+    children: z.array(
+      z.looseObject({
+        chatId: z.string(),
+        path: z.string(),
+        state: z.string(),
+      }),
+    ),
+  }),
+);
 const errorBodySchema = z.looseObject({
   cause: z.looseObject({ code: z.string() }),
 });
@@ -71,23 +87,23 @@ async function storageParts(
   };
 }
 
+const sandbox = defineSandbox(() =>
+  createVirtualSandbox({ fs: new InMemoryFs() }),
+);
+
 async function serveAgent(
   resources: AsyncDisposableStack,
   name: string,
   parts: ControlledAgentStorageParts,
+  agent: Pick<AgentDeclaration, 'model' | 'subagents'> = {
+    model: new MockLanguageModelV4({
+      doStream: async () => textResult('done'),
+    }),
+  },
 ) {
   const runtime = resources.use(
     await new AgentRuntime(
-      defineAgent({
-        name,
-        model: new MockLanguageModelV4({
-          doStream: async () => textResult('done'),
-        }),
-        instructions: [],
-        sandbox: defineSandbox(() =>
-          createVirtualSandbox({ fs: new InMemoryFs() }),
-        ),
-      }),
+      defineAgent({ name, instructions: [], sandbox, ...agent }),
     ).initialize(
       defineStack(async () => ({
         storage: new ControlledAgentStorage(parts),
@@ -449,6 +465,90 @@ test('POST /session for a chat another agent runtime created on the same storage
       otherSession: 404,
       otherHistory: [],
     },
+  );
+  assert.equal(otherUser.status, 404);
+});
+
+test('POST /session for a sub-agent chat of another agent runtime on the same storage answers 404 as it does for another user, and leaves that sub-agent to its owner', async (t) => {
+  await using resources = new AsyncDisposableStack();
+  const parts = await storageParts(resources);
+  let spawned = false;
+  const owner = await serveAgent(resources, 'owner', parts, {
+    model: new MockLanguageModelV4({
+      doStream: async () => {
+        if (spawned) return textResult('done');
+        spawned = true;
+        return toolCallResult({
+          toolCallId: randomUUID(),
+          toolName: 'spawn_agent',
+          input: JSON.stringify({
+            task_name: 'worker',
+            agent_type: 'worker',
+            message: 'start',
+            fork_turns: 'none',
+          }),
+        });
+      },
+    }),
+    subagents: [
+      defineAgent({
+        name: 'worker',
+        instructions: [],
+        sandbox,
+        model: new MockLanguageModelV4({
+          doStream: async () => textResult('worker done'),
+        }),
+      }),
+    ],
+  });
+  const other = await serveAgent(resources, 'other', parts);
+  resources.use(await owner.runtime.work());
+  const rootId = randomUUID();
+  await completedTurn(owner.app, rootId, t.signal);
+  const worker = async () => {
+    const history = historySchema.parse(
+      await (await owner.app.request(`${MOUNT}/history`)).json(),
+    );
+    const found = history
+      .find(({ chatId }) => chatId === rootId)
+      ?.children.find(({ path }) => path === '/root/worker');
+    assert.ok(found, 'no child at /root/worker');
+    return found;
+  };
+  await waitFor(async () => assert.equal((await worker()).state, 'completed'), {
+    signal: t.signal,
+  });
+  const { chatId } = await worker();
+  const ownerView = async () => ({
+    worker: await worker(),
+    messages: await owner.runtime
+      .observe({ chatId, userId: 'user-1' })
+      .engine.getMessages(),
+  });
+  const post = async (app: Hono<HttpEnv>, userId: string) => {
+    const response = await app.request(`${MOUNT}/session/${chatId}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-user-id': userId },
+      body: JSON.stringify({
+        sessionId: chatId,
+        message: {
+          id: `message-${randomUUID()}`,
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        },
+        trigger: 'submit-message',
+      }),
+    });
+    return { status: response.status, body: await response.json() };
+  };
+  const before = await ownerView();
+
+  const otherRuntime = await post(other.app, 'user-1');
+  const otherUser = await post(owner.app, 'user-2');
+
+  assert.deepStrictEqual(
+    { otherRuntime, ownerView: await ownerView() },
+    { otherRuntime: otherUser, ownerView: before },
   );
   assert.equal(otherUser.status, 404);
 });
