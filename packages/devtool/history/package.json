@@ -32,7 +32,7 @@
   "dependencies": {
     "@deepagents/experimental": "7.10.0",
     "cn": "^0.4.0",
-    "lucide-react": "^1.33.0"
+    "lucide-react": "^1.77.0"
   },
   "peerDependencies": {
     "react": "^19.2.8"

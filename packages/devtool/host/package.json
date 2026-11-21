@@ -72,7 +72,7 @@
     "ai": "7.0.166",
     "cn": "^0.4.0",
     "cronstrue": "^3.24.0",
-    "lucide-react": "^1.33.0",
+    "lucide-react": "^1.77.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-router": "8.2.0",
