@@ -1,6 +1,6 @@
-const DEFAULT_MIN_WAIT_TIMEOUT_MS = 10_000;
-const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
-const DEFAULT_MAX_WAIT_TIMEOUT_MS = 3_600_000;
+import { ToolNamespace } from './collaboration/tool-namespace.ts';
+import { WaitBounds } from './collaboration/wait-bounds.ts';
+
 /** Codex `DEFAULT_MULTI_AGENT_V2_MAX_CONCURRENT_THREADS_PER_SESSION`. */
 const DEFAULT_MAX_CONCURRENT_THREADS_PER_SESSION = 4;
 /** Verbatim Codex guidance (`core/src/session/multi_agents.rs`). */
@@ -11,23 +11,6 @@ const WAIT_AGENT_USAGE_HINT_TEXT =
 function concurrencySlotsText(maxConcurrency: number): string {
   return `There are ${maxConcurrency} available concurrency slots, meaning that up to ${maxConcurrency} agents can be active at once, including you.`;
 }
-
-const RESERVED_TOOL_NAMESPACES = new Set([
-  'api_tool',
-  'browser',
-  'computer',
-  'container',
-  'file_search',
-  'functions',
-  'image_gen',
-  'multi_tool_use',
-  'python',
-  'python_user_visible',
-  'submodel_delegator',
-  'terminal',
-  'tool_search',
-  'web',
-]);
 
 /** Host-level controls matching Codex multi-agent configuration. */
 export interface MultiAgentHostConfig {
@@ -69,15 +52,11 @@ export interface ResolvedMultiAgentHostConfig {
 export function resolveMultiAgentHostConfig(
   input: MultiAgentHostConfig = {},
 ): ResolvedMultiAgentHostConfig {
-  const minWaitTimeoutMs =
-    input.minWaitTimeoutMs ?? DEFAULT_MIN_WAIT_TIMEOUT_MS;
-  const defaultWaitTimeoutMs =
-    input.defaultWaitTimeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS;
-  const maxWaitTimeoutMs =
-    input.maxWaitTimeoutMs ?? DEFAULT_MAX_WAIT_TIMEOUT_MS;
-  assertTimeout('minWaitTimeoutMs', minWaitTimeoutMs);
-  assertTimeout('defaultWaitTimeoutMs', defaultWaitTimeoutMs);
-  assertTimeout('maxWaitTimeoutMs', maxWaitTimeoutMs);
+  const waitBounds = new WaitBounds({
+    minMs: input.minWaitTimeoutMs,
+    defaultMs: input.defaultWaitTimeoutMs,
+    maxMs: input.maxWaitTimeoutMs,
+  });
   const maxConcurrentThreadsPerSession =
     input.maxConcurrentThreadsPerSession ??
     DEFAULT_MAX_CONCURRENT_THREADS_PER_SESSION;
@@ -89,40 +68,14 @@ export function resolveMultiAgentHostConfig(
       'AgentRuntime: multiAgent.maxConcurrentThreadsPerSession must be a positive integer',
     );
   }
-  if (minWaitTimeoutMs > maxWaitTimeoutMs) {
-    throw new Error(
-      'AgentRuntime: multiAgent.minWaitTimeoutMs must be at most maxWaitTimeoutMs',
-    );
-  }
-  if (defaultWaitTimeoutMs < minWaitTimeoutMs) {
-    throw new Error(
-      'AgentRuntime: multiAgent.defaultWaitTimeoutMs must be at least minWaitTimeoutMs',
-    );
-  }
-  if (defaultWaitTimeoutMs > maxWaitTimeoutMs) {
-    throw new Error(
-      'AgentRuntime: multiAgent.defaultWaitTimeoutMs must be at most maxWaitTimeoutMs',
-    );
-  }
-
-  const toolNamespace = input.toolNamespace;
-  if (
-    toolNamespace !== undefined &&
-    (toolNamespace.length === 0 || toolNamespace.trim() !== toolNamespace)
-  ) {
-    throw new Error(
-      'AgentRuntime: multiAgent.toolNamespace cannot be empty or padded',
-    );
-  }
-  if (toolNamespace !== undefined) validateToolNamespace(toolNamespace);
+  const toolNamespace =
+    input.toolNamespace === undefined
+      ? undefined
+      : new ToolNamespace(input.toolNamespace);
 
   const codeMode = input.nonCodeModeOnly === false;
   const tool = (name: string) =>
-    codeMode
-      ? `tools.${name}`
-      : toolNamespace === undefined
-        ? name
-        : `${toolNamespace}.${name}`;
+    codeMode ? `tools.${name}` : (toolNamespace?.qualify(name) ?? name);
   const collaborationTools = [
     'spawn_agent',
     'send_message',
@@ -142,9 +95,9 @@ All agents share the same workspace, current working directory, and filesystem.`
 All agents share the same workspace, current working directory, and filesystem.`;
 
   return {
-    minWaitTimeoutMs,
-    defaultWaitTimeoutMs,
-    maxWaitTimeoutMs,
+    minWaitTimeoutMs: waitBounds.minMs,
+    defaultWaitTimeoutMs: waitBounds.defaultMs,
+    maxWaitTimeoutMs: waitBounds.maxMs,
     maxConcurrentThreadsPerSession,
     usageHintText: nonEmptyText(input.usageHintText),
     rootAgentUsageHintText:
@@ -155,31 +108,9 @@ All agents share the same workspace, current working directory, and filesystem.`
       input.subagentUsageHintText === undefined
         ? defaultSubagentUsageHint(tool, shared, maxConcurrentThreadsPerSession)
         : nonEmptyText(input.subagentUsageHintText),
-    toolNamespace,
+    toolNamespace: toolNamespace?.name,
     codeMode,
   };
-}
-
-function assertTimeout(name: string, value: number): void {
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new Error(
-      `AgentRuntime: multiAgent.${name} must be a non-negative safe integer`,
-    );
-  }
-}
-
-function validateToolNamespace(namespace: string): void {
-  if (
-    namespace.length > 64 ||
-    !/^[a-zA-Z0-9_-]+$/.test(namespace) ||
-    namespace === 'mcp' ||
-    namespace.startsWith('mcp__') ||
-    RESERVED_TOOL_NAMESPACES.has(namespace)
-  ) {
-    throw new Error(
-      `AgentRuntime: multiAgent.toolNamespace "${namespace}" is a reserved tool namespace or invalid`,
-    );
-  }
 }
 
 function nonEmptyText(value: string | undefined): string | undefined {
