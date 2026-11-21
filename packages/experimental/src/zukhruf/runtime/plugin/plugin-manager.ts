@@ -152,13 +152,10 @@ export class PluginManager implements AsyncDisposable {
     );
   }
 
-  async startWorkers(
-    workers: AsyncDisposableStack,
-    waitForActive: boolean,
-  ): Promise<void> {
+  async startWorkers(workers: AsyncDisposableStack): Promise<void> {
     // Share the queue worker's disposal scope to preserve error suppression order.
     for (const { running } of this.#running) {
-      if (running.work) workers.use(await running.work(waitForActive));
+      if (running.work) workers.use(await running.work());
     }
   }
 

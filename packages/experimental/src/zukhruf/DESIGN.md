@@ -886,7 +886,7 @@ const traceTelemetry: AgentPluginDefinition<TracePlugin> = {
 - Plugin `create()` remains synchronous and returns only static contributions (tools, agents,
   skills, runtime context, telemetry, `configure`), since `host.info` is built from them before the
   host exists. Its asynchronous `initialize(host)` returns the running phase, an
-  `AgentPluginInitialization`: discovered `tools`, `work(waitForActive)`,
+  `AgentPluginInitialization`: discovered `tools`, `work()`,
   `conversationAvailable(conversation)`, the plugin's control surface, and an optional
   `Symbol.asyncDispose` method. Anything that needs the host is built there, so no plugin holds a
   host that is not yet set. `PluginManager` keeps the running phases and starts their workers and

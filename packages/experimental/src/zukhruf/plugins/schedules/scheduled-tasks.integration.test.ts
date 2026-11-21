@@ -708,9 +708,9 @@ test('real PostgreSQL competing workers launch one execution for one run', async
   await first.initialize();
   await second.initialize();
   try {
-    await using _firstWorker = await first.work(FAST_POLLING, true);
+    await using _firstWorker = await first.work(FAST_POLLING);
     void _firstWorker;
-    await using _secondWorker = await second.work(FAST_POLLING, true);
+    await using _secondWorker = await second.work(FAST_POLLING);
     void _secondWorker;
     const task = await first.create('owner-1', {
       idempotencyKey: 'competing-workers',
@@ -838,7 +838,7 @@ function isTerminal(status: ExecutionState['status']): boolean {
   );
 }
 
-test('ScheduledTasks can drain an active dispatch before releasing its resources', async () => {
+test('ScheduledTasks worker disposal waits for an active dispatch before releasing its resources', async () => {
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   await using h = await pgliteHarness(({ executor }) => {
@@ -856,7 +856,7 @@ test('ScheduledTasks can drain an active dispatch before releasing its resources
     executionConfig: { destination: 'reports' },
   });
   const run = await h.scheduled.runNow('owner', task.id, 'drain');
-  const worker = await h.scheduled.work(FAST_POLLING, true);
+  const worker = await h.scheduled.work(FAST_POLLING);
   let disposing: PromiseLike<void> | undefined;
   try {
     await entered.promise;

@@ -134,7 +134,7 @@ export interface AgentPluginBindings {
 export interface AgentPluginInitialization extends Partial<AsyncDisposable> {
   readonly tools?: ZukhrufToolSet;
   /** Hosts wait for active plugin work before releasing infrastructure. */
-  work?(waitForActive?: boolean): Promise<AsyncDisposable>;
+  work?(): Promise<AsyncDisposable>;
   conversationAvailable?(conversation: ConversationId): Promise<void>;
 }
 
@@ -631,7 +631,7 @@ class RuntimeHost implements AsyncDisposable {
     options: AgentRuntimeWorkOptions | undefined,
   ): Promise<AsyncDisposable> {
     await using workers = new AsyncDisposableStack();
-    await this.#plugins.startWorkers(workers, true);
+    await this.#plugins.startWorkers(workers);
     const reconcilesAvailability = this.#plugins.reconcilesAvailability;
     workers.use(
       await this.#queue.consume(this.#executor.execute.bind(this.#executor), {

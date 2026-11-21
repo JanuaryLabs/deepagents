@@ -53,7 +53,7 @@ export function conversationScheduling(): AgentPluginDefinition {
           });
           return {
             tools: createSchedulingTools(conversationScheduler),
-            work: (waitForActive) => conversationScheduler.work(waitForActive),
+            work: () => conversationScheduler.work(),
             conversationAvailable: (conversation) =>
               conversationScheduler.materializeDueIfEligible(conversation),
           };

@@ -222,8 +222,7 @@ test('a ready host waits for worker startup, then closes workers before plugins 
         [Symbol.asyncDispose]: async () => {
           closed.push('plugin');
         },
-        work: async (waitForActive) => {
-          assert.equal(waitForActive, true);
+        work: async () => {
           workerEntered.resolve();
           await releaseWorker.promise;
           return {

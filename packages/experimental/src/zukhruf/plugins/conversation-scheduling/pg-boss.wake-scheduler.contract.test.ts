@@ -425,7 +425,7 @@ test('PgBossWakeScheduler retries after a PostgreSQL worker dies mid-handler', a
   }
 });
 
-test('PgBossWakeScheduler can drain a claimed wake before releasing its resources', async () => {
+test('PgBossWakeScheduler consumer disposal waits for a claimed wake before releasing its resources', async () => {
   await using h = await pgliteHarness();
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
@@ -433,7 +433,7 @@ test('PgBossWakeScheduler can drain a claimed wake before releasing its resource
   const worker = await h.scheduler.consume(async () => {
     entered.resolve();
     await release.promise;
-  }, true);
+  });
   let disposing: PromiseLike<void> | undefined;
   try {
     await entered.promise;

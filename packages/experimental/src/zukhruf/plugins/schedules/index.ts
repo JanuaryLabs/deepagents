@@ -153,8 +153,8 @@ class RunningSchedules implements Schedules {
     });
   }
 
-  work(waitForActive?: boolean): Promise<AsyncDisposable> {
-    return this.#scheduled.work(this.#workerOptions, waitForActive);
+  work(): Promise<AsyncDisposable> {
+    return this.#scheduled.work(this.#workerOptions);
   }
 
   async create(
