@@ -3,7 +3,7 @@ import { DockerTestbed } from '@zukhruf/testing/docker';
 import assert from 'node:assert';
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { symlink, writeFile } from 'node:fs/promises';
-import { delimiter, join } from 'node:path';
+import { basename, delimiter, dirname, join } from 'node:path';
 import { text } from 'node:stream/consumers';
 import { describe, it } from 'node:test';
 import { promisify } from 'node:util';
@@ -1436,9 +1436,15 @@ await createDockerSandbox({ ...options, dockerfile }).then(
         });
         // /etc/hosts is a bind of a file in the engine's directory of the
         // container, so an immutable flag makes the engine's removal fail.
+        // @zukhruf/docker's ContainerInspectResponse does not declare the
+        // engine's HostsPath field, so it is narrowed here instead of typed.
         const info = await client.containers.inspect(containerName);
-        const hostsPath = info?.HostsPath;
-        assert.ok(hostsPath);
+        assert.ok(
+          info !== undefined &&
+            'HostsPath' in info &&
+            typeof info.HostsPath === 'string',
+        );
+        const hostsPath = info.HostsPath;
         try {
           const lock = await sandbox.run({ command: 'chattr +i /etc/hosts' });
           assert.strictEqual(lock.exitCode, 0, lock.stderr);
@@ -1463,8 +1469,17 @@ await createDockerSandbox({ ...options, dockerfile }).then(
           await testbed.run({
             ...defaults.container,
             Image: 'bash:5.3-alpine3.24',
-            Cmd: ['nsenter', '-t', '1', '-m', '--', 'chattr', '-i', hostsPath],
-            HostConfig: { Privileged: true, PidMode: 'host' },
+            Cmd: ['chattr', '-i', `/engine-container/${basename(hostsPath)}`],
+            HostConfig: {
+              CapAdd: ['LINUX_IMMUTABLE'],
+              Mounts: [
+                {
+                  Type: 'bind',
+                  Source: dirname(hostsPath),
+                  Target: '/engine-container',
+                },
+              ],
+            },
           });
           const leftover = await client.containers.find(containerName);
           await leftover?.remove({ force: true });
