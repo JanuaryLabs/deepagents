@@ -5,6 +5,8 @@ import {
   type Container,
   ContainerNotFoundError,
   type ContainerProcess,
+  type Containers,
+  type Created,
   Docker,
   DockerEngineError,
   DockerError,
@@ -20,10 +22,13 @@ import spawn, { SubprocessError } from 'nano-spawn';
 import { hash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { posix } from 'node:path';
+import pMemoize from 'p-memoize';
 
 import type {
+  ChatContainerEngine,
+  ChatEngineContainer,
+  ChatSandboxVolume,
   CommonSandboxOptions,
-  ContainerEngine,
   ContainerErrorFactory,
   EngineContainer,
   EngineExecOptions,
@@ -44,8 +49,10 @@ import {
   validateSandboxOptions,
 } from './container-sandbox.ts';
 import {
+  chatContainerSandbox,
   readFileOverExec,
   statOverExec,
+  validateEnv,
   writeFileOverExec,
 } from './container-session.ts';
 import {
@@ -64,11 +71,18 @@ import {
   type InstallerContext,
   createInstallerContext,
 } from './installers/installer.ts';
-import { createByteReadable } from './session.ts';
 import {
+  chatSandboxLabels,
+  chatSandboxName,
+  createByteReadable,
+} from './session.ts';
+import {
+  type ChatSandbox,
   type CommandResult,
   type DisposableSandbox,
+  type SandboxContext,
   SandboxNotFoundError,
+  type StoppableSandboxEnvironment,
 } from './types.ts';
 
 export type {
@@ -209,15 +223,23 @@ function mount(volume: SandboxVolume): EngineApi.Mount {
   };
 }
 
+/** How long a container lives: removed when it stops, or kept for its chat. */
+type ContainerLifetime =
+  { kind: 'one-off' } | { kind: 'chat'; labels: Record<string, string> };
+
 /** The body of `POST /containers/create` for a sandbox container. */
 function containerCreateRequest(
   image: string,
   opts: DockerCommonOptions,
   workdir: string,
+  lifetime: ContainerLifetime,
 ): EngineApi.ContainerCreateRequest {
   const { HostConfig, ...config } = opts.container ?? {};
   return {
     ...config,
+    ...(lifetime.kind === 'chat'
+      ? { Labels: { ...config.Labels, ...lifetime.labels } }
+      : {}),
     Image: image,
     WorkingDir: workdir,
     Env: Object.entries(opts.env ?? {}).map(
@@ -230,7 +252,11 @@ function containerCreateRequest(
         : { Cmd: [...opts.command] }),
     HostConfig: {
       ...HostConfig,
-      AutoRemove: true,
+      // A chat container lives for days: tini as PID 1 reaps the processes
+      // that killed commands leave behind, and passes `docker stop` on.
+      ...(lifetime.kind === 'chat'
+        ? { AutoRemove: false, Init: true }
+        : { AutoRemove: true }),
       Mounts: (opts.volumes ?? []).map(mount),
     },
   };
@@ -512,14 +538,17 @@ class DockerContainer implements EngineContainer {
     if (this.#isExecOnly(target)) return statOverExec(this, target, signal);
     try {
       const followed = await this.#followLinks(target, signal);
-      return followed
-        ? { type: fileType(followed.stat.mode), size: followed.stat.size }
-        : null;
+      if (followed) {
+        return { type: fileType(followed.stat.mode), size: followed.stat.size };
+      }
+      // The engine's stat answers a missing container as a missing path.
+      await this.#container.inspect({ signal });
+      return null;
     } catch (error) {
       if (isUnexplainedFailure(error)) {
         return statOverExec(this, target, signal);
       }
-      throw error;
+      throw this.#notFound(error);
     }
   }
 
@@ -587,6 +616,55 @@ class DockerContainer implements EngineContainer {
   }
 }
 
+/** The container of a chat, which the engine keeps when it stops. */
+class DockerChatContainer
+  extends DockerContainer
+  implements ChatEngineContainer
+{
+  readonly #container: Container;
+  readonly #containers: Containers;
+
+  constructor(
+    name: string,
+    container: Container,
+    layout: FileLayout,
+    commandTimeout: number | undefined,
+    containers: Containers,
+  ) {
+    super(name, container, layout, commandTimeout, false);
+    this.#container = container;
+    this.#containers = containers;
+  }
+
+  /** Inspects by name, so a container that now has the name is not this one. */
+  async resume(): Promise<void> {
+    const info = await this.#containers.inspect(this.name).catch(unavailable);
+    const state = info?.State?.Status;
+    if (
+      info?.Id !== this.#container.id ||
+      state === 'removing' ||
+      state === 'dead'
+    ) {
+      throw new SandboxNotFoundError(this.name);
+    }
+    try {
+      if (state === 'paused') await this.#container.unpause();
+      else if (state === 'created' || state === 'exited') {
+        await this.#container.start();
+      }
+    } catch (error) {
+      if (error instanceof ContainerNotFoundError) {
+        throw new SandboxNotFoundError(this.name, { cause: error });
+      }
+      unavailable(error);
+    }
+  }
+
+  async remove(): Promise<void> {
+    await this.#container.remove({ force: true, v: true }).catch(unavailable);
+  }
+}
+
 /**
  * The Docker engine, reached through the Engine API of `@zukhruf/docker`. It
  * selects the engine that the Docker CLI selects (`DOCKER_HOST`,
@@ -594,7 +672,7 @@ class DockerContainer implements EngineContainer {
  * does for the CLI. Image builds and Compose stay on the CLI, sent to the same
  * engine through `docker.cliEnvironment`.
  */
-export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
+export class DockerEngine implements ChatContainerEngine<DockerCommonOptions> {
   readonly bindMountsOnClient = false;
   readonly defaultImage = 'bash:5.3-alpine3.24';
   readonly errors = dockerErrors;
@@ -642,6 +720,56 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
     );
   }
 
+  #chatContainer(
+    name: string,
+    container: Container,
+    info: EngineApi.ContainerInspectResponse,
+  ): DockerChatContainer {
+    return new DockerChatContainer(
+      name,
+      container,
+      fileLayout(info.Config, info.HostConfig),
+      this.#commandTimeout,
+      this.docker.containers,
+    );
+  }
+
+  async find(name: string): Promise<DockerChatContainer | undefined> {
+    const found = await this.docker.containers.find(name).catch(unavailable);
+    if (!found) return undefined;
+    const info = await found.inspect().catch((error: unknown) => {
+      if (error instanceof ContainerNotFoundError) return undefined;
+      unavailable(error);
+    });
+    return info && this.#chatContainer(name, found, info);
+  }
+
+  async createChat(
+    image: string,
+    name: string,
+    opts: DockerCommonOptions,
+    workdir: string,
+    labels: Record<string, string>,
+  ): Promise<{ created: boolean; container: DockerChatContainer }> {
+    const result = await this.#createOrGet(image, name, opts, workdir, {
+      kind: 'chat',
+      labels,
+    });
+    try {
+      return {
+        created: result.created,
+        container: this.#chatContainer(
+          name,
+          result.container,
+          await result.container.inspect(),
+        ),
+      };
+    } catch (error) {
+      if (result.created) await result.container[Symbol.asyncDispose]();
+      unavailable(error);
+    }
+  }
+
   async attach(
     name: string,
     image: string,
@@ -661,8 +789,11 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
     opts: DockerCommonOptions,
     workdir: string,
   ): Promise<RunResult> {
-    const started = await this.#createAndStart(image, name, opts, workdir);
-    if (!started) return { created: false };
+    const result = await this.#createOrGet(image, name, opts, workdir, {
+      kind: 'one-off',
+    });
+    if (!result.created) return { created: false };
+    const started = result.container;
     try {
       return {
         created: true,
@@ -675,15 +806,19 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
     }
   }
 
-  /** Creates and starts the container; `undefined` when another caller has the name. */
-  async #createAndStart(
+  /**
+   * Creates and starts the container, or gives the one that another caller
+   * has under the name, as it is.
+   */
+  async #createOrGet(
     image: string,
     name: string,
     opts: DockerCommonOptions,
     workdir: string,
-  ): Promise<OwnedContainer | undefined> {
+    lifetime: ContainerLifetime,
+  ): Promise<Created<'container', OwnedContainer, Container>> {
     try {
-      const body = containerCreateRequest(image, opts, workdir);
+      const body = containerCreateRequest(image, opts, workdir, lifetime);
       const create = () =>
         this.docker.containers.createOrGet(body, {
           name,
@@ -694,14 +829,14 @@ export class DockerEngine implements ContainerEngine<DockerCommonOptions> {
         await this.docker.images.pull(image, { platform: opts.platform });
         return create();
       });
-      if (!result.created) return undefined;
+      if (!result.created) return result;
       try {
         await result.container.start();
       } catch (error) {
         await result.container[Symbol.asyncDispose]();
         throw error;
       }
-      return result.container;
+      return result;
     } catch (error) {
       throw this.#runError(error, image, opts.volumes ?? []);
     }
@@ -908,6 +1043,180 @@ export class ComposeStrategy extends ContainerSandboxStrategy<DockerCommonOption
   protected override async release(): Promise<void> {
     // Cleanup errors are ignored: the stack may already be down.
     await this.compose(['down']).catch(() => {});
+  }
+}
+
+/**
+ * The create body that a chat container passes through. The environment also
+ * owns `HostConfig.Init`, and `Labels` get the chat's labels, which win.
+ */
+export type DockerChatContainerConfig = Omit<
+  DockerContainerConfig,
+  'HostConfig'
+> & {
+  HostConfig?: Omit<NonNullable<DockerContainerConfig['HostConfig']>, 'Init'>;
+};
+
+/** What a chat environment takes beside a backend's options. */
+interface DockerChatOptions {
+  /**
+   * With a chat's id, names that chat's container. Two environments with the
+   * same namespace on one engine reach the same containers; give each app or
+   * deployment its own.
+   */
+  namespace: string;
+  /**
+   * The volumes of a chat's container, given when `open` creates it. Its
+   * durable files belong here: the rest is lost when the container is deleted.
+   */
+  volumes?: (chat: SandboxContext) => ChatSandboxVolume[];
+  container?: DockerChatContainerConfig;
+}
+
+type ChatEnvironmentBase<T extends DockerCommonOptions> = Omit<
+  T,
+  'volumes' | 'name' | 'container'
+> &
+  DockerChatOptions;
+
+/**
+ * The options of a {@link DockerSandboxEnvironment}: an image, or a Dockerfile
+ * that builds one. A chat container has no installers: a second worker could
+ * attach to it before they finish, so what it needs belongs in its image.
+ */
+export type DockerSandboxEnvironmentOptions =
+  | (ChatEnvironmentBase<Omit<RuntimeSandboxOptions, 'installers'>> & {
+      dockerfile?: never;
+    })
+  | (ChatEnvironmentBase<DockerfileSandboxOptions> & { image?: never });
+
+/**
+ * Chat containers on the Docker engine that `environment` selects
+ * (`DOCKER_HOST`, a context, `ssh://`). A chat's container is named from the
+ * namespace and the chat's id, and carries the labels
+ * `deepagents.sandbox.namespace` and `deepagents.sandbox.chat`. It has no
+ * AutoRemove, so `stop` (`docker stop`) keeps it and its files, and the next
+ * `open` or `resume` starts it; `delete` is `docker rm -f`. Its PID 1 is the
+ * engine's init, which reaps what killed commands leave behind. The open
+ * handles share one engine client, which the first `open` connects and the
+ * last `close` closes.
+ */
+export class DockerSandboxEnvironment implements StoppableSandboxEnvironment {
+  readonly #options: DockerSandboxEnvironmentOptions;
+  /** The connected engine, while something holds it; concurrent connects share one. */
+  readonly #connected = new Map<undefined, DockerEngine>();
+  readonly #connect = pMemoize(
+    () =>
+      DockerEngine.connect(
+        this.#options.environment ?? process.env,
+        this.#options.commandTimeout,
+      ),
+    { cache: this.#connected },
+  );
+  #holders = 0;
+
+  constructor(options: DockerSandboxEnvironmentOptions) {
+    validateEnv(options.env, dockerErrors);
+    this.#options = options;
+  }
+
+  async #acquire(): Promise<DockerEngine> {
+    this.#holders++;
+    try {
+      return await this.#connect();
+    } catch (error) {
+      this.#holders--;
+      throw error;
+    }
+  }
+
+  /** The last holder closes the engine, and the next acquire connects again. */
+  async #release(): Promise<void> {
+    if (--this.#holders > 0) return;
+    const engines = [...this.#connected.values()];
+    this.#connected.clear();
+    for (const engine of engines) await engine.dispose();
+  }
+
+  async #withEngine<T>(fn: (engine: DockerEngine) => Promise<T>): Promise<T> {
+    const engine = await this.#acquire();
+    try {
+      return await fn(engine);
+    } finally {
+      await this.#release();
+    }
+  }
+
+  #strategy(
+    engine: DockerEngine,
+    chat: SandboxContext,
+  ): ContainerSandboxStrategy<DockerCommonOptions, DockerEngine> {
+    const { volumes, ...options } = this.#options;
+    const opts = { ...options, volumes: volumes?.(chat) ?? [] };
+    if (options.dockerfile !== undefined) {
+      return new ContainerfileStrategy(opts, engine, {
+        dockerfile: options.dockerfile,
+        context: options.context ?? '.',
+        showBuildLogs: options.showBuildLogs ?? false,
+        identity: options.platform,
+      });
+    }
+    return new RuntimeStrategy(opts, engine, {
+      image: options.image ?? engine.defaultImage,
+      installers: [],
+    });
+  }
+
+  async open(chat: SandboxContext): Promise<ChatSandbox> {
+    const engine = await this.#acquire();
+    let container: ChatEngineContainer;
+    try {
+      container = await this.#strategy(engine, chat).openChat(
+        chatSandboxName(this.#options.namespace, chat),
+        chatSandboxLabels(this.#options.namespace, chat),
+      );
+    } catch (error) {
+      await this.#release();
+      throw error;
+    }
+    const sandbox = chatContainerSandbox(
+      container,
+      dockerErrors,
+      chat.chatId,
+      () => this.#release(),
+    );
+    if (this.#options.readiness) {
+      try {
+        await this.#options.readiness(sandbox);
+      } catch (error) {
+        await sandbox.close().catch(() => {});
+        throw error;
+      }
+    }
+    return sandbox;
+  }
+
+  /** `docker stop` with the engine's grace, which the init cuts short. */
+  async stop(chat: SandboxContext): Promise<void> {
+    await this.#withEngine(async (engine) => {
+      const found = await engine.docker.containers
+        .find(chatSandboxName(this.#options.namespace, chat))
+        .catch(unavailable);
+      await found?.stop().catch((error: unknown) => {
+        if (error instanceof ContainerNotFoundError) return;
+        unavailable(error);
+      });
+    });
+  }
+
+  /** `docker rm -f` with the container's anonymous volumes; named volumes stay. */
+  async delete(chat: SandboxContext): Promise<void> {
+    await this.#withEngine(async (engine) => {
+      const found = await engine.find(
+        chatSandboxName(this.#options.namespace, chat),
+      );
+      await found?.remove();
+    });
   }
 }
 

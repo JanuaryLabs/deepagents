@@ -3,6 +3,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { setTimeout } from 'node:timers/promises';
 
 import type {
+  ChatContainerEngine,
+  ChatEngineContainer,
   CommonSandboxOptions,
   ContainerEngine,
   ContainerErrorFactory,
@@ -11,7 +13,7 @@ import type {
 } from './container-engine.ts';
 import { containerSession, validateEnv } from './container-session.ts';
 import { type Installer } from './installers/installer.ts';
-import type { DisposableSandbox } from './types.ts';
+import { type DisposableSandbox, SandboxNotFoundError } from './types.ts';
 
 const CONTAINER_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
 
@@ -61,15 +63,16 @@ function suppress(originalError: unknown, cleanupError: unknown): void {
  */
 export abstract class ContainerSandboxStrategy<
   TOpts extends CommonSandboxOptions = CommonSandboxOptions,
+  TEngine extends ContainerEngine<TOpts> = ContainerEngine<TOpts>,
 > {
-  protected engine: ContainerEngine<TOpts>;
+  protected engine: TEngine;
   protected opts: TOpts;
   protected volumes: SandboxVolume[];
   protected name?: string;
   protected workdir: string;
   private createdVolumes = new Set<string>();
 
-  constructor(opts: TOpts, engine: ContainerEngine<TOpts>) {
+  constructor(opts: TOpts, engine: TEngine) {
     this.opts = opts;
     this.engine = engine;
     validateSandboxOptions(opts, engine.errors);
@@ -117,6 +120,53 @@ export abstract class ContainerSandboxStrategy<
       }
     }
     return sandbox;
+  }
+
+  /**
+   * The running chat container `name`: unpaused or started when it exists,
+   * created with `labels` and configured when it does not. A create that
+   * another caller won takes the winner's container. A container this call
+   * created and could not configure is removed. The engine stays open.
+   */
+  async openChat(
+    this: ContainerSandboxStrategy<TOpts, ChatContainerEngine<TOpts>>,
+    name: string,
+    labels: Record<string, string>,
+  ): Promise<ChatEngineContainer> {
+    const found = await this.engine.find(name);
+    if (found) {
+      try {
+        await found.resume();
+        return found;
+      } catch (error) {
+        if (!(error instanceof SandboxNotFoundError)) throw error;
+      }
+    }
+
+    const image = await this.getImage();
+    await this.prepareVolumes();
+    const { created, container } = await this.engine.createChat(
+      image,
+      name,
+      this.opts,
+      this.workdir,
+      labels,
+    );
+    if (!created) {
+      await container.resume();
+      return container;
+    }
+    try {
+      await this.engine.ensureWorkdir(container, this.workdir);
+      await this.configure(container, image);
+      await this.assertBashAvailable(container);
+    } catch (error) {
+      await container
+        .remove()
+        .catch((removeError: unknown) => suppress(error, removeError));
+      throw error;
+    }
+    return container;
   }
 
   protected containerName(): string {
@@ -333,13 +383,14 @@ export abstract class ContainerSandboxStrategy<
  */
 export class RuntimeStrategy<
   TOpts extends CommonSandboxOptions = CommonSandboxOptions,
-> extends ContainerSandboxStrategy<TOpts> {
+  TEngine extends ContainerEngine<TOpts> = ContainerEngine<TOpts>,
+> extends ContainerSandboxStrategy<TOpts, TEngine> {
   private image: string;
   private installers: Installer[];
 
   constructor(
     opts: TOpts,
-    engine: ContainerEngine<TOpts>,
+    engine: TEngine,
     mode: { image: string; installers: Installer[] },
   ) {
     super(opts, engine);
@@ -370,7 +421,8 @@ export class RuntimeStrategy<
  */
 export class ContainerfileStrategy<
   TOpts extends CommonSandboxOptions = CommonSandboxOptions,
-> extends ContainerSandboxStrategy<TOpts> {
+  TEngine extends ContainerEngine<TOpts> = ContainerEngine<TOpts>,
+> extends ContainerSandboxStrategy<TOpts, TEngine> {
   private dockerfile: string;
   private dockerContext: string;
   private showBuildLogs: boolean;
@@ -378,7 +430,7 @@ export class ContainerfileStrategy<
 
   constructor(
     opts: TOpts,
-    engine: ContainerEngine<TOpts>,
+    engine: TEngine,
     mode: {
       dockerfile: string;
       context: string;

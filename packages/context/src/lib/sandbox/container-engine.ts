@@ -66,6 +66,21 @@ export interface SandboxNamedVolume {
 
 export type SandboxVolume = SandboxBindVolume | SandboxNamedVolume;
 
+/** A named volume that exists before the sandbox. The framework never creates or removes it. */
+export interface SandboxExternalVolume {
+  type: 'volume';
+  lifecycle?: 'external';
+  name: string;
+  containerPath: string;
+  /** Default: `true`. */
+  readOnly?: boolean;
+  subPath?: string;
+  noCopy?: boolean;
+}
+
+/** What a chat sandbox mounts: its durable files live in volumes the host provides. */
+export type ChatSandboxVolume = SandboxBindVolume | SandboxExternalVolume;
+
 /**
  * The options the shared skeleton is allowed to read. Each engine extends this
  * with its own dialect knobs (Docker's `container` create body; Apple's `arch`),
@@ -225,4 +240,36 @@ export interface ContainerEngine<
   buildImage(spec: ImageBuildSpec): Promise<void>;
   /** Releases what the engine holds, such as its connection. */
   dispose(): Promise<void>;
+}
+
+/** The container of a chat, which the engine keeps when it stops. */
+export interface ChatEngineContainer extends EngineContainer {
+  /**
+   * Makes this container run: starts it when it is stopped, unpauses it when
+   * it is paused. Rejects with `SandboxNotFoundError` when it is gone, or when
+   * another container now has its name. Never creates one.
+   */
+  resume(): Promise<void>;
+  /** Removes it, running or not, with its anonymous volumes. Resolves when it is gone. */
+  remove(): Promise<void>;
+}
+
+/** An engine that runs the containers of chats beside one-off containers. */
+export interface ChatContainerEngine<
+  TOpts extends CommonSandboxOptions = CommonSandboxOptions,
+> extends ContainerEngine<TOpts> {
+  /** The container named `name`, as it is; `undefined` when there is none. */
+  find(name: string): Promise<ChatEngineContainer | undefined>;
+  /**
+   * Creates and starts the chat container `name`, kept when it stops and
+   * marked with `labels`. `created: false` gives the container that another
+   * caller made under the name, which may not run yet.
+   */
+  createChat(
+    image: string,
+    name: string,
+    opts: TOpts,
+    workdir: string,
+    labels: Record<string, string>,
+  ): Promise<{ created: boolean; container: ChatEngineContainer }>;
 }

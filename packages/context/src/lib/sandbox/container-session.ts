@@ -13,6 +13,7 @@ import { text } from 'node:stream/consumers';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import type {
+  ChatEngineContainer,
   ContainerErrorFactory,
   EngineContainer,
   EngineProcess,
@@ -20,7 +21,7 @@ import type {
 } from './container-engine.ts';
 import { collect, controlProcess, resolveIn, textCalls } from './session.ts';
 import { shellQuote } from './shell-quote.ts';
-import type { CommandResult, DisposableSandbox } from './types.ts';
+import type { ChatSandbox, CommandResult, DisposableSandbox } from './types.ts';
 
 // The scripts are copied from `vercel-sandbox-session.ts` of
 // `@ai-sdk/sandbox-vercel`, which does not export them. Containers are Linux,
@@ -458,4 +459,46 @@ export function containerSession(
     deleteFile: ({ path, abortSignal }) =>
       deleteFileOverExec(container, path, abortSignal),
   };
+}
+
+/**
+ * The handle of a chat's container: its session, `resume`, and a `close` that
+ * runs `release` once and never touches the container. Once closed, every
+ * operation rejects with an error that names the chat.
+ */
+export function chatContainerSandbox(
+  container: ChatEngineContainer,
+  errors: ContainerErrorFactory,
+  chatId: string,
+  release: () => Promise<void>,
+): ChatSandbox {
+  const session = containerSession(container, errors);
+  let closing: Promise<void> | undefined;
+  const close = () => (closing ??= release());
+  const live =
+    <Args extends unknown[], Result>(
+      operation: (...args: Args) => PromiseLike<Result>,
+    ) =>
+    async (...args: Args): Promise<Result> => {
+      if (closing !== undefined) {
+        throw new Error(`The sandbox handle of chat "${chatId}" is closed.`);
+      }
+      return operation(...args);
+    };
+  return Object.assign(session, {
+    run: live(session.run),
+    spawn: live(session.spawn),
+    readFile: live(session.readFile),
+    readBinaryFile: live(session.readBinaryFile),
+    readTextFile: live(session.readTextFile),
+    writeFile: live(session.writeFile),
+    writeBinaryFile: live(session.writeBinaryFile),
+    writeTextFile: live(session.writeTextFile),
+    stat: live(session.stat),
+    listDirectory: live(session.listDirectory),
+    deleteFile: live(session.deleteFile),
+    resume: live(() => container.resume()),
+    close,
+    [Symbol.asyncDispose]: close,
+  });
 }
