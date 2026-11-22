@@ -2,14 +2,14 @@
 
 ## Release Process
 
-Releases need no command. When CI passes for a push to `main`, the [Release workflow](.github/workflows/release.yml) releases what the conventional commits since the last `release/*` tag ask for:
+Releases need no command. Each push to `main` starts the [Release workflow](.github/workflows/release.yml), which does not wait for CI: CI runs beside it and only reports, as in zukhruf. It releases what the conventional commits since the last `release/*` tag ask for:
 
-1. It checks that `main` is still the commit that CI tested. If a newer commit is on `main`, it stops: the run of the newer commit releases it.
-2. `npx nx release version` builds the public packages, sets the new version, then commits, tags (`release/x.x.x`) and pushes the release commit to `main`.
-3. `npx nx run tools:check-consumer-install` packs the packages and installs them in a consumer.
+1. zukhruf's `nx-release-version` action builds the public packages and writes the new version into the checkout of the runner only. It commits, tags and pushes nothing, so `main` gets no release commit and there is nothing to pull.
+2. `npx nx run tools:check-consumer-install` packs the packages and installs them in a consumer.
+3. zukhruf's `release-tag` action makes the tag `release/x.x.x` on the pushed commit through the GitHub API.
 4. The packages are published to npm with provenance. A version that is already on npm is skipped.
 
-A push with no `fix:`, `feat:`, `refactor:` or breaking commit since the last release changes nothing. The release commit and tag are pushed with `GITHUB_TOKEN`, so they start no CI run.
+A push with no `fix:`, `feat:`, `refactor:` or breaking commit since the last release changes nothing. The versions in the `package.json` files on `main` stay at 7.16.0, the last release that committed them: npm and the release tags hold the versions (`npm view @deepagents/<package> version`).
 
 To release, merge or push conventional commits to `main`, then check the [Actions tab](../../actions) and [npm](https://www.npmjs.com/org/deepagents).
 
@@ -47,5 +47,5 @@ Check the workflow logs in the Actions tab. Common issues:
 
 The publish step already retries once the packages that the first attempt did not publish (for example, after a sigstore Rekor 409). Do not push or delete `release/*` tags by hand.
 
-- **The run failed before the Version step** (npm authentication, the build): nothing was tagged. Fix the cause and re-run the failed Release run from the Actions tab. If a newer commit is already on `main`, the re-run stops, and the run of that commit releases instead.
-- **The run failed after the Version step** (the consumer install check or the publish): the release commit and tag are on `main`, but npm does not have the version. If the cause is outside the repo (an npm or registry error), re-run the failed Release run from the Actions tab: the tested-commit step accepts the release commit that the run made on top of the tested commit, so the re-run versions nothing new and publishes the version that npm does not have. If the cause needs a change in the repo, push the fix to `main`. When CI passes, its Release run publishes: if the fix is a `chore:` or `docs:` commit, it publishes the version that failed; if it is a `fix:` or `feat:` commit, it publishes the next version, and the failed version is never published.
+- **The run failed before the tag step** (npm authentication, the build, the consumer install check): nothing was tagged. Re-run the failed Release run from the Actions tab when the cause was outside the repo, or push the fix: the run of the next push releases these commits too.
+- **The run failed after the tag step** (the publish): the tag is on the pushed commit, but npm does not have the version. If the cause is outside the repo (an npm or registry error), re-run the failed Release run from the Actions tab: it finds the tag on its commit and publishes that version. If the cause needs a change in the repo, push the fix: its run counts from that tag, so a `fix:` or `feat:` publishes the next version and the failed version is never published, and a `chore:` or `docs:` publishes nothing.
