@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { z } from 'zod';
 
-import type { BashToolkit } from '@deepagents/context';
+import type { BashToolkit, DisposableSandbox } from '@deepagents/context';
 import { createBashTool, createVirtualSandbox } from '@deepagents/context';
 import { devtool } from '@deepagents/devtool';
 import { fileTelemetry, tracesHttp } from '@deepagents/devtool/traces';
@@ -37,7 +37,7 @@ const INFO_URL = `${ZUKHRUF_MOUNT_PATH}/info`;
 const TRACE_ID = '1'.repeat(32);
 
 /** These turns never use the sandbox; the toolkit only needs a real one to start. */
-async function unusedSandbox(): Promise<BashToolkit> {
+async function unusedSandbox(): Promise<BashToolkit<DisposableSandbox>> {
   return createBashTool({
     sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
   });

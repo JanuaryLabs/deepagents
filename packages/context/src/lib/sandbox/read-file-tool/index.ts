@@ -2,7 +2,7 @@ import { type ToolExecutionOptions, tool } from 'ai';
 import path from 'node:path';
 import z from 'zod';
 
-import type { DisposableSandbox, ReadFileTool } from '../types.ts';
+import type { ReadFileTool, SandboxSession } from '../types.ts';
 import { binaryFileFormat } from './binary.ts';
 import { type FileFormat } from './format.ts';
 import { imageFileFormat } from './image.ts';
@@ -38,7 +38,7 @@ export function createReadFileTool({
   sandbox,
   workingDirectory,
 }: {
-  sandbox: DisposableSandbox;
+  sandbox: SandboxSession;
   workingDirectory: string | undefined;
 }): ReadFileTool {
   return tool({

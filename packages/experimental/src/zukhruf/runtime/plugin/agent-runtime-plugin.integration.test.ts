@@ -11,6 +11,7 @@ import { z } from 'zod';
 
 import {
   InMemoryContextStore,
+  type SandboxContext,
   SqliteStreamStore,
   createVirtualSandbox,
 } from '@deepagents/context';
@@ -21,7 +22,6 @@ import {
   AgentRuntime,
   CodeModeTools,
   DirectMessaging,
-  type SandboxContext,
   Spawning,
   SqliteMailboxStore,
   Supervision,

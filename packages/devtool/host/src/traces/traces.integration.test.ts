@@ -20,7 +20,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
-import type { BashToolkit } from '@deepagents/context';
+import type { BashToolkit, DisposableSandbox } from '@deepagents/context';
 import { createBashTool, createVirtualSandbox } from '@deepagents/context';
 import {
   FileTraceAdapter,
@@ -50,7 +50,7 @@ const TRACES_HREF = `${ZUKHRUF_MOUNT_PATH}/traces`;
 const traceSummaries = z.array(z.record(z.string(), z.unknown()));
 
 /** These turns never use the sandbox; the toolkit only needs a real one to start. */
-async function unusedSandbox(): Promise<BashToolkit> {
+async function unusedSandbox(): Promise<BashToolkit<DisposableSandbox>> {
   return createBashTool({
     sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
   });

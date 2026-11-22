@@ -16,7 +16,7 @@ import {
   type BashToolkit,
   type CommandResult,
   type CreateBashToolOptions,
-  type DisposableSandbox,
+  type SandboxSession,
   type WrappedBashTool,
   type WriteFileTool,
 } from './types.ts';
@@ -97,7 +97,7 @@ async function listInitialFiles(
 }
 
 async function uploadInitialFiles(
-  sandbox: DisposableSandbox,
+  sandbox: SandboxSession,
   workingDirectory: string | undefined,
   files: InitialFile[],
 ): Promise<void> {
@@ -124,9 +124,9 @@ async function uploadInitialFiles(
  * The sandbox provides isolation and execution; these tools only translate AI
  * SDK tool calls into that backend contract.
  */
-export async function createBashTool(
-  options: CreateBashToolOptions,
-): Promise<BashToolkit> {
+export async function createBashTool<SANDBOX extends SandboxSession>(
+  options: CreateBashToolOptions<SANDBOX>,
+): Promise<BashToolkit<SANDBOX>> {
   const { workingDirectory, sandbox } = options;
   const initialFiles = await listInitialFiles(options);
 

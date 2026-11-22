@@ -8,26 +8,21 @@ import type {
   BashToolkitTools,
   ContextFragment,
   CreateAgent,
+  DisposableSandbox,
+  SandboxContext,
 } from '@deepagents/context';
 
 import type { AgentPluginDefinition } from './runtime/agent-runtime.ts';
 import type { ZukhrufToolSet } from './tool.ts';
 
 /**
- * Sandboxes are per-chat: the factory receives the conversation identity so
- * the backend can be named by `chatId` and re-attached across turns, workers,
- * and restarts (the container engine is the registry — no in-memory state).
- */
-export interface SandboxContext {
-  chatId: string;
-  userId: string;
-}
-
-/**
  * Needs both file tools: the uploads plugin tells the model to read attached
  * images with `readFile`.
  */
-export type ZukhrufSandbox = AgentSandbox<BashToolkitTools> & {
+export type ZukhrufSandbox = AgentSandbox<
+  BashToolkitTools,
+  DisposableSandbox
+> & {
   /** Absolute directory containing this conversation's files and skills. Omit to disable discovery. */
   readonly workingDirectory?: string;
 };
@@ -50,6 +45,12 @@ export interface AgentDeclaration extends AgentControls<ZukhrufToolSet> {
   name: string;
   description?: string;
   model: AgentModel;
+  /**
+   * Sandboxes are per-chat: the factory receives the conversation identity so
+   * the backend can be named by `chatId` and re-attached across turns,
+   * workers, and restarts (the container engine is the registry — no
+   * in-memory state).
+   */
   sandbox: (context: SandboxContext) => Promise<ZukhrufSandbox>;
   /** Native agent-loop termination; omitted uses the context agent default. */
   stopWhen?: CreateAgent['stopWhen'];

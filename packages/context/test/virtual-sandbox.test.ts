@@ -2,7 +2,11 @@ import { InMemoryFs, defineCommand } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { createVirtualSandbox } from '@deepagents/context';
+import {
+  SandboxNotFoundError,
+  VirtualSandboxEnvironment,
+  createVirtualSandbox,
+} from '@deepagents/context';
 
 describe('createVirtualSandbox', () => {
   it('executes normal bash commands directly', async () => {
@@ -152,6 +156,189 @@ describe('createVirtualSandbox', () => {
         },
       }),
       /service never came up/,
+    );
+  });
+});
+
+describe('VirtualSandboxEnvironment', () => {
+  it('rejects resume on a handle whose chat sandbox was deleted, also after the chat is opened again', async () => {
+    const environment = new VirtualSandboxEnvironment();
+    const chat = { chatId: 'chat-1', userId: 'user-1' };
+    await using held = await environment.open(chat);
+
+    await environment.delete(chat);
+    await assert.rejects(held.resume(), SandboxNotFoundError);
+    await using reopened = await environment.open(chat);
+
+    await assert.rejects(held.resume(), SandboxNotFoundError);
+    await reopened.resume();
+  });
+
+  it('resolves delete of a chat that has no sandbox, however often it is called', async () => {
+    const environment = new VirtualSandboxEnvironment();
+    const chat = { chatId: 'chat-1', userId: 'user-1' };
+
+    await environment.delete(chat);
+    await environment.delete(chat);
+
+    await using sandbox = await environment.open(chat);
+    assert.strictEqual(
+      (await sandbox.run({ command: 'echo ok' })).stdout,
+      'ok\n',
+    );
+  });
+
+  it('gives a second open of the same chat the same sandbox', async () => {
+    const environment = new VirtualSandboxEnvironment();
+    const chat = { chatId: 'chat-1', userId: 'user-1' };
+    await using first = await environment.open(chat);
+    await using second = await environment.open(chat);
+
+    await first.run({ command: 'echo from-first > /tmp/shared.txt' });
+
+    assert.strictEqual(
+      await second.readTextFile({ path: '/tmp/shared.txt' }),
+      'from-first\n',
+    );
+  });
+
+  it('keys the sandbox by the chat, so another user of the same chat opens the same sandbox', async () => {
+    const environment = new VirtualSandboxEnvironment();
+    await using first = await environment.open({
+      chatId: 'chat-1',
+      userId: 'user-1',
+    });
+    await using second = await environment.open({
+      chatId: 'chat-1',
+      userId: 'user-2',
+    });
+
+    await first.writeTextFile({ path: '/tmp/shared.txt', content: 'shared' });
+
+    assert.strictEqual(
+      await second.readTextFile({ path: '/tmp/shared.txt' }),
+      'shared',
+    );
+  });
+
+  it('keeps each chat in its own sandbox', async () => {
+    const environment = new VirtualSandboxEnvironment();
+    await using one = await environment.open({ chatId: 'one', userId: 'u' });
+    await using other = await environment.open({
+      chatId: 'other',
+      userId: 'u',
+    });
+
+    await one.writeTextFile({ path: '/tmp/a.txt', content: 'one' });
+
+    assert.strictEqual(await other.stat({ path: '/tmp/a.txt' }), null);
+  });
+
+  it('keeps the chat files when a handle closes', async () => {
+    const environment = new VirtualSandboxEnvironment();
+    const chat = { chatId: 'chat-1', userId: 'user-1' };
+    const first = await environment.open(chat);
+    await first.writeTextFile({ path: '/tmp/kept.txt', content: 'kept' });
+
+    await first.close();
+
+    await using next = await environment.open(chat);
+    assert.strictEqual(
+      await next.readTextFile({ path: '/tmp/kept.txt' }),
+      'kept',
+    );
+  });
+
+  it('removes the chat files on delete, so the next open is fresh', async () => {
+    const environment = new VirtualSandboxEnvironment();
+    const chat = { chatId: 'chat-1', userId: 'user-1' };
+    await using before = await environment.open(chat);
+    await before.writeTextFile({ path: '/tmp/gone.txt', content: 'gone' });
+
+    await environment.delete(chat);
+
+    await using after = await environment.open(chat);
+    assert.strictEqual(await after.stat({ path: '/tmp/gone.txt' }), null);
+  });
+
+  it('rejects every operation of a handle opened before its chat sandbox was deleted', async () => {
+    const environment = new VirtualSandboxEnvironment();
+    const chat = { chatId: 'chat-1', userId: 'user-1' };
+    await using held = await environment.open(chat);
+    await held.writeTextFile({ path: '/tmp/a.txt', content: 'a' });
+
+    await environment.delete(chat);
+
+    const outcome = (operation: PromiseLike<unknown>) =>
+      Promise.resolve(operation).then(
+        () => 'resolved',
+        (error) =>
+          error instanceof SandboxNotFoundError ? error.name : String(error),
+      );
+    assert.deepStrictEqual(
+      {
+        run: await outcome(held.run({ command: 'echo hi' })),
+        spawn: await outcome(held.spawn({ command: 'echo hi' })),
+        readFile: await outcome(held.readFile({ path: '/tmp/a.txt' })),
+        writeFile: await outcome(
+          held.writeFile({
+            path: '/tmp/b.txt',
+            content: new Blob(['b']).stream(),
+          }),
+        ),
+        stat: await outcome(held.stat({ path: '/tmp/a.txt' })),
+        resume: await outcome(held.resume()),
+      },
+      {
+        run: 'SandboxNotFoundError',
+        spawn: 'SandboxNotFoundError',
+        readFile: 'SandboxNotFoundError',
+        writeFile: 'SandboxNotFoundError',
+        stat: 'SandboxNotFoundError',
+        resume: 'SandboxNotFoundError',
+      },
+    );
+  });
+
+  it('rejects run on a closed handle as closed, not as a gone sandbox, and resolves a second close and the scope exit', async () => {
+    const environment = new VirtualSandboxEnvironment();
+    await using sandbox = await environment.open({
+      chatId: 'chat-1',
+      userId: 'user-1',
+    });
+
+    await sandbox.close();
+    await sandbox.close();
+
+    await assert.rejects(async () => sandbox.run({ command: 'echo hi' }), {
+      name: 'Error',
+      message: 'The sandbox handle of chat "chat-1" is closed.',
+    });
+  });
+
+  it('runs the readiness hook on every open, and runs it again after a failed open', async () => {
+    const chat = { chatId: 'chat-1', userId: 'user-1' };
+    const calls: string[] = [];
+    const environment = new VirtualSandboxEnvironment({
+      readiness: async (sandbox) => {
+        calls.push((await sandbox.run({ command: 'echo ready' })).stdout);
+        if (calls.length === 1) throw new Error('not ready');
+      },
+    });
+
+    const failed = await environment.open(chat).then(
+      () => 'opened',
+      (error: Error) => error.message,
+    );
+    await using opened = await environment.open(chat);
+    await using again = await environment.open(chat);
+
+    assert.deepStrictEqual(
+      { failed, calls },
+      {
+        failed: 'not ready',
+        calls: ['ready\n', 'ready\n', 'ready\n'],
+      },
     );
   });
 });

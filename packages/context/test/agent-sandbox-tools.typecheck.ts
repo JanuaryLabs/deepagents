@@ -5,8 +5,12 @@ import {
   type AgentSandbox,
   type BashToolkit,
   type BashToolkitTools,
+  type ChatSandbox,
+  type StoppableSandboxEnvironment,
+  VirtualSandboxEnvironment,
   agent,
   chat,
+  createBashTool,
   structuredOutput,
 } from '@deepagents/context';
 
@@ -59,3 +63,18 @@ async function verifySandboxToolsContract(toolkit: BashToolkit) {
 }
 
 void verifySandboxToolsContract;
+
+async function verifyToolkitKeepsChatHandle(handle: ChatSandbox) {
+  const toolkit = await createBashTool({ sandbox: handle });
+  await toolkit.sandbox.resume();
+  await toolkit.sandbox.close();
+  const shown: AgentSandbox<BashToolkitTools, ChatSandbox> = toolkit;
+  void shown;
+
+  // @ts-expect-error A virtual sandbox has no compute to stop.
+  const stoppable: StoppableSandboxEnvironment =
+    new VirtualSandboxEnvironment();
+  void stoppable;
+}
+
+void verifyToolkitKeepsChatHandle;

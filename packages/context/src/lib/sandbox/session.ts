@@ -2,14 +2,38 @@ import {
   type Experimental_SandboxProcess,
   extractLines,
 } from '@ai-sdk/provider-utils';
+import { hash } from 'node:crypto';
 import { posix } from 'node:path';
 import { text } from 'node:stream/consumers';
 
-import type { CommandResult, DisposableSandbox } from './types.ts';
+import type {
+  CommandResult,
+  DisposableSandbox,
+  SandboxContext,
+} from './types.ts';
 
 // The parts every process-backed session builds the same way: the container,
 // Microsandbox and Daytona sessions. How each backend kills, stats, lists and
 // deletes stays with the backend.
+
+/** The native name of a chat's sandbox: one per namespace and chat, valid on every backend. */
+export function chatSandboxName(
+  namespace: string,
+  chat: SandboxContext,
+): string {
+  return `sandbox-${hash('sha256', JSON.stringify([namespace, chat.chatId])).slice(0, 32)}`;
+}
+
+/** The labels every chat sandbox carries, so an operator or a test finds it by chat. */
+export function chatSandboxLabels(
+  namespace: string,
+  chat: SandboxContext,
+): Record<string, string> {
+  return {
+    'deepagents.sandbox.namespace': namespace,
+    'deepagents.sandbox.chat': chat.chatId,
+  };
+}
 
 /** The contract types `encoding` as a string; Node accepts only its own names. */
 function bufferEncoding(encoding = 'utf-8'): BufferEncoding {

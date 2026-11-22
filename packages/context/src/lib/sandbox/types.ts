@@ -17,15 +17,22 @@ export interface CommandResult {
 }
 
 /**
- * The AI SDK sandbox session plus the lifecycle the session contract leaves to
- * its owner. `run` may return {@link CommandResult}'s host-only fields; a value
- * of this type is still a valid `Experimental_SandboxSession`.
+ * What every sandbox offers its user: the AI SDK sandbox session, whose `run`
+ * may also return {@link CommandResult}'s host-only fields. A value of this
+ * type is a valid `Experimental_SandboxSession`. It has no lifecycle: who ends
+ * a sandbox, and how, depends on how it was made.
  */
-export interface DisposableSandbox
-  extends Omit<Experimental_SandboxSession, 'run'>, AsyncDisposable {
+export interface SandboxSession extends Omit<
+  Experimental_SandboxSession,
+  'run'
+> {
   readonly run: (
     options: Experimental_SandboxRunOptions,
   ) => PromiseLike<CommandResult>;
+}
+
+/** A sandbox from a `create*Sandbox` factory, which its owner disposes. */
+export interface DisposableSandbox extends SandboxSession, AsyncDisposable {
   /**
    * Release what this sandbox created, and leave what it attached to (a
    * container, VM or remote sandbox it found by name or id). Called
@@ -34,10 +41,77 @@ export interface DisposableSandbox
   dispose(): Promise<void>;
 }
 
+/** The chat whose sandbox an environment opens, stops or deletes. */
+export interface SandboxContext {
+  readonly chatId: string;
+  readonly userId: string;
+}
+
+/**
+ * A live handle to one chat's sandbox, from {@link SandboxEnvironment.open}.
+ * Other handles, in this process or another, can reach the same sandbox.
+ * Once {@link SandboxEnvironment.delete} removes the chat's sandbox, every
+ * operation of a handle opened before it (`run`, `spawn`, each file
+ * operation and `resume`) rejects with {@link SandboxNotFoundError}, also
+ * after the chat is opened again; the owner closes the handle and opens the
+ * chat again.
+ */
+export interface ChatSandbox extends SandboxSession, AsyncDisposable {
+  /**
+   * Makes the sandbox this handle holds usable again: starts it when it is
+   * stopped, and resolves at once when it runs. Rejects with
+   * {@link SandboxNotFoundError} when the sandbox no longer exists, or when
+   * another sandbox now has its name; the owner then closes this handle and
+   * opens the chat again. Never creates a sandbox.
+   */
+  resume(): Promise<void>;
+  /**
+   * Releases what this process holds for the sandbox, such as the engine
+   * client or the VM connection. Never stops, starts or removes the sandbox.
+   * Runs once; `[Symbol.asyncDispose]` is the same call. Afterwards every
+   * operation of this handle rejects, and never with
+   * {@link SandboxNotFoundError}: using a closed handle is a bug in its
+   * owner, not a sandbox that is gone.
+   */
+  close(): Promise<void>;
+}
+
+/**
+ * Where the sandboxes of chats live: a backend's options and a namespace.
+ * Building one does no I/O. Each chat has one sandbox, which the backend
+ * names from the namespace and the chat's id; the caller never names it.
+ * Options apply only when `open` creates the sandbox: an existing sandbox
+ * keeps the configuration it was created with.
+ */
+export interface SandboxEnvironment {
+  /**
+   * The chat's sandbox, live: attached when it runs, started when it is
+   * stopped, created when there is none. Two callers that open the same chat
+   * at once get the same sandbox.
+   */
+  open(chat: SandboxContext): Promise<ChatSandbox>;
+  /**
+   * Removes the chat's sandbox and everything in it outside its volumes.
+   * Never starts it, never touches a volume, and resolves when there is none.
+   */
+  delete(chat: SandboxContext): Promise<void>;
+}
+
+/** An environment whose sandboxes can stop and keep their files. */
+export interface StoppableSandboxEnvironment extends SandboxEnvironment {
+  /**
+   * Stops the chat's sandbox and keeps its files, so the next `open` or
+   * `resume` starts it again. Never starts it; resolves when it is already
+   * stopped or there is none.
+   */
+  stop(chat: SandboxContext): Promise<void>;
+}
+
 /**
  * The environment behind a sandbox no longer exists (its container was
  * removed), so every operation of that sandbox rejects with this error until
- * its owner acquires a new one by name. A failed command is not this error.
+ * its owner acquires a new one by name, or closes the handle and opens the
+ * chat again. A failed command is not this error.
  */
 export class SandboxNotFoundError extends Error {
   constructor(sandbox: string, options?: ErrorOptions) {
@@ -47,12 +121,12 @@ export class SandboxNotFoundError extends Error {
 }
 
 /**
- * Readiness option accepted by every sandbox factory. Readiness is workload
- * policy supplied by the caller — the hook runs once after boot and gates the
- * factory's return; on failure the sandbox is disposed and the error
- * propagates, so callers either receive a sandbox that satisfies their
- * readiness condition or no sandbox at all. Recurring health monitoring stays
- * the caller's responsibility.
+ * Readiness option accepted by every sandbox factory and environment.
+ * Readiness is workload policy supplied by the caller. The hook runs once per
+ * `create` or `open`, so it must be safe to repeat, and gates its return; on
+ * failure the sandbox is released and the error propagates, so callers either
+ * receive a sandbox that satisfies their readiness condition or no sandbox at
+ * all. Recurring health monitoring stays the caller's responsibility.
  *
  * @example
  * ```typescript
@@ -63,7 +137,7 @@ export class SandboxNotFoundError extends Error {
  * ```
  */
 export interface SandboxReadinessOptions {
-  readiness?: (sandbox: DisposableSandbox) => void | Promise<void>;
+  readiness?: (sandbox: SandboxSession) => void | Promise<void>;
 }
 
 /**
@@ -110,8 +184,10 @@ export interface AfterBashCallOutput {
   meta?: Record<string, unknown>;
 }
 
-export interface CreateBashToolOptions {
-  sandbox: DisposableSandbox;
+export interface CreateBashToolOptions<
+  SANDBOX extends SandboxSession = SandboxSession,
+> {
+  sandbox: SANDBOX;
   /**
    * Absolute directory every command starts in, created when the tool is created.
    * When omitted, commands run in the sandbox's default working directory and
@@ -156,12 +232,17 @@ export type BashToolkitTools = SandboxTools & {
  * model `tools` and the AI SDK `sandbox`; it calls no tool by name, so a host
  * that shows the model only bash passes `{ tools: { bash }, sandbox }`.
  */
-export interface AgentSandbox<TOOLS extends SandboxTools = SandboxTools> {
+export interface AgentSandbox<
+  TOOLS extends SandboxTools = SandboxTools,
+  SANDBOX extends SandboxSession = SandboxSession,
+> {
   tools: TOOLS;
-  sandbox: DisposableSandbox;
+  sandbox: SANDBOX;
 }
 
 /** What `createBashTool` returns: every tool it builds, and its sandbox. */
-export interface BashToolkit extends AgentSandbox<BashToolkitTools> {
+export interface BashToolkit<
+  SANDBOX extends SandboxSession = SandboxSession,
+> extends AgentSandbox<BashToolkitTools, SANDBOX> {
   bash: WrappedBashTool;
 }

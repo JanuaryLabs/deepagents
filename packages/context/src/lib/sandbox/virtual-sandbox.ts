@@ -2,11 +2,19 @@ import { createJustBashSandboxSessionFromNativeSandbox } from '@ai-sdk/sandbox-j
 import {
   type CustomCommand,
   type IFileSystem,
+  InMemoryFs,
   Sandbox,
   type SandboxOptions,
 } from 'just-bash';
 
-import type { DisposableSandbox, SandboxReadinessOptions } from './types.ts';
+import {
+  type ChatSandbox,
+  type DisposableSandbox,
+  type SandboxContext,
+  type SandboxEnvironment,
+  SandboxNotFoundError,
+  type SandboxReadinessOptions,
+} from './types.ts';
 
 export interface CreateVirtualSandboxOptions extends SandboxReadinessOptions {
   fs: IFileSystem;
@@ -40,4 +48,75 @@ export async function createVirtualSandbox({
     }
   }
   return sandbox;
+}
+
+export type VirtualSandboxEnvironmentOptions = Omit<
+  CreateVirtualSandboxOptions,
+  'fs'
+>;
+
+/**
+ * Chat sandboxes of just-bash in this process, each over its own in-memory
+ * filesystem, which the environment keeps until `delete`. Another process or
+ * another environment does not reach them. Nothing runs between commands, so
+ * it has no `stop`. Each handle runs its own interpreter over the chat's
+ * filesystem; `close` ends that interpreter and keeps the files. A handle
+ * whose chat was deleted rejects every operation with
+ * {@link SandboxNotFoundError}, and a closed handle rejects every operation:
+ * just-bash itself keeps serving a stopped interpreter, and a deleted chat's
+ * filesystem lives on in the handles that hold it.
+ */
+export class VirtualSandboxEnvironment implements SandboxEnvironment {
+  readonly #options: VirtualSandboxEnvironmentOptions;
+  readonly #filesystems = new Map<string, IFileSystem>();
+
+  constructor(options: VirtualSandboxEnvironmentOptions = {}) {
+    this.#options = options;
+  }
+
+  async open(chat: SandboxContext): Promise<ChatSandbox> {
+    let fs = this.#filesystems.get(chat.chatId);
+    if (fs === undefined) {
+      fs = new InMemoryFs();
+      this.#filesystems.set(chat.chatId, fs);
+    }
+    const sandbox = await createVirtualSandbox({ ...this.#options, fs });
+    let closing: Promise<void> | undefined;
+    const close = () => (closing ??= sandbox.dispose());
+    const live =
+      <Args extends unknown[], Result>(
+        operation: (...args: Args) => PromiseLike<Result>,
+      ) =>
+      async (...args: Args): Promise<Result> => {
+        if (closing !== undefined) {
+          throw new Error(
+            `The sandbox handle of chat "${chat.chatId}" is closed.`,
+          );
+        }
+        if (this.#filesystems.get(chat.chatId) !== fs) {
+          throw new SandboxNotFoundError(chat.chatId);
+        }
+        return operation.apply(sandbox, args);
+      };
+    return Object.assign(sandbox, {
+      run: live(sandbox.run),
+      spawn: live(sandbox.spawn),
+      readFile: live(sandbox.readFile),
+      readBinaryFile: live(sandbox.readBinaryFile),
+      readTextFile: live(sandbox.readTextFile),
+      writeFile: live(sandbox.writeFile),
+      writeBinaryFile: live(sandbox.writeBinaryFile),
+      writeTextFile: live(sandbox.writeTextFile),
+      stat: live(sandbox.stat),
+      listDirectory: live(sandbox.listDirectory),
+      deleteFile: live(sandbox.deleteFile),
+      resume: live(async () => {}),
+      close,
+      [Symbol.asyncDispose]: close,
+    });
+  }
+
+  async delete(chat: SandboxContext): Promise<void> {
+    this.#filesystems.delete(chat.chatId);
+  }
 }

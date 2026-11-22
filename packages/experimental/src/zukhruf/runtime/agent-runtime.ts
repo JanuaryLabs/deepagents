@@ -62,8 +62,8 @@ export interface AgentPluginHost {
    * Attach the root agent's sandbox for `conversation`. The handle is
    * borrowed: a plugin must never dispose it. The backend is named by
    * `chatId` and re-attached across turns, workers, and restarts (see
-   * `SandboxContext` in `agent.ts`), so this works before the conversation
-   * exists.
+   * `AgentDeclaration.sandbox` in `agent.ts`), so this works before the
+   * conversation exists.
    */
   sandbox(conversation: ConversationId): Promise<ZukhrufSandbox>;
   conversationExists(conversation: ConversationId): Promise<boolean>;

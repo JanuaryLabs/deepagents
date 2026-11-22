@@ -1,10 +1,6 @@
-import { SandboxNotFoundError } from '@deepagents/context';
+import { type SandboxContext, SandboxNotFoundError } from '@deepagents/context';
 
-import type {
-  AgentDeclaration,
-  SandboxContext,
-  ZukhrufSandbox,
-} from '../agent.ts';
+import type { AgentDeclaration, ZukhrufSandbox } from '../agent.ts';
 
 /**
  * The sandbox of each conversation, as DESIGN.md places it (sandbox →

@@ -29,7 +29,6 @@ import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
 
 import {
-  type BashToolkit,
   type DisposableSandbox,
   InMemoryContextStore,
   SqliteStreamStore,
@@ -1119,7 +1118,7 @@ describe('zukhruf runtime — setup failure durability', () => {
     const model = scriptedModel(track);
     const agentDeclaration = declaration(model);
     let sandboxCalls = 0;
-    agentDeclaration.sandbox = async (): Promise<BashToolkit> => {
+    agentDeclaration.sandbox = async () => {
       if (++sandboxCalls === 1) throw new Error('sandbox setup failed');
       return buildSandbox();
     };
@@ -3650,7 +3649,7 @@ describe('zukhruf runtime — conversation status', () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     const model = scriptedModel(track);
     const agentDeclaration = declaration(model);
-    agentDeclaration.sandbox = async (): Promise<BashToolkit> => {
+    agentDeclaration.sandbox = async () => {
       throw new Error('sandbox setup failed');
     };
     await using h = await harness(model, {
