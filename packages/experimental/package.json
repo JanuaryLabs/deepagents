@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/experimental",
-  "version": "7.13.1",
+  "version": "7.14.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -106,9 +106,9 @@
     "@ai-sdk/openai": "^4.0.111",
     "@ai-sdk/provider": "^4.0.37",
     "@ai-sdk/provider-utils": "^5.0.76",
-    "@deepagents/compaction": "7.13.1",
-    "@deepagents/context": "7.13.1",
-    "@deepagents/elements": "7.13.1",
+    "@deepagents/compaction": "7.14.0",
+    "@deepagents/context": "7.14.0",
+    "@deepagents/elements": "7.14.0",
     "@electric-sql/pglite": "^0.5.4",
     "@iarna/toml": "^2.2.5",
     "@napi-rs/keyring": "^2.1.0",
