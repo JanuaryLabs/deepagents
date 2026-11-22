@@ -2,6 +2,8 @@ import { type SandboxContext, SandboxNotFoundError } from '@deepagents/context';
 
 import type { AgentDeclaration, ZukhrufSandbox } from '../agent.ts';
 
+type Acquisition = () => Promise<ZukhrufSandbox>;
+
 /**
  * The sandbox of each conversation, as DESIGN.md places it (sandbox →
  * conversation, stream → turn). The first turn of a conversation acquires it
@@ -14,7 +16,11 @@ import type { AgentDeclaration, ZukhrufSandbox } from '../agent.ts';
  */
 export class ConversationSandboxes implements AsyncDisposable {
   // One memoized acquisition for each declaration and conversation.
-  readonly #held = new Map<string, () => Promise<ZukhrufSandbox>>();
+  readonly #held = new Map<string, Acquisition>();
+  // The check of a held acquisition that is in flight, which every caller
+  // shares: a caller's own check could still be running on a handle that
+  // another caller's check found gone and disposed.
+  readonly #checks = new WeakMap<Acquisition, Acquisition>();
 
   acquire(
     declaration: AgentDeclaration,
@@ -26,15 +32,30 @@ export class ConversationSandboxes implements AsyncDisposable {
       context.userId,
     ]);
     const held = this.#held.get(key);
-    if (held !== undefined)
-      return this.#existing(key, held, declaration, context);
-    // A failed acquisition is forgotten, so the next turn tries again.
-    const acquiring = declaration.sandbox(context).catch((error: unknown) => {
+    if (held === undefined)
+      return this.#hold(key, declaration.sandbox(context));
+    let check = this.#checks.get(held);
+    if (check === undefined) {
+      const checking = this.#check(key, held, declaration, context).finally(
+        () => this.#checks.delete(held),
+      );
+      check = () => checking;
+      this.#checks.set(held, check);
+    }
+    return check();
+  }
+
+  // A failed acquisition is forgotten, so the next turn tries again.
+  #hold(
+    key: string,
+    acquiring: Promise<ZukhrufSandbox>,
+  ): Promise<ZukhrufSandbox> {
+    const held = acquiring.catch((error: unknown) => {
       this.#held.delete(key);
       throw error;
     });
-    this.#held.set(key, () => acquiring);
-    return acquiring;
+    this.#held.set(key, () => held);
+    return held;
   }
 
   /**
@@ -42,9 +63,9 @@ export class ConversationSandboxes implements AsyncDisposable {
    * are bound to this handle, so a sandbox found gone mid-turn fails the
    * model's tool call instead of acquiring a new sandbox.
    */
-  async #existing(
+  async #check(
     key: string,
-    held: () => Promise<ZukhrufSandbox>,
+    held: Acquisition,
     declaration: AgentDeclaration,
     context: SandboxContext,
   ): Promise<ZukhrufSandbox> {
@@ -55,13 +76,12 @@ export class ConversationSandboxes implements AsyncDisposable {
     } catch (error) {
       if (!(error instanceof SandboxNotFoundError)) throw error;
     }
-    // Only the first caller to find it gone releases it; every caller then
-    // shares one new acquisition.
-    if (this.#held.get(key) === held) {
-      this.#held.delete(key);
-      await handle.sandbox.dispose();
-    }
-    return this.acquire(declaration, context);
+    // Held before the release, so a caller that comes during it waits for
+    // the new acquisition instead of starting one of its own.
+    return this.#hold(
+      key,
+      handle.sandbox.dispose().then(() => declaration.sandbox(context)),
+    );
   }
 
   async [Symbol.asyncDispose](): Promise<void> {

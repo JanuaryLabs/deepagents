@@ -5,7 +5,10 @@ import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { createDockerSandbox } from '@deepagents/context';
+import {
+  type DisposableSandbox,
+  createDockerSandbox,
+} from '@deepagents/context';
 import {
   type AgentPluginHost,
   AgentRuntime,
@@ -112,15 +115,18 @@ test('a chat whose container was removed between turns runs its next turn in a n
 });
 
 /** The runtime's plugin host, reached as a plugin reaches it. */
-async function chatRuntime(directory: string, chatId: string) {
+async function chatRuntime(
+  directory: string,
+  chatId: string,
+  createBackend: () => Promise<DisposableSandbox> = () =>
+    createDockerSandbox({ ...defaults, name: chatId }),
+) {
   const hosts: AgentPluginHost[] = [];
   const root = defineAgent({
     name: 'root',
     model: hostnameEveryTurn(),
     instructions: [],
-    sandbox: defineSandbox(() =>
-      createDockerSandbox({ ...defaults, name: chatId }),
-    ),
+    sandbox: defineSandbox(createBackend),
     plugins: [
       {
         name: 'host',
@@ -169,6 +175,84 @@ test('two callers that find the container removed share one new container', asyn
       filters: { name: [`^/${name}$`] },
     });
     const ran = await first.sandbox.run({ command: 'hostname' });
+    assert.deepStrictEqual(
+      {
+        sameSandbox: first.sandbox === second.sandbox,
+        containers: named.length,
+        replaced: named[0]?.Id !== removed.id,
+        hostname: { stdout: ran.stdout, exitCode: ran.exitCode },
+      },
+      {
+        sameSandbox: true,
+        containers: 1,
+        replaced: true,
+        hostname: { stdout: `${named[0]?.Id?.slice(0, 12)}\n`, exitCode: 0 },
+      },
+    );
+  } finally {
+    await (await client.containers.find(name))?.remove({ force: true });
+  }
+});
+
+test('a caller whose check of the removed container ends after another caller released it shares the new container', async () => {
+  const chatId = `overlap-${crypto.randomUUID()}`;
+  const name = `sandbox-${chatId}`;
+  const client = await testbed.client();
+  let containerRemoved = false;
+  try {
+    await using directory = await new TemporaryFiles().directory('zukhruf-');
+    const { runtime, plugins } = await chatRuntime(
+      directory.path,
+      chatId,
+      async () => {
+        const sandbox = await createDockerSandbox({
+          ...defaults,
+          name: chatId,
+        });
+        const removable = !containerRemoved;
+        const released = Promise.withResolvers<void>();
+        let checks = 0;
+        const dispose = async () => {
+          await sandbox.dispose();
+          released.resolve();
+        };
+        return {
+          ...sandbox,
+          // A second check of the removed container ends after its release,
+          // as a check still in flight when its engine client is disposed
+          // does: the disposed client fails the command instead of throwing.
+          run: async (options) => {
+            if (removable && containerRemoved && ++checks === 2) {
+              await released.promise;
+            }
+            return sandbox.run(options);
+          },
+          dispose,
+          [Symbol.asyncDispose]: dispose,
+        };
+      },
+    );
+    await using host = runtime;
+    await host.work();
+    const conversation = { chatId, userId: 'owner' };
+    await bashOutput(
+      await host.enqueue(conversation, userTurn('turn-1', 'first')),
+    );
+    const removed = await client.containers.find(name);
+    assert.ok(removed);
+    await removed.remove({ force: true });
+    containerRemoved = true;
+
+    const [first, second] = await Promise.all([
+      plugins.sandbox(conversation),
+      plugins.sandbox(conversation),
+    ]);
+
+    const named = await client.containers.list({
+      all: true,
+      filters: { name: [`^/${name}$`] },
+    });
+    const ran = await second.sandbox.run({ command: 'hostname' });
     assert.deepStrictEqual(
       {
         sameSandbox: first.sandbox === second.sandbox,
