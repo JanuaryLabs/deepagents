@@ -12,7 +12,6 @@ const bucket = process.env.MINIO_BUCKET ?? 'agent-storage';
 // driver_opts carry the MinIO config); run.ts just attaches to it.
 await using sandbox = await timed('createDockerSandbox', () =>
   createDockerSandbox({
-    name: `minio-demo`,
     image: 'alpine:latest',
     installers: [pkg(['strace'])],
     volumes: [

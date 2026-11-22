@@ -128,29 +128,12 @@ export interface AppleContainerResources {
   cpus?: number;
 }
 
-/**
- * Stable identity suffix for the container. When provided, the container is
- * named `sandbox-<name>` instead of a randomized `sandbox-<8hex>`. If a
- * container with that name already exists, the sandbox attaches to it:
- * installers, volume preparation, and env are skipped. If it exists but is
- * stopped, it is started first. Otherwise it is created fresh.
- *
- * This is get-or-create for SEQUENTIAL callers. Creating the same name from
- * two callers concurrently is not supported — the `container` runtime races on
- * duplicate-name `run` (it can leave a container mid-transition and fail with
- * an internal error); serialize creation of a given name.
- *
- * Must match `/^[A-Za-z0-9_.-]+$/`.
- */
-type StableContainerName = string;
-
 export interface AppleContainerCommonOptions {
   volumes?: AppleContainerVolume[];
   resources?: AppleContainerResources;
   /** DNS nameservers passed to `container run --dns`. */
   dns?: readonly string[];
   env?: Record<string, string>;
-  name?: StableContainerName;
   /**
    * Args appended after the image at `container run` time.
    * - `undefined` (default): `['tail', '-f', '/dev/null']` keep-alive so a bare
@@ -246,9 +229,9 @@ const containerInspectEntry = z.object({
 function readContainerStatus(entry: unknown): 'running' | 'stopped' {
   const parsed = containerInspectEntry.safeParse(entry);
   const status = parsed.success ? parsed.data.status.toLowerCase() : '';
-  // "running"/"booted" are up → attach. "stopped" is the only state
-  // `container start` accepts. Fail loud on anything else (error/exited/…)
-  // rather than attaching to a broken container.
+  // "running"/"booted" are up. "stopped" is the only state `container start`
+  // accepts. Fail loud on anything else (error/exited/…) rather than opening
+  // a broken container.
   if (status === 'running' || status === 'booted') return 'running';
   if (status === 'stopped') return 'stopped';
   throw new AppleContainerSandboxError(
@@ -404,6 +387,13 @@ class AppleContainer implements EngineContainer {
     );
   }
 
+  /** A call of the CLI reaches the container by name, and reads its absence as a failed command. */
+  async assertCurrent(): Promise<void> {
+    if ((await inspectContainer(this.name)) === undefined) {
+      throw new SandboxNotFoundError(this.name);
+    }
+  }
+
   async stop(): Promise<void> {
     try {
       await spawn(CLI, ['stop', this.name]);
@@ -426,7 +416,7 @@ const chatInspectEntry = z.object({
 });
 
 /** The container named `name` as the CLI reports it; `undefined` when there is none. */
-async function inspectChatContainer(
+async function inspectContainer(
   name: string,
 ): Promise<
   { state: 'running' | 'stopped'; instance: string | undefined } | undefined
@@ -481,14 +471,14 @@ class AppleChatContainer extends AppleContainer implements ChatEngineContainer {
 
   /** The state of the container that has the name, when it is this one. */
   async #state(): Promise<'running' | 'stopped'> {
-    const found = await inspectChatContainer(this.name);
+    const found = await inspectContainer(this.name);
     if (found === undefined || found.instance !== this.#instance) {
       throw new SandboxNotFoundError(this.name);
     }
     return found.state;
   }
 
-  async assertCurrent(): Promise<void> {
+  override async assertCurrent(): Promise<void> {
     await this.#state();
   }
 
@@ -553,7 +543,7 @@ function commandArgs(opts: AppleContainerCommonOptions): readonly string[] {
  * The Apple `container` CLI dialect, plugged into the shared
  * `ContainerSandboxStrategy` skeleton: `--cwd`/`--env` exec flags, JSON
  * `inspect` parsing, virtiofs mounts, `apiserver`-down detection, and Apple
- * error classes. `runArgs` and `parseStatus` are its argv and status dialect.
+ * error classes. `runArgs` is its argv dialect.
  */
 export const appleEngine: ChatContainerEngine<AppleContainerCommonOptions> & {
   runArgs(
@@ -562,7 +552,6 @@ export const appleEngine: ChatContainerEngine<AppleContainerCommonOptions> & {
     opts: AppleContainerCommonOptions,
     workdir: string,
   ): string[];
-  parseStatus(stdout: string): 'running' | 'stopped' | 'absent';
 } = {
   bindMountsOnClient: true,
   defaultImage: 'docker.io/library/bash:5.3-alpine3.24',
@@ -580,44 +569,8 @@ export const appleEngine: ChatContainerEngine<AppleContainerCommonOptions> & {
     ];
   },
 
-  parseStatus(stdout) {
-    const entries = safeParseArray(stdout);
-    if (entries.length === 0) return 'absent';
-    return readContainerStatus(entries[0]);
-  },
-
-  async attach(name, image) {
-    let status: 'running' | 'stopped' | 'absent';
-    try {
-      const result = await spawn(CLI, ['inspect', name]);
-      status = this.parseStatus(result.stdout.trim());
-    } catch (error) {
-      const message = getCliErrorMessage(error);
-      if (isServiceDown(message)) throw new ContainerServiceNotRunningError();
-      if (isMissing(message)) return undefined;
-      throw new AppleContainerSandboxError(
-        `Failed to inspect container "${name}": ${message}`,
-      );
-    }
-    if (status === 'absent') return undefined;
-    if (status === 'stopped') {
-      try {
-        await spawn(CLI, ['start', name]);
-      } catch (error) {
-        const message = getCliErrorMessage(error);
-        if (isServiceDown(message)) throw new ContainerServiceNotRunningError();
-        throw new AppleContainerCreationError(
-          message,
-          image,
-          Error.isError(error) ? error : undefined,
-        );
-      }
-    }
-    return new AppleContainer(name);
-  },
-
   async find(name) {
-    const found = await inspectChatContainer(name);
+    const found = await inspectContainer(name);
     return found && new AppleChatContainer(name, found.instance);
   },
 
@@ -833,7 +786,7 @@ interface AppleContainerChatOptions extends SandboxReadinessOptions {
 
 type AppleChatEnvironmentBase<T extends AppleContainerCommonOptions> = Omit<
   T,
-  'volumes' | 'name'
+  'volumes'
 > &
   AppleContainerChatOptions;
 
@@ -923,8 +876,12 @@ export class AppleContainerSandboxEnvironment implements StoppableSandboxEnviron
 }
 
 /**
- * Create a sandbox backed by Apple's `container` CLI — Linux containers run as
- * lightweight per-container virtual machines on Apple silicon (macOS 26+).
+ * Create a one-off sandbox backed by Apple's `container` CLI — Linux
+ * containers run as lightweight per-container virtual machines on Apple
+ * silicon (macOS 26+). The container has a generated name, which nothing else
+ * reaches. `dispose()` stops and removes it, and every operation rejects once
+ * `dispose()` is called. A container that outlives the process is a chat's,
+ * from an {@link AppleContainerSandboxEnvironment}.
  *
  * Requires the `container` service to be running (`container system start`)
  * with a guest kernel configured (`container system kernel set --recommended`).

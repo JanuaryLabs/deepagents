@@ -10,9 +10,9 @@ This page explains the internal architecture of the sandbox system. Read this if
 Docker and Apple Container share creation strategies. Each backend supplies
 an engine that handles its container runtime:
 
-- **Bridge (dialect axis).** `ContainerEngine<TOpts>` defines how to attach to
-  a named container, start a container, inspect and manage volumes, build an
-  image, and release the engine connection. It returns an `EngineContainer`
+- **Bridge (dialect axis).** `ContainerEngine<TOpts>` defines how to start a
+  container, inspect and manage volumes, build an image, and release the
+  engine connection. It returns an `EngineContainer`
   that executes commands, streams processes, reads and writes files, provides
   an installer context, and stops the container. There is one engine per
   backend: `DockerEngine` uses the Engine API through `@zukhruf/docker`, and
@@ -51,29 +51,29 @@ create()
   │     ├─ Containerfile:  engine.buildImage(...) if needed, return cached tag
   │     └─ Compose:       return '' (compose manages images)
   │
-  ├─ 2. acquireContainer()   ← common: engine.attach(name) for a named sandbox,
-  │     │                       else prepareVolumes() and engine.run(...)
+  ├─ 2. acquireContainer()   ← common: prepareVolumes() and engine.run(...)
+  │     │                       under a generated name
   │     └─ Compose override:  docker compose up -d, then find the service container
   │
-  ├─ 3. engine.ensureWorkdir()  ← new containers only; no-op on Docker, `mkdir -p` on Apple
+  ├─ 3. engine.ensureWorkdir()  ← no-op on Docker, `mkdir -p` on Apple
   │
-  ├─ 4. configure()          ← new containers only, mode-specific
+  ├─ 4. configure()          ← mode-specific
   │     ├─ Runtime:       run installers via container.installerContext()
   │     ├─ Containerfile:  no-op (image already configured)
   │     └─ Compose:       no-op (compose file defines everything)
   │
-  ├─ 5. assertBashAvailable()   ← new and attached containers
+  ├─ 5. assertBashAvailable()
   │
   ├─ 6. createSandboxMethods()  ← command, process, file, and disposal methods
   │
   └─ 7. readiness(sandbox)      ← optional caller hook, awaited before return
 ```
 
-If setup fails, the base class releases a newly acquired container, removes
-managed volumes it created, and disposes the engine. An attached container is
-left running when setup fails. If the readiness hook fails, the
-sandbox is disposed. `dispose()` releases only a container that the sandbox
-created; an attached container is borrowed and stays running.
+If setup fails, the base class releases the container, removes managed
+volumes it created, and disposes the engine. If the readiness hook fails, the
+sandbox is disposed. `dispose()` releases the container, and once it is
+called, every operation of the sandbox rejects with an error that names the
+sandbox.
 
 The methods object returned by `createSandboxMethods()` also implements
 `[Symbol.asyncDispose]`, which delegates to `dispose()`. Because
@@ -84,8 +84,7 @@ The methods object returned by `createSandboxMethods()` also implements
 
 All single-container strategies start a long-running container and then execute
 commands inside it. Docker sends the create request of the Engine API with the
-body that `docker run -d --rm` sends for the same options. A named sandbox uses
-`containers.createOrGet()`, so the container that exists wins. When the image
+body that `docker run -d --rm` sends for the same options. When the image
 is missing, the engine pulls it and creates the container again. Apple
 Container uses `container run` with equivalent name, resource, volume,
 environment, arch, and command controls where the Apple CLI supports them.
@@ -232,7 +231,7 @@ process runs under a small wrapper. The wrapper records the process group, and
 There are two extension points, one per axis:
 
 **Add a backend → implement `ContainerEngine`.** Provide the engine
-operations (attach, run, volumes, image build, dispose) and an
+operations (run, volumes, image build, dispose) and an
 `EngineContainer` for each container (commands, processes, files, installer
 context, stop). Then write a factory that passes the engine to the shared
 strategies. No strategy subclass is necessary. `appleEngine` works this way.
@@ -246,9 +245,6 @@ import {
 } from '@deepagents/context';
 
 const podmanEngine: ContainerEngine = {
-  attach: async (name, image) => {
-    /* the running container, or undefined */
-  },
   run: async (image, name, opts, workdir) => {
     /* { created, container } */
   },

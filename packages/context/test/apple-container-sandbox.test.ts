@@ -18,6 +18,10 @@ import {
 } from '@deepagents/context';
 
 import { appleContainerUnavailable } from './helpers/apple-container.ts';
+import {
+  everySessionOperation,
+  sessionOutcomes,
+} from './helpers/chat-sandbox-outcomes.ts';
 
 const temporaryFiles = new TemporaryFiles();
 
@@ -39,13 +43,6 @@ async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
  * every case throws before any `container` CLI call is made.
  */
 describe('createAppleContainerSandbox validation', () => {
-  it('rejects an invalid container name', async () => {
-    await assert.rejects(
-      createAppleContainerSandbox({ name: 'bad name!' }),
-      AppleContainerSandboxError,
-    );
-  });
-
   it('rejects an invalid env var key', async () => {
     await assert.rejects(
       createAppleContainerSandbox({ env: { 'BAD=KEY': 'v' } }),
@@ -88,79 +85,6 @@ describe('createAppleContainerSandbox validation', () => {
         ],
       }),
       AppleContainerVolumePathError,
-    );
-  });
-});
-
-/**
- * `container inspect` output parsing — pure, runs everywhere. Fixtures are
- * real captured stdout from the CLI: 1.0.0 (build ee848e3) nests the state
- * inside a `status` object, while pre-1.0 returned a bare string.
- */
-describe('appleEngine.parseStatus', () => {
-  const cli100Inspect = (state: string) =>
-    JSON.stringify([
-      {
-        configuration: { id: 'sandbox-abc12345' },
-        status: {
-          networks:
-            state === 'running'
-              ? [
-                  {
-                    hostname: 'sandbox-abc12345',
-                    ipv4Address: '192.168.64.33/24',
-                  },
-                ]
-              : [],
-          startedDate: '2026-07-06T13:57:44Z',
-          state,
-        },
-      },
-    ]);
-
-  it('parses a CLI 1.0.0 running container', () => {
-    assert.strictEqual(
-      appleEngine.parseStatus(cli100Inspect('running')),
-      'running',
-    );
-  });
-
-  it('parses a CLI 1.0.0 stopped container', () => {
-    assert.strictEqual(
-      appleEngine.parseStatus(cli100Inspect('stopped')),
-      'stopped',
-    );
-  });
-
-  it('parses the legacy pre-1.0 bare-string status', () => {
-    assert.strictEqual(
-      appleEngine.parseStatus('[{"status": "running"}]'),
-      'running',
-    );
-    assert.strictEqual(
-      appleEngine.parseStatus('[{"status": "booted"}]'),
-      'running',
-    );
-    assert.strictEqual(
-      appleEngine.parseStatus('[{"status": "stopped"}]'),
-      'stopped',
-    );
-  });
-
-  it('treats an empty inspect result as absent', () => {
-    assert.strictEqual(appleEngine.parseStatus('[]'), 'absent');
-    assert.strictEqual(appleEngine.parseStatus(''), 'absent');
-  });
-
-  it('fails loud on an unknown state, naming the actual state', () => {
-    assert.throws(
-      () => appleEngine.parseStatus(cli100Inspect('error')),
-      (thrown: unknown) => {
-        assert.ok(thrown instanceof AppleContainerSandboxError);
-        assert.match(thrown.message, /"error"/);
-        assert.doesNotMatch(thrown.message, /object object/i);
-        return true;
-      },
     );
   });
 });
@@ -418,33 +342,50 @@ describe('Apple container sandbox (runtime)', async () => {
     );
   });
 
-  it('reuses a stably-named container across handles', async () => {
-    const name = `reuse-${process.pid}`;
-    const first = await createAppleContainerSandbox({ name });
-    let second: DisposableSandbox | undefined;
-    try {
-      await first.writeTextFile({
-        path: '/workspace/marker.txt',
-        content: 'shared',
-      });
-      second = await createAppleContainerSandbox({ name });
-      const seen = await second.readTextFile({ path: '/workspace/marker.txt' });
-      assert.strictEqual(seen, 'shared');
-    } finally {
-      await second?.dispose();
-      await first.dispose();
-    }
+  it('rejects every operation with an error that names the sandbox once it is disposed, never with SandboxNotFoundError', async () => {
+    const sandbox = await createAppleContainerSandbox();
+    const name = await containerName(sandbox);
+
+    await sandbox.dispose();
+
+    assert.deepStrictEqual(
+      await sessionOutcomes(sandbox),
+      everySessionOperation(`Error: The sandbox "${name}" is disposed.`),
+    );
   });
 
-  it('leaves the container running when a sandbox that attached by name is disposed', async () => {
-    const name = `borrowed-${process.pid}`;
-    await using owner = await createAppleContainerSandbox({ name });
-    const borrower = await createAppleContainerSandbox({ name });
+  it('gives each one-off a container of its own under a generated name', async () => {
+    await using first = await createAppleContainerSandbox();
+    await using second = await createAppleContainerSandbox();
+    await first.writeTextFile({ path: 'marker.txt', content: 'first' });
 
-    await borrower.dispose();
+    const firstName = await containerName(first);
+    const secondName = await containerName(second);
 
-    const result = await owner.run({ command: 'echo still-here' });
-    assert.strictEqual(result.exitCode, 0, result.stderr);
-    assert.strictEqual(result.stdout, 'still-here\n');
+    assert.match(firstName, /^sandbox-[0-9a-f]{8}$/);
+    assert.match(secondName, /^sandbox-[0-9a-f]{8}$/);
+    assert.notStrictEqual(firstName, secondName);
+    assert.strictEqual(await second.readTextFile({ path: 'marker.txt' }), null);
+  });
+
+  it('rejects every operation with SandboxNotFoundError once its container is removed outside the sandbox', async () => {
+    await using sandbox = await createAppleContainerSandbox();
+    await spawn('container', [
+      'delete',
+      '--force',
+      await containerName(sandbox),
+    ]);
+
+    assert.deepStrictEqual(
+      await sessionOutcomes(sandbox),
+      everySessionOperation('SandboxNotFoundError'),
+    );
   });
 });
+
+/** The CLI makes a container's hostname its name. */
+async function containerName(sandbox: DisposableSandbox): Promise<string> {
+  const name = (await sandbox.readTextFile({ path: '/etc/hostname' }))?.trim();
+  assert.ok(name, 'the sandbox has a hostname');
+  return name;
+}

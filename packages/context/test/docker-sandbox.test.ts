@@ -19,7 +19,6 @@ import {
   type InstallerContext,
   MissingRuntimeError,
   PackageInstallError,
-  SandboxNotFoundError,
   VolumeCreateError,
   VolumeInspectError,
   VolumePathError,
@@ -32,6 +31,10 @@ import {
   useSandbox,
 } from '@deepagents/context';
 
+import {
+  everySessionOperation,
+  sessionOutcomes,
+} from './helpers/chat-sandbox-outcomes.ts';
 import { readFirstChunk } from './helpers/read-first-chunk.ts';
 
 const temporaryFiles = new TemporaryFiles();
@@ -54,6 +57,17 @@ function withContainer({ HostConfig, ...config }: DockerContainerConfig) {
 
 function testVolumeName(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+/** The container of a one-off sandbox, found through its hostname: the start of the container's id. */
+async function containerOf(sandbox: DisposableSandbox) {
+  const hostname = (
+    await sandbox.readTextFile({ path: '/etc/hostname' })
+  )?.trim();
+  assert.ok(hostname, 'the sandbox has a hostname');
+  const container = await (await testbed.client()).containers.find(hostname);
+  assert.ok(container, `a container has the id ${hostname}`);
+  return container;
 }
 
 async function removeDockerVolume(name: string): Promise<void> {
@@ -518,11 +532,9 @@ describe('Docker Sandbox', () => {
       it('attaches an existing Docker volume and keeps it after dispose', async () => {
         await using volume = await testbed.volume();
 
-        const writerName = `volume-writer-${crypto.randomUUID()}`;
         {
           await using writer = await createDockerSandbox({
             ...defaults,
-            name: writerName,
             volumes: [
               {
                 type: 'volume',
@@ -539,11 +551,8 @@ describe('Docker Sandbox', () => {
           assert.strictEqual(writeResult.exitCode, 0);
         }
 
-        const readerName = `volume-reader-${crypto.randomUUID()}`;
-
         await using reader = await createDockerSandbox({
           ...defaults,
-          name: readerName,
           volumes: [
             {
               type: 'volume',
@@ -765,24 +774,17 @@ describe('Docker Sandbox', () => {
 
     describe('resource limits', () => {
       it('applies custom memory and CPU limits', async () => {
-        const name = `limits-${crypto.randomUUID()}`;
-
-        await using sandbox = await createDockerSandbox({
-          ...withContainer({
+        await using sandbox = await createDockerSandbox(
+          withContainer({
             HostConfig: { Memory: 256 * 1024 ** 2, NanoCpus: 500_000_000 },
           }),
-          name,
-        });
+        );
 
         // Container should work with limits
         const result = await sandbox.run({ command: 'echo "limited"' });
         assert.strictEqual(result.exitCode, 0);
         assert.strictEqual(result.stdout, 'limited\n');
-        const found = await (
-          await testbed.client()
-        ).containers.find(`sandbox-${name}`);
-        assert.ok(found, `sandbox-${name} must exist`);
-        const container = await found.inspect();
+        const container = await (await containerOf(sandbox)).inspect();
         assert.deepStrictEqual(
           {
             Memory: container.HostConfig?.Memory,
@@ -950,23 +952,16 @@ describe('Docker Sandbox', () => {
       });
 
       it('attaches container labels', async () => {
-        const name = `label-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-
-        await using sandbox = await createDockerSandbox({
-          ...withContainer({
+        await using sandbox = await createDockerSandbox(
+          withContainer({
             Labels: {
               ...defaults.container.Labels,
               'com.example.role': 'sandbox-test',
             },
           }),
-          name,
-        });
+        );
 
-        const found = await (
-          await testbed.client()
-        ).containers.find(`sandbox-${name}`);
-        assert.ok(found, `sandbox-${name} must exist`);
-        const container = await found.inspect();
+        const container = await (await containerOf(sandbox)).inspect();
         assert.strictEqual(
           container.Config?.Labels?.['com.example.role'],
           'sandbox-test',
@@ -1380,26 +1375,21 @@ await createDockerSandbox({ ...options, dockerfile }).then(
 
     describe('cleanup', () => {
       it('dispose stops and removes container', async () => {
-        const name = `dispose-${crypto.randomUUID()}`;
-        await using sandbox = await createDockerSandbox({ ...defaults, name });
+        await using sandbox = await createDockerSandbox(defaults);
         const beforeResult = await sandbox.run({ command: 'echo alive' });
         assert.strictEqual(beforeResult.exitCode, 0);
+        const { id } = await containerOf(sandbox);
 
         await sandbox.dispose();
 
         const client = await testbed.client();
-        assert.strictEqual(
-          await client.containers.find(`sandbox-${name}`),
-          undefined,
-        );
+        assert.strictEqual(await client.containers.find(id), undefined);
       });
 
       it('dispose resolves only after the engine removed a slow container, so its bind mount is free', async () => {
         await using fixture = await testbed.directory();
-        const name = `dispose-slow-${crypto.randomUUID()}`;
         const sandbox = await createDockerSandbox({
           ...defaults,
-          name,
           volumes: [
             {
               type: 'bind',
@@ -1416,24 +1406,23 @@ await createDockerSandbox({ ...options, dockerfile }).then(
             'echo owned > /data/owned.txt; mkdir -p /tmp/many; for file in {1..5000}; do : > /tmp/many/$file; done',
         });
         assert.strictEqual(files.exitCode, 0, files.stderr);
+        const { id } = await containerOf(sandbox);
 
         await sandbox.dispose();
 
         const client = await testbed.client();
-        assert.strictEqual(
-          await client.containers.find(`sandbox-${name}`),
-          undefined,
-        );
+        assert.strictEqual(await client.containers.find(id), undefined);
       });
 
       it('dispose rejects with the engine message when the engine fails to remove the container', async () => {
-        const name = `dispose-unremovable-${crypto.randomUUID()}`;
-        const containerName = `sandbox-${name}`;
         const client = await testbed.client();
-        const sandbox = await createDockerSandbox({
-          ...withContainer({ HostConfig: { CapAdd: ['LINUX_IMMUTABLE'] } }),
-          name,
-        });
+        const sandbox = await createDockerSandbox(
+          withContainer({ HostConfig: { CapAdd: ['LINUX_IMMUTABLE'] } }),
+        );
+        const containerName = (
+          await (await containerOf(sandbox)).inspect()
+        ).Name?.slice(1);
+        assert.ok(containerName, 'the container has a name');
         // /etc/hosts is a bind of a file in the engine's directory of the
         // container, so an immutable flag makes the engine's removal fail.
         // @zukhruf/docker's ContainerInspectResponse does not declare the
@@ -1486,29 +1475,18 @@ await createDockerSandbox({ ...options, dockerfile }).then(
         }
       });
 
-      it('dispose leaves a container it attached to by name running', async () => {
-        const name = `dispose-borrowed-${crypto.randomUUID()}`;
-        await using container = await testbed.start(
-          { Image: 'bash:5.3-alpine3.24', Cmd: ['tail', '-f', '/dev/null'] },
-          { name: `sandbox-${name}` },
-        );
-        const sandbox = await createDockerSandbox({ ...defaults, name });
+      it('rejects every operation with an error that names the sandbox once it is disposed, never with SandboxNotFoundError', async () => {
+        const sandbox = await createDockerSandbox(defaults);
+        const { Name } = await (await containerOf(sandbox)).inspect();
 
         await sandbox.dispose();
 
-        assert.strictEqual((await container.inspect()).State?.Running, true);
-      });
-
-      it('dispose of a sandbox that attached by name leaves the sandbox that created the container working', async () => {
-        const name = `dispose-shared-${crypto.randomUUID()}`;
-        await using owner = await createDockerSandbox({ ...defaults, name });
-        const borrower = await createDockerSandbox({ ...defaults, name });
-
-        await borrower.dispose();
-
-        const result = await owner.run({ command: 'echo still-here' });
-        assert.strictEqual(result.exitCode, 0, result.stderr);
-        assert.strictEqual(result.stdout, 'still-here\n');
+        assert.deepStrictEqual(
+          await sessionOutcomes(sandbox),
+          everySessionOperation(
+            `Error: The sandbox "${Name?.slice(1)}" is disposed.`,
+          ),
+        );
       });
 
       it('dispose is idempotent (can call multiple times)', async () => {
@@ -1520,244 +1498,36 @@ await createDockerSandbox({ ...options, dockerfile }).then(
       });
     });
 
-    describe('stable container name', () => {
-      function uniqueName(): string {
-        return `test-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-      }
+    describe('one-off containers', () => {
+      it('gives each one-off a container of its own under a generated name', async () => {
+        await using first = await createDockerSandbox(defaults);
+        await using second = await createDockerSandbox(defaults);
+        await first.writeTextFile({ path: 'marker.txt', content: 'first' });
 
-      async function removeContainer(containerId: string): Promise<void> {
-        const container = await (
-          await testbed.client()
-        ).containers.find(containerId);
-        await container?.remove({ force: true });
-      }
-
-      async function containerNames(name: string): Promise<string[]> {
-        const client = await testbed.client();
-        const containers = await client.containers.list({
-          all: true,
-          filters: { name: [`^/${name}$`] },
-        });
-        return containers.flatMap(({ Names }) => Names ?? []);
-      }
-
-      it('names the container `sandbox-<name>`', async () => {
-        const name = uniqueName();
-        const sandbox = await createDockerSandbox({ ...defaults, name });
-
-        try {
-          assert.deepStrictEqual(await containerNames(`sandbox-${name}`), [
-            `/sandbox-${name}`,
-          ]);
-        } finally {
-          await sandbox.dispose();
-          await removeContainer(`sandbox-${name}`);
-        }
-      });
-
-      it('attaches to an existing running container and skips installers', async () => {
-        const name = uniqueName();
-        const first = await createDockerSandbox({
-          ...defaults,
-          name,
-          installers: [pkg(['curl'])],
-        });
-
-        let second: DisposableSandbox | undefined;
-        try {
-          await first.run({ command: 'echo first-run > /workspace/marker' });
-
-          second = await createDockerSandbox({
-            ...defaults,
-            name,
-            // Different installers would normally rerun; attach must skip them.
-            installers: [pkg(['nonexistent-package-should-not-install'])],
-          });
-
-          const marker = await second.run({ command: 'cat /workspace/marker' });
-          assert.strictEqual(marker.exitCode, 0);
-          assert.strictEqual(marker.stdout, 'first-run\n');
-
-          const curl = await second.run({ command: 'curl --version' });
-          assert.strictEqual(curl.exitCode, 0);
-        } finally {
-          // The second sandbox borrows the container; the first created it,
-          // so its dispose() removes it.
-          await second?.dispose();
-          await first.dispose();
-          await removeContainer(`sandbox-${name}`);
-        }
-      });
-
-      it('converges two concurrent same-named creations onto one container', async () => {
-        // Both calls inspect 'absent', then race to `docker run`. The daemon
-        // serializes the create, so one wins and the loser's run fails with a
-        // name conflict. The loser must recover — reprobe and attach to the
-        // winner's container — instead of throwing, so BOTH handles end up on
-        // the same container. (This is the only path that exercises the
-        // name-collision recovery branch; every sequential case attaches via
-        // the inspect-first branch above.)
-        const name = uniqueName();
-
-        let a: DisposableSandbox | undefined;
-        let b: DisposableSandbox | undefined;
-        try {
-          // If recovery were broken, the losing create would reject and this
-          // Promise.all would reject — failing the test.
-          [a, b] = await Promise.all([
-            createDockerSandbox({ ...defaults, name }),
-            createDockerSandbox({ ...defaults, name }),
-          ]);
-
-          // One handle writes; the other must read it back — proving both
-          // resolved to the same underlying container.
-          await a.run({ command: 'echo converged > /workspace/marker' });
-          const read = await b.run({ command: 'cat /workspace/marker' });
-          assert.strictEqual(read.exitCode, 0);
-          assert.strictEqual(read.stdout, 'converged\n');
-
-          // Exactly one container exists with that name.
-          assert.deepStrictEqual(await containerNames(`sandbox-${name}`), [
-            `/sandbox-${name}`,
-          ]);
-        } finally {
-          await a?.dispose();
-          await b?.dispose();
-          await removeContainer(`sandbox-${name}`);
-        }
-      });
-
-      it('starts a stopped container with the same name and attaches', async () => {
-        // Pre-create a container WITHOUT --rm so it stays around after stop;
-        // the factory always uses --rm, so factory-created containers can
-        // never naturally be in this state. This covers external/handoff
-        // scenarios where another process created the container.
-        const name = uniqueName();
-        await using container = await testbed.start(
-          { Image: 'bash:5.3-alpine3.24', Cmd: ['tail', '-f', '/dev/null'] },
-          { name: `sandbox-${name}` },
+        const [firstName, secondName] = await Promise.all(
+          [first, second].map(
+            async (sandbox) =>
+              (await (await containerOf(sandbox)).inspect()).Name,
+          ),
         );
-        await container.stop();
 
-        await using sandbox = await createDockerSandbox({ ...defaults, name });
-
-        const result = await sandbox.run({ command: 'echo back-online' });
-        assert.strictEqual(result.exitCode, 0);
-        assert.strictEqual(result.stdout, 'back-online\n');
-        const found = await (
-          await testbed.client()
-        ).containers.find(`sandbox-${name}`);
-        assert.ok(found, `sandbox-${name} must exist`);
-        assert.strictEqual(found.id, container.id);
-        assert.strictEqual((await found.inspect()).State?.Running, true);
-      });
-
-      it('rejects names that are not Docker-legal before it reaches the engine', async () => {
-        // No engine listens here: the error must come from the input alone.
-        const environment = {
-          DOCKER_HOST: 'unix:///nonexistent/deepagents-sandbox.sock',
-        };
-        await assert.rejects(
-          createDockerSandbox({ ...defaults, environment, name: '' }),
-          /Invalid container name/,
+        assert.match(firstName ?? '', /^\/sandbox-[0-9a-f]{8}$/);
+        assert.match(secondName ?? '', /^\/sandbox-[0-9a-f]{8}$/);
+        assert.notStrictEqual(firstName, secondName);
+        assert.strictEqual(
+          await second.readTextFile({ path: 'marker.txt' }),
+          null,
         );
-        await assert.rejects(
-          createDockerSandbox({ ...defaults, environment, name: 'has spaces' }),
-          /Invalid container name/,
-        );
-        await assert.rejects(
-          createDockerSandbox({ ...defaults, environment, name: 'has/slash' }),
-          /Invalid container name/,
-        );
-      });
-
-      it('tolerates concurrent calls with the same name', async () => {
-        // Two parallel callers must both end up with a usable handle to the
-        // SAME container, regardless of who wins the `docker run` race. The
-        // loser may take the plain "saw running" attach path or the
-        // race-recovery "got conflict, re-probe, attach" path depending on
-        // scheduling — both are acceptable; this test is a smoke check
-        // that no caller throws.
-        const name = uniqueName();
-        const containerId = `sandbox-${name}`;
-
-        try {
-          const [a, b] = await Promise.all([
-            createDockerSandbox({ ...defaults, name }),
-            createDockerSandbox({ ...defaults, name }),
-          ]);
-
-          const ra = await a.run({ command: 'echo a' });
-          const rb = await b.run({ command: 'echo b' });
-          assert.strictEqual(ra.stdout, 'a\n');
-          assert.strictEqual(rb.stdout, 'b\n');
-
-          assert.deepStrictEqual(await containerNames(containerId), [
-            `/${containerId}`,
-          ]);
-
-          await a.dispose();
-        } finally {
-          await removeContainer(containerId);
-        }
       });
 
       it('rejects every operation with SandboxNotFoundError once its container is removed outside the sandbox', async () => {
-        const name = uniqueName();
-        try {
-          await using sandbox = await createDockerSandbox({
-            ...defaults,
-            name,
-          });
-          await removeContainer(`sandbox-${name}`);
-          const operations = {
-            run: () => sandbox.run({ command: 'true' }),
-            'run with a signal': () =>
-              sandbox.run({
-                command: 'true',
-                abortSignal: new AbortController().signal,
-              }),
-            spawn: () => sandbox.spawn({ command: 'true' }),
-            readFile: () => sandbox.readBinaryFile({ path: '/etc/hostname' }),
-            writeFile: () =>
-              sandbox.writeTextFile({ path: 'note.txt', content: 'note' }),
-          };
+        await using sandbox = await createDockerSandbox(defaults);
+        await (await containerOf(sandbox)).remove({ force: true });
 
-          const outcomes: Record<string, string> = {};
-          for (const [operation, call] of Object.entries(operations)) {
-            outcomes[operation] = await Promise.resolve(call()).then(
-              (value) => `resolved ${JSON.stringify(value)}`,
-              (error: Error) =>
-                error instanceof SandboxNotFoundError
-                  ? 'SandboxNotFoundError'
-                  : `${error.name}: ${error.message}`,
-            );
-          }
-
-          assert.deepStrictEqual(
-            outcomes,
-            Object.fromEntries(
-              Object.keys(operations).map((operation) => [
-                operation,
-                'SandboxNotFoundError',
-              ]),
-            ),
-          );
-        } finally {
-          await removeContainer(`sandbox-${name}`);
-        }
-      });
-
-      it('falls back to random naming when no name is provided', async () => {
-        const a = await createDockerSandbox(defaults);
-        const b = await createDockerSandbox(defaults);
-        try {
-          await a.run({ command: 'echo a' });
-          await b.run({ command: 'echo b' });
-        } finally {
-          await a.dispose();
-          await b.dispose();
-        }
+        assert.deepStrictEqual(
+          await sessionOutcomes(sandbox),
+          everySessionOperation('SandboxNotFoundError'),
+        );
       });
     });
   });

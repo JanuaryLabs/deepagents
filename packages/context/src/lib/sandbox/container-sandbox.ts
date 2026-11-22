@@ -1,47 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { setTimeout } from 'node:timers/promises';
 
 import type {
   ChatContainerEngine,
   ChatEngineContainer,
   CommonSandboxOptions,
   ContainerEngine,
-  ContainerErrorFactory,
   EngineContainer,
   SandboxVolume,
 } from './container-engine.ts';
 import { containerSession, validateEnv } from './container-session.ts';
 import { type Installer } from './installers/installer.ts';
 import { type DisposableSandbox, SandboxNotFoundError } from './types.ts';
-
-const CONTAINER_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
-
-/**
- * A container the strategy runs in, and whether an earlier caller created it.
- * An attached container is borrowed: the sandbox never stops it.
- */
-export interface AcquiredContainer {
-  container: EngineContainer;
-  attached: boolean;
-}
-
-/**
- * Checks the caller's env keys and container name. It needs no engine, so a
- * factory runs it before it connects: a bad input is the caller's error even
- * when the engine is down.
- */
-export function validateSandboxOptions(
-  opts: CommonSandboxOptions,
-  errors: ContainerErrorFactory,
-): void {
-  validateEnv(opts.env, errors);
-  if (opts.name !== undefined && !CONTAINER_NAME_PATTERN.test(opts.name)) {
-    throw errors.generic(
-      `Invalid container name: "${opts.name}". Use only letters, numbers, underscore, period, or hyphen. The "sandbox-" prefix is added automatically.`,
-    );
-  }
-}
 
 /** Records a cleanup failure on the error that started the cleanup. */
 function suppress(originalError: unknown, cleanupError: unknown): void {
@@ -56,8 +26,8 @@ function suppress(originalError: unknown, cleanupError: unknown): void {
 /**
  * Template Method base for sandbox creation strategies, shared across engines.
  * Subclasses choose the image and define post-start configuration; the base owns
- * the container lifecycle (find or create, volumes, disposal) and delegates
- * every engine operation to the injected {@link ContainerEngine}. Typed to
+ * the container lifecycle (create, volumes, disposal) and delegates every
+ * engine operation to the injected {@link ContainerEngine}. Typed to
  * {@link CommonSandboxOptions} so the skeleton can never read an engine-only
  * knob.
  */
@@ -68,38 +38,35 @@ export abstract class ContainerSandboxStrategy<
   protected engine: TEngine;
   protected opts: TOpts;
   protected volumes: SandboxVolume[];
-  protected name?: string;
   protected workdir: string;
   private createdVolumes = new Set<string>();
 
   constructor(opts: TOpts, engine: TEngine) {
     this.opts = opts;
     this.engine = engine;
-    validateSandboxOptions(opts, engine.errors);
-    const { volumes = [], name, workdir = '/workspace' } = opts;
+    validateEnv(opts.env, engine.errors);
+    const { volumes = [], workdir = '/workspace' } = opts;
     this.volumes = volumes;
-    this.name = name;
     this.workdir = workdir;
   }
 
   /**
-   * Creates the sandbox. On failure, everything it made is released and the
-   * engine is disposed.
+   * Creates a one-off sandbox in a container of its own, which nothing else
+   * reaches. On failure, everything it made is released and the engine is
+   * disposed.
    */
   async create(): Promise<DisposableSandbox> {
-    let acquired: AcquiredContainer | undefined;
+    let container: EngineContainer | undefined;
 
     try {
       const image = await this.getImage();
-      acquired = await this.acquireContainer(image);
-      if (!acquired.attached) {
-        await this.engine.ensureWorkdir(acquired.container, this.workdir);
-        await this.configure(acquired.container, image);
-      }
-      await this.assertBashAvailable(acquired.container);
+      container = await this.acquireContainer(image);
+      await this.engine.ensureWorkdir(container, this.workdir);
+      await this.configure(container, image);
+      await this.assertBashAvailable(container);
     } catch (error) {
-      if (acquired && !acquired.attached) {
-        await this.release(acquired.container).catch((stopError: unknown) =>
+      if (container) {
+        await this.release(container).catch((stopError: unknown) =>
           suppress(error, stopError),
         );
       }
@@ -110,7 +77,7 @@ export abstract class ContainerSandboxStrategy<
       throw error;
     }
 
-    const sandbox = this.createSandboxMethods(acquired);
+    const sandbox = this.createSandboxMethods(container);
     if (this.opts.readiness) {
       try {
         await this.opts.readiness(sandbox);
@@ -169,50 +136,16 @@ export abstract class ContainerSandboxStrategy<
     return container;
   }
 
-  protected containerName(): string {
-    return this.name
-      ? `sandbox-${this.name}`
-      : `sandbox-${randomUUID().slice(0, 8)}`;
-  }
-
-  protected async acquireContainer(image: string): Promise<AcquiredContainer> {
-    const name = this.containerName();
-    if (this.name) {
-      const container = await this.engine.attach(name, image);
-      if (container) return { container, attached: true };
-    }
-
+  /** Runs the one-off's container under a generated name. */
+  protected async acquireContainer(image: string): Promise<EngineContainer> {
+    const name = `sandbox-${randomUUID().slice(0, 8)}`;
     await this.prepareVolumes();
     const result = await this.engine.run(image, name, this.opts, this.workdir);
-    if (result.created) {
-      return { container: result.container, attached: false };
-    }
-
-    // Another caller created this name between our attach and run. Attach to
-    // it when it is usable; `attach` fails loud on an unexpected state, so we
-    // never attach to a broken one.
+    if (result.created) return result.container;
     await this.cleanupCreatedVolumes();
-    if (this.name) {
-      const raced = await this.waitForRacedContainer(name, image);
-      if (raced) return raced;
-    }
     throw this.engine.errors.generic(
       `Container name "${name}" is already in use`,
     );
-  }
-
-  private async waitForRacedContainer(
-    name: string,
-    image: string,
-  ): Promise<AcquiredContainer | undefined> {
-    const timeoutAt = Date.now() + 1_000;
-
-    while (true) {
-      const container = await this.engine.attach(name, image);
-      if (container) return { container, attached: true };
-      if (Date.now() >= timeoutAt) return undefined;
-      await setTimeout(10);
-    }
   }
 
   protected async prepareVolumes(): Promise<void> {
@@ -347,26 +280,54 @@ export abstract class ContainerSandboxStrategy<
     );
   }
 
-  protected createSandboxMethods({
-    container,
-    attached,
-  }: AcquiredContainer): DisposableSandbox {
+  /**
+   * The one-off's session and its `dispose`, which runs once. Once `dispose`
+   * is called, every operation rejects with an Error that names the sandbox,
+   * never with `SandboxNotFoundError`: using a disposed sandbox is a bug in
+   * its owner, not a sandbox that is gone. Before that, the container's
+   * `assertCurrent` runs before every operation, for an engine that has one.
+   */
+  protected createSandboxMethods(
+    container: EngineContainer,
+  ): DisposableSandbox {
     let disposal: Promise<void> | undefined;
     const dispose = async (): Promise<void> => {
       try {
-        if (!attached) await this.release(container);
+        await this.release(container);
         await this.cleanupCreatedVolumes();
       } finally {
         await this.engine.dispose();
       }
     };
-
     const disposeOnce = () => (disposal ??= dispose());
-    return {
-      ...containerSession(container, this.engine.errors),
+
+    const session = containerSession(container, this.engine.errors);
+    const live =
+      <Args extends unknown[], Result>(
+        operation: (...args: Args) => PromiseLike<Result>,
+      ) =>
+      async (...args: Args): Promise<Result> => {
+        if (disposal !== undefined) {
+          throw new Error(`The sandbox "${container.name}" is disposed.`);
+        }
+        await container.assertCurrent?.();
+        return operation.apply(session, args);
+      };
+    return Object.assign(session, {
+      run: live(session.run),
+      spawn: live(session.spawn),
+      readFile: live(session.readFile),
+      readBinaryFile: live(session.readBinaryFile),
+      readTextFile: live(session.readTextFile),
+      writeFile: live(session.writeFile),
+      writeBinaryFile: live(session.writeBinaryFile),
+      writeTextFile: live(session.writeTextFile),
+      stat: live(session.stat),
+      listDirectory: live(session.listDirectory),
+      deleteFile: live(session.deleteFile),
       dispose: disposeOnce,
       [Symbol.asyncDispose]: disposeOnce,
-    };
+    });
   }
 
   protected abstract getImage(): Promise<string>;

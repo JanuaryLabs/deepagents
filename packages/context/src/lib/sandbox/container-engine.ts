@@ -91,21 +91,6 @@ export interface CommonSandboxOptions extends SandboxReadinessOptions {
   volumes?: SandboxVolume[];
   env?: Record<string, string>;
   /**
-   * Stable identity suffix. When provided, the container is named
-   * `sandbox-<name>` instead of a randomized `sandbox-<8hex>`. If a container
-   * with that name already exists, the sandbox attaches to it (installers,
-   * volume preparation, and env are skipped); if it exists but is stopped, it is
-   * started first; otherwise it is created fresh. Must match `/^[A-Za-z0-9_.-]+$/`.
-   *
-   * Who owns the container follows who created it. A sandbox that created the
-   * container owns it: `dispose()` stops it, and `--rm` removes it. A sandbox
-   * that attached to an existing container borrows it: `dispose()` closes the
-   * connection to the engine and leaves the container running, also when the
-   * sandbox started a stopped one. When two sandboxes share a name, the
-   * container ends when the one that created it is disposed.
-   */
-  name?: string;
-  /**
    * Args appended after the image at run time.
    * - `undefined` (default): `['tail', '-f', '/dev/null']` keep-alive so a bare
    *   image stays up for installers and commands.
@@ -150,7 +135,7 @@ export interface EngineProcess {
  * this, so each engine owns how commands and files reach its containers.
  */
 export interface EngineContainer {
-  /** The container name: `sandbox-<name>` or `sandbox-<8hex>`. */
+  /** The container name: a one-off's generated `sandbox-<8hex>`, or a chat's. */
   readonly name: string;
   /** Where commands start and what a relative path of a file call resolves against. */
   readonly workdir: string;
@@ -184,11 +169,18 @@ export interface EngineContainer {
    * (`pkg`/`npm`/`pip`/…) in this container.
    */
   installerContext(image: string): InstallerContext;
+  /**
+   * Rejects with `SandboxNotFoundError` when it is gone, or when another
+   * container now has its name; runs before every operation of its sandbox.
+   * An engine whose calls reach the container itself, not its name, rejects
+   * so on its own and gives none.
+   */
+  assertCurrent?(): Promise<void>;
   /** Stops the container, and resolves when the engine removed it or it is already gone. */
   stop(): Promise<void>;
 }
 
-/** The result of {@link ContainerEngine.run}: `created: false` when another caller has the name. */
+/** The result of {@link ContainerEngine.run}: `created: false` when another container has the name. */
 export type RunResult =
   { created: true; container: EngineContainer } | { created: false };
 
@@ -211,13 +203,8 @@ export interface ContainerEngine<
   readonly defaultImage: string;
   readonly errors: ContainerErrorFactory;
   /**
-   * The container named `name`, started when it is stopped, or `undefined`
-   * when there is none. `image` names the requested image in a start error.
-   */
-  attach(name: string, image: string): Promise<EngineContainer | undefined>;
-  /**
-   * Creates and starts a long-running, auto-removed container. A named
-   * container whose name another caller holds gives `{ created: false }`.
+   * Creates and starts a long-running, auto-removed container named `name`.
+   * A name that another container holds gives `{ created: false }`.
    */
   run(
     image: string,
@@ -250,13 +237,6 @@ export interface ChatEngineContainer extends EngineContainer {
    * another container now has its name. Never creates one.
    */
   resume(): Promise<void>;
-  /**
-   * Rejects with `SandboxNotFoundError` when it is gone, or when another
-   * container now has its name; runs before every operation of its handle.
-   * An engine whose calls reach the container itself, not its name, rejects
-   * so on its own and gives none.
-   */
-  assertCurrent?(): Promise<void>;
   /** Removes it, running or not, with its anonymous volumes. Resolves when it is gone. */
   remove(): Promise<void>;
 }

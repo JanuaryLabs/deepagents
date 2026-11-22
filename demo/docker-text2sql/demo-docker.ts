@@ -26,8 +26,7 @@ const here = import.meta.dirname;
 const repo = resolve(here, '..', '..');
 const dockerfile = resolve(here, '..', 'text2sql-daemon', 'Dockerfile');
 
-const backend = await createDockerSandbox({
-  name: 'text2sql-daemon',
+await using backend = await createDockerSandbox({
   dockerfile,
   context: repo,
   // The image build (npm ci + nx build) takes minutes; stream it so the first

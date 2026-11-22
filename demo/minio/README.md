@@ -60,15 +60,15 @@ PROFILE=1 node run.ts
 ```
 
 ```
-[profile] createDockerSandbox         93ms   # ~1900ms on the FIRST run (apk add strace); ~90ms after, reusing the named container
+[profile] createDockerSandbox       1900ms   # mostly apk add strace, in each run's new container
 [profile] withStraceFileChanges        1ms
 [profile] run (write)                253ms   # strace-wrapped: one exec carries the output and the trace
 [profile] run (read)                 235ms
-[profile] TOTAL                      809ms
+[profile] TOTAL                     2389ms
 ```
 
-The big lever is the first-run `apk add` (bake `strace` into a custom image to skip
-it). After that, each phase is ~2 `docker exec` round-trips (~55ms each on Docker
+The big lever is the `apk add` (bake `strace` into a custom image to skip it).
+After that, each phase is ~2 `docker exec` round-trips (~55ms each on Docker
 Desktop) plus strace's tracing overhead — the cost of the run-then-read-trace design,
 not the sandbox.
 

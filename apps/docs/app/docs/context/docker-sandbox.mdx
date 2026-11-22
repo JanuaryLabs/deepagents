@@ -126,37 +126,34 @@ A deadline terminates the command's process group inside the container before
 cancellation: `run` and `wait()` reject with the abort reason once the process
 group is gone. An abort is not reported as a timeout.
 
-## Stable container names
+## One-off and chat containers
 
-Runtime and Dockerfile strategies accept an optional `name` to reuse the same
-container across calls:
+`createDockerSandbox` makes a one-off: a container under a generated name,
+which nothing else reaches. Its `dispose()` stops and removes the container,
+and every operation of the sandbox rejects once `dispose()` is called.
+
+A container that outlives the process, so that the next turn of a chat finds
+its files, is a chat's. A `DockerSandboxEnvironment` names it from a namespace
+and the chat's id:
 
 ```typescript
-const sandbox = await createDockerSandbox({
+import { DockerSandboxEnvironment } from '@deepagents/context';
+
+const environment = new DockerSandboxEnvironment({
+  namespace: 'analytics',
   image: 'node:lts-bookworm-slim',
-  name: 'analytics-indexer',
-  installers: [pkg(['curl'])],
 });
+
+await using sandbox = await environment.open({
+  chatId: 'chat-123',
+  userId: 'user-456',
+});
+await sandbox.run({ command: 'echo kept > /workspace/note.txt' });
 ```
 
-DeepAgents uses `sandbox-<name>` as the Docker container name. Reuse behavior:
-
-- If `sandbox-<name>` is already running, the sandbox attaches to it.
-- If it exists but is stopped, the sandbox starts it and attaches.
-- If it does not exist, a new container is created.
-
-When attaching to an existing named container, installer execution, volume
-preparation, and env setup are skipped because the container is assumed to
-already be configured.
-
-`name` must match `/^[A-Za-z0-9_.-]+$/`.
-
-<Callout type="info">
-  The sandbox that created a named container owns it: its `dispose()` stops (and
-  removes, because runtime and Dockerfile containers use `--rm`) the container.
-  A sandbox that attached to an existing container borrows it: its `dispose()`
-  closes the connection to the engine and leaves the container running.
-</Callout>
+Every `open` of the chat reaches the same container. `close()` (or scope exit)
+releases the handle and leaves the container running; `environment.stop(chat)`
+stops it and keeps its files, and `environment.delete(chat)` removes it.
 
 ## Container command overrides
 
@@ -197,7 +194,7 @@ through `@zukhruf/docker`. Image builds and Compose startup and shutdown use
 the Docker CLI, configured to target the same engine.
 
 `environment` selects the engine for this sandbox; `env` sets variables inside
-the container. Runtime and Dockerfile strategies validate `name` and `env` keys
+the container. Runtime and Dockerfile strategies validate `env` keys
 before connecting, so invalid input is reported even when the engine is down.
 
 ## Container configuration — `container`
@@ -587,9 +584,7 @@ const version = await useSandbox(
 Runtime and Dockerfile containers are configured for automatic removal when
 stopped. `dispose()` sends a stop request through the Engine API and resolves
 when the engine has removed the container, so its volumes and bind mounts are
-free. A container that a named sandbox attached to stays running. Compose
-sandboxes run `docker compose down` to stop the
-stack.
+free. Compose sandboxes run `docker compose down` to stop the stack.
 
 ## Error handling
 

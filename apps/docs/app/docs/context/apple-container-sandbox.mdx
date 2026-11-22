@@ -86,36 +86,34 @@ await using sandbox2 = await createAppleContainerSandbox({
 
 There is no Compose strategy — `container` has no Compose primitive.
 
-## Stable container names
+## One-off and chat containers
 
-Both strategies accept an optional `name` to reuse the same container across calls:
+`createAppleContainerSandbox` makes a one-off: a container under a generated
+name, which nothing else reaches. Its `dispose()` stops and removes the
+container, and every operation of the sandbox rejects once `dispose()` is
+called.
+
+A container that outlives the process, so that the next turn of a chat finds
+its files, is a chat's. An `AppleContainerSandboxEnvironment` names it from a
+namespace and the chat's id:
 
 ```typescript
-await using sandbox = await createAppleContainerSandbox({
+import { AppleContainerSandboxEnvironment } from '@deepagents/context';
+
+const environment = new AppleContainerSandboxEnvironment({
+  namespace: 'analytics',
   image: 'docker.io/library/node:lts-bookworm-slim',
-  name: 'analytics-indexer',
+});
+
+await using sandbox = await environment.open({
+  chatId: 'chat-123',
+  userId: 'user-456',
 });
 ```
 
-The container is named `sandbox-<name>`. Reuse behavior:
-
-- If `sandbox-<name>` is already running, the sandbox attaches to it.
-- If it exists but is stopped, the sandbox starts it and attaches.
-- If it does not exist, a new container is created.
-
-When attaching, installer execution, volume preparation, and env setup are skipped — the container is assumed already configured. `name` must match `/^[A-Za-z0-9_.-]+$/`.
-
-<Callout type="warn">
-  This is get-or-create for **sequential** callers. Creating the same name from
-  two callers concurrently is not supported — the `container` runtime races on
-  duplicate-name `run`. Serialize creation of a given name.
-</Callout>
-
-<Callout type="info">
-  The sandbox that created a container owns it: its `dispose()` stops and
-  removes the container (containers use `--rm`). A sandbox that attached to an
-  existing container borrows it: its `dispose()` leaves the container running.
-</Callout>
+Every `open` of the chat reaches the same container. `close()` (or scope exit)
+releases the handle and leaves the container running; `environment.stop(chat)`
+stops it and keeps its files, and `environment.delete(chat)` removes it.
 
 ## Architecture selection
 

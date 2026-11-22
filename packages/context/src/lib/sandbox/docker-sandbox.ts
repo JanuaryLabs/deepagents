@@ -42,11 +42,9 @@ import type {
   SandboxVolume,
 } from './container-engine.ts';
 import {
-  type AcquiredContainer,
   ContainerSandboxStrategy,
   ContainerfileStrategy,
   RuntimeStrategy,
-  validateSandboxOptions,
 } from './container-sandbox.ts';
 import {
   chatContainerSandbox,
@@ -111,8 +109,8 @@ export {
  * The part of the Engine API create body that a Docker sandbox passes through:
  * every field the sandbox does not own. The sandbox sets `Image` from `image`
  * or `dockerfile`, `WorkingDir` from `workdir`, `Env` from `env` and `Cmd`
- * from `command`. `HostConfig.AutoRemove` follows who created the container,
- * and `HostConfig.Mounts` comes from `volumes`. `Labels` also go on the managed
+ * from `command`. `HostConfig.AutoRemove` is always on for a one-off, and
+ * `HostConfig.Mounts` comes from `volumes`. `Labels` also go on the managed
  * volumes that the sandbox creates.
  */
 export type DockerContainerConfig = Omit<
@@ -260,25 +258,6 @@ function containerCreateRequest(
       Mounts: (opts.volumes ?? []).map(mount),
     },
   };
-}
-
-/** Starts a stopped container of a named sandbox; `image` names the request in an error. */
-async function startContainer(
-  container: Container,
-  image: string,
-): Promise<void> {
-  try {
-    await container.start();
-  } catch (error) {
-    if (error instanceof ConnectionFailedError) {
-      throw new DockerNotAvailableError();
-    }
-    throw new ContainerCreationError(
-      messageOf(error),
-      image,
-      Error.isError(error) ? error : undefined,
-    );
-  }
 }
 
 /** Maps an unreachable engine to {@link DockerNotAvailableError}. */
@@ -770,19 +749,6 @@ export class DockerEngine implements ChatContainerEngine<DockerCommonOptions> {
     }
   }
 
-  async attach(
-    name: string,
-    image: string,
-  ): Promise<DockerContainer | undefined> {
-    const found = await this.docker.containers.find(name).catch(unavailable);
-    if (!found) return undefined;
-    const info = await found.inspect();
-    if (info.State?.Status !== 'running') {
-      await startContainer(found, image);
-    }
-    return this.container(name, found, info);
-  }
-
   async run(
     image: string,
     name: string,
@@ -998,7 +964,7 @@ export class ComposeStrategy extends ContainerSandboxStrategy<DockerCommonOption
     return '';
   }
 
-  protected override async acquireContainer(): Promise<AcquiredContainer> {
+  protected override async acquireContainer(): Promise<DockerContainer> {
     try {
       await this.compose(['up', '-d']);
     } catch (error) {
@@ -1026,14 +992,11 @@ export class ComposeStrategy extends ContainerSandboxStrategy<DockerCommonOption
         `service "${this.service}" has no running container`,
       );
     }
-    return {
-      container: this.dockerEngine.container(
-        this.projectName,
-        container,
-        await container.inspect(),
-      ),
-      attached: false,
-    };
+    return this.dockerEngine.container(
+      this.projectName,
+      container,
+      await container.inspect(),
+    );
   }
 
   protected async configure(): Promise<void> {
@@ -1075,7 +1038,7 @@ interface DockerChatOptions {
 
 type ChatEnvironmentBase<T extends DockerCommonOptions> = Omit<
   T,
-  'volumes' | 'name' | 'container'
+  'volumes' | 'container'
 > &
   DockerChatOptions;
 
@@ -1221,7 +1184,10 @@ export class DockerSandboxEnvironment implements StoppableSandboxEnvironment {
 }
 
 /**
- * Create a Docker-backed sandbox.
+ * Create a one-off Docker sandbox: a container under a generated name, which
+ * nothing else reaches. `dispose()` stops and removes it, and every operation
+ * rejects once `dispose()` is called. A container that outlives the process
+ * is a chat's, from a {@link DockerSandboxEnvironment}.
  *
  * @example Runtime with installers
  * ```ts
@@ -1259,7 +1225,7 @@ export async function createDockerSandbox(
   options: DockerSandboxOptions = {},
 ): Promise<DisposableSandbox> {
   if (!isComposeOptions(options)) {
-    validateSandboxOptions(options, dockerErrors);
+    validateEnv(options.env, dockerErrors);
   }
   const engine = await DockerEngine.connect(
     options.environment ?? process.env,

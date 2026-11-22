@@ -12,7 +12,6 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import {
   type DisposableSandbox,
   MicrosandboxSandboxError,
-  appleEngine,
   createAppleContainerSandbox,
   createDaytonaSandbox,
   createDockerSandbox,
@@ -49,6 +48,12 @@ interface Backend {
    */
   linkWrite: 'through' | 'replaces';
   open: (sandboxName?: string) => Promise<DisposableSandbox>;
+  /**
+   * The name the engine holds a sandbox under, read from the live sandbox.
+   * Given by a backend whose `open` ignores `sandboxName` and generates one,
+   * which no second `open` can attach to.
+   */
+  generatedName?: (sandbox: DisposableSandbox) => Promise<string>;
   /** Whether the engine holds the named sandbox. Absent when a backend holds nothing. */
   holds?: (sandboxName: string) => Promise<boolean>;
   /** Removes what a named sandbox keeps after its release, such as a stopped VM's disk. */
@@ -126,10 +131,12 @@ const backends: Backend[] = [
     runAbort: 'rejects',
     stderrAfterStdoutCancel: 'flows',
     linkWrite: 'through',
-    open: (name) => createDockerSandbox({ ...dockerDefaults, name }),
+    open: () => createDockerSandbox(dockerDefaults),
+    // A container's hostname is the start of its id, which the engine finds it by.
+    generatedName: hostname,
     holds: async (name) => {
       const client = await testbed.client();
-      return (await client.containers.find(`sandbox-${name}`)) !== undefined;
+      return (await client.containers.find(name)) !== undefined;
     },
   },
   {
@@ -139,14 +146,14 @@ const backends: Backend[] = [
     runAbort: 'rejects',
     stderrAfterStdoutCancel: 'flows',
     linkWrite: 'through',
-    open: (name) => createAppleContainerSandbox({ name }),
+    open: () => createAppleContainerSandbox(),
+    // The CLI makes a container's hostname its name.
+    generatedName: hostname,
     holds: async (name) => {
       try {
-        const { stdout } = await spawn('container', [
-          'inspect',
-          `sandbox-${name}`,
-        ]);
-        return appleEngine.parseStatus(stdout) !== 'absent';
+        const { stdout } = await spawn('container', ['inspect', name]);
+        const entries: unknown = JSON.parse(stdout.trim() || '[]');
+        return Array.isArray(entries) && entries.length > 0;
       } catch (error) {
         if (
           error instanceof SubprocessError &&
@@ -202,6 +209,12 @@ const backends: Backend[] = [
   },
 ];
 
+async function hostname(sandbox: DisposableSandbox): Promise<string> {
+  const name = (await sandbox.readTextFile({ path: '/etc/hostname' }))?.trim();
+  assert.ok(name, 'the sandbox has a hostname');
+  return name;
+}
+
 const LATER_WRITE_DELAY_MS = 3_500;
 /** Long enough for a stop to land on a remote engine, where one exec takes seconds. */
 const STOPPABLE_COMMAND =
@@ -227,6 +240,7 @@ for (const {
   runAbort,
   stderrAfterStdoutCancel,
   linkWrite,
+  generatedName,
   holds,
   forget,
 } of backends) {
@@ -850,9 +864,10 @@ for (const {
 
       if (holds) {
         it('releases what the engine holds by the time dispose resolves', async () => {
-          const sandboxName = `contract-${randomUUID().slice(0, 8)}`;
-          const sandbox = await open(sandboxName);
+          const requested = `contract-${randomUUID().slice(0, 8)}`;
+          const sandbox = await open(requested);
           try {
+            const sandboxName = (await generatedName?.(sandbox)) ?? requested;
             const heldWhileOpen = await holds(sandboxName);
 
             await sandbox.dispose();
@@ -861,10 +876,12 @@ for (const {
             assert.equal(await holds(sandboxName), false);
           } finally {
             await sandbox.dispose();
-            await forget?.(sandboxName);
+            await forget?.(requested);
           }
         });
+      }
 
+      if (holds && !generatedName) {
         it('leaves a sandbox it attached to by name running when it disposes', async () => {
           const sandboxName = `contract-${randomUUID().slice(0, 8)}`;
           const owner = await open(sandboxName);
