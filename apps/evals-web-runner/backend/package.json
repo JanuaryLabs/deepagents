@@ -9,7 +9,7 @@
     "@deepagents/evals": "*",
     "@deepagents/text2sql": "*",
     "@hono/node-server": "^2.0.10",
-    "@sdk-it/hono": "^0.51.9",
+    "@sdk-it/hono": "^0.51.11",
     "hono": "^4.12.30",
     "mssql": "^12.7.0",
     "zod": "^4.6.7",
@@ -23,6 +23,6 @@
     "p-memoize": "^8.0.0"
   },
   "devDependencies": {
-    "@sdk-it/openapi": "^0.51.9"
+    "@sdk-it/openapi": "^0.51.11"
   }
 }

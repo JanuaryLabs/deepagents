@@ -12,7 +12,12 @@ import {
 } from '@zukhruf/git-hooks';
 
 await preCommit([
-  new Sync(),
+  new Sync({
+    stage: [
+      '**/tsconfig*.json',
+      'apps/evals-web-runner/frontend/src/evals.openapi',
+    ],
+  }),
   new Format(),
   new NoNumericPins(),
   new NpmrcPolicy(),

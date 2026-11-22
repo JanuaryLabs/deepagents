@@ -177,7 +177,8 @@
     }
   },
   "sync": {
-    "applyChanges": true
+    "applyChanges": true,
+    "globalGenerators": ["@sdk-it/nx:openapi-sync"]
   },
   "generators": {
     "@nx/react": {

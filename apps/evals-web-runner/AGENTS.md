@@ -39,7 +39,7 @@ throw new HTTPException(400, {
 
 ### Generating the client
 
-The frontend has no generated client package. It imports `frontend/src/evals.openapi`, the committed OpenAPI document of the backend routes, which every reader derives from `backend/openapi.ts` (`defineOpenApi` of `@sdk-it/openapi`) and rewrites when the backend changes. `contentMappers[].options.derived` in `frontend/tsconfig.app.json` and `tsconfig.spec.json` names the definition. The frontend declares the backend as an Nx implicit dependency, so its cached targets follow a backend change.
+The frontend has no generated client package. It imports `frontend/src/evals.openapi`, the committed OpenAPI document of the backend routes, which every reader derives from `backend/openapi.ts` (`defineOpenApi` of `@sdk-it/openapi`) in memory, writing nothing. Its only writer is `@sdk-it/nx:openapi-sync`, a global Nx sync generator (`nx.json` `sync.globalGenerators`). `contentMappers[].options.derived` in `frontend/tsconfig.app.json` and `tsconfig.spec.json` names the definition. The frontend declares the backend as an Nx implicit dependency, so its cached targets follow a backend change.
 
 The frontend imports the document as a module. Its names come from the file name:
 
@@ -54,7 +54,7 @@ import {
 - Types come from the TypeScript 7.1 content mapper (`@sdk-it/content-mapper`, `contentMappers` in `frontend/tsconfig.app.json`). `tsc` needs `--runExternalCode`, which the `typecheck` target passes. The project is composite, so the document must be in `include` (`src/**/*.openapi`), or tsc fails with TS6307. The editor's TS 7.1 language server needs `runExternalCode` in its initialization options.
 - At runtime, `sdkIt.imports()` from `@sdk-it/vite` (`frontend/vite.config.ts`) renders the same document in Vite, in dev and build.
 
-After you change a backend route, the frontend's `typecheck` (or the editor, or the dev server) rewrites `evals.openapi`; commit it with the change. TypeScript resolves the import before the content mapper runs, so a missing document is TS2307. Do not edit `evals.openapi` by hand.
+After you change a backend route, the frontend's `typecheck`, the editor and the dev server already use the new route; `nx sync` rewrites `evals.openapi`, the pre-commit hook stages it into the commit that changed the backend, and CI's `nx sync:check` fails on a stale one. TypeScript resolves the import before the content mapper runs, so a missing document is TS2307. Do not edit `evals.openapi` by hand.
 
 ### API input validation
 
