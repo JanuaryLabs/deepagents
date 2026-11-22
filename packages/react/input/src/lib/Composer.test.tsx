@@ -3395,6 +3395,67 @@ describe('Composer link and paste behavior', () => {
     expect(submissions()).toHaveTextContent('image:dropped.png:3');
   });
 
+  it('accepts a file drag over the frame outside the editor', () => {
+    const { prompt } = renderRichInput();
+    const frame = composerFrame(prompt);
+    const dataTransfer = {
+      types: ['Files'],
+      files: [new File(['png'], 'dragged.png', { type: 'image/png' })],
+      getData: () => '',
+    };
+
+    const dragEnterAllowed = fireEvent.dragEnter(frame, { dataTransfer });
+    const dragOverAllowed = fireEvent.dragOver(frame, { dataTransfer });
+
+    expect({ dragEnterAllowed, dragOverAllowed }).toEqual({
+      dragEnterAllowed: false,
+      dragOverAllowed: false,
+    });
+  });
+
+  it('leaves a text drag over the frame outside the editor to the browser', () => {
+    const { prompt } = renderRichInput();
+    const frame = composerFrame(prompt);
+    const dataTransfer = {
+      types: ['text/plain'],
+      files: [],
+      getData: (type: string) => (type === 'text/plain' ? 'dragged text' : ''),
+    };
+
+    const dragEnterAllowed = fireEvent.dragEnter(frame, { dataTransfer });
+    const dragOverAllowed = fireEvent.dragOver(frame, { dataTransfer });
+
+    expect({ dragEnterAllowed, dragOverAllowed }).toEqual({
+      dragEnterAllowed: true,
+      dragOverAllowed: true,
+    });
+  });
+
+  it('attaches an image file dropped on the frame outside the editor', async () => {
+    const { user, prompt, submissions } = renderRichInput();
+    const file = new File(['png'], 'dropped.png', { type: 'image/png' });
+
+    await user.click(prompt);
+    const dropAllowed = fireEvent.drop(composerFrame(prompt), {
+      dataTransfer: {
+        types: ['Files'],
+        files: [file],
+        getData: () => '',
+      },
+    });
+
+    expect(dropAllowed).toBe(false);
+    await waitFor(() => {
+      expect(
+        screen.getByRole('region', { name: /rich composer snapshot/i }),
+      ).toHaveTextContent('Draft: [Image #1]');
+    });
+
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter' });
+
+    expect(submissions()).toHaveTextContent('image:dropped.png:3');
+  });
+
   it('drops file URI references as structured file mentions', async () => {
     const { user, prompt, submissions } = renderRichInput();
 
@@ -4579,6 +4640,14 @@ function remoteImageRow() {
     throw new Error('Expected the remote image row to be rendered');
   }
   return row;
+}
+
+function composerFrame(prompt: HTMLElement) {
+  const frame = prompt.closest<HTMLElement>('[data-slot="composer-frame"]');
+  if (!frame) {
+    throw new Error('Expected the prompt to sit inside the composer frame');
+  }
+  return frame;
 }
 
 function findTextNode(root: Node, text: string): Text | null {

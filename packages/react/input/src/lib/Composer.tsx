@@ -6,6 +6,7 @@ import { cn } from 'cn';
 import {
   type ComponentPropsWithoutRef,
   type MouseEvent,
+  type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useEffect,
@@ -1860,8 +1861,16 @@ function ComposerRemoteImages({
   );
 }
 
+function acceptFileDrag(event: ReactDragEvent<HTMLDivElement>) {
+  if (event.dataTransfer.types.includes('Files')) {
+    event.preventDefault();
+  }
+}
+
 function ComposerEditor({
   className,
+  onDragEnter,
+  onDragOver,
   onDrop,
   placeholder = 'Type a message or / for commands',
   ...props
@@ -1877,6 +1886,14 @@ function ComposerEditor({
       className={className}
       aria-disabled={disabled}
       data-disabled={disabled ? '' : undefined}
+      onDragEnter={(event) => {
+        onDragEnter?.(event);
+        acceptFileDrag(event);
+      }}
+      onDragOver={(event) => {
+        onDragOver?.(event);
+        acceptFileDrag(event);
+      }}
       onDrop={(event) => {
         onDrop?.(event);
         if (event.defaultPrevented) {
