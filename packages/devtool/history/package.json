@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/devtool-history",
-  "version": "7.15.0",
+  "version": "7.16.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -29,7 +29,7 @@
     }
   },
   "dependencies": {
-    "@deepagents/experimental": "7.15.0",
+    "@deepagents/experimental": "7.16.0",
     "cn": "^0.4.0",
     "lucide-react": "^1.77.0"
   },
