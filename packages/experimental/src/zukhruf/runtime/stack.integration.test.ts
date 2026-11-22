@@ -2,7 +2,6 @@ import { PGlite } from '@electric-sql/pglite';
 import { open } from '@zukhruf/sqlite-open';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PgBoss, fromPglite } from 'pg-boss';
@@ -10,7 +9,7 @@ import { PgBoss, fromPglite } from 'pg-boss';
 import {
   SqliteContextStore,
   SqliteStreamStore,
-  createVirtualSandbox,
+  VirtualSandboxEnvironment,
 } from '@deepagents/context';
 import {
   AgentPluginCapability,
@@ -36,7 +35,7 @@ const root = defineAgent({
   name: 'stack-test',
   model,
   instructions: [],
-  sandbox: defineSandbox(() => createVirtualSandbox({ fs: new InMemoryFs() })),
+  sandbox: defineSandbox(new VirtualSandboxEnvironment()),
 });
 
 async function adapters(resources: AsyncDisposableStack) {

@@ -5,7 +5,6 @@ import { waitFor } from '@zukhruf/testing/async';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
@@ -15,7 +14,7 @@ import { z } from 'zod';
 import {
   SqliteContextStore,
   SqliteStreamStore,
-  createVirtualSandbox,
+  VirtualSandboxEnvironment,
 } from '@deepagents/context';
 import {
   AgentRuntime,
@@ -96,9 +95,7 @@ test('POST /session answers 429 for an idle sub-agent while its tree has no free
   });
   const scripted: LanguageModelV4StreamPart[][] = [];
   const releaseBlocked = Promise.withResolvers<void>();
-  const sandbox = defineSandbox(() =>
-    createVirtualSandbox({ fs: new InMemoryFs() }),
-  );
+  const sandbox = defineSandbox(new VirtualSandboxEnvironment());
   const runtime = resources.use(
     await new AgentRuntime(
       defineAgent({

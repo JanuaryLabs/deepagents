@@ -12,7 +12,6 @@ import {
   tool,
   wrapProvider,
 } from 'ai';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { hash } from 'node:crypto';
 import { mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
@@ -25,7 +24,7 @@ import { z } from 'zod';
 import {
   SqliteContextStore,
   SqliteStreamStore,
-  createVirtualSandbox,
+  VirtualSandboxEnvironment,
 } from '@deepagents/context';
 import { codex, createCodex } from '@deepagents/experimental/providers/codex';
 import {
@@ -643,9 +642,7 @@ test('Zukhruf executes a host tool and persists history across queued turns', as
       name: 'ChatGPTTest',
       model: codex('gpt-5.5'),
       instructions: [],
-      sandbox: defineSandbox(() =>
-        createVirtualSandbox({ fs: new InMemoryFs() }),
-      ),
+      sandbox: defineSandbox(new VirtualSandboxEnvironment()),
       tools: {
         read_marker: tool({
           inputSchema: z.object({}),

@@ -764,7 +764,7 @@ suite('PgBossTurnQueue real PostgreSQL scheduler regressions', () => {
     let toolRuns = 0;
     const agent: AgentDeclaration = {
       name: 'approval-restart',
-      sandbox: buildSandbox,
+      sandbox: buildSandbox(),
       instructions: [],
       toolApproval: { sendEmail: 'user-approval' },
       tools: {

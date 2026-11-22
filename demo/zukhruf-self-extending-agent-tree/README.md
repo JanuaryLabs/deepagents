@@ -37,9 +37,9 @@ User message
         Root -> User
 ```
 
-The shared catalog is the handoff boundary. Each role has one named Microsandbox
-microVM, scoped to this tree rather than a chat. Every microVM mounts the same
-workspace and skill catalog as read-write volumes. Root inspects the current
+The shared catalog is the handoff boundary. Each chat, Root's and each child's,
+has its own Microsandbox microVM. Every microVM mounts the same workspace and
+skill catalog as read-write volumes. Root inspects the current
 catalog for each request. General Task receives skill names in its delegation
 message and discovers the published `SKILL.md` files on its first turn. There is
 no separate manifest or skill-invocation API.

@@ -3,7 +3,6 @@ import { open } from '@zukhruf/sqlite-open';
 import { waitFor } from '@zukhruf/testing/async';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
@@ -13,7 +12,7 @@ import { z } from 'zod';
 import {
   SqliteContextStore,
   SqliteStreamStore,
-  createVirtualSandbox,
+  VirtualSandboxEnvironment,
 } from '@deepagents/context';
 import {
   type AgentDeclaration,
@@ -87,9 +86,7 @@ async function storageParts(
   };
 }
 
-const sandbox = defineSandbox(() =>
-  createVirtualSandbox({ fs: new InMemoryFs() }),
-);
+const sandbox = defineSandbox(new VirtualSandboxEnvironment());
 
 async function serveAgent(
   resources: AsyncDisposableStack,

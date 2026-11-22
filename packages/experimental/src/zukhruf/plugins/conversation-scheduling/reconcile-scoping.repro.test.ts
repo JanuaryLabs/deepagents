@@ -160,7 +160,7 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4({}),
-      sandbox: buildSandbox,
+      sandbox: buildSandbox(),
       instructions: [],
       plugins: [conversationScheduling()],
     }),
@@ -183,7 +183,7 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
     defineAgent({
       name: 'root',
       model: cronCreatingModel(),
-      sandbox: buildSandbox,
+      sandbox: buildSandbox(),
       instructions: [],
       plugins: [conversationScheduling()],
     }),

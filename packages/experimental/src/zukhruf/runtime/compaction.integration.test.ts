@@ -16,7 +16,6 @@ import {
 } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import test from 'node:test';
@@ -32,7 +31,7 @@ import {
 import {
   SqliteContextStore,
   SqliteStreamStore,
-  createVirtualSandbox,
+  VirtualSandboxEnvironment,
   role,
 } from '@deepagents/context';
 import {
@@ -222,9 +221,7 @@ function declaration(
     instructions: [],
     compaction: options,
     tools,
-    sandbox: defineSandbox(() =>
-      createVirtualSandbox({ fs: new InMemoryFs() }),
-    ),
+    sandbox: defineSandbox(new VirtualSandboxEnvironment()),
   });
 }
 

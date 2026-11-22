@@ -2,7 +2,6 @@ import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
@@ -11,8 +10,10 @@ import { z } from 'zod';
 
 import {
   InMemoryContextStore,
+  type SandboxContext,
+  type SandboxEnvironment,
   SqliteStreamStore,
-  createVirtualSandbox,
+  VirtualSandboxEnvironment,
 } from '@deepagents/context';
 import {
   AgentRuntime,
@@ -154,8 +155,8 @@ function scriptedModel(script: LanguageModelV4StreamPart[][] = []) {
 }
 
 /**
- * One real runtime over one in-memory sandbox filesystem that every attach
- * shares, the way a named backend keeps its rootfs across attaches.
+ * One real runtime over one virtual environment, whose chat keeps its files
+ * across opens, the way a chat's container keeps its rootfs.
  */
 async function harness(
   options: {
@@ -164,7 +165,7 @@ async function harness(
   } = {},
 ) {
   const resources = new AsyncDisposableStack();
-  const fs = new InMemoryFs();
+  const environment = new VirtualSandboxEnvironment();
   const streamStore = resources.adopt(
     new SqliteStreamStore(':memory:'),
     (value) => value.close(),
@@ -181,9 +182,12 @@ async function harness(
     defineAgent({
       name: 'uploads-agent',
       model,
-      sandbox: defineSandbox(async (context) => {
-        acquisitions.push(context);
-        return createVirtualSandbox({ fs });
+      sandbox: defineSandbox({
+        open: (chat) => {
+          acquisitions.push(chat);
+          return environment.open(chat);
+        },
+        delete: (chat) => environment.delete(chat),
       }),
       instructions: [],
       plugins: [uploaded],
@@ -215,7 +219,7 @@ async function harness(
 
   return {
     app,
-    fs,
+    environment,
     model,
     queue,
     acquisitions,
@@ -224,14 +228,14 @@ async function harness(
   };
 }
 
-/** Reads the stored bytes through a fresh attach to the shared filesystem. */
+/** Reads the stored bytes through a fresh open of the session's sandbox. */
 async function storedBytes(
-  fs: InMemoryFs,
+  environment: SandboxEnvironment,
   userId: string,
   sessionId: string,
   fileId: string,
 ): Promise<Uint8Array> {
-  await using sandbox = await createVirtualSandbox({ fs });
+  await using sandbox = await environment.open({ chatId: sessionId, userId });
   return new Uint8Array(
     (await sandbox.readBinaryFile({
       path: `${UPLOAD_DIRECTORY}/${userId}/${sessionId}/${fileId}`,
@@ -239,22 +243,23 @@ async function storedBytes(
   );
 }
 
-/** Writes a file into the shared sandbox filesystem the way an agent's bash tool would. */
+/** Writes a file into the session's sandbox the way an agent's bash tool would. */
 async function writeSandboxFile(
-  fs: InMemoryFs,
+  environment: SandboxEnvironment,
+  chat: SandboxContext,
   path: string,
   content: Uint8Array,
 ): Promise<void> {
-  await using sandbox = await createVirtualSandbox({ fs });
+  await using sandbox = await environment.open(chat);
   await sandbox.writeBinaryFile({ path, content });
 }
 
 async function sessionDirectoryExists(
-  fs: InMemoryFs,
+  environment: SandboxEnvironment,
   userId: string,
   sessionId: string,
 ): Promise<boolean> {
-  await using sandbox = await createVirtualSandbox({ fs });
+  await using sandbox = await environment.open({ chatId: sessionId, userId });
   return (
     (await sandbox.stat({
       path: `${UPLOAD_DIRECTORY}/${userId}/${sessionId}`,
@@ -361,7 +366,10 @@ test('uploads reject path segments that can escape their owner and session scope
     ),
     /sessionId must be a single path segment/,
   );
-  assert.equal(await sessionDirectoryExists(h.fs, 'victim', ''), false);
+  assert.equal(
+    await sessionDirectoryExists(h.environment, OWNER, '../victim'),
+    false,
+  );
 });
 
 test('discovery advertises the uploads capability only when it is composed', async () => {
@@ -424,7 +432,7 @@ test('POST /session/:sessionId/uploads stores the image in the session sandbox a
     url: `http://localhost${MOUNT}/session/${sessionId}/uploads/${fileId}`,
   });
   assert.deepEqual(
-    await storedBytes(h.fs, OWNER, sessionId, fileId),
+    await storedBytes(h.environment, OWNER, sessionId, fileId),
     PNG_PIXEL,
   );
 
@@ -458,7 +466,12 @@ test('POST /session/:sessionId/uploads stores the image in the session sandbox a
     );
     assert.match(receipt.path, extension);
     assert.deepEqual(
-      await storedBytes(h.fs, OWNER, sessionId, posix.basename(receipt.path)),
+      await storedBytes(
+        h.environment,
+        OWNER,
+        sessionId,
+        posix.basename(receipt.path),
+      ),
       body,
     );
   }
@@ -489,7 +502,10 @@ test('POST /session/:sessionId/uploads requires a URI-encoded x-upload-filename 
       'api/validation-failed',
     );
   }
-  assert.equal(await sessionDirectoryExists(h.fs, OWNER, sessionId), false);
+  assert.equal(
+    await sessionDirectoryExists(h.environment, OWNER, sessionId),
+    false,
+  );
 });
 
 test("POST /session/:sessionId/uploads answers 404 on another user's session without acquiring its sandbox", async () => {
@@ -517,7 +533,10 @@ test("POST /session/:sessionId/uploads answers 404 on another user's session wit
     h.acquisitions.filter((context) => context.userId === 'owner-2'),
     [],
   );
-  assert.equal(await sessionDirectoryExists(h.fs, 'owner-2', sessionId), false);
+  assert.equal(
+    await sessionDirectoryExists(h.environment, 'owner-2', sessionId),
+    false,
+  );
 });
 
 test("GET /session/:sessionId/uploads/:fileId answers 404 on another user's session without acquiring its sandbox", async () => {
@@ -801,7 +820,10 @@ test('POST /session/:sessionId/uploads rejects declared and streamed oversized b
       'api/payload-too-large',
     );
   }
-  assert.equal(await sessionDirectoryExists(h.fs, OWNER, sessionId), false);
+  assert.equal(
+    await sessionDirectoryExists(h.environment, OWNER, sessionId),
+    false,
+  );
 });
 
 test('POST /session/:sessionId accepts any well-formed user message, https file parts included, since nothing resolves URLs into the prompt', async () => {
@@ -916,7 +938,12 @@ test('publish_upload adopts a file the agent rendered into the session and the G
       textChunks('Published.'),
     ],
   });
-  await writeSandboxFile(h.fs, rendered, MP4_HEADER);
+  await writeSandboxFile(
+    h.environment,
+    { chatId: sessionId, userId: OWNER },
+    rendered,
+    MP4_HEADER,
+  );
 
   const response = await turn(h.app, sessionId, {
     parts: [{ type: 'text', text: 'Publish the reel.' }],
@@ -944,7 +971,7 @@ test('publish_upload adopts a file the agent rendered into the session and the G
     url: `${PUBLIC_URL}/session/${sessionId}/uploads/${fileId}`,
   });
   assert.deepEqual(
-    await storedBytes(h.fs, OWNER, sessionId, fileId),
+    await storedBytes(h.environment, OWNER, sessionId, fileId),
     MP4_HEADER,
   );
   const served = await request(h.app, new URL(published.url ?? '').pathname, {
@@ -965,7 +992,12 @@ test('publish_upload adopts a file the agent rendered into the session and the G
     h.uploads.publish({ userId: OWNER, sessionId }, { path: '/etc/passwd' }),
     /outside this session's uploads directory/,
   );
-  await writeSandboxFile(h.fs, `${scope}/render/tool.exe`, MP4_HEADER);
+  await writeSandboxFile(
+    h.environment,
+    { chatId: sessionId, userId: OWNER },
+    `${scope}/render/tool.exe`,
+    MP4_HEADER,
+  );
   await assert.rejects(
     h.uploads.publish(
       { userId: OWNER, sessionId },

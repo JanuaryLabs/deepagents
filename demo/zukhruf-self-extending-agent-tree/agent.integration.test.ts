@@ -1,11 +1,10 @@
 import { TemporaryFiles } from '@zukhruf/fs';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createVirtualSandbox } from '@deepagents/context';
+import { VirtualSandboxEnvironment } from '@deepagents/context';
 import declaration from '@deepagents/demo-zukhruf-self-extending-agent-tree';
 import {
   AgentRuntime,
@@ -25,10 +24,17 @@ const usage = {
 } as const;
 
 test('authors a missing skill before a fresh general task agent uses it', async () => {
-  await using backend = await createVirtualSandbox({ fs: new InMemoryFs() });
-  const sandbox = defineSandbox(async () => backend, {
-    workingDirectory: '/agent',
-  });
+  // Every chat reaches one filesystem, as every microVM of the demo mounts
+  // the same workspace and skill catalog.
+  const environment = new VirtualSandboxEnvironment();
+  const catalog = { chatId: 'catalog', userId: 'user-1' };
+  const sandbox = defineSandbox(
+    {
+      open: () => environment.open(catalog),
+      delete: () => environment.delete(catalog),
+    },
+    { workingDirectory: '/agent' },
+  );
 
   let rootCalls = 0;
   const rootModel = new MockLanguageModelV4({
@@ -140,17 +146,15 @@ test('authors a missing skill before a fresh general task agent uses it', async 
   const host = resources.use(await runtime.initialize(stack));
   resources.use(await host.work({ concurrency: 4 }));
 
-  const turn = await host.enqueue(
-    { chatId: 'root-chat', userId: 'user-1' },
-    {
-      message: {
-        id: 'user-message',
-        role: 'user',
-        parts: [{ type: 'text', text: 'Build a TypeScript API with Hono.' }],
-      },
-      trigger: 'submit-message',
+  const conversation = { chatId: 'root-chat', userId: 'user-1' };
+  const turn = await host.enqueue(conversation, {
+    message: {
+      id: 'user-message',
+      role: 'user',
+      parts: [{ type: 'text', text: 'Build a TypeScript API with Hono.' }],
     },
-  );
+    trigger: 'submit-message',
+  });
   let answer = '';
   for await (const chunk of turn.stream) {
     if (chunk.type === 'text-delta') answer += chunk.delta;
@@ -160,6 +164,7 @@ test('authors a missing skill before a fresh general task agent uses it', async 
   assert.equal(rootCalls, 6);
   assert.equal(skillAuthorityCalls, 2);
   assert.equal(generalTaskCalls, 2);
+  await using backend = await environment.open(catalog);
   assert.match(
     (await backend.readTextFile({ path: '/agent/skills/hono/SKILL.md' }))!,
     /^name: hono$/m,

@@ -126,7 +126,7 @@ async function harness(options: { withSchedules?: boolean } = {}) {
     defineAgent({
       name: 'scheduled-agent',
       model: completingModel(),
-      sandbox: buildSandbox,
+      sandbox: buildSandbox(),
       instructions: [],
       plugins: [scheduled],
     }),

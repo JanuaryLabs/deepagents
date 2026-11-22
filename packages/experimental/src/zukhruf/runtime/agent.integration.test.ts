@@ -10,7 +10,7 @@ import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 const { defineAgent } = zukhruf;
 
 const model = new MockLanguageModelV4();
-const sandbox = buildSandbox;
+const sandbox = buildSandbox();
 
 test('defineAgent declares the subagents an agent may spawn', () => {
   const researcher = defineAgent({

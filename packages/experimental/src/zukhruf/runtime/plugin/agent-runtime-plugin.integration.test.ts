@@ -1,6 +1,5 @@
 import { TemporaryFiles } from '@zukhruf/fs';
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { mkdir, symlink, writeFile } from 'node:fs/promises';
@@ -13,7 +12,7 @@ import {
   InMemoryContextStore,
   type SandboxContext,
   SqliteStreamStore,
-  createVirtualSandbox,
+  VirtualSandboxEnvironment,
 } from '@deepagents/context';
 import {
   AgentPluginCapability,
@@ -74,7 +73,7 @@ function declaration(
   return defineAgent({
     name: 'root',
     model: new MockLanguageModelV4(),
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
     tools,
     plugins,
@@ -627,7 +626,7 @@ test('AgentRuntime rejects context collisions and subagent plugins', async () =>
   const child = defineAgent({
     name: 'child',
     model: new MockLanguageModelV4(),
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
     plugins: [plugin('child-plugin', () => ({}))],
   });
@@ -635,7 +634,7 @@ test('AgentRuntime rejects context collisions and subagent plugins', async () =>
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4(),
-      sandbox: buildSandbox,
+      sandbox: buildSandbox(),
       instructions: [],
       subagents: [child],
     }),
@@ -650,12 +649,16 @@ test('host.sandbox attaches the configured root sandbox before the conversation 
   const hosts: AgentPluginHost[] = [];
   const contexts: SandboxContext[] = [];
   let configuredAttaches = 0;
+  const environment = new VirtualSandboxEnvironment();
   const capturing = plugin('capturing', () => ({
     configure: (root) => ({
       ...root,
-      sandbox: (context) => {
-        configuredAttaches++;
-        return root.sandbox(context);
+      sandbox: {
+        environment: root.sandbox.environment,
+        open: (context) => {
+          configuredAttaches++;
+          return root.sandbox.open(context);
+        },
       },
     }),
     initialize: async (host) => {
@@ -666,9 +669,12 @@ test('host.sandbox attaches the configured root sandbox before the conversation 
     defineAgent({
       name: 'root',
       model: new MockLanguageModelV4(),
-      sandbox: defineSandbox(async (context) => {
-        contexts.push(context);
-        return createVirtualSandbox({ fs: new InMemoryFs() });
+      sandbox: defineSandbox({
+        open: (context) => {
+          contexts.push(context);
+          return environment.open(context);
+        },
+        delete: (context) => environment.delete(context),
       }),
       instructions: [],
       plugins: [capturing],

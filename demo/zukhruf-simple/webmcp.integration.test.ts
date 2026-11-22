@@ -1,13 +1,12 @@
 import { TemporaryFiles } from '@zukhruf/fs';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import test from 'node:test';
 
-import { createVirtualSandbox } from '@deepagents/context';
+import { VirtualSandboxEnvironment } from '@deepagents/context';
 import declaration from '@deepagents/demo-zukhruf-simple';
 import {
   AgentRuntime,
@@ -149,9 +148,7 @@ test('SimpleAgent discovers and executes a website tool through native WebMCP', 
       ...declaration,
       model,
       plugins: [browser],
-      sandbox: defineSandbox(async () =>
-        createVirtualSandbox({ fs: new InMemoryFs() }),
-      ),
+      sandbox: defineSandbox(new VirtualSandboxEnvironment()),
     }),
   );
   const stack = defineStack(async () => ({ storage }));

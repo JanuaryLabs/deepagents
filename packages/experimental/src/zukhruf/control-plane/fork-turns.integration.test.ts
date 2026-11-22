@@ -99,7 +99,7 @@ async function spawnAfter(options: {
       return textResult('child complete');
     },
   });
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const worker = defineAgent({
     name: 'worker',
     model: childModel,

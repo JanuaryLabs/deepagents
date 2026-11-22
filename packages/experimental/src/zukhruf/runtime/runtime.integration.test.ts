@@ -18,7 +18,6 @@ import {
 } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -29,11 +28,12 @@ import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
 
 import {
-  type DisposableSandbox,
+  type ChatSandbox,
   InMemoryContextStore,
+  type SandboxContext,
   SqliteStreamStore,
+  VirtualSandboxEnvironment,
   createBashTool,
-  createVirtualSandbox,
   fragment,
   once,
   reminder,
@@ -498,7 +498,7 @@ function declaration(
   return {
     name: 'test-agent',
     model,
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
     tools,
   };
@@ -1118,9 +1118,13 @@ describe('zukhruf runtime — setup failure durability', () => {
     const model = scriptedModel(track);
     const agentDeclaration = declaration(model);
     let sandboxCalls = 0;
-    agentDeclaration.sandbox = async () => {
-      if (++sandboxCalls === 1) throw new Error('sandbox setup failed');
-      return buildSandbox();
+    const sandbox = buildSandbox();
+    agentDeclaration.sandbox = {
+      environment: sandbox.environment,
+      open: async (chat) => {
+        if (++sandboxCalls === 1) throw new Error('sandbox setup failed');
+        return sandbox.open(chat);
+      },
     };
 
     await using h = await harness(model, {
@@ -1155,13 +1159,17 @@ describe('zukhruf runtime — setup failure durability', () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     const model = scriptedModel(track);
     const agentDeclaration = declaration(model);
-    agentDeclaration.sandbox = defineSandbox(async () => {
-      const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
-      await backend.writeTextFile({
-        path: '/workspace/skills/broken/README.md',
-        content: 'SKILL.md is intentionally missing',
-      });
-      return backend;
+    const environment = new VirtualSandboxEnvironment();
+    agentDeclaration.sandbox = defineSandbox({
+      open: async (chat) => {
+        const backend = await environment.open(chat);
+        await backend.writeTextFile({
+          path: '/workspace/skills/broken/README.md',
+          content: 'SKILL.md is intentionally missing',
+        });
+        return backend;
+      },
+      delete: (chat) => environment.delete(chat),
     });
 
     await using h = await harness(model, {
@@ -1374,7 +1382,7 @@ describe('zukhruf runtime — background executor', () => {
     ]);
 
     const prompts: string[] = [];
-    const backends: DisposableSandbox[] = [];
+    const backends: ChatSandbox[] = [];
     const model = new MockLanguageModelV4({
       doStream: async ({ prompt }) => {
         prompts.push(JSON.stringify(prompt));
@@ -1382,10 +1390,14 @@ describe('zukhruf runtime — background executor', () => {
       },
     });
     const agentDeclaration = declaration(model);
-    agentDeclaration.sandbox = defineSandbox(async () => {
-      const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
-      backends.push(backend);
-      return backend;
+    const environment = new VirtualSandboxEnvironment();
+    agentDeclaration.sandbox = defineSandbox({
+      open: async (chat) => {
+        const backend = await environment.open(chat);
+        backends.push(backend);
+        return backend;
+      },
+      delete: (chat) => environment.delete(chat),
     });
     agentDeclaration.skills = ['manage-schedules'];
 
@@ -1504,7 +1516,7 @@ describe('zukhruf runtime — background executor', () => {
     ]);
 
     const modelPrompts: string[] = [];
-    const backends: DisposableSandbox[] = [];
+    const backends: ChatSandbox[] = [];
     let discoveryCount = 0;
     const model = new MockLanguageModelV4({
       doStream: async ({ prompt }) => {
@@ -1513,20 +1525,22 @@ describe('zukhruf runtime — background executor', () => {
       },
     });
     const agentDeclaration = declaration(model);
+    const environment = new VirtualSandboxEnvironment();
     agentDeclaration.sandbox = defineSandbox(
-      async () => {
-        const backend = await createVirtualSandbox({
-          fs: new InMemoryFs(),
-        });
-        const listDirectory = backend.listDirectory.bind(backend);
-        Object.assign(backend, {
-          listDirectory: (options: Parameters<typeof listDirectory>[0]) => {
-            if (options.path === '/agent-workspace/skills') discoveryCount++;
-            return listDirectory(options);
-          },
-        });
-        backends.push(backend);
-        return backend;
+      {
+        open: async (chat) => {
+          const backend = await environment.open(chat);
+          const listDirectory = backend.listDirectory.bind(backend);
+          Object.assign(backend, {
+            listDirectory: (options: Parameters<typeof listDirectory>[0]) => {
+              if (options.path === '/agent-workspace/skills') discoveryCount++;
+              return listDirectory(options);
+            },
+          });
+          backends.push(backend);
+          return backend;
+        },
+        delete: (chat) => environment.delete(chat),
       },
       {
         workingDirectory: '/agent-workspace',
@@ -1598,20 +1612,24 @@ describe('zukhruf runtime — background executor', () => {
       },
     });
     const agentDeclaration = declaration(model);
-    agentDeclaration.sandbox = defineSandbox(async () => {
-      const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
-      await backend.writeTextFile({
-        path: '/workspace/skills/preinstalled/SKILL.md',
-        content: skillMd,
-      });
-      const listDirectory = backend.listDirectory.bind(backend);
-      Object.assign(backend, {
-        listDirectory: (options: Parameters<typeof listDirectory>[0]) => {
-          if (options.path === '/workspace/skills') discoveryCount++;
-          return listDirectory(options);
-        },
-      });
-      return backend;
+    const environment = new VirtualSandboxEnvironment();
+    agentDeclaration.sandbox = defineSandbox({
+      open: async (chat) => {
+        const backend = await environment.open(chat);
+        await backend.writeTextFile({
+          path: '/workspace/skills/preinstalled/SKILL.md',
+          content: skillMd,
+        });
+        const listDirectory = backend.listDirectory.bind(backend);
+        Object.assign(backend, {
+          listDirectory: (options: Parameters<typeof listDirectory>[0]) => {
+            if (options.path === '/workspace/skills') discoveryCount++;
+            return listDirectory(options);
+          },
+        });
+        return backend;
+      },
+      delete: (chat) => environment.delete(chat),
     });
 
     await using h = await harness(model, {
@@ -1644,16 +1662,20 @@ describe('zukhruf runtime — background executor', () => {
       },
     });
     const agentDeclaration = declaration(model);
-    agentDeclaration.sandbox = defineSandbox(async () => {
-      const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
-      const listDirectory = backend.listDirectory.bind(backend);
-      Object.assign(backend, {
-        listDirectory: (options: Parameters<typeof listDirectory>[0]) => {
-          if (options.path === '/workspace/skills') discoveryCount++;
-          return listDirectory(options);
-        },
-      });
-      return backend;
+    const environment = new VirtualSandboxEnvironment();
+    agentDeclaration.sandbox = defineSandbox({
+      open: async (chat) => {
+        const backend = await environment.open(chat);
+        const listDirectory = backend.listDirectory.bind(backend);
+        Object.assign(backend, {
+          listDirectory: (options: Parameters<typeof listDirectory>[0]) => {
+            if (options.path === '/workspace/skills') discoveryCount++;
+            return listDirectory(options);
+          },
+        });
+        return backend;
+      },
+      delete: (chat) => environment.delete(chat),
     });
 
     await using h = await harness(model, {
@@ -1682,13 +1704,17 @@ describe('zukhruf runtime — background executor', () => {
       },
     });
     const agentDeclaration = declaration(model);
-    agentDeclaration.sandbox = async () => {
-      const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
-      await backend.writeTextFile({
-        path: '/workspace/README.md',
-        content: `sandbox-${++sandboxCount}`,
-      });
-      return createBashTool({ sandbox: backend });
+    const environment = new VirtualSandboxEnvironment();
+    agentDeclaration.sandbox = {
+      environment,
+      open: async (chat) => {
+        const backend = await environment.open(chat);
+        await backend.writeTextFile({
+          path: '/workspace/README.md',
+          content: `sandbox-${++sandboxCount}`,
+        });
+        return createBashTool({ sandbox: backend });
+      },
     };
     agentDeclaration.instructions = [
       fragment('files', async ({ sandbox }) => {
@@ -2692,7 +2718,7 @@ describe('zukhruf runtime — background executor', () => {
   });
 
   it('toolApproval gates the sandbox bash tool: the command runs only once approved, never when denied', async (t) => {
-    const fs = new InMemoryFs();
+    const environment = new VirtualSandboxEnvironment();
     const calls: string[] = [];
     const model = new MockLanguageModelV4({
       doStream: async ({ prompt }) => {
@@ -2732,8 +2758,11 @@ describe('zukhruf runtime — background executor', () => {
     await using h = await harness(model, {
       declaration: {
         ...declaration(model),
-        sandbox: async () =>
-          createBashTool({ sandbox: await createVirtualSandbox({ fs }) }),
+        sandbox: {
+          environment,
+          open: async (chat) =>
+            createBashTool({ sandbox: await environment.open(chat) }),
+        },
         toolApproval: { bash: 'user-approval' },
       },
     });
@@ -2741,6 +2770,10 @@ describe('zukhruf runtime — background executor', () => {
     void _worker;
     const approvedChat = { chatId: 'bash-approved', userId: 'u1' };
     const deniedChat = { chatId: 'bash-denied', userId: 'u1' };
+    const fileIn = async (chat: SandboxContext, path: string) => {
+      await using sandbox = await environment.open(chat);
+      return await sandbox.readTextFile({ path });
+    };
 
     await collectText(
       (await h.runtime.enqueue(approvedChat, turn('approve'))).stream,
@@ -2760,7 +2793,16 @@ describe('zukhruf runtime — background executor', () => {
         ['tool-bash', 'approval-requested'],
       ],
     );
-    assert.equal(await fs.exists('/approve.txt'), false, 'paused, not run');
+    assert.deepStrictEqual(
+      await Promise.all(
+        [approvedChat, deniedChat].flatMap((chat) => [
+          fileIn(chat, '/approve.txt'),
+          fileIn(chat, '/deny.txt'),
+        ]),
+      ),
+      [null, null, null, null],
+      'paused, not run',
+    );
 
     await submitApprovalResponses(h.runtime, approvedChat, {
       toolCallId: approvedPause.part.toolCallId,
@@ -2774,8 +2816,16 @@ describe('zukhruf runtime — background executor', () => {
     await waitForText(h.runtime, approvedChat, 'continued:approve', t.signal);
     await waitForText(h.runtime, deniedChat, 'continued:deny', t.signal);
 
-    assert.equal(await fs.readFile('/approve.txt'), 'ran\n');
-    assert.equal(await fs.exists('/deny.txt'), false, 'denied, never run');
+    assert.deepStrictEqual(
+      await Promise.all(
+        [approvedChat, deniedChat].flatMap((chat) => [
+          fileIn(chat, '/approve.txt'),
+          fileIn(chat, '/deny.txt'),
+        ]),
+      ),
+      ['ran\n', null, null, null],
+      'approved ran once in its chat; denied never ran',
+    );
     const [approvedFinal, deniedFinal] = await Promise.all(
       [approvedChat, deniedChat].map(
         async (chat) =>
@@ -3649,8 +3699,11 @@ describe('zukhruf runtime — conversation status', () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     const model = scriptedModel(track);
     const agentDeclaration = declaration(model);
-    agentDeclaration.sandbox = async () => {
-      throw new Error('sandbox setup failed');
+    agentDeclaration.sandbox = {
+      environment: new VirtualSandboxEnvironment(),
+      open: async () => {
+        throw new Error('sandbox setup failed');
+      },
     };
     await using h = await harness(model, {
       declaration: agentDeclaration,

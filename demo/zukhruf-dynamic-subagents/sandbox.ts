@@ -1,8 +1,7 @@
-import { hash } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
-import { parse } from 'node:path';
+import { join, parse } from 'node:path';
 
-import { createDockerSandbox, pkg } from '@deepagents/context';
+import { DockerSandboxEnvironment } from '@deepagents/context';
 import { defineSandbox } from '@deepagents/experimental/zukhruf';
 
 export interface WorkspaceSandboxOptions {
@@ -19,31 +18,26 @@ export default function createWorkspaceSandbox(
   );
 
   return defineSandbox(
-    ({ chatId }) =>
-      createDockerSandbox({
-        name: `zukhruf-dynamic-subagents-${hash('sha256', chatId).slice(
-          0,
-          16,
-        )}`,
-        image: 'bash:5.3-alpine3.24',
-        installers: [pkg(['git', 'nodejs', 'npm', 'ripgrep'])],
-        container: {
-          HostConfig: {
-            Init: true,
-            Memory: 1024 ** 3,
-            NanoCpus: 2e9,
-            SecurityOpt: ['no-new-privileges'],
-          },
+    new DockerSandboxEnvironment({
+      namespace: 'zukhruf-dynamic-subagents',
+      dockerfile: join(import.meta.dirname, 'Dockerfile'),
+      context: import.meta.dirname,
+      container: {
+        HostConfig: {
+          Memory: 1024 ** 3,
+          NanoCpus: 2e9,
+          SecurityOpt: ['no-new-privileges'],
         },
-        volumes: [
-          {
-            type: 'bind',
-            hostPath: workspaceDirectory,
-            containerPath: '/agent/workspace',
-            readOnly: false,
-          },
-        ],
-      }),
+      },
+      volumes: () => [
+        {
+          type: 'bind',
+          hostPath: workspaceDirectory,
+          containerPath: '/agent/workspace',
+          readOnly: false,
+        },
+      ],
+    }),
     { workingDirectory: '/agent' },
   );
 }

@@ -6,10 +6,11 @@ import type {
   AgentModel,
   AgentSandbox,
   BashToolkitTools,
+  ChatSandbox,
   ContextFragment,
   CreateAgent,
-  DisposableSandbox,
   SandboxContext,
+  SandboxEnvironment,
 } from '@deepagents/context';
 
 import type { AgentPluginDefinition } from './runtime/agent-runtime.ts';
@@ -19,13 +20,21 @@ import type { ZukhrufToolSet } from './tool.ts';
  * Needs both file tools: the uploads plugin tells the model to read attached
  * images with `readFile`.
  */
-export type ZukhrufSandbox = AgentSandbox<
-  BashToolkitTools,
-  DisposableSandbox
-> & {
+export type ZukhrufSandbox = AgentSandbox<BashToolkitTools, ChatSandbox> & {
   /** Absolute directory containing this conversation's files and skills. Omit to disable discovery. */
   readonly workingDirectory?: string;
 };
+
+/**
+ * An agent's sandboxes: the environment where each chat's sandbox lives, and
+ * how a chat's handle is opened and wrapped in the Bash toolkit.
+ */
+export interface ZukhrufSandboxDeclaration {
+  /** Where each chat's sandbox lives; its `stop` and `delete` reach the sandboxes `open` opened. */
+  readonly environment: SandboxEnvironment;
+  /** Opens the chat's sandbox and wraps it in the Bash toolkit. */
+  open(chat: SandboxContext): Promise<ZukhrufSandbox>;
+}
 
 /** Estimated input budget includes messages, instructions and tools; reserve output separately. */
 export type AgentCompaction = Omit<
@@ -46,12 +55,11 @@ export interface AgentDeclaration extends AgentControls<ZukhrufToolSet> {
   description?: string;
   model: AgentModel;
   /**
-   * Sandboxes are per-chat: the factory receives the conversation identity so
-   * the backend can be named by `chatId` and re-attached across turns,
-   * workers, and restarts (the container engine is the registry — no
-   * in-memory state).
+   * Sandboxes are per-chat: the environment names each chat's sandbox from
+   * its namespace and `chatId`, so every turn, worker and restart opens the
+   * same one (the backend is the registry — no in-memory state).
    */
-  sandbox: (context: SandboxContext) => Promise<ZukhrufSandbox>;
+  sandbox: ZukhrufSandboxDeclaration;
   /** Native agent-loop termination; omitted uses the context agent default. */
   stopWhen?: CreateAgent['stopWhen'];
   instructions: ContextFragment[];

@@ -1,14 +1,12 @@
-import { InMemoryFs } from 'just-bash';
+import { VirtualSandboxEnvironment, createBashTool } from '@deepagents/context';
+import type { ZukhrufSandboxDeclaration } from '@deepagents/experimental/zukhruf';
 
-import {
-  type BashToolkit,
-  type DisposableSandbox,
-  createBashTool,
-  createVirtualSandbox,
-} from '@deepagents/context';
-
-export async function buildSandbox(): Promise<BashToolkit<DisposableSandbox>> {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
+/** An agent's sandboxes over a virtual environment of their own, with no working directory. */
+export function buildSandbox(): ZukhrufSandboxDeclaration {
+  const environment = new VirtualSandboxEnvironment();
+  return {
+    environment,
+    open: async (chat) =>
+      createBashTool({ sandbox: await environment.open(chat) }),
+  };
 }

@@ -47,7 +47,7 @@ function declaration(model: AgentDeclaration['model']): AgentDeclaration {
   return {
     name: 'crash-agent',
     model,
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
   };
 }

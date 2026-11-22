@@ -90,13 +90,13 @@ function rootSpawning(
         return spawnStep(task);
       },
     }),
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
     subagents: [
       defineAgent({
         name: 'worker',
         model: new MockLanguageModelV4({ doStream: async () => text('done') }),
-        sandbox: buildSandbox,
+        sandbox: buildSandbox(),
         instructions: [],
       }),
     ],

@@ -1,6 +1,4 @@
-import { InMemoryFs } from 'just-bash';
-
-import { createVirtualSandbox } from '@deepagents/context';
+import { VirtualSandboxEnvironment } from '@deepagents/context';
 import { defineSandbox } from '@deepagents/experimental/zukhruf';
 
 /**
@@ -8,12 +6,9 @@ import { defineSandbox } from '@deepagents/experimental/zukhruf';
  * in-memory sandbox satisfies the agent contract without creating a second
  * container or leaking filesystem state between parent and child.
  */
-export default defineSandbox(
-  () => createVirtualSandbox({ fs: new InMemoryFs() }),
-  {
-    uploadDirectory: {
-      source: import.meta.dirname,
-      include: 'skills/**/*',
-    },
+export default defineSandbox(new VirtualSandboxEnvironment(), {
+  uploadDirectory: {
+    source: import.meta.dirname,
+    include: 'skills/**/*',
   },
-);
+});

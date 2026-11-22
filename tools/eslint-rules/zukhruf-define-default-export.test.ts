@@ -66,7 +66,7 @@ test('a second define* call in a file is reported, even nested in the default ex
     [
       `import { defineSandbox, defineAgent } from '@deepagents/experimental/zukhruf';`,
       `export default defineAgent({`,
-      `  sandbox: defineSandbox(() => backend),`,
+      `  sandbox: defineSandbox(environment),`,
       `});`,
     ].join('\n'),
   );

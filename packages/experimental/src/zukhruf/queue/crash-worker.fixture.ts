@@ -44,7 +44,7 @@ const glacialModel = new MockLanguageModelV4({
 const declaration: AgentDeclaration = {
   name: 'crash-agent',
   model: glacialModel,
-  sandbox: buildSandbox,
+  sandbox: buildSandbox(),
   instructions: [],
 };
 

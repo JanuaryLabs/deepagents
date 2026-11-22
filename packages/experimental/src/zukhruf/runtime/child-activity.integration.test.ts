@@ -6,7 +6,6 @@ import { waitFor } from '@zukhruf/testing/async';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -17,7 +16,7 @@ import { z } from 'zod';
 import {
   SqliteContextStore,
   SqliteStreamStore,
-  createVirtualSandbox,
+  VirtualSandboxEnvironment,
 } from '@deepagents/context';
 import {
   AgentRuntime,
@@ -158,9 +157,7 @@ test(
         schema: 'pgboss',
       });
       const scripted: LanguageModelV4StreamPart[][] = [];
-      const sandbox = defineSandbox(async () =>
-        createVirtualSandbox({ fs: new InMemoryFs() }),
-      );
+      const sandbox = defineSandbox(new VirtualSandboxEnvironment());
       const root = defineAgent({
         name: 'root',
         sandbox,

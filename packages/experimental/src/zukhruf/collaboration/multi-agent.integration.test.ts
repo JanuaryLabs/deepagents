@@ -119,20 +119,20 @@ test('a team injects root guidance, spawn guidance, namespace, and wait bounds',
     defineAgent({
       name: 'root',
       model,
-      sandbox: buildSandbox,
+      sandbox: buildSandbox(),
       instructions: [],
       subagents: [
         defineAgent({
           name: 'reviewer',
           description: 'Reviews the current change.',
           model,
-          sandbox: buildSandbox,
+          sandbox: buildSandbox(),
           instructions: [],
         }),
         defineAgent({
           name: 'worker',
           model,
-          sandbox: buildSandbox,
+          sandbox: buildSandbox(),
           instructions: [],
         }),
       ],
@@ -232,7 +232,7 @@ test('wait_agent clamps a below-minimum timeout and reports it to the model', as
       defineAgent({
         name: 'root',
         model,
-        sandbox: buildSandbox,
+        sandbox: buildSandbox(),
         instructions: [],
       }),
     );
@@ -283,7 +283,7 @@ test('subagent guidance replaces root guidance on a child turn', async () => {
         return textResult('done');
       },
     }),
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
   });
   const runtimeSetup = new AgentRuntime(
@@ -363,7 +363,7 @@ test('spawn output is the canonical task name without agent_path', async () => {
   const child = defineAgent({
     name: 'worker',
     model,
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
   });
   const runtimeSetup = new AgentRuntime(
@@ -423,7 +423,7 @@ test('plugin-contributed subagent uses AI SDK code mode collaboration', async ()
     defineAgent({
       name: 'root',
       model,
-      sandbox: buildSandbox,
+      sandbox: buildSandbox(),
       instructions: [],
       plugins: [
         {
@@ -489,7 +489,7 @@ test('interrupt_agent reports not_found for a missing target', async () => {
     defineAgent({
       name: 'root',
       model,
-      sandbox: buildSandbox,
+      sandbox: buildSandbox(),
       instructions: [],
     }),
   );
@@ -540,7 +540,7 @@ test('default guidance tells root and child agents the Codex concurrency slots',
   const child = defineAgent({
     name: 'worker',
     model: capturing('worker'),
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
   });
   const runtimeSetup = new AgentRuntime(
@@ -614,7 +614,7 @@ async function guidanceFor(multiAgent: Team) {
   const child = defineAgent({
     name: 'worker',
     model: capturing('worker'),
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
   });
   const runtimeSetup = new AgentRuntime(
@@ -934,7 +934,7 @@ test("a child's FINAL_ANSWER reaches the root of a team without direct messaging
           : textResult('root done');
       },
     }),
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
     subagents: [
       defineAgent({
@@ -942,7 +942,7 @@ test("a child's FINAL_ANSWER reaches the root of a team without direct messaging
         model: new MockLanguageModelV4({
           doStream: async () => textResult('child result'),
         }),
-        sandbox: buildSandbox,
+        sandbox: buildSandbox(),
         instructions: [],
       }),
     ],

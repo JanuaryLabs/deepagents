@@ -1,23 +1,27 @@
 import { join } from 'node:path';
 
-import { createMicrosandboxSandbox } from '@deepagents/context';
+import { MicrosandboxSandboxEnvironment } from '@deepagents/context';
 import { defineSandbox } from '@deepagents/experimental/zukhruf';
 
 export default defineSandbox(
-  () =>
-    createMicrosandboxSandbox({
-      name: 'zukhruf-self-extending-general-task',
-      workdir: '/agent',
-      configure: (sandbox) =>
-        sandbox
-          .image('node:lts')
-          .detached(true)
-          .volume('/agent/workspace', (volume) =>
-            volume.bind(join(import.meta.dirname, '..', '..', 'workspace')),
-          )
-          .volume('/agent/skills', (volume) =>
-            volume.bind(join(import.meta.dirname, '..', '..', 'skills')),
-          ),
-    }),
+  new MicrosandboxSandboxEnvironment({
+    namespace: 'zukhruf-self-extending-agent-tree',
+    image: 'node:lts',
+    workdir: '/agent',
+    volumes: () => [
+      {
+        type: 'bind',
+        hostPath: join(import.meta.dirname, '..', '..', 'workspace'),
+        containerPath: '/agent/workspace',
+        readOnly: false,
+      },
+      {
+        type: 'bind',
+        hostPath: join(import.meta.dirname, '..', '..', 'skills'),
+        containerPath: '/agent/skills',
+        readOnly: false,
+      },
+    ],
+  }),
   { workingDirectory: '/agent' },
 );

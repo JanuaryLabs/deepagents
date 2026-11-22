@@ -1,12 +1,11 @@
 import { Postgres } from '@zukhruf/testing/postgres';
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { PgBoss } from 'pg-boss';
 
-import { createVirtualSandbox } from '@deepagents/context';
+import { VirtualSandboxEnvironment } from '@deepagents/context';
 import {
   AgentRuntime,
   MessageDeliveryModes,
@@ -33,9 +32,7 @@ test("a child's FINAL_ANSWER reaches its parent's wait_agent on a PostgreSQL sta
   boss.on('error', () => {});
   await boss.start();
   resources.defer(() => boss.stop({ graceful: false }));
-  const sandbox = defineSandbox(async () =>
-    createVirtualSandbox({ fs: new InMemoryFs() }),
-  );
+  const sandbox = defineSandbox(new VirtualSandboxEnvironment());
   const rootModel = new MockLanguageModelV4({
     doStream: [
       toolCallResult({
@@ -129,9 +126,7 @@ test('a trigger delivery whose wake push fails leaves no mail and no wake stream
   const storage = resources.use(
     await PostgresAgentStorage.create({ pool, boss }),
   );
-  const sandbox = defineSandbox(async () =>
-    createVirtualSandbox({ fs: new InMemoryFs() }),
-  );
+  const sandbox = defineSandbox(new VirtualSandboxEnvironment());
   await using host = await new AgentRuntime(
     defineAgent({
       name: 'root',

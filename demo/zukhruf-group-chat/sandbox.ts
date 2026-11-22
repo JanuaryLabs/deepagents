@@ -1,6 +1,6 @@
 import { NetworkPolicy } from 'microsandbox';
 
-import { createMicrosandboxSandbox } from '@deepagents/context';
+import { MicrosandboxSandboxEnvironment } from '@deepagents/context';
 import { defineSandbox } from '@deepagents/experimental/zukhruf';
 
 import {
@@ -12,24 +12,23 @@ import {
 
 export default function createGroupChatSandbox(readonly: boolean) {
   return defineSandbox(
-    ({ chatId }) =>
-      createMicrosandboxSandbox({
-        name: `zukhruf-group-chat-${chatId}`,
-        workdir: groupChatDirectory,
-        configure: (builder) =>
-          builder
-            .image('alpine')
-            .label(sandboxRunLabel, groupChatRunId)
-            .network((network) => network.policy(NetworkPolicy.none()))
-            .volume(groupChatDirectory, (mount) => {
-              const shared = mount
-                .bind(groupChatHostDirectory)
-                .noexec()
-                .nosuid()
-                .nodev();
-              return readonly ? shared.readonly() : shared;
-            }),
-      }),
+    new MicrosandboxSandboxEnvironment({
+      namespace: 'zukhruf-group-chat',
+      image: 'alpine',
+      workdir: groupChatDirectory,
+      configure: (builder) =>
+        builder
+          .label(sandboxRunLabel, groupChatRunId)
+          .network((network) => network.policy(NetworkPolicy.none()))
+          .volume(groupChatDirectory, (mount) => {
+            const shared = mount
+              .bind(groupChatHostDirectory)
+              .noexec()
+              .nosuid()
+              .nodev();
+            return readonly ? shared.readonly() : shared;
+          }),
+    }),
     { workingDirectory: groupChatDirectory },
   );
 }

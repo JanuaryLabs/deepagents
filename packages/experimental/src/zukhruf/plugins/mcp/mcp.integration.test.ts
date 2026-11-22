@@ -5,7 +5,11 @@ import assert from 'node:assert/strict';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import test from 'node:test';
 
-import { InMemoryContextStore, SqliteStreamStore } from '@deepagents/context';
+import {
+  InMemoryContextStore,
+  SqliteStreamStore,
+  VirtualSandboxEnvironment,
+} from '@deepagents/context';
 import {
   AgentRuntime,
   SqliteMailboxStore,
@@ -121,8 +125,11 @@ test('MCP uses real HTTP clients per runtime and closes them on failure or dispo
     name: 'root',
     model: new MockLanguageModelV4(),
     instructions: [],
-    sandbox: async () => {
-      throw new Error('sandbox must not be called');
+    sandbox: {
+      environment: new VirtualSandboxEnvironment(),
+      open: async () => {
+        throw new Error('sandbox must not be called');
+      },
     },
     plugins: [connection],
   });

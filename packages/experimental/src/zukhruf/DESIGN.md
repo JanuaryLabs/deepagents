@@ -357,15 +357,17 @@ turn cancelled while queued never enters the chain at all.
   DLQ → `onOrphaned` flips the stream row to `failed` → chat unblocks. The process-kill recovery
   path is integration-tested; automatic retry or exact resumption remains deliberately unsupported
   because it could silently re-run bash.
-- **Sandbox is per-chat, named by chatId.** `decl.sandbox({chatId, userId})` +
-  `createDockerSandbox({name: chatId})` — attach-or-create already existed in the context package
-  (`container-sandbox.ts` probes `sandbox-<name>`, attaches/restarts/creates, TOCTOU-safe). The
-  container engine is the registry (zero in-memory state); the workspace FS survives across turns,
-  workers, and restarts. A turn never disposes it: the host holds one handle per declaration and
-  conversation (`ConversationSandboxes`), turns and `host.sandbox()` borrow it, a failed acquisition
-  is forgotten so the next turn tries again, and the host disposes each held handle when it ends.
-  A handle can hold a connection (a Microsandbox microVM refuses every connect after about 107
-  open ones), and disposing one can end the environment (a container sandbox stops its container).
+- **Sandbox is per-chat, named from the environment's namespace and chatId.**
+  `defineSandbox(new DockerSandboxEnvironment({namespace}))`; `decl.sandbox.open({chatId, userId})`
+  attaches, starts or creates the chat's sandbox (TOCTOU-safe). The engine is the registry (zero
+  in-memory state); the workspace FS survives across turns, workers, and restarts. A turn never
+  closes it: the host holds one handle per declaration and conversation (`ConversationSandboxes`),
+  turns and `host.sandbox()` borrow it, each later borrow `resume()`s it (a stopped sandbox starts
+  again), a failed acquisition is forgotten so the next turn tries again, and the host closes each
+  held handle when it ends. A handle can hold a connection (a Microsandbox microVM refuses every
+  connect after about 107 open ones). Closing never stops or removes the sandbox, so a worker's
+  shutdown leaves the chat's sandbox to the other workers; only the environment's `stop` and
+  `delete` end it.
 - The host selects the `StreamStore` and `ChangeSource` when constructing the borrowed
   `StreamManager`; the ready host neither initializes nor disposes borrowed adapters.
 
@@ -995,12 +997,12 @@ the full Node+Postgres and Durable Object platform bundles.
 
 - `agent.ts` — `defineAgent({name, model, sandbox, instructions, tools?, skills?, subagents?})`
   returns a pure declaration with caller tools and a normalized subagent list. `sandbox` is a
-  factory `(ctx: {chatId, userId}) => Promise<ZukhrufSandbox>` so each independent chat owns its
-  backend. `name` is the stable declaration identity persisted in chat metadata.
-- `sandbox/define.ts` — `defineSandbox(createBackend, opts?) → () => Promise<ZukhrufSandbox>`
-  (backend-agnostic `createBashTool` wrapper; seam = `DisposableSandbox`; exposes the configured
-  working directory to the runtime and leaves uploads explicit through the existing
-  `uploadDirectory` option; proven over docker + virtual).
+  `ZukhrufSandboxDeclaration` `{environment, open(ctx: {chatId, userId})}` so each independent
+  chat owns its sandbox. `name` is the stable declaration identity persisted in chat metadata.
+- `sandbox/define.ts` — `defineSandbox(environment, opts?) → ZukhrufSandboxDeclaration`
+  (backend-agnostic `createBashTool` wrapper; seam = `SandboxEnvironment` and its `ChatSandbox`
+  handles; exposes the configured working directory to the runtime and leaves uploads explicit
+  through the existing `uploadDirectory` option; proven over docker, microsandbox + virtual).
 - `instructions.ts` — `defineInstructions(...fragments) => fragments`.
 - `runtime/plugin/plugin-agents.ts` — snapshots each plugin's immediate Markdown agent files during
   host initialization. Agent frontmatter accepts `name`, `description`, and a `skills` list;
@@ -1129,7 +1131,7 @@ work({concurrency?}) → AsyncDisposable }`.
   coalescing and FIFO ordering, cancellation, expiry, catch-up, spent-receipt cleanup, transactional
   task/run deduplication, generic execution handoff, independent review, and restart recovery.
 - Backends switch by composition in the demo sandbox declarations
-  (`defineSandbox(({chatId}) => createDockerSandbox({name: chatId}))` ↔ Daytona etc.);
+  (`defineSandbox(new DockerSandboxEnvironment({namespace}))` ↔ microsandbox etc.);
   `docker.ts`/`daytona.ts` deleted (no presets, no dispatcher flag).
 
 ## Open (deliberately deferred)
@@ -1146,10 +1148,10 @@ work({concurrency?}) → AsyncDisposable }`.
 - **Multi-agent unloading** — the resident-children cap is built (atomic admission, see the parity
   section); Codex-style LRU unloading of idle terminal/interrupted children is not, so idle children
   stay persisted and listed.
-- **Per-chat sandbox GC** — the host releases its per-chat sandbox handles when it ends, following
-  each backend's disposal policy. Before a turn borrows a held handle it runs `true` in it; a
-  handle whose environment was removed outside it (`SandboxNotFoundError`) is disposed and the
-  turn acquires the sandbox again by name. Reclaiming retained environments is decided but not built:
+- **Per-chat sandbox GC** — the host closes its per-chat sandbox handles when it ends, which never
+  stops or removes a sandbox. Before a turn borrows a held handle it resumes it; a handle whose
+  sandbox was removed outside it (`SandboxNotFoundError`) is closed and the turn opens the chat
+  again. Reclaiming retained sandboxes is decided but not built:
   deleting a chat removes its container (#5135), the runtime stops a chat's container, keeping its
   files, once the chat has been idle for a time the host sets (#5132), and files that must outlive
   the container live in a volume the app chooses.
@@ -1160,9 +1162,9 @@ work({concurrency?}) → AsyncDisposable }`.
 
 _Resolved by the executor build:_ **mid-turn message contract** → queue (strict FIFO per chat,
 structural via `key_strict_fifo`, whose per-key head selection prevents cross-chat starvation);
-**sandbox lifetime** → per-chat, named by chatId, attach-or-create; **workspace durability** → the
-per-chat container persists, so the FS survives across turns, workers, and restarts (durable volumes
-only needed once containers are reclaimed).\_
+**sandbox lifetime** → per-chat, named from namespace and chatId, open = attach, start or
+create; **workspace durability** → the per-chat container persists, so the FS survives across
+turns, workers, and restarts (durable volumes only needed once containers are reclaimed).\_
 
 ## Principles carried throughout
 
@@ -1172,9 +1174,9 @@ only needed once containers are reclaimed).\_
 - **Strict contracts over lenient fallbacks.** The store is required; no silent in-memory default.
 - **No in-memory continuation state.** Anything needed to resume a turn must round-trip the store —
   the same discipline that makes it durable also makes it portable.
-- **The host owns sandbox handles; turns and plugins borrow them.** The host lazily acquires one
-  handle per declaration and conversation, shares it across turns, and disposes it after workers
-  stop. Backend policy determines whether disposal stops, removes, or retains the underlying
-  environment. Reclaiming retained environments for deleted or idle chats remains open.
+- **The host owns sandbox handles; turns and plugins borrow them.** The host lazily opens one
+  handle per declaration and conversation, shares it across turns, and closes it after workers
+  stop. Closing never touches the sandbox; the environment's `stop` and `delete` do. Reclaiming
+  sandboxes of deleted or idle chats remains open.
 - **Scaffold one primitive at a time**, even erroring, where the error is diagnostic (it pins the
   exact missing dependency).

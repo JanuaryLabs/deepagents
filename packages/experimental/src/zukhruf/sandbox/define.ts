@@ -1,32 +1,40 @@
 import {
   type CreateBashToolOptions,
-  type DisposableSandbox,
-  type SandboxContext,
+  type SandboxEnvironment,
   createBashTool,
 } from '@deepagents/context';
 
-import type { ZukhrufSandbox } from '../agent.ts';
+import type { ZukhrufSandboxDeclaration } from '../agent.ts';
 
 type WrapOptions = Omit<CreateBashToolOptions, 'sandbox'>;
 
 const DEFAULT_WORKING_DIRECTORY = '/workspace';
 
-/** Wrap a backend with Zukhruf's Bash toolkit and working-directory metadata. */
+/**
+ * An agent's sandboxes in `environment`, each wrapped in Zukhruf's Bash
+ * toolkit with its working-directory metadata. The environment is a value,
+ * not a function, so the runtime stops and deletes a chat's sandbox in the
+ * same environment that opened it.
+ */
 export function defineSandbox(
-  createBackend: (context: SandboxContext) => Promise<DisposableSandbox>,
+  environment: SandboxEnvironment,
   options?: WrapOptions,
-): (context: SandboxContext) => Promise<ZukhrufSandbox> {
-  return async (context) => {
-    const workingDirectory =
-      options?.workingDirectory ?? DEFAULT_WORKING_DIRECTORY;
-
-    return Object.assign(
-      await createBashTool({
-        sandbox: await createBackend(context),
-        ...options,
-        workingDirectory,
-      }),
-      { workingDirectory },
-    );
+): ZukhrufSandboxDeclaration {
+  const workingDirectory =
+    options?.workingDirectory ?? DEFAULT_WORKING_DIRECTORY;
+  return {
+    environment,
+    open: async (chat) => {
+      const sandbox = await environment.open(chat);
+      try {
+        return Object.assign(
+          await createBashTool({ sandbox, ...options, workingDirectory }),
+          { workingDirectory },
+        );
+      } catch (error) {
+        await sandbox.close();
+        throw error;
+      }
+    },
   };
 }

@@ -90,7 +90,7 @@ function declaration(model: AgentDeclaration['model']): AgentDeclaration {
   return {
     name: 'researcher',
     model,
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
   };
 }

@@ -77,7 +77,7 @@ await rootIdleAgain.promise;
 statusAbort.abort();
 await statusLog;
 console.log(
-  `\n[done] the specialist's FINAL_ANSWER was consumed inside the root turn; root and specialist used independent histories, streams, mailboxes, and queue keys. Root container "sandbox-${conversation.chatId}" remains attached to its chat.\n`,
+  `\n[done] the specialist's FINAL_ANSWER was consumed inside the root turn; root and specialist used independent histories, streams, mailboxes, and queue keys. The root chat's container keeps running after this process ends (docker ps --filter label=deepagents.sandbox.chat=${conversation.chatId}).\n`,
 );
 
 /** Prints up to `limit` text deltas from `source`; returns how many it printed. */

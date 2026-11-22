@@ -4,7 +4,6 @@ import { open } from '@zukhruf/sqlite-open';
 import { waitFor } from '@zukhruf/testing/async';
 import { hasToolCall, isStepCount, tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PgBoss, fromPglite } from 'pg-boss';
@@ -13,7 +12,7 @@ import { z } from 'zod';
 import {
   SqliteContextStore,
   SqliteStreamStore,
-  createVirtualSandbox,
+  VirtualSandboxEnvironment,
 } from '@deepagents/context';
 import {
   AgentRuntime,
@@ -92,9 +91,7 @@ for (const stopWhen of [
       model,
       instructions: [],
       stopWhen,
-      sandbox: defineSandbox(() =>
-        createVirtualSandbox({ fs: new InMemoryFs() }),
-      ),
+      sandbox: defineSandbox(new VirtualSandboxEnvironment()),
       tools: {
         notify: tool({
           inputSchema: z.object({}),
@@ -169,9 +166,7 @@ test('a truncated tool input cannot park the next queued user turn', async (t) =
       model,
       instructions: [],
       stopWhen: isStepCount(1),
-      sandbox: defineSandbox(() =>
-        createVirtualSandbox({ fs: new InMemoryFs() }),
-      ),
+      sandbox: defineSandbox(new VirtualSandboxEnvironment()),
       tools: {
         query: tool({
           inputSchema: z.object({ sql: z.string() }),
@@ -210,10 +205,9 @@ test('a truncated tool input cannot park the next queued user turn', async (t) =
   assert.equal(queryExecutions, 0, 'An incomplete call cannot execute');
 });
 
-test('the turns of one chat borrow one sandbox, which stays open between turns, also after a failed turn, and the host disposes it at its end', async (t) => {
+test('the turns of one chat borrow one sandbox, which stays open between turns, also after a failed turn, and the host closes it at its end', async (t) => {
   // A handle can hold a connection (a named microVM refuses every connect
-  // after about 107 open ones), and disposing it can end the environment (a
-  // container sandbox stops its container), so the chat keeps one.
+  // after about 107 open ones), so the chat keeps one.
   let created = 0;
   let open = 0;
   const model: MockLanguageModelV4 = new MockLanguageModelV4({
@@ -234,25 +228,29 @@ test('the turns of one chat borrow one sandbox, which stays open between turns, 
       };
     },
   });
+  const environment = new VirtualSandboxEnvironment();
   const runtime = new AgentRuntime(
     defineAgent({
       name: 'shared',
       model,
       instructions: [],
       stopWhen: isStepCount(1),
-      sandbox: defineSandbox(async () => {
-        const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
-        created++;
-        open++;
-        const close = backend.dispose;
-        const dispose = async () => {
-          open--;
-          await close();
-        };
-        return Object.assign(backend, {
-          dispose,
-          [Symbol.asyncDispose]: dispose,
-        });
+      sandbox: defineSandbox({
+        open: async (chat) => {
+          const backend = await environment.open(chat);
+          created++;
+          open++;
+          const { close } = backend;
+          const closed = async () => {
+            open--;
+            await close();
+          };
+          return Object.assign(backend, {
+            close: closed,
+            [Symbol.asyncDispose]: closed,
+          });
+        },
+        delete: (chat) => environment.delete(chat),
       }),
     }),
   );

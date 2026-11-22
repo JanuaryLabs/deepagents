@@ -57,7 +57,7 @@ async function runtimeHarness(
   const declaration: AgentDeclaration = {
     name: 'researcher',
     model,
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
   };
   const pglite = new PGlite();

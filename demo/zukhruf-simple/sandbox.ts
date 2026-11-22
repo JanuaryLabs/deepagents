@@ -1,12 +1,11 @@
-import { createMicrosandboxSandbox } from '@deepagents/context';
+import { MicrosandboxSandboxEnvironment } from '@deepagents/context';
 import { defineSandbox } from '@deepagents/experimental/zukhruf';
 
 export default defineSandbox(
-  ({ chatId }) =>
-    createMicrosandboxSandbox({
-      name: `zukhruf-simple-${chatId}`,
-      configure: (builder) => builder.image('node:lts').detached(true),
-    }),
+  new MicrosandboxSandboxEnvironment({
+    namespace: 'zukhruf-simple',
+    image: 'node:lts',
+  }),
   {
     uploadDirectory: {
       source: import.meta.dirname,

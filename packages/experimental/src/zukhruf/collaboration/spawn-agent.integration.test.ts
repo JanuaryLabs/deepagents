@@ -97,7 +97,7 @@ test('concurrent identical spawn_agent calls reserve one canonical child path', 
       return textResult('spawns submitted');
     },
   });
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const worker = defineAgent({
     name: 'worker',
     model: new MockLanguageModelV4({
@@ -173,7 +173,7 @@ test('spawn_agent retries an enqueue gap but does not restart a completed child 
       return textResult('spawn submitted');
     },
   });
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const worker = defineAgent({
     name: 'worker',
     model: new MockLanguageModelV4({

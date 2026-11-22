@@ -119,7 +119,7 @@ function scriptedRoot(
   const root = defineAgent({
     name: 'root',
     model,
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
     subagents: [worker],
   });
@@ -130,7 +130,7 @@ function workerAgent(): AgentDeclaration {
   return defineAgent({
     name: 'worker',
     model: new MockLanguageModelV4({ doStream: async () => text('done') }),
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
   });
 }
@@ -437,7 +437,7 @@ test('a child paused on an approval holds its slot until its continuation comple
           ? step([{ toolName: 'publish', input: { report: 'findings' } }])
           : text('published'),
     }),
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
     toolApproval: { publish: 'user-approval' },
     tools: {

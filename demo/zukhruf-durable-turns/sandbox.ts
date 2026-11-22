@@ -1,6 +1,6 @@
-import { createDockerSandbox } from '@deepagents/context';
+import { DockerSandboxEnvironment } from '@deepagents/context';
 import { defineSandbox } from '@deepagents/experimental/zukhruf';
 
-export default defineSandbox(({ chatId }) =>
-  createDockerSandbox({ name: chatId }),
+export default defineSandbox(
+  new DockerSandboxEnvironment({ namespace: 'zukhruf-durable-turns' }),
 );

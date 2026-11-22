@@ -398,7 +398,7 @@ test('worker dispatches a child chat to the declaration named by its metadata', 
 
   const rootCalls: unknown[] = [];
   const childCalls: unknown[] = [];
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: textModel('child reply', childCalls),
@@ -488,7 +488,7 @@ test('a terminal duplicate cannot replace a newer latest turn', async () => {
     defineAgent({
       name: 'root',
       model: textModel('done', modelCalls),
-      sandbox: buildSandbox,
+      sandbox: buildSandbox(),
       instructions: [],
     }),
   );
@@ -560,7 +560,7 @@ test('spawn_agent queues an independent child turn and returns before it runs', 
     },
   });
   const childCalls: unknown[] = [];
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: textModel('research complete', childCalls),
@@ -631,7 +631,7 @@ test('a completed child queues its final answer to the parent without waking it'
     mailboxStore.close();
   });
 
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: textModel('research complete', []),
@@ -716,7 +716,7 @@ test('an approval-paused child sends one final answer only after continuation', 
   let childCalls = 0;
   let rootCalls = 0;
   let listedPrompt: unknown;
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: new MockLanguageModelV4({
@@ -840,6 +840,7 @@ test('a failed approval continuation reports failure instead of remaining paused
   });
 
   let sandboxCalls = 0;
+  const virtual = buildSandbox();
   let researcherCalls = 0;
   const listedPrompts: unknown[] = [];
   const researcher = defineAgent({
@@ -854,12 +855,15 @@ test('a failed approval continuation reports failure instead of remaining paused
           : textResult('recovered after failed continuation');
       },
     }),
-    sandbox: async () => {
-      sandboxCalls++;
-      if (sandboxCalls === 2) {
-        throw new Error('continuation sandbox exploded');
-      }
-      return buildSandbox();
+    sandbox: {
+      environment: virtual.environment,
+      open: async (chat) => {
+        sandboxCalls++;
+        if (sandboxCalls === 2) {
+          throw new Error('continuation sandbox exploded');
+        }
+        return virtual.open(chat);
+      },
     },
     instructions: [],
     toolApproval: { publish: 'user-approval' },
@@ -875,7 +879,7 @@ test('a failed approval continuation reports failure instead of remaining paused
     defineAgent({
       name: 'root',
       model: listAgentsModel(listedPrompts),
-      sandbox: buildSandbox,
+      sandbox: buildSandbox(),
       instructions: [],
       subagents: [researcher],
     }),
@@ -980,6 +984,7 @@ test('a cancelled approval continuation clears the gate and revives parked turns
   const continuationSandboxStarted = Promise.withResolvers<void>();
   const releaseContinuationSandbox = Promise.withResolvers<void>();
   let sandboxCalls = 0;
+  const virtual = buildSandbox();
   let modelCalls = 0;
   using stores = new DisposableStack();
   stores.defer(() => {
@@ -999,13 +1004,16 @@ test('a cancelled approval continuation clears the gate and revives parked turns
             : textResult('new ask recovered');
         },
       }),
-      sandbox: async () => {
-        sandboxCalls++;
-        if (sandboxCalls === 2) {
-          continuationSandboxStarted.resolve();
-          await releaseContinuationSandbox.promise;
-        }
-        return buildSandbox();
+      sandbox: {
+        environment: virtual.environment,
+        open: async (chat) => {
+          sandboxCalls++;
+          if (sandboxCalls === 2) {
+            continuationSandboxStarted.resolve();
+            await releaseContinuationSandbox.promise;
+          }
+          return virtual.open(chat);
+        },
       },
       instructions: [],
       toolApproval: { publish: 'user-approval' },
@@ -1081,6 +1089,7 @@ test('failed continuation preserves denied sibling semantics', async () => {
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new OrphaningTurnQueue();
   let sandboxCalls = 0;
+  const virtual = buildSandbox();
   using stores = new DisposableStack();
   stores.defer(() => {
     streamStore.close();
@@ -1115,10 +1124,14 @@ test('failed continuation preserves denied sibling semantics', async () => {
           }),
         }),
       }),
-      sandbox: async () => {
-        sandboxCalls++;
-        if (sandboxCalls === 2) throw new Error('sibling continuation failed');
-        return buildSandbox();
+      sandbox: {
+        environment: virtual.environment,
+        open: async (chat) => {
+          sandboxCalls++;
+          if (sandboxCalls === 2)
+            throw new Error('sibling continuation failed');
+          return virtual.open(chat);
+        },
       },
       instructions: [],
       toolApproval: { publish: 'user-approval', archive: 'user-approval' },
@@ -1192,7 +1205,7 @@ test('a terminal child completion survives a transient parent-mailbox failure', 
     mailboxStore.close();
   });
 
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: textModel('durable result', []),
@@ -1309,14 +1322,14 @@ test('a stale orphan retry cannot clear or supersede a successor turn', async ()
         };
       },
     }),
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
   });
   const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: textModel('root reply', []),
-      sandbox: buildSandbox,
+      sandbox: buildSandbox(),
       instructions: [],
       subagents: [researcher],
     }),
@@ -1430,7 +1443,7 @@ test('terminal child recovery does not duplicate a completion committed before a
     mailboxStore.close();
   });
 
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: textModel('one durable result', []),
@@ -1511,7 +1524,7 @@ test('a failed child asynchronously notifies its parent with the terminal status
     mailboxStore.close();
   });
 
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const failedListPrompts: unknown[] = [];
   const researcher = defineAgent({
     name: 'researcher',
@@ -1615,7 +1628,7 @@ test('list_agents reports a child whose turn fails before setup completes', asyn
 
   const childCalls: unknown[] = [];
   const listedPrompts: unknown[] = [];
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: textModel('must not run', childCalls),
@@ -1714,13 +1727,13 @@ test('a cancelled child asynchronously notifies its parent with the terminal sta
         }),
       }),
     }),
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
   });
   const root = defineAgent({
     name: 'root',
     model: listAgentsModel(cancelledListPrompts),
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
     subagents: [researcher],
   });
@@ -1812,7 +1825,7 @@ test('a child cancelled while queued notifies its parent once without running th
   });
 
   const childCalls: unknown[] = [];
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: textModel('must not run', childCalls),
@@ -1913,7 +1926,7 @@ test('send_message resolves a canonical sibling path and queues mail without wak
       return textResult('message sent');
     },
   });
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const sender = defineAgent({
     name: 'sender',
     model: senderModel,
@@ -2033,7 +2046,7 @@ test('followup_task wakes a non-root target with a new task', async () => {
     },
   });
   const researcherCalls: unknown[] = [];
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: textModel('follow-up complete', researcherCalls),
@@ -2151,7 +2164,7 @@ test('interrupt_agent cancels the oldest queued child turn and reports its prior
       return textResult('child interrupted');
     },
   });
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcherCalls: unknown[] = [];
   const researcher = defineAgent({
     name: 'researcher',
@@ -2261,7 +2274,7 @@ test('interrupt_agent can retry terminal projection before deleting a queued chi
       return textResult('child interrupted after retry');
     },
   });
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: textModel('must not run', []),
@@ -2381,7 +2394,7 @@ test('interrupt_agent aborts a running child across runtime instances without qu
       return textResult('active child interrupted');
     },
   });
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: childModel,
@@ -2492,14 +2505,14 @@ test('interrupt_agent rejects root and self targets', async () => {
         return textResult('invalid targets rejected');
       },
     }),
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
   });
   const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'root',
       model: textModel('root', []),
-      sandbox: buildSandbox,
+      sandbox: buildSandbox(),
       instructions: [],
       subagents: [caller],
     }),
@@ -2555,7 +2568,7 @@ test('interrupt_agent leaves terminal and approval-paused children unchanged', a
     mailboxStore.close();
   });
 
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const completed = defineAgent({
     name: 'completed',
     model: textModel('completed child', []),
@@ -2709,7 +2722,7 @@ test('wait_agent returns for pending caller mail without consuming it', async ()
   const root = defineAgent({
     name: 'root',
     model,
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
   });
   const runtimeSetup = new AgentRuntime(root);
@@ -2775,7 +2788,7 @@ test('wait_agent is released by cross-runtime mail that reaches the next model s
   const root = defineAgent({
     name: 'root',
     model,
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
   });
   const callerRuntimeSetup = new AgentRuntime(root);
@@ -2873,7 +2886,7 @@ test('wait_agent reports a bounded timeout when no mail arrives', async (t) => {
   const root = defineAgent({
     name: 'root',
     model,
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
   });
   const runtimeSetup = new AgentRuntime(root);
@@ -2922,7 +2935,7 @@ test('cancelling the caller aborts an active wait_agent call', async (t) => {
   const root = defineAgent({
     name: 'root',
     model,
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
   });
   const runtimeSetup = new AgentRuntime(root);
@@ -2996,7 +3009,7 @@ test('send_message crosses runtime instances and reaches an active recipient at 
     },
   });
 
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const sender = defineAgent({
     name: 'sender',
     model: senderModel,
@@ -3129,7 +3142,7 @@ test('followup_task crosses runtime instances and wakes an idle recipient', asyn
     },
   });
   const recipientPrompts: unknown[] = [];
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const sender = defineAgent({
     name: 'sender',
     model: senderModel,
@@ -3250,7 +3263,7 @@ test('followup_task stays behind an unstarted initial ask as a distinct later tu
     },
   });
   const researcherPrompts: unknown[] = [];
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: textModel('research complete', researcherPrompts),
@@ -3368,7 +3381,7 @@ test('followup_task rejects the root agent without storing mail or scheduling a 
   const root = defineAgent({
     name: 'root',
     model,
-    sandbox: buildSandbox,
+    sandbox: buildSandbox(),
     instructions: [],
   });
   const runtimeSetup = new AgentRuntime(root);
@@ -3429,7 +3442,7 @@ test('list_agents returns exact Codex items with canonical paths and current sta
       return textResult('tree listed');
     },
   });
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: textModel('research complete', []),
@@ -3526,7 +3539,7 @@ test('list_agents resolves a relative path prefix and returns only that subtree'
       return textResult('subtree listed');
     },
   });
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: textModel('research complete', []),
@@ -3639,7 +3652,7 @@ test('list_agents reports a completed child with its result', async () => {
       return textResult('completion listed');
     },
   });
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: textModel('verified result', []),
@@ -3736,7 +3749,7 @@ test('list_agents reports a completed child with a queued follow-up as running',
       return textResult('scheduled work listed');
     },
   });
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: textModel('initial result', []),
@@ -3882,7 +3895,7 @@ test('nested agents run independently, consume sibling mail, and remain visible 
   });
   const reviewerPrompts: unknown[] = [];
   const researcherPrompts: unknown[] = [];
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: textModel('researcher complete', researcherPrompts),
@@ -4047,7 +4060,7 @@ test('spawn_agent is rejected with the Codex limit error while the tree has no f
       return textResult('root noted the limit');
     },
   });
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: childModel,
@@ -4185,7 +4198,7 @@ test('followup_task is rejected with the Codex limit error while send_message st
       return textResult('root noted the limit');
     },
   });
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: childModel,
@@ -4304,7 +4317,7 @@ test('a settled child frees its execution slot for the next spawn', async () => 
     },
   });
   const childCalls: unknown[] = [];
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: textModel('research complete', childCalls),
@@ -4401,7 +4414,7 @@ test('a host cannot start a sub-agent turn while the tree has no free execution 
       };
     },
   });
-  const sandbox = buildSandbox;
+  const sandbox = buildSandbox();
   const researcher = defineAgent({
     name: 'researcher',
     model: childModel,

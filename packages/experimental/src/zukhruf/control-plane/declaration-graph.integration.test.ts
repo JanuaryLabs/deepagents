@@ -29,7 +29,7 @@ function adapters(resources: AsyncDisposableStack) {
 }
 
 const model = new MockLanguageModelV4();
-const sandbox = buildSandbox;
+const sandbox = buildSandbox();
 
 function declaration(name: string, subagents: AgentDeclaration[] = []) {
   return defineAgent({ name, model, sandbox, instructions: [], subagents });
