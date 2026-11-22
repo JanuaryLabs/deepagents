@@ -2,11 +2,12 @@ import {
   Adapter,
   type ExecuteFunction,
   type GroundingFn,
+  type SqlPolicyOption,
   type ValidateFunction,
 } from '../adapter.ts';
-import { SqlServerSqlPolicyAnalyzer } from './sqlserver.sql-policy.ts';
+import { textPolicy } from './sqlserver.sql-policy.ts';
 
-export type SqlServerAdapterOptions = {
+export type SqlServerAdapterOptions = SqlPolicyOption & {
   execute: ExecuteFunction;
   validate?: ValidateFunction;
   grounding: GroundingFn[];
@@ -93,10 +94,10 @@ export class SqlServer extends Adapter {
   override readonly formatterLanguage = 'transactsql';
 
   constructor(options: SqlServerAdapterOptions) {
-    super(new SqlServerSqlPolicyAnalyzer());
     if (!options || typeof options.execute !== 'function') {
       throw new Error('SqlServer adapter requires an execute function.');
     }
+    super(options.policy ?? textPolicy());
     this.#options = {
       ...options,
       schemas: options.schemas?.length ? options.schemas : undefined,

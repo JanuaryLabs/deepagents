@@ -2,14 +2,14 @@ import { open } from '@zukhruf/sqlite-open';
 import { transaction } from '@zukhruf/sqlite-transaction';
 import type { DatabaseSync } from 'node:sqlite';
 
-import type { GroundingFn } from '../adapter.ts';
+import type { GroundingFn, SqlPolicyOption } from '../adapter.ts';
 import { Sqlite } from '../sqlite/sqlite.ts';
 import { type ColumnType, type ParsedSheet, parseFile } from './parser.ts';
 
 /**
  * Options for creating a Spreadsheet adapter.
  */
-export interface SpreadsheetOptions {
+export interface SpreadsheetOptions extends SqlPolicyOption {
   /**
    * Path to the spreadsheet file (Excel .xlsx/.xls or CSV/TSV).
    */
@@ -73,6 +73,7 @@ export class Spreadsheet extends Sqlite {
     super({
       execute: (sql: string) => db.prepare(sql).all(),
       grounding: options.grounding,
+      policy: options.policy,
     });
 
     this.#db = db;

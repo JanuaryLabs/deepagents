@@ -157,6 +157,15 @@ export function groundingFor<A extends Adapter>(
 }
 
 export type ExecuteFunction = (sql: string) => Promise<any> | any;
+
+/** The option of every adapter that replaces its default SQL policy. */
+export interface SqlPolicyOption {
+  /**
+   * Decides whether SQL may reach validate() and execute(). Each adapter
+   * checks with its own dialect's policy when this is not given.
+   */
+  policy?: SqlPolicyAnalyzer;
+}
 export type ValidateFunction = (
   sql: string,
 ) => Promise<string | void> | string | void;
@@ -485,16 +494,37 @@ export abstract class Adapter {
     });
   }
 
-  async validate(sql: string): Promise<string | void> {
+  /** The decoded SQL when the policy allows it, or the policy's message. */
+  async #admit(sql: string): Promise<{ sql: string } | { error: string }> {
     const decoded = this.#decodeShellEscapes(sql);
     const violation = await this.#analyzePolicy(decoded);
-    if (violation?.kind === 'read-only') return violation.message;
-    if (violation?.kind === 'scope') return JSON.stringify(violation.payload);
-    return this.validateImpl(decoded);
+    if (violation?.kind === 'read-only') return { error: violation.message };
+    if (violation?.kind === 'scope') {
+      return { error: JSON.stringify(violation.payload) };
+    }
+    return { sql: decoded };
+  }
+
+  async validate(sql: string): Promise<string | void> {
+    const admitted = await this.#admit(sql);
+    if ('error' in admitted) return admitted.error;
+    return this.validateImpl(admitted.sql);
   }
 
   async execute(sql: string): Promise<any[]> {
     return this.executeImpl(await this.enforceExecutionPolicy(sql));
+  }
+
+  /**
+   * Validates and then executes SQL, checking it against the policy once.
+   * Gives the policy's or the validator's error in place of a result.
+   */
+  async run(sql: string): Promise<{ error: string } | { result: unknown }> {
+    const admitted = await this.#admit(sql);
+    if ('error' in admitted) return admitted;
+    const error = await this.validateImpl(admitted.sql);
+    if (error) return { error };
+    return { result: await this.executeImpl(admitted.sql) };
   }
 
   protected async enforceExecutionPolicy(sql: string): Promise<string> {

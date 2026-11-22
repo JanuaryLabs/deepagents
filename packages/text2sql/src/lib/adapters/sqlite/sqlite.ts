@@ -2,9 +2,10 @@ import {
   Adapter,
   type ExecuteFunction,
   type GroundingFn,
+  type SqlPolicyOption,
   type ValidateFunction,
 } from '../adapter.ts';
-import { SqliteSqlPolicyAnalyzer } from './sqlite.sql-policy.ts';
+import { policy } from './sqlite.sql-policy.ts';
 
 const SQL_ERROR_MAP: Array<{
   pattern: RegExp;
@@ -43,7 +44,7 @@ const SQL_ERROR_MAP: Array<{
   },
 ];
 
-export type SqliteAdapterOptions = {
+export type SqliteAdapterOptions = SqlPolicyOption & {
   execute: ExecuteFunction;
   validate?: ValidateFunction;
   grounding: GroundingFn[];
@@ -82,12 +83,10 @@ export class Sqlite extends Adapter {
   override readonly formatterLanguage = 'sqlite';
 
   constructor(options: SqliteAdapterOptions) {
-    // SQLite's grammar over-reserves identifiers such as COUNT and PERSIST;
-    // MySQL is the established lenient fallback for those valid SQLite names.
-    super(new SqliteSqlPolicyAnalyzer());
     if (!options || typeof options.execute !== 'function') {
       throw new Error('Sqlite adapter requires an execute function.');
     }
+    super(options.policy ?? policy());
     this.#options = options;
     this.grounding = options.grounding;
   }

@@ -2,11 +2,12 @@ import {
   Adapter,
   type ExecuteFunction,
   type GroundingFn,
+  type SqlPolicyOption,
   type ValidateFunction,
 } from '../adapter.ts';
-import { PostgresSqlPolicyAnalyzer } from './postgres.sql-policy.ts';
+import { policy } from './postgres.sql-policy.ts';
 
-export type PostgresAdapterOptions = {
+export type PostgresAdapterOptions = SqlPolicyOption & {
   execute: ExecuteFunction;
   validate?: ValidateFunction;
   grounding: GroundingFn[];
@@ -82,10 +83,10 @@ export class Postgres extends Adapter {
   override readonly formatterLanguage = 'postgresql';
 
   constructor(options: PostgresAdapterOptions) {
-    super(new PostgresSqlPolicyAnalyzer());
     if (!options || typeof options.execute !== 'function') {
       throw new Error('Postgres adapter requires an execute function.');
     }
+    super(options.policy ?? policy());
     this.#options = {
       ...options,
       schemas: options.schemas?.length ? options.schemas : undefined,

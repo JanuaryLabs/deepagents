@@ -1,9 +1,21 @@
-import { ParserSqlPolicyAnalyzer } from '../parser-sql-policy.ts';
+import { DeniedCalls } from '../policy/denied-calls.ts';
+import { GroundedNames, InScope } from '../policy/in-scope.ts';
+import { OneSelect } from '../policy/one-select.ts';
+import { SourcePolicy } from '../policy/source-policy.ts';
+import { SqlText } from '../policy/sql-text.ts';
 
-export class SqliteSqlPolicyAnalyzer extends ParserSqlPolicyAnalyzer {
-  // MySQL covers SQLite syntax that node-sql-parser's SQLite grammar rejects.
-  protected readonly dialects = ['sqlite', 'mysql'] as const;
-  protected override readonly readOnlyPolicy = {
-    blockedFunctions: ['EDIT', 'LOAD_EXTENSION', 'READFILE', 'WRITEFILE'],
-  } as const;
+/** The default policy of the Sqlite adapter. */
+export function policy() {
+  return new SourcePolicy(
+    // SQLite's grammar over-reserves identifiers such as COUNT and PERSIST;
+    // MySQL is the established lenient fallback for those valid SQLite names.
+    new SqlText({ dialects: ['sqlite', 'mysql'] }),
+    [
+      new OneSelect(),
+      new DeniedCalls({
+        names: ['EDIT', 'LOAD_EXTENSION', 'READFILE', 'WRITEFILE'],
+      }),
+      new InScope(new GroundedNames()),
+    ],
+  );
 }

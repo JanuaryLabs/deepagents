@@ -2,11 +2,12 @@ import {
   Adapter,
   type ExecuteFunction,
   type GroundingFn,
+  type SqlPolicyOption,
   type ValidateFunction,
 } from '../adapter.ts';
 import { ClickHouseSqlPolicyAnalyzer } from './clickhouse.sql-policy.ts';
 
-export interface ClickHouseAdapterOptions {
+export interface ClickHouseAdapterOptions extends SqlPolicyOption {
   execute: ExecuteFunction;
   validate: ValidateFunction;
   grounding?: GroundingFn[];
@@ -33,7 +34,7 @@ export class ClickHouse extends Adapter {
       throw new Error('ClickHouse adapter requires a validate(sql) function.');
     }
 
-    super(new ClickHouseSqlPolicyAnalyzer(options.execute));
+    super(options.policy ?? new ClickHouseSqlPolicyAnalyzer(options.execute));
     this.#options = options;
     this.grounding = options.grounding ?? [];
     this.defaultSchema = options.defaultDatabase;

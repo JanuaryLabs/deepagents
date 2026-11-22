@@ -136,7 +136,7 @@ function writeMultiAdapters(cwd: string): string {
     `const adapter = () => ({
       format: (sql) => sql,
       validate: async () => null,
-      execute: async () => [],
+      run: async () => ({ result: [] }),
       introspect: async () => [],
     });
     export default { alpha: adapter(), beta: adapter() };`,
@@ -318,7 +318,7 @@ describe('sql binary', () => {
     assert.match(result.stdout, /\ncolumns: \(none\)\nrows: 0\n$/);
   });
 
-  it('run: adapter execute errors are reported as run failures', async () => {
+  it('run: adapter run errors are reported as run failures', async () => {
     await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
@@ -327,7 +327,7 @@ describe('sql binary', () => {
         mem: {
           format: (sql) => sql,
           validate: async () => null,
-          execute: async () => { throw new Error('database exploded'); },
+          run: async () => { throw new Error('database exploded'); },
         },
       };`,
     );
@@ -341,7 +341,7 @@ describe('sql binary', () => {
     assert.match(result.stderr, /sql run: database exploded/);
   });
 
-  it('run: non-Error execute throws are reported as run failures', async () => {
+  it('run: non-Error run throws are reported as run failures', async () => {
     await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
@@ -350,7 +350,7 @@ describe('sql binary', () => {
         mem: {
           format: (sql) => sql,
           validate: async () => null,
-          execute: async () => { throw 'plain failure'; },
+          run: async () => { throw 'plain failure'; },
         },
       };`,
     );
@@ -363,7 +363,7 @@ describe('sql binary', () => {
     assert.match(result.stderr, /sql run: plain failure/);
   });
 
-  it('run: non-array execute results are rejected', async () => {
+  it('run: non-array run results are rejected', async () => {
     await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
@@ -372,7 +372,7 @@ describe('sql binary', () => {
         mem: {
           format: (sql) => sql,
           validate: async () => null,
-          execute: async () => ({ id: 1 }),
+          run: async () => ({ result: { id: 1 } }),
         },
       };`,
     );
@@ -384,7 +384,7 @@ describe('sql binary', () => {
     assert.equal(result.exitCode, 1);
     assert.match(
       result.stderr,
-      /sql run: adapter\.execute must return an array of rows/,
+      /sql run: adapter\.run must give an array of rows/,
     );
   });
 
@@ -396,7 +396,7 @@ describe('sql binary', () => {
       `const adapter = (rows) => ({
         format: (sql) => sql,
         validate: async () => null,
-        execute: async () => rows,
+        run: async () => ({ result: rows }),
       });
       export default {
         main: adapter([{ source: 'main', c: 2 }]),
@@ -432,7 +432,9 @@ describe('sql binary', () => {
     ]);
   });
 
-  it('run: adapter format output is validated and executed', async () => {
+  // A plain object's run checks its own SQL: sql run gives it the formatted
+  // SQL and never calls its validate.
+  it('run: a plain-object adapter runs the formatted SQL and checks it itself', async () => {
     await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
@@ -440,8 +442,9 @@ describe('sql binary', () => {
       `export default {
         mem: {
           format: (sql) => sql + ' formatted',
-          validate: async (sql) => sql.endsWith(' formatted') ? null : 'not formatted',
-          execute: async (sql) => [{ sql }],
+          validate: async () => { throw new Error('sql run must not validate'); },
+          run: async (sql) =>
+            sql.endsWith(' formatted') ? { result: [{ sql }] } : { error: 'not formatted' },
         },
       };`,
     );
@@ -455,6 +458,38 @@ describe('sql binary', () => {
     assert.ok(match, `expected result path, got ${result.stdout}`);
     const content = JSON.parse(readFileSync(match[1], 'utf-8'));
     assert.deepStrictEqual(content, [{ sql: 'SELECT 1 formatted' }]);
+  });
+
+  it('run: a policy refusal of an Adapter fails the run before the database sees the SQL', async () => {
+    await using cwdDirectory = await temporaryFiles.directory('sql-cli-test-');
+    const cwd = cwdDirectory.path;
+    const adaptersPath = writeAdaptersModule(
+      cwd,
+      `import { Sqlite } from '${distFileUrl('lib/adapters/sqlite/index.js')}';
+
+       export default {
+         mem: new Sqlite({
+           execute: () => { throw new Error('the database saw the SQL'); },
+           grounding: [],
+           policy: {
+             analyze: async () => ({
+               kind: 'read-only',
+               message: 'denied by the host policy',
+             }),
+           },
+         }),
+       };`,
+      'denying-adapters.ts',
+    );
+
+    const result = await runBin(['run', 'mem', 'SELECT 1'], {
+      cwd,
+      adaptersPath,
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /sql run: denied by the host policy/);
   });
 
   it('run: supports literal backtick identifiers in SQL argv', async () => {
@@ -483,7 +518,7 @@ describe('sql binary', () => {
         mem: {
           format: () => { throw new Error('formatter exploded'); },
           validate: async () => null,
-          execute: async () => [],
+          run: async () => ({ result: [] }),
         },
       };`,
     );
@@ -596,7 +631,7 @@ describe('sql binary', () => {
       `const adapter = (label) => ({
         format: (sql) => sql,
         validate: async () => null,
-        execute: async () => [],
+        run: async () => ({ result: [] }),
         introspect: async () => [{ name: label + '-schema', data: ['table ' + label] }],
       });
       export default { alpha: adapter('alpha'), beta: adapter('beta') };`,
@@ -869,7 +904,7 @@ describe('sql binary', () => {
         mem: {
           format: (sql) => sql,
           validate: async () => null,
-          execute: async () => [],
+          run: async () => ({ result: [] }),
           introspect: async () => { throw new Error('metadata unavailable'); },
         },
       };`,
@@ -1097,7 +1132,7 @@ describe('sql binary', () => {
         mem: {
           format: (sql) => sql + ' formatted',
           validate: async (sql) => sql.endsWith(' formatted') ? null : 'not formatted',
-          execute: async () => { throw new Error('validate must not execute'); },
+          run: async () => { throw new Error('validate must not run'); },
         },
       };`,
     );
@@ -1119,7 +1154,7 @@ describe('sql binary', () => {
         mem: {
           format: (sql) => sql,
           validate: async () => { throw new Error('validator exploded'); },
-          execute: async () => { throw new Error('validate must not execute'); },
+          run: async () => { throw new Error('validate must not run'); },
         },
       };`,
     );
@@ -1192,7 +1227,7 @@ describe('sql binary', () => {
     const cwd = cwdDirectory.path;
     const adaptersPath = writeAdaptersModule(
       cwd,
-      `const adapter = { format: (s) => s, validate: async () => null, execute: async () => [] };
+      `const adapter = { format: (s) => s, validate: async () => null, run: async () => ({ result: [] }) };
        export default { 'bad name': adapter };`,
       'bad-name-adapters.ts',
     );
@@ -1214,7 +1249,7 @@ describe('sql binary', () => {
         mem: {
           format: (sql) => sql,
           validate: async () => null,
-          execute: async () => [{ ok: true }],
+          run: async () => ({ result: [{ ok: true }] }),
         },
       };`,
       'relative-adapters.ts',
@@ -1235,7 +1270,7 @@ describe('sql binary', () => {
       mem: {
         format: (sql) => sql,
         validate: async () => null,
-        execute: async () => [{ n: 1 }],
+        run: async () => ({ result: [{ n: 1 }] }),
       },
     };`);
     const result = await runBin(['run', 'mem', 'SELECT 1'], {
@@ -1439,7 +1474,7 @@ describe('sql binary', () => {
   '1bad': {
     format(sql) { return sql; },
     async validate() {},
-    async execute() { return []; },
+    async run() { return { result: [] }; },
   },
 };`,
       'bad-name-adapters.ts',

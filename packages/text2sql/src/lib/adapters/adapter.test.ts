@@ -1,12 +1,31 @@
+import { TemporaryFiles } from '@zukhruf/fs';
 import { Sqlite as TestSqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert';
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 
-import { Adapter, type SqlPolicyAnalyzer } from '@deepagents/text2sql';
+import {
+  Adapter,
+  type SqlPolicyAnalyzer,
+  type SqlPolicyViolation,
+  Text2Sql,
+  Text2SqlValidationError,
+} from '@deepagents/text2sql';
+import { BigQuery } from '@deepagents/text2sql/bigquery';
+import { ClickHouse } from '@deepagents/text2sql/clickhouse';
+import { DuckDB } from '@deepagents/text2sql/duckdb';
 import { createGroundingContext } from '@deepagents/text2sql/grounding';
+import { Mysql } from '@deepagents/text2sql/mysql';
+import { FirstViolation } from '@deepagents/text2sql/policy';
+import { Postgres } from '@deepagents/text2sql/postgres';
+import { PostHog } from '@deepagents/text2sql/posthog';
+import { Spreadsheet } from '@deepagents/text2sql/spreadsheet';
 import { Sqlite, tables } from '@deepagents/text2sql/sqlite';
+import { SqlServer } from '@deepagents/text2sql/sqlserver';
 
 const testSqlite = new TestSqlite();
+const temporaryFiles = new TemporaryFiles();
 
 const READ_ONLY_MESSAGE = 'only SELECT or WITH queries allowed';
 
@@ -140,6 +159,173 @@ describe('Adapter policy strategy wiring', () => {
     assert.strictEqual(adapter.validateCalls, 0);
     assert.strictEqual(adapter.executeCalls, 0);
     assert.strictEqual(adapter.resolveScopeCalls, 0);
+  });
+});
+
+describe('Adapter policy option', () => {
+  it('checks SQL with the policy option in place of the default of every adapter', async () => {
+    await using directory = await temporaryFiles.directory('text2sql-policy-');
+    const csvPath = path.join(directory.path, 'numbers.csv');
+    await writeFile(csvPath, 'value\n1\n');
+    const denial: SqlPolicyViolation = {
+      kind: 'read-only',
+      message: 'denied by the host policy',
+    };
+    const policy: SqlPolicyAnalyzer = {
+      async analyze() {
+        return denial;
+      },
+    };
+    const execute = () => {
+      throw new Error('The host policy denies SQL before it runs.');
+    };
+    const spreadsheet = new Spreadsheet({
+      file: csvPath,
+      grounding: [],
+      policy,
+    });
+    const adapters: Adapter[] = [
+      new BigQuery({
+        execute,
+        validate: execute,
+        grounding: [],
+        datasets: ['analytics'],
+        policy,
+      }),
+      new ClickHouse({ execute, validate: execute, policy }),
+      new DuckDB({ execute, policy }),
+      new Mysql({ execute, grounding: [], policy }),
+      new Postgres({ execute, grounding: [], policy }),
+      new PostHog({
+        transport: {
+          query: async () => execute(),
+          listEventDefinitions: async () => [],
+          listPropertyDefinitions: async () => [],
+        },
+        policy,
+      }),
+      spreadsheet,
+      new Sqlite({ execute, grounding: [], policy }),
+      new SqlServer({ execute, grounding: [], policy }),
+    ];
+
+    try {
+      for (const adapter of adapters) {
+        assert.strictEqual(
+          await adapter.validate('SELECT 1'),
+          denial.message,
+          adapter.constructor.name,
+        );
+      }
+    } finally {
+      spreadsheet.close();
+    }
+  });
+
+  it('runs the policies of a FirstViolation in order and stops at the first violation', async () => {
+    const asked: string[] = [];
+    const policy = (
+      name: string,
+      violation: SqlPolicyViolation | null,
+    ): SqlPolicyAnalyzer => ({
+      async analyze() {
+        asked.push(name);
+        return violation;
+      },
+    });
+    await using database = await testSqlite.database();
+    const execute = (sql: string) => database.connection.prepare(sql).all();
+
+    const firstDenies = new Sqlite({
+      execute,
+      grounding: [],
+      policy: new FirstViolation(
+        policy('first', { kind: 'read-only', message: 'first denies' }),
+        policy('second', { kind: 'read-only', message: 'second denies' }),
+      ),
+    });
+    assert.strictEqual(await firstDenies.validate('SELECT 1'), 'first denies');
+    assert.deepStrictEqual(asked, ['first']);
+
+    asked.length = 0;
+    const secondDenies = new Sqlite({
+      execute,
+      grounding: [],
+      policy: new FirstViolation(
+        policy('first', null),
+        policy('second', { kind: 'read-only', message: 'second denies' }),
+        policy('third', { kind: 'read-only', message: 'third denies' }),
+      ),
+    });
+    assert.strictEqual(
+      await secondDenies.validate('SELECT 1'),
+      'second denies',
+    );
+    assert.deepStrictEqual(asked, ['first', 'second']);
+
+    asked.length = 0;
+    const allowed = new Sqlite({
+      execute,
+      grounding: [],
+      policy: new FirstViolation(policy('first', null), policy('second', null)),
+    });
+    assert.strictEqual(await allowed.validate('SELECT 1'), undefined);
+    assert.deepStrictEqual(asked, ['first', 'second']);
+  });
+
+  it('checks SQL with the policy once per Text2Sql run', async () => {
+    await using database = await testSqlite.database();
+    const checked: string[] = [];
+    const text2sql = new Text2Sql({
+      adapters: {
+        main: new Sqlite({
+          execute: (sql) => database.connection.prepare(sql).all(),
+          grounding: [],
+          policy: {
+            async analyze(sql) {
+              checked.push(sql);
+              return null;
+            },
+          },
+        }),
+      },
+    });
+
+    const { rows } = await text2sql.run('main', 'SELECT 1 AS one');
+
+    assert.deepStrictEqual(structuredClone(rows), [{ one: 1 }]);
+    assert.strictEqual(checked.length, 1);
+  });
+
+  it('refuses a Text2Sql run that the policy denies before the database sees it', async () => {
+    const executed: string[] = [];
+    const text2sql = new Text2Sql({
+      adapters: {
+        main: new Sqlite({
+          execute: (sql) => {
+            executed.push(sql);
+            return [];
+          },
+          grounding: [],
+          policy: {
+            async analyze() {
+              return {
+                kind: 'read-only',
+                message: 'denied by the host policy',
+              };
+            },
+          },
+        }),
+      },
+    });
+
+    await assert.rejects(
+      () => text2sql.run('main', 'SELECT 1'),
+      (error: unknown) =>
+        Text2SqlValidationError.isInstance(error) &&
+        error.message === 'denied by the host policy',
+    );
+    assert.deepStrictEqual(executed, []);
   });
 });
 

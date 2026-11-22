@@ -159,29 +159,25 @@ export class Text2Sql {
 
   async validate(name: string, sql: string): Promise<string> {
     const adapter = this.#requireAdapter(name);
-    const result = this.#validateWith(adapter, sql);
-    return result;
+    const formatted = adapter.format(sql);
+    const error = await adapter.validate(formatted);
+    if (error) throw new Text2SqlValidationError(error);
+    return formatted;
   }
 
   async run(name: string, sql: string): Promise<Text2SqlRunResult> {
     const adapter = this.#requireAdapter(name);
-    const formatted = await this.#validateWith(adapter, sql);
-    const result: unknown = await adapter.execute(formatted);
+    const outcome = await adapter.run(adapter.format(sql));
+    if ('error' in outcome) throw new Text2SqlValidationError(outcome.error);
+    const { result } = outcome;
     if (!Array.isArray(result)) {
-      throw new Error('adapter.execute must return an array of rows');
+      throw new Error('adapter.run must give an array of rows');
     }
     const rows: unknown[] = result;
     const [first] = rows;
     const columns =
       typeof first === 'object' && first !== null ? Object.keys(first) : [];
     return { rows, columns };
-  }
-
-  async #validateWith(adapter: Adapter, sql: string): Promise<string> {
-    const formatted = adapter.format(sql);
-    const error = await adapter.validate(formatted);
-    if (error) throw new Text2SqlValidationError(error);
-    return formatted;
   }
 
   async index(options: Text2SqlIndexOptions = {}): Promise<ContextFragment[]> {

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { Adapter, type GroundingFn } from '../adapter.ts';
+import { Adapter, type GroundingFn, type SqlPolicyOption } from '../adapter.ts';
 import { PostHogSqlPolicyAnalyzer } from './posthog.sql-policy.ts';
 import type {
   PostHogQueryRequest,
@@ -8,7 +8,7 @@ import type {
   PostHogTransport,
 } from './types.ts';
 
-export interface PostHogAdapterOptions {
+export interface PostHogAdapterOptions extends SqlPolicyOption {
   transport: PostHogTransport;
   grounding?: GroundingFn[];
 }
@@ -39,7 +39,7 @@ export class PostHog extends Adapter {
       );
     }
 
-    super(new PostHogSqlPolicyAnalyzer(options.transport));
+    super(options.policy ?? new PostHogSqlPolicyAnalyzer(options.transport));
     this.transport = options.transport;
     this.grounding = options.grounding ?? [];
   }

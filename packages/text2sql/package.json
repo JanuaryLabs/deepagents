@@ -32,6 +32,12 @@
       "import": "./dist/lib/adapters/groundings/index.js",
       "default": "./dist/lib/adapters/groundings/index.js"
     },
+    "./policy": {
+      "@deepagents/source": "./src/lib/adapters/policy/index.ts",
+      "types": "./dist/lib/adapters/policy/index.d.ts",
+      "import": "./dist/lib/adapters/policy/index.js",
+      "default": "./dist/lib/adapters/policy/index.js"
+    },
     "./sqlite": {
       "@deepagents/source": "./src/lib/adapters/sqlite/index.ts",
       "types": "./dist/lib/adapters/sqlite/index.d.ts",

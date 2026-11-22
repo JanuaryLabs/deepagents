@@ -3,6 +3,7 @@ import pMemoize from 'p-memoize';
 import type { SQLScopeErrorPayload } from '../../agents/exceptions.ts';
 import { buildScopeParseErrorPayload } from '../../sql-scope-error.ts';
 import type { ExecuteFunction } from '../adapter.ts';
+import { readOnly } from '../policy/read-only.ts';
 import type {
   SqlPolicyAnalyzer,
   SqlPolicyContext,
@@ -13,7 +14,6 @@ import {
   parseDuckDBRelationName,
 } from './duckdb-identifiers.ts';
 
-const READ_ONLY_MESSAGE = 'only SELECT queries allowed';
 const SAFE_TABLE_FUNCTIONS = new Set(['generate_series', 'range', 'unnest']);
 
 type Namespace = { catalog: string; schema: string };
@@ -43,7 +43,7 @@ export class DuckDBSqlPolicyAnalyzer implements SqlPolicyAnalyzer {
         ) ||
         (await this.#hasUnsafeFunction(analysis.functions))
       ) {
-        return { kind: 'read-only', message: READ_ONLY_MESSAGE };
+        return readOnly;
       }
 
       const allowedEntities = await context.resolveAllowedEntities();
@@ -66,7 +66,7 @@ export class DuckDBSqlPolicyAnalyzer implements SqlPolicyAnalyzer {
         : null;
     } catch (error) {
       if (isReadOnlySerializationError(error)) {
-        return { kind: 'read-only', message: READ_ONLY_MESSAGE };
+        return readOnly;
       }
       return {
         kind: 'scope',

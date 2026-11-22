@@ -687,7 +687,7 @@ it('runs generated HogQL through the public Text2Sql flow', async () => {
     rows: [{ signups: 7 }],
     columns: ['signups'],
   });
-  assert.equal(metadataCalls - metadataBeforeRun, 2);
+  assert.equal(metadataCalls - metadataBeforeRun, 1);
 });
 
 function schemaFixture() {

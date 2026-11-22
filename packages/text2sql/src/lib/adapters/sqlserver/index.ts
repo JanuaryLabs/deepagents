@@ -18,7 +18,7 @@ import { SqlServerTableGrounding } from './table.sqlserver.grounding.ts';
 import { SqlServerViewGrounding } from './view.sqlserver.grounding.ts';
 
 export * from './sqlserver.ts';
-export { SqlServerSqlPolicyAnalyzer } from './sqlserver.sql-policy.ts';
+export { textPolicy } from './sqlserver.sql-policy.ts';
 
 export function tables(config: TableGroundingConfig = {}) {
   return groundingFor(

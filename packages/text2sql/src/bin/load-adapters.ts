@@ -45,7 +45,7 @@ export async function loadAdapters(): Promise<Record<string, Adapter>> {
   for (const [name, value] of entries) {
     if (!isAdapterShape(value)) {
       throw new Error(
-        `TEXT2SQL_ADAPTERS=${target}: adapter "${name}" is missing one of the required methods (format, validate, execute).`,
+        `TEXT2SQL_ADAPTERS=${target}: adapter "${name}" is missing one of the required methods (format, validate, run).`,
       );
     }
     adapters[name] = value;
@@ -63,9 +63,10 @@ export async function loadAdapters(): Promise<Record<string, Adapter>> {
 }
 
 /**
- * The CLI accepts any object with the methods every command calls, so a
- * module may export plain objects as well as Adapter instances. Indexing also
- * calls introspect(), which fails when an adapter does not provide it.
+ * The CLI accepts any object with the methods its commands call: format,
+ * validate (`sql validate`) and run (`sql run`). A module may export plain
+ * objects as well as Adapter instances. Indexing also calls introspect(),
+ * which fails when an adapter does not provide it.
  */
 function isAdapterShape(value: unknown): value is Adapter {
   return (
@@ -75,8 +76,8 @@ function isAdapterShape(value: unknown): value is Adapter {
     typeof value.format === 'function' &&
     'validate' in value &&
     typeof value.validate === 'function' &&
-    'execute' in value &&
-    typeof value.execute === 'function'
+    'run' in value &&
+    typeof value.run === 'function'
   );
 }
 

@@ -3,13 +3,12 @@ import pMemoize from 'p-memoize';
 import type { SQLScopeErrorPayload } from '../../agents/exceptions.ts';
 import { buildScopeParseErrorPayload } from '../../sql-scope-error.ts';
 import type { ExecuteFunction } from '../adapter.ts';
+import { readOnly } from '../policy/read-only.ts';
 import type {
   SqlPolicyAnalyzer,
   SqlPolicyContext,
   SqlPolicyViolation,
 } from '../sql-policy.ts';
-
-const READ_ONLY_MESSAGE = 'only SELECT queries allowed';
 
 type ExplainNode = {
   text: string;
@@ -39,10 +38,10 @@ export class ClickHouseSqlPolicyAnalyzer implements SqlPolicyAnalyzer {
       const ast = await this.#explain(`EXPLAIN AST ${sql}`);
       const astAnalysis = analyzeAst(ast);
       if (!astAnalysis.isSelect) {
-        return { kind: 'read-only', message: READ_ONLY_MESSAGE };
+        return readOnly;
       }
       if (await this.#hasUnsafeFunction(astAnalysis.functions)) {
-        return { kind: 'read-only', message: READ_ONLY_MESSAGE };
+        return readOnly;
       }
 
       const syntacticTree = await this.#explain(

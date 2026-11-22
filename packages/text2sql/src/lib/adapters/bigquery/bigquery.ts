@@ -2,11 +2,12 @@ import {
   Adapter,
   type ExecuteFunction,
   type GroundingFn,
+  type SqlPolicyOption,
   type ValidateFunction,
 } from '../adapter.ts';
-import { BigQuerySqlPolicyAnalyzer } from './bigquery.sql-policy.ts';
+import { policy } from './bigquery.sql-policy.ts';
 
-export type BigQueryAdapterOptions = {
+export type BigQueryAdapterOptions = SqlPolicyOption & {
   execute: ExecuteFunction;
   /**
    * SQL validation is required for BigQuery.
@@ -55,11 +56,10 @@ export class BigQuery extends Adapter {
   override readonly formatterLanguage = 'bigquery';
 
   constructor(options: BigQueryAdapterOptions) {
-    super(new BigQuerySqlPolicyAnalyzer());
-
     if (!options || typeof options.execute !== 'function') {
       throw new Error('BigQuery adapter requires an execute(sql) function.');
     }
+    super(options.policy ?? policy());
     if (typeof options.validate !== 'function') {
       throw new Error(
         'BigQuery adapter requires a validate(sql) function. Provide a BigQuery dry-run validator (recommended) so generated SQL can be validated before execution.',

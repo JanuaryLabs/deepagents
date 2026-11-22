@@ -19,3 +19,19 @@ export function buildScopeParseErrorPayload(
     parser_error: parserError,
   };
 }
+
+export function buildOutOfScopePayload(
+  sql: string,
+  referencedEntities: string[],
+  allowedEntities: string[],
+): SQLScopeErrorPayload {
+  return {
+    error: `Query references entities outside grounded scope: ${referencedEntities.join(', ')}`,
+    error_type: 'OUT_OF_SCOPE',
+    suggestion:
+      'Restrict the query to grounded tables/views or expand grounding to include the referenced entities.',
+    sql_attempted: sql,
+    referenced_entities: referencedEntities,
+    allowed_entities: allowedEntities,
+  };
+}

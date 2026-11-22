@@ -549,7 +549,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
         for (const sql of statements) {
           assert.equal(
             await adapter.validate(sql),
-            'only SELECT queries allowed',
+            'only SELECT or WITH queries allowed',
           );
           assert.ok(!databaseQueries.includes(sql));
         }
@@ -611,7 +611,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
           const result = await adapter.validate(sql);
           assert.ok(typeof result === 'string');
           assert.ok(
-            result === 'only SELECT queries allowed' ||
+            result === 'only SELECT or WITH queries allowed' ||
               JSON.parse(result).error_type === 'SQL_SCOPE_PARSE_ERROR',
           );
           assert.ok(!databaseQueries.includes(sql));
@@ -720,7 +720,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
 
         const result = await adapter.validate(sql);
 
-        assert.equal(result, 'only SELECT queries allowed');
+        assert.equal(result, 'only SELECT or WITH queries allowed');
         assert.equal(validatorCalls, 0);
         assert.ok(!databaseQueries.includes(sql));
         assert.ok(
@@ -776,7 +776,7 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
         for (const sql of statements) {
           assert.equal(
             await adapter.validate(sql),
-            'only SELECT queries allowed',
+            'only SELECT or WITH queries allowed',
           );
           assert.ok(!databaseQueries.includes(sql));
         }

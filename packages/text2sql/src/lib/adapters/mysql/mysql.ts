@@ -2,11 +2,12 @@ import {
   Adapter,
   type ExecuteFunction,
   type GroundingFn,
+  type SqlPolicyOption,
   type ValidateFunction,
 } from '../adapter.ts';
-import { MysqlSqlPolicyAnalyzer } from './mysql.sql-policy.ts';
+import { policy } from './mysql.sql-policy.ts';
 
-export type MysqlAdapterOptions = {
+export type MysqlAdapterOptions = SqlPolicyOption & {
   execute: ExecuteFunction;
   validate?: ValidateFunction;
   grounding: GroundingFn[];
@@ -96,10 +97,10 @@ export class Mysql extends Adapter {
   ];
 
   constructor(options: MysqlAdapterOptions) {
-    super(new MysqlSqlPolicyAnalyzer());
     if (!options || typeof options.execute !== 'function') {
       throw new Error('Mysql adapter requires an execute function.');
     }
+    super(options.policy ?? policy());
     this.#options = {
       ...options,
       databases: options.databases?.length ? options.databases : undefined,

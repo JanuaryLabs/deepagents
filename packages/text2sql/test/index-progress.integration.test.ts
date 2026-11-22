@@ -36,11 +36,11 @@ import {
 import {
   Sqlite,
   type SqliteAdapterOptions,
-  SqliteSqlPolicyAnalyzer,
   columnStats,
   columnValues,
   constraints,
   indexes,
+  policy,
   rowCount,
   tables,
 } from '@deepagents/text2sql/sqlite';
@@ -65,7 +65,7 @@ class TestAdapter extends Adapter {
       ctx: GroundingContext,
     ) => Promise<ContextFragment[]> | ContextFragment[],
   ) {
-    super(new SqliteSqlPolicyAnalyzer());
+    super(policy());
     this.#introspect = introspect;
   }
 

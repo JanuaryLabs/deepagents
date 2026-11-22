@@ -233,7 +233,12 @@ provided.
 
 Install the package inside the sandbox and set `TEXT2SQL_ADAPTERS` to a module
 whose default export is `Record<string, Adapter>`. Missing `sql` means the
-sandbox was not prepared correctly.
+sandbox was not prepared correctly. The CLI also loads a plain object with the
+methods its commands call: `format(sql)`, `validate(sql)` for `sql validate`,
+and `run(sql)` for `sql run`. `sql run` gives the formatted SQL to `run` and
+never calls `validate`, so a plain object's `run` checks its own SQL and gives
+`{ result: rows }` or `{ error: message }`. `sql index` also calls
+`introspect()`.
 
 `sql index` output details:
 
@@ -336,6 +341,57 @@ Direct `adapter.execute(sql, values)` calls forward named HogQL values unchanged
 after validation, which is useful for application-owned filters added outside
 the model loop. Shell-escaped dollar-prefixed PostHog properties such as
 `properties['\$device_type']` are decoded before validation and execution.
+
+## SQL policy
+
+Each adapter checks SQL with a policy before its validator or executor runs.
+`Text2Sql.run` checks once, then validates and executes. A policy is a
+`SqlPolicyAnalyzer`, and every adapter takes one as its `policy` option in
+place of its default.
+
+The building blocks are in `@deepagents/text2sql/policy`. A fact source reads
+the SQL into facts, and rules check the facts in order; the first violation
+wins, and a rule that is not reached reads no fact. `SqlText` reads the SQL
+text with node-sql-parser and gives `Statements`, `Relations`, `Calls` and
+`Constructs`. A rule names the facts it reads, so a rule that the source cannot
+serve does not compile.
+
+| Rule          | Reads        | Refuses                                                          |
+| ------------- | ------------ | ---------------------------------------------------------------- |
+| `OneSelect`   | `Statements` | anything but one SELECT, `SELECT INTO` included                  |
+| `DeniedCalls` | `Calls`      | calls by name, by name prefix or by qualified name               |
+| `Forbid`      | `Constructs` | table hints, linked-server relations, locking reads, assignments |
+| `InScope`     | `Relations`  | relations outside the grounded tables and views                  |
+
+`InScope(new GroundedNames())` matches names without case, and it matches an
+unqualified name by the last part of an allowed entity. Each dialect exports
+its default policy: `policy()` of `sqlite`, `postgres`, `mysql` and `bigquery`,
+and `textPolicy()` of `sqlserver`. `FirstViolation` runs policies in order,
+and the first violation wins:
+
+```ts
+import {
+  DeniedCalls,
+  FirstViolation,
+  SourcePolicy,
+  SqlText,
+} from '@deepagents/text2sql/policy';
+import * as sqlserver from '@deepagents/text2sql/sqlserver';
+
+const adapter = new sqlserver.SqlServer({
+  execute,
+  grounding: [sqlserver.tables()],
+  policy: new FirstViolation(
+    sqlserver.textPolicy(),
+    new SourcePolicy(new SqlText({ dialects: ['transactsql'] }), [
+      new DeniedCalls({ names: ['HASHBYTES'] }),
+    ]),
+  ),
+});
+```
+
+A source that cannot read the SQL throws `UnreadableSql`, and the policy gives
+`SQL_SCOPE_PARSE_ERROR`. Any other error of a source rejects the check.
 
 ## Fragments
 

@@ -5,6 +5,7 @@ import {
   Adapter,
   type ExecuteFunction,
   type GroundingFn,
+  type SqlPolicyOption,
   type ValidateFunction,
 } from '../adapter.ts';
 import {
@@ -15,7 +16,7 @@ import { DuckDBSqlPolicyAnalyzer } from './duckdb.sql-policy.ts';
 
 const namespaceRow = z.object({ catalog: z.string(), schema: z.string() });
 
-export interface DuckDBAdapterOptions {
+export interface DuckDBAdapterOptions extends SqlPolicyOption {
   execute: ExecuteFunction;
   validate?: ValidateFunction;
   grounding?: GroundingFn[];
@@ -39,7 +40,7 @@ export class DuckDB extends Adapter {
     }
     validateScopeOption('catalogs', options.catalogs);
     validateScopeOption('schemas', options.schemas);
-    super(new DuckDBSqlPolicyAnalyzer(options.execute));
+    super(options.policy ?? new DuckDBSqlPolicyAnalyzer(options.execute));
     this.#options = options;
     this.#namespace = pMemoize(() => this.#loadNamespace());
     this.grounding = options.grounding ?? [];
