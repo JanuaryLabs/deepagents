@@ -1,0 +1,3341 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Agent API",
+    "version": "1.0.0"
+  },
+  "tags": [
+    {
+      "name": "suites"
+    },
+    {
+      "name": "runs"
+    },
+    {
+      "name": "datasets"
+    },
+    {
+      "name": "prompts"
+    },
+    {
+      "name": "compare"
+    },
+    {
+      "name": "models"
+    }
+  ],
+  "paths": {
+    "/suites": {
+      "get": {
+        "operationId": "listSuites",
+        "parameters": [],
+        "tags": [
+          "suites"
+        ],
+        "description": "List all evaluation suites with run counts",
+        "responses": {
+          "200": {
+            "description": "Response for 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "completedCount": {
+                        "type": "number"
+                      },
+                      "created_at": {
+                        "type": "number"
+                      },
+                      "failedCount": {
+                        "type": "number"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "lastStartedAt": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "number"
+                          }
+                        ]
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "runCount": {
+                        "type": "number"
+                      },
+                      "runningCount": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "completedCount",
+                      "created_at",
+                      "failedCount",
+                      "id",
+                      "lastStartedAt",
+                      "name",
+                      "runCount",
+                      "runningCount"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate400_application_json"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/suites/{id}": {
+      "get": {
+        "operationId": "getSuite",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "suites"
+        ],
+        "description": "Get a single suite with its runs and aggregate stats",
+        "responses": {
+          "200": {
+            "description": "Response for 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RunRow"
+                      }
+                    },
+                    "stats": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "totalCases": {
+                              "type": "number"
+                            },
+                            "totalFail": {
+                              "type": "number"
+                            },
+                            "totalLatency": {
+                              "type": "number"
+                            },
+                            "totalPass": {
+                              "type": "number"
+                            },
+                            "totalTokens": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "totalCases",
+                            "totalFail",
+                            "totalLatency",
+                            "totalPass",
+                            "totalTokens"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "suite": {
+                      "$ref": "#/components/schemas/SuiteRow"
+                    }
+                  },
+                  "required": [
+                    "runs",
+                    "stats",
+                    "suite"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate400_application_json"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "enum": [
+                        "Suite not found"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "renameSuite",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "suites"
+        ],
+        "description": "Rename an existing suite",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "name"
+                ],
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate400_application_json"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "enum": [
+                        "Suite not found"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteSuite",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "suites"
+        ],
+        "description": "Delete a suite and all its runs",
+        "responses": {
+          "204": {
+            "description": "Response for 204"
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate400_application_json"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "enum": [
+                        "Suite not found"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/suites/{id}/compare": {
+      "get": {
+        "operationId": "compareSuiteRuns",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "runIds",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "tags": [
+          "suites"
+        ],
+        "description": "Compare multiple runs within a suite",
+        "responses": {
+          "200": {
+            "description": "Response for 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "caseDiffs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "index": {
+                            "type": "number"
+                          },
+                          "scores": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "number"
+                              }
+                            }
+                          }
+                        },
+                        "required": [
+                          "index",
+                          "scores"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "summary": {
+                            "$ref": "#/components/schemas/RunSummary"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "model",
+                          "name",
+                          "summary"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "scorerNames": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "caseDiffs",
+                    "runs",
+                    "scorerNames"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/validate400_application_json"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "enum": [
+                            "At least 2 run IDs required"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "enum": [
+                            "Suite not found"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{id}/events": {
+      "get": {
+        "operationId": "streamRunEvents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "runs"
+        ],
+        "description": "Stream real-time SSE events for a running eval",
+        "responses": {
+          "200": {
+            "description": "Response for 200",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate400_application_json"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs": {
+      "get": {
+        "operationId": "listRuns",
+        "parameters": [],
+        "tags": [
+          "runs"
+        ],
+        "description": "List all runs grouped by suite",
+        "responses": {
+          "200": {
+            "description": "Response for 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "groups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "runs": {
+                            "type": "array",
+                            "items": {
+                              "$ref": "#/components/schemas/RunRow"
+                            }
+                          },
+                          "suiteId": {
+                            "type": "string"
+                          },
+                          "suiteName": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "runs",
+                          "suiteId",
+                          "suiteName"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "totalRuns": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "groups",
+                    "totalRuns"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate400_application_json"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createRun",
+        "parameters": [],
+        "tags": [
+          "runs"
+        ],
+        "description": "Start a new eval run across one or more models",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "dataset",
+                  "models",
+                  "name",
+                  "scorers"
+                ],
+                "type": "object",
+                "properties": {
+                  "batchSize": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991,
+                    "x-zod-type": "coerce-number"
+                  },
+                  "dataset": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "endpointUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "expectedField": {
+                    "type": "string"
+                  },
+                  "inputField": {
+                    "type": "string"
+                  },
+                  "maxConcurrency": {
+                    "default": 10,
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991,
+                    "x-zod-type": "coerce-number"
+                  },
+                  "models": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[^\\s/]+\\/[^\\s/].+$"
+                    }
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "promptId": {
+                    "type": "string"
+                  },
+                  "recordSelection": {
+                    "type": "string"
+                  },
+                  "scorerModel": {
+                    "type": "string"
+                  },
+                  "scorers": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "suiteId": {
+                    "type": "string"
+                  },
+                  "taskMode": {
+                    "default": "prompt",
+                    "type": "string",
+                    "enum": [
+                      "prompt",
+                      "http"
+                    ]
+                  },
+                  "threshold": {
+                    "default": 0.5,
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "x-zod-type": "coerce-number"
+                  },
+                  "timeout": {
+                    "default": 30000,
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991,
+                    "x-zod-type": "coerce-number"
+                  },
+                  "trials": {
+                    "default": 1,
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991,
+                    "x-zod-type": "coerce-number"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Response for 201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "suiteId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "suiteId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/validate400_application_json"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "enum": [
+                            "HTTP mode requires an endpoint URL."
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "enum": [
+                            "Prompt mode requires selecting a saved prompt."
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "enum": [
+                            "Selected prompt was not found."
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "enum": [
+                            "Suite not found"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{id}": {
+      "get": {
+        "operationId": "getRun",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "runs"
+        ],
+        "description": "Get a single run with cases and scores",
+        "responses": {
+          "200": {
+            "description": "Response for 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "cases": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CaseWithScores"
+                      }
+                    },
+                    "config": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "run": {
+                      "$ref": "#/components/schemas/RunRow"
+                    },
+                    "scorerNames": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "suite": {
+                      "$ref": "#/components/schemas/SuiteRow"
+                    },
+                    "summary": {
+                      "$ref": "#/components/schemas/RunSummary"
+                    }
+                  },
+                  "required": [
+                    "cases",
+                    "config",
+                    "run",
+                    "scorerNames",
+                    "suite",
+                    "summary"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate400_application_json"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "enum": [
+                        "Run not found"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "enum": [
+                        "Suite not found for run"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "renameRun",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "runs"
+        ],
+        "description": "Rename an existing run",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "name"
+                ],
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate400_application_json"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "enum": [
+                        "Run not found"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteRun",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "runs"
+        ],
+        "description": "Delete a run by ID",
+        "responses": {
+          "204": {
+            "description": "Response for 204"
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate400_application_json"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "enum": [
+                        "Run not found"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{id}/retry": {
+      "post": {
+        "operationId": "retryRun",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "runs"
+        ],
+        "description": "Retry a run in-place by resetting its cases and re-executing",
+        "responses": {
+          "200": {
+            "description": "Response for 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "runId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/validate400_application_json"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "enum": [
+                            "Stored config missing endpoint URL."
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "enum": [
+                            "Stored config missing prompt ID."
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "enum": [
+                            "Run not found"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "enum": [
+                            "Prompt referenced by run no longer exists."
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "enum": [
+                        "Run is already running"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets": {
+      "get": {
+        "operationId": "listDatasets",
+        "parameters": [],
+        "tags": [
+          "datasets"
+        ],
+        "description": "List all available datasets",
+        "responses": {
+          "200": {
+            "description": "Response for 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DatasetEntry"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate400_application_json"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "uploadDataset",
+        "parameters": [],
+        "tags": [
+          "datasets"
+        ],
+        "description": "Upload a dataset file (JSON, JSONL, or CSV)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "required": [
+                  "file"
+                ],
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "contentEncoding": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Response for 201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/validate400_application_json"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/import-hf": {
+      "post": {
+        "operationId": "importHfDataset",
+        "parameters": [],
+        "tags": [
+          "datasets"
+        ],
+        "description": "Import a dataset from HuggingFace and cache it locally as JSONL",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "dataset"
+                ],
+                "type": "object",
+                "properties": {
+                  "config": {
+                    "default": "default",
+                    "type": "string"
+                  },
+                  "dataset": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "maxRows": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991,
+                    "x-zod-type": "coerce-number"
+                  },
+                  "split": {
+                    "default": "train",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Response for 201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "filename": {
+                      "type": "string"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "filename",
+                    "success"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/validate400_application_json"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{name}/rows": {
+      "get": {
+        "operationId": "getDatasetRows",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991,
+                  "x-zod-type": "coerce-number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "default": 50,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 200,
+                  "x-zod-type": "coerce-number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        ],
+        "tags": [
+          "datasets"
+        ],
+        "description": "Get paginated rows from a dataset",
+        "responses": {
+          "200": {
+            "description": "Response for 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "columns": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "limit": {
+                      "type": "number"
+                    },
+                    "offset": {
+                      "type": "number"
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": {}
+                      }
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "columns",
+                    "limit",
+                    "offset",
+                    "rows",
+                    "total"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate400_application_json"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{name}": {
+      "delete": {
+        "operationId": "deleteDataset",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "datasets"
+        ],
+        "description": "Delete a dataset by name",
+        "responses": {
+          "204": {
+            "description": "Response for 204"
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate400_application_json"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/prompts": {
+      "get": {
+        "operationId": "listPrompts",
+        "parameters": [],
+        "tags": [
+          "prompts"
+        ],
+        "description": "List all saved prompts",
+        "responses": {
+          "200": {
+            "description": "Response for 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PromptRow"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate400_application_json"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createPrompt",
+        "parameters": [],
+        "tags": [
+          "prompts"
+        ],
+        "description": "Create a new prompt",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "content",
+                  "name"
+                ],
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Response for 201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptRow"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/validate400_application_json"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/prompts/{id}": {
+      "get": {
+        "operationId": "getPrompt",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "prompts"
+        ],
+        "description": "Get a single prompt by ID",
+        "responses": {
+          "200": {
+            "description": "Response for 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptRow"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate400_application_json"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "enum": [
+                        "Prompt not found"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deletePrompt",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "tags": [
+          "prompts"
+        ],
+        "description": "Delete a prompt by ID",
+        "responses": {
+          "204": {
+            "description": "Response for 204"
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate400_application_json"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/compare/runs": {
+      "get": {
+        "operationId": "listCompletedRuns",
+        "parameters": [],
+        "tags": [
+          "compare"
+        ],
+        "description": "List completed runs available for comparison",
+        "responses": {
+          "200": {
+            "description": "Response for 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RunRow"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate400_application_json"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/compare": {
+      "get": {
+        "operationId": "compareRuns",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "baseline",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "candidate",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "tags": [
+          "compare"
+        ],
+        "description": "Compare two runs side by side",
+        "responses": {
+          "200": {
+            "description": "Response for 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "baseline": {
+                      "$ref": "#/components/schemas/RunRow"
+                    },
+                    "candidate": {
+                      "$ref": "#/components/schemas/RunRow"
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/ComparisonResult"
+                    }
+                  },
+                  "required": [
+                    "baseline",
+                    "candidate",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate400_application_json"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "enum": [
+                        "One or both runs not found"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/models": {
+      "get": {
+        "operationId": "listModels",
+        "parameters": [],
+        "tags": [
+          "models"
+        ],
+        "description": "List all available AI models from models.dev",
+        "responses": {
+          "200": {
+            "description": "Response for 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ModelEntry"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate400_application_json"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sql-agent": {
+      "post": {
+        "operationId": "postSqlagent",
+        "parameters": [],
+        "tags": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "input"
+                ],
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "model": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "output": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "output"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate400_application_json"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Response for 415",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/validate415_application_json"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "validate415_application_json": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "cause": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "enum": [
+                      "api/unsupported-media-type"
+                    ],
+                    "type": "string"
+                  },
+                  "detail": {
+                    "enum": [
+                      "GET requests cannot have a content type header"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "detail"
+                ],
+                "additionalProperties": false
+              },
+              "message": {
+                "enum": [
+                  "Unsupported Media Type"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "cause",
+              "message"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "cause": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "enum": [
+                      "api/unsupported-media-type"
+                    ],
+                    "type": "string"
+                  },
+                  "detail": {
+                    "enum": [
+                      "Missing content type header"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "detail"
+                ],
+                "additionalProperties": false
+              },
+              "message": {
+                "enum": [
+                  "Unsupported Media Type"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "cause",
+              "message"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "cause": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "enum": [
+                      "api/unsupported-media-type"
+                    ],
+                    "type": "string"
+                  },
+                  "detail": {
+                    "enum": [
+                      "Invalid content type header"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "detail"
+                ],
+                "additionalProperties": false
+              },
+              "message": {
+                "enum": [
+                  "Unsupported Media Type"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "cause",
+              "message"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "cause": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "enum": [
+                      "api/unsupported-media-type"
+                    ],
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "detail"
+                ],
+                "additionalProperties": false
+              },
+              "message": {
+                "enum": [
+                  "Unsupported Media Type"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "cause",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "validate400_application_json": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "cause": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "enum": [
+                      "api/invalid-json"
+                    ],
+                    "type": "string"
+                  },
+                  "detail": {
+                    "enum": [
+                      "Request body must be valid JSON."
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "detail"
+                ],
+                "additionalProperties": false
+              },
+              "message": {
+                "enum": [
+                  "Invalid JSON body"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "cause",
+              "message"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "cause": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "enum": [
+                      "api/invalid-body"
+                    ],
+                    "type": "string"
+                  },
+                  "detail": {
+                    "enum": [
+                      "Request body must be an object when selecting fields."
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "detail"
+                ],
+                "additionalProperties": false
+              },
+              "message": {
+                "enum": [
+                  "Invalid request body"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "cause",
+              "message"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "cause": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "enum": [
+                      "api/validation-failed"
+                    ],
+                    "type": "string"
+                  },
+                  "detail": {
+                    "enum": [
+                      "The input data is invalid"
+                    ],
+                    "type": "string"
+                  },
+                  "errors": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "custom"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "enum": [
+                                  "invalid_element"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "enum": [
+                                  "invalid_format"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "enum": [
+                                  "invalid_key"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "enum": [
+                                  "invalid_type"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "enum": [
+                                  "invalid_union"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "enum": [
+                                  "invalid_value"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "enum": [
+                                  "not_multiple_of"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "enum": [
+                                  "too_big"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "enum": [
+                                  "too_small"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "enum": [
+                                  "unrecognized_keys"
+                                ],
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "code",
+                          "message",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "formErrors": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "custom"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "enum": [
+                                "invalid_element"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "enum": [
+                                "invalid_format"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "enum": [
+                                "invalid_key"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "enum": [
+                                "invalid_type"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "enum": [
+                                "invalid_union"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "enum": [
+                                "invalid_value"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "enum": [
+                                "not_multiple_of"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "enum": [
+                                "too_big"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "enum": [
+                                "too_small"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "enum": [
+                                "unrecognized_keys"
+                              ],
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "path"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "code",
+                  "detail",
+                  "errors",
+                  "formErrors"
+                ],
+                "additionalProperties": false
+              },
+              "message": {
+                "enum": [
+                  "Validation failed"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "cause",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "SuiteRow": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "number"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "created_at",
+          "id",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "RunRow": {
+        "type": "object",
+        "properties": {
+          "config": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            ]
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "number"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "completed"
+                ],
+                "type": "string"
+              },
+              {
+                "enum": [
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "enum": [
+                  "running"
+                ],
+                "type": "string"
+              }
+            ]
+          },
+          "suite_id": {
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunSummary"
+              }
+            ]
+          }
+        },
+        "required": [
+          "config",
+          "finished_at",
+          "id",
+          "model",
+          "name",
+          "started_at",
+          "status",
+          "suite_id",
+          "summary"
+        ],
+        "additionalProperties": false
+      },
+      "RunSummary": {
+        "type": "object",
+        "properties": {
+          "failCount": {
+            "type": "number"
+          },
+          "meanScores": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "passCount": {
+            "type": "number"
+          },
+          "totalCases": {
+            "type": "number"
+          },
+          "totalLatencyMs": {
+            "type": "number"
+          },
+          "totalTokensIn": {
+            "type": "number"
+          },
+          "totalTokensOut": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "failCount",
+          "meanScores",
+          "passCount",
+          "totalCases",
+          "totalLatencyMs",
+          "totalTokensIn",
+          "totalTokensOut"
+        ],
+        "additionalProperties": false
+      },
+      "CaseWithScores": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "expected": {},
+          "id": {
+            "type": "string"
+          },
+          "idx": {
+            "type": "number"
+          },
+          "input": {},
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "output": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "scores": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "score": {
+                  "type": "number"
+                },
+                "scorer_name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reason",
+                "score",
+                "scorer_name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "tokens_in": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "tokens_out": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          }
+        },
+        "required": [
+          "error",
+          "expected",
+          "id",
+          "idx",
+          "input",
+          "latency_ms",
+          "output",
+          "run_id",
+          "scores",
+          "tokens_in",
+          "tokens_out"
+        ],
+        "additionalProperties": false
+      },
+      "DatasetEntry": {
+        "type": "object",
+        "properties": {
+          "extension": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "extension",
+          "name",
+          "sizeBytes"
+        ],
+        "additionalProperties": false
+      },
+      "PromptRow": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "number"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "content",
+          "created_at",
+          "id",
+          "name",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "ComparisonResult": {
+        "type": "object",
+        "properties": {
+          "caseDiffs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaseDiff"
+            }
+          },
+          "costDelta": {
+            "$ref": "#/components/schemas/CostDelta"
+          },
+          "regression": {
+            "type": "object",
+            "properties": {
+              "details": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "exceeds": {
+                      "type": "boolean"
+                    },
+                    "meanDelta": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "exceeds",
+                    "meanDelta"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "regressed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "details",
+              "regressed"
+            ],
+            "additionalProperties": false
+          },
+          "scorerSummaries": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ScorerSummary"
+            }
+          },
+          "totalCasesCompared": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "caseDiffs",
+          "costDelta",
+          "regression",
+          "scorerSummaries",
+          "totalCasesCompared"
+        ],
+        "additionalProperties": false
+      },
+      "CaseDiff": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "number"
+          },
+          "scorerDeltas": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "baseline": {
+                  "type": "number"
+                },
+                "candidate": {
+                  "type": "number"
+                },
+                "change": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "improved"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "enum": [
+                        "regressed"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "enum": [
+                        "unchanged"
+                      ],
+                      "type": "string"
+                    }
+                  ]
+                },
+                "delta": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "baseline",
+                "candidate",
+                "change",
+                "delta"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "index",
+          "scorerDeltas"
+        ],
+        "additionalProperties": false
+      },
+      "ScorerSummary": {
+        "type": "object",
+        "properties": {
+          "improvedCount": {
+            "type": "number"
+          },
+          "meanDelta": {
+            "type": "number"
+          },
+          "regressedCount": {
+            "type": "number"
+          },
+          "unchangedCount": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "improvedCount",
+          "meanDelta",
+          "regressedCount",
+          "unchangedCount"
+        ],
+        "additionalProperties": false
+      },
+      "CostDelta": {
+        "type": "object",
+        "properties": {
+          "latencyDeltaMs": {
+            "type": "number"
+          },
+          "tokenInDelta": {
+            "type": "number"
+          },
+          "tokenOutDelta": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "latencyDeltaMs",
+          "tokenInDelta",
+          "tokenOutDelta"
+        ],
+        "additionalProperties": false
+      },
+      "ModelEntry": {
+        "type": "object",
+        "properties": {
+          "family": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "providerName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "family",
+          "id",
+          "name",
+          "provider",
+          "providerName"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

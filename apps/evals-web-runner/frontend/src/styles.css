@@ -1,6 +1,11 @@
 @import "tailwindcss";
 
 /* nx-tailwind-sources:start */
+@source "../../../../packages/agent";
+@source "../../../../packages/context";
+@source "../../../../packages/evals";
+@source "../../../../packages/text2sql";
+@source "../../backend";
 /* nx-tailwind-sources:end */
 @import "@zukhruf/shadcn/styles.css";
 @plugin "@tailwindcss/typography";

@@ -6,23 +6,20 @@
   "tags": [],
   "targets": {
     "build": {
-      "dependsOn": ["^build", "backend:openapi"],
-      "inputs": ["...", { "dependentTasksOutputFiles": "**/*" }]
+      "dependsOn": ["^build"]
     },
     "typecheck": {
-      "options": { "args": ["--runExternalCode"] },
-      "dependsOn": ["^typecheck", "backend:openapi"],
-      "inputs": ["...", { "dependentTasksOutputFiles": "**/*" }]
+      "options": {
+        "args": ["--runExternalCode"]
+      },
+      "dependsOn": ["^typecheck"]
     },
     "dev": {
-      "dependsOn": ["^build", "backend:openapi"]
+      "dependsOn": ["^build"]
     },
-    "serve": {
-      "dependsOn": ["backend:openapi"]
-    },
+    "serve": {},
     "test": {
-      "dependsOn": ["...", "backend:openapi"],
-      "inputs": ["...", { "dependentTasksOutputFiles": "**/*" }],
+      "dependsOn": ["..."],
       "outputs": [
         "{projectRoot}/{options.coverage.reportsDirectory}",
         "{projectRoot}/test-output/vitest/coverage"
@@ -32,5 +29,6 @@
         "coverage.reportsDirectory": "../../../coverage/apps/frontend"
       }
     }
-  }
+  },
+  "implicitDependencies": ["backend"]
 }

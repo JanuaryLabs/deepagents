@@ -70,6 +70,9 @@ export default defineConfig(
       'manifest/dependency-checks': [
         'error',
         {
+          // A backend's openapi.ts never ships: the app's readers load it to
+          // derive the document, so its @sdk-it/openapi is a devDependency.
+          ignoredFiles: ['{projectRoot}/openapi.ts'],
           projects: {
             // xlsx installs from the SheetJS CDN tarball, since npm stops at
             // 0.18.5. The check compares only semver, file:, workspace: and *

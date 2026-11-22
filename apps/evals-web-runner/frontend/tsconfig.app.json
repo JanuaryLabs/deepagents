@@ -43,7 +43,15 @@
     "src/**/*.openapi"
   ],
   "contentMappers": [
-    { "package": "@sdk-it/content-mapper", "extensions": [".openapi"] }
+    {
+      "package": "@sdk-it/content-mapper",
+      "extensions": [".openapi"],
+      "options": {
+        "derived": {
+          "src/evals.openapi": "../backend/openapi.ts"
+        }
+      }
+    }
   ],
   "references": []
 }

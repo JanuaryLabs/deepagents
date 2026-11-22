@@ -5,18 +5,8 @@
   "projectType": "application",
   "tags": [],
   "targets": {
-    "openapi": {
-      "dependsOn": ["^build"],
-      "executor": "nx:run-commands",
-      "outputs": [
-        "{workspaceRoot}/apps/evals-web-runner/frontend/src/evals.openapi"
-      ],
-      "options": {
-        "command": "node apps/evals-web-runner/backend/openapi.ts"
-      }
-    },
     "build": {
-      "dependsOn": ["^build", "openapi"],
+      "dependsOn": ["^build"],
       "executor": "@nx/esbuild:esbuild",
       "outputs": ["{options.outputPath}"],
       "defaultConfiguration": "production",
@@ -50,7 +40,7 @@
     "serve": {
       "executor": "@nx/js:node",
       "defaultConfiguration": "development",
-      "dependsOn": ["build", "openapi"],
+      "dependsOn": ["build"],
       "options": {
         "buildTarget": "backend:build"
       },

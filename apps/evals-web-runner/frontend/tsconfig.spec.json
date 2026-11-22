@@ -13,9 +13,21 @@
     ]
   },
   "contentMappers": [
-    { "package": "@sdk-it/content-mapper", "extensions": [".openapi"] }
+    {
+      "package": "@sdk-it/content-mapper",
+      "extensions": [".openapi"],
+      "options": {
+        "derived": {
+          "src/evals.openapi": "../backend/openapi.ts"
+        }
+      }
+    }
   ],
-  "references": [{ "path": "./tsconfig.app.json" }],
+  "references": [
+    {
+      "path": "./tsconfig.app.json"
+    }
+  ],
   "include": [
     "src/**/*.openapi",
     "vite.config.ts",
