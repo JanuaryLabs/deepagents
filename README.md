@@ -111,55 +111,17 @@ The Text2SQL test target uses the Node.js test runner. Import package modules
 in tests, not relative source paths, so private class identities stay aligned
 with built package output.
 
-## Use a package's source from another repo
+## Change a package and a repo that uses it
 
-Each source-runnable package export has a `@deepagents/source` condition first.
-This condition points at the source in `src/`. The other conditions point at
-the build in `dist/`. `./package.json`, wildcard `./*` exports, and asset
-exports such as `./styles.css` stay dist-only or asset-only. A repo that sets
-no condition gets `dist/`.
-
-To develop a package alongside a repo that consumes it, link the package.
-Run the consuming repo with the condition and this repo's text loader:
+To change a package and a repo that uses it together, push the package to
+`main`: the release workflow publishes it (see [MAINTAINERS.md](MAINTAINERS.md)).
+Then install the published version in the other repo:
 
 ```bash
-npm link                                  # in packages/<package>
-npm link @deepagents/<package>            # in the other repo
-NODE_OPTIONS="--conditions=@deepagents/source --import <deepagents>/tools/src/text-loader.ts" node …
+npm view @deepagents/<package> version         # the newest version on npm
+npm install @deepagents/<package>@<version>    # in the other repo
 ```
 
-The source imports `.md` and `.txt` files as text. The build does
-this with esbuild. Without the loader, Node.js stops with
-`ERR_UNKNOWN_FILE_EXTENSION`.
-
-`@deepagents/retrieval` and `@deepagents/toolbox` load their source in Node.js
-with this condition and loader. The source of `@deepagents/react-genai`,
-`@deepagents/react-input/browser`, and `@deepagents/devtool-history` includes
-`.tsx`, so use a bundler that sets the condition, for example Vite with
-`resolve.conditions`.
-
-In the `tsconfig.json` of the other repo:
-
-```json
-{
-  "compilerOptions": {
-    "customConditions": ["@deepagents/source"],
-    "allowImportingTsExtensions": true
-  },
-  "include": ["src", "<deepagents>/global.d.ts"]
-}
-```
-
-TypeScript then checks the source of the package with the options of the
-other repo. The source imports its own files with the `.ts` extension, so the
-other repo needs `allowImportingTsExtensions`. If the other repo emits
-JavaScript, use `rewriteRelativeImportExtensions` instead. `global.d.ts`
-declares the `.md` and `.txt` modules and `tiny-tfidf`, which the
-source imports.
-
-This repo does not set the condition in `customConditions`. The esbuild build
-writes declarations with no project references, so it would compile the
-source of each package that it imports.
-
-Set the condition only while the package is linked. The published package has
-no `src/`, so Node.js stops with `ERR_MODULE_NOT_FOUND`.
+Do not link the package into the other repo. A link runs code that no release
+holds, and the other repo can get a second copy of a dependency that both repos
+use. A published package holds only its `dist/` build.
