@@ -7,27 +7,23 @@ import {
   InScope,
   OneSelect,
   type Relations,
-  type Rule,
   SourcePolicy,
   SqlText,
-  type TextFacts,
 } from '@deepagents/text2sql/policy';
 import * as sqlite from '@deepagents/text2sql/sqlite';
-import { SqlServer } from '@deepagents/text2sql/sqlserver';
+import {
+  GrantedScope,
+  NoRemoteOperators,
+  SqlServer,
+  SqlServerPlan,
+  type SqlServerPrincipal,
+} from '@deepagents/text2sql/sqlserver';
 import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
-interface Grants {
-  denials(): Promise<readonly string[]>;
-}
-
-class TextAndGrants implements Rule<TextFacts & Grants> {
-  readonly check = async (facts: TextFacts & Grants) => {
-    await facts.denials();
-    return null;
-  };
-}
-
-function verifySqlPolicyContract(relationsOnly: FactSource<Relations>) {
+function verifySqlPolicyContract(
+  relationsOnly: FactSource<Relations>,
+  principal: SqlServerPrincipal,
+) {
   const text = new SqlText({ dialects: ['transactsql'] });
   new SourcePolicy(text, [
     new OneSelect(),
@@ -35,11 +31,6 @@ function verifySqlPolicyContract(relationsOnly: FactSource<Relations>) {
     new Forbid(['table-hint']),
     new InScope(new GroundedNames()),
   ]);
-  new SourcePolicy(
-    text,
-    // @ts-expect-error SQL text gives no grants, so a rule that reads them does not fit it.
-    [new TextAndGrants()],
-  );
 
   new SourcePolicy(relationsOnly, [new InScope(new GroundedNames())]);
   new SourcePolicy(
@@ -69,6 +60,45 @@ function verifySqlPolicyContract(relationsOnly: FactSource<Relations>) {
     grounding: [],
     policy: new FirstViolation(sqlserver.textPolicy(), sqlite.policy()),
   });
+
+  const plan = new SqlServerPlan(principal);
+  new SourcePolicy(plan, [
+    new GrantedScope(),
+    new OneSelect(),
+    new NoRemoteOperators(),
+  ]);
+  new SqlServer({
+    execute: () => [],
+    grounding: [],
+    policy: new FirstViolation(
+      new SourcePolicy(text, [new Forbid(['table-hint'])]),
+      sqlserver.planPolicy(principal),
+    ),
+  });
+  new SourcePolicy(
+    plan,
+    // @ts-expect-error A plan names base tables only, so it gives no relations.
+    [new InScope(new GroundedNames())],
+  );
+  new SourcePolicy(
+    plan,
+    // @ts-expect-error A lock hint leaves the plan the same, so a plan gives no constructs.
+    [new Forbid(['table-hint'])],
+  );
+  new SourcePolicy(
+    text,
+    // @ts-expect-error Grants are known only from a compile as a principal.
+    [new GrantedScope()],
+  );
+  new SourcePolicy(
+    text,
+    // @ts-expect-error Plan operators are known only from a compile.
+    [new NoRemoteOperators()],
+  );
+  // @ts-expect-error A plan compiles as a principal, so it needs the principal's name.
+  new SqlServerPlan({ session: principal.session });
+  // @ts-expect-error A plan policy needs a principal.
+  sqlserver.planPolicy();
 }
 
 void verifySqlPolicyContract;

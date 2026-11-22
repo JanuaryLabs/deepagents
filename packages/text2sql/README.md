@@ -391,7 +391,112 @@ const adapter = new sqlserver.SqlServer({
 ```
 
 A source that cannot read the SQL throws `UnreadableSql`, and the policy gives
-`SQL_SCOPE_PARSE_ERROR`. Any other error of a source rejects the check.
+`SQL_SCOPE_PARSE_ERROR`. Any other error of a source rejects the check. A
+source of one entry point, such as `SqlServerPlan` of `./sqlserver`, works in
+a `SourcePolicy` of `./policy`.
+
+### SQL Server's own plan
+
+`textPolicy()` reads T-SQL with node-sql-parser, whose grammar refuses valid
+T-SQL such as `STRING_AGG ... WITHIN GROUP`, `TRY_CAST`,
+`COUNT_BIG`, `OPENJSON ... WITH`, `OFFSET` without `FETCH`, `OPTION`,
+`LIKE ... ESCAPE` and `TOP ... WITH TIES`. `sqlserver.planPolicy(principal)`
+asks SQL Server instead: a database user, the principal, compiles the SQL
+under `SET SHOWPLAN_XML ON`, which plans each statement and runs none.
+
+| Rule                | Reads           | Refuses                                                          |
+| ------------------- | --------------- | ---------------------------------------------------------------- |
+| `GrantedScope`      | `Grants`        | SQL that SQL Server refuses for the principal, as `OUT_OF_SCOPE` |
+| `OneSelect`         | `Statements`    | a plan that is not exactly one SELECT                            |
+| `NoRemoteOperators` | `PlanOperators` | a plan with a `Remote` operator, which reads a linked server     |
+
+A permission error of the compile on an object (229) is `OUT_OF_SCOPE`, and
+its `error` is SQL Server's message, such as "The INSERT permission was denied
+on the object 'orders' ...". SQL Server compiles DDL such as `DROP TABLE`
+without a permission check, so DDL is a statement that is not a SELECT. Any
+other error of the compile is `SQL_SCOPE_PARSE_ERROR` with SQL Server's
+message: 102 for `LIMIT`, 208 for an unknown table and 262 for a principal
+without `SHOWPLAN`.
+
+The host creates the principal in its database: a user with `SELECT` on the
+tables and views that the model may read, and `SHOWPLAN`. The grants decide the
+scope, so `planPolicy` reads no grounding.
+
+```sql
+CREATE USER analyst WITHOUT LOGIN WITH DEFAULT_SCHEMA = marts;
+GRANT SELECT ON SCHEMA::marts TO analyst;
+GRANT SHOWPLAN TO analyst;
+```
+
+The principal gives its name and a session on a connection of its own. Each
+check opens a session, runs `EXECUTE AS USER = N'<name>' WITH NO REVERT` and
+`SET SHOWPLAN_XML ON` as batches of their own, compiles the SQL, and disposes
+the session, so no SQL of one check reaches the next. The login of the session
+needs `IMPERSONATE` on the user, which the database owner has.
+
+```ts
+import sql from 'mssql';
+
+import * as sqlserver from '@deepagents/text2sql/sqlserver';
+
+const principal: sqlserver.SqlServerPrincipal = {
+  name: 'analyst',
+  session: async () => {
+    const pool = await new sql.ConnectionPool({
+      ...config,
+      pool: { max: 1, min: 1 },
+    }).connect();
+    return {
+      batch: async (text) =>
+        (await pool.request().batch(text)).recordsets.flat(),
+      [Symbol.asyncDispose]: () => pool.close(),
+    };
+  },
+};
+
+const adapter = new sqlserver.SqlServer({
+  execute: async (text) => {
+    await using session = await principal.session();
+    await session.batch(`EXECUTE AS USER = N'analyst' WITH NO REVERT`);
+    return [...(await session.batch(text))];
+  },
+  grounding: [sqlserver.tables()],
+  policy: sqlserver.planPolicy(principal),
+});
+```
+
+`execute` must run the SQL as the same principal. SQL Server resolves a name
+such as `users` in the default schema of the user that compiles it, so a check
+as `analyst` and a run as another user can read two different tables.
+
+A lock hint such as `WITH (UPDLOCK)` leaves the plan the same, so `planPolicy`
+passes lock hints. To refuse them, compose the plan with the parser:
+
+```ts
+import {
+  FirstViolation,
+  Forbid,
+  SourcePolicy,
+  SqlText,
+} from '@deepagents/text2sql/policy';
+
+const policy = new FirstViolation(
+  new SourcePolicy(new SqlText({ dialects: ['transactsql'] }), [
+    new Forbid(['table-hint']),
+  ]),
+  sqlserver.planPolicy(principal),
+);
+```
+
+This composition also refuses all T-SQL that node-sql-parser cannot read,
+because the parser reads first: `STRING_AGG ... WITHIN GROUP` is then
+`SQL_SCOPE_PARSE_ERROR`.
+
+`SqlServerPlan` gives `Statements`, `Grants` and `PlanOperators`. It gives no
+`Relations`, because a plan names the base tables after views and functions
+are expanded, and no `Constructs`, so `InScope` and `Forbid` do not compile
+over it. A policy over `SqlServerPlan` without `GrantedScope` rejects the
+check when SQL Server refuses the compile.
 
 ## Fragments
 

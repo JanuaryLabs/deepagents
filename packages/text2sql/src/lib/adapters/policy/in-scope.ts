@@ -33,7 +33,10 @@ export class InScope implements Rule<Relations> {
       ? null
       : {
           kind: 'scope',
-          payload: buildOutOfScopePayload(check.sql, outOfScope, [...allowed]),
+          payload: buildOutOfScopePayload(check.sql, {
+            referenced: outOfScope,
+            allowed: [...allowed],
+          }),
         };
   };
 }

@@ -32,12 +32,27 @@ export interface Rule<in F> {
   ) => Promise<SqlPolicyViolation | null>;
 }
 
+const unreadable = Symbol.for('@deepagents/text2sql/UnreadableSql');
+
 /**
  * A source could not read the SQL. A policy turns this error, and only this
  * error, into an SQL_SCOPE_PARSE_ERROR; every other error rejects the check.
+ *
+ * Each entry point of the package bundles its own copy of this class, so
+ * `instanceof` reads a mark in the global symbol registry: a source of
+ * `./sqlserver` and a `SourcePolicy` of `./policy` agree on the error.
  */
 export class UnreadableSql extends Error {
   override readonly name = 'UnreadableSql';
+
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    Object.defineProperty(this, unreadable, { value: true });
+  }
+
+  static override [Symbol.hasInstance](value: unknown): value is UnreadableSql {
+    return Error.isError(value) && Object.hasOwn(value, unreadable);
+  }
 }
 
 /**

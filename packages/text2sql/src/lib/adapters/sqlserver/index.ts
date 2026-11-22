@@ -19,6 +19,17 @@ import { SqlServerViewGrounding } from './view.sqlserver.grounding.ts';
 
 export * from './sqlserver.ts';
 export { textPolicy } from './sqlserver.sql-policy.ts';
+export {
+  GrantedScope,
+  NoRemoteOperators,
+  planPolicy,
+  SqlServerPlan,
+  type Grants,
+  type PlanFacts,
+  type PlanOperators,
+  type SqlServerPrincipal,
+  type SqlServerSession,
+} from './sqlserver-plan.ts';
 
 export function tables(config: TableGroundingConfig = {}) {
   return groundingFor(
