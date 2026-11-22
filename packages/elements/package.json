@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/elements",
-  "version": "7.13.1",
+  "version": "7.14.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -46,7 +46,7 @@
     "zod": "^4.6.7"
   },
   "peerDependencies": {
-    "@deepagents/context": "7.13.1"
+    "@deepagents/context": "7.14.0"
   },
   "peerDependenciesMeta": {
     "@deepagents/context": {
@@ -54,6 +54,6 @@
     }
   },
   "devDependencies": {
-    "@deepagents/context": "7.13.1"
+    "@deepagents/context": "7.14.0"
   }
 }
