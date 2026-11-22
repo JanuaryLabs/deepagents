@@ -14,15 +14,30 @@ import type {
 import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 
+import type {
+  SandboxBindVolume,
+  SandboxExternalVolume,
+} from './container-engine.ts';
 import { FILE_STAT_TYPES } from './container-session.ts';
 import {
+  chatSandboxHandle,
+  chatSandboxLabels,
+  chatSandboxName,
   collect,
   controlProcess,
   createByteReadable,
   resolveIn,
   textCalls,
 } from './session.ts';
-import type { DisposableSandbox, SandboxReadinessOptions } from './types.ts';
+import {
+  type ChatSandbox,
+  type DisposableSandbox,
+  type SandboxContext,
+  SandboxNotFoundError,
+  type SandboxReadinessOptions,
+  type SandboxSession,
+  type StoppableSandboxEnvironment,
+} from './types.ts';
 
 export const MICROSANDBOX_DEFAULT_DESTINATION = '/workspace';
 const MICROSANDBOX_DEFAULT_IMAGE = 'bash:5.3-alpine3.24';
@@ -176,15 +191,38 @@ export async function createMicrosandboxSandbox(
     throw normalizeMicrosandboxError(error, sdk);
   }
 
-  const sandbox = microsandboxSession({
-    sdk,
-    vm,
-    workdir,
-    commandTimeout: options.commandTimeout,
-    reconnect: ephemeral
-      ? undefined
-      : () => sandboxBuilder(false).connectOrCreate(),
-  });
+  let reconnecting: Promise<MicrosandboxVm> | undefined;
+  const withVm: WithVm = async (operation) => {
+    try {
+      return await operation(vm);
+    } catch (error) {
+      if (ephemeral || !(error instanceof sdk.SandboxNotRunningError)) {
+        throw error;
+      }
+      reconnecting ??= sandboxBuilder(false)
+        .connectOrCreate()
+        .finally(() => {
+          reconnecting = undefined;
+        });
+      vm = await reconnecting;
+      return operation(vm);
+    }
+  };
+  const dispose = async () => {
+    // Stops a VM this client owns, which removes an ephemeral one; never
+    // rejects, so a second call is harmless.
+    await vm[Symbol.asyncDispose]();
+  };
+  const sandbox: DisposableSandbox = {
+    ...microsandboxSession({
+      sdk,
+      withVm,
+      workdir,
+      commandTimeout: options.commandTimeout,
+    }),
+    dispose,
+    [Symbol.asyncDispose]: dispose,
+  };
 
   if (options.readiness) {
     try {
@@ -195,6 +233,206 @@ export async function createMicrosandboxSandbox(
     }
   }
   return sandbox;
+}
+
+/**
+ * A volume of a chat's VM: a host directory, or a microsandbox named volume
+ * that exists before the VM (`msb volume create`), which the environment never
+ * creates or removes.
+ */
+export type MicrosandboxChatVolume =
+  SandboxBindVolume | Omit<SandboxExternalVolume, 'subPath' | 'noCopy'>;
+
+export interface MicrosandboxSandboxEnvironmentOptions extends SandboxReadinessOptions {
+  /**
+   * With a chat's id, names that chat's VM. Two environments with the same
+   * namespace on one host reach the same VMs; give each app or deployment
+   * its own.
+   */
+  namespace: string;
+  /**
+   * The OCI image of a chat's VM (default `'bash:5.3-alpine3.24'`). A chat's
+   * VM has no installers: a second worker could reach it before they finish,
+   * so what it needs belongs in its image.
+   */
+  image?: string;
+  /**
+   * The directory commands start in and relative paths resolve against,
+   * created at boot (default `'/workspace'`).
+   */
+  workdir?: string;
+  /** Per-command timeout in milliseconds for `run` and `spawn`. */
+  commandTimeout?: number;
+  /**
+   * The volumes of a chat's VM, given when `open` creates it. Its durable
+   * files belong here: the rest is lost when the VM is deleted. A bind
+   * mount's `hostPath` must have no symbolic link in it, which macOS's
+   * `/var` and `/tmp` are.
+   */
+  volumes?: (chat: SandboxContext) => MicrosandboxChatVolume[];
+  /**
+   * The SDK builder, for what the environment does not own: cpus, memory,
+   * env, network policy, secrets, user, …. Applied only when `open` creates
+   * the VM. The environment then sets the image, the name, the labels, the
+   * workdir, the volumes, the Bash shell, `ephemeral(false)` and
+   * `detached(true)`, so the VM outlives the process that created it.
+   */
+  configure?: (builder: SandboxBuilder) => SandboxBuilder;
+}
+
+/**
+ * Chat microVMs of microsandbox on this host. A chat's VM is named from the
+ * namespace and the chat's id, and carries the labels
+ * `deepagents.sandbox.namespace` and `deepagents.sandbox.chat`. It is
+ * detached and persisted: it outlives the process that opened it, `stop`
+ * keeps its root filesystem, and the next `open` or `resume` starts it;
+ * `delete` is the SDK's `destroy` (stop and remove). The SDK has no client to
+ * share: each handle holds its own connection to the VM, which `close`
+ * detaches.
+ */
+export class MicrosandboxSandboxEnvironment implements StoppableSandboxEnvironment {
+  readonly #options: MicrosandboxSandboxEnvironmentOptions;
+
+  constructor(options: MicrosandboxSandboxEnvironmentOptions) {
+    this.#options = options;
+  }
+
+  #name(chat: SandboxContext): string {
+    return chatSandboxName(this.#options.namespace, chat);
+  }
+
+  #builder(sdk: MicrosandboxSdk, chat: SandboxContext): SandboxBuilder {
+    const { configure, volumes, namespace } = this.#options;
+    const workdir = this.#options.workdir ?? MICROSANDBOX_DEFAULT_DESTINATION;
+    // `workdir()` alone fails boot validation when the image lacks the
+    // directory, so patch it into the rootfs first.
+    let builder = sdk.Sandbox.builder(this.#name(chat)).patch((patch) =>
+      patch.mkdir(workdir),
+    );
+    if (configure) builder = configure(builder);
+    for (const volume of volumes?.(chat) ?? []) {
+      builder = builder.volume(volume.containerPath, (mount) => {
+        const source =
+          volume.type === 'bind'
+            ? mount.bind(volume.hostPath)
+            : mount.namedWith(volume.name, 'existing');
+        return volume.readOnly === false ? source : source.readonly();
+      });
+    }
+    return builder
+      .image(this.#options.image ?? MICROSANDBOX_DEFAULT_IMAGE)
+      .labels(chatSandboxLabels(namespace, chat))
+      .workdir(workdir)
+      .shell('bash')
+      .ephemeral(false)
+      .detached(true);
+  }
+
+  async open(chat: SandboxContext): Promise<ChatSandbox> {
+    const sdk = await importMicrosandbox();
+    const name = this.#name(chat);
+    const workdir = this.#options.workdir ?? MICROSANDBOX_DEFAULT_DESTINATION;
+    let vm: MicrosandboxVm;
+    try {
+      vm = await this.#builder(sdk, chat).connectOrCreate();
+    } catch (error) {
+      throw normalizeMicrosandboxError(error, sdk);
+    }
+    try {
+      await vm.fs().mkdir(workdir);
+      await assertMicrosandboxBash(vm);
+    } catch (error) {
+      await vm.detach();
+      throw normalizeMicrosandboxError(error, sdk);
+    }
+
+    const gone = (cause?: unknown) =>
+      new SandboxNotFoundError(name, cause === undefined ? {} : { cause });
+    // A held VM runs a command in another VM that took its name, without an
+    // error, so the identity is checked before every operation.
+    const current = async () => {
+      let found;
+      try {
+        found = await sdk.Sandbox.get(name);
+      } catch (error) {
+        if (error instanceof sdk.SandboxNotFoundError) throw gone(error);
+        throw error;
+      }
+      if (found.id !== vm.id) throw gone();
+      return found;
+    };
+    const sandbox = chatSandboxHandle(
+      chat.chatId,
+      microsandboxSession({
+        sdk,
+        withVm: (operation) => operation(vm),
+        workdir,
+        commandTimeout: this.#options.commandTimeout,
+      }),
+      {
+        assertCurrent: async () => {
+          await current();
+        },
+        resume: async () => {
+          const found = await current();
+          if (found.status === 'running') return;
+          let started: MicrosandboxVm;
+          try {
+            started = await found.connectOrStart({ detached: true });
+          } catch (error) {
+            if (
+              error instanceof sdk.SandboxNotFoundError ||
+              error instanceof sdk.SandboxReplacedError
+            ) {
+              throw gone(error);
+            }
+            throw error;
+          }
+          const previous = vm;
+          vm = started;
+          await previous.detach();
+        },
+        release: () => vm.detach(),
+      },
+    );
+    if (this.#options.readiness) {
+      try {
+        await this.#options.readiness(sandbox);
+      } catch (error) {
+        await sandbox.close().catch(() => {});
+        throw error;
+      }
+    }
+    return sandbox;
+  }
+
+  /** The SDK's `stop`, which waits for the VM to shut down. */
+  async stop(chat: SandboxContext): Promise<void> {
+    const sdk = await importMicrosandbox();
+    await unlessGone(sdk, async () =>
+      (await sdk.Sandbox.get(this.#name(chat))).stop(),
+    );
+  }
+
+  /** The SDK's `destroy`: stops a running VM and removes it; volumes stay. */
+  async delete(chat: SandboxContext): Promise<void> {
+    const sdk = await importMicrosandbox();
+    await unlessGone(sdk, async () =>
+      (await sdk.Sandbox.get(this.#name(chat))).destroy(),
+    );
+  }
+}
+
+/** Runs `operation`, and resolves when the VM it acts on is gone, even midway. */
+async function unlessGone(
+  sdk: MicrosandboxSdk,
+  operation: () => Promise<void>,
+): Promise<void> {
+  try {
+    await operation();
+  } catch (error) {
+    if (!(error instanceof sdk.SandboxNotFoundError)) throw error;
+  }
 }
 
 async function importMicrosandbox(): Promise<MicrosandboxSdk> {
@@ -253,31 +491,17 @@ function validateMicrosandboxOptions(
  * filesystem; commands run through its exec stream, which gives live output,
  * stdin and a kill.
  */
-function microsandboxSession(args: {
+function microsandboxSession({
+  sdk,
+  withVm,
+  workdir,
+  commandTimeout,
+}: {
   sdk: MicrosandboxSdk;
-  vm: MicrosandboxVm;
+  withVm: WithVm;
   workdir: string;
   commandTimeout?: number;
-  reconnect?: () => Promise<MicrosandboxVm>;
-}): DisposableSandbox {
-  const { sdk, workdir, commandTimeout, reconnect } = args;
-  let vm = args.vm;
-  let reconnecting: Promise<MicrosandboxVm> | undefined;
-
-  const withVm: WithVm = async (operation) => {
-    try {
-      return await operation(vm);
-    } catch (error) {
-      if (!reconnect || !(error instanceof sdk.SandboxNotRunningError)) {
-        throw error;
-      }
-      reconnecting ??= reconnect().finally(() => {
-        reconnecting = undefined;
-      });
-      vm = await reconnecting;
-      return operation(vm);
-    }
-  };
+}): SandboxSession {
   const withFs = <T>(operation: (fs: SandboxFsOps) => Promise<T>) =>
     withVm((current) => operation(current.fs()));
 
@@ -454,7 +678,7 @@ function microsandboxSession(args: {
     };
   }
 
-  const readBinaryFile: DisposableSandbox['readBinaryFile'] = async ({
+  const readBinaryFile: SandboxSession['readBinaryFile'] = async ({
     path,
     abortSignal,
   }) => {
@@ -463,7 +687,7 @@ function microsandboxSession(args: {
     return orNull(() => withFs((fs) => fs.read(target)));
   };
 
-  const writeBinaryFile: DisposableSandbox['writeBinaryFile'] = async ({
+  const writeBinaryFile: SandboxSession['writeBinaryFile'] = async ({
     path,
     content,
     abortSignal,
@@ -471,12 +695,6 @@ function microsandboxSession(args: {
     abortSignal?.throwIfAborted();
     const target = resolve(path);
     await withParents(target, (fs) => fs.write(target, content));
-  };
-
-  const dispose = async () => {
-    // Stops a VM this client owns, which removes an ephemeral one; never
-    // rejects, so a second call is harmless.
-    await vm[Symbol.asyncDispose]();
   };
 
   return {
@@ -532,8 +750,6 @@ function microsandboxSession(args: {
         throw error;
       }
     },
-    dispose,
-    [Symbol.asyncDispose]: dispose,
   };
 }
 

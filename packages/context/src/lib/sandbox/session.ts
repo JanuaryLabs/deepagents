@@ -7,9 +7,11 @@ import { posix } from 'node:path';
 import { text } from 'node:stream/consumers';
 
 import type {
+  ChatSandbox,
   CommandResult,
   DisposableSandbox,
   SandboxContext,
+  SandboxSession,
 } from './types.ts';
 
 // The parts every process-backed session builds the same way: the container,
@@ -33,6 +35,67 @@ export function chatSandboxLabels(
     'deepagents.sandbox.namespace': namespace,
     'deepagents.sandbox.chat': chat.chatId,
   };
+}
+
+/** What a backend gives {@link chatSandboxHandle} beside the session. */
+export interface ChatSandboxLifecycle {
+  /** The backend's `resume`, which makes its own check that the sandbox is the handle's. */
+  resume: () => Promise<void>;
+  /** What `close` runs, once. */
+  release: () => Promise<void>;
+  /**
+   * Rejects with `SandboxNotFoundError` when the chat's sandbox is no longer
+   * the one the handle opened. Runs before every session operation. A backend
+   * whose own calls already reject so gives none.
+   */
+  assertCurrent?: () => void | Promise<void>;
+}
+
+/**
+ * Makes `session` the handle of chat `chatId`. `close` runs `release` once;
+ * afterwards every operation, `resume` too, rejects with an Error that names
+ * the chat.
+ */
+export function chatSandboxHandle(
+  chatId: string,
+  session: SandboxSession,
+  { resume, release, assertCurrent }: ChatSandboxLifecycle,
+): ChatSandbox {
+  let closing: Promise<void> | undefined;
+  const close = () => (closing ??= release());
+  const assertOpen = () => {
+    if (closing !== undefined) {
+      throw new Error(`The sandbox handle of chat "${chatId}" is closed.`);
+    }
+  };
+  const live =
+    <Args extends unknown[], Result>(
+      operation: (...args: Args) => PromiseLike<Result>,
+    ) =>
+    async (...args: Args): Promise<Result> => {
+      assertOpen();
+      await assertCurrent?.();
+      return operation.apply(session, args);
+    };
+  return Object.assign(session, {
+    run: live(session.run),
+    spawn: live(session.spawn),
+    readFile: live(session.readFile),
+    readBinaryFile: live(session.readBinaryFile),
+    readTextFile: live(session.readTextFile),
+    writeFile: live(session.writeFile),
+    writeBinaryFile: live(session.writeBinaryFile),
+    writeTextFile: live(session.writeTextFile),
+    stat: live(session.stat),
+    listDirectory: live(session.listDirectory),
+    deleteFile: live(session.deleteFile),
+    resume: async () => {
+      assertOpen();
+      return resume();
+    },
+    close,
+    [Symbol.asyncDispose]: close,
+  });
 }
 
 /** The contract types `encoding` as a string; Node accepts only its own names. */

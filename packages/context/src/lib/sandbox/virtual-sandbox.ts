@@ -7,6 +7,7 @@ import {
   type SandboxOptions,
 } from 'just-bash';
 
+import { chatSandboxHandle } from './session.ts';
 import {
   type ChatSandbox,
   type DisposableSandbox,
@@ -81,38 +82,15 @@ export class VirtualSandboxEnvironment implements SandboxEnvironment {
       this.#filesystems.set(chat.chatId, fs);
     }
     const sandbox = await createVirtualSandbox({ ...this.#options, fs });
-    let closing: Promise<void> | undefined;
-    const close = () => (closing ??= sandbox.dispose());
-    const live =
-      <Args extends unknown[], Result>(
-        operation: (...args: Args) => PromiseLike<Result>,
-      ) =>
-      async (...args: Args): Promise<Result> => {
-        if (closing !== undefined) {
-          throw new Error(
-            `The sandbox handle of chat "${chat.chatId}" is closed.`,
-          );
-        }
-        if (this.#filesystems.get(chat.chatId) !== fs) {
-          throw new SandboxNotFoundError(chat.chatId);
-        }
-        return operation.apply(sandbox, args);
-      };
-    return Object.assign(sandbox, {
-      run: live(sandbox.run),
-      spawn: live(sandbox.spawn),
-      readFile: live(sandbox.readFile),
-      readBinaryFile: live(sandbox.readBinaryFile),
-      readTextFile: live(sandbox.readTextFile),
-      writeFile: live(sandbox.writeFile),
-      writeBinaryFile: live(sandbox.writeBinaryFile),
-      writeTextFile: live(sandbox.writeTextFile),
-      stat: live(sandbox.stat),
-      listDirectory: live(sandbox.listDirectory),
-      deleteFile: live(sandbox.deleteFile),
-      resume: live(async () => {}),
-      close,
-      [Symbol.asyncDispose]: close,
+    const assertCurrent = () => {
+      if (this.#filesystems.get(chat.chatId) !== fs) {
+        throw new SandboxNotFoundError(chat.chatId);
+      }
+    };
+    return chatSandboxHandle(chat.chatId, sandbox, {
+      resume: async () => assertCurrent(),
+      release: () => sandbox.dispose(),
+      assertCurrent,
     });
   }
 
