@@ -4,7 +4,7 @@ import assert from 'node:assert';
 import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { after, before, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 import {
   AppleContainerImageBuildError,
@@ -17,39 +17,11 @@ import {
   useAppleContainerSandbox,
 } from '@deepagents/context';
 
+import { appleContainerUnavailable } from './helpers/apple-container.ts';
+
 const temporaryFiles = new TemporaryFiles();
 
 const ALPINE = 'docker.io/library/bash:5.3-alpine3.24';
-
-/**
- * The Apple `container` backend only works on Apple silicon (macOS 26+) with
- * the service running and a guest kernel configured. Probe by actually booting
- * a throwaway container — anything short of that (Linux CI, stopped service,
- * missing kernel) returns false and skips the runtime suite.
- */
-async function isAppleContainerUsable(): Promise<boolean> {
-  if (process.platform !== 'darwin' || process.arch !== 'arm64') return false;
-  const name = `probe-usable-${process.pid}`;
-  try {
-    await spawn('container', ['system', 'status']);
-    await spawn('container', [
-      'run',
-      '--detach',
-      '--rm',
-      '--name',
-      name,
-      ALPINE,
-      'tail',
-      '-f',
-      '/dev/null',
-    ]);
-    return true;
-  } catch {
-    return false;
-  } finally {
-    await spawn('container', ['stop', name]).catch(() => {});
-  }
-}
 
 async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
   const reader = stream.getReader();
@@ -230,11 +202,9 @@ describe('appleEngine.runArgs', () => {
 });
 
 describe('Apple container sandbox (runtime)', async () => {
-  const usable = await isAppleContainerUsable();
-  if (!usable) {
-    console.log(
-      'Skipping Apple container runtime tests: `container` not usable on this host',
-    );
+  const unavailable = await appleContainerUnavailable();
+  if (unavailable) {
+    console.log(`Skipping Apple container runtime tests: ${unavailable}`);
     return;
   }
 

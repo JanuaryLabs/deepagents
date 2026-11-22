@@ -12,8 +12,9 @@ import {
   type ChatSandbox,
   DockerSandboxEnvironment,
   type SandboxContext,
-  SandboxNotFoundError,
 } from '@deepagents/context';
+
+import { every, outcomes } from './helpers/chat-sandbox-outcomes.ts';
 
 const temporaryFiles = new TemporaryFiles();
 const testbed = new DockerTestbed({ environment: process.env });
@@ -63,49 +64,6 @@ async function removeNamespace(namespace: string): Promise<void> {
     if (Id === undefined) continue;
     await (await client.containers.find(Id))?.remove({ force: true });
   }
-}
-
-/** How each operation of `sandbox` ends: resolved, or the error's class. */
-async function outcomes(sandbox: ChatSandbox): Promise<Record<string, string>> {
-  const operations = {
-    run: () => sandbox.run({ command: 'true' }),
-    'run with a signal': () =>
-      sandbox.run({
-        command: 'true',
-        abortSignal: new AbortController().signal,
-      }),
-    spawn: () => sandbox.spawn({ command: 'true' }),
-    readFile: () => sandbox.readBinaryFile({ path: '/etc/hostname' }),
-    writeFile: () =>
-      sandbox.writeTextFile({ path: 'note.txt', content: 'note' }),
-    stat: () => sandbox.stat({ path: '/etc/hostname' }),
-    resume: () => sandbox.resume(),
-  };
-  const result: Record<string, string> = {};
-  for (const [operation, call] of Object.entries(operations)) {
-    result[operation] = await Promise.resolve(call()).then(
-      () => 'resolved',
-      (error: Error) =>
-        error instanceof SandboxNotFoundError
-          ? 'SandboxNotFoundError'
-          : `${error.name}: ${error.message}`,
-    );
-  }
-  return result;
-}
-
-function every(value: string): Record<string, string> {
-  return Object.fromEntries(
-    [
-      'run',
-      'run with a signal',
-      'spawn',
-      'readFile',
-      'writeFile',
-      'stat',
-      'resume',
-    ].map((operation) => [operation, value]),
-  );
 }
 
 describe('DockerSandboxEnvironment', () => {

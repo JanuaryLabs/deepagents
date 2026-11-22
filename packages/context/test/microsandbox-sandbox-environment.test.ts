@@ -12,9 +12,9 @@ import {
   type ChatSandbox,
   MicrosandboxSandboxEnvironment,
   type SandboxContext,
-  SandboxNotFoundError,
 } from '@deepagents/context';
 
+import { every, outcomes } from './helpers/chat-sandbox-outcomes.ts';
 import { isMicrosandboxUsable } from './helpers/microsandbox.ts';
 
 const temporaryFiles = new TemporaryFiles();
@@ -64,47 +64,6 @@ async function removeNamespace(namespace: string): Promise<void> {
       if (!(error instanceof Gone)) throw error;
     });
   }
-}
-
-/** How each operation of `sandbox` ends: resolved, or the error's class. */
-async function outcomes(sandbox: ChatSandbox): Promise<Record<string, string>> {
-  const operations = {
-    run: () => sandbox.run({ command: 'true' }),
-    spawn: () => sandbox.spawn({ command: 'true' }),
-    readFile: () => sandbox.readBinaryFile({ path: '/etc/hostname' }),
-    writeFile: () =>
-      sandbox.writeTextFile({ path: 'note.txt', content: 'note' }),
-    stat: () => sandbox.stat({ path: '/etc/hostname' }),
-    listDirectory: () => sandbox.listDirectory({ path: '/' }),
-    deleteFile: () => sandbox.deleteFile({ path: 'missing.txt' }),
-    resume: () => sandbox.resume(),
-  };
-  const result: Record<string, string> = {};
-  for (const [operation, call] of Object.entries(operations)) {
-    result[operation] = await Promise.resolve(call()).then(
-      () => 'resolved',
-      (error: Error) =>
-        error instanceof SandboxNotFoundError
-          ? 'SandboxNotFoundError'
-          : `${error.name}: ${error.message}`,
-    );
-  }
-  return result;
-}
-
-function every(value: string): Record<string, string> {
-  return Object.fromEntries(
-    [
-      'run',
-      'spawn',
-      'readFile',
-      'writeFile',
-      'stat',
-      'listDirectory',
-      'deleteFile',
-      'resume',
-    ].map((operation) => [operation, value]),
-  );
 }
 
 describe('MicrosandboxSandboxEnvironment', async () => {

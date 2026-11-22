@@ -250,6 +250,13 @@ export interface ChatEngineContainer extends EngineContainer {
    * another container now has its name. Never creates one.
    */
   resume(): Promise<void>;
+  /**
+   * Rejects with `SandboxNotFoundError` when it is gone, or when another
+   * container now has its name; runs before every operation of its handle.
+   * An engine whose calls reach the container itself, not its name, rejects
+   * so on its own and gives none.
+   */
+  assertCurrent?(): Promise<void>;
   /** Removes it, running or not, with its anonymous volumes. Resolves when it is gone. */
   remove(): Promise<void>;
 }

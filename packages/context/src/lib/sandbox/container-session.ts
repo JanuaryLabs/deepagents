@@ -469,8 +469,9 @@ export function containerSession(
 
 /**
  * The handle of a chat's container: its session, `resume`, and a `close` that
- * runs `release` once and never touches the container. The container's own
- * calls reject with `SandboxNotFoundError` once it is gone or replaced.
+ * runs `release` once and never touches the container. Once the container is
+ * gone or replaced, its own calls, or its `assertCurrent` before each
+ * operation, reject with `SandboxNotFoundError`.
  */
 export function chatContainerSandbox(
   container: ChatEngineContainer,
@@ -481,5 +482,6 @@ export function chatContainerSandbox(
   return chatSandboxHandle(chatId, containerSession(container, errors), {
     resume: () => container.resume(),
     release,
+    assertCurrent: container.assertCurrent?.bind(container),
   });
 }

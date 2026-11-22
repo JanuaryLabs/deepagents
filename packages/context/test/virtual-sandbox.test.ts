@@ -8,6 +8,8 @@ import {
   createVirtualSandbox,
 } from '@deepagents/context';
 
+import { every, outcomes } from './helpers/chat-sandbox-outcomes.ts';
+
 describe('createVirtualSandbox', () => {
   it('executes normal bash commands directly', async () => {
     const sandbox = await createVirtualSandbox({ fs: new InMemoryFs() });
@@ -269,35 +271,7 @@ describe('VirtualSandboxEnvironment', () => {
 
     await environment.delete(chat);
 
-    const outcome = (operation: PromiseLike<unknown>) =>
-      Promise.resolve(operation).then(
-        () => 'resolved',
-        (error) =>
-          error instanceof SandboxNotFoundError ? error.name : String(error),
-      );
-    assert.deepStrictEqual(
-      {
-        run: await outcome(held.run({ command: 'echo hi' })),
-        spawn: await outcome(held.spawn({ command: 'echo hi' })),
-        readFile: await outcome(held.readFile({ path: '/tmp/a.txt' })),
-        writeFile: await outcome(
-          held.writeFile({
-            path: '/tmp/b.txt',
-            content: new Blob(['b']).stream(),
-          }),
-        ),
-        stat: await outcome(held.stat({ path: '/tmp/a.txt' })),
-        resume: await outcome(held.resume()),
-      },
-      {
-        run: 'SandboxNotFoundError',
-        spawn: 'SandboxNotFoundError',
-        readFile: 'SandboxNotFoundError',
-        writeFile: 'SandboxNotFoundError',
-        stat: 'SandboxNotFoundError',
-        resume: 'SandboxNotFoundError',
-      },
-    );
+    assert.deepStrictEqual(await outcomes(held), every('SandboxNotFoundError'));
   });
 
   it('rejects run on a closed handle as closed, not as a gone sandbox, and resolves a second close and the scope exit', async () => {

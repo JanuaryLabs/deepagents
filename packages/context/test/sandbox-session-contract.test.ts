@@ -20,6 +20,8 @@ import {
   createVirtualSandbox,
 } from '@deepagents/context';
 
+import { appleContainerUnavailable } from './helpers/apple-container.ts';
+
 const testbed = new DockerTestbed({ environment: process.env });
 const dockerDefaults = { container: await testbed.defaults() };
 
@@ -51,18 +53,6 @@ interface Backend {
   holds?: (sandboxName: string) => Promise<boolean>;
   /** Removes what a named sandbox keeps after its release, such as a stopped VM's disk. */
   forget?: (sandboxName: string) => Promise<void>;
-}
-
-async function appleContainerUnavailable(): Promise<string | undefined> {
-  if (process.platform !== 'darwin' || process.arch !== 'arm64') {
-    return 'Apple containers need Apple silicon';
-  }
-  try {
-    await spawn('container', ['system', 'status']);
-    return undefined;
-  } catch {
-    return 'the Apple `container` service is not running';
-  }
 }
 
 /**
