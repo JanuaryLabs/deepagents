@@ -11,4 +11,7 @@ class DocsReminder extends Step<Push> {
   }
 }
 
-await prePush([new Build({ targets: ['lint', 'build'] }), new DocsReminder()]);
+await prePush([
+  new Build({ targets: ['lint', 'build', 'typecheck'] }),
+  new DocsReminder(),
+]);

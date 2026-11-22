@@ -31,8 +31,9 @@ node --test --no-warnings --test-timeout=60000 path/to/package/test/file.test.ts
   servers persist until explicit cleanup. See [TEST_PRIMITIVES.md](./TEST_PRIMITIVES.md).
 - `nx run <project>:typecheck` runs only `tsc --build`: no ESLint and no Prettier. Before committing, run
   `npx eslint <files>` and `npx prettier --check <files>` on what you changed, test files included. The
-  commit hook checks formatting and the pre-push gate runs each project's `lint` target, which refused a
-  type assertion in a test that typecheck had passed. The `lint` target is `eslint . --fix`, so it
+  commit hook checks formatting and the pre-push gate runs each affected project's `lint`, `build` and
+  `typecheck` targets on the pushed commit. Lint refused a type assertion in a test that typecheck had
+  passed, and only typecheck sees a test file's type errors. The `lint` target is `eslint . --fix`, so it
   rewrites files.
 - Run Nx build, test, and typecheck invocations sequentially in a shared checkout.
   Typecheck can rebuild dependencies and delete output directories that another
