@@ -11,7 +11,6 @@ import { waitFor } from '@zukhruf/testing/async';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -20,8 +19,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
-import type { BashToolkit, DisposableSandbox } from '@deepagents/context';
-import { createBashTool, createVirtualSandbox } from '@deepagents/context';
+import { VirtualSandboxEnvironment } from '@deepagents/context';
 import {
   FileTraceAdapter,
   fileTelemetry,
@@ -33,6 +31,7 @@ import {
   AgentRuntime,
   EmbeddedAgentStorage,
   defineAgent,
+  defineSandbox,
   defineStack,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
@@ -50,11 +49,7 @@ const TRACES_HREF = `${ZUKHRUF_MOUNT_PATH}/traces`;
 const traceSummaries = z.array(z.record(z.string(), z.unknown()));
 
 /** These turns never use the sandbox; the toolkit only needs a real one to start. */
-async function unusedSandbox(): Promise<BashToolkit<DisposableSandbox>> {
-  return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
-}
+const unusedSandbox = defineSandbox(new VirtualSandboxEnvironment());
 
 function openStorage(directory: string) {
   return EmbeddedAgentStorage.open({ directory: join(directory, 'storage') });
