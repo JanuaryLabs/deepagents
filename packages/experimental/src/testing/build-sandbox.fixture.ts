@@ -1,8 +1,8 @@
 import { VirtualSandboxEnvironment, createBashTool } from '@deepagents/context';
-import type { ZukhrufSandboxDeclaration } from '@deepagents/experimental/zukhruf';
+import type { SessionSandboxDeclaration } from '@deepagents/experimental/zukhruf';
 
 /** An agent's sandboxes over a virtual environment of their own, with no working directory. */
-export function buildSandbox(): ZukhrufSandboxDeclaration {
+export function buildSandbox(): SessionSandboxDeclaration {
   const environment = new VirtualSandboxEnvironment();
   return {
     environment,

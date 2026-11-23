@@ -38,7 +38,7 @@ export default function createWorkspaceSandbox(
         },
       ],
     }),
-    { workingDirectory: '/agent' },
+    { workingDirectory: '/agent', idleTimeoutMs: 60_000 },
   );
 }
 

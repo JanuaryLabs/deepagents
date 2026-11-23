@@ -11,6 +11,7 @@ import type {
   CreateAgent,
   SandboxContext,
   SandboxEnvironment,
+  StoppableSandboxEnvironment,
 } from '@deepagents/context';
 
 import type { AgentPluginDefinition } from './runtime/agent-runtime.ts';
@@ -26,15 +27,38 @@ export type ZukhrufSandbox = AgentSandbox<BashToolkitTools, ChatSandbox> & {
 };
 
 /**
- * An agent's sandboxes: the environment where each chat's sandbox lives, and
+ * An agent's sandboxes in an environment that can stop them: where each
+ * chat's sandbox lives, how long it keeps running once its chat is idle, and
  * how a chat's handle is opened and wrapped in the Bash toolkit.
  */
-export interface ZukhrufSandboxDeclaration {
+export interface StoppableSandboxDeclaration {
   /** Where each chat's sandbox lives; its `stop` and `delete` reach the sandboxes `open` opened. */
-  readonly environment: SandboxEnvironment;
+  readonly environment: StoppableSandboxEnvironment;
+  /**
+   * Milliseconds a chat's sandbox keeps running once the chat is idle, after
+   * which the runtime stops it and keeps its files: `0` stops it as soon as
+   * the chat is idle, `false` never stops it.
+   */
+  readonly idleTimeoutMs: number | false;
   /** Opens the chat's sandbox and wraps it in the Bash toolkit. */
   open(chat: SandboxContext): Promise<ZukhrufSandbox>;
 }
+
+/**
+ * An agent's sandboxes in an environment that cannot stop them, so they have
+ * no idle time.
+ */
+export interface SessionSandboxDeclaration {
+  /** Where each chat's sandbox lives; its `delete` reaches the sandboxes `open` opened. */
+  readonly environment: SandboxEnvironment & { readonly stop?: never };
+  readonly idleTimeoutMs?: never;
+  /** Opens the chat's sandbox and wraps it in the Bash toolkit. */
+  open(chat: SandboxContext): Promise<ZukhrufSandbox>;
+}
+
+/** An agent's sandboxes: a stoppable environment's carry an idle time, any other's none. */
+export type ZukhrufSandboxDeclaration =
+  StoppableSandboxDeclaration | SessionSandboxDeclaration;
 
 /** Estimated input budget includes messages, instructions and tools; reserve output separately. */
 export type AgentCompaction = Omit<

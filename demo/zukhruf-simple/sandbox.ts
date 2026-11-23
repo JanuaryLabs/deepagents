@@ -7,6 +7,7 @@ export default defineSandbox(
     image: 'node:lts',
   }),
   {
+    idleTimeoutMs: 60_000,
     uploadDirectory: {
       source: import.meta.dirname,
       include: 'skills/**/*',

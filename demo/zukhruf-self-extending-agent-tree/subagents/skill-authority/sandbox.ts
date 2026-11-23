@@ -23,5 +23,5 @@ export default defineSandbox(
       },
     ],
   }),
-  { workingDirectory: '/agent' },
+  { workingDirectory: '/agent', idleTimeoutMs: 30_000 },
 );

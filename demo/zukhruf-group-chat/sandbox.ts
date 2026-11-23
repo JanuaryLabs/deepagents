@@ -29,7 +29,7 @@ export default function createGroupChatSandbox(readonly: boolean) {
             return readonly ? shared.readonly() : shared;
           }),
     }),
-    { workingDirectory: groupChatDirectory },
+    { workingDirectory: groupChatDirectory, idleTimeoutMs: 60_000 },
   );
 }
 

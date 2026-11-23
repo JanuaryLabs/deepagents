@@ -358,7 +358,7 @@ turn cancelled while queued never enters the chain at all.
   path is integration-tested; automatic retry or exact resumption remains deliberately unsupported
   because it could silently re-run bash.
 - **Sandbox is per-chat, named from the environment's namespace and chatId.**
-  `defineSandbox(new DockerSandboxEnvironment({namespace}))`; `decl.sandbox.open({chatId, userId})`
+  `defineSandbox(new DockerSandboxEnvironment({namespace}), {idleTimeoutMs})`; `decl.sandbox.open({chatId, userId})`
   attaches, starts or creates the chat's sandbox (TOCTOU-safe). The engine is the registry (zero
   in-memory state); the workspace FS survives across turns, workers, and restarts. A turn never
   closes it: the host holds one handle per declaration and conversation (`ConversationSandboxes`),
@@ -997,10 +997,14 @@ the full Node+Postgres and Durable Object platform bundles.
 
 - `agent.ts` — `defineAgent({name, model, sandbox, instructions, tools?, skills?, subagents?})`
   returns a pure declaration with caller tools and a normalized subagent list. `sandbox` is a
-  `ZukhrufSandboxDeclaration` `{environment, open(ctx: {chatId, userId})}` so each independent
-  chat owns its sandbox. `name` is the stable declaration identity persisted in chat metadata.
+  `ZukhrufSandboxDeclaration` `{environment, idleTimeoutMs?, open(ctx: {chatId, userId})}` so each
+  independent chat owns its sandbox. It is a union: a `StoppableSandboxDeclaration` (its environment
+  has `stop`) carries `idleTimeoutMs: number | false`, and a `SessionSandboxDeclaration` (its
+  environment has no `stop`) has none. `name` is the stable declaration identity persisted in chat metadata.
 - `sandbox/define.ts` — `defineSandbox(environment, opts?) → ZukhrufSandboxDeclaration`
-  (backend-agnostic `createBashTool` wrapper; seam = `SandboxEnvironment` and its `ChatSandbox`
+  (backend-agnostic `createBashTool` wrapper; a `StoppableSandboxEnvironment` (Docker, Apple
+  container, microsandbox) requires `opts.idleTimeoutMs`, a non-negative safe integer or `false`
+  (else `RangeError`), and any other environment (virtual, Daytona) takes none; seam = `SandboxEnvironment` and its `ChatSandbox`
   handles; exposes the configured working directory to the runtime and leaves uploads explicit
   through the existing `uploadDirectory` option; proven over docker, microsandbox + virtual).
 - `instructions.ts` — `defineInstructions(...fragments) => fragments`.
@@ -1131,7 +1135,7 @@ work({concurrency?}) → AsyncDisposable }`.
   coalescing and FIFO ordering, cancellation, expiry, catch-up, spent-receipt cleanup, transactional
   task/run deduplication, generic execution handoff, independent review, and restart recovery.
 - Backends switch by composition in the demo sandbox declarations
-  (`defineSandbox(new DockerSandboxEnvironment({namespace}))` ↔ microsandbox etc.);
+  (`defineSandbox(new DockerSandboxEnvironment({namespace}), {idleTimeoutMs})` ↔ microsandbox etc.);
   `docker.ts`/`daytona.ts` deleted (no presets, no dispatcher flag).
 
 ## Open (deliberately deferred)

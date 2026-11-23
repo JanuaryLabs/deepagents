@@ -8,7 +8,7 @@ import { test } from 'node:test';
 
 import {
   DockerSandboxEnvironment,
-  type SandboxEnvironment,
+  type StoppableSandboxEnvironment,
 } from '@deepagents/context';
 import {
   type AgentPluginHost,
@@ -111,7 +111,9 @@ test('a chat whose container was removed between turns runs its next turn in a n
       name: 'root',
       model: bashEachTurn('hostname', 'hostname'),
       instructions: [],
-      sandbox: defineSandbox(chatEnvironment(namespace)),
+      sandbox: defineSandbox(chatEnvironment(namespace), {
+        idleTimeoutMs: false,
+      }),
     });
     await using host = await new AgentRuntime(root).initialize(
       defineStack(async (resources) => ({
@@ -157,7 +159,7 @@ test('a chat whose container was stopped between turns runs its next turn in tha
         'cat note.txt && hostname',
       ),
       instructions: [],
-      sandbox: defineSandbox(environment),
+      sandbox: defineSandbox(environment, { idleTimeoutMs: false }),
     });
     await using host = await new AgentRuntime(root).initialize(
       defineStack(async (resources) => ({
@@ -214,7 +216,9 @@ test("a worker that created the chat's container shuts down while another worker
           name: 'root',
           model: bashEachTurn(...commands),
           instructions: [],
-          sandbox: defineSandbox(chatEnvironment(namespace)),
+          sandbox: defineSandbox(chatEnvironment(namespace), {
+            idleTimeoutMs: false,
+          }),
         }),
       ).initialize(defineStack(async () => ({ storage })));
     const conversation = { chatId: 'chat', userId: 'owner' };
@@ -265,13 +269,16 @@ test("a worker that created the chat's container shuts down while another worker
 });
 
 /** The runtime's plugin host, reached as a plugin reaches it. */
-async function chatRuntime(directory: string, environment: SandboxEnvironment) {
+async function chatRuntime(
+  directory: string,
+  environment: StoppableSandboxEnvironment,
+) {
   const hosts: AgentPluginHost[] = [];
   const root = defineAgent({
     name: 'root',
     model: bashEachTurn('hostname'),
     instructions: [],
-    sandbox: defineSandbox(environment),
+    sandbox: defineSandbox(environment, { idleTimeoutMs: false }),
     plugins: [
       {
         name: 'host',
@@ -369,6 +376,7 @@ test('a caller whose check of the removed container ends after another caller cl
           [Symbol.asyncDispose]: closed,
         });
       },
+      stop: (chat) => environment.stop(chat),
       delete: (chat) => environment.delete(chat),
     });
     await using host = runtime;

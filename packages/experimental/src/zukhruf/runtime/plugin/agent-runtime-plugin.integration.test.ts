@@ -654,7 +654,7 @@ test('host.sandbox attaches the configured root sandbox before the conversation 
     configure: (root) => ({
       ...root,
       sandbox: {
-        environment: root.sandbox.environment,
+        ...root.sandbox,
         open: (context) => {
           configuredAttaches++;
           return root.sandbox.open(context);
