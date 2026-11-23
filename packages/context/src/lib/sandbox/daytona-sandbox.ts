@@ -514,8 +514,27 @@ function daytonaSession(args: {
     abortSignal,
   }) => {
     abortSignal?.throwIfAborted();
-    return orNull(() => sandbox.fs.readBytes(resolve(path)));
+    const target = resolve(path);
+    try {
+      return await orNull(() => sandbox.fs.readBytes(target));
+    } catch (error) {
+      if (await failedOnDirectory(error, target)) {
+        throw new Error(`Cannot read "${path}": it is a directory.`, {
+          cause: error,
+        });
+      }
+      throw error;
+    }
   };
+
+  // The current toolbox refuses a directory on a read or a write with
+  // InvalidFilePathError "not a regular file"; ALREADY_EXISTS is the earlier
+  // server's answer to a write.
+  const failedOnDirectory = async (error: unknown, target: string) =>
+    (error instanceof sdk.InvalidFilePathError ||
+      (error instanceof sdk.BadRequestError &&
+        ALREADY_EXISTS.test(error.message))) &&
+    (await stat({ path: target }))?.type === 'directory';
 
   const writeBinaryFile: SandboxSession['writeBinaryFile'] = async ({
     path,
@@ -527,11 +546,7 @@ function daytonaSession(args: {
     try {
       await reach(() => sandbox.fs.writeBytes(target, content));
     } catch (error) {
-      if (
-        error instanceof sdk.BadRequestError &&
-        ALREADY_EXISTS.test(error.message) &&
-        (await stat({ path: target }))?.type === 'directory'
-      ) {
+      if (await failedOnDirectory(error, target)) {
         throw new Error(`Cannot write "${path}": it is a directory.`, {
           cause: error,
         });
