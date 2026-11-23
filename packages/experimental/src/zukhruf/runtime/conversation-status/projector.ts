@@ -9,12 +9,16 @@ import {
   ContextEngine,
   type ContextStore,
   type StreamManager,
+  type StreamStore,
 } from '@deepagents/context';
 
 import type { AgentDirectory } from '../../control-plane/agent-directory.ts';
 import type { AgentThread } from '../../control-plane/agent-thread.ts';
 import type { ConversationId } from '../../mailbox/types.ts';
-import type { TurnQueue } from '../../queue/turn-queue.ts';
+import type {
+  TransactionalTurnQueue,
+  TurnQueue,
+} from '../../queue/turn-queue.ts';
 import {
   hasPendingClientInput,
   hasUnansweredApprovals,
@@ -116,33 +120,16 @@ export class ConversationStatusProjector {
     this.#changeSource = options.changeSource;
   }
 
-  async read(conversation: ConversationId): Promise<ConversationStatus> {
-    const activity = await this.#queue.getTurnActivity(conversation);
-    if (activity === 'running') return { type: 'active', activeFlags: [] };
-
-    const engine = new ContextEngine({
-      store: this.#store,
-      chatId: conversation.chatId,
-      userId: conversation.userId,
-    });
-    const head = (await engine.getMessages()).at(-1);
-    const thread = await this.#directory.load(conversation);
-    const streamId =
-      thread?.lastTurnId ?? (head?.role === 'assistant' ? head.id : undefined);
-    const stream = streamId
-      ? await this.#streams.store.getStream(streamId)
-      : undefined;
-    // A queued or running continuation carries the host's answer; once it
-    // ends, however it ended, the head's open tool calls wait again.
-    const continuing =
-      stream?.status === 'queued' || stream?.status === 'running';
-    const activeFlags =
-      !continuing && head?.role === 'assistant' ? activeFlagsOf(head) : [];
-    if (activity === 'queued' || activeFlags.length > 0) {
-      return { type: 'active', activeFlags };
-    }
-    if (stream?.status === 'failed') return { type: 'systemError' };
-    return { type: 'idle' };
+  read(conversation: ConversationId): Promise<ConversationStatus> {
+    return conversationStatusOf(
+      {
+        store: this.#store,
+        streams: this.#streams.store,
+        queue: this.#queue,
+        directory: this.#directory,
+      },
+      conversation,
+    );
   }
 
   async children(conversation: ConversationId): Promise<ChildProgress[]> {
@@ -389,6 +376,44 @@ export function withChildActivity(
       childActivities: { ...activities, [activity.type]: activity },
     },
   };
+}
+
+/** The storage parts a conversation's status is read through. */
+interface ConversationStatusParts {
+  store: ContextStore;
+  streams: StreamStore;
+  queue: TransactionalTurnQueue;
+  directory: AgentDirectory;
+}
+
+export async function conversationStatusOf(
+  parts: ConversationStatusParts,
+  conversation: ConversationId,
+): Promise<ConversationStatus> {
+  const activity = await parts.queue.getTurnActivity(conversation);
+  if (activity === 'running') return { type: 'active', activeFlags: [] };
+
+  const engine = new ContextEngine({
+    store: parts.store,
+    chatId: conversation.chatId,
+    userId: conversation.userId,
+  });
+  const head = (await engine.getMessages()).at(-1);
+  const thread = await parts.directory.load(conversation);
+  const streamId =
+    thread?.lastTurnId ?? (head?.role === 'assistant' ? head.id : undefined);
+  const stream = streamId ? await parts.streams.getStream(streamId) : undefined;
+  // A queued or running continuation carries the host's answer; once it
+  // ends, however it ended, the head's open tool calls wait again.
+  const continuing =
+    stream?.status === 'queued' || stream?.status === 'running';
+  const activeFlags =
+    !continuing && head?.role === 'assistant' ? activeFlagsOf(head) : [];
+  if (activity === 'queued' || activeFlags.length > 0) {
+    return { type: 'active', activeFlags };
+  }
+  if (stream?.status === 'failed') return { type: 'systemError' };
+  return { type: 'idle' };
 }
 
 function activeFlagsOf(message: UIMessage): ConversationActiveFlag[] {
