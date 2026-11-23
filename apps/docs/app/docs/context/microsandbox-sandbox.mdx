@@ -51,7 +51,6 @@ call resolve against it.
 import { createBashTool, createMicrosandboxSandbox } from '@deepagents/context';
 
 const backend = await createMicrosandboxSandbox({
-  name: 'chat-123',
   configure: (builder) => builder.image('node:lts-bookworm-slim'),
 });
 
@@ -61,50 +60,53 @@ const sandbox = await createBashTool({ sandbox: backend });
 Pass the `sandbox.tools` object to an agent the same way you would with Docker,
 Apple Container, Daytona, or a virtual sandbox.
 
-## Named sandboxes
+## One-off and chat VMs
 
-Pass `name` when a chat or workflow should resume the same microVM:
+`createMicrosandboxSandbox` makes a one-off: a microVM under a generated name,
+which nothing else reaches. Its `dispose()` stops and removes the microVM, and
+every operation of the sandbox rejects once `dispose()` is called.
+
+A microVM that outlives the process, so that the next turn of a chat finds its
+files, is a chat's. A `MicrosandboxSandboxEnvironment` names it from a
+namespace and the chat's id:
 
 ```typescript
-const sandbox = await createMicrosandboxSandbox({
-  name: 'analytics-session',
-  configure: (builder) => builder.image('python:3.12-slim').memory(2048),
+import { MicrosandboxSandboxEnvironment } from '@deepagents/context';
+
+const environment = new MicrosandboxSandboxEnvironment({
+  namespace: 'analytics',
+  image: 'python:3.12-slim',
+  configure: (builder) => builder.memory(2048),
 });
+
+await using sandbox = await environment.open({
+  chatId: 'chat-123',
+  userId: 'user-456',
+});
+await sandbox.run({ command: 'echo kept > /workspace/note.txt' });
 ```
 
-Named creation uses get-or-create semantics:
-
-- If a sandbox with that name is running, the factory connects to it.
-- If it exists but is stopped, the factory starts it and preserves rootfs state.
-- If it does not exist, the factory creates it.
-
-`dispose()` stops a named sandbox but does not remove it, so the next
-`createMicrosandboxSandbox({ name })` can resume it. For a fresh named sandbox,
-pass `replace: true`.
-
-Unnamed sandboxes are ephemeral: the factory generates a name, and `dispose()`
-stops and removes the microVM.
+Every `open` of the chat reaches the same microVM. `close()` (or scope exit)
+releases the handle and leaves the microVM running; `environment.stop(chat)`
+stops it and keeps its root filesystem, and `environment.delete(chat)` removes
+it.
 
 ## Options
 
 | Option           | Type                                 | Description                                                                                                                                          |
 | ---------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`           | `string`                             | Stable sandbox name for get-or-create reuse                                                                                                          |
 | `workdir`        | `string`                             | Where commands start and relative paths resolve; defaults to `/workspace`                                                                            |
-| `replace`        | `boolean`                            | Replace an existing named sandbox instead of attaching                                                                                               |
 | `commandTimeout` | `number`                             | Per-command timeout for `run` and `spawn`, in milliseconds; the command exits 124                                                                    |
 | `readiness`      | `(sandbox) => void \| Promise<void>` | Hook that must pass before the factory returns                                                                                                       |
 | `configure`      | `(builder) => builder`               | Fluent access to the SDK builder: image (defaults to `bash:5.3-alpine3.24`), cpus, memory, env, volumes, network policy, secrets, user, idle timeout |
 
 The options are the inputs the factory itself reads. Everything else is set
-fluently on the SDK builder through `configure`, which runs on every connect;
-the SDK applies builder options only when creating, so an existing named
-sandbox keeps its configuration.
+fluently on the SDK builder through `configure`.
 
-The factory applies `workdir`, the persistence implied by `name`, and the
-Bash shell after `configure`. A named sandbox therefore stays persistent even
-if `configure` calls `ephemeral(true)`, and the factory's `workdir` wins over
-one set in `configure`.
+The factory applies `workdir`, the Bash shell, and an ephemeral microVM that
+is not detached after `configure`. A one-off is therefore removed on
+`dispose()` even if `configure` calls `ephemeral(false)` or `detached(true)`,
+and the factory's `workdir` wins over one set in `configure`.
 
 ## Command execution APIs
 
@@ -147,7 +149,6 @@ agent gets the sandbox:
 
 ```typescript
 const sandbox = await createMicrosandboxSandbox({
-  name: 'daemon-backed-chat',
   configure: (builder) => builder.image('my-daemon-image:0.1.0'),
   readiness: async (sandbox) => {
     const result = await sandbox.run({ command: 'start-daemon && wait-ready' });

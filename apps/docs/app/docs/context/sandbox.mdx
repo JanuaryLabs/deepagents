@@ -20,7 +20,7 @@ policy, or binary bridges to combine approaches.
 | `createAppleContainerSandbox` + `createBashTool`                                     | Agent needs real binaries in Apple Container lightweight VMs                      | No               |
 | `createAppleContainerSandbox`                                                        | Direct VM-backed container control on Apple silicon/macOS 26+                     | No               |
 | [`createMicrosandboxSandbox`](/docs/context/microsandbox-sandbox) + `createBashTool` | Agent needs OCI images in local microVMs with streaming process output            | No               |
-| `createMicrosandboxSandbox`                                                          | Direct local microVM control with get-or-create named sandboxes                   | No               |
+| `createMicrosandboxSandbox`                                                          | Direct local microVM control; each sandbox is a one-off microVM                   | No               |
 | `createDaytonaSandbox(daytona.v2, options)` + `createBashTool`                       | Managed remote sandbox on Daytona v2                                              | No               |
 | `createVirtualSandbox`                                                               | In-process bash with a virtual filesystem and optional JavaScript command support | No               |
 | `createBinaryBridges`                                                                | Bridge specific host binaries into just-bash virtual FS                           | No               |

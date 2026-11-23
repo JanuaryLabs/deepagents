@@ -56,8 +56,6 @@ interface Backend {
   generatedName?: (sandbox: DisposableSandbox) => Promise<string>;
   /** Whether the engine holds the named sandbox. Absent when a backend holds nothing. */
   holds?: (sandboxName: string) => Promise<boolean>;
-  /** Removes what a named sandbox keeps after its release, such as a stopped VM's disk. */
-  forget?: (sandboxName: string) => Promise<void>;
 }
 
 /**
@@ -172,16 +170,19 @@ const backends: Backend[] = [
     runAbort: 'rejects',
     stderrAfterStdoutCancel: 'flows',
     linkWrite: 'through',
-    open: (name) => createMicrosandboxSandbox({ name }),
-    // A named sandbox keeps its disk when it stops, so the released VM is the
-    // one that is no longer running.
+    open: () => createMicrosandboxSandbox(),
+    // A VM's hostname is its name.
+    generatedName: hostname,
     holds: async (name) => {
-      const { Sandbox } = await import('microsandbox');
-      return (await Sandbox.get(name)).status === 'running';
-    },
-    forget: async (name) => {
-      const { Sandbox } = await import('microsandbox');
-      await Sandbox.remove(name);
+      const { Sandbox, SandboxNotFoundError: Gone } =
+        await import('microsandbox');
+      try {
+        await Sandbox.get(name);
+        return true;
+      } catch (error) {
+        if (error instanceof Gone) return false;
+        throw error;
+      }
     },
   },
   {
@@ -242,7 +243,6 @@ for (const {
   linkWrite,
   generatedName,
   holds,
-  forget,
 } of backends) {
   describe(`sandbox session contract: ${name}`, async () => {
     const skip = await unavailable?.();
@@ -865,40 +865,30 @@ for (const {
       if (holds) {
         it('releases what the engine holds by the time dispose resolves', async () => {
           const requested = `contract-${randomUUID().slice(0, 8)}`;
-          const sandbox = await open(requested);
-          try {
-            const sandboxName = (await generatedName?.(sandbox)) ?? requested;
-            const heldWhileOpen = await holds(sandboxName);
+          await using sandbox = await open(requested);
+          const sandboxName = (await generatedName?.(sandbox)) ?? requested;
+          const heldWhileOpen = await holds(sandboxName);
 
-            await sandbox.dispose();
+          await sandbox.dispose();
 
-            assert.equal(heldWhileOpen, true);
-            assert.equal(await holds(sandboxName), false);
-          } finally {
-            await sandbox.dispose();
-            await forget?.(requested);
-          }
+          assert.equal(heldWhileOpen, true);
+          assert.equal(await holds(sandboxName), false);
         });
       }
 
       if (holds && !generatedName) {
         it('leaves a sandbox it attached to by name running when it disposes', async () => {
           const sandboxName = `contract-${randomUUID().slice(0, 8)}`;
-          const owner = await open(sandboxName);
-          try {
-            const attached = await open(sandboxName);
+          await using owner = await open(sandboxName);
+          const attached = await open(sandboxName);
 
-            await attached.dispose();
+          await attached.dispose();
 
-            assert.equal(await holds(sandboxName), true);
-            assert.equal(
-              (await owner.run({ command: 'echo up' })).stdout,
-              'up\n',
-            );
-          } finally {
-            await owner.dispose();
-            await forget?.(sandboxName);
-          }
+          assert.equal(await holds(sandboxName), true);
+          assert.equal(
+            (await owner.run({ command: 'echo up' })).stdout,
+            'up\n',
+          );
         });
       }
     });

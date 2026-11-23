@@ -302,6 +302,57 @@ describe('MicrosandboxSandboxEnvironment', async () => {
       }
     });
 
+    it('keeps the VM and its files across a stop when configure marks it ephemeral', async () => {
+      const namespace = uniqueNamespace();
+      const environment = new MicrosandboxSandboxEnvironment({
+        namespace,
+        configure: (builder) => builder.ephemeral(true).detached(false),
+      });
+      try {
+        const first = await environment.open(chat('c'));
+        await first.writeTextFile({ path: 'note.txt', content: 'kept' });
+        await first.close();
+        await environment.stop(chat('c'));
+        assert.strictEqual(await status(namespace, 'c'), 'stopped');
+
+        await using reopened = await environment.open(chat('c'));
+        assert.strictEqual(
+          await reopened.readTextFile({ path: 'note.txt' }),
+          'kept',
+        );
+      } finally {
+        await removeNamespace(namespace);
+      }
+    });
+
+    it('keeps commands and relative paths in its own workdir when it opens a VM created with another', async () => {
+      const namespace = uniqueNamespace();
+      const creator = new MicrosandboxSandboxEnvironment({
+        namespace,
+        workdir: '/srv/first',
+      });
+      const environment = new MicrosandboxSandboxEnvironment({
+        namespace,
+        workdir: '/srv/second',
+      });
+      try {
+        await (await creator.open(chat('c'))).close();
+        await creator.stop(chat('c'));
+
+        await using sandbox = await environment.open(chat('c'));
+        await sandbox.writeTextFile({ path: 'here.txt', content: 'here' });
+        const result = await sandbox.run({ command: 'pwd; cat here.txt' });
+
+        assert.deepStrictEqual(result, {
+          stdout: '/srv/second\nhere',
+          stderr: '',
+          exitCode: 0,
+        });
+      } finally {
+        await removeNamespace(namespace);
+      }
+    });
+
     it('stops and deletes without ever starting the VM, and resolves when there is none', async () => {
       const namespace = uniqueNamespace();
       await using mounted = await temporaryFiles.directory('msb-env-');

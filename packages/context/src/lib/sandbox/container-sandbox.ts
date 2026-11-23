@@ -11,6 +11,7 @@ import type {
 } from './container-engine.ts';
 import { containerSession, validateEnv } from './container-session.ts';
 import { type Installer } from './installers/installer.ts';
+import { guardSession } from './session.ts';
 import { type DisposableSandbox, SandboxNotFoundError } from './types.ts';
 
 /** Records a cleanup failure on the error that started the cleanup. */
@@ -290,43 +291,24 @@ export abstract class ContainerSandboxStrategy<
   protected createSandboxMethods(
     container: EngineContainer,
   ): DisposableSandbox {
-    let disposal: Promise<void> | undefined;
-    const dispose = async (): Promise<void> => {
-      try {
-        await this.release(container);
-        await this.cleanupCreatedVolumes();
-      } finally {
-        await this.engine.dispose();
-      }
-    };
-    const disposeOnce = () => (disposal ??= dispose());
-
-    const session = containerSession(container, this.engine.errors);
-    const live =
-      <Args extends unknown[], Result>(
-        operation: (...args: Args) => PromiseLike<Result>,
-      ) =>
-      async (...args: Args): Promise<Result> => {
-        if (disposal !== undefined) {
-          throw new Error(`The sandbox "${container.name}" is disposed.`);
-        }
-        await container.assertCurrent?.();
-        return operation.apply(session, args);
-      };
+    const { session, release } = guardSession(
+      containerSession(container, this.engine.errors),
+      {
+        release: async () => {
+          try {
+            await this.release(container);
+            await this.cleanupCreatedVolumes();
+          } finally {
+            await this.engine.dispose();
+          }
+        },
+        releasedMessage: `The sandbox "${container.name}" is disposed.`,
+        assertCurrent: () => container.assertCurrent?.(),
+      },
+    );
     return Object.assign(session, {
-      run: live(session.run),
-      spawn: live(session.spawn),
-      readFile: live(session.readFile),
-      readBinaryFile: live(session.readBinaryFile),
-      readTextFile: live(session.readTextFile),
-      writeFile: live(session.writeFile),
-      writeBinaryFile: live(session.writeBinaryFile),
-      writeTextFile: live(session.writeTextFile),
-      stat: live(session.stat),
-      listDirectory: live(session.listDirectory),
-      deleteFile: live(session.deleteFile),
-      dispose: disposeOnce,
-      [Symbol.asyncDispose]: disposeOnce,
+      dispose: release,
+      [Symbol.asyncDispose]: release,
     });
   }
 

@@ -8,12 +8,16 @@ import { promisify } from 'node:util';
 import {
   type FileChange,
   MICROSANDBOX_DEFAULT_DESTINATION,
-  MicrosandboxSandboxError,
+  type SandboxSession,
   createBashTool,
   createMicrosandboxSandbox,
   withStraceFileChanges,
 } from '@deepagents/context';
 
+import {
+  everySessionOperation,
+  sessionOutcomes,
+} from './helpers/chat-sandbox-outcomes.ts';
 import {
   importMicrosandboxSdk,
   isMicrosandboxUsable,
@@ -21,6 +25,20 @@ import {
 import { readFirstChunk } from './helpers/read-first-chunk.ts';
 
 const execFileAsync = promisify(execFile);
+
+/** The name of a sandbox's VM, which the VM gives as its hostname. */
+async function vmName(sandbox: SandboxSession): Promise<string> {
+  const name = (await sandbox.readTextFile({ path: '/etc/hostname' }))?.trim();
+  assert.ok(name, 'the VM has a hostname');
+  return name;
+}
+
+/** Destroys the VM `name` when it is still there. */
+async function destroyVm(name: string): Promise<void> {
+  const { Sandbox } = await import('microsandbox');
+  const handle = await Sandbox.get(name).catch(() => undefined);
+  await handle?.destroy();
+}
 
 describe('Microsandbox Sandbox', async () => {
   const usable = await isMicrosandboxUsable();
@@ -31,28 +49,6 @@ describe('Microsandbox Sandbox', async () => {
   }
 
   const sdkInstalled = (await importMicrosandboxSdk()) !== undefined;
-
-  describe('option validation', () => {
-    it(
-      'rejects names longer than 128 UTF-8 bytes with the SDK error',
-      { skip: !sdkInstalled },
-      async () => {
-        const { InvalidConfigError } = await import('microsandbox');
-
-        await assert.rejects(
-          createMicrosandboxSandbox({ name: 'é'.repeat(65) }),
-          InvalidConfigError,
-        );
-      },
-    );
-
-    it('rejects "replace" without "name"', async () => {
-      await assert.rejects(
-        createMicrosandboxSandbox({ replace: true }),
-        MicrosandboxSandboxError,
-      );
-    });
-  });
 
   describe('runtime availability', { skip: !sdkInstalled }, () => {
     // The SDK keeps the runtime it resolved for its first VM, and the
@@ -398,183 +394,49 @@ describe('Microsandbox Sandbox', async () => {
     });
 
     describe('lifecycle', () => {
-      it('keeps a detached named sandbox running across client disposal and restart', async () => {
+      it('removes its VM on dispose, even when configure marks the VM persistent and detached', async () => {
         const sdk = await import('microsandbox');
-        const name = `deepagents-test-${randomUUID()}`;
-        const [first, peer] = await Promise.all([
-          createMicrosandboxSandbox({
-            name,
-            configure: (builder) => builder.detached(true),
-          }),
-          createMicrosandboxSandbox({
-            name,
-            configure: (builder) => builder.detached(true),
-          }),
-        ]);
-
-        try {
-          await first.dispose();
-          assert.strictEqual(
-            (await peer.run({ command: 'printf alive' })).stdout,
-            'alive',
-          );
-
-          await (await sdk.Sandbox.get(name)).stop();
-          const resumed = await createMicrosandboxSandbox({
-            name,
-            configure: (builder) => builder.detached(true),
-          });
-          await resumed.dispose();
-
-          assert.strictEqual((await sdk.Sandbox.get(name)).status, 'running');
-        } finally {
-          await first.dispose().catch(() => {});
-          await peer.dispose().catch(() => {});
-          const handle = await sdk.Sandbox.get(name).catch(() => undefined);
-          if (handle) {
-            await (await handle.connectOrStart()).destroy().catch(() => {});
-          }
-        }
-      });
-
-      it('reacquires a named sandbox for concurrent operations after its endpoint stops', async () => {
-        const sdk = await import('microsandbox');
-        const name = `deepagents-test-${randomUUID()}`;
         const sandbox = await createMicrosandboxSandbox({
-          name,
-          configure: (builder) => builder.detached(true),
+          configure: (builder) => builder.ephemeral(false).detached(true),
         });
-
+        const name = await vmName(sandbox);
         try {
-          await (await sdk.Sandbox.get(name)).stop();
-          const [result] = await Promise.all([
-            sandbox.run({ command: 'printf recovered' }),
-            sandbox.writeTextFile({
-              path: '/workspace/recovered.txt',
-              content: 'still writable',
-            }),
-          ]);
-          assert.deepStrictEqual(result, {
-            stdout: 'recovered',
-            stderr: '',
-            exitCode: 0,
-          });
-          assert.strictEqual(
-            await sandbox.readTextFile({ path: '/workspace/recovered.txt' }),
-            'still writable',
-          );
+          assert.strictEqual((await sdk.Sandbox.get(name)).status, 'running');
 
           await sandbox.dispose();
-          assert.strictEqual((await sdk.Sandbox.get(name)).status, 'running');
+
+          await assert.rejects(sdk.Sandbox.get(name), sdk.SandboxNotFoundError);
         } finally {
-          await sandbox.dispose().catch(() => {});
-          const handle = await sdk.Sandbox.get(name).catch(() => undefined);
-          if (handle) {
-            await (await handle.connectOrStart()).destroy().catch(() => {});
-          }
+          await sandbox.dispose();
+          await destroyVm(name);
         }
       });
 
-      it('resumes a named sandbox with rootfs state intact after dispose', async () => {
-        const sdk = await import('microsandbox');
-        const name = `deepagents-test-${randomUUID()}`;
-        try {
-          {
-            await using first = await createMicrosandboxSandbox({ name });
+      it('rejects every operation with an error that names its VM once it is disposed, never with SandboxNotFoundError', async () => {
+        const sandbox = await createMicrosandboxSandbox();
+        const name = await vmName(sandbox);
 
-            await first.writeTextFile({
-              path: '/workspace/persisted.txt',
-              content: 'still here',
-            });
-          }
-
-          await using second = await createMicrosandboxSandbox({ name });
-
-          assert.strictEqual(
-            await second.readTextFile({ path: '/workspace/persisted.txt' }),
-            'still here',
-          );
-        } finally {
-          await sdk.Sandbox.remove(name).catch(() => {});
-        }
-      });
-
-      it('removes an unnamed sandbox entirely on dispose', async () => {
-        const sdk = await import('microsandbox');
-        const run = randomUUID();
-        const labelled = async () =>
-          (
-            await sdk.Sandbox.listWith((list) =>
-              list.label('deepagents-test', run),
-            )
-          ).sandboxes.map((handle) => handle.name);
-
-        const sandbox = await createMicrosandboxSandbox({
-          configure: (builder) => builder.label('deepagents-test', run),
-        });
-        await sandbox.run({ command: 'true' });
-        const whileOpen = await labelled();
         await sandbox.dispose();
 
-        const leftovers = await labelled();
-        assert.strictEqual(whileOpen.length, 1);
-        assert.deepStrictEqual(leftovers, []);
+        assert.deepStrictEqual(
+          await sessionOutcomes(sandbox),
+          everySessionOperation(`Error: The sandbox "${name}" is disposed.`),
+        );
+      });
+
+      it('rejects every operation with SandboxNotFoundError once its VM was removed outside', async () => {
+        const sdk = await import('microsandbox');
+        await using sandbox = await createMicrosandboxSandbox();
+        await (await sdk.Sandbox.get(await vmName(sandbox))).destroy();
+
+        assert.deepStrictEqual(
+          await sessionOutcomes(sandbox),
+          everySessionOperation('SandboxNotFoundError'),
+        );
       });
     });
 
     describe('configure', () => {
-      it('keeps a named sandbox persistent when configure() marks it ephemeral', async () => {
-        const sdk = await import('microsandbox');
-        const name = `deepagents-test-${randomUUID()}`;
-        const sandbox = await createMicrosandboxSandbox({
-          name,
-          configure: (builder) => builder.detached(true).ephemeral(true),
-        });
-
-        try {
-          await sandbox.writeTextFile({
-            path: '/workspace/persist.txt',
-            content: 'survives the stop',
-          });
-          await (await sdk.Sandbox.get(name)).stop();
-          assert.strictEqual(
-            await sandbox.readTextFile({ path: '/workspace/persist.txt' }),
-            'survives the stop',
-          );
-        } finally {
-          await sandbox.dispose().catch(() => {});
-          const handle = await sdk.Sandbox.get(name).catch(() => undefined);
-          if (handle) {
-            await (await handle.connectOrStart()).destroy().catch(() => {});
-          }
-        }
-      });
-
-      it('keeps commands and relative paths in its workdir when it resumes a sandbox created with another', async () => {
-        const sdk = await import('microsandbox');
-        const name = `deepagents-test-${randomUUID()}`;
-        try {
-          await (
-            await createMicrosandboxSandbox({ name, workdir: '/srv/first' })
-          ).dispose();
-          await using second = await createMicrosandboxSandbox({
-            name,
-            workdir: '/srv/second',
-          });
-
-          await second.writeTextFile({ path: 'here.txt', content: 'here' });
-          const result = await second.run({ command: 'pwd; cat here.txt' });
-
-          assert.deepStrictEqual(result, {
-            stdout: '/srv/second\nhere',
-            stderr: '',
-            exitCode: 0,
-          });
-        } finally {
-          await sdk.Sandbox.remove(name).catch(() => {});
-        }
-      });
-
       it('applies the factory workdir after configure()', async () => {
         await using sandbox = await createMicrosandboxSandbox({
           workdir: '/workspace',
@@ -606,29 +468,22 @@ describe('Microsandbox Sandbox', async () => {
       );
     });
 
-    it('disposes the sandbox and rethrows when the hook fails', async () => {
+    it('removes the VM and rethrows when the hook fails', async () => {
       const sdk = await import('microsandbox');
-      const name = `deepagents-test-${randomUUID()}`;
-      try {
-        await assert.rejects(
-          createMicrosandboxSandbox({
-            name,
-            readiness: () => {
-              throw new Error('daemon never came up');
-            },
-          }),
-          /daemon never came up/,
-        );
+      let name: string | undefined;
+      await assert.rejects(
+        createMicrosandboxSandbox({
+          readiness: async (booting) => {
+            name = await vmName(booting);
+            assert.strictEqual((await sdk.Sandbox.get(name)).status, 'running');
+            throw new Error('daemon never came up');
+          },
+        }),
+        /daemon never came up/,
+      );
 
-        const handle = await sdk.Sandbox.get(name);
-        assert.strictEqual(
-          handle.status,
-          'stopped',
-          'a failing readiness hook must dispose (stop) the named sandbox',
-        );
-      } finally {
-        await sdk.Sandbox.remove(name).catch(() => {});
-      }
+      assert.ok(name, 'the readiness hook read the VM name');
+      await assert.rejects(sdk.Sandbox.get(name), sdk.SandboxNotFoundError);
     });
   });
 

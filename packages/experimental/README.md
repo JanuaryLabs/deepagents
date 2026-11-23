@@ -151,10 +151,8 @@ registered adapters are released by host disposal.
 The host lazily acquires one sandbox handle per agent declaration and
 conversation from the agent's `sandbox` factory. Later turns and plugins borrow
 the same handle; they must leave disposal to the host. A failed acquisition is
-retried on the next request. Host disposal releases the held handles after its
-workers stop. The backend's disposal policy determines whether the underlying
-environment stops, is removed, or remains available; a named Microsandbox
-microVM can outlive its host's client handle.
+retried on the next request. Host disposal closes the held handles after its
+workers stop; closing a handle never stops or removes the chat's sandbox.
 
 Zukhruf discovers immediate `skills/<name>/SKILL.md` children from each
 configured sandbox once per conversation. It persists only the ordered catalog

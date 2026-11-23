@@ -131,7 +131,6 @@ export class SandboxNotFoundError extends Error {
  * @example
  * ```typescript
  * const sandbox = await createMicrosandboxSandbox({
- *   name: 'demo',
  *   readiness: (sandbox) => startDaemon(sandbox),
  * });
  * ```

@@ -37,18 +37,74 @@ export function chatSandboxLabels(
   };
 }
 
-/** What a backend gives {@link chatSandboxHandle} beside the session. */
-export interface ChatSandboxLifecycle {
-  /** The backend's `resume`, which makes its own check that the sandbox is the handle's. */
-  resume: () => Promise<void>;
-  /** What `close` runs, once. */
+/** How {@link guardSession} guards the operations of a session. */
+export interface SessionGuard {
+  /** What `release` runs, once. */
   release: () => Promise<void>;
+  /** The message of the Error every operation rejects with once `release` was called. */
+  releasedMessage: string;
   /**
-   * Rejects with `SandboxNotFoundError` when the chat's sandbox is no longer
-   * the one the handle opened. Runs before every session operation. A backend
-   * whose own calls already reject so gives none.
+   * Rejects with `SandboxNotFoundError` when the sandbox is no longer the one
+   * the session reached. Runs before every session operation. A backend whose
+   * own calls already reject so gives none.
    */
   assertCurrent?: () => void | Promise<void>;
+}
+
+/**
+ * Guards every operation of `session`: once `release` was called, each
+ * rejects with an Error of `releasedMessage`; until then each runs
+ * `assertCurrent` first. `release` runs the guard's `release` once however
+ * often it is called, and `assertOpen` throws as a released operation does.
+ */
+export function guardSession(
+  session: SandboxSession,
+  { release, releasedMessage, assertCurrent }: SessionGuard,
+): {
+  session: SandboxSession;
+  release: () => Promise<void>;
+  assertOpen: () => void;
+} {
+  let releasing: Promise<void> | undefined;
+  const releaseOnce = () => (releasing ??= release());
+  const assertOpen = () => {
+    if (releasing !== undefined) throw new Error(releasedMessage);
+  };
+  const live =
+    <Args extends unknown[], Result>(
+      operation: (...args: Args) => PromiseLike<Result>,
+    ) =>
+    async (...args: Args): Promise<Result> => {
+      assertOpen();
+      await assertCurrent?.();
+      return operation.apply(session, args);
+    };
+  return {
+    session: Object.assign(session, {
+      run: live(session.run),
+      spawn: live(session.spawn),
+      readFile: live(session.readFile),
+      readBinaryFile: live(session.readBinaryFile),
+      readTextFile: live(session.readTextFile),
+      writeFile: live(session.writeFile),
+      writeBinaryFile: live(session.writeBinaryFile),
+      writeTextFile: live(session.writeTextFile),
+      stat: live(session.stat),
+      listDirectory: live(session.listDirectory),
+      deleteFile: live(session.deleteFile),
+    }),
+    release: releaseOnce,
+    assertOpen,
+  };
+}
+
+/** What a backend gives {@link chatSandboxHandle} beside the session. */
+export interface ChatSandboxLifecycle extends Omit<
+  SessionGuard,
+  'releasedMessage'
+> {
+  /** The backend's `resume`, which makes its own check that the sandbox is the handle's. */
+  resume: () => Promise<void>;
 }
 
 /**
@@ -61,40 +117,18 @@ export function chatSandboxHandle(
   session: SandboxSession,
   { resume, release, assertCurrent }: ChatSandboxLifecycle,
 ): ChatSandbox {
-  let closing: Promise<void> | undefined;
-  const close = () => (closing ??= release());
-  const assertOpen = () => {
-    if (closing !== undefined) {
-      throw new Error(`The sandbox handle of chat "${chatId}" is closed.`);
-    }
-  };
-  const live =
-    <Args extends unknown[], Result>(
-      operation: (...args: Args) => PromiseLike<Result>,
-    ) =>
-    async (...args: Args): Promise<Result> => {
-      assertOpen();
-      await assertCurrent?.();
-      return operation.apply(session, args);
-    };
-  return Object.assign(session, {
-    run: live(session.run),
-    spawn: live(session.spawn),
-    readFile: live(session.readFile),
-    readBinaryFile: live(session.readBinaryFile),
-    readTextFile: live(session.readTextFile),
-    writeFile: live(session.writeFile),
-    writeBinaryFile: live(session.writeBinaryFile),
-    writeTextFile: live(session.writeTextFile),
-    stat: live(session.stat),
-    listDirectory: live(session.listDirectory),
-    deleteFile: live(session.deleteFile),
+  const guarded = guardSession(session, {
+    release,
+    releasedMessage: `The sandbox handle of chat "${chatId}" is closed.`,
+    assertCurrent,
+  });
+  return Object.assign(guarded.session, {
     resume: async () => {
-      assertOpen();
+      guarded.assertOpen();
       return resume();
     },
-    close,
-    [Symbol.asyncDispose]: close,
+    close: guarded.release,
+    [Symbol.asyncDispose]: guarded.release,
   });
 }
 

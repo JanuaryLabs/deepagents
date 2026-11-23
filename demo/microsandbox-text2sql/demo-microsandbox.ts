@@ -28,9 +28,6 @@ import { demoImage } from './image.ts';
 const resolvePghostFromGateway = `export PGHOST="\${PGHOST:-$(ip route | awk '/default/ {print $3; exit}')}"`;
 
 const backend = await createMicrosandboxSandbox({
-  // Stable name → get-or-create: re-runs resume this one microVM (dispose()
-  // stops it with rootfs state intact instead of removing it).
-  name: 'deepagents-text2sql-demo',
   // microsandbox boots the microVM with its guest agent as PID 1 rather than
   // the image CMD, so the daemon must be started explicitly; the factory
   // returns only once it's ready and disposes the microVM if startup fails.

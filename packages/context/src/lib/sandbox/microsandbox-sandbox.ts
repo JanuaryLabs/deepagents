@@ -26,6 +26,7 @@ import {
   collect,
   controlProcess,
   createByteReadable,
+  guardSession,
   resolveIn,
   textCalls,
 } from './session.ts';
@@ -53,27 +54,11 @@ type WithVm = <T>(operation: (vm: MicrosandboxVm) => Promise<T>) => Promise<T>;
 
 export interface MicrosandboxSandboxOptions extends SandboxReadinessOptions {
   /**
-   * Stable sandbox name. When provided, the SDK connects to the running
-   * sandbox of this name, resumes it if stopped (rootfs state intact), or
-   * creates it. `dispose()` follows SDK lifecycle ownership and never removes
-   * a named sandbox. Configure the builder with `detached(true)` when the
-   * sandbox must outlive the client that creates or resumes it.
-   *
-   * When omitted, an ephemeral sandbox with a generated name is created and
-   * fully removed on `dispose()`.
-   */
-  name?: string;
-  /**
    * The directory commands start in and relative paths resolve against,
    * created at boot (default `'/workspace'`). Microsandbox images default to
    * `/`, and common images ship no `/workspace`, so the factory creates it.
    */
   workdir?: string;
-  /**
-   * Replace an existing sandbox with the same name instead of attaching to
-   * it. Requires `name`.
-   */
-  replace?: boolean;
   /** Per-command timeout in milliseconds for `run` and `spawn`. */
   commandTimeout?: number;
   /**
@@ -82,9 +67,9 @@ export interface MicrosandboxSandboxOptions extends SandboxReadinessOptions {
    * volumes, network policy, secrets, user, idle timeout, ….
    *
    * The factory applies its own setters after this callback — `workdir`,
-   * the persistence implied by `name`, and the required Bash shell — so
-   * `configure` cannot change what the lifecycle logic relies on. Runs on
-   * every connect; existing sandbox configuration wins when connecting.
+   * the required Bash shell, and the ephemeral, attached VM that `dispose`
+   * removes — so `configure` cannot change what the lifecycle logic relies
+   * on.
    */
   configure?: (builder: SandboxBuilder) => SandboxBuilder;
 }
@@ -133,51 +118,40 @@ export class MicrosandboxCreationError extends MicrosandboxSandboxError {
  *
  * Requires the optional peer dependency `microsandbox`.
  *
- * @example Ephemeral sandbox (removed on dispose)
+ * A one-off: the VM gets a generated name, which nothing else reaches, and
+ * `dispose` stops and removes it; afterwards every operation rejects. A VM
+ * that outlives the process, so that a chat's next turn finds its files, is a
+ * chat's, through {@link MicrosandboxSandboxEnvironment}.
+ *
+ * @example
  * ```typescript
  * await using sandbox = await createMicrosandboxSandbox();
  * const result = await sandbox.run({ command: 'echo hello' });
- * ```
- *
- * @example Named sandbox (stopped on dispose, resumed on next create)
- * ```typescript
- * const sandbox = await createMicrosandboxSandbox({ name: chatId });
- * const { tools } = await createBashTool({ sandbox });
  * ```
  */
 export async function createMicrosandboxSandbox(
   options: MicrosandboxSandboxOptions = {},
 ): Promise<DisposableSandbox> {
-  validateMicrosandboxOptions(options);
   const sdk = await importMicrosandbox();
-
-  const ephemeral = options.name === undefined;
-  const name = options.name ?? `deepagents-msb-${randomUUID()}`;
+  const name = `deepagents-msb-${randomUUID()}`;
   const workdir = options.workdir ?? MICROSANDBOX_DEFAULT_DESTINATION;
 
-  const sandboxBuilder = (replace: boolean) => {
+  let vm: MicrosandboxVm;
+  try {
     // `workdir()` alone fails boot validation when the image lacks the
     // directory, so patch it into the rootfs first.
     let builder = sdk.Sandbox.builder(name)
       .image(MICROSANDBOX_DEFAULT_IMAGE)
       .patch((patch) => patch.mkdir(workdir));
     if (options.configure) builder = options.configure(builder);
-    // Factory-owned setters go last so `configure` cannot override what the
-    // lifecycle logic reads: `name` decides persistence (an ephemeral flag
-    // from `configure` lets the runtime remove a named sandbox on stop, and
-    // the reconnect then boots a fresh one), `workdir` is the session's base
-    // directory, and Bash is required. The SDK rejects a stray `replace()`
-    // on the `connectOrCreate` path.
-    builder = builder.workdir(workdir).ephemeral(ephemeral).shell('bash');
-    return replace ? builder.replace() : builder;
-  };
-
-  let vm: MicrosandboxVm;
-  try {
-    const builder = sandboxBuilder(options.replace === true);
-    vm = await (ephemeral || options.replace
-      ? builder.create()
-      : builder.connectOrCreate());
+    // Set after `configure`, so that `dispose` stops and removes the VM: a
+    // detached one would outlive it, and a persisted one its stop.
+    vm = await builder
+      .workdir(workdir)
+      .shell('bash')
+      .ephemeral(true)
+      .detached(false)
+      .create();
   } catch (error) {
     throw normalizeMicrosandboxError(error, sdk);
   }
@@ -186,43 +160,38 @@ export async function createMicrosandboxSandbox(
     await vm.fs().mkdir(workdir);
     await assertMicrosandboxBash(vm);
   } catch (error) {
-    // Stops the VM, which removes an ephemeral one; never rejects.
+    // Stops the VM, which removes it; never rejects.
     await vm[Symbol.asyncDispose]();
     throw normalizeMicrosandboxError(error, sdk);
   }
 
-  let reconnecting: Promise<MicrosandboxVm> | undefined;
-  const withVm: WithVm = async (operation) => {
-    try {
-      return await operation(vm);
-    } catch (error) {
-      if (ephemeral || !(error instanceof sdk.SandboxNotRunningError)) {
-        throw error;
-      }
-      reconnecting ??= sandboxBuilder(false)
-        .connectOrCreate()
-        .finally(() => {
-          reconnecting = undefined;
-        });
-      vm = await reconnecting;
-      return operation(vm);
-    }
-  };
-  const dispose = async () => {
-    // Stops a VM this client owns, which removes an ephemeral one; never
-    // rejects, so a second call is harmless.
-    await vm[Symbol.asyncDispose]();
-  };
-  const sandbox: DisposableSandbox = {
-    ...microsandboxSession({
+  const { session, release } = guardSession(
+    microsandboxSession({
       sdk,
-      withVm,
+      withVm: async (operation) => {
+        try {
+          return await operation(vm);
+        } catch (error) {
+          // The VM is removed when it stops, so one that no longer runs is gone.
+          if (error instanceof sdk.SandboxNotRunningError) {
+            throw new SandboxNotFoundError(name, { cause: error });
+          }
+          throw error;
+        }
+      },
       workdir,
       commandTimeout: options.commandTimeout,
     }),
-    dispose,
-    [Symbol.asyncDispose]: dispose,
-  };
+    {
+      // Stops the VM, which removes it; never rejects.
+      release: () => vm[Symbol.asyncDispose](),
+      releasedMessage: `The sandbox "${name}" is disposed.`,
+    },
+  );
+  const sandbox: DisposableSandbox = Object.assign(session, {
+    dispose: release,
+    [Symbol.asyncDispose]: release,
+  });
 
   if (options.readiness) {
     try {
@@ -474,16 +443,6 @@ function normalizeMicrosandboxError(
     return err;
   }
   return new MicrosandboxCreationError(err.message, err);
-}
-
-function validateMicrosandboxOptions(
-  options: MicrosandboxSandboxOptions,
-): void {
-  if (options.replace && options.name === undefined) {
-    throw new MicrosandboxSandboxError(
-      'Microsandbox options can only include "replace" together with "name" — an unnamed sandbox is always created fresh.',
-    );
-  }
 }
 
 /**
