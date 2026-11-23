@@ -45,6 +45,7 @@ import {
   discoverAgentSkills,
 } from './plugin/agent-skills.ts';
 import type { PluginManager } from './plugin/plugin-manager.ts';
+import type { SandboxIdleStop } from './sandbox-idle-stop.ts';
 
 type TurnPlugins = Pick<
   PluginManager,
@@ -61,6 +62,8 @@ export interface AgentTurnExecutorOptions {
   plugins: TurnPlugins;
   /** The sandbox of each conversation, which a turn borrows. */
   sandboxes: ConversationSandboxes;
+  /** Cancels the idle stop of a chat's previous turn as its next turn starts. */
+  idleStop: SandboxIdleStop;
   /** Signals that the conversation's status may have changed. Never rejects. */
   publishConversationStatus: (conversation: ConversationId) => Promise<void>;
 }
@@ -79,6 +82,7 @@ export class AgentTurnExecutor {
   readonly #team: Team;
   readonly #plugins: TurnPlugins;
   readonly #sandboxes: ConversationSandboxes;
+  readonly #idleStop: SandboxIdleStop;
   readonly #publishConversationStatus: AgentTurnExecutorOptions['publishConversationStatus'];
 
   constructor(options: AgentTurnExecutorOptions) {
@@ -90,6 +94,7 @@ export class AgentTurnExecutor {
     this.#team = options.team;
     this.#plugins = options.plugins;
     this.#sandboxes = options.sandboxes;
+    this.#idleStop = options.idleStop;
     this.#publishConversationStatus = options.publishConversationStatus;
   }
 
@@ -156,6 +161,8 @@ export class AgentTurnExecutor {
       return;
     }
 
+    // `thread` still names the previous turn as the latest until this records.
+    await this.#idleStop.cancel(thread);
     await this.#controlPlane.recordLatestTurn(turn, turn.streamId);
     await this.#prepareChain(turn, engine, communications);
 

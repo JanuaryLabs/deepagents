@@ -465,6 +465,7 @@ class RuntimeHost implements AsyncDisposable {
       team,
       plugins,
       sandboxes,
+      idleStop: this.#idleStop,
       publishConversationStatus: (conversation) =>
         conversationStatus.publish(conversation),
     });

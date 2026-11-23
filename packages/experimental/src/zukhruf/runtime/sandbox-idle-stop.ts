@@ -10,6 +10,7 @@ import type {
 import type { AgentDeclarationRegistry } from '../control-plane/agent-declaration-registry.ts';
 import type { AgentDirectory } from '../control-plane/agent-directory.ts';
 import type { AgentResidency } from '../control-plane/agent-residency.ts';
+import type { AgentThread } from '../control-plane/agent-thread.ts';
 import { conversationNamespace } from '../control-plane/agent-turn-id.ts';
 import type { ConversationId } from '../mailbox/types.ts';
 import type { Wake, WakeScheduler } from '../queue/wake-scheduler.ts';
@@ -104,6 +105,37 @@ export class SandboxIdleStop {
         scheduledFor,
       }),
     );
+  }
+
+  /**
+   * Cancels the stop armed for the thread's latest turn, as the chat's next
+   * turn starts. It never rejects, so the turn runs: a failure is a process
+   * warning, and a stop still delivered finds the chat active or on a later
+   * turn and does nothing.
+   */
+  async cancel(thread: AgentThread): Promise<void> {
+    const turnId = thread.lastTurnId;
+    if (turnId === undefined) return;
+    const sandbox = this.#declarations.get(thread.declarationName)?.sandbox;
+    if (!sandbox || !stopsWhenIdle(sandbox)) return;
+    try {
+      const stream = await this.#streams.getStream(turnId);
+      if (typeof stream?.finishedAt !== 'number') return;
+      await this.#wakes.cancel(
+        this.#wakeId({
+          conversation: thread.conversation,
+          turnId,
+          scheduledFor: stream.finishedAt + sandbox.idleTimeoutMs,
+        }),
+      );
+    } catch (error) {
+      process.emitWarning(
+        new Error(
+          `SandboxIdleStop: cancelling the stop of chat "${thread.conversation.chatId}" armed for turn "${turnId}" failed: ${Error.isError(error) ? error.message : String(error)}`,
+          { cause: error },
+        ),
+      );
+    }
   }
 
   work(): Promise<AsyncDisposable> {

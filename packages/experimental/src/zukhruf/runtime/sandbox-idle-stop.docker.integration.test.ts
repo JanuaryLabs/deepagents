@@ -541,6 +541,198 @@ for (const { name, open } of storages) {
     }
   });
 
+  test(`${name}: a chat's next turn cancels the stop due for its earlier turn, its container keeps running through that turn past the earlier stop's due time, and stops once the later turn has been idle for idleTimeoutMs`, async (t) => {
+    const namespace = `cancel-${crypto.randomUUID()}`;
+    const looked = Promise.withResolvers<void>();
+    const stopWatching = new AbortController();
+    let watching: Promise<void> | undefined;
+    try {
+      await using resources = new AsyncDisposableStack();
+      const { storage, boss } = await open(resources);
+      const root = defineAgent({
+        name: 'root',
+        // The later turn runs its command once the earlier stop's due time
+        // has passed, so the turn runs past it.
+        model: bashEachTurn('hostname', {
+          command: 'hostname',
+          after: looked.promise,
+        }),
+        instructions: [],
+        // Long enough that the later turn is queued well before the earlier
+        // stop is due: an enqueue on the remote Postgres took 5.5 s.
+        sandbox: defineSandbox(chatEnvironment(namespace), {
+          idleTimeoutMs: 20_000,
+        }),
+      });
+      await using host = await new AgentRuntime(root).initialize(
+        defineStack(async () => ({ storage })),
+      );
+      await host.work();
+
+      await bashOutput(
+        await host.enqueue(conversation, userTurn('turn-1', 'first')),
+      );
+      const earlier = await armedStop(boss, t);
+      const later = await host.enqueue(
+        conversation,
+        userTurn('turn-2', 'second'),
+      );
+      const statuses = new Set<string | undefined>();
+      let laterEnded = false;
+      watching = waitFor(
+        async () => {
+          statuses.add(await containerStatus(namespace));
+          assert.ok(laterEnded, 'the later turn is still running');
+        },
+        { signal: AbortSignal.any([t.signal, stopWatching.signal]) },
+      );
+      // Settles once the earlier stop leaves 'created': cancelled by the
+      // later turn, or, without the cancel, delivered at its due time.
+      const earlierWhileLaterRuns = await waitFor(
+        async () => {
+          const [job] = await boss.findJobs(IDLE_QUEUE, { id: earlier.id });
+          assert.notEqual(job?.state, 'created');
+          return job?.state;
+        },
+        { signal: t.signal },
+      );
+      await setTimeout(
+        Math.max(0, earlier.startAfter.getTime() - Date.now()) + 1_000,
+        undefined,
+        { signal: t.signal },
+      );
+      looked.resolve();
+      const second = await bashOutput(later);
+      const settledAt = Date.now();
+      laterEnded = true;
+      await watching;
+      const laterStop = await waitFor(
+        async () => {
+          const job = (await boss.findJobs(IDLE_QUEUE)).find(
+            ({ id }) => id !== earlier.id,
+          );
+          assert.equal(job?.state, 'created');
+          return job;
+        },
+        { signal: t.signal },
+      );
+      await waitFor(
+        async () => assert.equal(await containerStatus(namespace), 'exited'),
+        { signal: t.signal },
+      );
+
+      const container = await chatContainer(namespace);
+      const dueAfterSettled = laterStop.startAfter.getTime() - settledAt;
+      assert.deepStrictEqual(
+        {
+          earlierWhileLaterRuns,
+          whileLaterRuns: [...statuses],
+          second,
+          laterDueAfterIdleTime:
+            dueAfterSettled > 0 && dueAfterSettled <= 20_000,
+        },
+        {
+          earlierWhileLaterRuns: 'cancelled',
+          whileLaterRuns: ['running'],
+          second: bashSucceeded(`${container.id.slice(0, 12)}\n`),
+          laterDueAfterIdleTime: true,
+        },
+      );
+    } finally {
+      looked.resolve();
+      stopWatching.abort();
+      await watching?.catch(() => undefined);
+      await removeNamespace(namespace);
+    }
+  });
+
+  test(`${name}: with idleTimeoutMs 0, a chat's next turn sent once the earlier turn's stop is armed runs to its end, and from then on the container stops exactly once`, async (t) => {
+    const namespace = `stale-${crypto.randomUUID()}`;
+    const events = new AbortController();
+    try {
+      await using resources = new AsyncDisposableStack();
+      const { storage, boss } = await open(resources);
+      const root = defineAgent({
+        name: 'root',
+        // The later turn runs long enough for the die events to be watched
+        // before it ends.
+        model: bashEachTurn('hostname', 'sleep 3 && hostname'),
+        instructions: [],
+        sandbox: defineSandbox(chatEnvironment(namespace), {
+          idleTimeoutMs: 0,
+        }),
+      });
+      await using host = await new AgentRuntime(root).initialize(
+        defineStack(async () => ({ storage })),
+      );
+      await host.work();
+
+      const first = await bashOutput(
+        await host.enqueue(conversation, userTurn('turn-1', 'first')),
+      );
+      // The earlier stop is armed: still due, or already delivered.
+      await waitFor(
+        async () => {
+          if ((await idleJobStates(boss)).length > 0) return;
+          assert.equal(await containerStatus(namespace), 'exited');
+        },
+        { signal: t.signal, interval: 10 },
+      );
+      const later = await host.enqueue(
+        conversation,
+        userTurn('turn-2', 'second'),
+      );
+      // Subscribed once the later turn is queued, so a stop the earlier
+      // wake made before that (the chat was idle then) is not counted.
+      const dies: { timeNano?: number }[] = [];
+      const client = await testbed.client();
+      const watching = (async () => {
+        try {
+          for await (const event of client.events({
+            filters: {
+              type: ['container'],
+              event: ['die'],
+              label: [`deepagents.sandbox.namespace=${namespace}`],
+            },
+            signal: events.signal,
+          })) {
+            dies.push(event);
+          }
+        } catch (error) {
+          if (!events.signal.aborted) throw error;
+        }
+      })();
+      const second = await bashOutput(later);
+      // Exited, and the die event of that exit has arrived: events come in
+      // order, so every earlier die has arrived too.
+      await waitFor(
+        async () => {
+          const state = (await (await chatContainer(namespace)).inspect())
+            .State;
+          assert.equal(state?.Status, 'exited');
+          const finishedAt = Date.parse(state?.FinishedAt ?? '') * 1e6;
+          assert.ok(dies.some(({ timeNano = 0 }) => timeNano >= finishedAt));
+        },
+        { signal: t.signal },
+      );
+      events.abort();
+      await watching;
+
+      const hostname = `${(await chatContainer(namespace)).id.slice(0, 12)}\n`;
+      assert.deepStrictEqual(
+        { first, second, dies: dies.length },
+        {
+          first: bashSucceeded(hostname),
+          second: bashSucceeded(hostname),
+          dies: 1,
+        },
+      );
+    } finally {
+      events.abort();
+      await removeNamespace(namespace);
+    }
+  });
+
   test(`${name}: a chat whose sandbox declares idleTimeoutMs false keeps its container running after it goes idle, with no stop due and no worker taking the idle queue's wakes`, async (t) => {
     const namespace = `never-${crypto.randomUUID()}`;
     try {
