@@ -1,3 +1,4 @@
+import type { WakeScheduler } from '../../queue/wake-scheduler.ts';
 import {
   AgentPluginCapability,
   type AgentPluginDefinition,
@@ -7,10 +8,7 @@ import {
   type SchedulingWake,
 } from './conversation-scheduler.ts';
 import { createSchedulingTools } from './tools.ts';
-import type { WakeScheduler } from './wake-scheduler.ts';
 
-export * from './pg-boss.wake-scheduler.ts';
-export * from './wake-scheduler.ts';
 export type { SchedulingWake } from './conversation-scheduler.ts';
 
 export const conversationSchedulingCapabilities = {

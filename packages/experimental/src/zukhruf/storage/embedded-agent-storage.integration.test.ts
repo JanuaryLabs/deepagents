@@ -11,7 +11,9 @@ import {
   AdmissionScopeError,
   EmbeddedAgentStorage,
   InterAgentCommunicationTypes,
+  type SandboxIdleWake,
   type TurnRef,
+  type Wake,
   createInterAgentCommunication,
 } from '@deepagents/experimental/zukhruf';
 
@@ -475,4 +477,48 @@ test("a failure of the queue's pg-boss with no caller to take it is reported as 
   await assert.rejects(storage[Symbol.asyncDispose](), /PGlite is closed/);
 
   assert.equal(String(reported), 'Error: PGlite is closed');
+});
+
+test('a sandbox idle wake scheduled before the storage closed waits on the queue named after the turn queue and reaches a consumer after it reopens', async (t) => {
+  await using directory = await new TemporaryFiles().directory(
+    'embedded-storage-',
+  );
+  const runAt = new Date();
+  const wake: Wake<SandboxIdleWake> = {
+    id: crypto.randomUUID(),
+    runAt,
+    data: {
+      conversation: { chatId: 'child', userId: 'user-1' },
+      turnId: 'turn/child#1',
+      scheduledFor: runAt.getTime(),
+    },
+  };
+  {
+    await using closed = await EmbeddedAgentStorage.open({
+      directory: directory.path,
+      queue: { queue: 'tree-a' },
+    });
+    await closed.sandboxIdleWakes.schedule(wake);
+  }
+
+  await using storage = await EmbeddedAgentStorage.open({
+    directory: directory.path,
+    queue: { queue: 'tree-a' },
+  });
+  const waiting = await storage.boss.findJobs('tree-a-sandbox-idle', {
+    id: wake.id,
+  });
+  const delivered = Promise.withResolvers<Wake<SandboxIdleWake>>();
+  t.signal.addEventListener('abort', () => delivered.reject(t.signal.reason));
+  await using _consumer = await storage.sandboxIdleWakes.consume(
+    async (received) => delivered.resolve(received),
+  );
+
+  assert.deepStrictEqual(
+    {
+      waiting: waiting.map((job) => job.data),
+      delivered: await delivered.promise,
+    },
+    { waiting: [wake.data], delivered: wake },
+  );
 });

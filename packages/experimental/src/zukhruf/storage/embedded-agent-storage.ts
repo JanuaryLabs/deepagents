@@ -19,7 +19,10 @@ import {
   PgBossTurnQueue,
   type PgBossTurnQueueOptions,
 } from '../queue/pg-boss.turn-queue.ts';
+import { PgBossWakeScheduler } from '../queue/pg-boss.wake-scheduler.ts';
 import type { TurnQueue } from '../queue/turn-queue.ts';
+import type { WakeScheduler } from '../queue/wake-scheduler.ts';
+import type { SandboxIdleWake } from '../sandbox/sandbox-idle-wake.ts';
 import {
   type AdmissionScope,
   AgentStorage,
@@ -62,8 +65,9 @@ function emitWarning(error: unknown): void {
 
 /**
  * Agent storage for one process: the context, stream and mailbox stores on
- * one SQLite connection, and the turn queue on pg-boss over PGlite, all under
- * one directory, which the storage owns and closes.
+ * one SQLite connection, and the turn queue and sandbox idle wakes on
+ * pg-boss over PGlite, all under one directory, which the storage owns and
+ * closes.
  *
  * An admission is one SQLite `BEGIN IMMEDIATE` transaction that holds the
  * connection alone, so admissions run one at a time, for every tree. A turn
@@ -79,6 +83,7 @@ export class EmbeddedAgentStorage
   readonly streams: StreamManager;
   readonly queue: TurnQueue;
   readonly mailboxStore: MailboxStore;
+  readonly sandboxIdleWakes: WakeScheduler<SandboxIdleWake>;
   /** Started and owned; a host may bind it to plugins that keep jobs beside the turns. */
   readonly boss: PgBoss;
   /** The PGlite database pg-boss runs on, for transactions of such plugins. */
@@ -93,6 +98,7 @@ export class EmbeddedAgentStorage
     streams: StreamManager;
     queue: TurnQueue;
     mailboxStore: MailboxStore;
+    sandboxIdleWakes: WakeScheduler<SandboxIdleWake>;
     boss: PgBoss;
     queueDatabase: PGlite;
     gate: SqliteAdmissionGate;
@@ -105,6 +111,7 @@ export class EmbeddedAgentStorage
     this.streams = parts.streams;
     this.queue = parts.queue;
     this.mailboxStore = parts.mailboxStore;
+    this.sandboxIdleWakes = parts.sandboxIdleWakes;
     this.boss = parts.boss;
     this.queueDatabase = parts.queueDatabase;
     this.#gate = parts.gate;
@@ -152,6 +159,11 @@ export class EmbeddedAgentStorage
       ...options.queue,
       schema: 'pgboss',
     });
+    const sandboxIdleWakes = new PgBossWakeScheduler<SandboxIdleWake>(boss, {
+      queue: `${turns.queue}-sandbox-idle`,
+      pollingIntervalSeconds: 0.5,
+    });
+    await sandboxIdleWakes.initialize();
 
     const gate = new SqliteAdmissionGate(database);
     const store = new SqliteContextStore(database);
@@ -172,6 +184,7 @@ export class EmbeddedAgentStorage
       }),
       queue,
       mailboxStore: gate.view(mailboxStore),
+      sandboxIdleWakes,
       boss,
       queueDatabase,
       gate,

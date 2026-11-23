@@ -10,6 +10,8 @@ import {
   AgentStorageDatabaseMismatchError,
   InterAgentCommunicationTypes,
   PostgresAgentStorage,
+  type SandboxIdleWake,
+  type Wake,
   createInterAgentCommunication,
 } from '@deepagents/experimental/zukhruf';
 
@@ -78,6 +80,19 @@ const EVERYTHING = {
   mail: true,
   turn: 'queued',
 };
+
+function idleWake(chatId: string): Wake<SandboxIdleWake> {
+  const runAt = new Date();
+  return {
+    id: crypto.randomUUID(),
+    runAt,
+    data: {
+      conversation: { chatId, userId: 'user-1' },
+      turnId: `turn/${chatId}#1`,
+      scheduledFor: runAt.getTime(),
+    },
+  };
+}
 
 /** Backends of `pool`'s database, PgBoss's own aside, that wait for an advisory lock. */
 async function advisoryWaiters(pool: Pool): Promise<number> {
@@ -306,5 +321,52 @@ test('an admission to another tree runs while one tree is held', async (t) => {
   assert.deepStrictEqual(
     { outcome, committed: await admitted(second, 'other-child') },
     { outcome: 'admitted', committed: EVERYTHING },
+  );
+});
+
+test('two storages on one database whose turn queues differ each keep their sandbox idle wakes on a queue named after their turn queue and deliver only their own', async (t) => {
+  await using resources = new AsyncDisposableStack();
+  const database = resources.use(await testPostgres.database());
+  const boss = await startedBoss(resources, database);
+  await using first = await PostgresAgentStorage.create({
+    pool: database.pool(),
+    boss,
+    queue: { queue: 'tree-a' },
+  });
+  await using second = await PostgresAgentStorage.create({
+    pool: database.pool(),
+    boss,
+    queue: { queue: 'tree-b' },
+  });
+  const firstWake = idleWake('chat-a');
+  const secondWake = idleWake('chat-b');
+
+  await first.sandboxIdleWakes.schedule(firstWake);
+  await second.sandboxIdleWakes.schedule(secondWake);
+  const waiting = {
+    first: (await boss.findJobs('tree-a-sandbox-idle')).map((job) => job.id),
+    second: (await boss.findJobs('tree-b-sandbox-idle')).map((job) => job.id),
+  };
+  const delivered: Record<'first' | 'second', Wake<SandboxIdleWake>[]> = {
+    first: [],
+    second: [],
+  };
+  await using _first = await first.sandboxIdleWakes.consume(async (wake) => {
+    delivered.first.push(wake);
+  });
+  await using _second = await second.sandboxIdleWakes.consume(async (wake) => {
+    delivered.second.push(wake);
+  });
+  await waitFor(
+    () => assert.equal(delivered.first.length + delivered.second.length, 2),
+    { signal: t.signal, interval: 25 },
+  );
+
+  assert.deepStrictEqual(
+    { waiting, delivered },
+    {
+      waiting: { first: [firstWake.id], second: [secondWake.id] },
+      delivered: { first: [firstWake], second: [secondWake] },
+    },
   );
 });

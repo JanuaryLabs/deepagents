@@ -6,8 +6,8 @@ import { isRecord } from '@deepagents/context';
 
 import { conversationNamespace } from '../../control-plane/agent-turn-id.ts';
 import type { ConversationId } from '../../mailbox/types.ts';
+import type { Wake, WakeScheduler } from '../../queue/wake-scheduler.ts';
 import type { AgentPluginHost } from '../../runtime/agent-runtime.ts';
-import type { Wake, WakeScheduler } from './wake-scheduler.ts';
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const CRON_LIFETIME_MS = 7 * DAY_MS;

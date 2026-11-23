@@ -16,6 +16,8 @@ import {
   PgBossTurnQueue,
   type PgBossTurnQueueOptions,
 } from '../queue/pg-boss.turn-queue.ts';
+import { PgBossWakeScheduler } from '../queue/pg-boss.wake-scheduler.ts';
+import type { SandboxIdleWake } from '../sandbox/sandbox-idle-wake.ts';
 import {
   type AdmissionScope,
   AgentStorage,
@@ -73,9 +75,10 @@ export interface PostgresAgentStorageOptions {
 
 /**
  * Agent storage on one PostgreSQL database: the context, stream and mailbox
- * stores on the host's pool and the turn queue on PgBoss, which must reach
- * the same database. An admission is one transaction under a per-tree
- * advisory lock, so a session that dies mid-admission leaves nothing.
+ * stores on the host's pool and the turn queue and sandbox idle wakes on
+ * PgBoss, which must reach the same database. An admission is one transaction
+ * under a per-tree advisory lock, so a session that dies mid-admission leaves
+ * nothing.
  *
  * Dispose it before ending the pool: it closes the change source it opened.
  */
@@ -87,6 +90,7 @@ export class PostgresAgentStorage
   readonly streams: StreamManager;
   readonly queue: PgBossTurnQueue;
   readonly mailboxStore: PostgresMailboxStore;
+  readonly sandboxIdleWakes: PgBossWakeScheduler<SandboxIdleWake>;
   readonly #pool: Pool;
   readonly #schema: string;
   readonly #streamStore: PostgresStreamStore;
@@ -100,6 +104,7 @@ export class PostgresAgentStorage
     streams: StreamManager;
     queue: PgBossTurnQueue;
     mailboxStore: PostgresMailboxStore;
+    sandboxIdleWakes: PgBossWakeScheduler<SandboxIdleWake>;
     ownedChangeSource: PostgresNotifyChangeSource | undefined;
   }) {
     super();
@@ -110,12 +115,13 @@ export class PostgresAgentStorage
     this.streams = parts.streams;
     this.queue = parts.queue;
     this.mailboxStore = parts.mailboxStore;
+    this.sandboxIdleWakes = parts.sandboxIdleWakes;
     this.#ownedChangeSource = parts.ownedChangeSource;
   }
 
   /**
    * Opens the storage: checks that the pool and PgBoss reach one database,
-   * then creates the tables and the turn queue.
+   * then creates the tables, the turn queue and the sandbox idle wake queue.
    */
   static async create(
     options: PostgresAgentStorageOptions,
@@ -136,6 +142,11 @@ export class PostgresAgentStorage
     const streamStore = await PostgresStreamStore.create({ pool, schema });
     const mailboxStore = await PostgresMailboxStore.create({ pool, schema });
     const queue = await PgBossTurnQueue.create(boss, options.queue);
+    const sandboxIdleWakes = new PgBossWakeScheduler<SandboxIdleWake>(boss, {
+      queue: `${queue.queue}-sandbox-idle`,
+      pollingIntervalSeconds: 0.5,
+    });
+    await sandboxIdleWakes.initialize();
     let changeSource = options.changeSource;
     let ownedChangeSource: PostgresNotifyChangeSource | undefined;
     if (changeSource === undefined) {
@@ -153,6 +164,7 @@ export class PostgresAgentStorage
       streams: new StreamManager({ store: streamStore, changeSource }),
       queue,
       mailboxStore,
+      sandboxIdleWakes,
       ownedChangeSource,
     });
   }

@@ -9,6 +9,8 @@ import type {
   TransactionalMailboxStore,
 } from '../mailbox/store.ts';
 import type { TransactionalTurnQueue, TurnQueue } from '../queue/turn-queue.ts';
+import type { WakeScheduler } from '../queue/wake-scheduler.ts';
+import type { SandboxIdleWake } from '../sandbox/sandbox-idle-wake.ts';
 
 /** An agent tree: the root conversation and every sub-agent under it. */
 export interface AgentTree {
@@ -42,6 +44,8 @@ export abstract class AgentStorage {
   abstract readonly queue: TurnQueue;
   /** Durable pending inter-agent input. Distinct from the TurnQueue scheduler. */
   abstract readonly mailboxStore: MailboxStore;
+  /** Due stops of idle chats' sandboxes, on their own queue beside the turn queue. */
+  abstract readonly sandboxIdleWakes: WakeScheduler<SandboxIdleWake>;
 
   /**
    * Runs `work` while no other admission to `tree` runs, on any worker that

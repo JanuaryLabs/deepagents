@@ -46,8 +46,6 @@ test('the customer barrel hides runtime wiring and injected tool implementations
   for (const internal of [
     'AgentControlPlane',
     'ConversationScheduler',
-    'WakeScheduler',
-    'PgBossWakeScheduler',
     'conversationScheduling',
     'AgentDeclarationRegistry',
     'AgentDirectory',
@@ -66,17 +64,19 @@ test('the customer barrel hides runtime wiring and injected tool implementations
   }
 });
 
-test('conversation scheduling is available only through its plugin subpath', () => {
+test('conversation scheduling is available only through its plugin subpath, and the wake schedulers only through the customer barrel', () => {
   assert.equal(
     typeof conversationSchedulingPlugin.conversationScheduling,
     'function',
   );
-  assert.equal(typeof conversationSchedulingPlugin.WakeScheduler, 'function');
-  assert.equal(
-    typeof conversationSchedulingPlugin.PgBossWakeScheduler,
-    'function',
+  assert.equal(typeof zukhruf.WakeScheduler, 'function');
+  assert.equal(typeof zukhruf.PgBossWakeScheduler, 'function');
+  assert.deepStrictEqual(
+    ['ConversationScheduler', 'WakeScheduler', 'PgBossWakeScheduler'].filter(
+      (name) => name in conversationSchedulingPlugin,
+    ),
+    [],
   );
-  assert.equal('ConversationScheduler' in conversationSchedulingPlugin, false);
 });
 
 test('the customer barrel does not expose the HTTP transport plugin', () => {

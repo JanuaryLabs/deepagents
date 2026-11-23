@@ -12,13 +12,13 @@ import {
   AgentRuntime,
   SqliteMailboxStore,
   type TurnRef,
+  type Wake,
+  WakeScheduler,
   defineAgent,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
 import {
   type SchedulingWake,
-  type Wake,
-  WakeScheduler,
   conversationScheduling,
   conversationSchedulingCapabilities,
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';

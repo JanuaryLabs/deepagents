@@ -713,7 +713,7 @@ conversationScheduling() plugin
   occurrence into a normal Zukhruf message turn.
 - **`conversationScheduling()`** is the model-facing capability bundle. Its tools bind implicitly
   to the calling agent's current conversation and are injected into root and child agents only when
-  the plugin is installed. The core runtime and model never see the raw `WakeScheduler`.
+  the plugin is installed. The model never sees the raw `WakeScheduler`.
 
 The portable one-shot port is intentionally smaller than cron:
 
@@ -745,8 +745,8 @@ instance, stable agent-tree queue name, and configured timezone remain host-owne
 of one agent tree share a queue; different trees use different queues:
 
 ```ts
+import { PgBossWakeScheduler } from '@deepagents/experimental/zukhruf';
 import {
-  PgBossWakeScheduler,
   type SchedulingWake,
   conversationScheduling,
   conversationSchedulingCapabilities,
@@ -918,7 +918,8 @@ const traceTelemetry: AgentPluginDefinition<TracePlugin> = {
 - `defineStack(async (resources) => options)` is an explicit infrastructure recipe. It returns
   `{ storage, multiAgent?, bindings?, conversationStatusChanges? }`. `storage` is an
   `AgentStorage` (`storage/agent-storage.ts`): `store`, `streams`, `queue` and `mailboxStore` on
-  one database, plus `admit(tree, work)`, which runs `work` with the four parts bound to one unit
+  one database, `sandboxIdleWakes` (a `PgBossWakeScheduler` on `${turn queue}-sandbox-idle`, polled
+  every 0.5 s, which the runtime does not use yet), plus `admit(tree, work)`, which runs `work` with the four parts bound to one unit
   (`AdmissionScope`) while no other admission to the tree runs. `PostgresAgentStorage.create({
 pool, boss, schema?, queue?, changeSource? })` builds the stores on the host pool and the turn
   queue on PgBoss, throws `AgentStorageDatabaseMismatchError` when `current_database()` or
@@ -1034,10 +1035,10 @@ work({concurrency?}) → AsyncDisposable }`.
   durable id. Instructions are seeded
   **unconditionally per turn** (the old `getTurnCount()===0` guard ran reopened conversations with
   an empty system prompt).
-- `plugins/conversation-scheduling/` — the opt-in `conversationScheduling()` capability, generic
-  `WakeScheduler` port, public `PgBossWakeScheduler` adapter, conversation metadata coordinator, and
-  `CronCreate`, `CronList`, `CronDelete`, and `ScheduleWakeup` tools. The adapter uses a borrowed pg-boss instance and one-shot `sendAfter()`;
-  the coordinator owns recurrence, replacement, expiry, catch-up, deterministic occurrence IDs,
+- `plugins/conversation-scheduling/` — the opt-in `conversationScheduling()` capability, conversation
+  metadata coordinator, and `CronCreate`, `CronList`, `CronDelete`, and `ScheduleWakeup` tools. It
+  takes a `WakeScheduler` from `queue/`, whose `PgBossWakeScheduler` adapter uses a borrowed pg-boss
+  instance and one-shot `sendAfter()`; the coordinator owns recurrence, replacement, expiry, catch-up, deterministic occurrence IDs,
   deferred turn conversion, and settlement catch-up.
 - `plugins/schedules/` — the complete Scheduled Tasks plugin: control plane, persistence,
   recurrence, workers, runtime execution, and optional file source.
@@ -1072,8 +1073,10 @@ work({concurrency?}) → AsyncDisposable }`.
   `getTurnActivity(): idle | queued | running` status inspection plus exact active/oldest-queued
   lookup and stream cancellation. The latter two are architecture-forced adapter capabilities for
   model-facing interruption: pg-boss must free a strict-FIFO key and signal an active worker, while
-  an actor host may absorb both capabilities (see the executor section).
-- `storage/` — the `AgentStorage` port (the four parts and `admit`), `PostgresAgentStorage`, and
+  an actor host may absorb both capabilities (see the executor section). Also the `WakeScheduler`
+  port and its `PgBossWakeScheduler` adapter, used by conversation scheduling and the storages'
+  sandbox idle wakes.
+- `storage/` — the `AgentStorage` port (the four parts, `sandboxIdleWakes` and `admit`), `PostgresAgentStorage`, and
   `EmbeddedAgentStorage` (SQLite + PGlite pg-boss, admission gate, turn outbox and relay).
 - `demo/zukhruf-durable-turns/agent.ts`, `instructions.ts`, and sandbox factories are pure
   declarations (no top-level await; importing spins no container or agent turn).
