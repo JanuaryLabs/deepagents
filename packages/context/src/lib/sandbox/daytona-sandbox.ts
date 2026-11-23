@@ -19,13 +19,25 @@ import { setTimeout } from 'node:timers/promises';
 
 import { statOverExec } from './container-session.ts';
 import {
+  chatSandboxHandle,
+  chatSandboxLabels,
+  chatSandboxName,
   collect,
   controlProcess,
   createByteReadable,
+  guardSession,
   resolveIn,
   textCalls,
 } from './session.ts';
-import type { DisposableSandbox, SandboxReadinessOptions } from './types.ts';
+import {
+  type ChatSandbox,
+  type DisposableSandbox,
+  type SandboxContext,
+  type SandboxEnvironment,
+  SandboxNotFoundError,
+  type SandboxReadinessOptions,
+  type SandboxSession,
+} from './types.ts';
 
 const COMMAND_TIMEOUT_EXIT_CODE = 124;
 const TIMED_OUT_MESSAGE = 'Command timed out';
@@ -43,35 +55,23 @@ const GATEWAY_RETRY_MS = 500;
 
 type DaytonaSdk = typeof import('@daytona/sdk/v2');
 
-/**
- * Creates a sandbox. With a `name`, a second create with the same name and
- * options returns the sandbox the first one made, so the name is a
- * get-or-create key; the same name with other options is a conflict.
- */
+/** The SDK's create options that apply to every sandbox, one-off or a chat's. */
 type DaytonaCreateOptions = Omit<
   CreateSandboxOptions,
-  'autoDelete' | 'idempotencyKey'
+  'name' | 'autoDelete' | 'idempotencyKey'
 > & {
-  sandboxId?: never;
   /** A registered image name or `img_…` id. Default: the organization's default Linux image. */
   image?: string;
-};
-
-/** Attaches to a sandbox that exists. */
-interface DaytonaAttachOptions {
-  sandboxId: string;
-}
-
-type DaytonaTarget = DaytonaCreateOptions | DaytonaAttachOptions;
-
-export type DaytonaSandboxOptions = SandboxReadinessOptions & {
   /**
    * Per-command timeout in milliseconds for `run` and `spawn`; the command
    * then exits 124. Daytona's deadline counts whole seconds, so it is rounded
    * up to the next second.
    */
   commandTimeout?: number;
-} & DaytonaTarget;
+};
+
+export type DaytonaSandboxOptions = SandboxReadinessOptions &
+  DaytonaCreateOptions;
 
 /** How every command runs, for both a buffered `run` and a started process. */
 type CommandScope = Pick<
@@ -97,16 +97,17 @@ export class DaytonaCreationError extends DaytonaSandboxError {
 /**
  * Creates a sandbox backed by a Daytona v2 sandbox.
  *
- * `dispose()` deletes a sandbox this call created and leaves one it attached
- * to, by `sandboxId` or by a `name` that already had a sandbox. A Linux
- * Daytona sandbox has no stopped state, so delete is its only release.
+ * A one-off: it always creates its own sandbox, under a name Daytona
+ * generates, and `dispose` deletes it; afterwards every operation rejects. A
+ * sandbox that outlives the process, so that a chat's next turn finds its
+ * files, is a chat's, through {@link DaytonaSandboxEnvironment}.
  *
  * Requires the optional peer dependency `@daytona/sdk`.
  *
  * @example
  * ```typescript
  * const daytona = new Daytona();
- * await using sandbox = await createDaytonaSandbox(daytona.v2, { name: chatId });
+ * await using sandbox = await createDaytonaSandbox(daytona.v2);
  * const result = await sandbox.run({ command: 'echo hello' });
  * ```
  */
@@ -114,47 +115,163 @@ export async function createDaytonaSandbox(
   client: DaytonaV2Client,
   options: DaytonaSandboxOptions = {},
 ): Promise<DisposableSandbox> {
-  const { commandTimeout, readiness, ...target } = options;
+  const { commandTimeout, readiness, image, ...create } = options;
   const sdk = await import('@daytona/sdk/v2');
-  const { sandbox, created } = await acquire(client, target);
+  const sandbox = await client.create(image, create);
 
-  let session: DisposableSandbox;
+  let workdir: string;
   try {
-    session = daytonaSession({
-      sdk,
-      sandbox,
-      created,
-      workdir: await startingDirectory(sdk, sandbox),
-      commandTimeout,
-    });
+    workdir = await startingDirectory(sdk, sandbox);
   } catch (error) {
-    if (created) await sandbox.delete();
+    await sandbox.delete();
     throw error;
   }
+  const { session, release } = guardSession(
+    daytonaSession({ sdk, sandbox, workdir, commandTimeout }),
+    {
+      release: () => sandbox.delete(),
+      releasedMessage: `The sandbox "${sandbox.id}" is disposed.`,
+    },
+  );
+  const disposable: DisposableSandbox = Object.assign(session, {
+    dispose: release,
+    [Symbol.asyncDispose]: release,
+  });
 
   if (readiness) {
     try {
-      await readiness(session);
+      await readiness(disposable);
     } catch (error) {
-      await session.dispose();
+      await disposable.dispose();
       throw error;
     }
   }
-  return session;
+  return disposable;
 }
 
-async function acquire(
-  client: DaytonaV2Client,
-  target: DaytonaTarget,
-): Promise<{ sandbox: Sandbox; created: boolean }> {
-  if (target.sandboxId !== undefined) {
-    return { sandbox: await client.get(target.sandboxId), created: false };
+/**
+ * No `volumes`: a chat's volumes depend on the chat, and the environment takes
+ * them as `(chat) => …` only once a consumer needs Daytona volumes.
+ */
+export type DaytonaSandboxEnvironmentOptions = SandboxReadinessOptions &
+  Omit<DaytonaCreateOptions, 'volumes'> & {
+    /**
+     * With a chat's id, names that chat's sandbox. Two environments with the
+     * same namespace on one Daytona project reach the same sandboxes; give
+     * each app or deployment its own.
+     */
+    namespace: string;
+  };
+
+/**
+ * Chat sandboxes on Daytona v2. A chat's sandbox is named from the namespace
+ * and the chat's id, and carries the labels `deepagents.sandbox.namespace` and
+ * `deepagents.sandbox.chat` beside the caller's. `open` is Daytona's own
+ * get-or-create by name; the create options apply only when it creates the
+ * sandbox, and an existing one keeps the configuration it was created with.
+ *
+ * A Linux Daytona sandbox has no stopped state, so this environment has no
+ * `stop`: bound idle cost with the create option `lifecyclePolicy`, such as
+ * `{ idleExpirySeconds, onIdleTimeout: 'delete' }`. `delete` finds the
+ * sandbox by name through Daytona search, which lags a create by a few
+ * seconds: a `delete` in that window misses a sandbox just created. A handle
+ * holds nothing but the HTTP client, so `close` releases nothing and never
+ * deletes the sandbox.
+ */
+export class DaytonaSandboxEnvironment implements SandboxEnvironment {
+  readonly #client: DaytonaV2Client;
+  readonly #options: DaytonaSandboxEnvironmentOptions;
+
+  constructor(
+    client: DaytonaV2Client,
+    options: DaytonaSandboxEnvironmentOptions,
+  ) {
+    this.#client = client;
+    this.#options = options;
   }
-  const { image, ...create } = target;
-  const sandbox = await client.create(image, create);
-  // Only the create that made the sandbox receives an access token; a create
-  // that returned the sandbox of an earlier one with the same name does not.
-  return { sandbox, created: sandbox.accessToken !== undefined };
+
+  #name(chat: SandboxContext): string {
+    return chatSandboxName(this.#options.namespace, chat);
+  }
+
+  async open(chat: SandboxContext): Promise<ChatSandbox> {
+    const { namespace, commandTimeout, readiness, image, ...create } =
+      this.#options;
+    const sdk = await import('@daytona/sdk/v2');
+    const name = this.#name(chat);
+    let sandbox: Sandbox;
+    try {
+      sandbox = await this.#client.create(image, {
+        ...create,
+        name,
+        labels: { ...create.labels, ...chatSandboxLabels(namespace, chat) },
+      });
+    } catch (error) {
+      // The API's conflict for a name created with other options, as after a
+      // deploy changed them: the existing sandbox keeps its configuration.
+      if (
+        !(error instanceof sdk.ConflictError) ||
+        error.code !== 'CONFLICT' ||
+        error.source !== 'DAYTONA_API'
+      ) {
+        throw error;
+      }
+      const [existing] = await this.#client.findByName(name);
+      if (!existing) throw error;
+      sandbox = existing;
+    }
+
+    const handle = chatSandboxHandle(
+      chat.chatId,
+      daytonaSession({
+        sdk,
+        sandbox,
+        workdir: await startingDirectory(sdk, sandbox),
+        commandTimeout,
+      }),
+      {
+        resume: () => assertExists(sdk, sandbox),
+        release: async () => {},
+      },
+    );
+    if (readiness) {
+      try {
+        await readiness(handle);
+      } catch (error) {
+        await handle.close();
+        throw error;
+      }
+    }
+    return handle;
+  }
+
+  async delete(chat: SandboxContext): Promise<void> {
+    const found = await this.#client.findByName(this.#name(chat));
+    await Promise.all(found.map((sandbox) => this.#client.delete(sandbox)));
+  }
+}
+
+/**
+ * Rejects with `SandboxNotFoundError` when the sandbox is deleted, or being
+ * deleted. A deleted sandbox reads as `destroyed` for a while, then as not
+ * found.
+ */
+async function assertExists(
+  sdk: DaytonaSdk,
+  sandbox: Sandbox,
+  failure?: unknown,
+): Promise<void> {
+  const gone = (cause: unknown) =>
+    new SandboxNotFoundError(sandbox.id, cause === undefined ? {} : { cause });
+  try {
+    await sandbox.refreshData();
+  } catch (error) {
+    if (error instanceof sdk.NotFoundError) throw gone(failure ?? error);
+    throw error;
+  }
+  if (sandbox.state === 'destroying' || sandbox.state === 'destroyed') {
+    throw gone(failure);
+  }
 }
 
 /** The directory commands start in, which also proves Bash runs. */
@@ -239,11 +356,10 @@ function entryType(mode: string): Experimental_SandboxDirectoryEntry['type'] {
 function daytonaSession(args: {
   sdk: DaytonaSdk;
   sandbox: Sandbox;
-  created: boolean;
   workdir: string;
   commandTimeout?: number;
-}): DisposableSandbox {
-  const { sdk, sandbox, created, workdir, commandTimeout } = args;
+}): SandboxSession {
+  const { sdk, sandbox, workdir, commandTimeout } = args;
 
   // The SDK takes absolute paths and an absolute `cwd` only.
   const resolve = (path: string) => resolveIn(workdir, path);
@@ -266,9 +382,23 @@ function daytonaSession(args: {
     (error instanceof sdk.BadRequestError &&
       NOT_A_DIRECTORY.test(error.message));
 
+  // A deleted sandbox fails a call as not found, or, when the call must first
+  // get an access token, as a conflict; a read of its state tells it from a
+  // call that failed in a live sandbox.
+  const reach = async <T>(call: () => Promise<T>): Promise<T> => {
+    try {
+      return await call();
+    } catch (error) {
+      if (error instanceof sdk.DaytonaError && !isMissing(error)) {
+        await assertExists(sdk, sandbox, error);
+      }
+      throw error;
+    }
+  };
+
   const orNull = async <T>(operation: () => Promise<T>): Promise<T | null> => {
     try {
-      return await operation();
+      return await reach(operation);
     } catch (error) {
       if (isMissing(error)) return null;
       throw error;
@@ -277,7 +407,7 @@ function daytonaSession(args: {
 
   const execRunner = {
     exec: async (argv: string[]) => {
-      const result = await sandbox.process.run({ argv });
+      const result = await reach(() => sandbox.process.run({ argv }));
       return {
         stdout: result.stdout,
         stderr: result.stderr,
@@ -286,7 +416,7 @@ function daytonaSession(args: {
     },
   };
 
-  const stat: DisposableSandbox['stat'] = async ({ path, abortSignal }) => {
+  const stat: SandboxSession['stat'] = async ({ path, abortSignal }) => {
     abortSignal?.throwIfAborted();
     const target = resolve(path);
     const info = await orNull(() => sandbox.fs.stat(target));
@@ -314,10 +444,12 @@ function daytonaSession(args: {
   > {
     const { command, abortSignal, stdin } = options;
     abortSignal?.throwIfAborted();
-    const handle = await sandbox.process.start(command, {
-      ...processOptions(options),
-      stdin: stdin ? 'open' : 'closed',
-    });
+    const handle = await reach(() =>
+      sandbox.process.start(command, {
+        ...processOptions(options),
+        stdin: stdin ? 'open' : 'closed',
+      }),
+    );
 
     const stdout = createByteReadable();
     const stderr = createByteReadable();
@@ -329,7 +461,7 @@ function daytonaSession(args: {
         else if (event.frame.channel === 'stderr') stderr.enqueue(bytes);
       }
     };
-    const exitCode = Promise.all([handle.wait(), pump()])
+    const exitCode = Promise.all([reach(() => handle.wait()), reach(pump)])
       .then(([result]) => {
         if (result.reason === 'timed_out') {
           stderr.enqueue(new TextEncoder().encode(TIMED_OUT_MESSAGE));
@@ -377,7 +509,7 @@ function daytonaSession(args: {
     };
   }
 
-  const readBinaryFile: DisposableSandbox['readBinaryFile'] = async ({
+  const readBinaryFile: SandboxSession['readBinaryFile'] = async ({
     path,
     abortSignal,
   }) => {
@@ -385,7 +517,7 @@ function daytonaSession(args: {
     return orNull(() => sandbox.fs.readBytes(resolve(path)));
   };
 
-  const writeBinaryFile: DisposableSandbox['writeBinaryFile'] = async ({
+  const writeBinaryFile: SandboxSession['writeBinaryFile'] = async ({
     path,
     content,
     abortSignal,
@@ -393,7 +525,7 @@ function daytonaSession(args: {
     abortSignal?.throwIfAborted();
     const target = resolve(path);
     try {
-      await sandbox.fs.writeBytes(target, content);
+      await reach(() => sandbox.fs.writeBytes(target, content));
     } catch (error) {
       if (
         error instanceof sdk.BadRequestError &&
@@ -408,19 +540,14 @@ function daytonaSession(args: {
     }
   };
 
-  let disposing: Promise<void> | undefined;
-  const dispose = () =>
-    (disposing ??= created ? sandbox.delete() : Promise.resolve());
-
   return {
     description: `Commands run through bash -lc in a Daytona sandbox, starting in ${workdir}.`,
     run: async (options) => {
       const { command, abortSignal } = options;
       abortSignal?.throwIfAborted();
       if (abortSignal) return collect(await spawn(options));
-      const result = await sandbox.process.run(
-        command,
-        processOptions(options),
+      const result = await reach(() =>
+        sandbox.process.run(command, processOptions(options)),
       );
       return {
         stdout: result.stdout,
@@ -449,7 +576,7 @@ function daytonaSession(args: {
       abortSignal?.throwIfAborted();
       const target = resolve(path);
       try {
-        const { items } = await sandbox.fs.list(target);
+        const { items } = await reach(() => sandbox.fs.list(target));
         return items.map((info) => ({
           name: info.name,
           type: entryType(info.mode),
@@ -464,15 +591,13 @@ function daytonaSession(args: {
     deleteFile: async ({ path, abortSignal }) => {
       abortSignal?.throwIfAborted();
       try {
-        await sandbox.fs.remove(resolve(path));
+        await reach(() => sandbox.fs.remove(resolve(path)));
         return true;
       } catch (error) {
         if (isMissing(error)) return false;
         throw error;
       }
     },
-    dispose,
-    [Symbol.asyncDispose]: dispose,
   };
 }
 

@@ -4,7 +4,6 @@ import { DockerTestbed } from '@zukhruf/testing/docker';
 import { InMemoryFs } from 'just-bash';
 import spawn, { SubprocessError } from 'nano-spawn';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
 import { text } from 'node:stream/consumers';
 import { type TestContext, describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -47,15 +46,14 @@ interface Backend {
    * InMemoryFs.writeFile replaces the link with a file.
    */
   linkWrite: 'through' | 'replaces';
-  open: (sandboxName?: string) => Promise<DisposableSandbox>;
-  /**
-   * The name the engine holds a sandbox under, read from the live sandbox.
-   * Given by a backend whose `open` ignores `sandboxName` and generates one,
-   * which no second `open` can attach to.
-   */
-  generatedName?: (sandbox: DisposableSandbox) => Promise<string>;
-  /** Whether the engine holds the named sandbox. Absent when a backend holds nothing. */
-  holds?: (sandboxName: string) => Promise<boolean>;
+  open: () => Promise<DisposableSandbox>;
+  /** How a test finds a sandbox in its engine. Absent when a backend holds nothing. */
+  engine?: {
+    /** The name the engine holds the sandbox under, read from the live sandbox. */
+    nameOf: (sandbox: DisposableSandbox) => Promise<string>;
+    /** Whether the engine holds the named sandbox. */
+    holds: (sandboxName: string) => Promise<boolean>;
+  };
 }
 
 /**
@@ -81,7 +79,6 @@ async function microsandboxUnavailable(): Promise<string | undefined> {
 }
 
 const DAYTONA_PROBE_MS = 15_000;
-const daytonaIds = new Map<string, string>();
 
 async function daytonaClient() {
   const { Daytona } = await import('@daytona/sdk');
@@ -130,11 +127,13 @@ const backends: Backend[] = [
     stderrAfterStdoutCancel: 'flows',
     linkWrite: 'through',
     open: () => createDockerSandbox(dockerDefaults),
-    // A container's hostname is the start of its id, which the engine finds it by.
-    generatedName: hostname,
-    holds: async (name) => {
-      const client = await testbed.client();
-      return (await client.containers.find(name)) !== undefined;
+    engine: {
+      // A container's hostname is the start of its id, which the engine finds it by.
+      nameOf: hostname,
+      holds: async (name) => {
+        const client = await testbed.client();
+        return (await client.containers.find(name)) !== undefined;
+      },
     },
   },
   {
@@ -145,22 +144,24 @@ const backends: Backend[] = [
     stderrAfterStdoutCancel: 'flows',
     linkWrite: 'through',
     open: () => createAppleContainerSandbox(),
-    // The CLI makes a container's hostname its name.
-    generatedName: hostname,
-    holds: async (name) => {
-      try {
-        const { stdout } = await spawn('container', ['inspect', name]);
-        const entries: unknown = JSON.parse(stdout.trim() || '[]');
-        return Array.isArray(entries) && entries.length > 0;
-      } catch (error) {
-        if (
-          error instanceof SubprocessError &&
-          /not found/.test(error.stderr)
-        ) {
-          return false;
+    engine: {
+      // The CLI makes a container's hostname its name.
+      nameOf: hostname,
+      holds: async (name) => {
+        try {
+          const { stdout } = await spawn('container', ['inspect', name]);
+          const entries: unknown = JSON.parse(stdout.trim() || '[]');
+          return Array.isArray(entries) && entries.length > 0;
+        } catch (error) {
+          if (
+            error instanceof SubprocessError &&
+            /not found/.test(error.stderr)
+          ) {
+            return false;
+          }
+          throw error;
         }
-        throw error;
-      }
+      },
     },
   },
   {
@@ -171,18 +172,20 @@ const backends: Backend[] = [
     stderrAfterStdoutCancel: 'flows',
     linkWrite: 'through',
     open: () => createMicrosandboxSandbox(),
-    // A VM's hostname is its name.
-    generatedName: hostname,
-    holds: async (name) => {
-      const { Sandbox, SandboxNotFoundError: Gone } =
-        await import('microsandbox');
-      try {
-        await Sandbox.get(name);
-        return true;
-      } catch (error) {
-        if (error instanceof Gone) return false;
-        throw error;
-      }
+    engine: {
+      // A VM's hostname is its name.
+      nameOf: hostname,
+      holds: async (name) => {
+        const { Sandbox, SandboxNotFoundError: Gone } =
+          await import('microsandbox');
+        try {
+          await Sandbox.get(name);
+          return true;
+        } catch (error) {
+          if (error instanceof Gone) return false;
+          throw error;
+        }
+      },
     },
   },
   {
@@ -192,20 +195,21 @@ const backends: Backend[] = [
     runAbort: 'rejects',
     stderrAfterStdoutCancel: 'flows',
     linkWrite: 'through',
-    open: async (name) => {
-      const client = await daytonaClient();
-      if (!name) return createDaytonaSandbox(client);
-      const sandbox = await createDaytonaSandbox(client, { name });
-      // A repeated create with the same name returns the sandbox the first one
-      // made. Only `get` by id reads it at once; sandbox search lags.
-      daytonaIds.set(name, (await client.create({ name })).id);
-      return sandbox;
-    },
-    holds: async (name) => {
-      const id = daytonaIds.get(name);
-      assert.ok(id, `no Daytona sandbox was opened as ${name}`);
-      const sandbox = await (await daytonaClient()).get(id);
-      return sandbox.state === 'started';
+    open: async () => createDaytonaSandbox(await daytonaClient()),
+    engine: {
+      // Daytona gives each sandbox its id; `get` reads it at once, where
+      // search lags.
+      nameOf: async (sandbox) => {
+        const { stdout } = await sandbox.run({
+          command: 'printf %s "$DAYTONA_SANDBOX_ID"',
+        });
+        assert.ok(stdout, 'the sandbox knows its id');
+        return stdout;
+      },
+      holds: async (id) => {
+        const sandbox = await (await daytonaClient()).get(id);
+        return sandbox.state === 'started';
+      },
     },
   },
 ];
@@ -241,8 +245,7 @@ for (const {
   runAbort,
   stderrAfterStdoutCancel,
   linkWrite,
-  generatedName,
-  holds,
+  engine,
 } of backends) {
   describe(`sandbox session contract: ${name}`, async () => {
     const skip = await unavailable?.();
@@ -862,33 +865,16 @@ for (const {
         await sandbox.dispose();
       });
 
-      if (holds) {
+      if (engine) {
         it('releases what the engine holds by the time dispose resolves', async () => {
-          const requested = `contract-${randomUUID().slice(0, 8)}`;
-          await using sandbox = await open(requested);
-          const sandboxName = (await generatedName?.(sandbox)) ?? requested;
-          const heldWhileOpen = await holds(sandboxName);
+          await using sandbox = await open();
+          const sandboxName = await engine.nameOf(sandbox);
+          const heldWhileOpen = await engine.holds(sandboxName);
 
           await sandbox.dispose();
 
           assert.equal(heldWhileOpen, true);
-          assert.equal(await holds(sandboxName), false);
-        });
-      }
-
-      if (holds && !generatedName) {
-        it('leaves a sandbox it attached to by name running when it disposes', async () => {
-          const sandboxName = `contract-${randomUUID().slice(0, 8)}`;
-          await using owner = await open(sandboxName);
-          const attached = await open(sandboxName);
-
-          await attached.dispose();
-
-          assert.equal(await holds(sandboxName), true);
-          assert.equal(
-            (await owner.run({ command: 'echo up' })).stdout,
-            'up\n',
-          );
+          assert.equal(await engine.holds(sandboxName), false);
         });
       }
     });

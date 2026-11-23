@@ -1,10 +1,25 @@
+import type { Sandbox } from '@daytona/sdk/v2';
+import { waitFor } from '@zukhruf/testing/async';
 import assert from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { text as streamText } from 'node:stream/consumers';
 import { describe, it } from 'node:test';
 
-import { createBashTool, createDaytonaSandbox } from '@deepagents/context';
+import {
+  type ChatSandbox,
+  DaytonaSandboxEnvironment,
+  type SandboxContext,
+  type SandboxSession,
+  createBashTool,
+  createDaytonaSandbox,
+} from '@deepagents/context';
 
+import {
+  every,
+  everySessionOperation,
+  outcomes,
+  sessionOutcomes,
+} from './helpers/chat-sandbox-outcomes.ts';
 import { readFirstChunk } from './helpers/read-first-chunk.ts';
 
 type DaytonaClient = Parameters<typeof createDaytonaSandbox>[0];
@@ -38,6 +53,19 @@ const skip = client
 function live(): DaytonaClient {
   assert.ok(client, 'live Daytona tests run only with a client');
   return client;
+}
+
+/** The Daytona sandbox behind a session, found by the id it carries inside. */
+async function sandboxOf(session: SandboxSession): Promise<Sandbox> {
+  const { stdout } = await session.run({
+    command: 'printf %s "$DAYTONA_SANDBOX_ID"',
+  });
+  assert.ok(stdout, 'the sandbox knows its id');
+  return live().get(stdout);
+}
+
+async function state(id: string): Promise<string> {
+  return (await live().get(id)).state;
 }
 
 describe('Daytona Sandbox', { skip }, () => {
@@ -280,32 +308,6 @@ describe('Daytona Sandbox', { skip }, () => {
       assert.strictEqual(err.trim(), 'err');
       assert.deepStrictEqual(exit, { exitCode: 0 });
     });
-
-    it('propagates the SDK error when the sandboxId does not exist', async () => {
-      const { NotFoundError } = await import('@daytona/sdk/v2');
-
-      await assert.rejects(
-        createDaytonaSandbox(live(), {
-          sandboxId: `sbx_missing${randomUUID().replaceAll('-', '')}`,
-        }),
-        NotFoundError,
-      );
-    });
-
-    it('propagates the SDK conflict when a name is reused with other options', async () => {
-      const { ConflictError } = await import('@daytona/sdk/v2');
-      const name = `deepagents-conflict-${randomUUID()}`;
-      await using sandbox = await createDaytonaSandbox(live(), { name });
-
-      await assert.rejects(
-        createDaytonaSandbox(live(), { name, labels: { other: 'options' } }),
-        ConflictError,
-      );
-      assert.strictEqual(
-        (await sandbox.run({ command: 'echo up' })).stdout,
-        'up\n',
-      );
-    });
   });
 
   describe('live streaming', () => {
@@ -377,45 +379,39 @@ describe('Daytona Sandbox', { skip }, () => {
   });
 
   describe('lifecycle', () => {
-    it('deletes a sandbox it created and leaves one it attached to by name', async () => {
-      const name = `deepagents-owner-${randomUUID()}`;
-      await using owner = await createDaytonaSandbox(live(), { name });
-      await owner.writeTextFile({ path: '/tmp/marker', content: 'first' });
-      const attached = await createDaytonaSandbox(live(), { name });
-      assert.strictEqual(
-        await attached.readTextFile({ path: '/tmp/marker' }),
-        'first',
-      );
+    it('deletes its sandbox by the time dispose resolves', async () => {
+      await using sandbox = await createDaytonaSandbox(live());
+      const { id } = await sandboxOf(sandbox);
+      const whileOpen = await state(id);
 
-      await attached.dispose();
-      assert.strictEqual(
-        await owner.readTextFile({ path: '/tmp/marker' }),
-        'first',
-      );
+      await sandbox.dispose();
 
-      await owner.dispose();
-      await using fresh = await createDaytonaSandbox(live(), { name });
-      assert.strictEqual(
-        await fresh.readTextFile({ path: '/tmp/marker' }),
-        null,
+      assert.deepStrictEqual(
+        [whileOpen, await state(id)],
+        ['started', 'destroyed'],
       );
     });
 
-    it('leaves a sandbox it attached to by sandboxId', async () => {
-      const existing = await live().create({
-        name: `deepagents-attach-${randomUUID()}`,
-      });
-      try {
-        const attached = await createDaytonaSandbox(live(), {
-          sandboxId: existing.id,
-        });
-        await attached.dispose();
+    it('rejects every operation with an error that names its sandbox once it is disposed, never with SandboxNotFoundError', async () => {
+      await using sandbox = await createDaytonaSandbox(live());
+      const { id } = await sandboxOf(sandbox);
 
-        await existing.refreshData();
-        assert.strictEqual(existing.state, 'started');
-      } finally {
-        await existing.delete();
-      }
+      await sandbox.dispose();
+
+      assert.deepStrictEqual(
+        await sessionOutcomes(sandbox),
+        everySessionOperation(`Error: The sandbox "${id}" is disposed.`),
+      );
+    });
+
+    it('rejects every operation with SandboxNotFoundError once its sandbox was deleted outside', async () => {
+      await using sandbox = await createDaytonaSandbox(live());
+      await live().delete((await sandboxOf(sandbox)).id);
+
+      assert.deepStrictEqual(
+        await sessionOutcomes(sandbox),
+        everySessionOperation('SandboxNotFoundError'),
+      );
     });
   });
 
@@ -444,5 +440,232 @@ describe('Daytona Sandbox', { skip }, () => {
       assert.match(rest, /bye/);
       assert.deepStrictEqual(await child.wait(), { exitCode: 0 });
     });
+  });
+});
+
+function chat(chatId: string): SandboxContext {
+  return { chatId, userId: 'user-1' };
+}
+
+/**
+ * The chat sandboxes of one test, which it deletes when it ends: each one it
+ * reached, and each one Daytona search lists under its namespace (search lags
+ * a create by seconds, so it alone could miss one).
+ */
+class Chats implements AsyncDisposable {
+  readonly namespace = `deepagents-test-${randomUUID()}`;
+  readonly #reached = new Set<string>();
+
+  environment(
+    options: Omit<
+      ConstructorParameters<typeof DaytonaSandboxEnvironment>[1],
+      'namespace'
+    > = {},
+  ): DaytonaSandboxEnvironment {
+    return new DaytonaSandboxEnvironment(live(), {
+      ...options,
+      namespace: this.namespace,
+    });
+  }
+
+  /** The chat's sandbox, opened through `environment` and deleted when the test ends. */
+  async open(
+    environment: DaytonaSandboxEnvironment,
+    chatId: string,
+  ): Promise<ChatSandbox> {
+    const handle = await environment.open(chat(chatId));
+    await this.idOf(handle);
+    return handle;
+  }
+
+  /** The id of the sandbox `handle` holds, deleted when the test ends. */
+  async idOf(handle: ChatSandbox): Promise<string> {
+    const { id } = await sandboxOf(handle);
+    this.#reached.add(id);
+    return id;
+  }
+
+  /** The ids Daytona search lists for the chat, by its labels. */
+  async listed(chatId: string): Promise<string[]> {
+    const { items } = await live().search({
+      labels: {
+        'deepagents.sandbox.namespace': this.namespace,
+        'deepagents.sandbox.chat': chatId,
+      },
+    });
+    return items.map(({ id }) => id);
+  }
+
+  async [Symbol.asyncDispose](): Promise<void> {
+    const { items } = await live().search({
+      labels: { 'deepagents.sandbox.namespace': this.namespace },
+    });
+    const ids = new Set([...this.#reached, ...items.map(({ id }) => id)]);
+    await Promise.all([...ids].map((id) => live().delete(id)));
+  }
+}
+
+describe('DaytonaSandboxEnvironment', { skip }, () => {
+  it('opens one sandbox per chat that its handles and another environment share, found by its labels', async (t) => {
+    await using chats = new Chats();
+    await using first = await chats.open(chats.environment(), 'chat-1');
+    const id = await chats.idOf(first);
+    await first.writeTextFile({ path: '/tmp/marker', content: 'first' });
+
+    await using second = await chats.open(chats.environment(), 'chat-1');
+    await using other = await chats.open(chats.environment(), 'chat-1');
+
+    assert.deepStrictEqual(
+      [await chats.idOf(second), await chats.idOf(other)],
+      [id, id],
+    );
+    assert.strictEqual(
+      await other.readTextFile({ path: '/tmp/marker' }),
+      'first',
+    );
+    await waitFor(
+      async () => assert.deepStrictEqual(await chats.listed('chat-1'), [id]),
+      { signal: t.signal },
+    );
+  });
+
+  it('isolates chats from each other, and the same chat in another namespace', async () => {
+    await using chats = new Chats();
+    await using elsewhere = new Chats();
+    await using one = await chats.open(chats.environment(), 'chat-1');
+    await using two = await chats.open(chats.environment(), 'chat-2');
+    await using sameChat = await elsewhere.open(
+      elsewhere.environment(),
+      'chat-1',
+    );
+
+    const ids = [
+      await chats.idOf(one),
+      await chats.idOf(two),
+      await elsewhere.idOf(sameChat),
+    ];
+
+    assert.strictEqual(new Set(ids).size, 3);
+  });
+
+  it('closes a handle once and rejects its operations with an error that names the chat, leaving the sandbox running', async () => {
+    await using chats = new Chats();
+    const handle = await chats.open(chats.environment(), 'chat-1');
+    const id = await chats.idOf(handle);
+
+    await handle.close();
+    await handle.close();
+    await handle[Symbol.asyncDispose]();
+
+    assert.deepStrictEqual(
+      await outcomes(handle),
+      every('Error: The sandbox handle of chat "chat-1" is closed.'),
+    );
+    assert.strictEqual(await state(id), 'started');
+  });
+
+  it('deletes the chat sandbox once search lists it, resolves when there is none, and the next open makes a new one', async (t) => {
+    await using chats = new Chats();
+    const environment = chats.environment();
+    await using handle = await chats.open(environment, 'chat-1');
+    const id = await chats.idOf(handle);
+    await handle.writeTextFile({ path: '/tmp/marker', content: 'first' });
+    await waitFor(
+      async () => assert.deepStrictEqual(await chats.listed('chat-1'), [id]),
+      { signal: t.signal },
+    );
+
+    await environment.delete(chat('chat-1'));
+    await environment.delete(chat('chat-1'));
+    await environment.delete(chat('never-opened'));
+
+    assert.strictEqual(await state(id), 'destroyed');
+    await using fresh = await chats.open(environment, 'chat-1');
+    assert.notStrictEqual(await chats.idOf(fresh), id);
+    assert.strictEqual(await fresh.readTextFile({ path: '/tmp/marker' }), null);
+  });
+
+  it('rejects every operation of a handle, resume included, with SandboxNotFoundError once its sandbox was deleted outside, also after the chat is opened again', async () => {
+    await using chats = new Chats();
+    const environment = chats.environment();
+    await using handle = await chats.open(environment, 'chat-1');
+    await live().delete(await chats.idOf(handle));
+
+    const afterDelete = await outcomes(handle);
+    await using reopened = await chats.open(environment, 'chat-1');
+    const afterReopen = await outcomes(handle);
+
+    assert.deepStrictEqual(afterDelete, every('SandboxNotFoundError'));
+    assert.deepStrictEqual(afterReopen, every('SandboxNotFoundError'));
+    await reopened.resume();
+    assert.strictEqual(
+      (await reopened.run({ command: 'echo up' })).stdout,
+      'up\n',
+    );
+  });
+
+  it('opens the existing sandbox, with its configuration, when the options changed since it was created', async (t) => {
+    await using chats = new Chats();
+    await using before = await chats.open(
+      chats.environment({ env: { DEPLOY: 'first' }, labels: { app: 'first' } }),
+      'chat-1',
+    );
+    const id = await chats.idOf(before);
+    await waitFor(
+      async () => assert.deepStrictEqual(await chats.listed('chat-1'), [id]),
+      { signal: t.signal },
+    );
+
+    await using after = await chats.open(
+      chats.environment({
+        env: { DEPLOY: 'changed' },
+        labels: { app: 'changed' },
+      }),
+      'chat-1',
+    );
+
+    assert.strictEqual(await chats.idOf(after), id);
+    assert.strictEqual(
+      (await after.run({ command: 'printf %s "$DEPLOY"' })).stdout,
+      'first',
+    );
+    const { labels = {} } = await live().get(id);
+    assert.deepStrictEqual(
+      {
+        app: labels['app'],
+        namespace: labels['deepagents.sandbox.namespace'],
+        chat: labels['deepagents.sandbox.chat'],
+      },
+      { app: 'first', namespace: chats.namespace, chat: 'chat-1' },
+    );
+  });
+
+  it('runs readiness on every open, and a failed readiness rejects the open and leaves the sandbox', async () => {
+    await using chats = new Chats();
+    const ready: string[] = [];
+    const environment = chats.environment({
+      readiness: async (sandbox) => {
+        ready.push((await sandbox.run({ command: 'echo ready' })).stdout);
+      },
+    });
+    await using handle = await chats.open(environment, 'chat-1');
+    const id = await chats.idOf(handle);
+    await using again = await chats.open(environment, 'chat-1');
+    const failure = new Error('not ready');
+
+    await assert.rejects(
+      chats
+        .environment({
+          readiness: () => {
+            throw failure;
+          },
+        })
+        .open(chat('chat-1')),
+      (error) => error === failure,
+    );
+
+    assert.deepStrictEqual(ready, ['ready\n', 'ready\n']);
+    assert.strictEqual(await chats.idOf(again), id);
+    assert.strictEqual(await state(id), 'started');
   });
 });

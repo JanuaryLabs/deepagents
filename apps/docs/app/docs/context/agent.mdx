@@ -84,10 +84,8 @@ import { createBashTool, createDaytonaSandbox } from '@deepagents/context';
 const daytona = new Daytona();
 
 // Every Daytona v2 create option passes through (`image`, `env`, `resources`,
-// `lifecyclePolicy`, `networkPolicy`, ...). A `name` makes the create a
-// get-or-create: the same name and options return the same sandbox.
+// `lifecyclePolicy`, `networkPolicy`, ...).
 await using backend = await createDaytonaSandbox(daytona.v2, {
-  name: 'agent-backend',
   image: 'your-image',
 });
 const sandbox = await createBashTool({
@@ -96,9 +94,31 @@ const sandbox = await createBashTool({
 });
 ```
 
-`dispose()` deletes a sandbox this call created and leaves one it attached to,
-either by `sandboxId` or by a `name` that already had a sandbox. A Linux Daytona
-sandbox has no stopped state, so delete is its only release.
+`createDaytonaSandbox` makes a one-off: it always creates its own sandbox, and
+`dispose()` deletes it. A sandbox that outlives the process, so that the next
+turn of a chat finds its files, is a chat's. A `DaytonaSandboxEnvironment`
+names it from a namespace and the chat's id, and every `open` of the chat
+reaches the same sandbox:
+
+```typescript
+import { DaytonaSandboxEnvironment } from '@deepagents/context';
+
+const environment = new DaytonaSandboxEnvironment(daytona.v2, {
+  namespace: 'analytics',
+  image: 'your-image',
+  // A Linux Daytona sandbox has no stopped state: Daytona deletes an idle one.
+  lifecyclePolicy: { idleExpirySeconds: 3600, onIdleTimeout: 'delete' },
+});
+
+await using chatSandbox = await environment.open({
+  chatId: 'chat-123',
+  userId: 'user-456',
+});
+```
+
+`close()` (or scope exit) leaves the sandbox running. The environment has no
+`stop`; `environment.delete(chat)` deletes the sandbox, found through Daytona
+search, which lags a create by a few seconds.
 
 The agent merges `sandbox.tools` into its toolset automatically. Any `tools` you pass override sandbox tools on name conflict. The agent calls no sandbox tool by name, so a host that shows the model only bash passes `{ tools: { bash: toolkit.bash }, sandbox: toolkit.sandbox }`, and the agent's tool types then name only `bash`.
 

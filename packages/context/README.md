@@ -46,10 +46,10 @@ For same-host Linux Docker daemons, `gcs({ hostPath, mountPath })` provides a
 typed bind-volume helper over a host `gcsfuse` mount. For remote daemons, keep
 cloud wiring in the daemon/plugin layer and attach the resulting named volume.
 
-`createDaytonaSandbox(daytona.v2, options)` takes a Daytona v2 client plus either
-`sandboxId` (attach) or the SDK's own create options, where a `name` makes the
-create a get-or-create. `dispose()` deletes a sandbox it created and leaves one
-it attached to.
+`createDaytonaSandbox(daytona.v2, options)` takes a Daytona v2 client and the
+SDK's own create options. It always creates its own sandbox, and `dispose()`
+deletes it. A chat's sandbox, which outlives the process, comes from
+`new DaytonaSandboxEnvironment(daytona.v2, { namespace, ...options }).open(chat)`.
 
 ### File-change tracking
 

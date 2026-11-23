@@ -69,10 +69,10 @@ our `dispose`. Every factory returns one directly, with `listDirectory` and
 `@ai-sdk/sandbox-just-bash` adapter. Its `spawn` delivers output when the process
 exits, so use a process-backed sandbox for live streaming.
 
-`dispose()` releases what the sandbox created and leaves what it attached to.
-Docker and Apple Container stop a container they created, Microsandbox stops a
-VM its client owns, and Daytona deletes a sandbox it created, since a Linux
-Daytona sandbox has no stopped state.
+Every factory makes a one-off, which nothing else reaches, and `dispose()`
+removes it: Docker and Apple Container stop and remove its container,
+Microsandbox its VM, and Daytona deletes its sandbox. A sandbox that a chat's
+next turn reaches again comes from the backend's `SandboxEnvironment` instead.
 
 Commands execute with Bash semantics. Process-backed
 environments must contain `bash`; factories fail with a clear error when Bash

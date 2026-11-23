@@ -17,7 +17,8 @@ session operations so that each rejects with a plain `Error` once the sandbox
 was released and otherwise runs the backend's optional `assertCurrent` first,
 and it runs the release once. The message and `assertCurrent` are its
 parameters; the chat handle's `resume` and the one-offs' `dispose` stay with
-each consumer.
+each consumer. The Daytona one-off (`createDaytonaSandbox`, #5132 S2 step 8)
+is its fourth consumer.
 
 One part exists in two places only. Under the Rule of Three it stays copied
 until a third place needs it. Until then, mirror every fix in both files and
