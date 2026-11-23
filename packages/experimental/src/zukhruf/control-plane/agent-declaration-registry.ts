@@ -15,7 +15,7 @@ export class AgentDeclarationRegistry {
     return this.#declarations.get(name);
   }
 
-  values(): IterableIterator<AgentDeclaration> {
+  values(): MapIterator<AgentDeclaration> {
     return this.#declarations.values();
   }
 

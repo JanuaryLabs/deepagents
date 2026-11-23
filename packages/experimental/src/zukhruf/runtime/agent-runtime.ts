@@ -40,6 +40,7 @@ import {
   ConversationStatusProjector,
 } from './conversation-status/projector.ts';
 import { PluginManager } from './plugin/plugin-manager.ts';
+import { SandboxIdleStop } from './sandbox-idle-stop.ts';
 
 export interface AgentPluginToolContext extends Readonly<
   Record<string, unknown>
@@ -356,6 +357,7 @@ class RuntimeHost implements AsyncDisposable {
   readonly #root: AgentDeclaration;
   readonly #plugins: PluginManager;
   readonly #pluginHost: AgentPluginHost;
+  readonly #idleStop: SandboxIdleStop;
 
   constructor(
     root: AgentDeclaration,
@@ -446,6 +448,14 @@ class RuntimeHost implements AsyncDisposable {
     };
     // Registered before the workers, so it is disposed after they stop.
     const sandboxes = resources.use(new ConversationSandboxes());
+    this.#idleStop = new SandboxIdleStop({
+      wakes: storage.sandboxIdleWakes,
+      declarations,
+      directory,
+      streams: streams.store,
+      residency,
+      conversationStatus,
+    });
     this.#executor = new AgentTurnExecutor({
       store: storage.store,
       streams,
@@ -649,17 +659,35 @@ class RuntimeHost implements AsyncDisposable {
   ): Promise<AsyncDisposable> {
     await using workers = new AsyncDisposableStack();
     await this.#plugins.startWorkers(workers);
+    const stopsIdleSandboxes = this.#idleStop.stopsIdleSandboxes;
+    if (stopsIdleSandboxes) {
+      workers.use(await this.#idleStop.work());
+    }
     const reconcilesAvailability = this.#plugins.reconcilesAvailability;
     workers.use(
       await this.#queue.consume(this.#executor.execute.bind(this.#executor), {
         concurrency: options?.concurrency,
         onOrphaned: this.#onOrphaned.bind(this),
         onSettled: async ({ chatId, userId }) => {
-          // Status first: a plugin reconciliation failure must not hide
-          // the settled transition from host subscribers.
+          // Status first: an arming or a plugin reconciliation failure must
+          // not hide the settled transition from host subscribers.
           await this.#conversationStatus.publish({ chatId, userId });
-          if (reconcilesAvailability) {
-            await this.#plugins.conversationAvailable({ chatId, userId });
+          const followUps = await Promise.allSettled([
+            stopsIdleSandboxes
+              ? this.#idleStop.arm({ chatId, userId })
+              : undefined,
+            reconcilesAvailability
+              ? this.#plugins.conversationAvailable({ chatId, userId })
+              : undefined,
+          ]);
+          const errors = followUps.flatMap((followUp) =>
+            followUp.status === 'rejected' ? [followUp.reason] : [],
+          );
+          if (errors.length > 0) {
+            throw new AggregateError(
+              errors,
+              `AgentRuntime: settling "${chatId}" failed: ${errors.map((error) => (Error.isError(error) ? error.message : String(error))).join('; ')}`,
+            );
           }
         },
       }),
