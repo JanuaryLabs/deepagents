@@ -188,6 +188,8 @@ selection redesign here; see [existing problems](../problems.md).
 The older `packages/context/src/lib/estimate.ts` GPT-default issue is separately
 captured as backlog **#1958**. Removing the compaction dependency does not authorize
 removing `gpt-tokenizer` from remaining legitimate consumers or fixing that API.
+Later, on 2026-11-24, a6dbc0e1 removed `gpt-tokenizer` and the cost estimate from
+`@deepagents/context` as well, which closed #1958.
 The existing demo shutdown issue is separately tracked as **#1952**.
 
 ## Handoff record

@@ -146,6 +146,7 @@ The temporary probe was removed. There is no alternate demo entry point.
   durability contract; replacing the GPT import alone could not do that.
 - Retained dependency: packages/context still legitimately imports gpt-tokenizer;
   its separate API issue remains backlog #1958. No unrelated removal claimed.
+  (Later, on 2026-11-24, a6dbc0e1 removed it from context too, which closed #1958.)
 - Rejected/deferred: native provider compaction and exact provider counting are
   outside scope. Provider framing, code-mode wrappers, language accuracy and
   unobservable routing/middleware changes remain estimate limitations.
