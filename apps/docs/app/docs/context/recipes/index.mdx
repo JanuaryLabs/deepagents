@@ -27,14 +27,14 @@ The context package is designed as the foundation layer for deepagents:
 │   (Your chatbot, analytics tool, code assistant)     │
 └─────────────────────────────────────────────────────┘
                          │
-            ┌────────────┼────────────┐
-            ▼            ▼            ▼
-┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│    Agent     │  │   Text2SQL   │  │   Retrieval  │
-│   Package    │  │   Package    │  │   Package    │
-└──────────────┘  └──────────────┘  └──────────────┘
-            │            │            │
-            └────────────┼────────────┘
+                ┌────────┴────────┐
+                ▼                 ▼
+        ┌──────────────┐   ┌──────────────┐
+        │    Agent     │   │   Text2SQL   │
+        │   Package    │   │   Package    │
+        └──────────────┘   └──────────────┘
+                │                 │
+                └────────┬────────┘
                          ▼
             ┌─────────────────────────┐
             │    Context Package      │

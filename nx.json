@@ -110,7 +110,6 @@
           "@deepagents/agent",
           "@deepagents/toolbox",
           "@deepagents/text2sql",
-          "@deepagents/retrieval",
           "@deepagents/orchestrator",
           "@deepagents/context",
           "@deepagents/elements",

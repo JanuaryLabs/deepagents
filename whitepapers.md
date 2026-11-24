@@ -131,16 +131,6 @@ Papers backing implementations in `packages/agent/src/lib/patterns/`.
 
 ---
 
-## Other References
-
-### CLIP Paper (arXiv:2103.00020)
-
-- **URL:** https://arxiv.org/pdf/2103.00020.pdf
-- **Location:** `packages/orchestrator/src/lib/arxiv/arxiv.ts:141`
-- **Context:** Used as an example/demo URL in the arXiv research assistant agent.
-
----
-
 ## Summary Table
 
 | Paper                     | arXiv      | Year | Backs                                |

@@ -10,9 +10,6 @@
       "path": "./packages/orchestrator"
     },
     {
-      "path": "./packages/retrieval"
-    },
-    {
       "path": "./packages/agent"
     },
     {

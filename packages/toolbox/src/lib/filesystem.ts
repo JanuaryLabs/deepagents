@@ -1,13 +1,8 @@
-import { type ToolExecutionOptions, dynamicTool, jsonSchema, tool } from 'ai';
-import FastGlob from 'fast-glob';
+import { type ToolExecutionOptions, tool } from 'ai';
 import spawn from 'nano-spawn';
 import { readFile, readdir, stat } from 'node:fs/promises';
-import { basename, join, relative } from 'node:path';
+import { join } from 'node:path';
 import z from 'zod';
-
-import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
-import * as connectors from '@deepagents/retrieval/connectors';
-import { ignorePatterns } from '@deepagents/retrieval/connectors';
 
 /** Tool context: the repository the file tools read from. */
 export type RepoContext = {
@@ -101,58 +96,6 @@ export const read_dir_tool = tool({
   },
 });
 
-export const glob_tool = tool({
-  description: `Use this tool to list files in a directory.
-			This tool returns only direct files and directories that match the provided glob pattern.
-			Make sure not to look for framework generated files, such as ios/android folders in a react native project or .next in a nextjs project and so on.
-			`,
-  inputSchema: z.object({
-    pattern: z.string().min(1).describe('A glob pattern to match files. '),
-  }),
-  execute: async (
-    { pattern },
-    { context }: ToolExecutionOptions<RepoContext>,
-  ) => {
-    const files = await FastGlob(pattern, {
-      dot: true,
-      cwd: context.repo_path,
-      unique: true,
-      deep: 1,
-      followSymbolicLinks: false,
-      ignore: await ignorePatterns(context.repo_path),
-    });
-    return files;
-  },
-});
-
-export const search_files_tool = tool({
-  description:
-    'Search for files in the repository by name or extension. Returns relative file paths. Avoids framework-generated and ignored paths.',
-  inputSchema: z.object({
-    pattern: z.string().min(1).describe('A glob pattern to match files.'),
-    max_results: z.number().int().positive().max(500).optional().default(100),
-    depth: z
-      .number()
-      .int()
-      .describe('Max directory depth to search. defaults to 31.'),
-  }),
-  execute: async (
-    { pattern, max_results = 100, depth },
-    { context }: ToolExecutionOptions<RepoContext>,
-  ) => {
-    const ignore = await ignorePatterns(context.repo_path);
-    const files = await FastGlob(pattern, {
-      dot: false,
-      cwd: context.repo_path,
-      unique: true,
-      deep: depth,
-      followSymbolicLinks: false,
-      ignore,
-    });
-    return files.slice(0, max_results);
-  },
-});
-
 export const file_exists_tool = tool({
   description: 'Check if a file exists in the repository.',
   inputSchema: z.object({ filePath: z.string().min(1) }),
@@ -163,71 +106,6 @@ export const file_exists_tool = tool({
     return stat(join(context.repo_path, filePath))
       .then(() => true)
       .catch(() => false);
-  },
-});
-
-export const search_content_tool = dynamicTool({
-  description: `Use this tool to search the content of files in the repository. this tool is backed by a vector database and uses semantic search to find the most relevant snippets of content.`,
-  // inputSchema: z.object({
-  //   query: z.string().min(1).describe('The search query.'),
-  // }),
-  inputSchema: jsonSchema({
-    additionalProperties: true,
-    type: 'object',
-    properties: {
-      query: {
-        type: 'string',
-        description: 'The search query.',
-      },
-    },
-  }),
-  async execute(input: any, { context }) {
-    const keys = Object.keys(input).filter((k) => k !== 'query');
-    if (keys.length > 0) {
-      return `Invalid input: only "query" is supported. Found extra keys: ${keys.join(', ')}`;
-    }
-    if (typeof input.query !== 'string' || input.query.trim().length === 0) {
-      return 'Invalid input: "query" must be a non-empty string.';
-    }
-    const repoPath = context.repo_path;
-    if (typeof repoPath !== 'string') {
-      return 'Invalid context: "repo_path" must be a string.';
-    }
-    try {
-      const results = await similaritySearch(input.query, {
-        connector: connectors.repo(
-          repoPath,
-          ['.ts', '.tsx', '.md', '.prisma'],
-          'never',
-        ),
-
-        store: nodeSQLite('deepsearch.sqlite', 384),
-        embedder: fastembed(),
-      });
-      const contents = results.map((it) => {
-        const source = relative(repoPath, it.document_id);
-        const filename = basename(source);
-        return {
-          source: source,
-          snippet: it.content,
-          citation: `[${filename}](./${source})`,
-        };
-      });
-      return contents
-        .map((it) =>
-          [
-            `File: ${it.source}`,
-            `Citation: ${it.citation}`,
-            '```',
-            it.snippet,
-            '```',
-          ].join('\n'),
-        )
-        .join('\n\n------\n\n');
-    } catch (error) {
-      console.error('Error in search_content_tool:', error);
-      return `Error during content search: ${JSON.stringify(error)}`;
-    }
   },
 });
 

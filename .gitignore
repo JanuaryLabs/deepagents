@@ -76,7 +76,6 @@ local_cache/
 
 
 **/.vitepress/cache/
-deepsearch.sqlite*
 zukhruf*.sqlite*
 simple*.sqlite*
 zukhruf.queue/

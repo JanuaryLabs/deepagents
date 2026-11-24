@@ -22,12 +22,6 @@ const packages = [
     href: '/docs/context',
   },
   {
-    name: '@deepagents/retrieval',
-    description:
-      'Vector & semantic retrieval with embeddings and full-text search.',
-    href: '/docs/retrieval',
-  },
-  {
     name: '@deepagents/orchestrator',
     description: 'Multi-agent workflow coordination and task distribution.',
     href: '/docs/orchestrator',
@@ -56,7 +50,7 @@ const features = [
     number: '03',
     title: 'Battery Powered',
     description:
-      'Built-in retrieval, embeddings, connectors, and tools. Everything you need out of the box.',
+      'Built-in text-to-SQL, context, and tools. Everything you need out of the box.',
   },
 ];
 
@@ -108,15 +102,6 @@ const context = new ContextEngine({
 
 context.set(role('You are helpful'), user('Hello'));
 await context.resolve({ renderer: new XmlRenderer() });`,
-
-  retrieval: `import { ingest, fastembed, nodeSQLite } from '@deepagents/retrieval';
-import * as connectors from '@deepagents/retrieval/connectors';
-
-await ingest({
-  connector: connectors.local('./docs'),
-  store: nodeSQLite('./vectors.db', 1024),
-  embedder: fastembed(),
-});`,
 };
 
 function PackageCard({
@@ -181,7 +166,7 @@ npm install @deepagents/context`}
 
           {/* Package Usage Examples */}
           <div style={{ maxWidth: '700px', marginBottom: '3rem' }}>
-            <Tabs items={['agent', 'text2sql', 'context', 'retrieval']}>
+            <Tabs items={['agent', 'text2sql', 'context']}>
               <Tab value="agent">
                 <DynamicCodeBlock lang="ts" code={codeExamples.agent} />
               </Tab>
@@ -190,9 +175,6 @@ npm install @deepagents/context`}
               </Tab>
               <Tab value="context">
                 <DynamicCodeBlock lang="ts" code={codeExamples.context} />
-              </Tab>
-              <Tab value="retrieval">
-                <DynamicCodeBlock lang="ts" code={codeExamples.retrieval} />
               </Tab>
             </Tabs>
           </div>
@@ -206,7 +188,7 @@ npm install @deepagents/context`}
             </h1>
             <p className="text-fd-muted-foreground mb-10 max-w-[540px] font-sans text-xl leading-relaxed">
               AI-native building blocks for production systems. Composable
-              packages for agents, retrieval, and natural language interfaces.
+              packages for agents and natural language interfaces.
             </p>
 
             <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
@@ -288,7 +270,7 @@ npm install @deepagents/context`}
               code={`const features = {
   production: "Built for real workloads",
   composable: "Use only what you need",
-  batteryPowered: "Built-in retrieval, text2sql, and tools",
+  batteryPowered: "Built-in text2sql and tools",
 };`}
             />
           </div>
@@ -333,23 +315,12 @@ npm install @deepagents/context`}
             <DynamicCodeBlock
               lang="ts"
               code={`import { agent, execute } from '@deepagents/agent';
-import { similaritySearch, nodeSQLite, fastembed } from '@deepagents/retrieval';
-import * as connectors from '@deepagents/retrieval/connectors';
 import { groq } from '@ai-sdk/groq';
-
-const results = await similaritySearch(query, {
-  store: nodeSQLite('./knowledge.sqlite', 1024),
-  embedder: fastembed(),
-  connector: connectors.github.repo(
-    'https://github.com/JanuaryLabs/deepagents',
-    { includes: ['docs/**/*.md'] }
-  ),
-});
 
 const assistant = agent({
   name: 'Assistant',
   model: groq('gpt-oss-20b'),
-  prompt: results.map(r => r.content).join('\\n'),
+  prompt: 'You are a helpful assistant.',
 });
 
 await execute(assistant, "What can DeepAgents do?");`}

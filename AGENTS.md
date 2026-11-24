@@ -106,20 +106,6 @@ AI-powered natural language to SQL. Ask questions in plain English, get executab
 
 **Teachable Types:** `term`, `hint`, `guardrail`, `example`, `explain`, `clarification`, `workflow`, `quirk`, `styleGuide`, `analogy`
 
-### @deepagents/retrieval (`packages/retrieval`)
-
-A local-first RAG (Retrieval-Augmented Generation) system that ingests content from various sources, creates vector embeddings, and provides intelligent document search.
-
-**Key Features:**
-
-- **Connector Pattern** - Ingest from GitHub, RSS feeds, local files, PDFs, Linear issues
-- **Embedding** - FastEmbed for local embedding generation
-- **Vector Storage** - SQLite-based vector store
-- **Semantic Search** - Similarity search across ingested content
-- **Chunking** - Markdown and recursive character text splitters
-
-**Main Exports:** `ingest`, `similaritySearch`, `FastEmbed`, `SqliteStore`
-
 ### React chat UI (`packages/react`)
 
 `@deepagents/react-input` is the headless chat composer (the `Composer` parts in `./browser`). `@deepagents/react-genai` gives them the chat kit's look (`ChatComposer`).
