@@ -14,7 +14,7 @@ export default function createGroupChatSandbox(readonly: boolean) {
   return defineSandbox(
     new MicrosandboxSandboxEnvironment({
       namespace: 'zukhruf-group-chat',
-      image: 'alpine',
+      image: 'bash:5.3-alpine3.24',
       workdir: groupChatDirectory,
       configure: (builder) =>
         builder
