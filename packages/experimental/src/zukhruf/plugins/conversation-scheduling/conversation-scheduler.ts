@@ -8,6 +8,7 @@ import { conversationNamespace } from '../../control-plane/agent-turn-id.ts';
 import type { ConversationNotFoundError } from '../../control-plane/conversation-not-found-error.ts';
 import { isNamedError } from '../../is-named-error.ts';
 import type { ConversationId } from '../../mailbox/types.ts';
+import { NonRetryableError } from '../../non-retryable-error.ts';
 import type { Wake, WakeScheduler } from '../../queue/wake-scheduler.ts';
 import type { AgentPluginHost } from '../../runtime/agent-runtime.ts';
 
@@ -82,6 +83,11 @@ const schedulingStateSchema = z
 type SchedulingState = z.infer<typeof schedulingStateSchema>;
 type CronDefinition = SchedulingState['cron'][string];
 type DispatchingOccurrence = NonNullable<SchedulingState['dispatching']>;
+
+/** The conversation's stored scheduling metadata is corrupt: no retry makes it readable, and every operation on it fails closed. */
+export class InvalidSchedulingMetadataError extends NonRetryableError {
+  override readonly name = 'InvalidSchedulingMetadataError';
+}
 
 export interface SchedulingWake {
   conversation: ConversationId;
@@ -648,16 +654,19 @@ export class ConversationScheduler {
     if (zukhruf.scheduling === undefined) return { cron: {} };
     const parsed = schedulingStateSchema.safeParse(zukhruf.scheduling);
     if (!parsed.success) {
-      throw new Error('Invalid metadata.zukhruf.scheduling state', {
-        cause: parsed.error,
-      });
+      throw new InvalidSchedulingMetadataError(
+        'Invalid metadata.zukhruf.scheduling state',
+        { cause: parsed.error },
+      );
     }
     return parsed.data;
   }
 
   static #record(value: unknown): Record<string, unknown> {
     if (!isRecord(value)) {
-      throw new Error('Invalid metadata.zukhruf state');
+      throw new InvalidSchedulingMetadataError(
+        'Invalid metadata.zukhruf state',
+      );
     }
     return value;
   }

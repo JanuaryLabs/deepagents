@@ -8,6 +8,10 @@ import type {
   MailboxStore,
   TransactionalMailboxStore,
 } from '../mailbox/store.ts';
+import type {
+  SettleQueue,
+  TransactionalSettleIntents,
+} from '../queue/settle-intent.ts';
 import type { TransactionalTurnQueue, TurnQueue } from '../queue/turn-queue.ts';
 import type { WakeScheduler } from '../queue/wake-scheduler.ts';
 import type { SandboxIdleWake } from '../sandbox/sandbox-idle-wake.ts';
@@ -29,6 +33,8 @@ export interface AdmissionScope {
   streams: StreamStore;
   mailboxStore: TransactionalMailboxStore;
   queue: TransactionalTurnQueue;
+  /** The settle intents of the follow-ups `settleQueue` opened. */
+  settleIntents: TransactionalSettleIntents;
 }
 
 /**
@@ -46,6 +52,13 @@ export abstract class AgentStorage {
   abstract readonly mailboxStore: MailboxStore;
   /** Due stops of idle chats' sandboxes, on their own queue beside the turn queue. */
   abstract readonly sandboxIdleWakes: WakeScheduler<SandboxIdleWake>;
+
+  /**
+   * Opens the queue of `followUp`'s settle intents, creating it when
+   * missing. An admission records intents only for a follow-up whose queue
+   * is open.
+   */
+  abstract settleQueue(followUp: string): Promise<SettleQueue>;
 
   /**
    * Runs `work` while no other admission to `tree` runs, on any worker that

@@ -12,6 +12,7 @@ import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import test from 'node:test';
+import { setImmediate } from 'node:timers/promises';
 import { z } from 'zod';
 
 import {
@@ -46,6 +47,7 @@ import {
 
 import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
 import { ControlledAgentStorage } from '../../../testing/controlled-agent-storage.fixture.ts';
+import { ControlledSettleQueues } from '../../../testing/controlled-settle-queues.fixture.ts';
 import {
   ControlledTurnQueue,
   type TurnConsumer,
@@ -99,8 +101,21 @@ function last<T>(values: readonly T[]): T {
   return value;
 }
 
+/** Runs each turn, then the settle follow-ups its completion recorded. */
 class SchedulingTurnQueue extends ControlledTurnQueue {
   readonly pushFaults: Error[] = [];
+  readonly #settleQueues: ControlledSettleQueues;
+
+  constructor(settleQueues: ControlledSettleQueues) {
+    super();
+    this.#settleQueues = settleQueues;
+  }
+
+  override async runNext(): Promise<void> {
+    await super.runNext();
+    await this.#settleQueues.drain();
+  }
+
   readonly #pausedActivityReads: { started: Latch; release: Latch }[] = [];
   readonly #running = new Map<string, TurnRef>();
 
@@ -319,12 +334,14 @@ function disposableHarness(
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const streams = streamsFor(streamStore);
-  const queue = new SchedulingTurnQueue();
+  const settleQueues = new ControlledSettleQueues();
+  const queue = new SchedulingTurnQueue(settleQueues);
   return {
     store,
     streams,
     mailboxStore,
     queue,
+    settleQueues,
     [Symbol.dispose]() {
       streamStore.close();
       mailboxStore.close();
@@ -1141,7 +1158,7 @@ test('one conversation-scheduling definition creates a fresh instance per runtim
   assert.notEqual(first.plugin(plugin), second.plugin(plugin));
 });
 
-test('conversation availability reaches every plugin before reporting failures', async () => {
+test("one plugin's failing availability neither stops another plugin's nor fails the turn, and is retried", async () => {
   const scheduler = new RecordingWakeScheduler();
   using h = disposableHarness(scheduler);
   const calls: string[] = [];
@@ -1187,8 +1204,14 @@ test('conversation availability reaches every plugin before reporting failures',
   );
   await using _worker = await runtime.work();
   void _worker;
-  await assert.rejects(h.queue.runNext(), /availability failed/);
-  assert.deepEqual(calls, ['failing', 'following']);
+  await h.queue.runNext();
+  assert.deepStrictEqual(
+    {
+      following: calls.filter((call) => call === 'following').length,
+      retried: calls.filter((call) => call === 'failing').length > 1,
+    },
+    { following: 1, retried: true },
+  );
 });
 
 test('failed wake insertion does not commit a cron definition', async () => {
@@ -1835,6 +1858,7 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
   assert.equal(h.queue.turns.length, 1);
 
   await runtime.observe(conversation).cancel(queued.id);
+  await h.settleQueues.drain();
   assert.equal(h.queue.turns.length, 1);
   const catchUp = h.queue.turns[0];
   assert.ok(catchUp?.kind === 'message');
@@ -2205,12 +2229,35 @@ test('resume ignores scheduling metadata while scheduling tools fail closed', as
       },
     },
   }));
-  await using _worker = await runtime.work();
-  void _worker;
-  assert.equal(await runtime.observe(conversation).resume(), null);
-  await assert.rejects(
-    runTurn(runtime, h.queue, conversation, 'list malformed'),
-    /Invalid metadata\.zukhruf\.scheduling state/,
+  const warnings: string[] = [];
+  const record = (warning: Error) => warnings.push(warning.message);
+  process.on('warning', record);
+  try {
+    await using _worker = await runtime.work();
+    void _worker;
+    assert.equal(await runtime.observe(conversation).resume(), null);
+    await runTurn(runtime, h.queue, conversation, 'list malformed');
+    // process.emitWarning emits on the next tick.
+    await setImmediate();
+  } finally {
+    process.off('warning', record);
+  }
+  const listed = last(
+    await runtime.observe(conversation).engine.getMessages(),
+  ).parts.find(isToolUIPart);
+  assert.deepStrictEqual(
+    {
+      list: listed?.state,
+      warnings: warnings.filter((warning) =>
+        warning.includes('Invalid metadata.zukhruf.scheduling state'),
+      ),
+      failed: h.settleQueues.failed,
+    },
+    {
+      list: 'output-error',
+      warnings: ['Invalid metadata.zukhruf.scheduling state'],
+      failed: [],
+    },
   );
 });
 

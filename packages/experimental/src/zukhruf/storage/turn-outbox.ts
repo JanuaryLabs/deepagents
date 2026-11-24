@@ -1,10 +1,12 @@
 import { Lock } from '@zukhruf/async';
 import { Declaration } from '@zukhruf/sqlite-drift';
 import type { DatabaseSync } from 'node:sqlite';
+import type { PgBoss } from 'pg-boss';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
 
 import type { PgBossTurnQueue } from '../queue/pg-boss.turn-queue.ts';
+import type { SettleIntent } from '../queue/settle-intent.ts';
 import {
   type ConsumeContext,
   type ConsumeOptions,
@@ -29,11 +31,25 @@ const tables = new Declaration(
   )`,
     `CREATE INDEX zukhruf_turn_outbox_conversation
     ON zukhruf_turn_outbox (chat_id, user_id, sequence)`,
+    `CREATE TABLE zukhruf_settle_outbox (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL UNIQUE,
+    queue TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    intent TEXT NOT NULL
+  )`,
   ],
   { rows: 'keep' },
 );
 
 const outboxRowSchema = z.object({ jobId: z.string(), turn: z.string() });
+
+const settleRowSchema = z.object({
+  jobId: z.string(),
+  queue: z.string(),
+  intent: z.string(),
+});
 
 type Conversation = Pick<TurnRef, 'chatId' | 'userId'>;
 
@@ -43,14 +59,29 @@ interface OutboxedTurn {
   turn: TurnRef;
 }
 
+/** A settle intent committed in SQLite and not yet sent to its pg-boss queue. */
+interface OutboxedSettleIntent {
+  jobId: string;
+  queue: string;
+  intent: SettleIntent;
+}
+
 function parseTurn(text: string): TurnRef {
   // Written by `add` from a TurnRef; the outbox is this storage's own table.
   const turn: TurnRef = JSON.parse(text);
   return turn;
 }
 
+function parseSettleIntent(text: string): SettleIntent {
+  // Written by `addSettleIntent` from a SettleIntent; the outbox is this storage's own table.
+  const intent: SettleIntent = JSON.parse(text);
+  return intent;
+}
+
 /**
- * Turns committed in SQLite and not yet pushed to pg-boss. Each method runs
+ * Turns and settle intents committed in SQLite and not yet sent to pg-boss,
+ * in two tables: a turn row keeps its chat's FIFO order and counts as queued
+ * work, a settle intent row only names the queue it goes to. Each method runs
  * synchronously on the storage's connection, so inside an admission it reads
  * and writes in the admission's transaction.
  */
@@ -124,12 +155,47 @@ export class TurnOutbox {
       .run(streamId);
   }
 
-  removeConversation(conversation: Conversation): void {
+  /** Adds `intent` for `queue` as the job `jobId`, unless the outbox already holds that job. */
+  addSettleIntent(queue: string, jobId: string, intent: SettleIntent): void {
     this.#database
       .prepare(
-        'DELETE FROM zukhruf_turn_outbox WHERE chat_id = ? AND user_id = ?',
+        `INSERT INTO zukhruf_settle_outbox (job_id, queue, chat_id, user_id, intent)
+         VALUES (?, ?, ?, ?, ?) ON CONFLICT (job_id) DO NOTHING`,
       )
-      .run(conversation.chatId, conversation.userId);
+      .run(
+        jobId,
+        queue,
+        intent.conversation.chatId,
+        intent.conversation.userId,
+        JSON.stringify(intent),
+      );
+  }
+
+  oldestSettleIntent(): OutboxedSettleIntent | undefined {
+    const row = this.#database
+      .prepare(
+        `SELECT job_id AS jobId, queue, intent FROM zukhruf_settle_outbox
+         ORDER BY sequence LIMIT 1`,
+      )
+      .get();
+    if (row === undefined) return undefined;
+    const { jobId, queue, intent } = settleRowSchema.parse(row);
+    return { jobId, queue, intent: parseSettleIntent(intent) };
+  }
+
+  removeSettleIntent(jobId: string): void {
+    this.#database
+      .prepare('DELETE FROM zukhruf_settle_outbox WHERE job_id = ?')
+      .run(jobId);
+  }
+
+  /** Removes the conversation's turns and settle intents, as deleting its chat does. */
+  removeConversation(conversation: Conversation): void {
+    for (const table of ['zukhruf_turn_outbox', 'zukhruf_settle_outbox']) {
+      this.#database
+        .prepare(`DELETE FROM ${table} WHERE chat_id = ? AND user_id = ?`)
+        .run(conversation.chatId, conversation.userId);
+    }
   }
 
   #outboxed(row: unknown): OutboxedTurn | undefined {
@@ -147,14 +213,16 @@ function withOutboxed(activity: TurnActivity, outboxed: boolean): TurnActivity {
 
 /**
  * Pushes outboxed turns to pg-boss in outbox order, one at a time, each as
- * the job id the outbox gave it, and deletes a row only after its push. A
- * process that dies between the two leaves the row, and the next drain pushes
- * it again as the same job.
+ * the job id the outbox gave it, then sends the outboxed settle intents the
+ * same way, and deletes a row only after its push. A process that dies
+ * between the two leaves the row, and the next drain pushes it again as the
+ * same job.
  */
 export class OutboxRelay {
   readonly #gate: SqliteAdmissionGate;
   readonly #outbox: TurnOutbox;
   readonly #queue: PgBossTurnQueue;
+  readonly #boss: PgBoss;
   /** Held by a drain, and by work that must not run while a row is between its push and its delete. */
   readonly #rows = new Lock();
 
@@ -162,10 +230,12 @@ export class OutboxRelay {
     gate: SqliteAdmissionGate,
     outbox: TurnOutbox,
     queue: PgBossTurnQueue,
+    boss: PgBoss,
   ) {
     this.#gate = gate;
     this.#outbox = outbox;
     this.#queue = queue;
+    this.#boss = boss;
   }
 
   /** Resolves once every row added before the call has reached pg-boss. */
@@ -173,9 +243,19 @@ export class OutboxRelay {
     return this.between(async () => {
       for (;;) {
         const next = await this.#gate.call(async () => this.#outbox.oldest());
-        if (!next) return;
+        if (!next) break;
         await this.#queue.pushAs(next.jobId, next.turn);
         await this.#gate.call(async () => this.#outbox.remove(next.jobId));
+      }
+      for (;;) {
+        const next = await this.#gate.call(async () =>
+          this.#outbox.oldestSettleIntent(),
+        );
+        if (!next) return;
+        await this.#boss.send(next.queue, next.intent, { id: next.jobId });
+        await this.#gate.call(async () =>
+          this.#outbox.removeSettleIntent(next.jobId),
+        );
       }
     });
   }

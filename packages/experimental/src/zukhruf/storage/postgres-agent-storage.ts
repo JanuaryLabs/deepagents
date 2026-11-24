@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import type { PgBoss } from 'pg-boss';
+import type { Db, PgBoss } from 'pg-boss';
 import { z } from 'zod';
 
 import {
@@ -13,10 +13,15 @@ import {
 
 import { PostgresMailboxStore } from '../mailbox/postgres.store.ts';
 import {
+  openSettleQueue,
+  settleQueueName,
+} from '../queue/pg-boss.settle-queue.ts';
+import {
   PgBossTurnQueue,
   type PgBossTurnQueueOptions,
 } from '../queue/pg-boss.turn-queue.ts';
 import { PgBossWakeScheduler } from '../queue/pg-boss.wake-scheduler.ts';
+import type { SettleQueue } from '../queue/settle-intent.ts';
 import type { SandboxIdleWake } from '../sandbox/sandbox-idle-wake.ts';
 import {
   type AdmissionScope,
@@ -92,12 +97,14 @@ export class PostgresAgentStorage
   readonly mailboxStore: PostgresMailboxStore;
   readonly sandboxIdleWakes: PgBossWakeScheduler<SandboxIdleWake>;
   readonly #pool: Pool;
+  readonly #boss: PgBoss;
   readonly #schema: string;
   readonly #streamStore: PostgresStreamStore;
   readonly #ownedChangeSource: PostgresNotifyChangeSource | undefined;
 
   private constructor(parts: {
     pool: Pool;
+    boss: PgBoss;
     schema: string;
     store: PostgresContextStore;
     streamStore: PostgresStreamStore;
@@ -109,6 +116,7 @@ export class PostgresAgentStorage
   }) {
     super();
     this.#pool = parts.pool;
+    this.#boss = parts.boss;
     this.#schema = parts.schema;
     this.store = parts.store;
     this.#streamStore = parts.streamStore;
@@ -158,6 +166,7 @@ export class PostgresAgentStorage
     }
     return new PostgresAgentStorage({
       pool,
+      boss,
       schema,
       store,
       streamStore,
@@ -169,6 +178,14 @@ export class PostgresAgentStorage
     });
   }
 
+  settleQueue(followUp: string): Promise<SettleQueue> {
+    return openSettleQueue(
+      this.#boss,
+      settleQueueName(this.queue.queue, followUp),
+    );
+  }
+
+  /** Runs `work` in one transaction under the tree's advisory lock; its settle intents are pg-boss jobs of that transaction. */
   admit<T>(
     tree: AgentTree,
     work: (scope: AdmissionScope) => Promise<T>,
@@ -177,11 +194,21 @@ export class PostgresAgentStorage
       await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
         `zukhruf:agent-tree:${JSON.stringify([this.#schema, tree.userId, tree.treeId])}`,
       ]);
+      const db: Db = { executeSql: (text, values) => tx.query(text, values) };
       return work({
         store: this.store.bind(tx),
         streams: this.#streamStore.bind(tx),
         mailboxStore: this.mailboxStore.bind(tx),
         queue: this.queue.bind(tx),
+        settleIntents: {
+          record: async (followUp, id, intent) => {
+            await this.#boss.send(
+              settleQueueName(this.queue.queue, followUp),
+              intent,
+              { id, db },
+            );
+          },
+        },
       });
     });
   }

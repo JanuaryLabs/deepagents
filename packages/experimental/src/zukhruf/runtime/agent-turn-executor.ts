@@ -46,6 +46,7 @@ import {
 } from './plugin/agent-skills.ts';
 import type { PluginManager } from './plugin/plugin-manager.ts';
 import type { SandboxIdleStop } from './sandbox-idle-stop.ts';
+import type { TurnSettlement } from './turn-settlement.ts';
 
 type TurnPlugins = Pick<
   PluginManager,
@@ -62,11 +63,16 @@ export interface AgentTurnExecutorOptions {
   plugins: TurnPlugins;
   /** The sandbox of each conversation, which a turn borrows. */
   sandboxes: ConversationSandboxes;
-  /** Cancels the idle stop of a chat's previous turn as its next turn starts. */
-  idleStop: SandboxIdleStop;
+  /** Cancels the idle stop of a chat's previous turn as its next turn starts; none when no agent stops idle sandboxes. */
+  idleStop: SandboxIdleStop | undefined;
+  /** Completes every delivery that does not park, recording its settle intents. */
+  settlement: Pick<TurnSettlement, 'complete' | 'completeEmptyWake'>;
   /** Signals that the conversation's status may have changed. Never rejects. */
   publishConversationStatus: (conversation: ConversationId) => Promise<void>;
 }
+
+/** How a delivery that did not park ends: a mailbox wake that found no mail completes its stream itself. */
+type TurnEnd = 'settled' | 'empty-wake';
 
 interface SamplingMailboxState {
   firstRequest: boolean;
@@ -82,7 +88,8 @@ export class AgentTurnExecutor {
   readonly #team: Team;
   readonly #plugins: TurnPlugins;
   readonly #sandboxes: ConversationSandboxes;
-  readonly #idleStop: SandboxIdleStop;
+  readonly #idleStop: SandboxIdleStop | undefined;
+  readonly #settlement: AgentTurnExecutorOptions['settlement'];
   readonly #publishConversationStatus: AgentTurnExecutorOptions['publishConversationStatus'];
 
   constructor(options: AgentTurnExecutorOptions) {
@@ -95,19 +102,28 @@ export class AgentTurnExecutor {
     this.#plugins = options.plugins;
     this.#sandboxes = options.sandboxes;
     this.#idleStop = options.idleStop;
+    this.#settlement = options.settlement;
     this.#publishConversationStatus = options.publishConversationStatus;
   }
 
+  /**
+   * Runs the turn, then completes every delivery that does not park, the
+   * redelivery of a terminal turn included, in one admission that records
+   * its settle intents. A parked turn records none: it has not settled.
+   */
   async execute(turn: TurnRef, context: ConsumeContext): Promise<void> {
     if (turn.kind === 'recovery') {
       await this.#reopen(turn.streamId);
     }
-    if (await this.#projectSkippedTerminalTurn(turn)) return;
+    if (await this.#projectSkippedTerminalTurn(turn)) {
+      await this.#settlement.complete(turn);
+      return;
+    }
 
     let parked = false;
     await this.#mailbox.beginTurn(turn);
     try {
-      await this.#executeTurn(turn, {
+      const end = await this.#executeTurn(turn, {
         ...context,
         park: async () => {
           parked = true;
@@ -117,6 +133,11 @@ export class AgentTurnExecutor {
           await this.#publishConversationStatus(turn);
         },
       });
+      if (!parked) {
+        await (end === 'empty-wake'
+          ? this.#settlement.completeEmptyWake(turn)
+          : this.#settlement.complete(turn));
+      }
     } finally {
       await this.#mailbox.endTurn(turn, { parked });
     }
@@ -125,8 +146,8 @@ export class AgentTurnExecutor {
   async #executeTurn(
     turn: TurnRef,
     { signal, park }: ConsumeContext,
-  ): Promise<void> {
-    if (await this.#projectSkippedTerminalTurn(turn)) return;
+  ): Promise<TurnEnd> {
+    if (await this.#projectSkippedTerminalTurn(turn)) return 'settled';
 
     const { declaration, thread } = await this.#controlPlane.resolve(turn);
     const usageHint = this.#team.guidance(
@@ -144,7 +165,7 @@ export class AgentTurnExecutor {
       const head = (await engine.getMessages()).at(-1);
       if (this.#approvals.isPaused(head)) {
         await park();
-        return;
+        return 'settled';
       }
     }
 
@@ -157,12 +178,11 @@ export class AgentTurnExecutor {
 
     if (turn.kind === 'mailbox' && communications.length === 0) {
       // Duplicate wakes are harmless scheduling receipts once mail is gone.
-      await this.#streams.store.updateStreamStatus(turn.streamId, 'completed');
-      return;
+      return 'empty-wake';
     }
 
     // `thread` still names the previous turn as the latest until this records.
-    await this.#idleStop.cancel(thread);
+    await this.#idleStop?.cancel(thread);
     await this.#controlPlane.recordLatestTurn(turn, turn.streamId);
     await this.#prepareChain(turn, engine, communications);
 
@@ -182,10 +202,10 @@ export class AgentTurnExecutor {
       engine.set(elementsFragment(elements));
     }
 
-    if (await this.#projectSkippedTerminalTurn(turn)) return;
+    if (await this.#projectSkippedTerminalTurn(turn)) return 'settled';
     if (!(await this.#streams.claim(turn.streamId))) {
       await this.#projectSkippedTerminalTurn(turn);
-      return;
+      return 'settled';
     }
     // Claimed = genuinely running. Parked, skipped, and empty-wake turns never
     // reach this point, so they cannot flash an "active" status.
@@ -309,6 +329,7 @@ export class AgentTurnExecutor {
       await this.#reconcileTerminalContinuation(turn);
     }
     await this.#controlPlane.projectTerminal(turn, thread);
+    return 'settled';
   }
 
   async #projectSkippedTerminalTurn(turn: TurnRef): Promise<boolean> {

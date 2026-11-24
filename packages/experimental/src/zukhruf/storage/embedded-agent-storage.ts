@@ -16,10 +16,15 @@ import {
 import { SqliteMailboxStore } from '../mailbox/sqlite.store.ts';
 import type { MailboxStore } from '../mailbox/store.ts';
 import {
+  openSettleQueue,
+  settleQueueName,
+} from '../queue/pg-boss.settle-queue.ts';
+import {
   PgBossTurnQueue,
   type PgBossTurnQueueOptions,
 } from '../queue/pg-boss.turn-queue.ts';
 import { PgBossWakeScheduler } from '../queue/pg-boss.wake-scheduler.ts';
+import type { SettleQueue } from '../queue/settle-intent.ts';
 import type { TurnQueue } from '../queue/turn-queue.ts';
 import type { WakeScheduler } from '../queue/wake-scheduler.ts';
 import type { SandboxIdleWake } from '../sandbox/sandbox-idle-wake.ts';
@@ -71,9 +76,10 @@ function emitWarning(error: unknown): void {
  *
  * An admission is one SQLite `BEGIN IMMEDIATE` transaction that holds the
  * connection alone, so admissions run one at a time, for every tree. A turn
- * pushed inside it becomes an outbox row of the same transaction; after the
- * commit a relay pushes the row to pg-boss as a job whose id is the row's, and
- * deletes the row. `open` pushes the rows a stopped process left.
+ * pushed, or a settle intent recorded, inside it becomes an outbox row of the
+ * same transaction; after the commit a relay sends the row to pg-boss as a job
+ * whose id is the row's, and deletes the row. `open` pushes the rows a stopped
+ * process left.
  */
 export class EmbeddedAgentStorage
   extends AgentStorage
@@ -91,6 +97,7 @@ export class EmbeddedAgentStorage
   readonly #gate: SqliteAdmissionGate;
   readonly #scope: AdmissionScope;
   readonly #relay: OutboxRelay;
+  readonly #turnQueue: string;
   readonly #resources: AsyncDisposableStack;
 
   private constructor(parts: {
@@ -104,6 +111,7 @@ export class EmbeddedAgentStorage
     gate: SqliteAdmissionGate;
     scope: AdmissionScope;
     relay: OutboxRelay;
+    turnQueue: string;
     resources: AsyncDisposableStack;
   }) {
     super();
@@ -117,6 +125,7 @@ export class EmbeddedAgentStorage
     this.#gate = parts.gate;
     this.#scope = parts.scope;
     this.#relay = parts.relay;
+    this.#turnQueue = parts.turnQueue;
     this.#resources = parts.resources;
   }
 
@@ -170,7 +179,7 @@ export class EmbeddedAgentStorage
     const streamStore = new SqliteStreamStore(database);
     const mailboxStore = new SqliteMailboxStore(database);
     const outbox = new TurnOutbox(database);
-    const relay = new OutboxRelay(gate, outbox, turns);
+    const relay = new OutboxRelay(gate, outbox, turns, boss);
     resources.defer(() => relay.between(async () => undefined));
     const queue = new OutboxTurnQueue({ gate, outbox, relay, queue: turns });
     const streams = gate.view(streamStore);
@@ -193,16 +202,32 @@ export class EmbeddedAgentStorage
         streams: streamStore,
         mailboxStore,
         queue: queue.scope(),
+        settleIntents: {
+          record: async (followUp, id, intent) =>
+            outbox.addSettleIntent(
+              settleQueueName(turns.queue, followUp),
+              id,
+              intent,
+            ),
+        },
       },
       relay,
+      turnQueue: turns.queue,
       resources: resources.move(),
     });
+  }
+
+  settleQueue(followUp: string): Promise<SettleQueue> {
+    return openSettleQueue(
+      this.boss,
+      settleQueueName(this.#turnQueue, followUp),
+    );
   }
 
   /**
    * Runs `work` in one SQLite transaction while no other admission, to any
    * tree, runs. Resolves once it has committed; the relay then pushes the
-   * turns it outboxed.
+   * turns and sends the settle intents it outboxed.
    */
   async admit<T>(
     _tree: AgentTree,

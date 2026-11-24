@@ -16,6 +16,7 @@ import {
   AgentStorage,
   type AgentTree,
   EmbeddedAgentStorage,
+  NonRetryableError,
   PostgresAgentStorage,
   TurnQueue,
   type TurnRef,
@@ -105,6 +106,10 @@ class OrphanRecordingStorage extends AgentStorage {
     return this.#inner.sandboxIdleWakes;
   }
 
+  settleQueue(followUp: string) {
+    return this.#inner.settleQueue(followUp);
+  }
+
   admit<T>(
     tree: AgentTree,
     work: (scope: AdmissionScope) => Promise<T>,
@@ -144,7 +149,7 @@ const storages = [
   },
 ];
 
-/** A plugin whose settle follow-up rejects on every settle, recording each chat it settles. */
+/** A plugin whose settle follow-up fails, not to be retried, on every run, recording each chat it runs for. */
 function rejectingAvailability(settled: string[]): AgentPluginDefinition {
   return {
     name: 'rejecting-availability',
@@ -152,12 +157,15 @@ function rejectingAvailability(settled: string[]): AgentPluginDefinition {
       initialize: async () => ({
         conversationAvailable: async ({ chatId }) => {
           settled.push(chatId);
-          throw new Error('availability failed');
+          throw new NonRetryableError(availabilityFailure(chatId));
         },
       }),
     }),
   };
 }
+
+const availabilityFailure = (chatId: string) =>
+  `availability of "${chatId}" failed`;
 
 /** Records the process warnings about `chatId` emitted while `body` runs. */
 async function recordingWarnings<T>(
@@ -176,12 +184,8 @@ async function recordingWarnings<T>(
   }
 }
 
-function settleWarning(streamId: string, chatId: string) {
-  return `PgBossTurnQueue: settling turn "${streamId}" of chat "${chatId}" failed: AgentRuntime: settling "${chatId}" failed: AgentRuntime: conversation availability reconciliation failed for "${chatId}": availability failed`;
-}
-
 for (const { name, open } of storages) {
-  suite(`a settle follow-up that rejects (${name})`, () => {
+  suite(`a settle follow-up that fails (${name})`, () => {
     test('an approval continuation that completes is not orphaned, and no recovery runs its model again', async (t) => {
       await using resources = new AsyncDisposableStack();
       const storage = new OrphanRecordingStorage(await open(resources));
@@ -228,6 +232,12 @@ for (const { name, open } of storages) {
           userTurn(crypto.randomUUID(), 'send it'),
         );
         await Array.fromAsync(ask.stream);
+        // The ask's follow-up runs before the continuation starts, so a later
+        // turn cannot supersede it.
+        await waitFor(() => assert.equal(settled.length, 1), {
+          signal: t.signal,
+          interval: 50,
+        });
         const paused: UIMessage | undefined = (
           await runtime.observe(conversation).engine.getMessages()
         ).at(-1);
@@ -254,8 +264,8 @@ for (const { name, open } of storages) {
           signal: t.signal,
           interval: 50,
         });
-        // Give what follows a rejected settle the time to show: a warning,
-        // or an orphan report and the recovery it may push.
+        // Give what follows a failed follow-up the time to show: an orphan
+        // report and the recovery it may push.
         await setTimeout(2_000);
 
         assert.deepStrictEqual(
@@ -273,8 +283,8 @@ for (const { name, open } of storages) {
             orphans: [],
             settled: [conversation.chatId, conversation.chatId],
             warnings: [
-              settleWarning(ask.id, conversation.chatId),
-              settleWarning(continuation.id, conversation.chatId),
+              availabilityFailure(conversation.chatId),
+              availabilityFailure(conversation.chatId),
             ],
             calls: ['ask', 'continuation'],
             continuation: 'completed',
@@ -320,7 +330,7 @@ for (const { name, open } of storages) {
           signal: t.signal,
           interval: 50,
         });
-        // Give the settle, and a re-run of the reconciliation (pg-boss
+        // Give the follow-up, and a re-run of the reconciliation (pg-boss
         // retries a rejected dead-letter job right away), the time to show.
         await setTimeout(2_000);
 
@@ -335,7 +345,7 @@ for (const { name, open } of storages) {
           {
             orphans: [crashed.id],
             settled: [conversation.chatId],
-            warnings: [settleWarning(crashed.id, conversation.chatId)],
+            warnings: [availabilityFailure(conversation.chatId)],
             status: 'failed',
           },
         );

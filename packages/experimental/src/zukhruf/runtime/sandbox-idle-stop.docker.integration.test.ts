@@ -11,12 +11,16 @@ import { PgBoss } from 'pg-boss';
 
 import { DockerSandboxEnvironment } from '@deepagents/context';
 import {
+  type AdmissionScope,
   type AgentHost,
   AgentRuntime,
-  type AgentStorage,
+  AgentStorage,
+  type AgentTree,
   EmbeddedAgentStorage,
   PostgresAgentStorage,
   type SandboxIdleWake,
+  type Wake,
+  WakeScheduler,
   defineAgent,
   defineSandbox,
   defineStack,
@@ -232,6 +236,72 @@ async function approveHead(host: AgentHost) {
     ),
   };
   return host.enqueue(conversation, { message, trigger: 'submit-message' });
+}
+
+/** Real idle wakes that refuse their first schedule, as an unreachable queue would. */
+class FailOnceWakes extends WakeScheduler<SandboxIdleWake> {
+  failedSchedules = 0;
+  readonly #inner: WakeScheduler<SandboxIdleWake>;
+
+  constructor(inner: WakeScheduler<SandboxIdleWake>) {
+    super();
+    this.#inner = inner;
+  }
+
+  override async schedule(wake: Wake<SandboxIdleWake>) {
+    if (this.failedSchedules === 0) {
+      this.failedSchedules++;
+      throw new Error('idle wake queue unreachable');
+    }
+    await this.#inner.schedule(wake);
+  }
+
+  override cancel(id: string) {
+    return this.#inner.cancel(id);
+  }
+
+  override consume(handler: (wake: Wake<SandboxIdleWake>) => Promise<void>) {
+    return this.#inner.consume(handler);
+  }
+}
+
+/** A real storage whose idle wakes refuse their first schedule. */
+class FailOnceIdleWakesStorage extends AgentStorage {
+  readonly sandboxIdleWakes: FailOnceWakes;
+  readonly #inner: AgentStorage;
+
+  constructor(inner: AgentStorage) {
+    super();
+    this.#inner = inner;
+    this.sandboxIdleWakes = new FailOnceWakes(inner.sandboxIdleWakes);
+  }
+
+  get store() {
+    return this.#inner.store;
+  }
+
+  get streams() {
+    return this.#inner.streams;
+  }
+
+  get queue() {
+    return this.#inner.queue;
+  }
+
+  get mailboxStore() {
+    return this.#inner.mailboxStore;
+  }
+
+  settleQueue(followUp: string) {
+    return this.#inner.settleQueue(followUp);
+  }
+
+  admit<T>(
+    tree: AgentTree,
+    work: (scope: AdmissionScope) => Promise<T>,
+  ): Promise<T> {
+    return this.#inner.admit(tree, work);
+  }
 }
 
 for (const { name, open } of storages) {
@@ -1022,6 +1092,39 @@ for (const { name, open } of storages) {
         },
         { status: 'running', jobs: ['created'] },
       );
+    } finally {
+      await removeNamespace(namespace);
+    }
+  });
+
+  test(`${name}: an idle stop whose arming fails once is armed again by its retried settle intent, and the container stops`, async (t) => {
+    const namespace = `retried-${crypto.randomUUID()}`;
+    try {
+      await using resources = new AsyncDisposableStack();
+      const { storage } = await open(resources);
+      const flaky = new FailOnceIdleWakesStorage(storage);
+      const root = defineAgent({
+        name: 'root',
+        model: bashEachTurn('hostname'),
+        instructions: [],
+        sandbox: defineSandbox(chatEnvironment(namespace), {
+          idleTimeoutMs: 1_000,
+        }),
+      });
+      await using host = await new AgentRuntime(root).initialize(
+        defineStack(async () => ({ storage: flaky })),
+      );
+      await host.work();
+
+      await bashOutput(
+        await host.enqueue(conversation, userTurn('turn-1', 'first')),
+      );
+
+      await waitFor(
+        async () => assert.equal(await containerStatus(namespace), 'exited'),
+        { signal: t.signal },
+      );
+      assert.equal(flaky.sandboxIdleWakes.failedSchedules, 1);
     } finally {
       await removeNamespace(namespace);
     }

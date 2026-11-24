@@ -1,3 +1,4 @@
+import { Latch } from '@zukhruf/async';
 import type { Telemetry } from 'ai';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -43,6 +44,7 @@ import {
 } from './conversation-status/projector.ts';
 import { PluginManager } from './plugin/plugin-manager.ts';
 import { SandboxIdleStop } from './sandbox-idle-stop.ts';
+import { TurnSettlement } from './turn-settlement.ts';
 
 /** How long a delete waits for a running turn to exit before it carries on: Codex's wait_for_thread_shutdown bound. */
 const SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -139,6 +141,16 @@ export interface AgentPluginInitialization extends Partial<AsyncDisposable> {
   readonly tools?: ZukhrufToolSet;
   /** Hosts wait for active plugin work before releasing infrastructure. */
   work?(): Promise<AsyncDisposable>;
+  /**
+   * The conversation may be available again: one of its turns has settled,
+   * or a queued turn of it was cancelled. Runs from a durable intent on the
+   * plugin's own queue, at least once, on any worker that has this plugin,
+   * so it must be idempotent and safe to run concurrently on other hosts. A
+   * conversation deleted or archived meanwhile must resolve. A rejection is
+   * retried with backoff, up to 20 times; throw a `NonRetryableError` (or a
+   * subclass) for a failure no retry can fix, such as corrupt stored state:
+   * it is reported once as a process warning and not retried.
+   */
   conversationAvailable?(conversation: ConversationId): Promise<void>;
   /** The conversation is being deleted; its metadata is still readable. Must be idempotent; a rejection aborts the delete. */
   conversationDeleting?(conversation: ConversationId): Promise<void>;
@@ -220,7 +232,7 @@ export class AgentObservation {
   readonly #streams: StreamManager;
   readonly #queue: TurnQueue;
   readonly #status: AgentObservationStatus;
-  readonly #conversationAvailable?: () => Promise<void>;
+  readonly #recordCancelled: (streamId: string) => Promise<void>;
 
   constructor(
     conversation: ConversationId,
@@ -229,7 +241,7 @@ export class AgentObservation {
     streams: StreamManager,
     queue: TurnQueue,
     status: AgentObservationStatus,
-    conversationAvailable?: () => Promise<void>,
+    recordCancelled: (streamId: string) => Promise<void>,
   ) {
     this.engine = new ContextEngine({
       store,
@@ -241,7 +253,7 @@ export class AgentObservation {
     this.#streams = streams;
     this.#queue = queue;
     this.#status = status;
-    this.#conversationAvailable = conversationAvailable;
+    this.#recordCancelled = recordCancelled;
   }
 
   /** Codex-shaped conversation status derived from durable state. */
@@ -283,7 +295,8 @@ export class AgentObservation {
       await this.#streams.cancel(id);
       await this.#queue.cancel(id);
       await this.#status.publish();
-      await this.#conversationAvailable?.();
+      // A cancelled queued turn never runs, so nothing else settles it.
+      await this.#recordCancelled(id);
     }
   }
 
@@ -375,7 +388,9 @@ class RuntimeHost implements AsyncDisposable {
   readonly #root: AgentDeclaration;
   readonly #plugins: PluginManager;
   readonly #pluginHost: AgentPluginHost;
-  readonly #idleStop: SandboxIdleStop;
+  readonly #idleStop: SandboxIdleStop | undefined;
+  /** Opened by `initialize`, once the plugins' follow-ups are known; AgentRuntime hands out a host only after that. */
+  readonly #settlement = new Latch<TurnSettlement>();
   readonly #storage: AgentStorage;
   readonly #declarations: AgentDeclarationRegistry;
   readonly #sandboxes: ConversationSandboxes;
@@ -483,7 +498,7 @@ class RuntimeHost implements AsyncDisposable {
       }),
     );
     this.#sandboxes = sandboxes;
-    this.#idleStop = new SandboxIdleStop({
+    this.#idleStop = SandboxIdleStop.of({
       wakes: storage.sandboxIdleWakes,
       declarations,
       directory,
@@ -501,6 +516,12 @@ class RuntimeHost implements AsyncDisposable {
       plugins,
       sandboxes,
       idleStop: this.#idleStop,
+      settlement: {
+        complete: async (turn) =>
+          (await this.#settlement.wait()).complete(turn),
+        completeEmptyWake: async (turn) =>
+          (await this.#settlement.wait()).completeEmptyWake(turn),
+      },
       publishConversationStatus: (conversation) =>
         conversationStatus.publish(conversation),
     });
@@ -533,15 +554,27 @@ class RuntimeHost implements AsyncDisposable {
           userId: conversation.userId,
         });
         // The borrow can start the sandbox, so its idle window starts too.
-        await this.#idleStop.armAfterBorrow(conversation);
+        await this.#idleStop?.armAfterBorrow(conversation);
         return sandbox;
       },
     };
     resources.use(this.#workers);
   }
 
-  initialize(): Promise<void> {
-    return this.#plugins.initialize(this.#pluginHost);
+  async initialize(): Promise<void> {
+    await this.#plugins.initialize(this.#pluginHost);
+    const settlement = await TurnSettlement.open({
+      storage: this.#storage,
+      directory: this.#directory,
+      streams: this.#streams.store,
+      queue: this.#queue,
+      inDeletedTree: (thread) => this.#inDeletedTree(thread),
+      followUps: [
+        ...(this.#idleStop ? [this.#idleStop] : []),
+        ...this.#plugins.settleFollowUps,
+      ],
+    });
+    this.#settlement.open(settlement);
   }
 
   [Symbol.asyncDispose](): Promise<void> {
@@ -634,7 +667,7 @@ class RuntimeHost implements AsyncDisposable {
           `AgentRuntime.deleteSession: unknown agent declaration "${member.declarationName}" of chat "${member.conversation.chatId}"`,
         );
       }
-      await this.#idleStop.cancel(member);
+      await this.#idleStop?.cancel(member);
       await this.#sandboxes.forget(declaration, member.conversation);
       await declaration.sandbox.environment.delete(member.conversation);
     }
@@ -719,7 +752,11 @@ class RuntimeHost implements AsyncDisposable {
         read: () => this.#conversationStatus.read(conversation),
         publish: () => this.#conversationStatus.publish(conversation),
       },
-      () => this.#plugins.conversationAvailable(conversation),
+      async (streamId) =>
+        (await this.#settlement.wait()).complete({
+          ...conversation,
+          streamId,
+        }),
     );
   }
 
@@ -813,118 +850,31 @@ class RuntimeHost implements AsyncDisposable {
   ): Promise<AsyncDisposable> {
     await using workers = new AsyncDisposableStack();
     await this.#plugins.startWorkers(workers);
-    const stopsIdleSandboxes = this.#idleStop.stopsIdleSandboxes;
-    if (stopsIdleSandboxes) {
-      workers.use(await this.#idleStop.work());
-    }
-    const reconcilesAvailability = this.#plugins.reconcilesAvailability;
+    if (this.#idleStop) workers.use(await this.#idleStop.work());
+    workers.use(await (await this.#settlement.wait()).work());
     workers.use(
       await this.#queue.consume(this.#executor.execute.bind(this.#executor), {
         concurrency: options?.concurrency,
         onOrphaned: this.#onOrphaned.bind(this),
-        onSettled: async ({ chatId, userId }) => {
-          // Status first: an arming or a plugin reconciliation failure must
-          // not hide the settled transition from host subscribers.
-          await this.#conversationStatus.publish({ chatId, userId });
-          const followUps = await Promise.allSettled([
-            stopsIdleSandboxes
-              ? this.#idleStop.arm({ chatId, userId })
-              : undefined,
-            reconcilesAvailability
-              ? this.#plugins.conversationAvailable({ chatId, userId })
-              : undefined,
-          ]);
-          const errors = followUps.flatMap((followUp) =>
-            followUp.status === 'rejected' ? [followUp.reason] : [],
-          );
-          if (errors.length > 0) {
-            throw new AggregateError(
-              errors,
-              `AgentRuntime: settling "${chatId}" failed: ${errors.map((error) => (Error.isError(error) ? error.message : String(error))).join('; ')}`,
-            );
-          }
-        },
+        // The follow-ups run from the intents the turn's completion recorded.
+        onSettled: ({ chatId, userId }) =>
+          this.#conversationStatus.publish({ chatId, userId }),
       }),
     );
     return workers.move();
   }
 
+  /**
+   * Reconciles a turn whose handler crashed or whose worker died, then
+   * completes a settled one, recording its settle intents before the queue
+   * releases its job. A turn whose reconciliation fails records none; the
+   * dead-letter queue tries it again.
+   */
   async #onOrphaned(turn: TurnRef, error: string): Promise<void> {
     try {
-      let stream = await this.#streams.store.getStream(turn.streamId);
-      // Every push registers its stream first, so a turn whose stream is
-      // gone belongs to a deleted chat; resolving it would create the chat
-      // again.
-      if (stream === undefined) return;
-      const firstReconciliation =
-        stream.status === 'queued' || stream.status === 'running';
-      if (firstReconciliation) {
-        await this.#streams.store.updateStreamStatus(turn.streamId, 'failed', {
-          error,
-        });
-        stream = await this.#streams.store.getStream(turn.streamId);
+      if (await this.#reconcileOrphan(turn, error)) {
+        await (await this.#settlement.wait()).complete(turn);
       }
-      let declaration: AgentDeclaration | undefined;
-      const continuation =
-        turn.kind === 'recovery' ||
-        (turn.kind === 'message' && turn.message.role === 'assistant');
-      if (
-        continuation &&
-        !(turn.kind === 'recovery' && turn.mode === 'idempotent') &&
-        stream?.status === 'failed'
-      ) {
-        try {
-          ({ declaration } = await this.#controlPlane.resolve(turn));
-        } catch {
-          // Default terminal reconciliation below remains the safe fallback.
-        }
-      }
-      if (
-        declaration !== undefined &&
-        (await this.#approvals.retryIdempotentContinuation(
-          turn,
-          turn.streamId,
-          { ...declaration.tools, ...this.#plugins.tools },
-        ))
-      ) {
-        return;
-      }
-      if (
-        continuation &&
-        stream?.status === 'completed' &&
-        (await this.#approvals.recoverUnstartedContinuation(
-          turn,
-          turn.streamId,
-        ))
-      ) {
-        return;
-      }
-      stream = await this.#streams.store.getStream(turn.streamId);
-      if (
-        continuation &&
-        (stream?.status === 'completed' ||
-          stream?.status === 'failed' ||
-          stream?.status === 'cancelled')
-      ) {
-        await this.#approvals.reconcileTerminalContinuation(
-          turn,
-          turn.streamId,
-          stream.status,
-          stream.error ?? error,
-        );
-      }
-      const { thread } = await this.#controlPlane.resolve(turn);
-      if (
-        thread.lastTurnId === undefined ||
-        thread.lastTurnId === turn.streamId
-      ) {
-        await this.#controlPlane.recordLatestTurnIfCurrent(
-          turn,
-          turn.streamId,
-          thread.lastTurnId,
-        );
-      }
-      await this.#controlPlane.projectTerminal(turn, thread);
     } finally {
       try {
         if (
@@ -937,5 +887,84 @@ class RuntimeHost implements AsyncDisposable {
         await this.#mailbox.endTurn(turn);
       }
     }
+  }
+
+  /**
+   * Reconciles an orphaned turn. Whether it settled: not when its stream is
+   * gone with its deleted chat, or when a recovery turn it pushed for the
+   * same stream will settle it.
+   */
+  async #reconcileOrphan(turn: TurnRef, error: string): Promise<boolean> {
+    let stream = await this.#streams.store.getStream(turn.streamId);
+    // Every push registers its stream first, so a turn whose stream is
+    // gone belongs to a deleted chat; resolving it would create the chat
+    // again.
+    if (stream === undefined) return false;
+    const firstReconciliation =
+      stream.status === 'queued' || stream.status === 'running';
+    if (firstReconciliation) {
+      await this.#streams.store.updateStreamStatus(turn.streamId, 'failed', {
+        error,
+      });
+      stream = await this.#streams.store.getStream(turn.streamId);
+    }
+    let declaration: AgentDeclaration | undefined;
+    const continuation =
+      turn.kind === 'recovery' ||
+      (turn.kind === 'message' && turn.message.role === 'assistant');
+    if (
+      continuation &&
+      !(turn.kind === 'recovery' && turn.mode === 'idempotent') &&
+      stream?.status === 'failed'
+    ) {
+      try {
+        ({ declaration } = await this.#controlPlane.resolve(turn));
+      } catch {
+        // Default terminal reconciliation below remains the safe fallback.
+      }
+    }
+    if (
+      declaration !== undefined &&
+      (await this.#approvals.retryIdempotentContinuation(turn, turn.streamId, {
+        ...declaration.tools,
+        ...this.#plugins.tools,
+      }))
+    ) {
+      return false;
+    }
+    if (
+      continuation &&
+      stream?.status === 'completed' &&
+      (await this.#approvals.recoverUnstartedContinuation(turn, turn.streamId))
+    ) {
+      return false;
+    }
+    stream = await this.#streams.store.getStream(turn.streamId);
+    if (
+      continuation &&
+      (stream?.status === 'completed' ||
+        stream?.status === 'failed' ||
+        stream?.status === 'cancelled')
+    ) {
+      await this.#approvals.reconcileTerminalContinuation(
+        turn,
+        turn.streamId,
+        stream.status,
+        stream.error ?? error,
+      );
+    }
+    const { thread } = await this.#controlPlane.resolve(turn);
+    if (
+      thread.lastTurnId === undefined ||
+      thread.lastTurnId === turn.streamId
+    ) {
+      await this.#controlPlane.recordLatestTurnIfCurrent(
+        turn,
+        turn.streamId,
+        thread.lastTurnId,
+      );
+    }
+    await this.#controlPlane.projectTerminal(turn, thread);
+    return true;
   }
 }

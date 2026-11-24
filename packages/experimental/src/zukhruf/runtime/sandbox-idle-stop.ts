@@ -13,12 +13,14 @@ import type { AgentResidency } from '../control-plane/agent-residency.ts';
 import type { AgentThread } from '../control-plane/agent-thread.ts';
 import { conversationNamespace } from '../control-plane/agent-turn-id.ts';
 import type { ConversationId } from '../mailbox/types.ts';
+import { NonRetryableError } from '../non-retryable-error.ts';
 import type { Wake, WakeScheduler } from '../queue/wake-scheduler.ts';
 import type { SandboxIdleWake } from '../sandbox/sandbox-idle-wake.ts';
 import {
   type ConversationStatusProjector,
   conversationStatusOf,
 } from './conversation-status/projector.ts';
+import type { SettleFollowUp } from './turn-settlement.ts';
 
 const sandboxIdleWakeSchema: z.ZodType<SandboxIdleWake> = z
   .object({
@@ -41,6 +43,11 @@ function stopsWhenIdle(
   return typeof sandbox.idleTimeoutMs === 'number';
 }
 
+/** An idle chat's latest turn has no finish time: its stream contradicts the chat's status, which no retry changes. */
+export class UnfinishedIdleTurnError extends NonRetryableError {
+  override readonly name = 'UnfinishedIdleTurnError';
+}
+
 export interface SandboxIdleStopOptions {
   wakes: WakeScheduler<SandboxIdleWake>;
   declarations: AgentDeclarationRegistry;
@@ -53,12 +60,14 @@ export interface SandboxIdleStopOptions {
 /**
  * Stops a chat's sandbox once the chat has been idle for its declaration's
  * `idleTimeoutMs`, keeping its files: the next turn's resume starts it again.
- * The stop is a wake armed when a turn settles and the chat is idle, at the
- * turn's finish plus the idle time; when it fires, the chat is checked again
- * inside its tree's admission, so no turn can be pushed between the check
- * and the stop.
+ * The stop is a wake armed by this settle follow-up once a turn has settled
+ * and the chat is idle, at the turn's finish plus the idle time; when it
+ * fires, the chat is checked again inside its tree's admission, so no turn
+ * can be pushed between the check and the stop. A runtime has one only when
+ * an agent of its tree stops its sandboxes after an idle time.
  */
-export class SandboxIdleStop {
+export class SandboxIdleStop implements SettleFollowUp {
+  readonly name = 'sandbox-idle-stop';
   readonly #wakes: WakeScheduler<SandboxIdleWake>;
   readonly #declarations: AgentDeclarationRegistry;
   readonly #directory: AgentDirectory;
@@ -66,7 +75,7 @@ export class SandboxIdleStop {
   readonly #residency: AgentResidency;
   readonly #conversationStatus: ConversationStatusProjector;
 
-  constructor(options: SandboxIdleStopOptions) {
+  private constructor(options: SandboxIdleStopOptions) {
     this.#wakes = options.wakes;
     this.#declarations = options.declarations;
     this.#directory = options.directory;
@@ -75,15 +84,17 @@ export class SandboxIdleStop {
     this.#conversationStatus = options.conversationStatus;
   }
 
-  /** Whether any agent of the tree stops its sandboxes after an idle time. */
-  get stopsIdleSandboxes(): boolean {
-    return this.#declarations
+  /** The idle stop of the tree's agents, or none when no agent stops its sandboxes after an idle time. */
+  static of(options: SandboxIdleStopOptions): SandboxIdleStop | undefined {
+    return options.declarations
       .values()
-      .some(({ sandbox }) => stopsWhenIdle(sandbox));
+      .some(({ sandbox }) => stopsWhenIdle(sandbox))
+      ? new SandboxIdleStop(options)
+      : undefined;
   }
 
   /** Arms the chat's stop when the chat is idle after its latest turn. */
-  async arm(conversation: ConversationId): Promise<void> {
+  async run(conversation: ConversationId): Promise<void> {
     const thread = await this.#directory.load(conversation);
     if (thread?.lastTurnId === undefined) return;
     const sandbox = this.#idleStoppingSandbox(thread);
@@ -93,7 +104,7 @@ export class SandboxIdleStop {
     }
     const stream = await this.#streams.getStream(thread.lastTurnId);
     if (typeof stream?.finishedAt !== 'number') {
-      throw new Error(
+      throw new UnfinishedIdleTurnError(
         `SandboxIdleStop: the latest turn "${thread.lastTurnId}" of idle chat "${conversation.chatId}" has not finished`,
       );
     }

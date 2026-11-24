@@ -13,6 +13,7 @@ import type {
   AgentPluginInstance,
   AgentPluginToolContext,
 } from '../agent-runtime.ts';
+import type { SettleFollowUp } from '../turn-settlement.ts';
 import { PluginSkillComposition, type PluginSkills } from './agent-skills.ts';
 import { PluginAgentComposition } from './plugin-agents.ts';
 import { PluginBindings } from './plugin-bindings.ts';
@@ -140,10 +141,20 @@ export class PluginManager implements AsyncDisposable {
       : { ...telemetry, integrations };
   }
 
-  get reconcilesAvailability(): boolean {
-    return this.#running.some(({ running }) =>
-      Boolean(running.conversationAvailable),
-    );
+  /** One settle follow-up per plugin that implements `conversationAvailable`, named after the plugin. */
+  get settleFollowUps(): SettleFollowUp[] {
+    return this.#running.flatMap(({ definition, running }) => {
+      const { conversationAvailable } = running;
+      return conversationAvailable
+        ? [
+            {
+              name: definition.name,
+              run: (conversation: ConversationId) =>
+                conversationAvailable.call(running, conversation),
+            },
+          ]
+        : [];
+    });
   }
 
   async startWorkers(workers: AsyncDisposableStack): Promise<void> {
@@ -167,23 +178,6 @@ export class PluginManager implements AsyncDisposable {
       this.tools,
       this.#toolComposition.compose(this.declarations.values()),
     );
-  }
-
-  async conversationAvailable(conversation: ConversationId): Promise<void> {
-    const errors: unknown[] = [];
-    for (const { running } of this.#running) {
-      try {
-        await running.conversationAvailable?.(conversation);
-      } catch (error) {
-        errors.push(error);
-      }
-    }
-    if (errors.length > 0) {
-      throw new AggregateError(
-        errors,
-        `AgentRuntime: conversation availability reconciliation failed for "${conversation.chatId}": ${errors.map((error) => (Error.isError(error) ? error.message : String(error))).join('; ')}`,
-      );
-    }
   }
 
   async conversationDeleting(conversation: ConversationId): Promise<void> {
