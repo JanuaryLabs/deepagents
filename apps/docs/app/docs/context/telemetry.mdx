@@ -26,8 +26,8 @@ import { createFileTelemetry } from '@deepagents/context/telemetry/file';
 import { createOpenAITracesIntegration } from '@deepagents/context/tracing';
 
 registerTelemetry(
-  createConsoleTelemetry(),
-  createFileTelemetry({ path: './logs/ai-telemetry.jsonl' }),
+  createConsoleTelemetry({ clock: globalThis }),
+  createFileTelemetry({ path: './logs/ai-telemetry.jsonl', clock: globalThis }),
   createOpenAITracesIntegration({ clock: globalThis }),
 );
 ```
@@ -42,8 +42,8 @@ await generateText({
   telemetry: {
     functionId: 'support-agent',
     integrations: [
-      createConsoleTelemetry(),
-      createFileTelemetry({ path: './logs/support.jsonl' }),
+      createConsoleTelemetry({ clock: globalThis }),
+      createFileTelemetry({ path: './logs/support.jsonl', clock: globalThis }),
     ],
   },
 });
@@ -56,13 +56,15 @@ import { createConsoleTelemetry } from '@deepagents/context/telemetry';
 
 const telemetry = createConsoleTelemetry({
   pretty: true,
+  clock: globalThis,
 });
 ```
 
-| Option   | Type                              | Default   | Description                                                     |
-| -------- | --------------------------------- | --------- | --------------------------------------------------------------- |
-| `pretty` | `boolean`                         | `true`    | Indent records for interactive console use                      |
-| `logger` | `Pick<Console, 'log' \| 'error'>` | `console` | Replace the output destination with a console-compatible logger |
+| Option   | Type                              | Default   | Description                                                                                                             |
+| -------- | --------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `pretty` | `boolean`                         | `true`    | Indent records for interactive console use                                                                              |
+| `logger` | `Pick<Console, 'log' \| 'error'>` | `console` | Replace the output destination with a console-compatible logger                                                         |
+| `clock`  | `{ Date: { now(): number } }`     | required  | Where record timestamps read time. Pass `globalThis` in an app; a test passes `createClock()` of `@sinonjs/fake-timers` |
 
 Normal lifecycle events use `logger.log`. The `onError` event uses
 `logger.error`. Logger failures are swallowed so observability cannot break
@@ -78,16 +80,18 @@ import { createFileTelemetry } from '@deepagents/context/telemetry/file';
 
 const telemetry = createFileTelemetry({
   path: './logs/ai-telemetry.jsonl',
+  clock: globalThis,
   onWriteError(error) {
     console.error('AI telemetry write failed', error);
   },
 });
 ```
 
-| Option         | Type                                            | Default  | Description                                             |
-| -------------- | ----------------------------------------------- | -------- | ------------------------------------------------------- |
-| `path`         | `string`                                        | required | Destination JSONL file                                  |
-| `onWriteError` | `(error: unknown) => void \| PromiseLike<void>` | —        | Observe write failures without failing the AI operation |
+| Option         | Type                                            | Default  | Description                                                                                                             |
+| -------------- | ----------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `path`         | `string`                                        | required | Destination JSONL file                                                                                                  |
+| `onWriteError` | `(error: unknown) => void \| PromiseLike<void>` | —        | Observe write failures without failing the AI operation                                                                 |
+| `clock`        | `{ Date: { now(): number } }`                   | required | Where record timestamps read time. Pass `globalThis` in an app; a test passes `createClock()` of `@sinonjs/fake-timers` |
 
 Parent directories are created automatically, and existing files are preserved.
 Writes from the same integration instance are serialized, so concurrent AI

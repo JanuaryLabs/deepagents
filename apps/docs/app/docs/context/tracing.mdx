@@ -176,7 +176,10 @@ const consoleProcessor: TracingProcessor = {
   },
 };
 
-createOpenAITracesIntegration({ processor: consoleProcessor });
+createOpenAITracesIntegration({
+  clock: globalThis,
+  processor: consoleProcessor,
+});
 ```
 
 Pass an array to run multiple processors — they're combined via
