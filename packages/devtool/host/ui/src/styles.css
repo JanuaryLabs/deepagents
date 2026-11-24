@@ -1,4 +1,4 @@
-@import "@deepagents/react-input/styles.css";
+@import "@deepagents/react-genai/styles.css";
 @import "./traces/styles.css";
 @import "streamdown/styles.css";
 @import "tailwindcss";

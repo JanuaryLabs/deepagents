@@ -15,6 +15,7 @@
     "dist",
     "src/styles.css",
     "COMPOSER_FEATURE_MATRIX.md",
+    "README.md",
     "!dist/spec/**",
     "!**/*.tsbuildinfo"
   ],

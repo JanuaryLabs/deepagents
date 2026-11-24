@@ -1,3 +1,5 @@
+@source "../dist";
+
 [data-slot="composer"] {
   --composer-line-height: 1.55rem;
   --composer-font-size: 0.875rem;

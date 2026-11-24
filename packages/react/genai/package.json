@@ -13,6 +13,7 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
+    "styles.css",
     "!dist/spec/**",
     "!**/*.tsbuildinfo"
   ],
@@ -25,7 +26,8 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
-    }
+    },
+    "./styles.css": "./styles.css"
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.170",
