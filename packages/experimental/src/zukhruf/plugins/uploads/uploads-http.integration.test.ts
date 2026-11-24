@@ -18,7 +18,6 @@ import {
 import {
   AgentRuntime,
   SqliteMailboxStore,
-  type TurnRef,
   defineAgent,
   defineSandbox,
   defineStack,
@@ -36,10 +35,7 @@ import {
 } from '@deepagents/experimental/zukhruf/uploads/http';
 
 import { ControlledAgentStorage } from '../../../testing/controlled-agent-storage.fixture.ts';
-import {
-  ControlledTurnQueue,
-  type TurnConsumer,
-} from '../../../testing/controlled-turn-queue.fixture.ts';
+import { ControlledTurnQueue } from '../../../testing/controlled-turn-queue.fixture.ts';
 import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 import { usage } from '../../../testing/usage.fixture.ts';
 
@@ -90,20 +86,8 @@ const MP3_HEADER = Uint8Array.fromHex('494433040000000000');
 const MAX_UPLOAD_BYTES = 4096;
 const PUBLIC_URL = `http://localhost${MOUNT}`;
 
-class SettlingTurnQueue extends ControlledTurnQueue {
+class ParkingTurnQueue extends ControlledTurnQueue {
   protected override async park(): Promise<void> {}
-
-  protected override async deliver(
-    turn: TurnRef,
-    consumer: TurnConsumer,
-  ): Promise<void> {
-    try {
-      await super.deliver(turn, consumer);
-      await consumer.options.onSettled?.(turn);
-    } catch (error) {
-      await this.orphan(turn, consumer, error);
-    }
-  }
 }
 
 function textChunks(text: string): LanguageModelV4StreamPart[] {
@@ -176,7 +160,7 @@ async function harness(
     publicUrl: PUBLIC_URL,
   });
   const model = scriptedModel(options.script);
-  const queue = new SettlingTurnQueue();
+  const queue = new ParkingTurnQueue();
   const acquisitions: Array<{ chatId: string; userId: string }> = [];
   const runtimeSetup = new AgentRuntime(
     defineAgent({
@@ -236,11 +220,11 @@ async function storedBytes(
   fileId: string,
 ): Promise<Uint8Array> {
   await using sandbox = await environment.open({ chatId: sessionId, userId });
-  return new Uint8Array(
-    (await sandbox.readBinaryFile({
-      path: `${UPLOAD_DIRECTORY}/${userId}/${sessionId}/${fileId}`,
-    }))!,
-  );
+  const bytes = await sandbox.readBinaryFile({
+    path: `${UPLOAD_DIRECTORY}/${userId}/${sessionId}/${fileId}`,
+  });
+  assert.ok(bytes, `expected the stored file ${fileId}`);
+  return new Uint8Array(bytes);
 }
 
 /** Writes a file into the session's sandbox the way an agent's bash tool would. */

@@ -36,7 +36,10 @@ function ref(chat: string, n: number): TurnRef {
   };
 }
 
-const noOrphans = { onOrphaned: async () => {} };
+const unobserved = {
+  onOrphaned: async () => {},
+  onSettled: async () => {},
+};
 
 async function makeQueue() {
   const pglite = new PGlite();
@@ -80,7 +83,7 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
     const seen: string[] = [];
     await using _consumer = await h.queue.consume(async (turn) => {
       seen.push(turn.streamId); // commit: handler returns without parking
-    }, noOrphans);
+    }, unobserved);
     void _consumer;
 
     await h.queue.push(ref('c1', 1));
@@ -112,7 +115,7 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
         return;
       }
       ran.push(turn.streamId);
-    }, noOrphans);
+    }, unobserved);
     void _consumer;
 
     await h.queue.push(ref('gchat', 1));
@@ -167,7 +170,7 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
     await using _consumer = await h.queue.consume(async (_turn, ctx) => {
       parkCount += 1;
       await ctx.park();
-    }, noOrphans);
+    }, unobserved);
     void _consumer;
     await h.queue.push(ref('gchat', 1));
     await waitFor(t, () => parkCount === 1, 'turn parked on the durable queue');

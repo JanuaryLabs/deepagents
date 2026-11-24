@@ -23,7 +23,6 @@ import type {
   AgentDeclaration,
   AgentHost,
   PgBossTurnQueueOptions,
-  TurnQueue,
   TurnRef,
 } from '@deepagents/experimental/zukhruf';
 import {
@@ -62,12 +61,12 @@ const queuedTurnSchema = z.looseObject({
  *
  */
 interface TurnQueueHarness extends AsyncDisposable {
-  queue: TurnQueue;
+  queue: PgBossTurnQueue;
+  boss: PgBoss;
 }
 
 interface PostgresQueueHarness extends TurnQueueHarness {
   connectionString: string;
-  queue: PgBossTurnQueue;
 }
 
 interface PostgresQueueHarnessOptions {
@@ -142,7 +141,10 @@ function recoveryRef(chat: string): Extract<TurnRef, { kind: 'recovery' }> {
   };
 }
 
-const noOrphans = { onOrphaned: async () => {} };
+const unobserved = {
+  onOrphaned: async () => {},
+  onSettled: async () => {},
+};
 
 const turnQueueContracts = [
   {
@@ -165,7 +167,7 @@ for (const contract of turnQueueContracts) {
       const seen: TurnRef[] = [];
       await using _consumer = await h.queue.consume(async (turn) => {
         seen.push(turn);
-      }, noOrphans);
+      }, unobserved);
       void _consumer;
 
       await waitFor(t, () => seen.length === 1, 'late consumer receives turn');
@@ -186,7 +188,7 @@ for (const contract of turnQueueContracts) {
       await using _consumer = await h.queue.consume(async () => {
         started.resolve();
         await release.promise;
-      }, noOrphans);
+      }, unobserved);
       void _consumer;
       try {
         await untilAborted(started.promise, t.signal);
@@ -230,7 +232,7 @@ for (const contract of turnQueueContracts) {
       const seen: TurnRef[] = [];
       await using _consumer = await h.queue.consume(async (turn) => {
         seen.push(turn);
-      }, noOrphans);
+      }, unobserved);
       void _consumer;
       await waitFor(
         t,
@@ -264,7 +266,7 @@ for (const contract of turnQueueContracts) {
           aborted.resolve();
           await release.promise;
         },
-        { ...noOrphans, concurrency: 2 },
+        { ...unobserved, concurrency: 2 },
       );
       void _consumer;
 
@@ -335,7 +337,7 @@ for (const contract of turnQueueContracts) {
           active--;
           deliveries++;
         },
-        { ...noOrphans, concurrency: 4 },
+        { ...unobserved, concurrency: 4 },
       );
       void _consumer;
 
@@ -361,7 +363,7 @@ for (const contract of turnQueueContracts) {
           await sleep(250);
           events.push(`end ${textOf(turn)}`);
         },
-        { ...noOrphans, concurrency: 4 },
+        { ...unobserved, concurrency: 4 },
       );
       void _consumer;
 
@@ -396,7 +398,7 @@ for (const contract of turnQueueContracts) {
             outcome.b = 'done';
           }
         },
-        { ...noOrphans, concurrency: 2 },
+        { ...unobserved, concurrency: 2 },
       );
       void _consumer;
 
@@ -432,7 +434,7 @@ for (const contract of turnQueueContracts) {
           successorsQueued = true;
           await releaseActive.promise;
         },
-        { ...noOrphans, concurrency: 4 },
+        { ...unobserved, concurrency: 4 },
       );
       void _consumer;
 
@@ -469,7 +471,7 @@ for (const contract of turnQueueContracts) {
           active--;
           done++;
         },
-        { ...noOrphans, concurrency: 2 },
+        { ...unobserved, concurrency: 2 },
       );
       void _consumer;
 
@@ -495,6 +497,7 @@ for (const contract of turnQueueContracts) {
           if (turn.streamId === boom.streamId) throw new Error('kaput');
         },
         {
+          onSettled: async () => {},
           onOrphaned: async (turn, error) => {
             orphans.push({ streamId: turn.streamId, error });
           },
@@ -533,6 +536,7 @@ for (const contract of turnQueueContracts) {
           if (turn.streamId === boom.streamId) throw new Error('kaput');
         },
         {
+          onSettled: async () => {},
           onOrphaned: async () => {
             orphanAttempts++;
             throw new Error('projection unavailable');
@@ -555,6 +559,7 @@ for (const contract of turnQueueContracts) {
       let gateOpen = false;
       const parked: string[] = [];
       const ran: string[] = [];
+      const settled: string[] = [];
       await using _consumer = await h.queue.consume(
         async (turn, context) => {
           if (turn.kind !== 'message') return;
@@ -565,7 +570,13 @@ for (const contract of turnQueueContracts) {
           }
           ran.push(textOf(turn));
         },
-        { ...noOrphans, concurrency: 2 },
+        {
+          ...unobserved,
+          concurrency: 2,
+          onSettled: async (turn) => {
+            settled.push(textOf(turn));
+          },
+        },
       );
       void _consumer;
 
@@ -579,16 +590,17 @@ for (const contract of turnQueueContracts) {
         'parked once each — no redelivery',
       );
       assert.deepStrictEqual(ran, [], 'nothing executed while parked');
+      assert.deepStrictEqual(settled, [], 'a parked delivery does not settle');
 
       gateOpen = true;
       await sleep(1200);
       assert.deepStrictEqual(ran, [], 'opening the gate alone revives nothing');
 
       await h.queue.resumeParked('gated');
-      await waitFor(t, () => ran.length === 2, 'parked turns revived');
+      await waitFor(t, () => settled.length === 2, 'revived turns settle');
       assert.deepStrictEqual(
-        ran,
-        ['input-1', 'input-2'],
+        { ran, settled },
+        { ran: ['input-1', 'input-2'], settled: ['input-1', 'input-2'] },
         'original FIFO order preserved',
       );
     });
@@ -601,7 +613,7 @@ for (const contract of turnQueueContracts) {
       const gatekeeper = await h.queue.consume(async (_turn, context) => {
         parkCount++;
         await context.park();
-      }, noOrphans);
+      }, unobserved);
       await h.queue.push(ref('ranked', 1));
       await waitFor(t, () => parkCount === 1, 'turn parked');
       await gatekeeper[Symbol.asyncDispose]();
@@ -611,7 +623,7 @@ for (const contract of turnQueueContracts) {
 
       await using _consumer = await h.queue.consume(async (turn) => {
         ran.push(turn.kind);
-      }, noOrphans);
+      }, unobserved);
       void _consumer;
 
       await waitFor(t, () => ran.length === 2, 'both delivered');
@@ -631,7 +643,7 @@ for (const contract of turnQueueContracts) {
       await h.queue.push(first);
       await h.queue.push(second);
       await using _consumer = await h.queue.consume(async () => {}, {
-        ...noOrphans,
+        ...unobserved,
         onSettled: async (turn) => {
           settled.push(turn.streamId);
           assert.notEqual(
@@ -645,6 +657,104 @@ for (const contract of turnQueueContracts) {
 
       await waitFor(t, () => settled.length === 2, 'both turns settle');
       assert.deepStrictEqual(settled, [first.streamId, second.streamId]);
+    });
+
+    test('a completed turn whose settle rejects is reported as a warning naming it, never as an orphan', async (t) => {
+      await using h = await contract.makeQueue();
+      const done = ref('settle-rejects', 1);
+      const next = ref('settle-rejects', 2);
+      const orphans: string[] = [];
+      const settled: string[] = [];
+      const warnings: string[] = [];
+      const record = (warning: Error) => {
+        if (warning.message.includes('"settle-rejects"')) {
+          warnings.push(warning.message);
+        }
+      };
+      process.on('warning', record);
+      try {
+        await h.queue.push(done);
+        await h.queue.push(next);
+        await using _consumer = await h.queue.consume(async () => {}, {
+          onOrphaned: async (turn) => {
+            orphans.push(turn.streamId);
+          },
+          onSettled: async (turn) => {
+            settled.push(turn.streamId);
+            if (turn.streamId === done.streamId) {
+              throw new Error('follow-up failed');
+            }
+          },
+        });
+        void _consumer;
+
+        await waitFor(t, () => settled.length === 2, 'both turns settle');
+        await sleep(500);
+        assert.deepStrictEqual(
+          { orphans, settled, warnings },
+          {
+            orphans: [],
+            settled: [done.streamId, next.streamId],
+            warnings: [
+              `PgBossTurnQueue: settling turn "${done.streamId}" of chat "settle-rejects" failed: follow-up failed`,
+            ],
+          },
+        );
+      } finally {
+        process.off('warning', record);
+      }
+    });
+
+    test('an orphan settles once, after its dead-letter job completes, and a settle rejection never reconciles it again', async (t) => {
+      await using h = await contract.makeQueue();
+      const boom = ref('orphan-settles', 1);
+      const orphans: string[] = [];
+      const deadLetterStates: (string | undefined)[] = [];
+      const warnings: string[] = [];
+      const record = (warning: Error) => {
+        if (warning.message.includes('"orphan-settles"')) {
+          warnings.push(warning.message);
+        }
+      };
+      process.on('warning', record);
+      try {
+        await h.queue.push(boom);
+        await using _consumer = await h.queue.consume(
+          async () => {
+            throw new Error('kaput');
+          },
+          {
+            onOrphaned: async (turn) => {
+              orphans.push(turn.streamId);
+            },
+            onSettled: async () => {
+              const [deadLetter] = await h.boss.findJobs(
+                h.queue.deadLetterQueue,
+                { data: { streamId: boom.streamId } },
+              );
+              deadLetterStates.push(deadLetter?.state);
+              throw new Error('follow-up failed');
+            },
+          },
+        );
+        void _consumer;
+
+        await waitFor(t, () => orphans.length >= 1, 'the orphan is reconciled');
+        // Give the settle, and a retry of the dead-letter job, time to show.
+        await sleep(2_000);
+        assert.deepStrictEqual(
+          { orphans, deadLetterStates, warnings },
+          {
+            orphans: [boom.streamId],
+            deadLetterStates: ['completed'],
+            warnings: [
+              `PgBossTurnQueue: settling turn "${boom.streamId}" of chat "orphan-settles" failed: follow-up failed`,
+            ],
+          },
+        );
+      } finally {
+        process.off('warning', record);
+      }
     });
 
     test('disposal stops new claims and waits for the active handler to exit', async (t) => {
@@ -663,7 +773,7 @@ for (const contract of turnQueueContracts) {
           seen.push(turn.streamId);
           activeStarted.resolve();
           await releaseActive.promise;
-        }, noOrphans);
+        }, unobserved);
         await untilAborted(activeStarted.promise, t.signal);
         await h.queue.push(queued);
 
@@ -694,7 +804,7 @@ for (const contract of turnQueueContracts) {
 
         replacement = await h.queue.consume(async (turn) => {
           seen.push(turn.streamId);
-        }, noOrphans);
+        }, unobserved);
         await waitFor(
           t,
           () => seen.length === 2,
@@ -713,7 +823,7 @@ for (const contract of turnQueueContracts) {
       let executions = 0;
       const consumer = await h.queue.consume(async () => {
         executions++;
-      }, noOrphans);
+      }, unobserved);
       await consumer[Symbol.asyncDispose]();
 
       await h.queue.push(ref('backlog', 1));
@@ -722,7 +832,7 @@ for (const contract of turnQueueContracts) {
 
       await using _revived = await h.queue.consume(async () => {
         executions++;
-      }, noOrphans);
+      }, unobserved);
       void _revived;
       await waitFor(
         t,
@@ -912,7 +1022,7 @@ suite('PgBossTurnQueue real PostgreSQL scheduler regressions', () => {
         deliveries++;
         await sleep(50);
       },
-      { ...noOrphans, concurrency: 8 },
+      { ...unobserved, concurrency: 8 },
     );
     void _consumer;
 
@@ -977,11 +1087,11 @@ suite('PgBossTurnQueue real PostgreSQL scheduler regressions', () => {
       };
 
       firstConsumer = await h.queue.consume(handle, {
-        ...noOrphans,
+        ...unobserved,
         concurrency: 4,
       });
       secondConsumer = await peerQueue.consume(handle, {
-        ...noOrphans,
+        ...unobserved,
         concurrency: 4,
       });
 
@@ -1033,6 +1143,7 @@ suite('PgBossTurnQueue real PostgreSQL scheduler regressions', () => {
       },
       {
         concurrency: 2,
+        onSettled: async () => {},
         onOrphaned: async (turn) => {
           orphaned.push(turn.streamId);
         },
@@ -1075,6 +1186,7 @@ suite('PgBossTurnQueue real PostgreSQL scheduler regressions', () => {
       },
       {
         concurrency: 2,
+        onSettled: async () => {},
         onOrphaned: async (turn) => {
           orphaned.push(turn.streamId);
         },
@@ -1130,6 +1242,7 @@ async function postgresQueueHarness(
   return {
     connectionString: database.connectionString,
     queue,
+    boss,
     [Symbol.asyncDispose]: () => owned.disposeAsync(),
   };
 }
@@ -1145,6 +1258,7 @@ async function pgliteQueueHarness(): Promise<TurnQueueHarness> {
   });
   return {
     queue,
+    boss,
     async [Symbol.asyncDispose]() {
       await boss.stop({ graceful: false });
       await pglite.close();
@@ -1214,7 +1328,7 @@ test('does not delete or overlap a turn claimed after the cancellation snapshot'
         firstStarted.resolve();
         await releaseFirst.promise;
       },
-      { ...noOrphans, concurrency: 2 },
+      { ...unobserved, concurrency: 2 },
     );
     await untilAborted(firstStarted.promise, t.signal);
     releaseSnapshot.resolve();
@@ -1306,13 +1420,13 @@ test('delivers cancellation to a local handler registered after cancel returns',
         firstStarted.resolve();
         await releaseFirst.promise;
       },
-      { ...noOrphans, concurrency: 2 },
+      { ...unobserved, concurrency: 2 },
     );
     await queue.push(first);
     await queue.push(second);
     await untilAborted(claimed.promise, t.signal);
     await queue.cancel(first.streamId);
-    otherWorker = await queue.consume(async () => {}, noOrphans);
+    otherWorker = await queue.consume(async () => {}, unobserved);
     await otherWorker[Symbol.asyncDispose]();
     otherWorker = undefined;
     registerHandler.resolve();
@@ -1374,7 +1488,7 @@ test('a worker keeps a cancel intent only as long as the existing queue lets a j
     runningWorker = await running.consume(async () => {
       started.resolve();
       await release.promise;
-    }, noOrphans);
+    }, unobserved);
     await running.push(cancelled);
     await untilAborted(started.promise, t.signal);
     await cancelling.cancel(cancelled.streamId);
@@ -1394,7 +1508,7 @@ test('a worker keeps a cancel intent only as long as the existing queue lets a j
 
     cancellingWorker = await cancelling.consume(async (_turn, context) => {
       reopenedAborted.resolve(context.signal.aborted);
-    }, noOrphans);
+    }, unobserved);
     await cancelling.push({ ...cancelled });
 
     assert.equal(
@@ -1450,7 +1564,7 @@ test('a consumer disposed while its claim is in flight hands the claimed turn to
   try {
     const disposed = await queue.consume(async () => {
       disposedRuns++;
-    }, noOrphans);
+    }, unobserved);
     await claimInFlight.promise;
     const disposing = Promise.resolve(disposed[Symbol.asyncDispose]());
     await queue.push(ref('claim-after-dispose', 1));
@@ -1460,7 +1574,7 @@ test('a consumer disposed while its claim is in flight hands the claimed turn to
 
     next = await queue.consume(async () => {
       nextRuns++;
-    }, noOrphans);
+    }, unobserved);
     await waitFor(
       t,
       () => disposedRuns + nextRuns === 1,

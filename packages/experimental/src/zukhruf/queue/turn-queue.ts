@@ -77,10 +77,15 @@ export interface ConsumeOptions {
    */
   onOrphaned: (turn: TurnRef, error: string) => Promise<void>;
   /**
-   * Runs after a non-parked turn releases its conversation's FIFO ownership.
-   * Implementations report failures without rolling back the settled turn.
+   * Runs once for every delivery that does not park, after that delivery's
+   * own job is complete and has released its conversation's FIFO ownership:
+   * after a turn's handler returns, and after an orphan's `onOrphaned`
+   * resolves. The consumer owns the failures of its follow-ups. A rejection
+   * is a consumer defect: the queue never reports it through `onOrphaned`
+   * (the turn has settled) and never delivers the turn again;
+   * `PgBossTurnQueue` reports it as a process warning naming the turn.
    */
-  onSettled?: (turn: TurnRef) => Promise<void>;
+  onSettled: (turn: TurnRef) => Promise<void>;
 }
 
 export type TurnActivity = 'idle' | 'queued' | 'running';
@@ -98,8 +103,10 @@ export type TurnActivity = 'idle' | 'queued' | 'running';
  * - Per chat, at most ONE handler invocation is active at a time, and turns
  *   run in the order they were pushed (strict FIFO per `chatId`) — this
  *   covers duplicates too: they can never run concurrently or out of order.
- * - After a non-parked job releases its FIFO ownership, `consume` invokes the
- *   optional `onSettled` hook before considering that delivery complete.
+ * - Every delivery that does not park settles exactly once through
+ *   `onSettled`, after its own job is complete (for an orphan, after
+ *   `onOrphaned` resolves). A settle rejection never becomes an orphan
+ *   report and never re-runs the turn or its reconciliation.
  * - Turns from different chats may run concurrently.
  * - Disposing a consumer stops new claims and resolves only after every
  *   handler it is running has exited and settled.

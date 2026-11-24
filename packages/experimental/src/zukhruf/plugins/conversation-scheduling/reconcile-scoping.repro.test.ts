@@ -11,7 +11,6 @@ import { SqliteContextStore, SqliteStreamStore } from '@deepagents/context';
 import {
   AgentRuntime,
   SqliteMailboxStore,
-  type TurnRef,
   type Wake,
   WakeScheduler,
   defineAgent,
@@ -25,10 +24,7 @@ import {
 
 import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
 import { ControlledAgentStorage } from '../../../testing/controlled-agent-storage.fixture.ts';
-import {
-  ControlledTurnQueue,
-  type TurnConsumer,
-} from '../../../testing/controlled-turn-queue.fixture.ts';
+import { ControlledTurnQueue } from '../../../testing/controlled-turn-queue.fixture.ts';
 import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 import { usage } from '../../../testing/usage.fixture.ts';
 import { userTurn } from '../../../testing/user-turn.fixture.ts';
@@ -58,16 +54,6 @@ class RecordingWakeScheduler extends WakeScheduler<SchedulingWake> {
     const [handler] = this.#handlers;
     assert.ok(handler, 'expected a running wake consumer');
     await handler(wake);
-  }
-}
-
-class SettlingTurnQueue extends ControlledTurnQueue {
-  protected override async deliver(
-    turn: TurnRef,
-    consumer: TurnConsumer,
-  ): Promise<void> {
-    await super.deliver(turn, consumer);
-    await consumer.options.onSettled?.(turn);
   }
 }
 
@@ -142,8 +128,8 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
   const store = new SqliteContextStore(database);
   const schedulerA = new RecordingWakeScheduler();
   const schedulerB = new RecordingWakeScheduler();
-  const queueA = new SettlingTurnQueue();
-  const queueB = new SettlingTurnQueue();
+  const queueA = new ControlledTurnQueue();
+  const queueB = new ControlledTurnQueue();
   const streamStoreA = new SqliteStreamStore(':memory:');
   const streamStoreB = new SqliteStreamStore(':memory:');
   const mailboxStoreA = new SqliteMailboxStore(':memory:');

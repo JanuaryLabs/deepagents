@@ -14,8 +14,10 @@ export type TurnConsumer = {
 
 /**
  * Holds turns until a test runs one, so the test decides when each turn
- * executes. Real queues differ in what follows a handler (settle, orphan,
- * park), and tests depend on that, so a subclass overrides `deliver` or `park`.
+ * executes. A delivery follows the TurnQueue contract as PgBossTurnQueue
+ * does: a handler that throws is reported through `onOrphaned`, and every
+ * delivery that does not park then settles through `onSettled`. A rejection
+ * of either propagates out of `runNext`. A subclass overrides `park`.
  */
 export class ControlledTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];
@@ -94,24 +96,25 @@ export class ControlledTurnQueue extends TurnQueue {
     turn: TurnRef,
     consumer: TurnConsumer,
   ): Promise<void> {
-    await consumer.handler(turn, {
-      signal: new AbortController().signal,
-      park: () => this.park(),
-    });
+    let parked = false;
+    try {
+      await consumer.handler(turn, {
+        signal: new AbortController().signal,
+        park: async () => {
+          parked = true;
+          await this.park();
+        },
+      });
+    } catch (error) {
+      await consumer.options.onOrphaned(
+        turn,
+        Error.isError(error) ? error.message : String(error),
+      );
+    }
+    if (!parked) await consumer.options.onSettled(turn);
   }
 
   protected async park(): Promise<void> {
     throw new Error('turn unexpectedly parked');
-  }
-
-  protected async orphan(
-    turn: TurnRef,
-    consumer: TurnConsumer,
-    error: unknown,
-  ): Promise<void> {
-    await consumer.options.onOrphaned(
-      turn,
-      Error.isError(error) ? error.message : String(error),
-    );
   }
 }

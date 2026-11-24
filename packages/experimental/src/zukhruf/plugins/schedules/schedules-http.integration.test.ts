@@ -16,7 +16,6 @@ import {
   type AgentHost,
   AgentRuntime,
   SqliteMailboxStore,
-  type TurnRef,
   defineAgent,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
@@ -38,10 +37,7 @@ import {
 
 import { buildSandbox } from '../../../testing/build-sandbox.fixture.ts';
 import { ControlledAgentStorage } from '../../../testing/controlled-agent-storage.fixture.ts';
-import {
-  ControlledTurnQueue,
-  type TurnConsumer,
-} from '../../../testing/controlled-turn-queue.fixture.ts';
+import { ControlledTurnQueue } from '../../../testing/controlled-turn-queue.fixture.ts';
 import { streamsFor } from '../../../testing/streams-for.fixture.ts';
 import { usage } from '../../../testing/usage.fixture.ts';
 
@@ -54,20 +50,8 @@ const FAST_POLLING = {
   notifyPollingIntervalSeconds: 0.5,
 } as const;
 
-class SettlingTurnQueue extends ControlledTurnQueue {
+class ParkingTurnQueue extends ControlledTurnQueue {
   protected override async park(): Promise<void> {}
-
-  protected override async deliver(
-    turn: TurnRef,
-    consumer: TurnConsumer,
-  ): Promise<void> {
-    try {
-      await super.deliver(turn, consumer);
-      await consumer.options.onSettled?.(turn);
-    } catch (error) {
-      await this.orphan(turn, consumer, error);
-    }
-  }
 }
 
 function completingModel() {
@@ -92,7 +76,7 @@ function completingModel() {
 
 interface Harness extends AsyncDisposable {
   app: Hono<HttpEnv>;
-  queue: SettlingTurnQueue;
+  queue: ParkingTurnQueue;
   runtime: AgentHost;
 }
 
@@ -121,7 +105,7 @@ async function harness(options: { withSchedules?: boolean } = {}) {
     reconciliationIntervalMs: 50,
     workerOptions: FAST_POLLING,
   });
-  const queue = new SettlingTurnQueue();
+  const queue = new ParkingTurnQueue();
   const runtimeSetup = new AgentRuntime(
     defineAgent({
       name: 'scheduled-agent',

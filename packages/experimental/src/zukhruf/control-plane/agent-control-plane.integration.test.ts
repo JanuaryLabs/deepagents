@@ -31,10 +31,7 @@ import {
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 import { ControlledAgentStorage } from '../../testing/controlled-agent-storage.fixture.ts';
-import {
-  ControlledTurnQueue,
-  type TurnConsumer,
-} from '../../testing/controlled-turn-queue.fixture.ts';
+import { ControlledTurnQueue } from '../../testing/controlled-turn-queue.fixture.ts';
 import {
   textResult,
   toolCallResult,
@@ -115,17 +112,6 @@ class OrphaningTurnQueue extends ControlledTurnQueue {
 
   async retryOrphan(turn: TurnRef, error: string): Promise<void> {
     await this.consumer.options.onOrphaned(turn, error);
-  }
-
-  protected override async deliver(
-    turn: TurnRef,
-    consumer: TurnConsumer,
-  ): Promise<void> {
-    try {
-      await super.deliver(turn, consumer);
-    } catch (error) {
-      await this.orphan(turn, consumer, error);
-    }
   }
 }
 
@@ -235,6 +221,7 @@ class SharedControlledTurnQueue extends TurnQueue {
     } finally {
       this.#state.running.delete(key);
     }
+    await consumer.options.onSettled(turn);
   }
 
   static #key(conversation: ConversationId): string {

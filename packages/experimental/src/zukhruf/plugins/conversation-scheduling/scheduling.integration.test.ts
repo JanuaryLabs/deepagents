@@ -139,17 +139,21 @@ class SchedulingTurnQueue extends ControlledTurnQueue {
     );
   }
 
-  protected override async deliver(
+  protected override deliver(
     turn: TurnRef,
     consumer: TurnConsumer,
   ): Promise<void> {
-    this.#running.set(turn.streamId, turn);
-    try {
-      await super.deliver(turn, consumer);
-    } finally {
-      this.#running.delete(turn.streamId);
-    }
-    await consumer.options.onSettled?.(turn);
+    return super.deliver(turn, {
+      ...consumer,
+      handler: async (running, context) => {
+        this.#running.set(running.streamId, running);
+        try {
+          await consumer.handler(running, context);
+        } finally {
+          this.#running.delete(running.streamId);
+        }
+      },
+    });
   }
 
   #runningTurn(conversation: Pick<TurnRef, 'chatId' | 'userId'>) {

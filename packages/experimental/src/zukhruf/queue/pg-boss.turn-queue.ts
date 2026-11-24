@@ -61,7 +61,8 @@ function deadLetterQueueOf(queue: string): string {
  *   already executed). It dead-letters instead.
  * - A failed job blocks its chat's key until acknowledged; the dead-letter
  *   consumer is that acknowledgement: it reports the orphan via
- *   `onOrphaned`, then deletes the source job, unblocking the chat.
+ *   `onOrphaned`, then deletes the source job, unblocking the chat, then
+ *   completes its own job and settles the turn.
  * - `deleteAfterSeconds: 0` — pg-boss never deletes a terminal job on a
  *   wall-clock timer. That is what makes a parked (cancelled) turn durable: it
  *   awaits its approval for as long as it takes, with no retention deadline.
@@ -430,8 +431,11 @@ export class PgBossTurnQueue extends TurnQueue {
           if (job.sourceId) {
             await this.#boss.deleteJob(this.#queue, job.sourceId);
           }
-          await this.#notifySettled(options, job.data);
         }
+        // The settle runs outside the reconciliation's retry scope: pg-boss
+        // retries a rejected DLQ job, which would reconcile the orphan again.
+        await this.#boss.complete(this.deadLetterQueue, job.id);
+        await this.#notifySettled(options, job.data);
       },
     );
 
@@ -565,13 +569,20 @@ export class PgBossTurnQueue extends TurnQueue {
     return output ? JSON.stringify(output) : 'turn orphaned';
   }
 
+  /**
+   * Runs once the delivery's job is complete. pg-boss reports nothing for a
+   * handler that rejects after its job is gone or complete, so the queue
+   * reports a rejection itself; the turn has settled and is no orphan.
+   */
   async #notifySettled(options: ConsumeOptions, turn: TurnRef): Promise<void> {
     try {
-      await options.onSettled?.(turn);
+      await options.onSettled(turn);
     } catch (error) {
-      await options.onOrphaned(
-        turn,
-        `turn follow-up reconciliation failed: ${Error.isError(error) ? error.message : String(error)}`,
+      process.emitWarning(
+        new Error(
+          `PgBossTurnQueue: settling turn "${turn.streamId}" of chat "${turn.chatId}" failed: ${Error.isError(error) ? error.message : String(error)}`,
+          { cause: error },
+        ),
       );
     }
   }

@@ -59,7 +59,7 @@ test('a turn pushed through a transaction that throws never reaches a worker, an
       async (turn) => {
         seen.push(turn);
       },
-      { onOrphaned: async () => {} },
+      { onOrphaned: async () => {}, onSettled: async () => {} },
     );
     await waitFor(() => assert.equal(seen.length, 1), {
       signal: t.signal,
