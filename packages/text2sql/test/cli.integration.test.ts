@@ -3,8 +3,11 @@ import { Sqlite as TestSqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import {
+  closeSync,
+  constants,
   createReadStream,
   existsSync,
+  openSync,
   readFileSync,
   readdirSync,
   writeFileSync,
@@ -108,6 +111,19 @@ function mkfifo(p: string): void {
     throw new Error(
       `mkfifo ${p} failed: ${result.stderr?.toString() ?? 'unknown'}`,
     );
+  }
+}
+
+/** A non-blocking write open of a FIFO fails with ENXIO exactly when no process reads it. */
+function fifoHasReader(p: string): boolean {
+  try {
+    closeSync(openSync(p, constants.O_WRONLY | constants.O_NONBLOCK));
+    return true;
+  } catch (error) {
+    if (Error.isError(error) && 'code' in error && error.code === 'ENXIO') {
+      return false;
+    }
+    throw error;
   }
 }
 
@@ -812,21 +828,39 @@ describe('sql binary', () => {
     child.stdout.on('data', (d) => {
       stdout += d.toString();
     });
-    const sawWarning = new Promise<void>((resolve) => {
+    const sawWarning = new Promise<'warned'>((resolve) => {
       child.stderr.on('data', (d) => {
         stderr += d.toString();
-        if (stderr.includes('waiting for reader on FIFO')) resolve();
+        if (stderr.includes('waiting for reader on FIFO')) resolve('warned');
       });
     });
-
-    await sawWarning;
-    const readerData = streamText(
-      createReadStream(fifoPath, { encoding: 'utf-8' }),
-    );
-    const exitCode = await new Promise<number>((resolve, reject) => {
+    const closed = new Promise<number>((resolve, reject) => {
       child.on('error', reject);
       child.on('close', (code) => resolve(code ?? 0));
     });
+
+    const first = await Promise.race([
+      sawWarning,
+      closed.then(() => 'exited' as const),
+    ]);
+    if (first === 'exited') {
+      // Microsoft Defender's real-time scan on macOS opens every new file in
+      // the temp directory, a FIFO included, about 50 ms after it is made: the
+      // bin then sees a reader, writes its events to the scanner, and exits.
+      if (fifoHasReader(fifoPath)) {
+        t.skip(
+          `a process outside the test holds ${fifoPath} open for reading, so a FIFO without a reader cannot be had here`,
+        );
+        return;
+      }
+      assert.fail(
+        `sql index exited without the FIFO warning although ${fifoPath} has no reader; stderr: ${stderr}`,
+      );
+    }
+    const readerData = streamText(
+      createReadStream(fifoPath, { encoding: 'utf-8' }),
+    );
+    const exitCode = await closed;
 
     assert.equal(exitCode, 0, stderr);
     assert.match(
