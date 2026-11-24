@@ -303,9 +303,10 @@ describe('FragmentLoaderResolver — full default chain integration', () => {
     const f = fragment('skills', async () => ['skill-a', 'skill-b']);
     const walker = newWalker();
     await walker.resolve([f], await ctx());
-    const xml = new XmlRenderer().render([f]);
-    assert.ok(xml.includes('skill-a'));
-    assert.ok(xml.includes('skill-b'));
+    assert.strictEqual(
+      new XmlRenderer().render([f]),
+      new XmlRenderer().render([fragment('skills', ['skill-a', 'skill-b'])]),
+    );
   });
 
   it('handles all resolver types in one fragment tree', async () => {

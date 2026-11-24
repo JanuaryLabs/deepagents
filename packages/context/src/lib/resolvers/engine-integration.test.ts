@@ -32,7 +32,13 @@ describe('engine + resolver chain integration', () => {
       sandbox: await buildSandbox(),
     });
 
-    assert.ok(systemPrompt.includes('project documentation'));
+    assert.strictEqual(
+      systemPrompt,
+      new XmlRenderer().render([
+        role('You are a helper.'),
+        fragment('readme', 'project documentation'),
+      ]),
+    );
   });
 
   it('caches resolved values across resolve() calls', async (t) => {
@@ -195,8 +201,13 @@ describe('engine + resolver chain integration', () => {
       sandbox: await buildSandbox(),
     });
 
-    assert.ok(systemPrompt.includes('Be brief.'));
-    assert.ok(systemPrompt.includes('Use UTC timestamps.'));
+    assert.strictEqual(
+      systemPrompt,
+      new XmlRenderer().render([
+        hint('Be brief.'),
+        fragment('async-hint', 'Use UTC timestamps.'),
+      ]),
+    );
   });
 
   it('inspect() materializes loaders before rendering', async () => {
