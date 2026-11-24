@@ -654,6 +654,109 @@ for (const { name, open } of storages) {
     );
   });
 
+  test(`${name}: a DELETE whose host data cleanup rejects answers 500 and keeps every chat row, and its retry calls the cleanup again with the same conversations and deletes the session; each cleanup call comes once every container of the session is gone`, async (t) => {
+    const namespace = `cleanup-${randomUUID()}`;
+    try {
+      await using resources = new AsyncDisposableStack();
+      const { storage } = await open(resources);
+      const sandbox = defineSandbox(
+        new DockerSandboxEnvironment({ namespace, container: defaults }),
+        { idleTimeoutMs: false },
+      );
+      const cleanups: { conversations: string[]; containers: number }[] = [];
+      const rootSteps = [spawnWorker()];
+      const runtime = resources.use(
+        await new AgentRuntime(
+          defineAgent({
+            name: 'root',
+            instructions: [],
+            model: new MockLanguageModelV4({
+              doStream: async () => rootSteps.shift() ?? textResult('done'),
+            }),
+            sandbox,
+            subagents: [worker(sandbox)],
+          }),
+        ).initialize(
+          defineStack(async () => ({
+            storage,
+            conversationDataCleanup: async (conversations) => {
+              cleanups.push({
+                conversations: conversations
+                  .map(({ userId, chatId }) => `${userId}/${chatId}`)
+                  .toSorted(),
+                containers: (await namespaceContainers(namespace)).length,
+              });
+              if (cleanups.length === 1) {
+                throw new Error('the volume service is down');
+              }
+            },
+          })),
+        ),
+      );
+      const app = new Hono<HttpEnv>();
+      app.use(`${MOUNT}/*`, (context, next) => {
+        context.set('userId', 'user-1');
+        return next();
+      });
+      app.route(MOUNT, http(runtime));
+      resources.use(await runtime.work({ concurrency: 2 }));
+      const sessionId = randomUUID();
+      await startTurn(app, sessionId);
+      const child = await idleChild(app, storage, sessionId, t.signal);
+      const members = [
+        `user-1/${sessionId}`,
+        `user-1/${child.chatId}`,
+      ].toSorted();
+      const containersBefore = (await namespaceContainers(namespace)).length;
+
+      const cutShort = (await deleteSession(app, sessionId)).status;
+      const meanwhile = {
+        session: await answer(
+          await app.request(`${MOUNT}/session/${sessionId}`),
+        ),
+        rowsKept: {
+          root: (await storage.store.getChat(sessionId)) !== undefined,
+          child: (await storage.store.getChat(child.chatId)) !== undefined,
+        },
+      };
+      const retried = await answer(await deleteSession(app, sessionId));
+
+      assert.deepStrictEqual(
+        {
+          containersBefore,
+          cutShort,
+          meanwhile,
+          retried,
+          session: await answer(
+            await app.request(`${MOUNT}/session/${sessionId}`),
+          ),
+          cleanups,
+          chats: {
+            root: await storage.store.getChat(sessionId),
+            child: await storage.store.getChat(child.chatId),
+          },
+        },
+        {
+          containersBefore: 2,
+          cutShort: 500,
+          meanwhile: {
+            session: sessionNotFound(sessionId),
+            rowsKept: { root: true, child: true },
+          },
+          retried: deleted,
+          session: sessionNotFound(sessionId),
+          cleanups: [
+            { conversations: members, containers: 0 },
+            { conversations: members, containers: 0 },
+          ],
+          chats: { root: undefined, child: undefined },
+        },
+      );
+    } finally {
+      await removeNamespace(namespace);
+    }
+  });
+
   test(`${name}: DELETE /session/:sessionId of a session with a running turn cancels the turn, so its model is aborted while the turn's stream reads cancelled, and once the turn has settled no chat of the session is left`, async (t) => {
     await using resources = new AsyncDisposableStack();
     const { storage } = await open(resources);

@@ -313,6 +313,16 @@ export type AgentStack = (resources: AsyncDisposableStack) => Promise<{
    * observed only by the process where the transition happened.
    */
   conversationStatusChanges?: ConversationStatusChangeSource;
+  /**
+   * Removes what the host keeps per conversation outside the framework
+   * (volumes, object-storage prefixes). Called once per delete with every
+   * member, after every sandbox is deleted and before any row goes; must
+   * resolve when the data is already gone. A rejection aborts the delete; a
+   * retry calls it again with the same ids.
+   */
+  conversationDataCleanup?: (
+    conversations: readonly ConversationId[],
+  ) => Promise<void>;
 }>;
 
 /** Defines infrastructure without acquiring it; each initialization opens its own scope. */
@@ -367,6 +377,9 @@ class RuntimeHost implements AsyncDisposable {
   readonly #storage: AgentStorage;
   readonly #declarations: AgentDeclarationRegistry;
   readonly #sandboxes: ConversationSandboxes;
+  readonly #conversationDataCleanup: Awaited<
+    ReturnType<AgentStack>
+  >['conversationDataCleanup'];
 
   constructor(
     root: AgentDeclaration,
@@ -428,6 +441,7 @@ class RuntimeHost implements AsyncDisposable {
         conversationStatus.recordActivity(thread, activity),
     });
     this.#storage = storage;
+    this.#conversationDataCleanup = options.conversationDataCleanup;
     this.#declarations = declarations;
     this.#store = storage.store;
     this.#queue = queue;
@@ -582,10 +596,12 @@ class RuntimeHost implements AsyncDisposable {
    * their sandboxes, queued turns, idle stops, mail, streams and chat rows.
    * The root is marked first, in its tree's admission, so from then on the
    * tree admits nothing and reads as absent; then the tree's turns are
-   * stopped, waiting at most 10 s for a running one; the rows go last, deepest first
-   * and the root last, in one admission for the tree. A delete cut short
-   * leaves the marked root, and calling this again finishes it. Any other
-   * chat, and one already deleted, rejects with ConversationNotFoundError.
+   * stopped, waiting at most 10 s for a running one; once the sandboxes are
+   * deleted, the stack's conversationDataCleanup gets every member; the rows
+   * go last, deepest first and the root last, in one admission for the tree.
+   * A delete cut short leaves the marked root, and calling this again
+   * finishes it. Any other chat, and one already deleted, rejects with
+   * ConversationNotFoundError.
    */
   async deleteSession(conversation: ConversationId): Promise<void> {
     const tree = { userId: conversation.userId, treeId: conversation.chatId };
@@ -615,6 +631,9 @@ class RuntimeHost implements AsyncDisposable {
       await this.#sandboxes.forget(declaration, member.conversation);
       await declaration.sandbox.environment.delete(member.conversation);
     }
+    await this.#conversationDataCleanup?.(
+      members.map(({ conversation }) => conversation),
+    );
     await this.#storage.admit(tree, async (scope) => {
       for (const { conversation: member } of members) {
         await scope.mailboxStore.forget(member);
