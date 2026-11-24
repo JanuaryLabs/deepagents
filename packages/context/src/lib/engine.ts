@@ -15,17 +15,10 @@ import pMemoize from 'p-memoize';
 
 import { type ChainSummary, summarizeChain } from './chain-summary.ts';
 import {
-  type EstimateResult,
-  type FragmentEstimate,
-  getModelsRegistry,
-  inputPricePerMillion,
-} from './estimate.ts';
-import {
   type ChatMessage,
   type ContextFragment,
   type FragmentData,
   assistant,
-  getFragmentData,
   isFragment,
   isFragmentObject,
   isMessageFragment,
@@ -45,11 +38,7 @@ import {
   isSyntheticReminderMessage,
   synthesizeReminderMessage,
 } from './fragments/reminders/index.ts';
-import type { Models } from './models.generated.ts';
-import {
-  type ContextRenderer,
-  XmlRenderer,
-} from './renderers/abstract.renderer.ts';
+import type { ContextRenderer } from './renderers/abstract.renderer.ts';
 import {
   FragmentLoaderResolver,
   type ValueResolver,
@@ -121,10 +110,6 @@ export interface ContextEngineOptions {
   metadata?: Record<string, unknown>;
   /** Custom resolver chain (defaults to async, generator, function, iterable) */
   resolvers?: ValueResolver[];
-}
-
-function estimateMessageContent(data: unknown): string {
-  return typeof data === 'string' ? data : JSON.stringify(data);
 }
 
 function isLanguageModelUsage(value: unknown): value is LanguageModelUsage {
@@ -383,12 +368,10 @@ interface ReminderSessionState {
  * Options for context inspection.
  */
 export interface InspectOptions {
-  /** Model ID for cost estimation (required) */
-  modelId: Models;
-  /** Renderer for estimation (required) */
+  /** Renders the `rendered` system prompt (required) */
   renderer: ContextRenderer;
   /**
-   * Sandbox forwarded to the resolver chain via estimate(). Optional —
+   * Sandbox forwarded to the resolver chain. Optional —
    * required only if fragments contain values that dispatch to resolvers
    * declaring `requiresSandbox`.
    */
@@ -402,8 +385,6 @@ export interface InspectOptions {
  * JSON-serializable snapshot for debugging.
  */
 export interface InspectResult {
-  /** Token usage and cost estimation */
-  estimate: EstimateResult;
   /** Rendered output using the provided renderer */
   rendered: string;
   /** Fragment structure breakdown */
@@ -1381,112 +1362,6 @@ export class ContextEngine {
   }
 
   /**
-   * Estimate token count and cost for the full context.
-   *
-   * Includes:
-   * - System prompt fragments (role, hints, etc.)
-   * - Persisted chat messages (from store)
-   * - Pending messages (not yet saved)
-   *
-   * @param modelId - Model ID (e.g., "openai:gpt-4o", "anthropic:claude-3-5-sonnet")
-   * @param options - Optional settings
-   * @returns Estimate result with token counts, costs, and per-fragment breakdown
-   */
-  public async estimate(
-    modelId: Models,
-    options: {
-      renderer?: ContextRenderer;
-      sandbox?: AgentSandbox;
-      signal?: AbortSignal;
-    } = {},
-  ): Promise<EstimateResult> {
-    const open = await this.#open();
-    await this.#loaderResolver.resolve(this.#fragments, {
-      sandbox: options.sandbox,
-      context: this,
-      signal: options.signal,
-    });
-
-    const renderer = options.renderer ?? new XmlRenderer();
-    const registry = getModelsRegistry();
-    await registry.load();
-
-    const model = registry.get(modelId);
-    if (!model) {
-      throw new Error(
-        `Model "${modelId}" not found. Call load() first or check model ID.`,
-      );
-    }
-
-    const inputPrice = inputPricePerMillion(model);
-    const tokenizer = registry.getTokenizer(modelId);
-    const fragmentEstimates: FragmentEstimate[] = [];
-
-    // 1. Estimate context fragments (system prompt), skip conditional reminders
-    for (const fragment of this.#renderableFragments) {
-      const rendered = renderer.render([fragment]);
-      const tokens = tokenizer.count(rendered);
-      const cost = (tokens / 1_000_000) * inputPrice;
-      fragmentEstimates.push({
-        id: fragment.id,
-        name: fragment.name,
-        tokens,
-        cost,
-      });
-    }
-
-    // 2. Estimate persisted messages from store
-    if (open.branch.headMessageId) {
-      const chain = await this.#store.getMessageChain(
-        open.branch.headMessageId,
-      );
-      for (const msg of chain) {
-        const content = estimateMessageContent(msg.data);
-        const tokens = tokenizer.count(content);
-        const cost = (tokens / 1_000_000) * inputPrice;
-        fragmentEstimates.push({
-          name: msg.name,
-          id: msg.id,
-          tokens,
-          cost,
-        });
-      }
-    }
-
-    // 3. Estimate pending messages (not yet saved)
-    for (const fragment of this.#pendingMessages) {
-      const content = estimateMessageContent(
-        fragment.codec ? fragment.codec.encode() : getFragmentData(fragment),
-      );
-      const tokens = tokenizer.count(content);
-      const cost = (tokens / 1_000_000) * inputPrice;
-      fragmentEstimates.push({
-        name: fragment.name,
-        id: fragment.id,
-        tokens,
-        cost,
-      });
-    }
-
-    // Calculate totals
-    const totalTokens = fragmentEstimates.reduce((sum, f) => sum + f.tokens, 0);
-    const totalCost = fragmentEstimates.reduce((sum, f) => sum + f.cost, 0);
-
-    return {
-      model: model.id,
-      provider: model.provider,
-      tokens: totalTokens,
-      cost: totalCost,
-      limits: {
-        context: model.limit.context,
-        output: model.limit.output,
-        exceedsContext: totalTokens > model.limit.context,
-      },
-      fragments: fragmentEstimates,
-    };
-  }
-
-  /**
    * Rewind to a specific message by ID.
    *
    * Creates a new branch from that message, preserving the original branch.
@@ -1787,13 +1662,12 @@ export class ContextEngine {
    * Inspect the full context state for debugging.
    * Returns a JSON-serializable object with context information.
    *
-   * @param options - Inspection options (modelId and renderer required)
-   * @returns Complete inspection data including estimates, rendered output, fragments, and graph
+   * @param options - Inspection options (renderer required)
+   * @returns Complete inspection data including rendered output, fragments, and graph
    *
    * @example
    * ```ts
    * const inspection = await context.inspect({
-   *   modelId: 'openai:gpt-4o',
    *   renderer: new XmlRenderer(),
    * });
    * console.log(JSON.stringify(inspection, null, 2));
@@ -1804,17 +1678,14 @@ export class ContextEngine {
    */
   public async inspect(options: InspectOptions): Promise<InspectResult> {
     const open = await this.#open();
-
-    const { renderer } = options;
-
-    const estimateResult = await this.estimate(options.modelId, {
-      renderer,
+    await this.#loaderResolver.resolve(this.#fragments, {
       sandbox: options.sandbox,
+      context: this,
       signal: options.signal,
     });
 
     // Render using provided renderer (exclude conditional reminders)
-    const rendered = renderer.render(this.#renderableFragments);
+    const rendered = options.renderer.render(this.#renderableFragments);
 
     // Get persisted messages from store
     const persistedMessages: MessageData[] = [];
@@ -1829,7 +1700,6 @@ export class ContextEngine {
     const graph = await this.#store.getGraph(this.#chatId);
 
     return {
-      estimate: estimateResult,
       rendered,
       fragments: {
         context: [...this.#fragments],

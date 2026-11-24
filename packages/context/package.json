@@ -74,7 +74,6 @@
     "ai": "^7.0.166",
     "dedent": "^1.7.2",
     "fast-glob": "^3.3.3",
-    "gpt-tokenizer": "^3.4.0",
     "just-bash": "^3.6.0",
     "nano-spawn": "^2.1.0",
     "p-memoize": "^8.0.0",

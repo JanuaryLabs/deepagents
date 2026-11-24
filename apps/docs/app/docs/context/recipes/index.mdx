@@ -99,41 +99,7 @@ const reportPrompt = (
 ).systemPrompt;
 ```
 
-### Pattern 3: Cost-Aware Processing
-
-Estimate costs before expensive operations:
-
-```typescript
-async function processWithBudget(
-  context: ContextEngine,
-  budget: number,
-): Promise<string> {
-  const estimate = await context.estimate('openai:gpt-4o');
-
-  if (estimate.cost > budget) {
-    // Fall back to cheaper model
-    const { systemPrompt, messages } = await context.resolve({
-      renderer: new ToonRenderer(), // More token-efficient
-    });
-
-    return generateText({
-      model: groq('gpt-oss-20b'), // Cheaper model
-      instructions: systemPrompt,
-      messages,
-    }).then((r) => r.text);
-  }
-
-  // Use premium model
-  const { systemPrompt, messages } = await context.resolve();
-  return generateText({
-    model: openai('gpt-4o'),
-    instructions: systemPrompt,
-    messages,
-  }).then((r) => r.text);
-}
-```
-
-### Pattern 4: Context Layering
+### Pattern 3: Context Layering
 
 Compose context from multiple sources:
 

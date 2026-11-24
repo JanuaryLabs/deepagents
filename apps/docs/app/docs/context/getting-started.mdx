@@ -152,20 +152,6 @@ console.log(messages);
 // ]
 ```
 
-## Estimating Costs
-
-Before making API calls, estimate token usage and costs:
-
-```typescript
-const estimate = await context.estimate('groq:llama-3.3-70b-versatile');
-
-console.log(`Tokens: ${estimate.tokens}`);
-console.log(`Cost: $${estimate.cost.toFixed(6)}`);
-console.log(`Exceeds limit: ${estimate.limits.exceedsContext}`);
-```
-
-The estimate uses real pricing information from [models.dev](https://models.dev) for 1000+ models.
-
 ## Choosing a Renderer
 
 By default, context renders to XML. You can switch formats:

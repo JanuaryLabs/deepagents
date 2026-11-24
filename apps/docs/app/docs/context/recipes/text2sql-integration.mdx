@@ -198,38 +198,6 @@ const sqlContext = createSqlContext([
 const { systemPrompt } = await sqlContext.resolve();
 ```
 
-## Cost-Aware Query Generation
-
-Estimate costs before complex schema contexts:
-
-```typescript
-async function generateSql(
-  question: string,
-  schemaContext: ContextEngine,
-): Promise<string> {
-  // Estimate cost
-  const estimate = await schemaContext.estimate('openai:gpt-4o');
-
-  console.log(
-    `Schema context: ${estimate.tokens} tokens, $${estimate.cost.toFixed(4)}`,
-  );
-
-  // If context is too large, use TOON for efficiency
-  const renderer =
-    estimate.tokens > 10000 ? new ToonRenderer() : new XmlRenderer();
-
-  const { systemPrompt } = await schemaContext.resolve({ renderer });
-
-  const response = await generateText({
-    model: groq('gpt-oss-20b'),
-    instructions: systemPrompt,
-    messages: [{ role: 'user', content: question }],
-  });
-
-  return response.text;
-}
-```
-
 ## Conversation-Aware SQL
 
 Maintain SQL conversation history for follow-up questions:

@@ -258,14 +258,6 @@ class ManagedChatSession {
       );
     }
 
-    // Check token count
-    const estimate = await this.context.estimate(
-      'groq:llama-3.3-70b-versatile',
-    );
-    if (estimate.limits.exceedsContext) {
-      throw new Error('Conversation too long. Please start a new session.');
-    }
-
     const response = await generateText({
       model: groq('gpt-oss-20b'),
       instructions: systemPrompt,
@@ -420,4 +412,3 @@ class MetadataSession {
 
 - [Storage](/docs/context/storage) - Storage implementation details
 - [Agent Integration](/docs/context/recipes/agent-integration) - Using context with agents
-- [Cost Estimation](/docs/context/cost-estimation) - Monitor context growth

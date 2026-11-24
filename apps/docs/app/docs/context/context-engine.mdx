@@ -330,13 +330,11 @@ Get a complete snapshot for debugging.
 import { XmlRenderer } from '@deepagents/context';
 
 const snapshot = await context.inspect({
-  modelId: 'openai:gpt-4o',
   renderer: new XmlRenderer(),
 });
 
 console.log(snapshot);
 // {
-//   estimate: { tokens: 156, cost: 0.00078, ... },
 //   rendered: '<role>You are helpful.</role>...',
 //   fragments: {
 //     context: [...],   // non-message fragments

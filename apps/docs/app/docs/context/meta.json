@@ -50,8 +50,6 @@
     "---Observability---",
     "telemetry",
     "tracing",
-    "---Cost Estimation---",
-    "cost-estimation",
     "---Recipes---",
     "recipes",
     "fragment-serialization"

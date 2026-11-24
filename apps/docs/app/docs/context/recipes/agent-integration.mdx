@@ -133,44 +133,6 @@ const claudeAgent = agent({
 });
 ```
 
-## Cost-Aware Agent Execution
-
-Check costs before executing expensive agents:
-
-```typescript
-import { generate } from '@deepagents/agent';
-
-async function executeWithBudget(
-  agentDef: any,
-  prompt: string,
-  context: any,
-  maxCost: number,
-) {
-  const contextEngine = new ContextEngine({ store }).set(
-    role('You are helpful.'),
-    hint('Be thorough.'),
-  );
-
-  const estimate = await contextEngine.estimate('openai:gpt-4o');
-
-  if (estimate.cost > maxCost) {
-    console.warn(
-      `Estimated cost $${estimate.cost.toFixed(4)} exceeds budget $${maxCost}. Using cheaper model.`,
-    );
-
-    // Switch to cheaper model
-    const cheaperAgent = agent({
-      ...agentDef,
-      model: groq('gpt-oss-20b'),
-    });
-
-    return generate(cheaperAgent, prompt, context);
-  }
-
-  return generate(agentDef, prompt, context);
-}
-```
-
 ## Multi-Agent with Shared Context
 
 Share domain context across multiple agents:

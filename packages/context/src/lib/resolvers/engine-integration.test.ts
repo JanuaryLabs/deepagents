@@ -1,5 +1,3 @@
-import { Msw } from '@zukhruf/testing/msw';
-import { HttpResponse, http } from 'msw';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -20,32 +18,6 @@ const newEngine = () =>
     chatId: 'resolver-test',
     userId: 'user-1',
   });
-
-const modelsDevResponse = {
-  openai: {
-    id: 'openai',
-    name: 'OpenAI',
-    models: {
-      'gpt-4o': {
-        id: 'gpt-4o',
-        name: 'GPT-4o',
-        family: 'gpt-4o',
-        cost: { input: 2.5, output: 10 },
-        limit: { context: 128_000, output: 16_384 },
-      },
-    },
-  },
-};
-
-const msw = new Msw();
-
-function stubModelsDev() {
-  return msw.intercept(
-    http.get('https://models.dev/api.json', () =>
-      HttpResponse.json(modelsDevResponse),
-    ),
-  );
-}
 
 describe('engine + resolver chain integration', () => {
   it('materializes async loaders in resolve()', async () => {
@@ -227,48 +199,19 @@ describe('engine + resolver chain integration', () => {
     assert.ok(systemPrompt.includes('Use UTC timestamps.'));
   });
 
-  it('estimate() materializes loaders before counting tokens', async () => {
-    using _modelsDev = stubModelsDev();
-    const engine = newEngine();
-    const sandbox = await buildSandbox();
-    const longString = 'x'.repeat(2000);
-    engine.set(fragment('big', async () => longString));
-
-    const result = await engine.estimate('openai:gpt-4o', { sandbox });
-
-    // The 2000-char string materialized into the system prompt should bump
-    // the input token count well above what an empty context produces.
-    assert.ok(
-      result.tokens > 100,
-      `expected materialized tokens, got ${result.tokens}`,
-    );
-  });
-
-  it('estimate() invokes a loader exactly once (caching)', async (t) => {
-    using _modelsDev = stubModelsDev();
-    const engine = newEngine();
-    const sandbox = await buildSandbox();
-    const loader = t.mock.fn(async () => 'estimate-content');
-    engine.set(fragment('once', loader));
-
-    await engine.estimate('openai:gpt-4o', { sandbox });
-    await engine.estimate('openai:gpt-4o', { sandbox });
-
-    assert.strictEqual(loader.mock.callCount(), 1);
-  });
-
   it('inspect() materializes loaders before rendering', async () => {
-    using _modelsDev = stubModelsDev();
     const engine = newEngine();
     const sandbox = await buildSandbox();
     engine.set(fragment('readme', async () => 'inspected-content'));
 
     const result = await engine.inspect({
-      modelId: 'openai:gpt-4o',
       renderer: new XmlRenderer(),
       sandbox,
     });
 
-    assert.ok(result.rendered.includes('inspected-content'));
+    assert.strictEqual(
+      result.rendered,
+      new XmlRenderer().render([fragment('readme', 'inspected-content')]),
+    );
   });
 });

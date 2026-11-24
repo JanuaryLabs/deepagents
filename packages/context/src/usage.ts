@@ -100,12 +100,7 @@ async function demonstrateContextEngine() {
   });
   console.log('\nSecond turn messages:', result2.messages.length);
 
-  // Estimate cost
-  // const estimate = await context.estimate(
-  //   'groq:moonshotai/kimi-k2-instruct-0905',
-  // );
   const inspection = await context.inspect({
-    modelId: 'groq:moonshotai/kimi-k2-instruct-0905',
     renderer: new XmlRenderer(),
     sandbox: await createAgentSandbox(),
   });

@@ -297,11 +297,10 @@ const graph = await store.getGraph(context.chatId);
 // }
 ```
 
-Use `inspect()` for a complete snapshot including token estimates:
+Use `inspect()` for a complete snapshot:
 
 ```typescript
 const snapshot = await context.inspect({
-  modelId: 'openai:gpt-4o',
   renderer: new XmlRenderer(),
 });
 ```

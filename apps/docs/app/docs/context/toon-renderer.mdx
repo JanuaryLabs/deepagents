@@ -290,22 +290,9 @@ const context = new ContextEngine({ store: new InMemoryContextStore() }).set(
 const { systemPrompt } = await context.resolve({
   renderer: new ToonRenderer(),
 });
-
-// Estimate savings
-const xmlEstimate = await context.estimate('openai:gpt-4o');
-const toonEstimate = await context.estimate('openai:gpt-4o', {
-  renderer: new ToonRenderer(),
-});
-
-console.log(`XML tokens: ${xmlEstimate.tokens}`);
-console.log(`TOON tokens: ${toonEstimate.tokens}`);
-console.log(
-  `Savings: ${((1 - toonEstimate.tokens / xmlEstimate.tokens) * 100).toFixed(1)}%`,
-);
 ```
 
 ## Next Steps
 
 - [Renderers Overview](/docs/context/renderers-overview) - Compare all renderers
-- [Cost Estimation](/docs/context/cost-estimation) - Measure token savings
 - [XML Renderer](/docs/context/xml-renderer) - Standard XML format

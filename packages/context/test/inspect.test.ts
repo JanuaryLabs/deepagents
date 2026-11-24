@@ -1,5 +1,3 @@
-import { Msw } from '@zukhruf/testing/msw';
-import { HttpResponse, http } from 'msw';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import { z } from 'zod';
@@ -30,39 +28,11 @@ const persistedUserMessageSchema = z.object({
 /** The InspectResult fields the JSON round-trip test reads back. */
 const inspectResultJsonSchema = z.object({
   rendered: z.string(),
-  estimate: z.looseObject({ model: z.string() }),
   meta: z.looseObject({ chatId: z.string() }),
 });
 
-const modelsDevResponse = {
-  openai: {
-    id: 'openai',
-    name: 'OpenAI',
-    models: {
-      'gpt-4o': {
-        id: 'gpt-4o',
-        name: 'GPT-4o',
-        family: 'gpt-4o',
-        cost: { input: 2.5, output: 10 },
-        limit: { context: 128_000, output: 16_384 },
-      },
-    },
-  },
-};
-
-const msw = new Msw();
-
-function stubModelsDev() {
-  return msw.intercept(
-    http.get('https://models.dev/api.json', () =>
-      HttpResponse.json(modelsDevResponse),
-    ),
-  );
-}
-
 describe('ContextEngine.inspect()', () => {
   it('should return all expected fields with empty context', async () => {
-    using _modelsDev = stubModelsDev();
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       userId: 'test-user',
@@ -71,13 +41,11 @@ describe('ContextEngine.inspect()', () => {
     });
 
     const result = await engine.inspect({
-      modelId: 'openai:gpt-4o',
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
 
     // Verify structure
-    assert.ok(result.estimate, 'should have estimate');
     assert.strictEqual(
       typeof result.rendered,
       'string',
@@ -99,7 +67,6 @@ describe('ContextEngine.inspect()', () => {
   });
 
   it('should include context fragments in output', async () => {
-    using _modelsDev = stubModelsDev();
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       userId: 'test-user',
@@ -111,7 +78,6 @@ describe('ContextEngine.inspect()', () => {
     engine.set(hint('Be concise.'));
 
     const result = await engine.inspect({
-      modelId: 'openai:gpt-4o',
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
@@ -131,7 +97,6 @@ describe('ContextEngine.inspect()', () => {
   });
 
   it('should include pending messages', async () => {
-    using _modelsDev = stubModelsDev();
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       userId: 'test-user',
@@ -143,7 +108,6 @@ describe('ContextEngine.inspect()', () => {
     engine.set(assistantText('Hi there!'));
 
     const result = await engine.inspect({
-      modelId: 'openai:gpt-4o',
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
@@ -158,7 +122,6 @@ describe('ContextEngine.inspect()', () => {
   });
 
   it('should include persisted messages after save', async () => {
-    using _modelsDev = stubModelsDev();
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       userId: 'test-user',
@@ -171,7 +134,6 @@ describe('ContextEngine.inspect()', () => {
     await engine.save();
 
     const result = await engine.inspect({
-      modelId: 'openai:gpt-4o',
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
@@ -186,7 +148,6 @@ describe('ContextEngine.inspect()', () => {
   });
 
   it('should keep reminder text visible in inspect persisted data and graph preview', async () => {
-    using _modelsDev = stubModelsDev();
     const partMode = true;
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
@@ -206,7 +167,6 @@ describe('ContextEngine.inspect()', () => {
     await engine.save();
 
     const result = await engine.inspect({
-      modelId: 'openai:gpt-4o',
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
@@ -238,36 +198,7 @@ describe('ContextEngine.inspect()', () => {
     );
   });
 
-  it('should provide accurate token estimates', async () => {
-    using _modelsDev = stubModelsDev();
-    const store = new InMemoryContextStore();
-    const engine = new ContextEngine({
-      userId: 'test-user',
-      store,
-      chatId: 'test-chat-5',
-    });
-
-    engine.set(role('You are a helpful assistant.'));
-
-    const result = await engine.inspect({
-      modelId: 'openai:gpt-4o',
-      renderer: new XmlRenderer(),
-      sandbox: await buildSandbox(),
-    });
-
-    // Verify estimate structure
-    assert.ok(result.estimate.tokens > 0, 'should have positive token count');
-    assert.ok(result.estimate.cost >= 0, 'should have non-negative cost');
-    assert.strictEqual(result.estimate.model, 'gpt-4o');
-    assert.strictEqual(result.estimate.provider, 'openai');
-
-    // Verify fragment-level estimates
-    assert.ok(result.estimate.fragments.length > 0);
-    assert.ok(result.estimate.fragments[0].tokens > 0);
-  });
-
   it('should include graph data', async () => {
-    using _modelsDev = stubModelsDev();
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       userId: 'test-user',
@@ -280,7 +211,6 @@ describe('ContextEngine.inspect()', () => {
     await engine.save();
 
     const result = await engine.inspect({
-      modelId: 'openai:gpt-4o',
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
@@ -296,26 +226,7 @@ describe('ContextEngine.inspect()', () => {
     assert.ok(activeBranch.headMessageId, 'active branch should have head');
   });
 
-  it('should throw on invalid model ID', async () => {
-    using _modelsDev = stubModelsDev();
-    const store = new InMemoryContextStore();
-    const engine = new ContextEngine({
-      userId: 'test-user',
-      store,
-      chatId: 'test-chat-8',
-    });
-
-    await assert.rejects(async () => {
-      await engine.inspect({
-        modelId: 'invalid:nonexistent-model',
-        renderer: new XmlRenderer(),
-        sandbox: await buildSandbox(),
-      });
-    }, /not found/i);
-  });
-
   it('should be JSON-serializable', async () => {
-    using _modelsDev = stubModelsDev();
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       userId: 'test-user',
@@ -328,7 +239,6 @@ describe('ContextEngine.inspect()', () => {
     await engine.save();
 
     const result = await engine.inspect({
-      modelId: 'openai:gpt-4o',
       renderer: new XmlRenderer(),
       sandbox: await buildSandbox(),
     });
@@ -339,7 +249,6 @@ describe('ContextEngine.inspect()', () => {
 
     // Verify round-trip
     assert.strictEqual(parsed.meta.chatId, 'test-chat-9');
-    assert.strictEqual(parsed.estimate.model, 'gpt-4o');
     assert.ok(parsed.rendered.includes('helpful'));
   });
 });
