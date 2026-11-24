@@ -727,13 +727,16 @@ export class SqliteFs implements IFileSystem {
       throw new Error(`ENOENT: no such file or directory: ${src}`);
     }
 
+    if (srcPrefixed === destPrefixed) {
+      return;
+    }
+
     transaction(
       this.#db,
       () => {
         this.#ensureParentExists(destPrefixed);
 
         if (srcEntry.type === 'directory') {
-          // Reverse order: children before parents for delete
           const allEntries = z
             .array(entryRow)
             .parse(
@@ -741,15 +744,22 @@ export class SqliteFs implements IFileSystem {
                 .all`SELECT * FROM fs_entries WHERE path = ${srcPrefixed} OR path LIKE ${srcPrefixed} || '/%' ORDER BY path DESC`,
             );
 
+          // Chunks cascade via FK
+          this.#sql
+            .run`DELETE FROM fs_entries WHERE path = ${destPrefixed} OR path LIKE ${destPrefixed} || '/%'`;
+
           for (const entry of allEntries.toReversed()) {
             const relativePath = path.posix.relative(srcPrefixed, entry.path);
             const newPath = path.posix.join(destPrefixed, relativePath);
 
             this.#sql
               .run`INSERT INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
-             VALUES (${newPath}, ${entry.type}, ${entry.mode}, ${entry.size}, ${Date.now()}, ${entry.symlinkTarget})`;
+             VALUES (${newPath}, ${entry.type}, ${entry.mode}, ${entry.size}, ${Date.now()}, ${entry.symlinkTarget})
+             ON CONFLICT (path) DO UPDATE SET type = excluded.type, mode = excluded.mode, size = excluded.size, mtime = excluded.mtime, symlinkTarget = excluded.symlinkTarget`;
 
             if (entry.type === 'file') {
+              this.#sql.run`DELETE FROM fs_chunks WHERE path = ${newPath}`;
+
               const chunks = this.#chunks(entry.path);
 
               for (const chunk of chunks) {
@@ -765,9 +775,12 @@ export class SqliteFs implements IFileSystem {
         } else {
           this.#sql
             .run`INSERT INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
-           VALUES (${destPrefixed}, ${srcEntry.type}, ${srcEntry.mode}, ${srcEntry.size}, ${Date.now()}, ${srcEntry.symlinkTarget})`;
+           VALUES (${destPrefixed}, ${srcEntry.type}, ${srcEntry.mode}, ${srcEntry.size}, ${Date.now()}, ${srcEntry.symlinkTarget})
+           ON CONFLICT (path) DO UPDATE SET type = excluded.type, mode = excluded.mode, size = excluded.size, mtime = excluded.mtime, symlinkTarget = excluded.symlinkTarget`;
 
           if (srcEntry.type === 'file') {
+            this.#sql.run`DELETE FROM fs_chunks WHERE path = ${destPrefixed}`;
+
             const chunks = this.#chunks(srcPrefixed);
 
             for (const chunk of chunks) {

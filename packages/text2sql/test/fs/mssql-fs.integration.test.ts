@@ -143,51 +143,6 @@ describe('MssqlFs', () => {
     });
   });
 
-  describe('copy and move operations', () => {
-    it('should overwrite existing file on move', async () => {
-      await using container = await testSqlServer.database();
-
-      const fs = await MssqlFs.create({
-        pool: container.connectionString,
-        root: '/',
-      });
-      try {
-        await fs.writeFile('/src.txt', 'new content');
-        await fs.writeFile('/dest.txt', 'old content');
-        await fs.mv('/src.txt', '/dest.txt');
-
-        assert.strictEqual(await fs.exists('/src.txt'), false);
-        assert.strictEqual(await fs.readFile('/dest.txt'), 'new content');
-      } finally {
-        await fs.close();
-      }
-    });
-
-    it('should overwrite existing directory on move', async () => {
-      await using container = await testSqlServer.database();
-
-      const fs = await MssqlFs.create({
-        pool: container.connectionString,
-        root: '/',
-      });
-      try {
-        await fs.mkdir('/src');
-        await fs.writeFile('/src/a.txt', 'alpha');
-
-        await fs.mkdir('/dest');
-        await fs.writeFile('/dest/old.txt', 'stale');
-
-        await fs.mv('/src', '/dest');
-
-        assert.strictEqual(await fs.exists('/src'), false);
-        assert.strictEqual(await fs.readFile('/dest/a.txt'), 'alpha');
-        assert.strictEqual(await fs.exists('/dest/old.txt'), false);
-      } finally {
-        await fs.close();
-      }
-    });
-  });
-
   describe('root option', () => {
     it('should prefix paths with root', async () => {
       await using container = await testSqlServer.database();

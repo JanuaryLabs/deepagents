@@ -346,6 +346,55 @@ void describe.each(fsCases, (fsCase) =>
             'deep',
           );
         });
+
+        it('should overwrite existing file on move', async () => {
+          await using opened = await fsCase.open();
+          const { fs } = opened;
+          await fs.writeFile('/src.txt', 'new content');
+          await fs.writeFile('/dest.txt', 'old content');
+          await fs.mv('/src.txt', '/dest.txt');
+
+          assert.strictEqual(await fs.exists('/src.txt'), false);
+          assert.strictEqual(await fs.readFile('/dest.txt'), 'new content');
+        });
+
+        it('should overwrite existing directory on move', async () => {
+          await using opened = await fsCase.open();
+          const { fs } = opened;
+          await fs.mkdir('/src');
+          await fs.writeFile('/src/a.txt', 'alpha');
+
+          await fs.mkdir('/dest');
+          await fs.writeFile('/dest/old.txt', 'stale');
+
+          await fs.mv('/src', '/dest');
+
+          assert.strictEqual(await fs.exists('/src'), false);
+          assert.strictEqual(await fs.readFile('/dest/a.txt'), 'alpha');
+          assert.strictEqual(await fs.exists('/dest/old.txt'), false);
+        });
+
+        it('should keep a file moved onto itself', async () => {
+          await using opened = await fsCase.open();
+          const { fs } = opened;
+          await fs.writeFile('/same.txt', 'kept');
+
+          await fs.mv('/same.txt', '/same.txt');
+
+          assert.strictEqual(await fs.readFile('/same.txt'), 'kept');
+        });
+
+        it('should keep a directory and its children moved onto itself', async () => {
+          await using opened = await fsCase.open();
+          const { fs } = opened;
+          await fs.mkdir('/same');
+          await fs.writeFile('/same/child.txt', 'kept');
+
+          await fs.mv('/same/', '/same');
+
+          assert.strictEqual((await fs.stat('/same')).isDirectory, true);
+          assert.strictEqual(await fs.readFile('/same/child.txt'), 'kept');
+        });
       });
 
       describe('stat operations', () => {

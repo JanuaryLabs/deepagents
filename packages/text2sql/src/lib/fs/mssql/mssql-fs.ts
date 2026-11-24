@@ -960,6 +960,10 @@ export class MssqlFs implements IFileSystem {
       throw new Error(`ENOENT: no such file or directory: ${src}`);
     }
 
+    if (srcPrefixed === destPrefixed) {
+      return;
+    }
+
     await this.#useTransaction(async (transaction) => {
       await this.#ensureParentExists(destPrefixed, transaction);
 
