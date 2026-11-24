@@ -150,6 +150,21 @@ export class PostgresMailboxStore extends MailboxStore {
     });
   }
 
+  override async forget(recipient: ConversationId): Promise<void> {
+    await this.#forRecipient(recipient, async (client) => {
+      for (const table of [
+        'zukhruf_mailbox_items',
+        'zukhruf_mailbox_activity',
+      ]) {
+        await client.query(
+          `DELETE FROM ${this.#database.table(table)}
+            WHERE recipient_chat_id = $1 AND recipient_user_id = $2`,
+          [recipient.chatId, recipient.userId],
+        );
+      }
+    });
+  }
+
   override hasPending(recipient: ConversationId): Promise<boolean> {
     return this.#hasPending(this.#database, recipient);
   }

@@ -40,9 +40,13 @@ export class AgentTurnId {
     return AgentTurnId.fromRequest(conversation, crypto.randomUUID());
   }
 
+  /** What every turn id of `conversation` starts with, and no other conversation's does. */
+  static prefixOf(conversation: ConversationId): string {
+    return `${prefix}:${conversationNamespace(conversation)}:`;
+  }
+
   static assertOwner(conversation: ConversationId, streamId: string): void {
-    const expectedPrefix = `${prefix}:${conversationNamespace(conversation)}:`;
-    if (!streamId.startsWith(expectedPrefix)) {
+    if (!streamId.startsWith(AgentTurnId.prefixOf(conversation))) {
       throw new TurnNotFoundError(streamId);
     }
   }

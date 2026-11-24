@@ -15,6 +15,7 @@ import type {
 } from '../storage/agent-storage.ts';
 import { AgentDirectory } from './agent-directory.ts';
 import { AgentThread } from './agent-thread.ts';
+import { ConversationNotFoundError } from './conversation-not-found-error.ts';
 
 /**
  * One admission to an agent tree: the storage parts bound to its unit, and
@@ -169,8 +170,13 @@ export class AgentResidency {
       treeId: thread?.treeId ?? conversation.chatId,
     };
     const pushed = new Map<string, ConversationId>();
-    const result = await this.#storage.admit(tree, (scope) =>
-      work(
+    const result = await this.#storage.admit(tree, async (scope) => {
+      // A tree whose delete has begun reads as absent, so nothing enters it
+      // while its delete runs, on any worker.
+      if (await AgentResidency.#deleting(scope, tree)) {
+        throw new ConversationNotFoundError(conversation.chatId);
+      }
+      return work(
         new Admission({
           scope,
           tree,
@@ -179,9 +185,23 @@ export class AgentResidency {
           pushed: ({ chatId, userId }) =>
             pushed.set(JSON.stringify([chatId, userId]), { chatId, userId }),
         }),
-      ),
-    );
+      );
+    });
     for (const target of pushed.values()) await this.#publish(target);
     return result;
+  }
+
+  static async #deleting(
+    scope: AdmissionScope,
+    tree: AgentTree,
+  ): Promise<boolean> {
+    const root = await scope.store.getChat(tree.treeId);
+    if (root?.userId !== tree.userId) return false;
+    return (
+      AgentThread.fromMetadata(
+        { chatId: root.id, userId: root.userId },
+        root.metadata,
+      )?.deletingAt !== undefined
+    );
   }
 }

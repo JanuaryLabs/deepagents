@@ -67,6 +67,17 @@ export class ControlledTurnQueue extends TurnQueue {
 
   override async resumeParked(): Promise<void> {}
 
+  override async forget(
+    conversation: Pick<TurnRef, 'chatId' | 'userId'>,
+  ): Promise<void> {
+    const remaining = this.turns.filter(
+      (turn) =>
+        turn.chatId !== conversation.chatId ||
+        turn.userId !== conversation.userId,
+    );
+    this.turns.splice(0, this.turns.length, ...remaining);
+  }
+
   async runNext(): Promise<void> {
     const turn = this.turns.shift();
     assert.ok(turn, 'expected a queued turn');

@@ -122,6 +122,7 @@ const turnBodySchema = z.strictObject({
 export interface HttpRuntime extends Pick<
   AgentHost,
   | 'createSession'
+  | 'deleteSession'
   | 'enqueue'
   | 'info'
   | 'listHistory'
@@ -367,8 +368,26 @@ export function http(
       return accepted(context, sessionId, turn.id);
     },
   );
+  // No requireSession: a session whose delete was cut short reads as absent,
+  // and deleting it again finishes the delete.
+  app.delete(
+    SESSION_ROUTE_PATH,
+    validate((payload) => ({
+      sessionId: {
+        select: payload.params.sessionId,
+        against: sessionIdSchema,
+      },
+    })),
+    async (context) => {
+      await runtime.deleteSession({
+        chatId: context.var.input.sessionId,
+        userId: context.get('userId'),
+      });
+      return context.body(null, 204, NO_STORE);
+    },
+  );
   app.all(SESSION_ROUTE_PATH, (context) =>
-    methodNotAllowed(context, 'GET, POST'),
+    methodNotAllowed(context, 'GET, POST, DELETE'),
   );
 
   app.get(

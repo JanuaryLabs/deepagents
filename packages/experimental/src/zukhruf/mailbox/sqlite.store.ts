@@ -118,6 +118,26 @@ export class SqliteMailboxStore extends MailboxStore implements Disposable {
     );
   }
 
+  override async forget(recipient: ConversationId): Promise<void> {
+    transaction(
+      this.#database,
+      () => {
+        for (const table of [
+          'zukhruf_mailbox_items',
+          'zukhruf_mailbox_activity',
+        ]) {
+          this.#database
+            .prepare(
+              `DELETE FROM ${table}
+              WHERE recipient_chat_id = ? AND recipient_user_id = ?`,
+            )
+            .run(recipient.chatId, recipient.userId);
+        }
+      },
+      { mode: 'immediate' },
+    );
+  }
+
   override async hasPending(recipient: ConversationId): Promise<boolean> {
     return this.#hasPending(recipient);
   }

@@ -124,6 +124,14 @@ export class TurnOutbox {
       .run(streamId);
   }
 
+  removeConversation(conversation: Conversation): void {
+    this.#database
+      .prepare(
+        'DELETE FROM zukhruf_turn_outbox WHERE chat_id = ? AND user_id = ?',
+      )
+      .run(conversation.chatId, conversation.userId);
+  }
+
   #outboxed(row: unknown): OutboxedTurn | undefined {
     if (row === undefined) return undefined;
     const { jobId, turn } = outboxRowSchema.parse(row);
@@ -259,5 +267,14 @@ export class OutboxTurnQueue extends TurnQueue {
 
   resumeParked(chatId: string): Promise<void> {
     return this.#queue.resumeParked(chatId);
+  }
+
+  forget(conversation: Conversation): Promise<void> {
+    return this.#relay.between(async () => {
+      await this.#gate.call(async () =>
+        this.#outbox.removeConversation(conversation),
+      );
+      await this.#queue.forget(conversation);
+    });
   }
 }

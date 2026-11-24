@@ -32,4 +32,8 @@ export class UnusedTurnQueue extends TurnQueue {
   override async resumeParked(): Promise<void> {
     throw unusedQueue();
   }
+
+  override async forget(): Promise<void> {
+    throw unusedQueue();
+  }
 }

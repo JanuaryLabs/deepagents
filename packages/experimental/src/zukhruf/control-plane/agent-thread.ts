@@ -10,6 +10,8 @@ export interface AgentThreadOptions {
   parentChatId: string | null;
   declarationName: string;
   lastTurnId?: string;
+  /** When a delete of this root's tree began; set only on a root. */
+  deletingAt?: number;
 }
 
 /** Durable identity and persisted metadata for one agent instance. */
@@ -20,6 +22,12 @@ export class AgentThread {
   readonly parentChatId: string | null;
   readonly declarationName: string;
   readonly lastTurnId?: string;
+  /**
+   * When a delete of this root's tree began. The tree then reads as absent
+   * and admits nothing, while its rows stay as the anchor a retried delete
+   * finishes from.
+   */
+  readonly deletingAt?: number;
 
   constructor(options: AgentThreadOptions) {
     AgentThread.#assertTopology(options);
@@ -32,6 +40,7 @@ export class AgentThread {
     this.parentChatId = options.parentChatId;
     this.declarationName = options.declarationName;
     this.lastTurnId = options.lastTurnId;
+    this.deletingAt = options.deletingAt;
   }
 
   static root(
@@ -71,12 +80,14 @@ export class AgentThread {
       return undefined;
     }
 
-    const { path, parentChatId, declarationName, lastTurnId } = zukhruf;
+    const { path, parentChatId, declarationName, lastTurnId, deletingAt } =
+      zukhruf;
     if (
       typeof path !== 'string' ||
       (parentChatId !== null && typeof parentChatId !== 'string') ||
       typeof declarationName !== 'string' ||
-      (lastTurnId !== undefined && typeof lastTurnId !== 'string')
+      (lastTurnId !== undefined && typeof lastTurnId !== 'string') ||
+      (deletingAt !== undefined && typeof deletingAt !== 'number')
     ) {
       return undefined;
     }
@@ -97,6 +108,7 @@ export class AgentThread {
         parentChatId,
         declarationName,
         ...(lastTurnId === undefined ? {} : { lastTurnId }),
+        ...(deletingAt === undefined ? {} : { deletingAt }),
       });
     } catch {
       return undefined;
@@ -104,14 +116,24 @@ export class AgentThread {
   }
 
   withLatestTurn(lastTurnId: string): AgentThread {
-    return new AgentThread({
+    return new AgentThread({ ...this.#options(), lastTurnId });
+  }
+
+  /** This root, marked as being deleted since `deletingAt`. */
+  deleting(deletingAt: number): AgentThread {
+    return new AgentThread({ ...this.#options(), deletingAt });
+  }
+
+  #options(): AgentThreadOptions {
+    return {
       conversation: this.conversation,
       treeId: this.treeId,
       path: this.path,
       parentChatId: this.parentChatId,
       declarationName: this.declarationName,
-      lastTurnId,
-    });
+      ...(this.lastTurnId === undefined ? {} : { lastTurnId: this.lastTurnId }),
+      ...(this.deletingAt === undefined ? {} : { deletingAt: this.deletingAt }),
+    };
   }
 
   toMetadata(
@@ -129,6 +151,9 @@ export class AgentThread {
         ...(this.lastTurnId === undefined
           ? {}
           : { lastTurnId: this.lastTurnId }),
+        ...(this.deletingAt === undefined
+          ? {}
+          : { deletingAt: this.deletingAt }),
       },
     };
   }
@@ -142,6 +167,9 @@ export class AgentThread {
         throw new Error('root agent thread cannot have a parent');
       }
       return;
+    }
+    if (options.deletingAt !== undefined) {
+      throw new Error('only a root agent thread is deleted');
     }
     if (options.parentChatId === null) {
       throw new Error('child agent thread requires a parent');

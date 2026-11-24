@@ -85,6 +85,9 @@ function createRuntime(overrides: Partial<TestRuntime> = {}) {
       throw new Error('plugin is not installed');
     },
     async createSession() {},
+    async deleteSession() {
+      throw new Error('this test never deletes a session');
+    },
     async enqueue() {
       return {
         id: 'internal-turn-id',

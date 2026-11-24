@@ -202,6 +202,10 @@ describe('zukhruf runtime mailbox delivery', () => {
       override resumeParked(chatId: string) {
         return this.#inner.resumeParked(chatId);
       }
+
+      override forget(conversation: Pick<TurnRef, 'chatId' | 'userId'>) {
+        return this.#inner.forget(conversation);
+      }
     }
     await using h = await runtimeHarness(model, {
       turnQueue: (queue, mailboxStore) =>

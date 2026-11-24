@@ -28,11 +28,7 @@ export class ConversationSandboxes implements AsyncDisposable {
     declaration: AgentDeclaration,
     context: SandboxContext,
   ): Promise<ZukhrufSandbox> {
-    const key = JSON.stringify([
-      declaration.name,
-      context.chatId,
-      context.userId,
-    ]);
+    const key = ConversationSandboxes.#key(declaration, context);
     const held = this.#held.get(key);
     if (held === undefined)
       return this.#hold(key, declaration.sandbox.open(context));
@@ -45,6 +41,31 @@ export class ConversationSandboxes implements AsyncDisposable {
       this.#checks.set(held, check);
     }
     return check();
+  }
+
+  /**
+   * Closes the handle this process holds for the chat, as deleting the chat
+   * does, once a check in flight settles: a check that opened the chat again
+   * holds the handle to close.
+   */
+  async forget(
+    declaration: AgentDeclaration,
+    context: SandboxContext,
+  ): Promise<void> {
+    const key = ConversationSandboxes.#key(declaration, context);
+    const held = this.#held.get(key);
+    if (held === undefined) return;
+    await this.#checks
+      .get(held)?.()
+      .catch(() => undefined);
+    const current = this.#held.get(key);
+    this.#held.delete(key);
+    const handle = await current?.().catch(() => undefined);
+    await handle?.sandbox.close();
+  }
+
+  static #key(declaration: AgentDeclaration, context: SandboxContext): string {
+    return JSON.stringify([declaration.name, context.chatId, context.userId]);
   }
 
   // A failed acquisition is forgotten, so the next turn tries again.

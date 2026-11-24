@@ -59,6 +59,23 @@ export class AgentDirectory {
     return thread;
   }
 
+  /** Marks the root as being deleted since `deletingAt`, keeping an earlier mark. */
+  async markDeleting(root: ConversationId, deletingAt: number): Promise<void> {
+    await this.#store.updateChat(root.chatId, (chat) => {
+      assertConversationOwner(root, chat.userId);
+      const thread = this.#threadFromMetadata(root, chat.metadata);
+      if (!thread?.path.isRoot) {
+        throw new Error(
+          `AgentDirectory.markDeleting: chat "${root.chatId}" is not a root agent`,
+        );
+      }
+      if (thread.deletingAt !== undefined) return undefined;
+      return {
+        metadata: thread.deleting(deletingAt).toMetadata(chat.metadata),
+      };
+    });
+  }
+
   async recordLatestTurn(
     conversation: ConversationId,
     streamId: string,

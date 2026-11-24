@@ -144,6 +144,15 @@ export abstract class TurnQueue {
   ): Promise<AsyncDisposable>;
 
   abstract resumeParked(chatId: string): Promise<void>;
+
+  /**
+   * Removes every job of the conversation that is not running, parked and
+   * dead-lettered ones included, as deleting its chat does. A running job
+   * keeps its FIFO key until its handler exits.
+   */
+  abstract forget(
+    conversation: Pick<TurnRef, 'chatId' | 'userId'>,
+  ): Promise<void>;
 }
 
 /** The part of the queue that writes and reads inside a caller's transaction. */

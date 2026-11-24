@@ -34,10 +34,13 @@ export abstract class MailboxStore {
 
   /** Draining is consumption: removes and returns all pending mail in FIFO order. */
   abstract drain(recipient: ConversationId): Promise<InterAgentCommunication[]>;
+
+  /** Removes the recipient's pending mail and its turn activity, as deleting its chat does. */
+  abstract forget(recipient: ConversationId): Promise<void>;
 }
 
 /** The part of the mailbox that writes inside a caller's transaction. */
 export type TransactionalMailboxStore = Pick<
   MailboxStore,
-  'enqueue' | 'beginTurn' | 'hasPendingTriggerTurn'
+  'enqueue' | 'beginTurn' | 'hasPendingTriggerTurn' | 'forget'
 >;

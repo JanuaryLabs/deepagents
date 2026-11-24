@@ -11,6 +11,7 @@ import {
 import type { AgentDeclaration, ZukhrufSandbox } from '../agent.ts';
 import { Team } from '../collaboration/team.ts';
 import { AgentControlPlane } from '../control-plane/agent-control-plane.ts';
+import type { AgentDeclarationRegistry } from '../control-plane/agent-declaration-registry.ts';
 import { AgentDirectory } from '../control-plane/agent-directory.ts';
 import { AgentResidency } from '../control-plane/agent-residency.ts';
 import { AgentStatusProjector } from '../control-plane/agent-status-projector.ts';
@@ -358,6 +359,9 @@ class RuntimeHost implements AsyncDisposable {
   readonly #plugins: PluginManager;
   readonly #pluginHost: AgentPluginHost;
   readonly #idleStop: SandboxIdleStop;
+  readonly #storage: AgentStorage;
+  readonly #declarations: AgentDeclarationRegistry;
+  readonly #sandboxes: ConversationSandboxes;
 
   constructor(
     root: AgentDeclaration,
@@ -418,6 +422,8 @@ class RuntimeHost implements AsyncDisposable {
       recordActivity: (thread, activity) =>
         conversationStatus.recordActivity(thread, activity),
     });
+    this.#storage = storage;
+    this.#declarations = declarations;
     this.#store = storage.store;
     this.#queue = queue;
     this.#streams = streams;
@@ -448,6 +454,7 @@ class RuntimeHost implements AsyncDisposable {
     };
     // Registered before the workers, so it is disposed after they stop.
     const sandboxes = resources.use(new ConversationSandboxes());
+    this.#sandboxes = sandboxes;
     this.#idleStop = new SandboxIdleStop({
       wakes: storage.sandboxIdleWakes,
       declarations,
@@ -515,12 +522,18 @@ class RuntimeHost implements AsyncDisposable {
     return this.#plugins.get(definition);
   }
 
-  /** Creates the root chat, or keeps a chat of a tree this runtime owns (its root or a sub-agent); any other chat reads as absent. */
+  /** Creates the root chat, or keeps a chat of a tree this runtime owns (its root or a sub-agent); any other chat, and one of a tree being deleted, reads as absent. */
   async createSession(conversation: ConversationId): Promise<void> {
     const thread =
       (await this.#directory.load(conversation)) ??
       (await this.#controlPlane.resolve(conversation)).thread;
-    if (!(await this.#ownsTree(thread))) {
+    const root = thread.path.isRoot
+      ? thread
+      : await this.#directory.load({
+          chatId: thread.treeId,
+          userId: thread.conversation.userId,
+        });
+    if (!root || !this.#ownsRoot(root) || root.deletingAt !== undefined) {
       throw new ConversationNotFoundError(conversation.chatId);
     }
   }
@@ -529,22 +542,67 @@ class RuntimeHost implements AsyncDisposable {
     const chat = await this.#store.getChat(conversation.chatId);
     if (!chat || chat.userId !== conversation.userId) return false;
     const thread = await this.#directory.load(conversation);
-    return thread !== undefined && this.#ownsRoot(thread);
+    return (
+      thread !== undefined &&
+      this.#ownsRoot(thread) &&
+      thread.deletingAt === undefined
+    );
+  }
+
+  /**
+   * Deletes a root chat this runtime owns and every sub-agent chat under it:
+   * their sandboxes, queued turns, idle stops, mail, streams and chat rows.
+   * The root is marked first, in its tree's admission, so from then on the
+   * tree admits nothing and reads as absent; the rows go last, deepest first
+   * and the root last, in one admission for the tree. A delete cut short
+   * leaves the marked root, and calling this again finishes it. Any other
+   * chat, and one already deleted, rejects with ConversationNotFoundError.
+   */
+  async deleteSession(conversation: ConversationId): Promise<void> {
+    const tree = { userId: conversation.userId, treeId: conversation.chatId };
+    const root = await this.#storage.admit(tree, async (scope) => {
+      const directory = new AgentDirectory(scope.store);
+      const thread = await directory.load(conversation);
+      if (!thread || !this.#ownsRoot(thread)) {
+        throw new ConversationNotFoundError(conversation.chatId);
+      }
+      await directory.markDeleting(conversation, Date.now());
+      return thread;
+    });
+    const depth = (thread: AgentThread) =>
+      thread.path.toString().split('/').length;
+    const members = (await this.#directory.listTree(root)).toSorted(
+      (left, right) => depth(right) - depth(left),
+    );
+    for (const member of members) {
+      const declaration = this.#declarations.get(member.declarationName);
+      if (!declaration) {
+        throw new Error(
+          `AgentRuntime.deleteSession: unknown agent declaration "${member.declarationName}" of chat "${member.conversation.chatId}"`,
+        );
+      }
+      await this.#idleStop.cancel(member);
+      await this.#queue.forget(member.conversation);
+      await this.#sandboxes.forget(declaration, member.conversation);
+      await declaration.sandbox.environment.delete(member.conversation);
+    }
+    await this.#storage.admit(tree, async (scope) => {
+      for (const { conversation: member } of members) {
+        await scope.mailboxStore.forget(member);
+        const streamIds = await scope.streams.listStreamIds({
+          prefix: AgentTurnId.prefixOf(member),
+        });
+        for (const streamId of streamIds) {
+          await scope.streams.deleteStream(streamId);
+        }
+        await scope.store.deleteChat(member.chatId, { userId: member.userId });
+      }
+    });
   }
 
   /** A root thread this runtime's root declaration started. */
   #ownsRoot(thread: AgentThread): boolean {
     return thread.path.isRoot && thread.declarationName === this.info.root;
-  }
-
-  /** A thread of a tree this runtime's root declaration started: that root, or a sub-agent under it. */
-  async #ownsTree(thread: AgentThread): Promise<boolean> {
-    if (thread.path.isRoot) return this.#ownsRoot(thread);
-    const root = await this.#directory.load({
-      chatId: thread.treeId,
-      userId: thread.conversation.userId,
-    });
-    return root !== undefined && this.#ownsRoot(root);
   }
 
   async enqueue(conversation: ConversationId, turn: TurnRequest) {
@@ -629,7 +687,9 @@ class RuntimeHost implements AsyncDisposable {
         }
         return [];
       }
-      return this.#ownsRoot(thread) ? [{ chat, conversation }] : [];
+      return this.#ownsRoot(thread) && thread.deletingAt === undefined
+        ? [{ chat, conversation }]
+        : [];
     });
 
     return Promise.all(
@@ -702,8 +762,12 @@ class RuntimeHost implements AsyncDisposable {
   async #onOrphaned(turn: TurnRef, error: string): Promise<void> {
     try {
       let stream = await this.#streams.store.getStream(turn.streamId);
+      // Every push registers its stream first, so a turn whose stream is
+      // gone belongs to a deleted chat; resolving it would create the chat
+      // again.
+      if (stream === undefined) return;
       const firstReconciliation =
-        stream?.status === 'queued' || stream?.status === 'running';
+        stream.status === 'queued' || stream.status === 'running';
       if (firstReconciliation) {
         await this.#streams.store.updateStreamStatus(turn.streamId, 'failed', {
           error,

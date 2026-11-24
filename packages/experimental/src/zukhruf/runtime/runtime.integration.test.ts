@@ -539,6 +539,10 @@ class FailOnceResumeParkedQueue extends TurnQueue {
     if (fault) throw fault;
     await this.#inner.resumeParked(chatId);
   }
+
+  override forget(conversation: Pick<TurnRef, 'chatId' | 'userId'>) {
+    return this.#inner.forget(conversation);
+  }
 }
 
 async function harness(

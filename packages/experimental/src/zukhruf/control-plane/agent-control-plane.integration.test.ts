@@ -169,6 +169,10 @@ class SharedControlledTurnQueue extends TurnQueue {
 
   override async resumeParked(): Promise<void> {}
 
+  override async forget(): Promise<void> {
+    throw new Error('this test never deletes a chat');
+  }
+
   override async getTurnActivity(
     conversation: ConversationId,
   ): Promise<'idle' | 'queued' | 'running'> {

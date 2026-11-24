@@ -42,6 +42,7 @@ interface PgBossTurnQueueSettings {
 /** The turn queue as pg-boss stores it, which may predate this worker's options. */
 interface OpenedQueue {
   readonly table: string;
+  readonly deadLetterTable: string;
   readonly expireInSeconds: number;
 }
 
@@ -81,6 +82,7 @@ export class PgBossTurnQueue extends TurnQueue {
   readonly #queue: string;
   readonly #schema: string;
   readonly #table: string;
+  readonly #deadLetterTable: string;
   readonly #cancelIntentTtlMs: number;
   readonly #pollingIntervalSeconds: number;
   readonly #active = new Map<string, Set<AbortController>>();
@@ -100,6 +102,7 @@ export class PgBossTurnQueue extends TurnQueue {
     this.#queue = settings.queue;
     this.#schema = settings.schema;
     this.#table = opened.table;
+    this.#deadLetterTable = opened.deadLetterTable;
     this.#cancelIntentTtlMs = opened.expireInSeconds * 1_000;
     this.#pollingIntervalSeconds = settings.pollingIntervalSeconds;
   }
@@ -160,8 +163,13 @@ export class PgBossTurnQueue extends TurnQueue {
     settings: PgBossTurnQueueSettings,
   ): Promise<OpenedQueue> {
     const deadLetterQueue = deadLetterQueueOf(settings.queue);
-    if (!(await boss.getQueue(deadLetterQueue))) {
+    let deadLetter = await boss.getQueue(deadLetterQueue);
+    if (!deadLetter) {
       await boss.createQueue(deadLetterQueue);
+      deadLetter = await boss.getQueue(deadLetterQueue);
+    }
+    if (!deadLetter) {
+      throw new Error(`Queue "${deadLetterQueue}" was not initialized`);
     }
     let queue = await boss.getQueue(settings.queue);
     if (!queue) {
@@ -205,7 +213,7 @@ export class PgBossTurnQueue extends TurnQueue {
         { cause },
       );
     }
-    return { table, expireInSeconds };
+    return { table, deadLetterTable: deadLetter.table, expireInSeconds };
   }
 
   get queue(): string {
@@ -463,6 +471,28 @@ export class PgBossTurnQueue extends TurnQueue {
     if (parked.length > 0) {
       await this.#boss.resume(this.#queue, parked);
     }
+  }
+
+  override async forget(
+    conversation: Pick<TurnRef, 'chatId' | 'userId'>,
+  ): Promise<void> {
+    const db = this.#boss.getDb();
+    await db.executeSql(
+      `DELETE FROM ${this.#relation()}
+       WHERE name = $1
+         AND singleton_key = $2
+         AND data->>'userId' = $3
+         AND state <> 'active'`,
+      [this.#queue, conversation.chatId, conversation.userId],
+    );
+    await db.executeSql(
+      `DELETE FROM ${PgBossTurnQueue.#relationOf(this.#schema, this.#deadLetterTable)}
+       WHERE name = $1
+         AND data->>'chatId' = $2
+         AND data->>'userId' = $3
+         AND state <> 'active'`,
+      [this.deadLetterQueue, conversation.chatId, conversation.userId],
+    );
   }
 
   #abortLocal(streamId: string): void {
