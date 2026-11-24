@@ -90,7 +90,9 @@ Compose infrastructure in a reusable `defineStack(async (resources) => ...)`
 recipe returning `{ storage }`, plus any plugin `bindings` or host options.
 `storage` is an `AgentStorage`: the context store, stream manager, turn queue
 and mailbox store on one database, the wakes of the sandbox idle stop on their
-own queue beside the turn queue, and `admit(tree, work)`, which runs `work`
+own queue beside the turn queue, one queue per settle follow-up (the idle
+stop's arm and each plugin's `conversationAvailable`, recorded before the turn
+queue releases a settled turn), and `admit(tree, work)`, which runs `work`
 with all four bound to one unit under a per-tree lock. On PostgreSQL,
 `PostgresAgentStorage.create({ pool, boss })` builds the stores on the host's
 pool and the turn queue on PgBoss, refuses a PgBoss on another database with

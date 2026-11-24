@@ -239,15 +239,21 @@ abstract class TurnQueue {
   push(turn: TurnRef): Promise<void>;
   consume(
     handler: (turn, { signal }) => Promise<void>,
-    options: { concurrency?; onOrphaned(turn, error) },
+    options: { concurrency?; onOrphaned(turn, error); onSettled(turn) },
   ): Promise<AsyncDisposable>;
   resumeParked(chatId: string): Promise<void>;
 }
 ```
 
 Contract: per chat at most ONE active handler, strict FIFO per chat, cross-chat concurrency;
-disposing a consumer stops new claims and waits for its running handlers to exit; a
+disposing a consumer stops new claims and waits for its running handlers to exit and settle; a
 crashed handler/worker surfaces once through `onOrphaned` (no retry), then the chat unblocks.
+Every delivery that does not park settles exactly once through `onSettled`, after its own job is
+complete (for an orphan, after `onOrphaned` resolves). A settle rejection is a consumer defect: the
+queue never reports it through `onOrphaned` (the turn has settled) and never re-runs the turn or its
+reconciliation; `PgBossTurnQueue` reports it as a process warning naming the turn. Work that must be
+durable before the chat's next turn may start belongs in the handler, which holds the job, not in
+`onSettled`, which runs after the release (see Settle follow-ups).
 User submissions, regeneration, client tool output, and approval responses all arrive as AI SDK
 `UIMessage` requests. `recovery` and `mailbox` are internal work, not alternate client protocols.
 
@@ -272,7 +278,58 @@ semantics live-verified):
   monitor fails the job of a dead worker. No hand-rolled lease.
 - **DLQ worker is the crash reconciler** — consumes `<queue>-dead`, calls `onOrphaned` (runtime
   flips the orphaned stream row to `failed`), and always deletes the failed source job in `finally`.
-  Projection failures remain retryable without blocking the chat's strict-FIFO key.
+  Projection failures remain retryable without blocking the chat's strict-FIFO key. Only after
+  `onOrphaned` resolves does it complete the DLQ job and then call `onSettled`, outside the DLQ
+  job's retry scope, so a settle rejection cannot reconcile the orphan again. An orphan whose
+  reconciliation fails on every DLQ retry is never settled: settling would run follow-ups for a
+  stream still `running`; its source job is deleted anyway, so the chat unblocks, and the failed
+  DLQ job stays visible.
+
+### Settle follow-ups _(Built, #5546)_
+
+Work owed to a conversation once one of its turns has settled: arming its sandbox's idle stop
+(`SandboxIdleStop`) and each plugin's `conversationAvailable`. Each is a `SettleFollowUp`
+(`runtime/turn-settlement.ts`, `{ name, run(conversation) }`), composed by type when the runtime is
+built: `SandboxIdleStop` exists only when some declaration of the tree stops idle sandboxes, and
+`PluginManager.settleFollowUps` yields one per plugin that implements `conversationAvailable`, named
+after the plugin. No follow-up runs inline.
+
+- **Intents before release.** The stream's terminal status is written by `@deepagents/context`'s
+  `StreamManager.persist`, in its own unit. Then `TurnSettlement` records one durable intent per
+  follow-up, in one admission to the turn's tree, before the turn queue releases the turn: the
+  executor's handler does it for every delivery that does not park (the redelivery of a terminal
+  turn included), before it returns. A process that dies after `persist` and before the intents
+  leaves the job unreleased; the turn becomes an orphan, and `#onOrphaned` records the intents
+  after its reconciliation, before the dead-letter worker completes. So a released turn always has
+  its follow-ups recorded. The one exception is an orphan whose reconciliation fails: the
+  dead-letter worker deletes its source job anyway, so the chat unblocks, and its intents wait for
+  a DLQ retry whose reconciliation succeeds. `observe().cancel()` records them for a cancelled queued turn, which
+  never runs. A turn whose stream is gone belongs to a deleted chat and records nothing; a parked
+  turn records none, since it has not settled.
+- **`complete` vs `completeEmptyWake`.** `complete(turn)` only records intents. A mailbox wake that
+  found no mail has a stream nothing else ends, so `completeEmptyWake(turn)` marks it `completed` in
+  the same admission that records its intents.
+- **One queue per follow-up.** `AgentStorage.settleQueue(name)` opens `<turn queue>-settle-<name>`
+  (20 retries, backoff up to 60 s; a job that uses them all stays `failed`), so only a process that
+  has the follow-up consumes its intents, and a rolling deploy cannot poison a queue with intents
+  no worker can run. `AdmissionScope.settleIntents.record` writes an intent inside the admission:
+  Postgres sends it in the admission's transaction; the embedded storage writes a row to
+  `zukhruf_settle_outbox`, which the outbox relay sends after the turns. The intent id is a UUIDv5
+  of `['settle', name, turnId]` under the chat's namespace, so a repeated settle of one turn records
+  one intent, and turns of one chat get distinct ids.
+- **The handler's outcomes.** A missing chat, or a tree being deleted, is done. A newer turn that
+  superseded the intent's turn is done: its own intent runs the follow-up. The intent's turn still
+  holding its chat is retried. A `NonRetryableError` is reported once with `process.emitWarning`
+  and done. Any other failure is retried. Follow-ups re-read durable state, so they are idempotent
+  and safe to run concurrently with themselves on another host (the `conversationAvailable`
+  contract says so).
+- **Non-retryable errors.** `NonRetryableError` (exported; Temporal's non-retryable failure is the
+  model) is recognized by a `Symbol.for('@deepagents/experimental/zukhruf/non-retryable')` brand, not
+  by `instanceof` or `name`: each subpath entry bundles its own copy of the class, and a subclass
+  replaces `name`. `UnfinishedIdleTurnError` (an idle chat whose latest turn has not finished) and
+  conversation scheduling's `InvalidSchedulingMetadataError` are non-retryable.
+- **`onSettled` only publishes status.** The follow-ups run from the intents; a publish never
+  rejects.
 
 ### Runtime API split _(Built — replaces the fused `continue()/send()`)_
 
@@ -907,8 +964,10 @@ const traceTelemetry: AgentPluginDefinition<TracePlugin> = {
   `conversationAvailable(conversation)`, `conversationDeleting(conversation)`, the plugin's
   control surface, and an optional
   `Symbol.asyncDispose` method. Anything that needs the host is built there, so no plugin holds a
-  host that is not yet set. `PluginManager` keeps the running phases and starts their workers and
-  availability reconciliation. The runtime
+  host that is not yet set. `PluginManager` keeps the running phases, starts their workers and
+  yields one settle follow-up per plugin with `conversationAvailable` (see Settle follow-ups). A
+  plugin's `conversationDeleting` failures do not stop the other plugins'; they reject together as
+  one plain `AggregateError` whose `errors` hold the causes. The runtime
   validates those tools against static plugin tools, runtime tools, and every agent's tools
   before starting a worker. Failed initialization disposes all acquired contributions.
 - `PluginToolComposition` owns shared tool names, owner diagnostics, and composition. Each
@@ -920,7 +979,9 @@ const traceTelemetry: AgentPluginDefinition<TracePlugin> = {
   `{ storage, multiAgent?, bindings?, conversationStatusChanges? }`. `storage` is an
   `AgentStorage` (`storage/agent-storage.ts`): `store`, `streams`, `queue` and `mailboxStore` on
   one database, `sandboxIdleWakes` (a `PgBossWakeScheduler` on `${turn queue}-sandbox-idle`, polled
-  every 0.5 s, for the sandbox idle stop), plus `admit(tree, work)`, which runs `work` with the four parts bound to one unit
+  every 0.5 s, for the sandbox idle stop), `settleQueue(name)` (one follow-up's settle intents, see
+  Settle follow-ups), plus `admit(tree, work)`, which runs `work` with the four parts and the settle
+  intents bound to one unit
   (`AdmissionScope`) while no other admission to the tree runs. `PostgresAgentStorage.create({
 pool, boss, schema?, queue?, changeSource? })` builds the stores on the host pool and the turn
   queue on PgBoss, throws `AgentStorageDatabaseMismatchError` when `current_database()` or
@@ -972,12 +1033,14 @@ starts it again. Removing a deleted chat's sandbox is #5135. `runtime/sandbox-id
   declaration, not an environment option, because only the runtime acts on it.
 - **Idle** means `conversationStatusOf` is not `active`: no turn queued or running, and the chain
   head waits on no approval or client input. A failed latest turn (`systemError`) is idle.
-- **Arm.** The queue's `onSettled` runs `arm(chat)` for every chat that settles, sub-agents
-  included. When the chat's declaration stops idle sandboxes and the chat is idle, it schedules a
-  wake on `storage.sandboxIdleWakes` (a `PgBossWakeScheduler` on `<turn queue>-sandbox-idle`,
+- **Arm.** `SandboxIdleStop` is a settle follow-up (see Settle follow-ups): its `run(chat)` runs
+  from the settle intent every settled turn records, sub-agents included, at least once. When the
+  chat's declaration stops idle sandboxes and the chat is idle, it schedules a wake on `storage.sandboxIdleWakes` (a `PgBossWakeScheduler` on `<turn queue>-sandbox-idle`,
   polled every 0.5 s) at the latest turn's `finishedAt` plus `idleTimeoutMs`. The wake id is a UUIDv5
   of `['sandbox-idle', turnId, scheduledFor]` under the chat's namespace, so a re-arm of the same
-  turn is idempotent. Workers consume the queue only when some declaration of the tree stops idle
+  turn is idempotent. An idle chat whose latest turn has not finished throws the non-retryable
+  `UnfinishedIdleTurnError`; any other arm failure is retried from the intent. The runtime has an
+  idle stop, and its workers consume both queues, only when some declaration of the tree stops idle
   sandboxes.
 - **Cancel.** `AgentTurnExecutor` calls `cancel(thread)` just before the next turn records itself as
   the latest; it derives the previous wake's id from that turn's `finishedAt`. A failed cancel is a
@@ -1122,8 +1185,8 @@ work({concurrency?}) → AsyncDisposable }`.
   an actor host may absorb both capabilities (see the executor section). Also the `WakeScheduler`
   port and its `PgBossWakeScheduler` adapter, used by conversation scheduling and the storages'
   sandbox idle wakes.
-- `storage/` — the `AgentStorage` port (the four parts, `sandboxIdleWakes` and `admit`), `PostgresAgentStorage`, and
-  `EmbeddedAgentStorage` (SQLite + PGlite pg-boss, admission gate, turn outbox and relay).
+- `storage/` — the `AgentStorage` port (the four parts, `sandboxIdleWakes`, `settleQueue` and `admit`), `PostgresAgentStorage`, and
+  `EmbeddedAgentStorage` (SQLite + PGlite pg-boss, admission gate, turn and settle outboxes and relay).
 - `demo/zukhruf-durable-turns/agent.ts`, `instructions.ts`, and sandbox factories are pure
   declarations (no top-level await; importing spins no container or agent turn).
 - `runtime/conversation-status/projector.ts` — Codex `thread/status/changed` for hosts. `ConversationStatus`
@@ -1137,9 +1200,9 @@ work({concurrency?}) → AsyncDisposable }`.
   yields the changes this process observes: every committed admission
   (`AgentResidency.admit` publishes each conversation it pushed to, so host asks, spawns, mailbox
   wakes, and recovery pushes all count), the executor's stream claim, approval parking, queue
-  settle (`onSettled` is always wired now; status publishes before plugin availability
-  reconciliation), and `observe().cancel()`. Each signal re-reads and dedupes, so duplicates are free
-  and a publish never rejects into `onSettled`. Cross-process push is opt-in through
+  settle (`onSettled` publishes status and nothing else; the follow-ups run from settle intents),
+  and `observe().cancel()`. Each signal re-reads and dedupes, so duplicates are free and a publish
+  never rejects into `onSettled`. Cross-process push is opt-in through
   `conversationStatusChanges: ConversationStatusChangeSource` (`runtime/conversation-status/change-source.ts`):
   a local change also `notify`s a wake hint carrying only `{chatId, userId}`, and a subscribing process
   re-reads on each hint, so the payload can never be stale. `PgBossConversationStatusChangeSource`

@@ -192,7 +192,7 @@ export class PluginManager implements AsyncDisposable {
     if (errors.length > 0) {
       throw new AggregateError(
         errors,
-        `AgentRuntime: plugin cleanup of deleted conversation "${conversation.chatId}" failed: ${errors.map((error) => (Error.isError(error) ? error.message : String(error))).join('; ')}`,
+        `AgentRuntime: plugin cleanup of deleted conversation "${conversation.chatId}" failed`,
       );
     }
   }

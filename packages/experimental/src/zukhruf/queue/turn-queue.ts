@@ -80,9 +80,11 @@ export interface ConsumeOptions {
    * Runs once for every delivery that does not park, after that delivery's
    * own job is complete and has released its conversation's FIFO ownership:
    * after a turn's handler returns, and after an orphan's `onOrphaned`
-   * resolves. The consumer owns the failures of its follow-ups. A rejection
-   * is a consumer defect: the queue never reports it through `onOrphaned`
-   * (the turn has settled) and never delivers the turn again;
+   * resolves. Work that must be durable before the conversation's next turn
+   * may start belongs in the handler (or `onOrphaned`), which holds the
+   * job; this runs after the release, so nothing durable may depend on it.
+   * A rejection is a consumer defect: the queue never reports it through
+   * `onOrphaned` (the turn has settled) and never delivers the turn again;
    * `PgBossTurnQueue` reports it as a process warning naming the turn.
    */
   onSettled: (turn: TurnRef) => Promise<void>;
