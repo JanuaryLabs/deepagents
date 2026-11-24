@@ -13,8 +13,10 @@ export interface DeduplicatedProducerOptions {
 /**
  * DeduplicatedProducer - Remove duplicate pairs from another producer.
  *
- * Wraps another PairProducer and removes duplicates based on
- * exact match or semantic similarity.
+ * Wraps another PairProducer and keeps the first pair of each key, where the
+ * strategy picks the key: `exact` (the default) the question and the
+ * normalized SQL, `sql-only` the normalized SQL, `question-only` the question.
+ * Questions compare lowercased and trimmed.
  */
 export class DeduplicatedProducer extends PairProducer {
   readonly #producer: PairProducer;
