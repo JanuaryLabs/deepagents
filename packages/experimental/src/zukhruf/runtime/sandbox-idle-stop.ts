@@ -86,8 +86,8 @@ export class SandboxIdleStop {
   async arm(conversation: ConversationId): Promise<void> {
     const thread = await this.#directory.load(conversation);
     if (thread?.lastTurnId === undefined) return;
-    const sandbox = this.#declarations.get(thread.declarationName)?.sandbox;
-    if (!sandbox || !stopsWhenIdle(sandbox)) return;
+    const sandbox = this.#idleStoppingSandbox(thread);
+    if (!sandbox) return;
     if ((await this.#conversationStatus.read(conversation)).type === 'active') {
       return;
     }
@@ -116,8 +116,8 @@ export class SandboxIdleStop {
   async cancel(thread: AgentThread): Promise<void> {
     const turnId = thread.lastTurnId;
     if (turnId === undefined) return;
-    const sandbox = this.#declarations.get(thread.declarationName)?.sandbox;
-    if (!sandbox || !stopsWhenIdle(sandbox)) return;
+    const sandbox = this.#idleStoppingSandbox(thread);
+    if (!sandbox) return;
     try {
       const stream = await this.#streams.getStream(turnId);
       if (typeof stream?.finishedAt !== 'number') return;
@@ -132,6 +132,40 @@ export class SandboxIdleStop {
       process.emitWarning(
         new Error(
           `SandboxIdleStop: cancelling the stop of chat "${thread.conversation.chatId}" armed for turn "${turnId}" failed: ${Error.isError(error) ? error.message : String(error)}`,
+          { cause: error },
+        ),
+      );
+    }
+  }
+
+  /**
+   * Arms the chat's stop as a plugin borrows its sandbox outside a turn,
+   * which can start it: idleTimeoutMs from now, when the chat is idle, keyed
+   * on its latest turn (none before the first), in place of the stop that
+   * turn armed when it settled. It never rejects, so the borrow succeeds: a
+   * failure is a process warning, and the sandbox then stops on the next
+   * turn's window instead.
+   */
+  async armAfterBorrow(conversation: ConversationId): Promise<void> {
+    const { chatId, userId } = conversation;
+    try {
+      const thread = await this.#directory.load(conversation);
+      const sandbox = this.#idleStoppingSandbox(thread);
+      if (!sandbox) return;
+      const status = await this.#conversationStatus.read(conversation);
+      if (status.type === 'active') return;
+      if (thread) await this.cancel(thread);
+      await this.#wakes.schedule(
+        this.#toWake({
+          conversation: { chatId, userId },
+          turnId: thread?.lastTurnId ?? null,
+          scheduledFor: Date.now() + sandbox.idleTimeoutMs,
+        }),
+      );
+    } catch (error) {
+      process.emitWarning(
+        new Error(
+          `SandboxIdleStop: arming the stop of chat "${chatId}" after a plugin borrowed its sandbox failed: ${Error.isError(error) ? error.message : String(error)}`,
           { cause: error },
         ),
       );
@@ -153,16 +187,32 @@ export class SandboxIdleStop {
       );
     }
     const thread = await this.#directory.load(wake.conversation);
-    if (!thread) return;
-    const sandbox = this.#declarations.get(thread.declarationName)?.sandbox;
-    if (!sandbox || !stopsWhenIdle(sandbox)) return;
-    await this.#residency.admit(thread, async (admission) => {
-      const current = await admission.directory.load(wake.conversation);
-      if ((current?.lastTurnId ?? null) !== wake.turnId) return;
-      const status = await conversationStatusOf(admission, wake.conversation);
-      if (status.type === 'active') return;
-      await sandbox.environment.stop(wake.conversation);
-    });
+    const sandbox = this.#idleStoppingSandbox(thread);
+    if (!sandbox) return;
+    await this.#residency.admit(
+      thread ?? wake.conversation,
+      async (admission) => {
+        const current = await admission.directory.load(wake.conversation);
+        if ((current?.lastTurnId ?? null) !== wake.turnId) return;
+        const status = await conversationStatusOf(admission, wake.conversation);
+        if (status.type === 'active') return;
+        await sandbox.environment.stop(wake.conversation);
+      },
+    );
+  }
+
+  /**
+   * The sandbox of the chat's agent when it stops after an idle time. A chat
+   * with no thread yet has only the root's, which a plugin borrow opens.
+   */
+  #idleStoppingSandbox(
+    thread: AgentThread | undefined,
+  ): IdleStoppingSandbox | undefined {
+    const declaration = thread
+      ? this.#declarations.get(thread.declarationName)
+      : this.#declarations.root;
+    const sandbox = declaration?.sandbox;
+    return sandbox && stopsWhenIdle(sandbox) ? sandbox : undefined;
   }
 
   #toWake(data: SandboxIdleWake): Wake<SandboxIdleWake> {

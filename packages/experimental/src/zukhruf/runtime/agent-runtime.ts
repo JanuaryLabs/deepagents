@@ -488,10 +488,13 @@ class RuntimeHost implements AsyncDisposable {
       // conversation through the control plane would create its root thread.
       sandbox: async (conversation) => {
         await this.#directory.assertOwnerIfExists(conversation);
-        return sandboxes.acquire(this.#root, {
+        const sandbox = await sandboxes.acquire(this.#root, {
           chatId: conversation.chatId,
           userId: conversation.userId,
         });
+        // The borrow can start the sandbox, so its idle window starts too.
+        await this.#idleStop.armAfterBorrow(conversation);
+        return sandbox;
       },
     };
     resources.use(this.#workers);

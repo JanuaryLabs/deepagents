@@ -21,6 +21,7 @@ import {
   defineSandbox,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
+import { uploads } from '@deepagents/experimental/zukhruf/uploads';
 
 import {
   textResult,
@@ -36,6 +37,13 @@ const testPostgres = new Postgres({ environment: process.env });
 const IDLE_QUEUE = 'zukhruf-turns-sandbox-idle';
 
 const conversation = { chatId: 'chat', userId: 'owner' };
+
+/** The uploads plugin's directory, and the chat's scope in it. */
+const UPLOADS = '/workspace/uploads';
+const uploadScope = {
+  userId: conversation.userId,
+  sessionId: conversation.chatId,
+};
 
 /** A storage and the pg-boss its turn queue and idle wakes run on. */
 const storages = [
@@ -729,6 +737,244 @@ for (const { name, open } of storages) {
       );
     } finally {
       events.abort();
+      await removeNamespace(namespace);
+    }
+  });
+
+  test(`${name}: a plugin's upload to a chat with no turn starts its container, which stops idleTimeoutMs after the upload, and the chat's first turn runs in it, started again, with the uploaded file`, async (t) => {
+    const namespace = `borrow-${crypto.randomUUID()}`;
+    try {
+      await using resources = new AsyncDisposableStack();
+      const { storage, boss } = await open(resources);
+      const uploaded = uploads({ directory: UPLOADS });
+      const root = defineAgent({
+        name: 'root',
+        model: bashEachTurn(
+          `cat ${UPLOADS}/${uploadScope.userId}/${uploadScope.sessionId}/* && hostname`,
+        ),
+        instructions: [],
+        // Long enough that the stop is seen due before it is delivered.
+        sandbox: defineSandbox(chatEnvironment(namespace), {
+          idleTimeoutMs: 10_000,
+        }),
+        plugins: [uploaded],
+      });
+      await using host = await new AgentRuntime(root).initialize(
+        defineStack(async () => ({ storage })),
+      );
+      await host.work();
+
+      const uploading = Date.now();
+      await host.plugin(uploaded).write(uploadScope, {
+        data: new TextEncoder().encode('uploaded\n'),
+        mediaType: 'image/png',
+      });
+      const upload = Date.now();
+      const afterUpload = await containerStatus(namespace);
+      const container = await chatContainer(namespace);
+      const due = (await armedStop(boss, t)).startAfter.getTime();
+      await waitFor(
+        async () => assert.equal(await containerStatus(namespace), 'exited'),
+        { signal: t.signal },
+      );
+      const first = await bashOutput(
+        await host.enqueue(conversation, userTurn('turn-1', 'first')),
+      );
+
+      assert.deepStrictEqual(
+        {
+          afterUpload,
+          dueAfterUpload: due >= uploading + 10_000 && due <= upload + 10_000,
+          first,
+          container: (await chatContainer(namespace)).id,
+        },
+        {
+          afterUpload: 'running',
+          dueAfterUpload: true,
+          first: bashSucceeded(`uploaded\n${container.id.slice(0, 12)}\n`),
+          container: container.id,
+        },
+      );
+    } finally {
+      await removeNamespace(namespace);
+    }
+  });
+
+  test(`${name}: a plugin's upload to an idle chat moves its stop to idleTimeoutMs after the upload, so its container keeps running past the stop due for the chat's last turn and stops once the upload has been idle that long`, async (t) => {
+    const namespace = `reborrow-${crypto.randomUUID()}`;
+    try {
+      await using resources = new AsyncDisposableStack();
+      const { storage, boss } = await open(resources);
+      const uploadsPlugin = uploads({ directory: UPLOADS });
+      const root = defineAgent({
+        name: 'root',
+        model: bashEachTurn('hostname'),
+        instructions: [],
+        sandbox: defineSandbox(chatEnvironment(namespace), {
+          idleTimeoutMs: 30_000,
+        }),
+        plugins: [uploadsPlugin],
+      });
+      await using host = await new AgentRuntime(root).initialize(
+        defineStack(async () => ({ storage })),
+      );
+      await host.work();
+
+      await bashOutput(
+        await host.enqueue(conversation, userTurn('turn-1', 'first')),
+      );
+      const settled = await armedStop(boss, t);
+      // A third of the way through the settled turn's window.
+      await setTimeout(
+        Math.max(0, settled.startAfter.getTime() - 20_000 - Date.now()),
+        undefined,
+        { signal: t.signal },
+      );
+      const uploading = Date.now();
+      await host.plugin(uploadsPlugin).write(uploadScope, {
+        data: new TextEncoder().encode('uploaded\n'),
+        mediaType: 'image/png',
+      });
+      const upload = Date.now();
+      await setTimeout(
+        Math.max(0, settled.startAfter.getTime() - Date.now()) + 1_000,
+        undefined,
+        { signal: t.signal },
+      );
+      // Cancelled, or delivered by now, the stop having run.
+      const settledStop = await waitFor(
+        async () => {
+          const [job] = await boss.findJobs(IDLE_QUEUE, { id: settled.id });
+          assert.ok(job?.state !== 'created' && job?.state !== 'active');
+          return job?.state;
+        },
+        { signal: t.signal },
+      );
+      const pastSettledStop = {
+        settledStop,
+        container: await containerStatus(namespace),
+      };
+      const uploadStop = (
+        await boss.findJobs<SandboxIdleWake>(IDLE_QUEUE)
+      ).find(({ id }) => id !== settled.id);
+      await waitFor(
+        async () => assert.equal(await containerStatus(namespace), 'exited'),
+        { signal: t.signal },
+      );
+      const stopped = Date.now();
+
+      const due = uploadStop?.startAfter.getTime() ?? 0;
+      assert.deepStrictEqual(
+        {
+          pastSettledStop,
+          uploadStop: {
+            state: uploadStop?.state,
+            turnId: uploadStop?.data.turnId,
+            dueAfterUpload: due >= uploading + 30_000 && due <= upload + 30_000,
+          },
+          stoppedAfterUploadWindow: stopped >= uploading + 30_000,
+        },
+        {
+          pastSettledStop: { settledStop: 'cancelled', container: 'running' },
+          uploadStop: {
+            state: 'created',
+            turnId: settled.data.turnId,
+            dueAfterUpload: true,
+          },
+          stoppedAfterUploadWindow: true,
+        },
+      );
+    } finally {
+      await removeNamespace(namespace);
+    }
+  });
+
+  test(`${name}: a plugin's upload while the chat's turn runs arms no stop of its own, so the one stop due is the turn's, idleTimeoutMs after it ends`, async (t) => {
+    const namespace = `busy-${crypto.randomUUID()}`;
+    const running = Promise.withResolvers<void>();
+    const uploaded = Promise.withResolvers<void>();
+    try {
+      await using resources = new AsyncDisposableStack();
+      const { storage, boss } = await open(resources);
+      const uploadsPlugin = uploads({ directory: UPLOADS });
+      const root = defineAgent({
+        name: 'root',
+        // The turn answers only once the upload it runs during has ended.
+        model: new MockLanguageModelV4({
+          doStream: async () => {
+            running.resolve();
+            await uploaded.promise;
+            return textResult('done');
+          },
+        }),
+        instructions: [],
+        // Long enough that no stop is delivered while the test reads them.
+        sandbox: defineSandbox(chatEnvironment(namespace), {
+          idleTimeoutMs: 20_000,
+        }),
+        plugins: [uploadsPlugin],
+      });
+      await using host = await new AgentRuntime(root).initialize(
+        defineStack(async () => ({ storage })),
+      );
+      await host.work();
+
+      const turn = await host.enqueue(
+        conversation,
+        userTurn('turn-1', 'first'),
+      );
+      await running.promise;
+      const { fileId } = await host.plugin(uploadsPlugin).write(uploadScope, {
+        data: new TextEncoder().encode('uploaded\n'),
+        mediaType: 'image/png',
+      });
+      // Read back before the turn answers, so the upload is in the chat's
+      // sandbox while the turn still runs.
+      const duringTurn = {
+        upload: await host.plugin(uploadsPlugin).read(uploadScope, fileId),
+        chat: (await host.observe(conversation).conversationStatus()).type,
+      };
+      const upload = Date.now();
+      uploaded.resolve();
+      await Array.fromAsync(turn.stream);
+      // The turn's own stop: due idleTimeoutMs after the turn ended, which
+      // is after the upload ended.
+      const afterTurn = (startAfter: Date) =>
+        startAfter.getTime() > upload + 20_000;
+      await waitFor(
+        async () =>
+          assert.ok(
+            (await boss.findJobs(IDLE_QUEUE)).some(({ startAfter }) =>
+              afterTurn(startAfter),
+            ),
+          ),
+        { signal: t.signal },
+      );
+
+      assert.deepStrictEqual(
+        {
+          duringTurn,
+          stops: (await boss.findJobs(IDLE_QUEUE)).map(
+            ({ state, startAfter }) => ({
+              state,
+              afterTurn: afterTurn(startAfter),
+            }),
+          ),
+        },
+        {
+          duringTurn: {
+            upload: {
+              data: new TextEncoder().encode('uploaded\n'),
+              mediaType: 'image/png',
+            },
+            chat: 'active',
+          },
+          stops: [{ state: 'created', afterTurn: true }],
+        },
+      );
+    } finally {
+      running.resolve();
+      uploaded.resolve();
       await removeNamespace(namespace);
     }
   });
