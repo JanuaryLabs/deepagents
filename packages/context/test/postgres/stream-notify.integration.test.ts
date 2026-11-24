@@ -363,6 +363,27 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
     }
   });
 
+  it('close() with a subscription still listening resolves once the LISTEN connection is back in its pool, so the host can end the pool right after it', async (t) => {
+    await using container = await testPostgres.database();
+    const schema = testSchema();
+    const pool = container.pool();
+    await PostgresStreamStore.create({ pool, schema });
+    const source = await PostgresNotifyChangeSource.create({ pool, schema });
+    const iterator = source
+      .subscribe('listening-at-close', new AbortController().signal)
+      [Symbol.asyncIterator]();
+    await untilAborted(iterator.next(), t.signal);
+    const next = iterator.next();
+
+    await untilAborted(source.close(), t.signal);
+    const checkedOut = pool.totalCount - pool.idleCount;
+
+    assert.deepStrictEqual(
+      { checkedOut, next: await untilAborted(next, t.signal) },
+      { checkedOut: 0, next: { value: undefined, done: true } },
+    );
+  });
+
   it('should not leak a listener when closed during LISTEN setup', async (t) => {
     await using container = await testPostgres.database();
 

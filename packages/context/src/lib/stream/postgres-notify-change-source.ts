@@ -1,3 +1,4 @@
+import { Lock } from '@zukhruf/async';
 import { EventEmitter, on } from 'node:events';
 import pMemoize from 'p-memoize';
 import type { Notification, Pool, PoolClient } from 'pg';
@@ -87,6 +88,8 @@ export class PostgresNotifyChangeSource implements StreamChangeSource {
   #listener: Listening | typeof NOT_LISTENING = NOT_LISTENING;
   /** Concurrent subscribers share one LISTEN setup; a failed one runs again. */
   readonly #listen = pMemoize(() => this.#openListener(), { cache: false });
+  /** One release of the LISTEN connection at a time, so close() waits for one still running. */
+  readonly #releasing = new Lock();
 
   readonly #handlers: ListenerHandlers = {
     notification: (message) => {
@@ -170,6 +173,9 @@ export class PostgresNotifyChangeSource implements StreamChangeSource {
     } catch {
       // Listener setup already released the failed client.
     }
+    // The last subscription, ended by the abort, may have taken the
+    // connection first; this waits until it is back in the pool, so the
+    // host can end the pool.
     await this.#releaseListener();
   }
 
@@ -225,10 +231,13 @@ export class PostgresNotifyChangeSource implements StreamChangeSource {
     await this.#releaseListener();
   }
 
-  async #releaseListener(): Promise<void> {
+  /** Taken at once, so no subscriber joins a connection being released. */
+  #releaseListener(): Promise<void> {
     const listener = this.#listener;
     this.#listener = NOT_LISTENING;
-    await listener.release(this.#channel);
+    return this.#releasing.run(() => listener.release(this.#channel), {
+      signal: undefined,
+    });
   }
 }
 
