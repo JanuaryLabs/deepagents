@@ -7,6 +7,8 @@ export type StreamStatus =
 
 export interface ListStreamIdsOptions {
   status?: StreamStatus;
+  /** Only stream ids that start with this literal, case-sensitive prefix. */
+  prefix?: string;
 }
 
 export interface StreamData {

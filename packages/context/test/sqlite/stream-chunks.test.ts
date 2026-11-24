@@ -331,6 +331,38 @@ describe('Stream Chunks', () => {
       assert.deepStrictEqual(streamIds, ['stream-a', 'stream-b']);
     });
 
+    it('returns only the stream IDs that start with a literal prefix', async () => {
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      for (const [createdAt, id, status] of [
+        [1, 'turn:a_b%:2', 'running'],
+        [2, 'turn:a_b%:1', 'completed'],
+        [3, 'turn:aXbYZ:1', 'running'],
+        [4, 'TURN:A_B%:1', 'running'],
+        [5, 'other:turn:a_b%:1', 'running'],
+      ] as const) {
+        await store.createStream(createStream({ id, status, createdAt }));
+      }
+      const all = [
+        'turn:a_b%:2',
+        'turn:a_b%:1',
+        'turn:aXbYZ:1',
+        'TURN:A_B%:1',
+        'other:turn:a_b%:1',
+      ];
+
+      assert.deepStrictEqual(
+        await store.listStreamIds({ prefix: 'turn:a_b%:' }),
+        ['turn:a_b%:2', 'turn:a_b%:1'],
+      );
+      assert.deepStrictEqual(
+        await store.listStreamIds({ prefix: 'turn:a_b%:', status: 'running' }),
+        ['turn:a_b%:2'],
+      );
+      assert.deepStrictEqual(await store.listStreamIds({ prefix: '' }), all);
+      assert.deepStrictEqual(await store.listStreamIds(), all);
+    });
+
     it('provides listRunningStreamIds as a store instance method', async () => {
       await using database = await sqlite.database();
       const store = new SqliteStreamStore(database.connection);

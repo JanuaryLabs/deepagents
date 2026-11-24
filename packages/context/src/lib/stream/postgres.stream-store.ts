@@ -136,13 +136,20 @@ export class PostgresStreamStore extends StreamStore {
 
   async listStreamIds(options?: ListStreamIdsOptions): Promise<string[]> {
     const params: unknown[] = [];
-    let sql = `SELECT id FROM ${this.#database.table('streams')}`;
+    const where: string[] = [];
 
     if (options?.status) {
       params.push(options.status);
-      sql += ` WHERE status = $${params.length}`;
+      where.push(`status = $${params.length}`);
     }
 
+    if (options?.prefix) {
+      params.push(options.prefix);
+      where.push(`starts_with(id, $${params.length})`);
+    }
+
+    let sql = `SELECT id FROM ${this.#database.table('streams')}`;
+    if (where.length > 0) sql += ` WHERE ${where.join(' AND ')}`;
     sql += ' ORDER BY created_at ASC, id ASC';
 
     const rows = await this.#database.rows(idRow, sql, params);

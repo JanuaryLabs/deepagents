@@ -85,7 +85,7 @@ only when all users of a shared connection have finished.
 | `upsertStream(stream)`                        | Insert or return existing stream. Returns `{ stream, created }`                                                                     |
 | `getStream(streamId)`                         | Fetch stream metadata, or `undefined` if not found                                                                                  |
 | `getStreamStatus(streamId)`                   | Fetch only the stream status, or `undefined` if not found                                                                           |
-| `listStreamIds(options?)`                     | List stream IDs, optionally filtered by `options.status`                                                                            |
+| `listStreamIds(options?)`                     | List stream IDs by creation time, optionally filtered by `options.status` and a literal, case-sensitive `options.prefix`            |
 | `listRunningStreamIds()`                      | List IDs with status `running`; delegates to `listStreamIds`                                                                        |
 | `updateStream(streamId, update)`              | Atomically read and update a stream under its write lock. Returns `{ stream, updated }`                                             |
 | `updateStreamStatus(streamId, status, opts?)` | Transition stream status. Automatically sets `startedAt`, `finishedAt`, `cancelRequestedAt`, and `error` based on the target status |

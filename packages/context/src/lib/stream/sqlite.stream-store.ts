@@ -103,15 +103,14 @@ export class SqliteStreamStore extends StreamStore {
   }
 
   async listStreamIds(options?: ListStreamIdsOptions): Promise<string[]> {
-    const rows = z
-      .array(idRow)
-      .parse(
-        options?.status
-          ? this.#sql
-              .all`SELECT id FROM streams WHERE status = ${options.status} ORDER BY createdAt ASC, id ASC`
-          : this.#sql
-              .all`SELECT id FROM streams ORDER BY createdAt ASC, id ASC`,
-      );
+    const status = options?.status ?? null;
+    const prefix = options?.prefix ?? '';
+    const rows = z.array(idRow).parse(
+      this.#sql.all`SELECT id FROM streams
+          WHERE (${status} IS NULL OR status = ${status})
+            AND substr(id, 1, length(${prefix})) = ${prefix}
+          ORDER BY createdAt ASC, id ASC`,
+    );
     return rows.map((row) => row.id);
   }
 
