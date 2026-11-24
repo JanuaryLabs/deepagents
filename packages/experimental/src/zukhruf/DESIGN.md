@@ -1204,8 +1204,21 @@ work({concurrency?}) → AsyncDisposable }`.
   stops or removes a sandbox. Before a turn borrows a held handle it resumes it; a handle whose
   sandbox was removed outside it (`SandboxNotFoundError`) is closed and the turn opens the chat
   again. The runtime stops an idle chat's sandbox and keeps its files (see Sandbox idle stop).
-  Removing a deleted chat's sandbox is decided but not built (#5135); files that must outlive the
+  Deleting a chat removes its sandbox (`environment.delete`, #5135); files that must outlive the
   sandbox live in a volume the app chooses.
+  - **A stale handle never re-creates a deleted chat's sandbox.** Another worker can still hold a
+    handle it opened before the delete. `ConversationSandboxes` opens a chat again only when the
+    host's `reopenable` check, read from the directory, finds the chat an agent of a tree whose
+    root is there and not marked `deletingAt`. Otherwise it forgets the handle, closes it and
+    rejects with `ConversationNotFoundError` (HTTP 404). `host.sandbox()` refuses a chat of a tree
+    being deleted before it borrows, so a worker that holds no handle cannot open it either.
+  - **Residual race.** A borrow that passed its check just before the delete's marker commits can
+    still finish one open after the delete removed the sandbox. That open is already in flight;
+    the deleting worker waits only for its own, and cannot wait for another worker's. Deleting the
+    chat again removes the sandbox.
+  - A chat with no row yet (an upload before the first message) opens its sandbox on a first
+    borrow, so a later first borrow of a deleted chat's id opens a new, empty sandbox (#5135's
+    tombstone question).
 - **Queued-turn visibility** — `resume()` only sees executing/executed turns (the chain mutates at
   execution time). `conversationStatus()` reports a queued turn as `active`, but a reconnecting
   client still can't stream a turn that is queued but unstarted; folds into the observe/reconnect

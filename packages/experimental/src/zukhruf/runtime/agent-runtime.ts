@@ -453,7 +453,14 @@ class RuntimeHost implements AsyncDisposable {
       })),
     };
     // Registered before the workers, so it is disposed after they stop.
-    const sandboxes = resources.use(new ConversationSandboxes());
+    const sandboxes = resources.use(
+      new ConversationSandboxes({
+        reopenable: async (chat) => {
+          const thread = await this.#directory.load(chat);
+          return thread !== undefined && !(await this.#inDeletedTree(thread));
+        },
+      }),
+    );
     this.#sandboxes = sandboxes;
     this.#idleStop = new SandboxIdleStop({
       wakes: storage.sandboxIdleWakes,
@@ -493,8 +500,13 @@ class RuntimeHost implements AsyncDisposable {
         this.subscribeConversationStatus(signal),
       // Borrows the root declaration's sandbox directly: resolving the
       // conversation through the control plane would create its root thread.
+      // A chat with no agent yet opens its sandbox (an upload before the
+      // first message); one of a tree being deleted reads as absent.
       sandbox: async (conversation) => {
-        await this.#directory.assertOwnerIfExists(conversation);
+        const thread = await this.#directory.load(conversation);
+        if (thread !== undefined && (await this.#inDeletedTree(thread))) {
+          throw new ConversationNotFoundError(conversation.chatId);
+        }
         const sandbox = await sandboxes.acquire(this.#root, {
           chatId: conversation.chatId,
           userId: conversation.userId,
@@ -527,15 +539,26 @@ class RuntimeHost implements AsyncDisposable {
     const thread =
       (await this.#directory.load(conversation)) ??
       (await this.#controlPlane.resolve(conversation)).thread;
-    const root = thread.path.isRoot
+    const root = await this.#rootOf(thread);
+    if (!root || !this.#ownsRoot(root) || root.deletingAt !== undefined) {
+      throw new ConversationNotFoundError(conversation.chatId);
+    }
+  }
+
+  /** The root of the tree `thread` is in: `thread` itself, or the tree's root chat while it is there. */
+  async #rootOf(thread: AgentThread): Promise<AgentThread | undefined> {
+    return thread.path.isRoot
       ? thread
       : await this.#directory.load({
           chatId: thread.treeId,
           userId: thread.conversation.userId,
         });
-    if (!root || !this.#ownsRoot(root) || root.deletingAt !== undefined) {
-      throw new ConversationNotFoundError(conversation.chatId);
-    }
+  }
+
+  /** Whether the tree `thread` is in is being deleted, or its root is gone. */
+  async #inDeletedTree(thread: AgentThread): Promise<boolean> {
+    const root = await this.#rootOf(thread);
+    return root === undefined || root.deletingAt !== undefined;
   }
 
   async sessionExists(conversation: ConversationId): Promise<boolean> {

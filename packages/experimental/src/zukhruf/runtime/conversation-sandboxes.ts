@@ -1,6 +1,7 @@
 import { type SandboxContext, SandboxNotFoundError } from '@deepagents/context';
 
 import type { AgentDeclaration, ZukhrufSandbox } from '../agent.ts';
+import { ConversationNotFoundError } from '../control-plane/conversation-not-found-error.ts';
 
 type Acquisition = () => Promise<ZukhrufSandbox>;
 
@@ -14,15 +15,25 @@ type Acquisition = () => Promise<ZukhrufSandbox>;
  * so neither a turn nor a plugin closes it. Closing never stops or removes
  * the sandbox, which other workers may be using: stopping and deleting a
  * chat's sandbox belongs to its environment. A handle whose sandbox is gone
- * is closed, and the chat is opened again.
+ * is closed, and the chat is opened again while it is `reopenable`; a chat
+ * that is not (it was deleted, perhaps by another worker) is forgotten and
+ * reads as absent, so a stale handle never creates its sandbox again.
  */
 export class ConversationSandboxes implements AsyncDisposable {
+  readonly #reopenable: (chat: SandboxContext) => Promise<boolean>;
   // One memoized acquisition for each declaration and conversation.
   readonly #held = new Map<string, Acquisition>();
   // The check of a held acquisition that is in flight, which every caller
   // shares: a caller's own check could still be running on a handle that
   // another caller's check found gone and closed.
   readonly #checks = new WeakMap<Acquisition, Acquisition>();
+
+  constructor(options: {
+    /** Whether a chat whose sandbox is gone may open it again. */
+    reopenable(chat: SandboxContext): Promise<boolean>;
+  }) {
+    this.#reopenable = options.reopenable;
+  }
 
   acquire(
     declaration: AgentDeclaration,
@@ -98,6 +109,11 @@ export class ConversationSandboxes implements AsyncDisposable {
       return handle;
     } catch (error) {
       if (!(error instanceof SandboxNotFoundError)) throw error;
+    }
+    if (!(await this.#reopenable(context))) {
+      this.#held.delete(key);
+      await handle.sandbox.close();
+      throw new ConversationNotFoundError(context.chatId);
     }
     // Held before the release, so a caller that comes during it waits for
     // the new acquisition instead of starting one of its own.

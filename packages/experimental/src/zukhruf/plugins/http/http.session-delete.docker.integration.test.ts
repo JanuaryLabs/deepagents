@@ -1,7 +1,7 @@
 import { TemporaryFiles } from '@zukhruf/fs';
 import { waitFor } from '@zukhruf/testing/async';
 import { DockerTestbed } from '@zukhruf/testing/docker';
-import { Postgres } from '@zukhruf/testing/postgres';
+import { Postgres, type PostgresDatabase } from '@zukhruf/testing/postgres';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
 import assert from 'node:assert/strict';
@@ -17,6 +17,7 @@ import {
 } from '@deepagents/context';
 import {
   type AgentDeclaration,
+  type AgentHost,
   AgentRuntime,
   type AgentStorage,
   EmbeddedAgentStorage,
@@ -27,7 +28,16 @@ import {
   defineSandbox,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
-import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
+import {
+  type HttpEnv,
+  type HttpProjection,
+  http,
+} from '@deepagents/experimental/zukhruf/http';
+import { uploads } from '@deepagents/experimental/zukhruf/uploads';
+import {
+  UPLOAD_FILENAME_HEADER,
+  uploadsHttp,
+} from '@deepagents/experimental/zukhruf/uploads/http';
 
 import {
   textResult,
@@ -55,6 +65,25 @@ const historySchema = z.array(
   }),
 );
 
+/** One host process's storage on the database, with its own pool and pg-boss. */
+async function postgresStorage(
+  resources: AsyncDisposableStack,
+  database: PostgresDatabase,
+) {
+  const boss = new PgBoss({ connectionString: database.connectionString });
+  boss.on('error', () => {});
+  await boss.start();
+  resources.defer(() => boss.stop({ graceful: false }));
+  const storage = resources.use(
+    await PostgresAgentStorage.create({
+      pool: database.pool(),
+      boss,
+      queue: { pollingIntervalSeconds: 0.5 },
+    }),
+  );
+  return { storage, boss };
+}
+
 const storages = [
   {
     name: 'embedded',
@@ -70,21 +99,8 @@ const storages = [
   },
   {
     name: 'postgres',
-    open: async (resources: AsyncDisposableStack) => {
-      const database = resources.use(await testPostgres.database());
-      const boss = new PgBoss({ connectionString: database.connectionString });
-      boss.on('error', () => {});
-      await boss.start();
-      resources.defer(() => boss.stop({ graceful: false }));
-      const storage = resources.use(
-        await PostgresAgentStorage.create({
-          pool: database.pool(),
-          boss,
-          queue: { pollingIntervalSeconds: 0.5 },
-        }),
-      );
-      return { storage, boss };
-    },
+    open: async (resources: AsyncDisposableStack) =>
+      postgresStorage(resources, resources.use(await testPostgres.database())),
   },
 ] satisfies {
   name: string;
@@ -93,11 +109,15 @@ const storages = [
   ): Promise<{ storage: AgentStorage; boss: PgBoss }>;
 }[];
 
-/** A runtime of the root agent `name` on `storage`, served as http(runtime) behind a user header. */
+/** A runtime of the root agent `name` on `storage`, served as http(runtime, ...projections) behind a user header. */
 async function serveAgent(
   resources: AsyncDisposableStack,
   storage: AgentStorage,
-  agent: Pick<AgentDeclaration, 'name' | 'model' | 'sandbox' | 'subagents'>,
+  agent: Pick<
+    AgentDeclaration,
+    'name' | 'model' | 'sandbox' | 'subagents' | 'plugins'
+  >,
+  ...projections: HttpProjection[]
 ) {
   const runtime = resources.use(
     await new AgentRuntime(
@@ -109,12 +129,12 @@ async function serveAgent(
     context.set('userId', context.req.header('x-user-id') ?? 'user-1');
     return next();
   });
-  app.route(MOUNT, http(runtime));
+  app.route(MOUNT, http(runtime, ...projections));
   return { app, runtime };
 }
 
-async function startTurn(app: Hono<HttpEnv>, sessionId: string) {
-  const response = await app.request(`${MOUNT}/session/${sessionId}`, {
+function postTurn(app: Hono<HttpEnv>, sessionId: string) {
+  return app.request(`${MOUNT}/session/${sessionId}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -127,8 +147,33 @@ async function startTurn(app: Hono<HttpEnv>, sessionId: string) {
       trigger: 'submit-message',
     }),
   });
+}
+
+async function startTurn(app: Hono<HttpEnv>, sessionId: string) {
+  const response = await postTurn(app, sessionId);
   assert.equal(response.status, 202);
   return acceptedBodySchema.parse(await response.json()).turnId;
+}
+
+/** Starts the session with a turn, once that turn has completed. */
+async function completedTurn(
+  { app, runtime }: { app: Hono<HttpEnv>; runtime: AgentHost },
+  sessionId: string,
+  signal: AbortSignal,
+) {
+  const turnId = await startTurn(app, sessionId);
+  await waitFor(
+    async () =>
+      assert.equal(
+        (
+          await runtime
+            .observe({ chatId: sessionId, userId: 'user-1' })
+            .status(turnId)
+        )?.status,
+        'completed',
+      ),
+    { signal },
+  );
 }
 
 function deleteSession(
@@ -167,12 +212,17 @@ function sessionNotFound(sessionId: string) {
 
 const deleted = { status: 204, cacheControl: 'no-store', body: null };
 
-/** The namespace's containers, found by their labels. */
-async function namespaceContainers(namespace: string) {
+/** The containers of the namespace, or of one chat in it, found by their labels. */
+async function namespaceContainers(namespace: string, chatId?: string) {
   const client = await testbed.client();
   return client.containers.list({
     all: true,
-    filters: { label: [`deepagents.sandbox.namespace=${namespace}`] },
+    filters: {
+      label: [
+        `deepagents.sandbox.namespace=${namespace}`,
+        ...(chatId === undefined ? [] : [`deepagents.sandbox.chat=${chatId}`]),
+      ],
+    },
   });
 }
 
@@ -272,19 +322,7 @@ for (const { name, open } of storages) {
     resources.use(await owner.runtime.work());
     const sessionId = randomUUID();
     const unknownId = randomUUID();
-    const turnId = await startTurn(owner.app, sessionId);
-    await waitFor(
-      async () =>
-        assert.equal(
-          (
-            await owner.runtime
-              .observe({ chatId: sessionId, userId: 'user-1' })
-              .status(turnId)
-          )?.status,
-          'completed',
-        ),
-      { signal: t.signal },
-    );
+    await completedTurn(owner, sessionId, t.signal);
     const ownerSession = async () =>
       (await owner.app.request(`${MOUNT}/session/${sessionId}`)).status;
 
@@ -597,3 +635,172 @@ for (const { name, open } of storages) {
     );
   });
 }
+
+const UPLOADS = '/workspace/uploads';
+const PNG_PIXEL = Uint8Array.fromBase64(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+);
+const receiptSchema = z.looseObject({ url: z.string() });
+
+/** One host process on the database, with its own pool, pg-boss and held sandboxes, serving the root agent and its uploads over HTTP. */
+async function uploadsHost(
+  resources: AsyncDisposableStack,
+  database: PostgresDatabase,
+  sandbox: AgentDeclaration['sandbox'],
+) {
+  const { storage } = await postgresStorage(resources, database);
+  const uploaded = uploads({ directory: UPLOADS });
+  return serveAgent(
+    resources,
+    storage,
+    {
+      name: 'root',
+      model: new MockLanguageModelV4({
+        doStream: async () => textResult('done'),
+      }),
+      sandbox,
+      plugins: [uploaded],
+    },
+    uploadsHttp(uploaded, { maxBytes: 4096 }),
+  );
+}
+
+function upload(app: Hono<HttpEnv>, sessionId: string) {
+  return app.request(`${MOUNT}/session/${sessionId}/uploads`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'image/png',
+      [UPLOAD_FILENAME_HEADER]: 'pixel.png',
+    },
+    body: PNG_PIXEL,
+  });
+}
+
+test("postgres: a host still holding the sandbox handle of a session another host deleted answers 404 to the session's next upload and opens no container for it", async (t) => {
+  const namespace = `stale-${randomUUID()}`;
+  try {
+    await using resources = new AsyncDisposableStack();
+    const database = resources.use(await testPostgres.database());
+    // Two host processes on one database, each with its own pool, pg-boss,
+    // environment and held sandboxes.
+    const host = () =>
+      uploadsHost(
+        resources,
+        database,
+        defineSandbox(
+          new DockerSandboxEnvironment({ namespace, container: defaults }),
+          { idleTimeoutMs: false },
+        ),
+      );
+    const a = await host();
+    const b = await host();
+    resources.use(await a.runtime.work());
+    const sessionId = randomUUID();
+    await completedTurn(a, sessionId, t.signal);
+    // B's upload opens the session's container, so B holds a handle to it.
+    const held = (await upload(b.app, sessionId)).status;
+    const before = (await namespaceContainers(namespace, sessionId)).length;
+
+    const response = await answer(await deleteSession(a.app, sessionId));
+    const stale = await answer(await upload(b.app, sessionId));
+
+    assert.deepStrictEqual(
+      {
+        held,
+        before,
+        response,
+        stale,
+        containers: (await namespaceContainers(namespace, sessionId)).length,
+      },
+      {
+        held: 201,
+        before: 1,
+        response: deleted,
+        stale: sessionNotFound(sessionId),
+        containers: 0,
+      },
+    );
+  } finally {
+    await removeNamespace(namespace);
+  }
+});
+
+test("postgres: while a DELETE cut short after removing the session's container leaves the session being deleted, an upload and a read of an uploaded file answer 404 on a host that still holds the session's sandbox handle, an upload answers 404 on the deleting host, which holds none, a turn answers 404, and no container is opened for the session; a second DELETE finishes the delete", async (t) => {
+  const namespace = `cut-short-${randomUUID()}`;
+  try {
+    await using resources = new AsyncDisposableStack();
+    const database = resources.use(await testPostgres.database());
+    const docker = new DockerSandboxEnvironment({
+      namespace,
+      container: defaults,
+    });
+    let engineFails = true;
+    const failingAfterRemoval: SandboxEnvironment = {
+      open: (chat) => docker.open(chat),
+      delete: async (chat) => {
+        await docker.delete(chat);
+        if (engineFails) {
+          engineFails = false;
+          throw new Error('the engine failed after removing the container');
+        }
+      },
+    };
+    const a = await uploadsHost(
+      resources,
+      database,
+      defineSandbox(failingAfterRemoval),
+    );
+    const b = await uploadsHost(
+      resources,
+      database,
+      defineSandbox(
+        new DockerSandboxEnvironment({ namespace, container: defaults }),
+        { idleTimeoutMs: false },
+      ),
+    );
+    resources.use(await a.runtime.work());
+    const sessionId = randomUUID();
+    await completedTurn(a, sessionId, t.signal);
+    const uploaded = await upload(b.app, sessionId);
+    const held = uploaded.status;
+    const { url } = receiptSchema.parse(await uploaded.json());
+    const before = (await namespaceContainers(namespace, sessionId)).length;
+
+    const cutShort = (await deleteSession(a.app, sessionId)).status;
+    const meanwhile = {
+      heldUpload: await answer(await upload(b.app, sessionId)),
+      heldRead: await answer(await b.app.request(url)),
+      deletingHostUpload: await answer(await upload(a.app, sessionId)),
+      turn: await answer(await postTurn(b.app, sessionId)),
+      containers: (await namespaceContainers(namespace, sessionId)).length,
+    };
+    const retried = await answer(await deleteSession(a.app, sessionId));
+
+    assert.deepStrictEqual(
+      {
+        held,
+        before,
+        cutShort,
+        meanwhile,
+        retried,
+        containers: (await namespaceContainers(namespace, sessionId)).length,
+      },
+      {
+        held: 201,
+        before: 1,
+        cutShort: 500,
+        meanwhile: {
+          heldUpload: sessionNotFound(sessionId),
+          heldRead: sessionNotFound(sessionId),
+          deletingHostUpload: sessionNotFound(sessionId),
+          turn: sessionNotFound(sessionId),
+          containers: 0,
+        },
+        retried: deleted,
+        containers: 0,
+      },
+    );
+  } finally {
+    await removeNamespace(namespace);
+  }
+});
