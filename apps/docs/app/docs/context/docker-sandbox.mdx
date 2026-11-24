@@ -155,6 +155,13 @@ Every `open` of the chat reaches the same container. `close()` (or scope exit)
 releases the handle and leaves the container running; `environment.stop(chat)`
 stops it and keeps its files, and `environment.delete(chat)` removes it.
 
+The chat's container has no auto-remove, and its PID 1 is Docker's init, so a
+stop ends it at once and killed commands leave no zombies. It takes the image or
+`dockerfile` options without `installers`, and `volumes` as a function of the
+chat: `(chat) => [...]`, with bind mounts and external volumes only. The handles
+of one environment share one engine client. See [one-off and chat sandboxes](/docs/context/sandbox#one-off-and-chat-sandboxes) for what `open`, `stop`,
+`delete`, `resume` and `close` promise on every backend.
+
 ## Container command overrides
 
 Runtime and Dockerfile strategies accept an optional `command` to control the
@@ -581,8 +588,8 @@ const version = await useSandbox(
 );
 ```
 
-Runtime and Dockerfile containers are configured for automatic removal when
-stopped. `dispose()` sends a stop request through the Engine API and resolves
+One-off Runtime and Dockerfile containers are configured for automatic removal
+when stopped. `dispose()` sends a stop request through the Engine API and resolves
 when the engine has removed the container, so its volumes and bind mounts are
 free. Compose sandboxes run `docker compose down` to stop the stack.
 

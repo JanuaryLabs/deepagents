@@ -6,8 +6,7 @@ description: Execute OCI images in local hardware-isolated microVMs without Dock
 The Microsandbox backend runs commands inside local hardware-isolated microVMs
 through the optional [`microsandbox`](https://www.npmjs.com/package/microsandbox)
 SDK. It implements the same `DisposableSandbox` contract as the other
-DeepAgents backends: `executeCommand`, `spawn`, `readFile`, `writeFiles`, and
-`dispose`.
+DeepAgents backends: the AI SDK sandbox session plus `dispose`.
 
 Use it when you want standard OCI images and real process streaming, but do not
 want your app coupled to a Docker daemon. The backend boots a microVM from an
@@ -90,6 +89,14 @@ Every `open` of the chat reaches the same microVM. `close()` (or scope exit)
 releases the handle and leaves the microVM running; `environment.stop(chat)`
 stops it and keeps its root filesystem, and `environment.delete(chat)` removes
 it.
+
+The chat's microVM is persisted and detached, so it outlives the process that
+opened it. It takes `image` without installers, `volumes` as a function of the
+chat (`(chat) => [...]`, bind mounts and existing named volumes only), and
+`configure` for the rest of the SDK builder, applied only when `open` creates
+the microVM. Each handle holds its own connection to the microVM, which
+`close()` detaches. See [one-off and chat sandboxes](/docs/context/sandbox#one-off-and-chat-sandboxes) for what `open`, `stop`, `delete`, `resume` and
+`close` promise on every backend.
 
 ## Options
 

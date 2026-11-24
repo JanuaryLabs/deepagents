@@ -83,8 +83,8 @@ The methods object returned by `createSandboxMethods()` also implements
 ### Container startup
 
 All single-container strategies start a long-running container and then execute
-commands inside it. Docker sends the create request of the Engine API with the
-body that `docker run -d --rm` sends for the same options. When the image
+commands inside it. For a one-off, Docker sends the create request of the Engine
+API with the body that `docker run -d --rm` sends for the same options. When the image
 is missing, the engine pulls it and creates the container again. Apple
 Container uses `container run` with equivalent name, resource, volume,
 environment, arch, and command controls where the Apple CLI supports them.
@@ -100,10 +100,37 @@ Commands then run through the exec requests of the Engine API, as
 `bash -lc "<command>"`.
 
 Apple Container follows the same shape with `container run --detach --rm ...`
-and executes commands via `container exec <id> bash -lc "<command>"`. It does not
+for a one-off and executes commands via `container exec <id> bash -lc "<command>"`. It does not
 support Compose, Docker volume drivers, or Docker security/network flags;
 instead each container runs inside its own lightweight VM and exposes a smaller
 set of resource, arch, bind-mount, named-volume, and environment controls.
+
+### Chat containers
+
+A `DockerSandboxEnvironment` or `AppleContainerSandboxEnvironment` opens a
+chat's container through the same strategies, with an engine that also
+implements `ChatContainerEngine`. Its `find(name)` returns the container that
+has the chat's name, and `createChat(...)` creates one under that name with the
+chat's labels. A chat container has no auto-remove, so a stop keeps it, and its
+PID 1 is the engine's init, which reaps what killed commands leave behind. The
+strategy's `openChat` works in this order:
+
+```
+openChat(name, labels)
+  │
+  ├─ 1. engine.find(name)      ← found: container.resume() starts or unpauses it
+  │                              and returns it; gone in between: go on to create
+  ├─ 2. getImage(), prepareVolumes()
+  ├─ 3. engine.createChat(...) ← another caller won the name: resume() theirs
+  ├─ 4. ensureWorkdir(), configure(), assertBashAvailable()
+  │                            ← on failure, container.remove()
+  └─ 5. return the container
+```
+
+The returned `ChatEngineContainer` adds `resume()`, which never creates a
+container, and `remove()`, which the environment's `delete` calls. What the
+environment and its handles promise is on
+[Sandbox: one-off and chat sandboxes](/docs/context/sandbox#one-off-and-chat-sandboxes).
 
 ### Dockerfile image caching
 

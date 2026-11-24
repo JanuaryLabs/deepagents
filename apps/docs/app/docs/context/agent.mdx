@@ -118,7 +118,8 @@ await using chatSandbox = await environment.open({
 
 `close()` (or scope exit) leaves the sandbox running. The environment has no
 `stop`; `environment.delete(chat)` deletes the sandbox, found through Daytona
-search, which lags a create by a few seconds.
+search, which lags a create by a few seconds. It takes no `volumes` yet. See
+[one-off and chat sandboxes](/docs/context/sandbox#one-off-and-chat-sandboxes) for what every environment promises.
 
 The agent merges `sandbox.tools` into its toolset automatically. Any `tools` you pass override sandbox tools on name conflict. The agent calls no sandbox tool by name, so a host that shows the model only bash passes `{ tools: { bash: toolkit.bash }, sandbox: toolkit.sandbox }`, and the agent's tool types then name only `bash`.
 

@@ -89,7 +89,8 @@ and injected collaboration-tool implementations are internal wiring. See
 Compose infrastructure in a reusable `defineStack(async (resources) => ...)`
 recipe returning `{ storage }`, plus any plugin `bindings` or host options.
 `storage` is an `AgentStorage`: the context store, stream manager, turn queue
-and mailbox store on one database, and `admit(tree, work)`, which runs `work`
+and mailbox store on one database, the wakes of the sandbox idle stop on their
+own queue beside the turn queue, and `admit(tree, work)`, which runs `work`
 with all four bound to one unit under a per-tree lock. On PostgreSQL,
 `PostgresAgentStorage.create({ pool, boss })` builds the stores on the host's
 pool and the turn queue on PgBoss, refuses a PgBoss on another database with
@@ -148,11 +149,37 @@ adapters without registering them with `resources`; those adapters remain
 caller-owned. Host and worker disposal always wait for active work. Only
 registered adapters are released by host disposal.
 
+An agent's `sandbox` is `defineSandbox(environment, options)`, where
+`environment` is a `@deepagents/context` sandbox environment that gives each
+chat its own sandbox (see
+[one-off and chat sandboxes](https://januarylabs.github.io/deepagents/docs/context/sandbox#one-off-and-chat-sandboxes)).
+An environment that can stop its sandboxes (Docker, Apple container,
+microsandbox) requires `idleTimeoutMs`: the runtime stops a chat's sandbox,
+keeping its files, once the chat has been idle that many milliseconds, and the
+next turn starts it again. `0` stops it as soon as the chat is idle and `false`
+never stops it; there is no default. The virtual and Daytona environments take
+no `idleTimeoutMs`.
+
+```ts
+import { DockerSandboxEnvironment } from '@deepagents/context';
+import { defineSandbox } from '@deepagents/experimental/zukhruf';
+
+const sandbox = defineSandbox(
+  new DockerSandboxEnvironment({ namespace: 'analytics', image: 'node:lts' }),
+  { idleTimeoutMs: 10 * 60_000 },
+);
+```
+
+A chat waiting on an approval is not idle, so its sandbox keeps running, and
+each sub-agent's sandbox stops on its own declaration's idle time. See the
+sandbox idle stop in [`src/zukhruf/DESIGN.md`](./src/zukhruf/DESIGN.md).
+
 The host lazily acquires one sandbox handle per agent declaration and
-conversation from the agent's `sandbox` factory. Later turns and plugins borrow
-the same handle; they must leave disposal to the host. A failed acquisition is
-retried on the next request. Host disposal closes the held handles after its
-workers stop; closing a handle never stops or removes the chat's sandbox.
+conversation from the agent's `sandbox` declaration. Later turns and plugins
+borrow the same handle; they must leave disposal to the host. A failed
+acquisition is retried on the next request. Host disposal closes the held
+handles after its workers stop; closing a handle never stops or removes the
+chat's sandbox.
 
 Zukhruf discovers immediate `skills/<name>/SKILL.md` children from each
 configured sandbox once per conversation. It persists only the ordered catalog

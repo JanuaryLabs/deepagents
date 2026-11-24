@@ -69,11 +69,6 @@ our `dispose`. Every factory returns one directly, with `listDirectory` and
 `@ai-sdk/sandbox-just-bash` adapter. Its `spawn` delivers output when the process
 exits, so use a process-backed sandbox for live streaming.
 
-Every factory makes a one-off, which nothing else reaches, and `dispose()`
-removes it: Docker and Apple Container stop and remove its container,
-Microsandbox its VM, and Daytona deletes its sandbox. A sandbox that a chat's
-next turn reaches again comes from the backend's `SandboxEnvironment` instead.
-
 Commands execute with Bash semantics. Process-backed
 environments must contain `bash`; factories fail with a clear error when Bash
 cannot be started. There is no POSIX `sh` fallback.
@@ -87,6 +82,60 @@ await using backend = await createDockerSandbox({ installers: [pkg(['jq'])] });
 await backend.run({ command: 'jq --version' });
 // backend.dispose() runs automatically when this scope exits
 ```
+
+## One-off and chat sandboxes
+
+Every factory makes a one-off, which nothing else reaches, and `dispose()`
+removes it: Docker and Apple Container stop and remove its container,
+Microsandbox its VM, and Daytona deletes its sandbox. Once `dispose()` is
+called, every operation of these one-offs rejects with an `Error` that names
+the sandbox. A one-off whose container, VM or Daytona sandbox was removed from
+outside rejects every operation with `SandboxNotFoundError`.
+
+A sandbox that a chat's next turn reaches again comes from the backend's
+`SandboxEnvironment`. The environment names each chat's sandbox
+from its `namespace` and the chat's id, so the caller never names it. Give each
+app or deployment its own namespace: two environments with the same namespace
+on one engine reach the same sandboxes.
+
+- `open(chat)` returns a handle to the chat's sandbox. It attaches to the
+  sandbox when it runs, starts it when it is stopped, and creates it when there
+  is none. Two callers that open the same chat at once get the same sandbox.
+  The environment's options apply only when `open` creates the sandbox.
+- `delete(chat)` removes the sandbox and everything in it outside its volumes.
+  It never starts the sandbox, never touches a volume, and resolves when there
+  is no sandbox.
+- `stop(chat)`, on a `StoppableSandboxEnvironment` only, stops the sandbox and
+  keeps its files, so the next `open` or `resume` starts it again. It never
+  starts the sandbox, and resolves when the sandbox is stopped or missing.
+
+The handle, a `ChatSandbox`, is the sandbox session plus two methods:
+
+- `resume()` starts the sandbox when it is stopped and resolves at once when it
+  runs. It never creates a sandbox. When the sandbox is gone, or another sandbox
+  now has its name, it rejects with `SandboxNotFoundError`. Every other operation
+  of the handle also rejects so after `delete`, even after the chat is opened
+  again: close the handle and open the chat again.
+- `close()` (or scope exit with `await using`) releases what this process holds,
+  such as the engine client or the VM connection. It never stops, starts or
+  removes the sandbox. After `close()`, every operation of the handle rejects
+  with an `Error`, not `SandboxNotFoundError`.
+
+| Environment                        | `stop`                                             | `delete`                                  |
+| ---------------------------------- | -------------------------------------------------- | ----------------------------------------- |
+| `DockerSandboxEnvironment`         | `docker stop`; the container and its files stay    | `docker rm -f` with its anonymous volumes |
+| `AppleContainerSandboxEnvironment` | `container stop`; the container and its files stay | `container delete --force`                |
+| `MicrosandboxSandboxEnvironment`   | Stops the microVM and keeps its root filesystem    | The SDK's `destroy`                       |
+| `DaytonaSandboxEnvironment`        | None: use the `lifecyclePolicy` create option      | Deletes the sandbox found by name         |
+| `VirtualSandboxEnvironment`        | None: nothing runs between commands                | Drops the chat's in-memory filesystem     |
+
+A chat's sandbox takes no installers: a second worker could reach it before
+they finish, so what it needs belongs in its image. Its durable files, such
+as uploads and what the agent creates, belong in volumes, because the rest is
+lost when the sandbox is deleted. The Docker, Apple Container and Microsandbox
+environments take `volumes: (chat) => [...]`, with bind mounts and external
+volumes only. The Daytona environment takes no volumes yet. The virtual
+environment keeps each chat's files in this process only.
 
 ## Quick start: Docker + Bash tool
 

@@ -367,7 +367,7 @@ turn cancelled while queued never enters the chain at all.
   held handle when it ends. A handle can hold a connection (a Microsandbox microVM refuses every
   connect after about 107 open ones). Closing never stops or removes the sandbox, so a worker's
   shutdown leaves the chat's sandbox to the other workers; only the environment's `stop` and
-  `delete` end it.
+  `delete` end it. The runtime calls `stop` for an idle chat (see Sandbox idle stop).
 - The host selects the `StreamStore` and `ChangeSource` when constructing the borrowed
   `StreamManager`; the ready host neither initializes nor disposes borrowed adapters.
 
@@ -919,7 +919,7 @@ const traceTelemetry: AgentPluginDefinition<TracePlugin> = {
   `{ storage, multiAgent?, bindings?, conversationStatusChanges? }`. `storage` is an
   `AgentStorage` (`storage/agent-storage.ts`): `store`, `streams`, `queue` and `mailboxStore` on
   one database, `sandboxIdleWakes` (a `PgBossWakeScheduler` on `${turn queue}-sandbox-idle`, polled
-  every 0.5 s, which the runtime does not use yet), plus `admit(tree, work)`, which runs `work` with the four parts bound to one unit
+  every 0.5 s, for the sandbox idle stop), plus `admit(tree, work)`, which runs `work` with the four parts bound to one unit
   (`AdmissionScope`) while no other admission to the tree runs. `PostgresAgentStorage.create({
 pool, boss, schema?, queue?, changeSource? })` builds the stores on the host pool and the turn
   queue on PgBoss, throws `AgentStorageDatabaseMismatchError` when `current_database()` or
@@ -953,6 +953,51 @@ native`AsyncDisposableStack`passed to the recipe owns registered resources. Cons
   client on discovery failure, later initialization failure, or host disposal. Browser,
   transport, and authentication configuration stay with the caller. This is a startup snapshot;
   changes to the server's tool catalog require a new initialized host.
+
+## Sandbox idle stop _(Built, #5132)_
+
+A chat's sandbox outlives every turn, worker and restart (see Consequences in the executor
+section), so something must end the compute of a chat nobody uses. The runtime **stops** it once the
+chat has been idle for its declaration's `idleTimeoutMs`, and never removes it: a stop keeps the
+sandbox and its files, and the next turn's `resume()` (or `open()` on a worker that holds no handle)
+starts it again. Removing a deleted chat's sandbox is #5135. `runtime/sandbox-idle-stop.ts`
+(`SandboxIdleStop`) owns it.
+
+- **The idle time is the declaration's.** `defineSandbox` on a `StoppableSandboxEnvironment`
+  (Docker, Apple container, microsandbox) requires `idleTimeoutMs: number | false`: a non-negative
+  safe integer (`0` stops as soon as the chat is idle) or `false` (never stop), else `RangeError`.
+  There is no package default. An environment without `stop` (virtual, Daytona) refuses it
+  (`idleTimeoutMs?: never`); Daytona bounds idle cost with its own `lifecyclePolicy`. It is per
+  declaration, not an environment option, because only the runtime acts on it.
+- **Idle** means `conversationStatusOf` is not `active`: no turn queued or running, and the chain
+  head waits on no approval or client input. A failed latest turn (`systemError`) is idle.
+- **Arm.** The queue's `onSettled` runs `arm(chat)` for every chat that settles, sub-agents
+  included. When the chat's declaration stops idle sandboxes and the chat is idle, it schedules a
+  wake on `storage.sandboxIdleWakes` (a `PgBossWakeScheduler` on `<turn queue>-sandbox-idle`,
+  polled every 0.5 s) at the latest turn's `finishedAt` plus `idleTimeoutMs`. The wake id is a UUIDv5
+  of `['sandbox-idle', turnId, scheduledFor]` under the chat's namespace, so a re-arm of the same
+  turn is idempotent. Workers consume the queue only when some declaration of the tree stops idle
+  sandboxes.
+- **Cancel.** `AgentTurnExecutor` calls `cancel(thread)` just before the next turn records itself as
+  the latest; it derives the previous wake's id from that turn's `finishedAt`. A failed cancel is a
+  process warning and never fails the turn.
+- **Plugin borrows.** `host.sandbox(conversation)` outside a turn can start the sandbox, so
+  `armAfterBorrow` cancels the latest turn's wake and arms one at now plus `idleTimeoutMs`, keyed on
+  the latest turn (`null` before the first): the window starts when the sandbox starts, if that is
+  later (eve's rule). It never fails the borrow. A later borrow cannot cancel an earlier borrow's
+  wake, so the earlier one still stops the sandbox at its own time (#5471).
+- **Fire.** The handler checks the payload against the wake's id and due time, then, inside the
+  tree's `residency.admit`, stops only when the chat's latest turn is still the wake's and the chat
+  is still idle. Every turn push admits through the same lock, so no turn starts between the check
+  and `environment.stop(chat)`. A cancel is cheap but no barrier (a fetched wake still runs), so this
+  re-check is what makes a late wake harmless. Any worker can deliver the stop, including one that
+  never ran the chat's turns.
+- **A parked approval keeps the sandbox running.** A head that waits on an approval is `active`, so
+  nothing arms, as in eve, where a turn waiting for approval is still an open turn. An approval that
+  nobody answers keeps the sandbox running until the backend's own limits apply.
+- **Each sub-agent's idle is its own.** A child is its own conversation with its own declaration,
+  sandbox and idle time: its sandbox stops after its own `idleTimeoutMs` while its parent waits in
+  `wait_agent`, and the parent's keeps running and stops on its own window.
 
 ## Stacks: one runtime, explicit adapter composition
 
@@ -1158,10 +1203,9 @@ work({concurrency?}) → AsyncDisposable }`.
 - **Per-chat sandbox GC** — the host closes its per-chat sandbox handles when it ends, which never
   stops or removes a sandbox. Before a turn borrows a held handle it resumes it; a handle whose
   sandbox was removed outside it (`SandboxNotFoundError`) is closed and the turn opens the chat
-  again. Reclaiming retained sandboxes is decided but not built:
-  deleting a chat removes its container (#5135), the runtime stops a chat's container, keeping its
-  files, once the chat has been idle for a time the host sets (#5132), and files that must outlive
-  the container live in a volume the app chooses.
+  again. The runtime stops an idle chat's sandbox and keeps its files (see Sandbox idle stop).
+  Removing a deleted chat's sandbox is decided but not built (#5135); files that must outlive the
+  sandbox live in a volume the app chooses.
 - **Queued-turn visibility** — `resume()` only sees executing/executed turns (the chain mutates at
   execution time). `conversationStatus()` reports a queued turn as `active`, but a reconnecting
   client still can't stream a turn that is queued but unstarted; folds into the observe/reconnect
@@ -1171,7 +1215,7 @@ _Resolved by the executor build:_ **mid-turn message contract** → queue (stric
 structural via `key_strict_fifo`, whose per-key head selection prevents cross-chat starvation);
 **sandbox lifetime** → per-chat, named from namespace and chatId, open = attach, start or
 create; **workspace durability** → the per-chat container persists, so the FS survives across
-turns, workers, and restarts (durable volumes only needed once containers are reclaimed).\_
+turns, workers, and restarts (durable volumes hold the files that must outlive a deleted sandbox).\_
 
 ## Principles carried throughout
 
@@ -1183,7 +1227,7 @@ turns, workers, and restarts (durable volumes only needed once containers are re
   the same discipline that makes it durable also makes it portable.
 - **The host owns sandbox handles; turns and plugins borrow them.** The host lazily opens one
   handle per declaration and conversation, shares it across turns, and closes it after workers
-  stop. Closing never touches the sandbox; the environment's `stop` and `delete` do. Reclaiming
-  sandboxes of deleted or idle chats remains open.
+  stop. Closing never touches the sandbox; the environment's `stop` and `delete` do. The idle stop
+  is built; removing the sandboxes of deleted chats remains open (#5135).
 - **Scaffold one primitive at a time**, even erroring, where the error is diagnostic (it pins the
   exact missing dependency).
