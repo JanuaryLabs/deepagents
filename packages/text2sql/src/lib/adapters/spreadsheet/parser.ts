@@ -54,6 +54,7 @@ export function parseFile(filePath: string): ParsedSheet[] {
   }
 
   const sheets: ParsedSheet[] = [];
+  const tableIdentifier = uniqueIdentifiers();
 
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
@@ -64,12 +65,6 @@ export function parseFile(filePath: string): ParsedSheet[] {
       continue;
     }
 
-    // For CSV files, use filename as table name; for Excel, use sheet name
-    const tableName =
-      ext === '.csv' || ext === '.tsv'
-        ? getTableNameFromFile(filePath)
-        : sanitizeTableName(sheetName);
-
     const columns = inferColumns(rows);
 
     // Skip sheets with no columns (shouldn't happen if rows exist, but be safe)
@@ -77,8 +72,14 @@ export function parseFile(filePath: string): ParsedSheet[] {
       continue;
     }
 
+    // For CSV files, use filename as table name; for Excel, use sheet name.
+    // Distinct sheet names can sanitize to one identifier ("Sales Data",
+    // "sales-data"), so each sheet's table name is made unique.
     sheets.push({
-      name: tableName,
+      name:
+        ext === '.csv' || ext === '.tsv'
+          ? getTableNameFromFile(filePath)
+          : tableIdentifier(sheetName),
       columns,
       rows,
     });
@@ -162,43 +163,30 @@ function inferColumns(rows: Record<string, unknown>[]): Column[] {
     return [];
   }
 
-  const rawNames = Array.from(keySet);
-  const dedupedNames = deduplicateColumnNames(rawNames);
-
-  return dedupedNames.map((name, idx) => {
-    const originalKey = rawNames[idx];
+  const columnIdentifier = uniqueIdentifiers();
+  return Array.from(keySet, (originalKey) => {
     const values = rows.map((row) => row[originalKey]);
     const type = inferColumnType(values);
-    return { name, originalKey, type };
+    return { name: columnIdentifier(originalKey), originalKey, type };
   });
 }
 
 /**
- * Deduplicate column names by appending _2, _3, etc. to duplicates.
+ * Hands out sanitized identifiers, each unique among the ones it handed out
+ * before: a clash gets the first free `_2`, `_3`, … suffix, so a name that
+ * already ends in `_2` cannot collide with a suffixed duplicate.
  */
-function deduplicateColumnNames(names: string[]): string[] {
-  const seen = new Map<string, number>();
-  const result: string[] = [];
-
-  for (const rawName of names) {
-    // Sanitize the column name
-    let name = sanitizeTableName(rawName);
-
-    // Handle empty names (generate column_1, column_2, etc.)
-    if (!name) {
-      name = 'column';
+function uniqueIdentifiers(): (rawName: string) => string {
+  const used = new Set<string>();
+  return (rawName) => {
+    const base = sanitizeIdentifier(rawName);
+    let name = base;
+    for (let suffix = 2; used.has(name); suffix++) {
+      name = `${base}_${suffix}`;
     }
-
-    const count = seen.get(name) ?? 0;
-    if (count > 0) {
-      result.push(`${name}_${count + 1}`);
-    } else {
-      result.push(name);
-    }
-    seen.set(name, count + 1);
-  }
-
-  return result;
+    used.add(name);
+    return name;
+  };
 }
 
 /**

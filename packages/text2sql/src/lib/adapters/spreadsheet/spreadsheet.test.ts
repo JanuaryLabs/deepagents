@@ -265,6 +265,56 @@ describe('Spreadsheet Adapter', () => {
       adapter.close();
     });
 
+    it('loads two sheets whose names sanitize to one identifier as two tables', async () => {
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
+      );
+      const xlsxPath = path.join(directory.path, 'clash.xlsx');
+
+      createExcel(xlsxPath, {
+        'Sales Data': [{ region: 'north' }],
+        'sales-data': [{ region: 'south' }],
+      });
+
+      const adapter = new Spreadsheet({
+        file: xlsxPath,
+        grounding: [tables()],
+      });
+
+      assert.deepStrictEqual(
+        {
+          first: normalize(await adapter.execute('SELECT * FROM sales_data')),
+          second: normalize(
+            await adapter.execute('SELECT * FROM sales_data_2'),
+          ),
+        },
+        { first: [{ region: 'north' }], second: [{ region: 'south' }] },
+      );
+
+      adapter.close();
+    });
+
+    it('gives columns unique names even when a header already ends in a suffix', async () => {
+      await using directory = await temporaryFiles.directory(
+        'text2sql-spreadsheet-',
+      );
+      const xlsxPath = path.join(directory.path, 'columns.xlsx');
+
+      createExcel(xlsxPath, {
+        Only: [{ a: 1, A: 2, a_2: 3 }],
+      });
+
+      const adapter = new Spreadsheet({
+        file: xlsxPath,
+        grounding: [tables()],
+      });
+
+      const rows = await adapter.execute('SELECT * FROM only');
+      assert.deepStrictEqual(normalize(rows), [{ a: 1, a_2: 2, a_2_2: 3 }]);
+
+      adapter.close();
+    });
+
     it('should prefix sheet names starting with numbers', async () => {
       await using directory = await temporaryFiles.directory(
         'text2sql-spreadsheet-',
