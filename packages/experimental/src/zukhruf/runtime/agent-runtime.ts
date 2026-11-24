@@ -140,6 +140,8 @@ export interface AgentPluginInitialization extends Partial<AsyncDisposable> {
   /** Hosts wait for active plugin work before releasing infrastructure. */
   work?(): Promise<AsyncDisposable>;
   conversationAvailable?(conversation: ConversationId): Promise<void>;
+  /** The conversation is being deleted; its metadata is still readable. Must be idempotent; a rejection aborts the delete. */
+  conversationDeleting?(conversation: ConversationId): Promise<void>;
 }
 
 /**
@@ -596,7 +598,9 @@ class RuntimeHost implements AsyncDisposable {
    * their sandboxes, queued turns, idle stops, mail, streams and chat rows.
    * The root is marked first, in its tree's admission, so from then on the
    * tree admits nothing and reads as absent; then the tree's turns are
-   * stopped, waiting at most 10 s for a running one; once the sandboxes are
+   * stopped, waiting at most 10 s for a running one; each plugin's
+   * conversationDeleting gets each member, whose metadata is still readable,
+   * so it removes its own state, such as wakes; once the sandboxes are
    * deleted, the stack's conversationDataCleanup gets every member; the rows
    * go last, deepest first and the root last, in one admission for the tree.
    * A delete cut short leaves the marked root, and calling this again
@@ -620,6 +624,9 @@ class RuntimeHost implements AsyncDisposable {
       (left, right) => depth(right) - depth(left),
     );
     await this.#stopLiveWork(members.map(({ conversation }) => conversation));
+    for (const { conversation: member } of members) {
+      await this.#plugins.conversationDeleting(member);
+    }
     for (const member of members) {
       const declaration = this.#declarations.get(member.declarationName);
       if (!declaration) {

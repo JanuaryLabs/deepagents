@@ -5,6 +5,8 @@ import { z } from 'zod';
 import { isRecord } from '@deepagents/context';
 
 import { conversationNamespace } from '../../control-plane/agent-turn-id.ts';
+import type { ConversationNotFoundError } from '../../control-plane/conversation-not-found-error.ts';
+import { isNamedError } from '../../is-named-error.ts';
 import type { ConversationId } from '../../mailbox/types.ts';
 import type { Wake, WakeScheduler } from '../../queue/wake-scheduler.ts';
 import type { AgentPluginHost } from '../../runtime/agent-runtime.ts';
@@ -285,7 +287,21 @@ export class ConversationScheduler {
   }
 
   async work(): Promise<AsyncDisposable> {
-    return this.#scheduler.consume((wake) => this.#handle(wake));
+    return this.#scheduler.consume(async (wake) => {
+      try {
+        await this.#handle(wake);
+      } catch (error) {
+        // A wake the chat's delete could not cancel, such as a successor armed while it ran, finds the chat gone: it is done.
+        if (
+          isNamedError<ConversationNotFoundError>(
+            error,
+            'ConversationNotFoundError',
+          )
+        )
+          return;
+        throw error;
+      }
+    });
   }
 
   async materializeDueIfEligible(conversation: ConversationId): Promise<void> {
@@ -315,6 +331,23 @@ export class ConversationScheduler {
               left.wake.id.localeCompare(right.wake.id),
           )[0]?.wake;
     if (wake) await this.#handle(wake);
+  }
+
+  /** Cancels every wake the conversation's metadata names: its crons, its dynamic wake and an occurrence being dispatched. */
+  async cancelWakes(conversation: ConversationId): Promise<void> {
+    const state = await this.#read(conversation);
+    const wakes = [
+      ...Object.values(state.cron).map((definition) =>
+        this.#cronWake(conversation, definition),
+      ),
+      ...(state.dynamic
+        ? [this.#dynamicWake(conversation, state.dynamic)]
+        : []),
+      ...(state.dispatching
+        ? [this.#dispatchingWake(conversation, state.dispatching)]
+        : []),
+    ];
+    for (const { id } of wakes) await this.#scheduler.cancel(id);
   }
 
   async #handle(rawWake: Wake<SchedulingWake>): Promise<void> {

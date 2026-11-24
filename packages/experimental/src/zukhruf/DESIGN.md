@@ -904,7 +904,8 @@ const traceTelemetry: AgentPluginDefinition<TracePlugin> = {
   skills, runtime context, telemetry, `configure`), since `host.info` is built from them before the
   host exists. Its asynchronous `initialize(host)` returns the running phase, an
   `AgentPluginInitialization`: discovered `tools`, `work()`,
-  `conversationAvailable(conversation)`, the plugin's control surface, and an optional
+  `conversationAvailable(conversation)`, `conversationDeleting(conversation)`, the plugin's
+  control surface, and an optional
   `Symbol.asyncDispose` method. Anything that needs the host is built there, so no plugin holds a
   host that is not yet set. `PluginManager` keeps the running phases and starts their workers and
   availability reconciliation. The runtime
@@ -1223,6 +1224,12 @@ work({concurrency?}) → AsyncDisposable }`.
     outlives the wait fails on the deleted rows; its orphan finds no stream and settles without
     resolving the chat, and a status read of a chat with no row does not open it, so nothing
     creates the chat again.
+  - **Plugins clean up their own state next.** Each member then goes to every plugin's
+    `conversationDeleting`, while its metadata is still readable; a rejection aborts the delete
+    and a retry calls it again. `schedules()` archives each task whose target is the member, and
+    `conversationScheduling()` cancels the cron, dynamic and dispatching wakes its metadata names.
+    A wake the delete could not cancel (a successor armed while its wake ran) finds the chat gone
+    when it fires, and its handler treats `ConversationNotFoundError` as done, so it is not retried.
   - A chat with no row yet (an upload before the first message) opens its sandbox on a first
     borrow, so a later first borrow of a deleted chat's id opens a new, empty sandbox (#5135's
     tombstone question).

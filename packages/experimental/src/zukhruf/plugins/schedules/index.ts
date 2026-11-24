@@ -2,6 +2,7 @@ import { isToolUIPart } from 'ai';
 import type { JobPollingOptions, PgBoss } from 'pg-boss';
 import { z } from 'zod';
 
+import type { ConversationId } from '../../mailbox/types.ts';
 import {
   AgentPluginCapability,
   type AgentPluginDefinition,
@@ -267,6 +268,20 @@ class RunningSchedules implements Schedules {
     runId: string,
   ): Promise<ScheduledRun<ExecutionConfig>> {
     return this.#scheduled.archiveRun(ownerId, runId);
+  }
+
+  async conversationDeleting({
+    chatId,
+    userId,
+  }: ConversationId): Promise<void> {
+    for (const { id, executionConfig } of await this.#scheduled.list(userId)) {
+      if (
+        executionConfig.target?.kind === 'existing-conversation' &&
+        executionConfig.target.chatId === chatId
+      ) {
+        await this.#scheduled.archive(userId, id);
+      }
+    }
   }
 
   async #launch({

@@ -54,6 +54,8 @@ export function conversationScheduling(): AgentPluginDefinition {
             work: () => conversationScheduler.work(),
             conversationAvailable: (conversation) =>
               conversationScheduler.materializeDueIfEligible(conversation),
+            conversationDeleting: (conversation) =>
+              conversationScheduler.cancelWakes(conversation),
           };
         },
       };

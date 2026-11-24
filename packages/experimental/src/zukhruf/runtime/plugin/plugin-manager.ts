@@ -185,4 +185,21 @@ export class PluginManager implements AsyncDisposable {
       );
     }
   }
+
+  async conversationDeleting(conversation: ConversationId): Promise<void> {
+    const errors: unknown[] = [];
+    for (const { running } of this.#running) {
+      try {
+        await running.conversationDeleting?.(conversation);
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length > 0) {
+      throw new AggregateError(
+        errors,
+        `AgentRuntime: plugin cleanup of deleted conversation "${conversation.chatId}" failed: ${errors.map((error) => (Error.isError(error) ? error.message : String(error))).join('; ')}`,
+      );
+    }
+  }
 }

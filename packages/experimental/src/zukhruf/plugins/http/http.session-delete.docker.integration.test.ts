@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { PgBoss } from 'pg-boss';
+import { type Db, PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
 
 import {
@@ -24,6 +24,7 @@ import {
   type AgentStorage,
   EmbeddedAgentStorage,
   MessageDeliveryModes,
+  PgBossWakeScheduler,
   PostgresAgentStorage,
   createInterAgentCommunication,
   defineAgent,
@@ -31,10 +32,21 @@ import {
   defineStack,
 } from '@deepagents/experimental/zukhruf';
 import {
+  type SchedulingWake,
+  conversationScheduling,
+  conversationSchedulingCapabilities,
+} from '@deepagents/experimental/zukhruf/conversation-scheduling';
+import {
   type HttpEnv,
   type HttpProjection,
   http,
 } from '@deepagents/experimental/zukhruf/http';
+import {
+  type ScheduleTarget,
+  type ScheduledTaskTransaction,
+  schedules,
+  schedulesCapabilities,
+} from '@deepagents/experimental/zukhruf/schedules';
 import { uploads } from '@deepagents/experimental/zukhruf/uploads';
 import {
   UPLOAD_FILENAME_HEADER,
@@ -76,14 +88,32 @@ async function postgresStorage(
   boss.on('error', () => {});
   await boss.start();
   resources.defer(() => boss.stop({ graceful: false }));
+  const pool = database.pool();
   const storage = resources.use(
     await PostgresAgentStorage.create({
-      pool: database.pool(),
+      pool,
       boss,
       queue: { pollingIntervalSeconds: 0.5 },
     }),
   );
-  return { storage, boss };
+  const transaction: ScheduledTaskTransaction = async (operation) => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const db: Db = {
+        executeSql: (text, values) => client.query(text, values),
+      };
+      const result = await operation(db);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  };
+  return { storage, boss, transaction };
 }
 
 const storages = [
@@ -96,7 +126,9 @@ const storages = [
       const storage = resources.use(
         await EmbeddedAgentStorage.open({ directory: directory.path }),
       );
-      return { storage, boss: storage.boss };
+      const transaction: ScheduledTaskTransaction = (operation) =>
+        storage.queueDatabase.transaction((tx) => operation(fromPglite(tx)));
+      return { storage, boss: storage.boss, transaction };
     },
   },
   {
@@ -106,9 +138,11 @@ const storages = [
   },
 ] satisfies {
   name: string;
-  open(
-    resources: AsyncDisposableStack,
-  ): Promise<{ storage: AgentStorage; boss: PgBoss }>;
+  open(resources: AsyncDisposableStack): Promise<{
+    storage: AgentStorage;
+    boss: PgBoss;
+    transaction: ScheduledTaskTransaction;
+  }>;
 }[];
 
 /** A runtime of the root agent `name` on `storage`, served as http(runtime, ...projections) behind a user header. */
@@ -392,6 +426,26 @@ function settledOrphans(
     },
     { signal },
   );
+}
+
+/**
+ * Conversation-scheduling wakes on pg-boss whose first cancel fails, as when
+ * pg-boss is briefly unreachable: a replaced dynamic wake stays armed while
+ * the chat's metadata no longer names it.
+ */
+class FirstCancelFails extends PgBossWakeScheduler<SchedulingWake> {
+  #cancels = 0;
+
+  override async cancel(id: string): Promise<void> {
+    this.#cancels += 1;
+    if (this.#cancels === 1) throw new Error('pg-boss is unreachable');
+    await super.cancel(id);
+  }
+}
+
+/** The states of the jobs in the wake queue, sorted. */
+async function wakeStates(boss: PgBoss, queue: string) {
+  return (await boss.findJobs(queue)).map(({ state }) => state).toSorted();
 }
 
 for (const { name, open } of storages) {
@@ -755,6 +809,123 @@ for (const { name, open } of storages) {
     } finally {
       await removeNamespace(namespace);
     }
+  });
+
+  test(`${name}: DELETE /session/:sessionId archives the schedules task that targets the session and keeps the one that does not, cancels the cron and dynamic wakes the agent armed through conversation-scheduling, and a wake of the session left armed comes due after the delete and finishes without a retry`, async (t) => {
+    await using resources = new AsyncDisposableStack();
+    const { storage, boss, transaction } = await open(resources);
+    const scheduled = schedules({
+      queue: `scheduled-${randomUUID()}`,
+      reconciliationIntervalMs: 50,
+    });
+    const wakeQueue = `scheduling-${randomUUID()}`;
+    const wakes = new FirstCancelFails(boss, {
+      queue: wakeQueue,
+      pollingIntervalSeconds: 0.5,
+    });
+    await wakes.initialize();
+    const wakeup = () =>
+      toolCallResult({
+        toolCallId: randomUUID(),
+        toolName: 'ScheduleWakeup',
+        input: JSON.stringify({
+          delaySeconds: 60,
+          reason: 'check back',
+          prompt: 'check back',
+        }),
+      });
+    const rootSteps = [
+      toolCallResult({
+        toolCallId: randomUUID(),
+        toolName: 'CronCreate',
+        input: JSON.stringify({ cron: '0 0 1 1 *', prompt: 'new year' }),
+      }),
+      wakeup(),
+      wakeup(),
+    ];
+    const runtime = resources.use(
+      await new AgentRuntime(
+        defineAgent({
+          name: 'root',
+          instructions: [],
+          model: new MockLanguageModelV4({
+            doStream: async () => rootSteps.shift() ?? textResult('done'),
+          }),
+          sandbox: defineSandbox(new VirtualSandboxEnvironment()),
+          plugins: [scheduled, conversationScheduling()],
+        }),
+      ).initialize(
+        defineStack(async () => ({
+          storage,
+          bindings: [
+            schedulesCapabilities.boss.bind(boss),
+            schedulesCapabilities.transaction.bind(transaction),
+            conversationSchedulingCapabilities.scheduler.bind(wakes),
+            conversationSchedulingCapabilities.timezone.bind('UTC'),
+            conversationSchedulingCapabilities.clock.bind(globalThis),
+          ],
+        })),
+      ),
+    );
+    const app = new Hono<HttpEnv>();
+    app.use(`${MOUNT}/*`, (context, next) => {
+      context.set('userId', 'user-1');
+      return next();
+    });
+    app.route(MOUNT, http(runtime));
+    resources.use(await runtime.work());
+    const sessionId = randomUUID();
+    await completedTurn({ app, runtime }, sessionId, t.signal);
+    const tasks = runtime.plugin(scheduled);
+    const task = (target: ScheduleTarget) =>
+      tasks.create('user-1', {
+        idempotencyKey: randomUUID(),
+        name: target.kind,
+        prompt: 'yearly',
+        recurrence: '0 0 1 1 *',
+        timezone: 'UTC',
+        executionConfig: { target },
+      });
+    const targeting = await task({
+      kind: 'existing-conversation',
+      chatId: sessionId,
+    });
+    const elsewhere = await task({ kind: 'new-conversation' });
+    const before = await wakeStates(boss, wakeQueue);
+
+    const response = await answer(await deleteSession(app, sessionId));
+
+    assert.deepStrictEqual(
+      {
+        before,
+        response,
+        wakes: await wakeStates(boss, wakeQueue),
+        tasks: {
+          targeting: (await tasks.get('user-1', targeting.id)).status,
+          elsewhere: (await tasks.get('user-1', elsewhere.id)).status,
+        },
+      },
+      {
+        // The cron, the dynamic wake and the dynamic wake it replaced.
+        before: ['created', 'created', 'created'],
+        response: deleted,
+        // The replaced wake, whose cancel failed, is still armed.
+        wakes: ['cancelled', 'cancelled', 'created'],
+        tasks: { targeting: 'archived', elsewhere: 'active' },
+      },
+    );
+    const handled = await waitFor(
+      async () => {
+        const states = await wakeStates(boss, wakeQueue);
+        assert.ok(!states.includes('created') && !states.includes('active'));
+        return states;
+      },
+      { signal: t.signal, interval: 500 },
+    );
+    assert.deepStrictEqual(
+      { handled, chat: await storage.store.getChat(sessionId) },
+      { handled: ['cancelled', 'cancelled'], chat: undefined },
+    );
   });
 
   test(`${name}: DELETE /session/:sessionId of a session with a running turn cancels the turn, so its model is aborted while the turn's stream reads cancelled, and once the turn has settled no chat of the session is left`, async (t) => {
