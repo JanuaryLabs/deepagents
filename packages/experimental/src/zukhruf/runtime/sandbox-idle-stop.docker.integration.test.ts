@@ -1,7 +1,7 @@
 import { TemporaryFiles } from '@zukhruf/fs';
 import { waitFor } from '@zukhruf/testing/async';
 import { DockerTestbed } from '@zukhruf/testing/docker';
-import { Postgres } from '@zukhruf/testing/postgres';
+import { Postgres, type PostgresDatabase } from '@zukhruf/testing/postgres';
 import { type UIMessage, type UIMessageChunk, isToolUIPart } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
@@ -45,6 +45,21 @@ const uploadScope = {
   sessionId: conversation.chatId,
 };
 
+/** One worker process's storage on the database, with its own pool and pg-boss. */
+async function postgresStorage(
+  resources: AsyncDisposableStack,
+  database: PostgresDatabase,
+) {
+  const boss = new PgBoss({ connectionString: database.connectionString });
+  boss.on('error', () => {});
+  await boss.start();
+  resources.defer(() => boss.stop({ graceful: false }));
+  const storage = resources.use(
+    await PostgresAgentStorage.create({ pool: database.pool(), boss }),
+  );
+  return { storage, boss };
+}
+
 /** A storage and the pg-boss its turn queue and idle wakes run on. */
 const storages = [
   {
@@ -61,17 +76,8 @@ const storages = [
   },
   {
     name: 'postgres',
-    open: async (resources: AsyncDisposableStack) => {
-      const database = resources.use(await testPostgres.database());
-      const boss = new PgBoss({ connectionString: database.connectionString });
-      boss.on('error', () => {});
-      await boss.start();
-      resources.defer(() => boss.stop({ graceful: false }));
-      const storage = resources.use(
-        await PostgresAgentStorage.create({ pool: database.pool(), boss }),
-      );
-      return { storage, boss };
-    },
+    open: async (resources: AsyncDisposableStack) =>
+      postgresStorage(resources, resources.use(await testPostgres.database())),
   },
 ] satisfies {
   name: string;
@@ -1021,3 +1027,210 @@ for (const { name, open } of storages) {
     }
   });
 }
+
+test("postgres: a chat's idle stop, delivered by a worker that never ran its turn, stops its container, and the next turn on the worker that ran the first runs in that same container, started again", async (t) => {
+  const namespace = `workers-${crypto.randomUUID()}`;
+  try {
+    await using resources = new AsyncDisposableStack();
+    const database = resources.use(await testPostgres.database());
+    // Two worker processes on one database, each with its own pool, pg-boss,
+    // environment and held sandboxes.
+    const workerHost = async (model: MockLanguageModelV4) => {
+      const { storage, boss } = await postgresStorage(resources, database);
+      const root = defineAgent({
+        name: 'root',
+        model,
+        instructions: [],
+        // Long enough that the turn's worker stops working before it is due.
+        sandbox: defineSandbox(chatEnvironment(namespace), {
+          idleTimeoutMs: 10_000,
+        }),
+      });
+      const host = resources.use(
+        await new AgentRuntime(root).initialize(
+          defineStack(async () => ({ storage })),
+        ),
+      );
+      return { host, boss };
+    };
+    const a = await workerHost(bashEachTurn('hostname', 'hostname'));
+    const b = await workerHost(bashEachTurn());
+
+    const aWorking = await a.host.work();
+    const first = await bashOutput(
+      await a.host.enqueue(conversation, userTurn('turn-1', 'first')),
+    );
+    const container = await chatContainer(namespace);
+    const stop = await armedStop(a.boss, t);
+    await aWorking[Symbol.asyncDispose]();
+    await setTimeout(
+      Math.max(0, stop.startAfter.getTime() - Date.now()) + 1_000,
+      undefined,
+      { signal: t.signal },
+    );
+    const dueWithNoWorker = {
+      container: await containerStatus(namespace),
+      stop: (await a.boss.findJobs(IDLE_QUEUE, { id: stop.id })).map(
+        ({ state }) => state,
+      ),
+    };
+    const bWorking = await b.host.work();
+    await waitFor(
+      async () => assert.deepStrictEqual(await idleJobStates(a.boss), []),
+      { signal: t.signal },
+    );
+    const stoppedByB = (await namespaceContainers(namespace)).map(
+      ({ Id, State }) => ({ Id, State }),
+    );
+    await bWorking[Symbol.asyncDispose]();
+    await a.host.work();
+    const second = await bashOutput(
+      await a.host.enqueue(conversation, userTurn('turn-2', 'second')),
+    );
+
+    const hostname = `${container.id.slice(0, 12)}\n`;
+    assert.deepStrictEqual(
+      {
+        first,
+        dueWithNoWorker,
+        stoppedByB,
+        second,
+        container: (await chatContainer(namespace)).id,
+      },
+      {
+        first: bashSucceeded(hostname),
+        dueWithNoWorker: { container: 'running', stop: ['created'] },
+        stoppedByB: [{ Id: container.id, State: 'exited' }],
+        second: bashSucceeded(hostname),
+        container: container.id,
+      },
+    );
+  } finally {
+    await removeNamespace(namespace);
+  }
+});
+
+test("postgres: a child agent whose turn ends while its parent waits in wait_agent stops its own container after its idleTimeoutMs, while the parent's keeps running through the parent's turn, which stops its own once it has been idle that long", async (t) => {
+  const rootNamespace = `parent-${crypto.randomUUID()}`;
+  const childNamespace = `child-${crypto.randomUUID()}`;
+  const answer = Promise.withResolvers<void>();
+  try {
+    await using resources = new AsyncDisposableStack();
+    const { storage, boss } = await postgresStorage(
+      resources,
+      resources.use(await testPostgres.database()),
+    );
+    let rootCalls = 0;
+    let waited: { prompt: string; at: number } | undefined;
+    // Spawns the child and waits for it, then answers only once the test
+    // has looked at both containers.
+    const rootModel = new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        rootCalls += 1;
+        if (rootCalls === 1) {
+          return toolCallResult({
+            toolCallId: 'spawn',
+            toolName: 'spawn_agent',
+            input: JSON.stringify({
+              task_name: 'research',
+              agent_type: 'worker',
+              message: 'Find the answer',
+              fork_turns: 'none',
+            }),
+          });
+        }
+        if (rootCalls === 2) {
+          return toolCallResult({
+            toolCallId: 'wait',
+            toolName: 'wait_agent',
+            input: JSON.stringify({ timeout_ms: 60_000 }),
+          });
+        }
+        waited ??= { prompt: JSON.stringify(prompt), at: Date.now() };
+        await answer.promise;
+        return textResult('root done');
+      },
+    });
+    const root = defineAgent({
+      name: 'root',
+      model: rootModel,
+      instructions: [],
+      sandbox: defineSandbox(chatEnvironment(rootNamespace), {
+        idleTimeoutMs: 3_000,
+      }),
+      subagents: [
+        defineAgent({
+          name: 'worker',
+          model: bashEachTurn('hostname'),
+          instructions: [],
+          sandbox: defineSandbox(chatEnvironment(childNamespace), {
+            idleTimeoutMs: 3_000,
+          }),
+        }),
+      ],
+    });
+    await using host = await new AgentRuntime(root).initialize(
+      defineStack(async () => ({ storage })),
+    );
+    await host.work({ concurrency: 2 });
+
+    const turn = await host.enqueue(
+      conversation,
+      userTurn('turn-1', 'Research it'),
+    );
+    // The child's: the parent's turn has not settled, so arms none.
+    const childStop = await armedStop(boss, t);
+    await waitFor(
+      async () => assert.deepStrictEqual(await idleJobStates(boss), []),
+      { signal: t.signal },
+    );
+    const soleStatus = async (namespace: string) =>
+      (await namespaceContainers(namespace)).map(({ State }) => State);
+    const childStopped = {
+      child: await soleStatus(childNamespace),
+      parent: await soleStatus(rootNamespace),
+      parentChat: (await host.observe(conversation).conversationStatus()).type,
+      waitedForChild: waited?.prompt.includes('"timed_out":false'),
+    };
+    // The child's turn ended before the wait returned, so its stop is due
+    // at most idleTimeoutMs after that, and later than it.
+    const childDueAfterWait =
+      childStop.startAfter.getTime() - (waited?.at ?? Infinity);
+    answer.resolve();
+    await Array.fromAsync(turn.stream);
+    const settledAt = Date.now();
+    const parentDueAfterSettled =
+      (await armedStop(boss, t)).startAfter.getTime() - settledAt;
+    await waitFor(
+      async () =>
+        assert.deepStrictEqual(await soleStatus(rootNamespace), ['exited']),
+      { signal: t.signal },
+    );
+
+    assert.deepStrictEqual(
+      {
+        childStop: childStop.data.conversation.chatId !== conversation.chatId,
+        childDueAfterIdleTime:
+          childDueAfterWait > 0 && childDueAfterWait <= 3_000,
+        childStopped,
+        parentDueAfterIdleTime:
+          parentDueAfterSettled > 0 && parentDueAfterSettled <= 3_000,
+      },
+      {
+        childStop: true,
+        childDueAfterIdleTime: true,
+        childStopped: {
+          child: ['exited'],
+          parent: ['running'],
+          parentChat: 'active',
+          waitedForChild: true,
+        },
+        parentDueAfterIdleTime: true,
+      },
+    );
+  } finally {
+    answer.resolve();
+    await removeNamespace(rootNamespace);
+    await removeNamespace(childNamespace);
+  }
+});
