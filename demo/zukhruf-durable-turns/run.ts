@@ -25,7 +25,7 @@ const statusLog = (async () => {
     for await (const change of await host.subscribeConversationStatus(
       statusAbort.signal,
     )) {
-      if (change.type === 'reset') continue;
+      if (change.type !== 'change') continue;
       const isRoot = change.conversation.chatId === conversation.chatId;
       const flags =
         change.status.type === 'active' && change.status.activeFlags.length > 0

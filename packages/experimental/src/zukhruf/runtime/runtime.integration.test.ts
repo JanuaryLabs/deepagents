@@ -3249,7 +3249,7 @@ describe('zukhruf runtime — conversation status', () => {
         for await (const change of await runtime.subscribeConversationStatus(
           signal,
         )) {
-          if (change.type === 'reset') continue;
+          if (change.type !== 'change') continue;
           if (change.conversation.chatId === conversation.chatId) {
             seen.push(change.status);
           }
@@ -3875,7 +3875,7 @@ describe('zukhruf runtime — cross-process conversation status', () => {
         for await (const change of await observer.subscribeConversationStatus(
           abort.signal,
         )) {
-          if (change.type === 'reset') continue;
+          if (change.type !== 'change') continue;
           if (change.conversation.chatId === conversation.chatId) {
             seen.push(change.status);
           }

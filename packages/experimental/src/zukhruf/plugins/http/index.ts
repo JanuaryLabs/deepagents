@@ -484,13 +484,22 @@ export function http(
           for await (const event of events) {
             if (event.type === 'reset') {
               yield event;
-            } else if (event.conversation.userId === userId) {
+            } else if (event.conversation.userId !== userId) {
+              continue;
+            } else if (event.type === 'change') {
               yield {
                 type: 'change',
                 resource: 'conversation',
                 id: event.conversation.chatId,
                 status: event.status,
                 ...(event.child ? { child: event.child } : {}),
+              } satisfies OwnerEvent;
+            } else {
+              yield {
+                type: 'change',
+                resource: 'conversation',
+                id: event.conversation.chatId,
+                lifecycle: event.type,
               } satisfies OwnerEvent;
             }
           }

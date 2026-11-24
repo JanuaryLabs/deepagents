@@ -14,6 +14,7 @@ import {
 
 import type { AgentDirectory } from '../../control-plane/agent-directory.ts';
 import type { AgentThread } from '../../control-plane/agent-thread.ts';
+import { AgentTurnId } from '../../control-plane/agent-turn-id.ts';
 import type { ConversationId } from '../../mailbox/types.ts';
 import type {
   TransactionalTurnQueue,
@@ -50,8 +51,14 @@ export interface ConversationStatusChange {
   child?: ChildProgress;
 }
 
+/** Codex's `thread/deleted`: the conversation has no chat and no turn left. */
+export interface ConversationDeleted {
+  type: 'deleted';
+  conversation: ConversationId;
+}
+
 export type ConversationStatusEvent =
-  ConversationStatusChange | { type: 'reset' };
+  ConversationStatusChange | ConversationDeleted | { type: 'reset' };
 
 type ProjectorEvent =
   ConversationStatusEvent | { type: 'error'; error: unknown };
@@ -107,7 +114,10 @@ export class ConversationStatusProjector {
   readonly #directory: AgentDirectory;
   readonly #changeSource?: ConversationStatusChangeSource;
   readonly #emitter = new EventEmitter();
-  readonly #last = new Map<string, ConversationStatusChange>();
+  readonly #last = new Map<
+    string,
+    ConversationStatusChange | ConversationDeleted
+  >();
   readonly #publishing = new Mutex(new MemoryStore());
   #subscribers = 0;
   #remote: RemoteAttachment | Detached = DETACHED;
@@ -261,20 +271,22 @@ export class ConversationStatusProjector {
   }
 
   async #project(conversation: ConversationId, key: string): Promise<boolean> {
-    let change: ConversationStatusChange;
+    let change: ConversationStatusChange | ConversationDeleted;
     try {
-      const status = await this.read(conversation);
-      const thread = await this.#directory.load(conversation);
-      const child = thread ? await this.#child(thread) : undefined;
-      change = {
-        type: 'change',
-        conversation: {
-          chatId: conversation.chatId,
-          userId: conversation.userId,
-        },
-        status,
-        ...(child ? { child } : {}),
-      };
+      const id = { chatId: conversation.chatId, userId: conversation.userId };
+      if (await this.#isGone(conversation)) {
+        change = { type: 'deleted', conversation: id };
+      } else {
+        const status = await this.read(conversation);
+        const thread = await this.#directory.load(conversation);
+        const child = thread ? await this.#child(thread) : undefined;
+        change = {
+          type: 'change',
+          conversation: id,
+          status,
+          ...(child ? { child } : {}),
+        };
+      }
     } catch {
       // A read failure must not surface as a turn orphan through onSettled;
       // the next transition re-reads from durable state anyway.
@@ -284,6 +296,21 @@ export class ConversationStatusProjector {
     this.#last.set(key, change);
     this.#emit(change);
     return true;
+  }
+
+  /**
+   * Whether the conversation has neither a chat nor a turn. A conversation
+   * enqueued before its first turn opened its chat already has that turn's
+   * stream; deleting a conversation removes both.
+   */
+  async #isGone(conversation: ConversationId): Promise<boolean> {
+    if ((await this.#store.getChat(conversation.chatId)) !== undefined) {
+      return false;
+    }
+    const turns = await this.#streams.store.listStreamIds({
+      prefix: AgentTurnId.prefixOf(conversation),
+    });
+    return turns.length === 0;
   }
 
   async #attachRemote(): Promise<void> {

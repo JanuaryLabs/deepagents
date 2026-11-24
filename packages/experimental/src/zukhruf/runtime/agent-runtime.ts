@@ -635,8 +635,9 @@ class RuntimeHost implements AsyncDisposable {
    * conversationDeleting gets each member, whose metadata is still readable,
    * so it removes its own state, such as wakes; once the sandboxes are
    * deleted, the stack's conversationDataCleanup gets every member; the rows
-   * go last, deepest first and the root last, in one admission for the tree.
-   * A delete cut short leaves the marked root, and calling this again
+   * go last, deepest first and the root last, in one admission for the tree;
+   * then each member's status is published, which subscribers receive as
+   * `deleted`. A delete cut short leaves the marked root, and calling this again
    * finishes it. Any other chat, and one already deleted, rejects with
    * ConversationNotFoundError.
    */
@@ -686,6 +687,9 @@ class RuntimeHost implements AsyncDisposable {
         await scope.store.deleteChat(member.chatId, { userId: member.userId });
       }
     });
+    for (const { conversation: member } of members) {
+      await this.#conversationStatus.publish(member);
+    }
   }
 
   /**

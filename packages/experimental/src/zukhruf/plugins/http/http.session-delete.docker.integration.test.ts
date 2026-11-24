@@ -21,9 +21,11 @@ import {
   type AgentDeclaration,
   type AgentHost,
   AgentRuntime,
+  type AgentStack,
   type AgentStorage,
   EmbeddedAgentStorage,
   MessageDeliveryModes,
+  PgBossConversationStatusChangeSource,
   PgBossWakeScheduler,
   PostgresAgentStorage,
   createInterAgentCommunication,
@@ -145,10 +147,10 @@ const storages = [
   }>;
 }[];
 
-/** A runtime of the root agent `name` on `storage`, served as http(runtime, ...projections) behind a user header. */
+/** A runtime of the root agent `name` on the stack's parts, served as http(runtime, ...projections) behind a user header. */
 async function serveAgent(
   resources: AsyncDisposableStack,
-  storage: AgentStorage,
+  stack: Awaited<ReturnType<AgentStack>>,
   agent: Pick<
     AgentDeclaration,
     'name' | 'model' | 'sandbox' | 'subagents' | 'plugins' | 'toolApproval'
@@ -158,7 +160,7 @@ async function serveAgent(
   const runtime = resources.use(
     await new AgentRuntime(
       defineAgent({ instructions: [], ...agent }),
-    ).initialize(defineStack(async () => ({ storage }))),
+    ).initialize(defineStack(async () => stack)),
   );
   const app = new Hono<HttpEnv>();
   app.use(`${MOUNT}/*`, (context, next) => {
@@ -338,6 +340,28 @@ function idleChild(
   );
 }
 
+/** The owner events of a GET /events response, one per SSE data frame, until the stream ends. */
+async function* ownerEvents(
+  response: Response,
+): AsyncGenerator<Record<string, unknown>> {
+  assert.ok(response.body);
+  let buffered = '';
+  for await (const chunk of response.body.pipeThrough(
+    new TextDecoderStream(),
+  )) {
+    buffered += chunk;
+    const frames = buffered.split('\n\n');
+    buffered = frames.pop() ?? '';
+    for (const frame of frames) {
+      if (frame.startsWith('data: ')) {
+        yield z
+          .record(z.string(), z.unknown())
+          .parse(JSON.parse(frame.slice('data: '.length)));
+      }
+    }
+  }
+}
+
 /** How long a DELETE waits for a running turn: Codex's wait_for_thread_shutdown bound. */
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 /** What a DELETE that waited the whole bound may take beyond it on a loaded test host. */
@@ -455,16 +479,24 @@ for (const { name, open } of storages) {
     const sandbox = defineSandbox(new VirtualSandboxEnvironment());
     const model = () =>
       new MockLanguageModelV4({ doStream: async () => textResult('done') });
-    const owner = await serveAgent(resources, storage, {
-      name: 'owner',
-      model: model(),
-      sandbox,
-    });
-    const other = await serveAgent(resources, storage, {
-      name: 'other',
-      model: model(),
-      sandbox,
-    });
+    const owner = await serveAgent(
+      resources,
+      { storage },
+      {
+        name: 'owner',
+        model: model(),
+        sandbox,
+      },
+    );
+    const other = await serveAgent(
+      resources,
+      { storage },
+      {
+        name: 'other',
+        model: model(),
+        sandbox,
+      },
+    );
     resources.use(await owner.runtime.work());
     const sessionId = randomUUID();
     const unknownId = randomUUID();
@@ -496,6 +528,66 @@ for (const { name, open } of storages) {
     );
   });
 
+  test(`${name}: GET /events tells the owner that DELETE /session/:sessionId deleted the session and its sub-agent's chat, with one lifecycle 'deleted' change for each`, async (t) => {
+    await using resources = new AsyncDisposableStack();
+    const { storage } = await open(resources);
+    const sandbox = defineSandbox(new VirtualSandboxEnvironment());
+    const rootSteps = [spawnWorker()];
+    const { app, runtime } = await serveAgent(
+      resources,
+      { storage },
+      {
+        name: 'root',
+        model: new MockLanguageModelV4({
+          doStream: async () => rootSteps.shift() ?? textResult('done'),
+        }),
+        sandbox,
+        subagents: [worker(sandbox)],
+      },
+    );
+    resources.use(await runtime.work({ concurrency: 2 }));
+    const sessionId = randomUUID();
+    await startTurn(app, sessionId);
+    const child = await idleChild(app, storage, sessionId, t.signal);
+    // The stream ends when the test's limit aborts it.
+    const subscription = await app.request(`${MOUNT}/events`, {
+      signal: t.signal,
+    });
+    const events = ownerEvents(subscription);
+    const first = await events.next();
+
+    const response = await answer(await deleteSession(app, sessionId));
+    const lifecycle: Record<string, unknown>[] = [];
+    for await (const event of events) {
+      if (event.lifecycle === undefined) continue;
+      lifecycle.push(event);
+      if (lifecycle.length === 2) break;
+    }
+
+    const change = (id: string) => ({
+      type: 'change',
+      resource: 'conversation',
+      id,
+      lifecycle: 'deleted',
+    });
+    assert.deepStrictEqual(
+      {
+        first: first.value,
+        response,
+        lifecycle: lifecycle.toSorted((left, right) =>
+          String(left.id).localeCompare(String(right.id)),
+        ),
+      },
+      {
+        first: { type: 'ready' },
+        response: deleted,
+        lifecycle: [change(sessionId), change(child.chatId)].toSorted(
+          (left, right) => left.id.localeCompare(right.id),
+        ),
+      },
+    );
+  });
+
   test(`${name}: DELETE /session/:sessionId of a session whose turn spawned a sub-agent, with mail and a turn queued for the sub-agent, removes the root and the sub-agent: their chats, streams, mail, queued turns and containers`, async (t) => {
     const namespace = `delete-${randomUUID()}`;
     try {
@@ -517,14 +609,18 @@ for (const { name, open } of storages) {
         }),
         spawnWorker(),
       ];
-      const { app, runtime } = await serveAgent(resources, storage, {
-        name: 'root',
-        model: new MockLanguageModelV4({
-          doStream: async () => rootSteps.shift() ?? textResult('done'),
-        }),
-        sandbox,
-        subagents: [worker(sandbox)],
-      });
+      const { app, runtime } = await serveAgent(
+        resources,
+        { storage },
+        {
+          name: 'root',
+          model: new MockLanguageModelV4({
+            doStream: async () => rootSteps.shift() ?? textResult('done'),
+          }),
+          sandbox,
+          subagents: [worker(sandbox)],
+        },
+      );
       const workers = await runtime.work({ concurrency: 2 });
       const sessionId = randomUUID();
       const root = { chatId: sessionId, userId: 'user-1' };
@@ -627,14 +723,18 @@ for (const { name, open } of storages) {
     };
     const sandbox = defineSandbox(environment);
     const rootSteps = [spawnWorker()];
-    const { app, runtime } = await serveAgent(resources, storage, {
-      name: 'root',
-      model: new MockLanguageModelV4({
-        doStream: async () => rootSteps.shift() ?? textResult('done'),
-      }),
-      sandbox,
-      subagents: [worker(sandbox)],
-    });
+    const { app, runtime } = await serveAgent(
+      resources,
+      { storage },
+      {
+        name: 'root',
+        model: new MockLanguageModelV4({
+          doStream: async () => rootSteps.shift() ?? textResult('done'),
+        }),
+        sandbox,
+        subagents: [worker(sandbox)],
+      },
+    );
     resources.use(await runtime.work({ concurrency: 2 }));
     const sessionId = randomUUID();
     const root = { chatId: sessionId, userId: 'user-1' };
@@ -933,27 +1033,31 @@ for (const { name, open } of storages) {
     const { storage } = await open(resources);
     const turn = Promise.withResolvers<string>();
     const statusAtAbort = Promise.withResolvers<string | undefined>();
-    const { app, runtime } = await serveAgent(resources, storage, {
-      name: 'root',
-      model: new MockLanguageModelV4({
-        doStream: ({ abortSignal }) =>
-          new Promise((_resolve, reject) => {
-            abortSignal?.addEventListener(
-              'abort',
-              () => {
-                statusAtAbort.resolve(
-                  turn.promise.then((turnId) =>
-                    storage.streams.store.getStreamStatus(turnId),
-                  ),
-                );
-                reject(abortSignal.reason);
-              },
-              { once: true },
-            );
-          }),
-      }),
-      sandbox: defineSandbox(new VirtualSandboxEnvironment()),
-    });
+    const { app, runtime } = await serveAgent(
+      resources,
+      { storage },
+      {
+        name: 'root',
+        model: new MockLanguageModelV4({
+          doStream: ({ abortSignal }) =>
+            new Promise((_resolve, reject) => {
+              abortSignal?.addEventListener(
+                'abort',
+                () => {
+                  statusAtAbort.resolve(
+                    turn.promise.then((turnId) =>
+                      storage.streams.store.getStreamStatus(turnId),
+                    ),
+                  );
+                  reject(abortSignal.reason);
+                },
+                { once: true },
+              );
+            }),
+        }),
+        sandbox: defineSandbox(new VirtualSandboxEnvironment()),
+      },
+    );
     // Disposed again by the test once the DELETE answers; a second dispose does nothing.
     const workers = resources.use(await runtime.work());
     const sessionId = randomUUID();
@@ -992,13 +1096,17 @@ for (const { name, open } of storages) {
     await using resources = new AsyncDisposableStack();
     const { storage, boss } = await open(resources);
     const stall = stallingDiscovery();
-    const { app, runtime } = await serveAgent(resources, storage, {
-      name: 'root',
-      model: new MockLanguageModelV4({
-        doStream: async () => textResult('never reached'),
-      }),
-      sandbox: defineSandbox(stall.environment),
-    });
+    const { app, runtime } = await serveAgent(
+      resources,
+      { storage },
+      {
+        name: 'root',
+        model: new MockLanguageModelV4({
+          doStream: async () => textResult('never reached'),
+        }),
+        sandbox: defineSandbox(stall.environment),
+      },
+    );
     resources.use(await runtime.work());
     const sessionId = randomUUID();
     const root = { chatId: sessionId, userId: 'user-1' };
@@ -1053,13 +1161,17 @@ for (const { name, open } of storages) {
         { signal: t.signal },
       );
     });
-    const { app, runtime } = await serveAgent(resources, storage, {
-      name: 'root',
-      model: new MockLanguageModelV4({
-        doStream: async () => textResult('never reached'),
-      }),
-      sandbox: defineSandbox(stall.environment),
-    });
+    const { app, runtime } = await serveAgent(
+      resources,
+      { storage },
+      {
+        name: 'root',
+        model: new MockLanguageModelV4({
+          doStream: async () => textResult('never reached'),
+        }),
+        sandbox: defineSandbox(stall.environment),
+      },
+    );
     resources.use(await runtime.work());
     const sessionId = randomUUID();
     turn.resolve(await startTurn(app, sessionId));
@@ -1079,24 +1191,28 @@ for (const { name, open } of storages) {
     await using resources = new AsyncDisposableStack();
     const { storage, boss } = await open(resources);
     let modelCalls = 0;
-    const { app, runtime } = await serveAgent(resources, storage, {
-      name: 'root',
-      model: new MockLanguageModelV4({
-        doStream: async () => {
-          modelCalls += 1;
-          return toolCallResult({
-            toolCallId: randomUUID(),
-            toolName: 'bash',
-            input: JSON.stringify({
-              command: 'echo approved',
-              reasoning: 'a command the user approves',
-            }),
-          });
-        },
-      }),
-      toolApproval: { bash: 'user-approval' },
-      sandbox: defineSandbox(new VirtualSandboxEnvironment()),
-    });
+    const { app, runtime } = await serveAgent(
+      resources,
+      { storage },
+      {
+        name: 'root',
+        model: new MockLanguageModelV4({
+          doStream: async () => {
+            modelCalls += 1;
+            return toolCallResult({
+              toolCallId: randomUUID(),
+              toolName: 'bash',
+              input: JSON.stringify({
+                command: 'echo approved',
+                reasoning: 'a command the user approves',
+              }),
+            });
+          },
+        }),
+        toolApproval: { bash: 'user-approval' },
+        sandbox: defineSandbox(new VirtualSandboxEnvironment()),
+      },
+    );
     resources.use(await runtime.work());
     const sessionId = randomUUID();
     const root = { chatId: sessionId, userId: 'user-1' };
@@ -1159,7 +1275,7 @@ async function uploadsHost(
   const uploaded = uploads({ directory: UPLOADS });
   return serveAgent(
     resources,
-    storage,
+    { storage },
     {
       name: 'root',
       model: new MockLanguageModelV4({
@@ -1375,14 +1491,18 @@ test("postgres: a turn admitted before its session's DELETE that reaches its san
     };
     const model = () =>
       new MockLanguageModelV4({ doStream: async () => textResult('done') });
-    const holding = await serveAgent(resources, holder.storage, {
-      name: 'root',
-      model: model(),
-      sandbox: defineSandbox(holderEnvironment),
-    });
+    const holding = await serveAgent(
+      resources,
+      { storage: holder.storage },
+      {
+        name: 'root',
+        model: model(),
+        sandbox: defineSandbox(holderEnvironment),
+      },
+    );
     const deleting = await serveAgent(
       resources,
-      (await postgresStorage(resources, database)).storage,
+      { storage: (await postgresStorage(resources, database)).storage },
       {
         name: 'root',
         model: model(),
@@ -1433,4 +1553,89 @@ test("postgres: a turn admitted before its session's DELETE that reaches its san
   } finally {
     await removeNamespace(namespace);
   }
+});
+
+test("postgres: GET /events on a host that did not delete the session tells the owner that another host's DELETE /session/:sessionId deleted the session and its sub-agent's chat", async (t) => {
+  await using resources = new AsyncDisposableStack();
+  const database = resources.use(await testPostgres.database());
+  const host = async (agent: Parameters<typeof serveAgent>[2]) => {
+    const { storage, boss } = await postgresStorage(resources, database);
+    return {
+      storage,
+      ...(await serveAgent(
+        resources,
+        {
+          storage,
+          conversationStatusChanges: new PgBossConversationStatusChangeSource(
+            boss,
+          ),
+        },
+        agent,
+      )),
+    };
+  };
+  const sandbox = defineSandbox(new VirtualSandboxEnvironment());
+  const rootSteps = [spawnWorker()];
+  const deleting = await host({
+    name: 'root',
+    model: new MockLanguageModelV4({
+      doStream: async () => rootSteps.shift() ?? textResult('done'),
+    }),
+    sandbox,
+    subagents: [worker(sandbox)],
+  });
+  const observing = await host({
+    name: 'root',
+    model: new MockLanguageModelV4({
+      doStream: async () => textResult('done'),
+    }),
+    sandbox,
+    subagents: [worker(sandbox)],
+  });
+  resources.use(await deleting.runtime.work({ concurrency: 2 }));
+  const sessionId = randomUUID();
+  await startTurn(deleting.app, sessionId);
+  const child = await idleChild(
+    deleting.app,
+    deleting.storage,
+    sessionId,
+    t.signal,
+  );
+  // The stream ends when the test's limit aborts it.
+  const subscription = await observing.app.request(`${MOUNT}/events`, {
+    signal: t.signal,
+  });
+  const events = ownerEvents(subscription);
+  const first = await events.next();
+
+  const response = await answer(await deleteSession(deleting.app, sessionId));
+  const lifecycle: Record<string, unknown>[] = [];
+  for await (const event of events) {
+    if (event.lifecycle === undefined) continue;
+    lifecycle.push(event);
+    if (lifecycle.length === 2) break;
+  }
+
+  const change = (id: string) => ({
+    type: 'change',
+    resource: 'conversation',
+    id,
+    lifecycle: 'deleted',
+  });
+  assert.deepStrictEqual(
+    {
+      first: first.value,
+      response,
+      lifecycle: lifecycle.toSorted((left, right) =>
+        String(left.id).localeCompare(String(right.id)),
+      ),
+    },
+    {
+      first: { type: 'ready' },
+      response: deleted,
+      lifecycle: [change(sessionId), change(child.chatId)].toSorted(
+        (left, right) => left.id.localeCompare(right.id),
+      ),
+    },
+  );
 });
