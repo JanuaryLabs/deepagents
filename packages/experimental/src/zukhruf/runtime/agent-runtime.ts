@@ -1,4 +1,5 @@
 import type { Telemetry } from 'ai';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import {
   ContextEngine,
@@ -42,6 +43,10 @@ import {
 } from './conversation-status/projector.ts';
 import { PluginManager } from './plugin/plugin-manager.ts';
 import { SandboxIdleStop } from './sandbox-idle-stop.ts';
+
+/** How long a delete waits for a running turn to exit before it carries on: Codex's wait_for_thread_shutdown bound. */
+const SHUTDOWN_TIMEOUT_MS = 10_000;
+const SHUTDOWN_POLL_INTERVAL_MS = 50;
 
 export interface AgentPluginToolContext extends Readonly<
   Record<string, unknown>
@@ -576,7 +581,8 @@ class RuntimeHost implements AsyncDisposable {
    * Deletes a root chat this runtime owns and every sub-agent chat under it:
    * their sandboxes, queued turns, idle stops, mail, streams and chat rows.
    * The root is marked first, in its tree's admission, so from then on the
-   * tree admits nothing and reads as absent; the rows go last, deepest first
+   * tree admits nothing and reads as absent; then the tree's turns are
+   * stopped, waiting at most 10 s for a running one; the rows go last, deepest first
    * and the root last, in one admission for the tree. A delete cut short
    * leaves the marked root, and calling this again finishes it. Any other
    * chat, and one already deleted, rejects with ConversationNotFoundError.
@@ -597,6 +603,7 @@ class RuntimeHost implements AsyncDisposable {
     const members = (await this.#directory.listTree(root)).toSorted(
       (left, right) => depth(right) - depth(left),
     );
+    await this.#stopLiveWork(members.map(({ conversation }) => conversation));
     for (const member of members) {
       const declaration = this.#declarations.get(member.declarationName);
       if (!declaration) {
@@ -605,7 +612,6 @@ class RuntimeHost implements AsyncDisposable {
         );
       }
       await this.#idleStop.cancel(member);
-      await this.#queue.forget(member.conversation);
       await this.#sandboxes.forget(declaration, member.conversation);
       await declaration.sandbox.environment.delete(member.conversation);
     }
@@ -621,6 +627,41 @@ class RuntimeHost implements AsyncDisposable {
         await scope.store.deleteChat(member.chatId, { userId: member.userId });
       }
     });
+  }
+
+  /**
+   * Stops the turns of a tree being deleted, as Codex shuts a thread down
+   * before it deletes it: each member's queued and parked jobs go first, so
+   * none is claimed meanwhile; its queued and running streams are cancelled,
+   * which aborts a running turn on any worker; the running turns get at most
+   * 10 s to exit, and the delete carries on after that; then the jobs are
+   * forgotten again, for a turn that parked or failed on its way out.
+   */
+  async #stopLiveWork(members: readonly ConversationId[]): Promise<void> {
+    for (const member of members) {
+      await this.#queue.forget(member);
+      const prefix = AgentTurnId.prefixOf(member);
+      for (const status of ['queued', 'running'] as const) {
+        for (const streamId of await this.#streams.store.listStreamIds({
+          prefix,
+          status,
+        })) {
+          await this.#streams.cancel(streamId);
+          await this.#queue.cancel(streamId);
+        }
+      }
+    }
+    const deadline = performance.now() + SHUTDOWN_TIMEOUT_MS;
+    for (const member of members) {
+      while ((await this.#queue.getTurnActivity(member)) === 'running') {
+        const remaining = deadline - performance.now();
+        if (remaining <= 0) break;
+        await delay(Math.min(SHUTDOWN_POLL_INTERVAL_MS, remaining));
+      }
+    }
+    for (const member of members) {
+      await this.#queue.forget(member);
+    }
   }
 
   /** A root thread this runtime's root declaration started. */

@@ -393,12 +393,18 @@ export async function conversationStatusOf(
   const activity = await parts.queue.getTurnActivity(conversation);
   if (activity === 'running') return { type: 'active', activeFlags: [] };
 
-  const engine = new ContextEngine({
-    store: parts.store,
-    chatId: conversation.chatId,
-    userId: conversation.userId,
-  });
-  const head = (await engine.getMessages()).at(-1);
+  // Opening an engine creates its chat, and a deleted chat's last turn
+  // still publishes its status when it settles.
+  const chatExists =
+    (await parts.store.getChat(conversation.chatId)) !== undefined;
+  const messages = chatExists
+    ? await new ContextEngine({
+        store: parts.store,
+        chatId: conversation.chatId,
+        userId: conversation.userId,
+      }).getMessages()
+    : [];
+  const head = messages.at(-1);
   const thread = await parts.directory.load(conversation);
   const streamId =
     thread?.lastTurnId ?? (head?.role === 'assistant' ? head.id : undefined);

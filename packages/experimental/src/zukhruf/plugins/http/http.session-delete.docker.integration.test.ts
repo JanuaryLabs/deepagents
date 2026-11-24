@@ -1,3 +1,4 @@
+import { untilAborted } from '@zukhruf/async';
 import { TemporaryFiles } from '@zukhruf/fs';
 import { waitFor } from '@zukhruf/testing/async';
 import { DockerTestbed } from '@zukhruf/testing/docker';
@@ -7,6 +8,7 @@ import { Hono } from 'hono';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { PgBoss } from 'pg-boss';
 import { z } from 'zod';
 
@@ -115,7 +117,7 @@ async function serveAgent(
   storage: AgentStorage,
   agent: Pick<
     AgentDeclaration,
-    'name' | 'model' | 'sandbox' | 'subagents' | 'plugins'
+    'name' | 'model' | 'sandbox' | 'subagents' | 'plugins' | 'toolApproval'
   >,
   ...projections: HttpProjection[]
 ) {
@@ -297,6 +299,96 @@ function idleChild(
         assert.equal(await storage.queue.getTurnActivity(member), 'idle');
       }
       return child;
+    },
+    { signal },
+  );
+}
+
+/** How long a DELETE waits for a running turn: Codex's wait_for_thread_shutdown bound. */
+const SHUTDOWN_TIMEOUT_MS = 10_000;
+/** What a DELETE that waited the whole bound may take beyond it on a loaded test host. */
+const SHUTDOWN_MARGIN_MS = 10_000;
+
+/** Waits until the turn's stream reads running. */
+function runningTurn(
+  runtime: AgentHost,
+  conversation: { chatId: string; userId: string },
+  turnId: string,
+  signal: AbortSignal,
+) {
+  return waitFor(
+    async () =>
+      assert.equal(
+        (await runtime.observe(conversation).status(turnId))?.status,
+        'running',
+      ),
+    { signal },
+  );
+}
+
+/**
+ * Virtual chat sandboxes whose skill discovery, the directory listing a
+ * chat's first turn makes before its stream runs, holds the turn and ignores
+ * its abort, then fails it: when `fail()` is called, or once `until` resolves.
+ */
+function stallingDiscovery(until?: () => Promise<void>) {
+  const virtual = new VirtualSandboxEnvironment();
+  const entered = Promise.withResolvers<void>();
+  const failed = Promise.withResolvers<void>();
+  const environment: SandboxEnvironment = {
+    open: async (chat) => {
+      const sandbox = await virtual.open(chat);
+      return new Proxy(sandbox, {
+        get: (target, property) => {
+          if (property === 'listDirectory') {
+            return async () => {
+              entered.resolve();
+              await (until?.() ?? failed.promise);
+              throw new Error('the sandbox failed the turn');
+            };
+          }
+          const value: unknown = Reflect.get(target, property, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    },
+    delete: (chat) => virtual.delete(chat),
+  };
+  return {
+    environment,
+    entered: entered.promise,
+    fail: () => failed.resolve(),
+  };
+}
+
+/**
+ * The states of the session's dead-lettered turns, once none is in the turn
+ * queue and each has settled as an orphan. With `orphanOptional`, a turn may
+ * also have ended without dead-lettering, or its dead-letter job been removed.
+ */
+function settledOrphans(
+  boss: PgBoss,
+  sessionId: string,
+  signal: AbortSignal,
+  { orphanOptional = false } = {},
+) {
+  // A dead-letter job completes only after its orphan is settled.
+  return waitFor(
+    async () => {
+      const turns = await boss.findJobs('zukhruf-turns', { key: sessionId });
+      const orphans = (
+        await boss.findJobs<{ chatId: string }>('zukhruf-turns-dead')
+      )
+        .filter(({ data }) => data.chatId === sessionId)
+        .map(({ state }) => state);
+      assert.deepStrictEqual(
+        { turns: turns.length, orphans },
+        {
+          turns: 0,
+          orphans: orphanOptional && orphans.length === 0 ? [] : ['completed'],
+        },
+      );
+      return orphans;
     },
     { signal },
   );
@@ -562,62 +654,96 @@ for (const { name, open } of storages) {
     );
   });
 
-  test(`${name}: a turn still running when its session is deleted fails on the deleted rows, and settling it as an orphan does not make the deleted session an agent again`, async (t) => {
+  test(`${name}: DELETE /session/:sessionId of a session with a running turn cancels the turn, so its model is aborted while the turn's stream reads cancelled, and once the turn has settled no chat of the session is left`, async (t) => {
     await using resources = new AsyncDisposableStack();
-    const { storage, boss } = await open(resources);
-    const released = Promise.withResolvers<void>();
+    const { storage } = await open(resources);
+    const turn = Promise.withResolvers<string>();
+    const statusAtAbort = Promise.withResolvers<string | undefined>();
     const { app, runtime } = await serveAgent(resources, storage, {
       name: 'root',
       model: new MockLanguageModelV4({
-        doStream: async () => {
-          await released.promise;
-          return textResult('too late');
-        },
+        doStream: ({ abortSignal }) =>
+          new Promise((_resolve, reject) => {
+            abortSignal?.addEventListener(
+              'abort',
+              () => {
+                statusAtAbort.resolve(
+                  turn.promise.then((turnId) =>
+                    storage.streams.store.getStreamStatus(turnId),
+                  ),
+                );
+                reject(abortSignal.reason);
+              },
+              { once: true },
+            );
+          }),
       }),
       sandbox: defineSandbox(new VirtualSandboxEnvironment()),
+    });
+    // Disposed again by the test once the DELETE answers; a second dispose does nothing.
+    const workers = resources.use(await runtime.work());
+    const sessionId = randomUUID();
+    const root = { chatId: sessionId, userId: 'user-1' };
+    const turnId = await startTurn(app, sessionId);
+    turn.resolve(turnId);
+    await runningTurn(runtime, root, turnId, t.signal);
+
+    const response = await answer(await deleteSession(app, sessionId));
+    const aborted = await Promise.race([
+      statusAtAbort.promise,
+      delay(SHUTDOWN_TIMEOUT_MS, 'never aborted'),
+    ]);
+    // Disposing the workers waits for every turn they run to settle.
+    await workers[Symbol.asyncDispose]();
+
+    assert.deepStrictEqual(
+      {
+        response,
+        aborted,
+        chat: await storage.store.getChat(root.chatId),
+        session: await answer(
+          await app.request(`${MOUNT}/session/${sessionId}`),
+        ),
+      },
+      {
+        response: deleted,
+        aborted: 'cancelled',
+        chat: undefined,
+        session: sessionNotFound(sessionId),
+      },
+    );
+  });
+
+  test(`${name}: DELETE /session/:sessionId waits at most 10 s for a running turn that ignores its abort, then deletes the session, and when that turn fails afterwards, settling it as an orphan leaves no chat of the session behind`, async (t) => {
+    await using resources = new AsyncDisposableStack();
+    const { storage, boss } = await open(resources);
+    const stall = stallingDiscovery();
+    const { app, runtime } = await serveAgent(resources, storage, {
+      name: 'root',
+      model: new MockLanguageModelV4({
+        doStream: async () => textResult('never reached'),
+      }),
+      sandbox: defineSandbox(stall.environment),
     });
     resources.use(await runtime.work());
     const sessionId = randomUUID();
     const root = { chatId: sessionId, userId: 'user-1' };
-    const turnId = await startTurn(app, sessionId);
-    await waitFor(
-      async () =>
-        assert.equal(
-          (await runtime.observe(root).status(turnId))?.status,
-          'running',
-        ),
-      { signal: t.signal },
-    );
+    await startTurn(app, sessionId);
+    await untilAborted(stall.entered, t.signal);
 
+    const started = performance.now();
     const response = await answer(await deleteSession(app, sessionId));
-    released.resolve();
-    // The dead-letter job completes only after the orphan is settled.
-    const settled = await waitFor(
-      async () => {
-        const turns = await boss.findJobs('zukhruf-turns', { key: sessionId });
-        const dead = await boss.findJobs<{ chatId: string }>(
-          'zukhruf-turns-dead',
-        );
-        const orphans = dead
-          .filter(({ data }) => data.chatId === sessionId)
-          .map(({ state }) => state);
-        assert.deepStrictEqual(
-          { turns: turns.length, orphans },
-          { turns: 0, orphans: ['completed'] },
-        );
-        return orphans;
-      },
-      { signal: t.signal },
-    );
+    const elapsed = performance.now() - started;
+    stall.fail();
+    const settled = await settledOrphans(boss, sessionId, t.signal);
 
     assert.deepStrictEqual(
       {
-        settled,
         response,
-        // The turn's own writes can leave a bare chat row behind, which
-        // stopping live work first (#5135 step 4) removes; the orphan must
-        // not make it an agent again.
-        agentMetadata: (await storage.store.getChat(root.chatId))?.metadata,
+        waited: elapsed >= SHUTDOWN_TIMEOUT_MS,
+        bounded: elapsed < SHUTDOWN_TIMEOUT_MS + SHUTDOWN_MARGIN_MS,
+        settled,
+        chat: await storage.store.getChat(root.chatId),
         history: historySchema
           .parse(await (await app.request(`${MOUNT}/history`)).json())
           .map(({ chatId }) => chatId),
@@ -626,11 +752,118 @@ for (const { name, open } of storages) {
         ),
       },
       {
-        settled: ['completed'],
         response: deleted,
-        agentMetadata: undefined,
+        waited: true,
+        bounded: true,
+        settled: ['completed'],
+        chat: undefined,
         history: [],
         session: sessionNotFound(sessionId),
+      },
+    );
+  });
+
+  test(`${name}: a running turn that fails while its session's DELETE waits for it leaves no job of the session in the turn queue once the DELETE answers`, async (t) => {
+    await using resources = new AsyncDisposableStack();
+    const { storage, boss } = await open(resources);
+    const turn = Promise.withResolvers<string>();
+    // The turn's sandbox fails it once the DELETE has cancelled its stream.
+    const stall = stallingDiscovery(async () => {
+      const turnId = await turn.promise;
+      await waitFor(
+        async () =>
+          assert.equal(
+            await storage.streams.store.getStreamStatus(turnId),
+            'cancelled',
+          ),
+        { signal: t.signal },
+      );
+    });
+    const { app, runtime } = await serveAgent(resources, storage, {
+      name: 'root',
+      model: new MockLanguageModelV4({
+        doStream: async () => textResult('never reached'),
+      }),
+      sandbox: defineSandbox(stall.environment),
+    });
+    resources.use(await runtime.work());
+    const sessionId = randomUUID();
+    turn.resolve(await startTurn(app, sessionId));
+    await untilAborted(stall.entered, t.signal);
+
+    const response = await answer(await deleteSession(app, sessionId));
+    const turns = await boss.findJobs('zukhruf-turns', { key: sessionId });
+    await settledOrphans(boss, sessionId, t.signal, { orphanOptional: true });
+
+    assert.deepStrictEqual(
+      { response, turns: turns.map(({ state }) => state) },
+      { response: deleted, turns: [] },
+    );
+  });
+
+  test(`${name}: DELETE /session/:sessionId of a session waiting on a tool approval, with a follow-up turn parked behind it, removes the parked turn's job, so resuming the session's parked turns revives nothing and neither turn runs`, async (t) => {
+    await using resources = new AsyncDisposableStack();
+    const { storage, boss } = await open(resources);
+    let modelCalls = 0;
+    const { app, runtime } = await serveAgent(resources, storage, {
+      name: 'root',
+      model: new MockLanguageModelV4({
+        doStream: async () => {
+          modelCalls += 1;
+          return toolCallResult({
+            toolCallId: randomUUID(),
+            toolName: 'bash',
+            input: JSON.stringify({
+              command: 'echo approved',
+              reasoning: 'a command the user approves',
+            }),
+          });
+        },
+      }),
+      toolApproval: { bash: 'user-approval' },
+      sandbox: defineSandbox(new VirtualSandboxEnvironment()),
+    });
+    resources.use(await runtime.work());
+    const sessionId = randomUUID();
+    const root = { chatId: sessionId, userId: 'user-1' };
+    await startTurn(app, sessionId);
+    await waitFor(
+      async () =>
+        assert.deepStrictEqual(
+          await runtime.observe(root).conversationStatus(),
+          { type: 'active', activeFlags: ['waitingOnApproval'] },
+        ),
+      { signal: t.signal },
+    );
+    await startTurn(app, sessionId);
+    const parked = await waitFor(
+      async () => {
+        const states = (
+          await boss.findJobs('zukhruf-turns', { key: sessionId })
+        ).map(({ state }) => state);
+        assert.deepStrictEqual(states, ['cancelled']);
+        return states;
+      },
+      { signal: t.signal },
+    );
+
+    const response = await answer(await deleteSession(app, sessionId));
+    await storage.queue.resumeParked(sessionId);
+
+    assert.deepStrictEqual(
+      {
+        parked,
+        response,
+        turns: await boss.findJobs('zukhruf-turns', { key: sessionId }),
+        modelCalls,
+        chat: await storage.store.getChat(root.chatId),
+      },
+      {
+        parked: ['cancelled'],
+        response: deleted,
+        turns: [],
+        modelCalls: 1,
+        chat: undefined,
       },
     );
   });
@@ -798,6 +1031,129 @@ test("postgres: while a DELETE cut short after removing the session's container 
         },
         retried: deleted,
         containers: 0,
+      },
+    );
+  } finally {
+    await removeNamespace(namespace);
+  }
+});
+
+test("postgres: a turn admitted before its session's DELETE that reaches its sandbox only after the deleting host removed the session's container, while the session's rows are still there, finds its held sandbox gone and fails on the host that holds the handle, without opening the session again or creating a container; the DELETE waited at most 10 s for that turn", async (t) => {
+  const namespace = `reopen-${randomUUID()}`;
+  try {
+    await using resources = new AsyncDisposableStack();
+    const database = resources.use(await testPostgres.database());
+    const sessionId = randomUUID();
+    let holdResume = false;
+    const resumeHeld = Promise.withResolvers<void>();
+    const sandboxGone = Promise.withResolvers<void>();
+    let holderOpens = 0;
+    const resumes: string[] = [];
+    const holderDocker = new DockerSandboxEnvironment({
+      namespace,
+      container: defaults,
+    });
+    // The holder's borrow of a held handle resumes it; once armed, that
+    // resume waits until the deleting host has removed the container.
+    const holderEnvironment: SandboxEnvironment = {
+      open: async (chat) => {
+        holderOpens += 1;
+        const sandbox = await holderDocker.open(chat);
+        return new Proxy(sandbox, {
+          get: (target, property) => {
+            if (property === 'resume' && holdResume) {
+              return async () => {
+                resumeHeld.resolve();
+                await sandboxGone.promise;
+                try {
+                  await target.resume();
+                  resumes.push('running');
+                } catch (error) {
+                  resumes.push(Error.isError(error) ? error.name : 'rejected');
+                  throw error;
+                }
+              };
+            }
+            const value: unknown = Reflect.get(target, property, target);
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        });
+      },
+      delete: (chat) => holderDocker.delete(chat),
+    };
+    const holder = await postgresStorage(resources, database);
+    const deleterDocker = new DockerSandboxEnvironment({
+      namespace,
+      container: defaults,
+    });
+    // After removing the container, the deleting host lets the holder's turn
+    // reach its sandbox and waits for that turn to settle, however it ends,
+    // before the rows go.
+    const deleterEnvironment: SandboxEnvironment = {
+      open: (chat) => deleterDocker.open(chat),
+      delete: async (chat) => {
+        await deleterDocker.delete(chat);
+        sandboxGone.resolve();
+        await settledOrphans(holder.boss, sessionId, t.signal, {
+          orphanOptional: true,
+        });
+      },
+    };
+    const model = () =>
+      new MockLanguageModelV4({ doStream: async () => textResult('done') });
+    const holding = await serveAgent(resources, holder.storage, {
+      name: 'root',
+      model: model(),
+      sandbox: defineSandbox(holderEnvironment),
+    });
+    const deleting = await serveAgent(
+      resources,
+      (await postgresStorage(resources, database)).storage,
+      {
+        name: 'root',
+        model: model(),
+        sandbox: defineSandbox(deleterEnvironment),
+      },
+    );
+    resources.use(await holding.runtime.work());
+    // The first turn opens the session's container on the holder, which
+    // keeps the handle.
+    await completedTurn(holding, sessionId, t.signal);
+    holdResume = true;
+    await startTurn(holding.app, sessionId);
+    await untilAborted(resumeHeld.promise, t.signal);
+
+    const started = performance.now();
+    const response = await answer(await deleteSession(deleting.app, sessionId));
+    const elapsed = performance.now() - started;
+    // A turn the holder's borrow refused dead-letters; one it reopened for
+    // would see its cancelled stream and end without one.
+    const orphans = (
+      await holder.boss.findJobs<{ chatId: string }>('zukhruf-turns-dead')
+    )
+      .filter(({ data }) => data.chatId === sessionId)
+      .map(({ state }) => state);
+
+    assert.deepStrictEqual(
+      {
+        response,
+        waited: elapsed >= SHUTDOWN_TIMEOUT_MS,
+        bounded: elapsed < SHUTDOWN_TIMEOUT_MS + SHUTDOWN_MARGIN_MS,
+        resumes,
+        orphans,
+        holderOpens,
+        containers: (await namespaceContainers(namespace, sessionId)).length,
+        chat: await holder.storage.store.getChat(sessionId),
+      },
+      {
+        response: deleted,
+        waited: true,
+        bounded: true,
+        resumes: ['SandboxNotFoundError'],
+        orphans: ['completed'],
+        holderOpens: 1,
+        containers: 0,
+        chat: undefined,
       },
     );
   } finally {

@@ -1216,6 +1216,13 @@ work({concurrency?}) → AsyncDisposable }`.
     still finish one open after the delete removed the sandbox. That open is already in flight;
     the deleting worker waits only for its own, and cannot wait for another worker's. Deleting the
     chat again removes the sandbox.
+  - **Live work stops first.** After the marker, the delete forgets each member's jobs, cancels
+    its queued and running streams (which aborts a running turn on any worker), waits at most
+    10 s (Codex's shutdown bound, no option) for the running turns to exit and carries on after
+    that, then forgets the jobs again for a turn that parked or failed on its way out. A turn that
+    outlives the wait fails on the deleted rows; its orphan finds no stream and settles without
+    resolving the chat, and a status read of a chat with no row does not open it, so nothing
+    creates the chat again.
   - A chat with no row yet (an upload before the first message) opens its sandbox on a first
     borrow, so a later first borrow of a deleted chat's id opens a new, empty sandbox (#5135's
     tombstone question).
