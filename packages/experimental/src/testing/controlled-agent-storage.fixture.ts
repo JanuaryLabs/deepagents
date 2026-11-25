@@ -81,6 +81,7 @@ export class ControlledAgentStorage extends AgentStorage {
         mailboxStore: this.mailboxStore,
         queue: this.queue,
         settleIntents: this.settleQueues,
+        sandboxIdleWakes: this.sandboxIdleWakes,
       }),
     );
   }

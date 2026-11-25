@@ -16,6 +16,7 @@ import type { ConversationId } from '../mailbox/types.ts';
 import { NonRetryableError } from '../non-retryable-error.ts';
 import type { Wake, WakeScheduler } from '../queue/wake-scheduler.ts';
 import type { SandboxIdleWake } from '../sandbox/sandbox-idle-wake.ts';
+import type { AdmissionScope } from '../storage/agent-storage.ts';
 import {
   type ConversationStatusProjector,
   conversationStatusOf,
@@ -32,15 +33,21 @@ const sandboxIdleWakeSchema: z.ZodType<SandboxIdleWake> = z
   })
   .strict();
 
-/** A declaration whose sandboxes stop after a number of idle milliseconds. */
-type IdleStoppingSandbox = StoppableSandboxDeclaration & {
-  readonly idleTimeoutMs: number;
-};
-
-function stopsWhenIdle(
+function stoppable(
   sandbox: ZukhrufSandboxDeclaration,
-): sandbox is IdleStoppingSandbox {
-  return typeof sandbox.idleTimeoutMs === 'number';
+): sandbox is StoppableSandboxDeclaration {
+  return sandbox.idleTimeoutMs !== undefined;
+}
+
+/**
+ * Milliseconds the sandbox keeps running once its chat is idle: none while
+ * the chat is archived, else its declaration's, where `false` never stops it.
+ */
+function idleTimeOf(
+  thread: AgentThread,
+  sandbox: StoppableSandboxDeclaration,
+): number | false {
+  return thread.archivedAt === undefined ? sandbox.idleTimeoutMs : 0;
 }
 
 /** An idle chat's latest turn has no finish time: its stream contradicts the chat's status, which no retry changes. */
@@ -58,13 +65,14 @@ export interface SandboxIdleStopOptions {
 }
 
 /**
- * Stops a chat's sandbox once the chat has been idle for its declaration's
- * `idleTimeoutMs`, keeping its files: the next turn's resume starts it again.
- * The stop is a wake armed by this settle follow-up once a turn has settled
- * and the chat is idle, at the turn's finish plus the idle time; when it
- * fires, the chat is checked again inside its tree's admission, so no turn
- * can be pushed between the check and the stop. A runtime has one only when
- * an agent of its tree stops its sandboxes after an idle time.
+ * Stops a chat's sandbox once the chat has been idle for its idle time,
+ * keeping its files: the next turn's resume starts it again. The idle time is
+ * the declaration's `idleTimeoutMs`, and none while the chat is archived. The
+ * stop is a wake armed by this settle follow-up once a turn has settled and
+ * the chat is idle, at the turn's finish plus the idle time, or by the
+ * archive itself; when it fires, the chat is checked again inside its tree's
+ * admission, so no turn can be pushed between the check and the stop. A
+ * runtime has one only when an agent of its tree has a sandbox that can stop.
  */
 export class SandboxIdleStop implements SettleFollowUp {
   readonly name = 'sandbox-idle-stop';
@@ -84,11 +92,11 @@ export class SandboxIdleStop implements SettleFollowUp {
     this.#conversationStatus = options.conversationStatus;
   }
 
-  /** The idle stop of the tree's agents, or none when no agent stops its sandboxes after an idle time. */
+  /** The idle stop of the tree's agents, or none when no agent's sandbox can stop. */
   static of(options: SandboxIdleStopOptions): SandboxIdleStop | undefined {
     return options.declarations
       .values()
-      .some(({ sandbox }) => stopsWhenIdle(sandbox))
+      .some(({ sandbox }) => stoppable(sandbox))
       ? new SandboxIdleStop(options)
       : undefined;
   }
@@ -97,8 +105,10 @@ export class SandboxIdleStop implements SettleFollowUp {
   async run(conversation: ConversationId): Promise<void> {
     const thread = await this.#directory.load(conversation);
     if (thread?.lastTurnId === undefined) return;
-    const sandbox = this.#idleStoppingSandbox(thread);
+    const sandbox = this.#stoppableSandbox(thread);
     if (!sandbox) return;
+    const idleTime = idleTimeOf(thread, sandbox);
+    if (idleTime === false) return;
     if ((await this.#conversationStatus.read(conversation)).type === 'active') {
       return;
     }
@@ -108,7 +118,7 @@ export class SandboxIdleStop implements SettleFollowUp {
         `SandboxIdleStop: the latest turn "${thread.lastTurnId}" of idle chat "${conversation.chatId}" has not finished`,
       );
     }
-    const scheduledFor = stream.finishedAt + sandbox.idleTimeoutMs;
+    const scheduledFor = stream.finishedAt + idleTime;
     await this.#wakes.schedule(
       this.#toWake({
         conversation: thread.conversation,
@@ -127,8 +137,10 @@ export class SandboxIdleStop implements SettleFollowUp {
   async cancel(thread: AgentThread): Promise<void> {
     const turnId = thread.lastTurnId;
     if (turnId === undefined) return;
-    const sandbox = this.#idleStoppingSandbox(thread);
+    const sandbox = this.#stoppableSandbox(thread);
     if (!sandbox) return;
+    const idleTime = idleTimeOf(thread, sandbox);
+    if (idleTime === false) return;
     try {
       const stream = await this.#streams.getStream(turnId);
       if (typeof stream?.finishedAt !== 'number') return;
@@ -136,7 +148,7 @@ export class SandboxIdleStop implements SettleFollowUp {
         this.#wakeId({
           conversation: thread.conversation,
           turnId,
-          scheduledFor: stream.finishedAt + sandbox.idleTimeoutMs,
+          scheduledFor: stream.finishedAt + idleTime,
         }),
       );
     } catch (error) {
@@ -155,14 +167,15 @@ export class SandboxIdleStop implements SettleFollowUp {
    * on its latest turn (none before the first), in place of the stop that
    * turn armed when it settled. It never rejects, so the borrow succeeds: a
    * failure is a process warning, and the sandbox then stops on the next
-   * turn's window instead.
+   * turn's window instead. The borrower uses the sandbox after this, so an
+   * archived chat's window is its declaration's idle time too.
    */
   async armAfterBorrow(conversation: ConversationId): Promise<void> {
     const { chatId, userId } = conversation;
     try {
       const thread = await this.#directory.load(conversation);
-      const sandbox = this.#idleStoppingSandbox(thread);
-      if (!sandbox) return;
+      const sandbox = this.#stoppableSandbox(thread);
+      if (!sandbox || sandbox.idleTimeoutMs === false) return;
       const status = await this.#conversationStatus.read(conversation);
       if (status.type === 'active') return;
       if (thread) await this.cancel(thread);
@@ -183,22 +196,43 @@ export class SandboxIdleStop implements SettleFollowUp {
     }
   }
 
+  /**
+   * Schedules the stop of `member`'s sandbox, due at `archivedAt`, in the
+   * admission that archives it, keyed on its latest turn: any worker delivers
+   * it, and retries a stop that fails. A turn of the member still running is
+   * cancelled after the admission; its settle arms the stop again, at once,
+   * as an archived chat's idle time is none.
+   */
+  async archive(
+    scope: AdmissionScope,
+    member: AgentThread,
+    archivedAt: number,
+  ): Promise<void> {
+    if (!this.#stoppableSandbox(member)) return;
+    await scope.sandboxIdleWakes.schedule(
+      this.#toWake({
+        conversation: member.conversation,
+        turnId: member.lastTurnId ?? null,
+        scheduledFor: archivedAt,
+      }),
+    );
+  }
+
   work(): Promise<AsyncDisposable> {
     return this.#wakes.consume((wake) => this.#handle(wake));
   }
 
   async #handle(raw: Wake<SandboxIdleWake>): Promise<void> {
     const wake = sandboxIdleWakeSchema.parse(raw.data);
-    if (raw.runAt.getTime() !== wake.scheduledFor) {
-      throw new Error('Sandbox idle wake due time does not match its payload');
-    }
+    // The id covers the payload's due time; `runAt` does not, since a retried
+    // delivery comes later.
     if (raw.id !== this.#wakeId(wake)) {
       throw new Error(
         `Sandbox idle wake id "${raw.id}" does not match its payload`,
       );
     }
     const thread = await this.#directory.load(wake.conversation);
-    const sandbox = this.#idleStoppingSandbox(thread);
+    const sandbox = this.#stoppableSandbox(thread);
     if (!sandbox) return;
     await this.#residency.admit(
       thread ?? wake.conversation,
@@ -213,17 +247,17 @@ export class SandboxIdleStop implements SettleFollowUp {
   }
 
   /**
-   * The sandbox of the chat's agent when it stops after an idle time. A chat
-   * with no thread yet has only the root's, which a plugin borrow opens.
+   * The sandbox of the chat's agent when it can stop. A chat with no thread
+   * yet has only the root's, which a plugin borrow opens.
    */
-  #idleStoppingSandbox(
+  #stoppableSandbox(
     thread: AgentThread | undefined,
-  ): IdleStoppingSandbox | undefined {
+  ): StoppableSandboxDeclaration | undefined {
     const declaration = thread
       ? this.#declarations.get(thread.declarationName)
       : this.#declarations.root;
     const sandbox = declaration?.sandbox;
-    return sandbox && stopsWhenIdle(sandbox) ? sandbox : undefined;
+    return sandbox && stoppable(sandbox) ? sandbox : undefined;
   }
 
   #toWake(data: SandboxIdleWake): Wake<SandboxIdleWake> {

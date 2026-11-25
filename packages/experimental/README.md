@@ -159,8 +159,9 @@ An environment that can stop its sandboxes (Docker, Apple container,
 microsandbox) requires `idleTimeoutMs`: the runtime stops a chat's sandbox,
 keeping its files, once the chat has been idle that many milliseconds, and the
 next turn starts it again. `0` stops it as soon as the chat is idle and `false`
-never stops it; there is no default. The virtual and Daytona environments take
-no `idleTimeoutMs`.
+never stops it while the chat is idle; there is no default. Archiving a session
+stops its sandboxes at once, whatever their `idleTimeoutMs`. The virtual and
+Daytona environments take no `idleTimeoutMs`.
 
 ```ts
 import { DockerSandboxEnvironment } from '@deepagents/context';

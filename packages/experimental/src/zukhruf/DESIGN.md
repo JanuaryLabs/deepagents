@@ -1020,37 +1020,57 @@ native`AsyncDisposableStack`passed to the recipe owns registered resources. Cons
 
 A chat's sandbox outlives every turn, worker and restart (see Consequences in the executor
 section), so something must end the compute of a chat nobody uses. The runtime **stops** it once the
-chat has been idle for its declaration's `idleTimeoutMs`, and never removes it: a stop keeps the
-sandbox and its files, and the next turn's `resume()` (or `open()` on a worker that holds no handle)
-starts it again. Removing a deleted chat's sandbox is #5135. `runtime/sandbox-idle-stop.ts`
-(`SandboxIdleStop`) owns it.
+chat has been idle for its idle time, and never removes it: a stop keeps the sandbox and its files,
+and the next turn's `resume()` (or `open()` on a worker that holds no handle) starts it again.
+Removing a deleted chat's sandbox is #5135. `runtime/sandbox-idle-stop.ts` (`SandboxIdleStop`)
+owns it.
 
-- **The idle time is the declaration's.** `defineSandbox` on a `StoppableSandboxEnvironment`
-  (Docker, Apple container, microsandbox) requires `idleTimeoutMs: number | false`: a non-negative
-  safe integer (`0` stops as soon as the chat is idle) or `false` (never stop), else `RangeError`.
-  There is no package default. An environment without `stop` (virtual, Daytona) refuses it
-  (`idleTimeoutMs?: never`); Daytona bounds idle cost with its own `lifecyclePolicy`. It is per
-  declaration, not an environment option, because only the runtime acts on it.
+- **The idle time is the declaration's, and none while the chat is archived.** `defineSandbox` on a
+  `StoppableSandboxEnvironment` (Docker, Apple container, microsandbox) requires
+  `idleTimeoutMs: number | false`: a non-negative safe integer (`0` stops as soon as the chat is
+  idle) or `false` (never stop an idle chat's sandbox), else `RangeError`. There is no package
+  default. An environment without `stop` (virtual, Daytona) refuses it (`idleTimeoutMs?: never`);
+  Daytona bounds idle cost with its own `lifecyclePolicy`. It is per declaration, not an environment
+  option, because only the runtime acts on it. An archived chat's idle time is `0` whatever its
+  declaration says, `false` included (see Archive below).
 - **Idle** means `conversationStatusOf` is not `active`: no turn queued or running, and the chain
   head waits on no approval or client input. A failed latest turn (`systemError`) is idle.
 - **Arm.** `SandboxIdleStop` is a settle follow-up (see Settle follow-ups): its `run(chat)` runs
   from the settle intent every settled turn records, sub-agents included, at least once. When the
-  chat's declaration stops idle sandboxes and the chat is idle, it schedules a wake on `storage.sandboxIdleWakes` (a `PgBossWakeScheduler` on `<turn queue>-sandbox-idle`,
-  polled every 0.5 s) at the latest turn's `finishedAt` plus `idleTimeoutMs`. The wake id is a UUIDv5
-  of `['sandbox-idle', turnId, scheduledFor]` under the chat's namespace, so a re-arm of the same
-  turn is idempotent. An idle chat whose latest turn has not finished throws the non-retryable
+  chat's sandbox can stop, its idle time is a number and the chat is idle, it schedules a wake on
+  `storage.sandboxIdleWakes` (a `PgBossWakeScheduler` on `<turn queue>-sandbox-idle`, polled every
+  0.5 s) at the latest turn's `finishedAt` plus the idle time. The wake id is a UUIDv5 of
+  `['sandbox-idle', turnId, scheduledFor]` under the chat's namespace, so a re-arm of the same turn
+  is idempotent. An idle chat whose latest turn has not finished throws the non-retryable
   `UnfinishedIdleTurnError`; any other arm failure is retried from the intent. The runtime has an
-  idle stop, and its workers consume both queues, only when some declaration of the tree stops idle
-  sandboxes.
+  idle stop, and its workers consume both queues, only when some declaration of the tree has a
+  sandbox that can stop.
 - **Cancel.** `AgentTurnExecutor` calls `cancel(thread)` just before the next turn records itself as
-  the latest; it derives the previous wake's id from that turn's `finishedAt`. A failed cancel is a
-  process warning and never fails the turn.
+  the latest; it derives the previous wake's id from that turn's `finishedAt` and the thread's idle
+  time. A failed cancel is a process warning and never fails the turn.
 - **Plugin borrows.** `host.sandbox(conversation)` outside a turn can start the sandbox, so
   `armAfterBorrow` cancels the latest turn's wake and arms one at now plus `idleTimeoutMs`, keyed on
   the latest turn (`null` before the first): the window starts when the sandbox starts, if that is
-  later (eve's rule). It never fails the borrow. A later borrow cannot cancel an earlier borrow's
-  wake, so the earlier one still stops the sandbox at its own time (#5471).
-- **Fire.** The handler checks the payload against the wake's id and due time, then, inside the
+  later (eve's rule). The borrower uses the sandbox after the arm, so an archived chat's borrow gets
+  the declaration's idle time too, and with `false` nothing stops it. It never fails the borrow. A
+  later borrow cannot cancel an earlier borrow's wake, so the earlier one still stops the sandbox at
+  its own time (#5471).
+- **Archive.** `archiveSession` stops the tree's sandboxes at once (#5135 step 9). The admission that
+  marks every member archived also schedules, for each member whose sandbox can stop, a wake due at
+  `archivedAt`, keyed on the member's latest turn, through `AdmissionScope.sandboxIdleWakes`: the
+  Postgres storage sends it in the admission's transaction, and the embedded storage keeps it in its
+  outbox until the relay sends it, as it does settle intents. So the stop is as durable as the mark,
+  though a second archive answers 409. Once the admission commits, each member's armed stop is
+  cancelled, its id derived from the member as read before the mark. The wake's handler is the idle
+  stop's: any worker delivers it, and a stop that fails is delivered again (20 times, backing off to
+  60 s). A running turn is cancelled only after the mark, so the wake can find the chat still
+  `active` and stop nothing; that turn's settle then arms a stop at its `finishedAt`, since the idle
+  time is none, and so does each turn that collaboration runs in an archived sub-agent. Unarchive
+  starts nothing; the next turn's `resume()` does. An arm that read the chat before the mark and
+  schedules after the archive's cancel leaves its stop pending; when it fires, it stops a sandbox
+  that is already stopped.
+- **Fire.** The handler checks the payload against the wake's id, which covers its due time (not
+  against `runAt`: pg-boss delivers a retry later, at its backoff), then, inside the
   tree's `residency.admit`, stops only when the chat's latest turn is still the wake's and the chat
   is still idle. Every turn push admits through the same lock, so no turn starts between the check
   and `environment.stop(chat)`. A cancel is cheap but no barrier (a fetched wake still runs), so this

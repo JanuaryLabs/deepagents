@@ -15,6 +15,8 @@ import {
   TurnQueue,
   type TurnRef,
 } from '../queue/turn-queue.ts';
+import type { Wake } from '../queue/wake-scheduler.ts';
+import type { SandboxIdleWake } from '../sandbox/sandbox-idle-wake.ts';
 import type { SqliteAdmissionGate } from './sqlite-admission-gate.ts';
 
 // SQLite stores the text of each CREATE and @zukhruf/sqlite-drift compares
@@ -39,6 +41,15 @@ const tables = new Declaration(
     user_id TEXT NOT NULL,
     intent TEXT NOT NULL
   )`,
+    `CREATE TABLE zukhruf_wake_outbox (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL UNIQUE,
+    queue TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    run_at INTEGER NOT NULL,
+    data TEXT NOT NULL
+  )`,
   ],
   { rows: 'keep' },
 );
@@ -49,6 +60,13 @@ const settleRowSchema = z.object({
   jobId: z.string(),
   queue: z.string(),
   intent: z.string(),
+});
+
+const wakeRowSchema = z.object({
+  jobId: z.string(),
+  queue: z.string(),
+  runAt: z.number(),
+  data: z.string(),
 });
 
 type Conversation = Pick<TurnRef, 'chatId' | 'userId'>;
@@ -66,6 +84,12 @@ interface OutboxedSettleIntent {
   intent: SettleIntent;
 }
 
+/** A sandbox idle wake committed in SQLite and not yet scheduled on its pg-boss queue. */
+interface OutboxedWake {
+  queue: string;
+  wake: Wake<SandboxIdleWake>;
+}
+
 function parseTurn(text: string): TurnRef {
   // Written by `add` from a TurnRef; the outbox is this storage's own table.
   const turn: TurnRef = JSON.parse(text);
@@ -78,10 +102,17 @@ function parseSettleIntent(text: string): SettleIntent {
   return intent;
 }
 
+function parseIdleWake(text: string): SandboxIdleWake {
+  // Written by `addWake` from a SandboxIdleWake; the outbox is this storage's own table.
+  const wake: SandboxIdleWake = JSON.parse(text);
+  return wake;
+}
+
 /**
- * Turns and settle intents committed in SQLite and not yet sent to pg-boss,
- * in two tables: a turn row keeps its chat's FIFO order and counts as queued
- * work, a settle intent row only names the queue it goes to. Each method runs
+ * Turns, settle intents and sandbox idle wakes committed in SQLite and not
+ * yet sent to pg-boss, in three tables: a turn row keeps its chat's FIFO
+ * order and counts as queued work, a settle intent row only names the queue
+ * it goes to, and a wake row also its due time. Each method runs
  * synchronously on the storage's connection, so inside an admission it reads
  * and writes in the admission's transaction.
  */
@@ -189,9 +220,51 @@ export class TurnOutbox {
       .run(jobId);
   }
 
-  /** Removes the conversation's turns and settle intents, as deleting its chat does. */
+  /** Adds `wake` for `queue` as the job of its id, unless the outbox already holds that job. */
+  addWake(queue: string, wake: Wake<SandboxIdleWake>): void {
+    this.#database
+      .prepare(
+        `INSERT INTO zukhruf_wake_outbox (job_id, queue, chat_id, user_id, run_at, data)
+         VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (job_id) DO NOTHING`,
+      )
+      .run(
+        wake.id,
+        queue,
+        wake.data.conversation.chatId,
+        wake.data.conversation.userId,
+        wake.runAt.getTime(),
+        JSON.stringify(wake.data),
+      );
+  }
+
+  oldestWake(): OutboxedWake | undefined {
+    const row = this.#database
+      .prepare(
+        `SELECT job_id AS jobId, queue, run_at AS runAt, data FROM zukhruf_wake_outbox
+         ORDER BY sequence LIMIT 1`,
+      )
+      .get();
+    if (row === undefined) return undefined;
+    const { jobId, queue, runAt, data } = wakeRowSchema.parse(row);
+    return {
+      queue,
+      wake: { id: jobId, runAt: new Date(runAt), data: parseIdleWake(data) },
+    };
+  }
+
+  removeWake(jobId: string): void {
+    this.#database
+      .prepare('DELETE FROM zukhruf_wake_outbox WHERE job_id = ?')
+      .run(jobId);
+  }
+
+  /** Removes the conversation's turns, settle intents and wakes, as deleting its chat does. */
   removeConversation(conversation: Conversation): void {
-    for (const table of ['zukhruf_turn_outbox', 'zukhruf_settle_outbox']) {
+    for (const table of [
+      'zukhruf_turn_outbox',
+      'zukhruf_settle_outbox',
+      'zukhruf_wake_outbox',
+    ]) {
       this.#database
         .prepare(`DELETE FROM ${table} WHERE chat_id = ? AND user_id = ?`)
         .run(conversation.chatId, conversation.userId);
@@ -213,8 +286,8 @@ function withOutboxed(activity: TurnActivity, outboxed: boolean): TurnActivity {
 
 /**
  * Pushes outboxed turns to pg-boss in outbox order, one at a time, each as
- * the job id the outbox gave it, then sends the outboxed settle intents the
- * same way, and deletes a row only after its push. A process that dies
+ * the job id the outbox gave it, then sends the outboxed settle intents and
+ * wakes the same way, and deletes a row only after its push. A process that dies
  * between the two leaves the row, and the next drain pushes it again as the
  * same job.
  */
@@ -251,11 +324,25 @@ export class OutboxRelay {
         const next = await this.#gate.call(async () =>
           this.#outbox.oldestSettleIntent(),
         );
-        if (!next) return;
+        if (!next) break;
         await this.#boss.send(next.queue, next.intent, { id: next.jobId });
         await this.#gate.call(async () =>
           this.#outbox.removeSettleIntent(next.jobId),
         );
+      }
+      for (;;) {
+        const next = await this.#gate.call(async () =>
+          this.#outbox.oldestWake(),
+        );
+        if (!next) return;
+        const { queue, wake } = next;
+        await this.#boss.sendAfter(
+          queue,
+          wake.data,
+          { id: wake.id },
+          wake.runAt,
+        );
+        await this.#gate.call(async () => this.#outbox.removeWake(wake.id));
       }
     });
   }

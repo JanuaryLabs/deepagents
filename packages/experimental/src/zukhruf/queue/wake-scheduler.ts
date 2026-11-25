@@ -4,6 +4,12 @@ export interface Wake<T extends object> {
   data: T;
 }
 
+/** Schedules wakes in a caller's unit: workers see them only once it commits. */
+export interface TransactionalWakeScheduler<T extends object> {
+  /** Schedules `wake`; scheduling an id the queue still holds adds nothing. */
+  schedule(wake: Wake<T>): Promise<void>;
+}
+
 /** Durable, at-least-once delivery of opaque one-shot wakes. */
 export abstract class WakeScheduler<T extends object> {
   abstract schedule(wake: Wake<T>): Promise<void>;

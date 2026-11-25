@@ -1,7 +1,19 @@
 import { isDeepStrictEqual } from 'node:util';
-import type { JobWithMetadata, PgBoss } from 'pg-boss';
+import type { Db, JobWithMetadata, PgBoss } from 'pg-boss';
+import { v7 as uuidv7 } from 'uuid';
 
-import { type Wake, WakeScheduler } from './wake-scheduler.ts';
+import {
+  type TransactionalWakeScheduler,
+  type Wake,
+  WakeScheduler,
+} from './wake-scheduler.ts';
+
+function assertSchedulable(wake: Wake<object>): void {
+  if (!wake.id.trim()) throw new Error('WakeScheduler wake id cannot be empty');
+  if (Number.isNaN(wake.runAt.getTime())) {
+    throw new Error('WakeScheduler runAt must be a valid Date');
+  }
+}
 
 export interface PgBossWakeSchedulerOptions {
   /** Stable queue shared only by replicas of one agent tree. */
@@ -37,14 +49,30 @@ export class PgBossWakeScheduler<T extends object> extends WakeScheduler<T> {
       expireInSeconds: this.#expireInSeconds,
       heartbeatSeconds: this.#heartbeatSeconds,
     });
+    // pg-boss looks up queue metadata on its own database before it honors a
+    // transaction's `db`, and creating the queue drops what it had cached; a
+    // cache miss inside a caller's transaction would wait for a pool
+    // connection that transaction may be holding. Fill the cache now.
+    await this.#boss.findJobs(this.#queue, { id: uuidv7() });
+  }
+
+  /** Schedules wakes in the transaction `db` runs in. */
+  bind(db: Db): TransactionalWakeScheduler<T> {
+    return {
+      schedule: async (wake) => {
+        assertSchedulable(wake);
+        await this.#boss.sendAfter(
+          this.#queue,
+          wake.data,
+          { id: wake.id, db },
+          wake.runAt,
+        );
+      },
+    };
   }
 
   override async schedule(wake: Wake<T>): Promise<void> {
-    if (!wake.id.trim())
-      throw new Error('WakeScheduler wake id cannot be empty');
-    if (Number.isNaN(wake.runAt.getTime())) {
-      throw new Error('WakeScheduler runAt must be a valid Date');
-    }
+    assertSchedulable(wake);
 
     const inserted = await this.#boss.sendAfter(
       this.#queue,

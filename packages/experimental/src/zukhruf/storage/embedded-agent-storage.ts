@@ -168,8 +168,9 @@ export class EmbeddedAgentStorage
       ...options.queue,
       schema: 'pgboss',
     });
+    const sandboxIdleQueue = `${turns.queue}-sandbox-idle`;
     const sandboxIdleWakes = new PgBossWakeScheduler<SandboxIdleWake>(boss, {
-      queue: `${turns.queue}-sandbox-idle`,
+      queue: sandboxIdleQueue,
       pollingIntervalSeconds: 0.5,
     });
     await sandboxIdleWakes.initialize();
@@ -209,6 +210,9 @@ export class EmbeddedAgentStorage
               id,
               intent,
             ),
+        },
+        sandboxIdleWakes: {
+          schedule: async (wake) => outbox.addWake(sandboxIdleQueue, wake),
         },
       },
       relay,

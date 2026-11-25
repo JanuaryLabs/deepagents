@@ -157,6 +157,28 @@ class FailingScheduler extends WakeScheduler<SchedulingWake> {
   }
 }
 
+/** The scheduling plugin's real wake queue, which this worker never takes wakes from. */
+class ScheduleOnlyScheduler extends WakeScheduler<SchedulingWake> {
+  readonly #inner: WakeScheduler<SchedulingWake>;
+
+  constructor(inner: WakeScheduler<SchedulingWake>) {
+    super();
+    this.#inner = inner;
+  }
+
+  override schedule(wake: Wake<SchedulingWake>): Promise<void> {
+    return this.#inner.schedule(wake);
+  }
+
+  override cancel(id: string): Promise<void> {
+    return this.#inner.cancel(id);
+  }
+
+  override async consume(): Promise<AsyncDisposable> {
+    return { [Symbol.asyncDispose]: async () => {} };
+  }
+}
+
 async function schedulingQueue(boss: PgBoss) {
   const queue = new PgBossWakeScheduler<SchedulingWake>(boss, {
     queue: 'zukhruf-scheduling',
@@ -518,6 +540,77 @@ for (const { name, open } of storages) {
       assert.equal(
         (await host.observe(conversation).status(queued.id))?.status,
         'cancelled',
+      );
+    });
+  });
+
+  suite(`scheduling wakes on the real queue (${name})`, () => {
+    test('a cron occurrence whose wake delivery fails is delivered again by pg-boss, later than its due time, and the occurrence dispatches with its successor armed', async (t) => {
+      await using resources = new AsyncDisposableStack();
+      const { storage, boss } = await open(resources);
+      // One minute before the latest noon that real time has passed: the
+      // occurrence is not due by the plugin's clock, so the chat's settle
+      // dispatches nothing, while pg-boss delivers its wake at once.
+      const noon = new Date();
+      noon.setUTCHours(12, 0, 0, 0);
+      if (noon.getTime() > Date.now()) noon.setUTCDate(noon.getUTCDate() - 1);
+      const clock = { Date: { now: () => noon.getTime() - 60_000 } };
+      const plugin = conversationScheduling();
+      const conversation = { chatId: 'redelivered', userId: 'u1' };
+      const seen: string[] = [];
+      const root = plainAgent(
+        [plugin],
+        new MockLanguageModelV4({
+          doStream: async ({ prompt }) => {
+            if (prompt.at(-1)?.role === 'tool') return textResult('created');
+            const text = lastUserText(prompt);
+            seen.push(text);
+            return text === 'create cron'
+              ? toolCallResult({
+                  toolCallId: crypto.randomUUID(),
+                  toolName: 'CronCreate',
+                  input: JSON.stringify({
+                    cron: '0 12 * * *',
+                    prompt: 'daily',
+                  }),
+                })
+              : textResult(`done:${text}`);
+          },
+        }),
+      );
+      // Takes no wake, so the occurrence is first delivered to the next host,
+      // with the chat idle.
+      const creating = await schedulingHost(
+        root,
+        plugin,
+        storage,
+        new ScheduleOnlyScheduler(await schedulingQueue(boss)),
+        clock,
+      );
+      await creating.work();
+      await Array.fromAsync(
+        (await creating.enqueue(conversation, userTurn('t-1', 'create cron')))
+          .stream,
+      );
+      await creating[Symbol.asyncDispose]();
+
+      // Its first delivery fails as it arms the successor.
+      const scheduler = new FailingScheduler(await schedulingQueue(boss), 1);
+      await using next = await schedulingHost(
+        root,
+        plugin,
+        storage,
+        scheduler,
+        clock,
+      );
+      await next.work();
+
+      await waitFor(() => assert.ok(seen.includes('daily')), {
+        signal: t.signal,
+      });
+      assert.deepStrictEqual(
+        { seen, failing: scheduler.failing },
+        { seen: ['create cron', 'daily'], failing: 0 },
       );
     });
   });

@@ -359,9 +359,8 @@ export class ConversationScheduler {
 
   async #handle(rawWake: Wake<SchedulingWake>): Promise<void> {
     const wake = schedulingWakeSchema.parse(rawWake.data);
-    if (rawWake.runAt.getTime() !== wake.scheduledFor) {
-      throw new Error('Scheduling wake due time does not match its payload');
-    }
+    // The id covers the payload's due time; `runAt` does not, since a retried
+    // delivery comes later.
     if (rawWake.id !== this.#wakeId(wake)) {
       throw new Error(
         `Scheduling wake id "${rawWake.id}" does not match its payload`,

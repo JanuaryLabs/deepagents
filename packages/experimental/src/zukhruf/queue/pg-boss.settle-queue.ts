@@ -1,5 +1,4 @@
 import type { PgBoss } from 'pg-boss';
-import { v7 as uuidv7 } from 'uuid';
 
 import { PgBossWakeScheduler } from './pg-boss.wake-scheduler.ts';
 import type { SettleIntent, SettleQueue } from './settle-intent.ts';
@@ -22,10 +21,7 @@ export async function openSettleQueue(
     queue,
     pollingIntervalSeconds: 0.5,
   });
+  // Also fills pg-boss's cache of the queue, which an admission's send needs.
   await wakes.initialize();
-  // pg-boss looks up queue metadata on its own database before it honors a
-  // transaction's `db`; a cache miss inside an admission would wait for a
-  // pool connection the transaction may be holding. Fill the cache now.
-  await boss.findJobs(queue, { id: uuidv7() });
   return { consume: (handler) => wakes.consume(({ data }) => handler(data)) };
 }

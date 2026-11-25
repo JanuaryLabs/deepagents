@@ -9,7 +9,11 @@ import { type TestContext, test } from 'node:test';
 import { setTimeout } from 'node:timers/promises';
 import { PgBoss } from 'pg-boss';
 
-import { DockerSandboxEnvironment } from '@deepagents/context';
+import {
+  DockerSandboxEnvironment,
+  type SandboxContext,
+  type StoppableSandboxEnvironment,
+} from '@deepagents/context';
 import {
   type AdmissionScope,
   type AgentHost,
@@ -17,10 +21,12 @@ import {
   AgentStorage,
   type AgentTree,
   EmbeddedAgentStorage,
+  MessageDeliveryModes,
   PostgresAgentStorage,
   type SandboxIdleWake,
   type Wake,
   WakeScheduler,
+  createInterAgentCommunication,
   defineAgent,
   defineSandbox,
   defineStack,
@@ -301,6 +307,32 @@ class FailOnceIdleWakesStorage extends AgentStorage {
     work: (scope: AdmissionScope) => Promise<T>,
   ): Promise<T> {
     return this.#inner.admit(tree, work);
+  }
+}
+
+/** A real chat environment whose first stop fails, as an engine that is briefly unreachable does. */
+class FailOnceStopEnvironment implements StoppableSandboxEnvironment {
+  failedStops = 0;
+  readonly #inner: StoppableSandboxEnvironment;
+
+  constructor(inner: StoppableSandboxEnvironment) {
+    this.#inner = inner;
+  }
+
+  open(chat: SandboxContext) {
+    return this.#inner.open(chat);
+  }
+
+  delete(chat: SandboxContext) {
+    return this.#inner.delete(chat);
+  }
+
+  async stop(chat: SandboxContext) {
+    if (this.failedStops === 0) {
+      this.failedStops++;
+      throw new Error('docker engine unreachable');
+    }
+    await this.#inner.stop(chat);
   }
 }
 
@@ -1055,7 +1087,7 @@ for (const { name, open } of storages) {
     }
   });
 
-  test(`${name}: a chat whose sandbox declares idleTimeoutMs false keeps its container running after it goes idle, with no stop due and no worker taking the idle queue's wakes`, async (t) => {
+  test(`${name}: a chat whose sandbox declares idleTimeoutMs false keeps its container running after it goes idle, with no stop armed`, async (t) => {
     const namespace = `never-${crypto.randomUUID()}`;
     try {
       await using resources = new AsyncDisposableStack();
@@ -1076,21 +1108,13 @@ for (const { name, open } of storages) {
       await bashOutput(
         await host.enqueue(conversation, userTurn('turn-1', 'first')),
       );
-      // Any wake on the idle queue, which a worker taking it would settle.
-      const runAt = new Date();
-      await storage.sandboxIdleWakes.schedule({
-        id: crypto.randomUUID(),
-        runAt,
-        data: { conversation, turnId: null, scheduledFor: runAt.getTime() },
-      });
-      await setTimeout(3_000, undefined, { signal: t.signal });
 
       assert.deepStrictEqual(
         {
+          seen: await idleJobStatesDuring(boss, 3_000, t),
           status: await containerStatus(namespace),
-          jobs: await idleJobStates(boss),
         },
-        { status: 'running', jobs: ['created'] },
+        { seen: [], status: 'running' },
       );
     } finally {
       await removeNamespace(namespace);
@@ -1125,6 +1149,320 @@ for (const { name, open } of storages) {
         { signal: t.signal },
       );
       assert.equal(flaky.sandboxIdleWakes.failedSchedules, 1);
+    } finally {
+      await removeNamespace(namespace);
+    }
+  });
+
+  test(`${name}: archiving an idle chat stops its container at once, long before its idleTimeoutMs, and cancels the stop its last turn armed; unarchiving starts nothing, and the next turn runs in that same container, started again with its files`, async (t) => {
+    const namespace = `archive-${crypto.randomUUID()}`;
+    try {
+      await using resources = new AsyncDisposableStack();
+      const { storage, boss } = await open(resources);
+      const root = defineAgent({
+        name: 'root',
+        model: bashEachTurn(
+          'echo kept > note.txt && hostname',
+          'cat note.txt && hostname',
+        ),
+        instructions: [],
+        sandbox: defineSandbox(chatEnvironment(namespace), {
+          idleTimeoutMs: 600_000,
+        }),
+      });
+      await using host = await new AgentRuntime(root).initialize(
+        defineStack(async () => ({ storage })),
+      );
+      await host.work();
+
+      const first = await bashOutput(
+        await host.enqueue(conversation, userTurn('turn-1', 'first')),
+      );
+      const container = await chatContainer(namespace);
+      const idleStop = await armedStop(boss, t);
+
+      await host.archiveSession(conversation);
+      await waitFor(
+        async () => assert.equal(await containerStatus(namespace), 'exited'),
+        { signal: t.signal },
+      );
+      // The archive's own stop is deleted once delivered.
+      const leftOnQueue = await waitFor(
+        async () => {
+          const jobs = (await boss.findJobs(IDLE_QUEUE)).map(
+            ({ id, state }) => ({ lastTurns: id === idleStop.id, state }),
+          );
+          assert.deepStrictEqual(jobs, [
+            { lastTurns: true, state: 'cancelled' },
+          ]);
+          return jobs;
+        },
+        { signal: t.signal },
+      );
+      await host.unarchiveSession(conversation);
+      const afterUnarchive = await containerStatus(namespace);
+      const second = await bashOutput(
+        await host.enqueue(conversation, userTurn('turn-2', 'second')),
+      );
+
+      const hostname = `${container.id.slice(0, 12)}\n`;
+      assert.deepStrictEqual(
+        {
+          leftOnQueue,
+          afterUnarchive,
+          turns: [first, second],
+          container: (await chatContainer(namespace)).id,
+        },
+        {
+          leftOnQueue: [{ lastTurns: true, state: 'cancelled' }],
+          afterUnarchive: 'exited',
+          turns: [bashSucceeded(hostname), bashSucceeded(`kept\n${hostname}`)],
+          container: container.id,
+        },
+      );
+    } finally {
+      await removeNamespace(namespace);
+    }
+  });
+
+  test(`${name}: archiving a chat while its turn runs cancels the turn and stops its container, leaving no stop armed`, async (t) => {
+    const namespace = `archive-running-${crypto.randomUUID()}`;
+    const holding = Promise.withResolvers<void>();
+    try {
+      await using resources = new AsyncDisposableStack();
+      const { storage, boss } = await open(resources);
+      let calls = 0;
+      // The second turn's model call runs until the archive aborts it.
+      const model = new MockLanguageModelV4({
+        doStream: async ({ prompt, abortSignal }) => {
+          if (prompt.at(-1)?.role === 'tool') return textResult('done');
+          calls += 1;
+          if (calls === 1) {
+            return toolCallResult({
+              toolCallId: crypto.randomUUID(),
+              toolName: 'bash',
+              input: JSON.stringify({
+                command: 'hostname',
+                reasoning: 'start',
+              }),
+            });
+          }
+          holding.resolve();
+          return new Promise<never>((_resolve, reject) => {
+            abortSignal?.addEventListener(
+              'abort',
+              () => reject(abortSignal.reason),
+              { once: true },
+            );
+          });
+        },
+      });
+      const root = defineAgent({
+        name: 'root',
+        model,
+        instructions: [],
+        sandbox: defineSandbox(chatEnvironment(namespace), {
+          idleTimeoutMs: 600_000,
+        }),
+      });
+      await using host = await new AgentRuntime(root).initialize(
+        defineStack(async () => ({ storage })),
+      );
+      await host.work();
+
+      await bashOutput(
+        await host.enqueue(conversation, userTurn('turn-1', 'first')),
+      );
+      const firstStop = await armedStop(boss, t);
+      const running = await host.enqueue(
+        conversation,
+        userTurn('turn-2', 'second'),
+      );
+      await holding.promise;
+
+      await host.archiveSession(conversation);
+      await Array.fromAsync(running.stream);
+      await waitFor(
+        async () => assert.equal(await containerStatus(namespace), 'exited'),
+        { signal: t.signal },
+      );
+      // The second turn cancelled the first's stop as it started; every
+      // other stop is deleted once delivered.
+      const leftOnQueue = await waitFor(
+        async () => {
+          const jobs = (await boss.findJobs(IDLE_QUEUE)).map(
+            ({ id, state }) => ({ firstTurns: id === firstStop.id, state }),
+          );
+          assert.deepStrictEqual(jobs, [
+            { firstTurns: true, state: 'cancelled' },
+          ]);
+          return jobs;
+        },
+        { signal: t.signal },
+      );
+
+      assert.deepStrictEqual(
+        {
+          turn: (await host.observe(conversation).status(running.id))?.status,
+          leftOnQueue,
+        },
+        {
+          turn: 'cancelled',
+          leftOnQueue: [{ firstTurns: true, state: 'cancelled' }],
+        },
+      );
+    } finally {
+      await removeNamespace(namespace);
+    }
+  });
+
+  test(`${name}: a sub-agent of an archived session that collaboration runs again starts its container for that turn and stops it as soon as the turn ends, though its idleTimeoutMs is far off`, async (t) => {
+    const rootNamespace = `archive-root-${crypto.randomUUID()}`;
+    const childNamespace = `archive-child-${crypto.randomUUID()}`;
+    try {
+      await using resources = new AsyncDisposableStack();
+      const { storage, boss } = await open(resources);
+      const rootSteps = [
+        toolCallResult({
+          toolCallId: 'spawn',
+          toolName: 'spawn_agent',
+          input: JSON.stringify({
+            task_name: 'worker',
+            agent_type: 'worker',
+            message: 'start',
+            fork_turns: 'none',
+          }),
+        }),
+      ];
+      const root = defineAgent({
+        name: 'root',
+        model: new MockLanguageModelV4({
+          doStream: async () => rootSteps.shift() ?? textResult('done'),
+        }),
+        instructions: [],
+        sandbox: defineSandbox(chatEnvironment(rootNamespace), {
+          idleTimeoutMs: 600_000,
+        }),
+        subagents: [
+          defineAgent({
+            name: 'worker',
+            model: bashEachTurn('hostname', 'hostname'),
+            instructions: [],
+            sandbox: defineSandbox(chatEnvironment(childNamespace), {
+              idleTimeoutMs: 600_000,
+            }),
+          }),
+        ],
+      });
+      await using host = await new AgentRuntime(root).initialize(
+        defineStack(async () => ({ storage })),
+      );
+      await host.work({ concurrency: 2 });
+
+      await Array.fromAsync(
+        (await host.enqueue(conversation, userTurn('turn-1', 'delegate')))
+          .stream,
+      );
+      const child = await waitFor(
+        async () => {
+          const [session] = await host.listHistory(conversation.userId);
+          const [worker] = session?.children ?? [];
+          assert.equal(worker?.state, 'completed');
+          assert.ok(worker);
+          const found = { chatId: worker.chatId, userId: conversation.userId };
+          assert.equal(await storage.queue.getTurnActivity(found), 'idle');
+          return found;
+        },
+        { signal: t.signal },
+      );
+      const childStatus = async () =>
+        (await (await chatContainer(childNamespace, child.chatId)).inspect())
+          .State;
+
+      await host.archiveSession(conversation);
+      // The archive's stops are delivered and deleted; the cancelled ones,
+      // its turns' idle stops, stay.
+      await waitFor(
+        async () => {
+          assert.equal((await childStatus())?.Status, 'exited');
+          assert.ok(!(await idleJobStates(boss)).includes('created'));
+        },
+        { signal: t.signal },
+      );
+      const stoppedByArchive = await childStatus();
+      await host.deliver(
+        createInterAgentCommunication({
+          author: conversation,
+          recipient: child,
+          content: 'run again',
+        }),
+        MessageDeliveryModes.TriggerTurn,
+      );
+      await waitFor(
+        async () => {
+          const state = await childStatus();
+          assert.notEqual(state?.StartedAt, stoppedByArchive?.StartedAt);
+          assert.equal(state?.Status, 'exited');
+        },
+        { signal: t.signal },
+      );
+
+      assert.deepStrictEqual(
+        {
+          leftArmed: (await idleJobStates(boss)).includes('created'),
+          archived: (
+            await host.listHistory(conversation.userId, { archived: true })
+          ).map(({ chatId }) => chatId),
+        },
+        { leftArmed: false, archived: [conversation.chatId] },
+      );
+    } finally {
+      await removeNamespace(rootNamespace);
+      await removeNamespace(childNamespace);
+    }
+  });
+
+  test(`${name}: archiving a chat whose sandbox declares idleTimeoutMs false stops its container too, and a stop that fails is delivered again until the container has exited, the session archived throughout`, async (t) => {
+    const namespace = `archive-retry-${crypto.randomUUID()}`;
+    try {
+      await using resources = new AsyncDisposableStack();
+      const { storage, boss } = await open(resources);
+      const environment = new FailOnceStopEnvironment(
+        chatEnvironment(namespace),
+      );
+      const root = defineAgent({
+        name: 'root',
+        model: bashEachTurn('hostname'),
+        instructions: [],
+        sandbox: defineSandbox(environment, { idleTimeoutMs: false }),
+      });
+      await using host = await new AgentRuntime(root).initialize(
+        defineStack(async () => ({ storage })),
+      );
+      await host.work();
+
+      await bashOutput(
+        await host.enqueue(conversation, userTurn('turn-1', 'first')),
+      );
+      await host.archiveSession(conversation);
+      await waitFor(
+        async () => assert.equal(await containerStatus(namespace), 'exited'),
+        { signal: t.signal },
+      );
+      await waitFor(
+        async () => assert.deepStrictEqual(await idleJobStates(boss), []),
+        { signal: t.signal },
+      );
+
+      assert.deepStrictEqual(
+        {
+          failedStops: environment.failedStops,
+          archived: (
+            await host.listHistory(conversation.userId, { archived: true })
+          ).map(({ chatId }) => chatId),
+        },
+        { failedStops: 1, archived: [conversation.chatId] },
+      );
     } finally {
       await removeNamespace(namespace);
     }

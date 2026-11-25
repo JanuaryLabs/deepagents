@@ -185,7 +185,7 @@ export class PostgresAgentStorage
     );
   }
 
-  /** Runs `work` in one transaction under the tree's advisory lock; its settle intents are pg-boss jobs of that transaction. */
+  /** Runs `work` in one transaction under the tree's advisory lock; its settle intents and idle wakes are pg-boss jobs of that transaction. */
   admit<T>(
     tree: AgentTree,
     work: (scope: AdmissionScope) => Promise<T>,
@@ -209,6 +209,7 @@ export class PostgresAgentStorage
             );
           },
         },
+        sandboxIdleWakes: this.sandboxIdleWakes.bind(db),
       });
     });
   }

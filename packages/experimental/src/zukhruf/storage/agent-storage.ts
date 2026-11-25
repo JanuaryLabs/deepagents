@@ -13,7 +13,10 @@ import type {
   TransactionalSettleIntents,
 } from '../queue/settle-intent.ts';
 import type { TransactionalTurnQueue, TurnQueue } from '../queue/turn-queue.ts';
-import type { WakeScheduler } from '../queue/wake-scheduler.ts';
+import type {
+  TransactionalWakeScheduler,
+  WakeScheduler,
+} from '../queue/wake-scheduler.ts';
 import type { SandboxIdleWake } from '../sandbox/sandbox-idle-wake.ts';
 
 /** An agent tree: the root conversation and every sub-agent under it. */
@@ -35,6 +38,8 @@ export interface AdmissionScope {
   queue: TransactionalTurnQueue;
   /** The settle intents of the follow-ups `settleQueue` opened. */
   settleIntents: TransactionalSettleIntents;
+  /** The due stops of chats' sandboxes, on `sandboxIdleWakes`'s queue. */
+  sandboxIdleWakes: TransactionalWakeScheduler<SandboxIdleWake>;
 }
 
 /**

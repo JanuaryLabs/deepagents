@@ -35,7 +35,7 @@ import type {
   MessageDeliveryMode,
 } from '../mailbox/types.ts';
 import type { TurnQueue, TurnRef, TurnRequest } from '../queue/turn-queue.ts';
-import type { AgentStorage } from '../storage/agent-storage.ts';
+import type { AdmissionScope, AgentStorage } from '../storage/agent-storage.ts';
 import type { ZukhrufToolSet } from '../tool.ts';
 import { AgentTurnExecutor } from './agent-turn-executor.ts';
 import { ApprovalController } from './approval-controller.ts';
@@ -748,8 +748,10 @@ class RuntimeHost implements AsyncDisposable {
    * it, as Codex's thread/archive does. One admission to the tree marks
    * every member archived, so from then on the tree admits no turn through
    * enqueue, a user's or a plugin's, and a turn queued before the archive
-   * is parked when a worker claims it. Then its running turns are
-   * cancelled, the root first and then its descendants, deepest first,
+   * is parked when a worker claims it; the same admission schedules the
+   * stop of each member's sandbox that can stop, due at once. Then the
+   * stops each member's latest turn armed are cancelled, its running turns
+   * are cancelled, the root first and then its descendants, deepest first,
    * waiting at most 10 s for them to exit; then each member's status is
    * published, which subscribers receive as `archived`. Everything stays
    * readable, and mail still runs a member's turn, as collaboration resumes
@@ -766,8 +768,13 @@ class RuntimeHost implements AsyncDisposable {
           throw new ConversationArchivedError(conversation.chatId);
         }
       },
-      (directory, member) => directory.markArchived(member, archivedAt),
+      async (scope, directory, member) => {
+        await directory.markArchived(member.conversation, archivedAt);
+        await this.#idleStop?.archive(scope, member, archivedAt);
+      },
     );
+    // As read before the mark, each finds the stop its latest turn armed.
+    for (const member of members) await this.#idleStop?.cancel(member);
     // Codex shuts the root down first, then its descendants in reverse.
     const order = [
       ...members.filter(({ path }) => path.isRoot),
@@ -798,7 +805,8 @@ class RuntimeHost implements AsyncDisposable {
           throw new ConversationNotArchivedError(conversation.chatId);
         }
       },
-      (directory, member) => directory.markUnarchived(member),
+      (_scope, directory, member) =>
+        directory.markUnarchived(member.conversation),
     );
     for (const { conversation: member } of members) {
       await this.#queue.resumeParked(member.chatId);
@@ -821,12 +829,17 @@ class RuntimeHost implements AsyncDisposable {
   /**
    * In one admission to the tree of `conversation`, a root this runtime owns
    * that is not being deleted and that `assertMarkable` accepts, applies
-   * `mark` to every member, and resolves with the members.
+   * `mark` to every member, and resolves with the members as they were
+   * before it.
    */
   async #markTree(
     conversation: ConversationId,
     assertMarkable: (root: AgentThread) => void,
-    mark: (directory: AgentDirectory, member: ConversationId) => Promise<void>,
+    mark: (
+      scope: AdmissionScope,
+      directory: AgentDirectory,
+      member: AgentThread,
+    ) => Promise<void>,
   ): Promise<AgentThread[]> {
     const tree = { userId: conversation.userId, treeId: conversation.chatId };
     return this.#storage.admit(tree, async (scope) => {
@@ -837,9 +850,7 @@ class RuntimeHost implements AsyncDisposable {
       }
       assertMarkable(root);
       const members = await directory.listTree(root);
-      for (const { conversation: member } of members) {
-        await mark(directory, member);
-      }
+      for (const member of members) await mark(scope, directory, member);
       return members;
     });
   }
