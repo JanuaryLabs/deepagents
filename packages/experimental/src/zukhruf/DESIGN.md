@@ -424,7 +424,8 @@ turn cancelled while queued never enters the chain at all.
   held handle when it ends. A handle can hold a connection (a Microsandbox microVM refuses every
   connect after about 107 open ones). Closing never stops or removes the sandbox, so a worker's
   shutdown leaves the chat's sandbox to the other workers; only the environment's `stop` and
-  `delete` end it. The runtime calls `stop` for an idle chat (see Sandbox idle stop).
+  `delete` end it. The runtime calls `stop` for an idle or archived chat (see Sandbox idle stop)
+  and `delete` for a deleted one (see Session delete and archive).
 - The host selects the `StreamStore` and `ChangeSource` when constructing the borrowed
   `StreamManager`; the ready host neither initializes nor disposes borrowed adapters.
 
@@ -1022,8 +1023,8 @@ A chat's sandbox outlives every turn, worker and restart (see Consequences in th
 section), so something must end the compute of a chat nobody uses. The runtime **stops** it once the
 chat has been idle for its idle time, and never removes it: a stop keeps the sandbox and its files,
 and the next turn's `resume()` (or `open()` on a worker that holds no handle) starts it again.
-Removing a deleted chat's sandbox is #5135. `runtime/sandbox-idle-stop.ts` (`SandboxIdleStop`)
-owns it.
+Only deleting the session removes it (see Session delete and archive).
+`runtime/sandbox-idle-stop.ts` (`SandboxIdleStop`) owns it.
 
 - **The idle time is the declaration's, and none while the chat is archived.** `defineSandbox` on a
   `StoppableSandboxEnvironment` (Docker, Apple container, microsandbox) requires
@@ -1092,6 +1093,85 @@ owns it.
 - **Each sub-agent's idle is its own.** A child is its own conversation with its own declaration,
   sandbox and idle time: its sandbox stops after its own `idleTimeoutMs` while its parent waits in
   `wait_agent`, and the parent's keeps running and stops on its own window.
+
+## Session delete and archive _(Built, #5135)_
+
+`AgentHost.deleteSession`, `archiveSession` and `unarchiveSession` take a root chat this runtime
+owns and act on its whole tree, every sub-agent chat included, as Codex's `thread/delete`,
+`thread/archive` and `thread/unarchive` do. Any other chat, and a deleted one, rejects with
+`ConversationNotFoundError` (HTTP 404 `zukhruf/session-not-found`), and so does a tree being
+deleted, except to `deleteSession`, which finishes it. Each member's status is
+published at the end, which `subscribeConversationStatus` delivers as a `deleted`, `archived` or
+`unarchived` event and `GET /events` as one `{type: 'change', resource: 'conversation', id,
+lifecycle}` per member.
+
+### Delete
+
+- **The marker, then two admissions.** The first admission to the tree marks the root
+  `deletingAt`. From then on the tree reads as absent: `AgentResidency.admit` refuses every turn
+  push into it, `createSession`, `sessionExists` and `listHistory` skip it, and a plugin's borrow
+  refuses it. The second admission, once everything outside the rows is gone, removes each
+  member's mail, streams and chat row, deepest first and the root last, and writes each member's
+  tombstone. A delete cut short leaves the marked root, so calling it again (a second `DELETE`)
+  finishes it; `DELETE /session/:sessionId` therefore skips the `sessionExists` check the other
+  routes make.
+- **Live work stops first.** After the marker, the delete forgets each member's jobs, cancels
+  its queued and running streams (which aborts a running turn on any worker), waits at most
+  10 s in all (Codex's shutdown bound, no option) for the running turns to exit and carries on
+  after that, then forgets the jobs again for a turn that parked or failed on its way out. A turn
+  that outlives the wait fails on the deleted rows; its orphan finds no stream and settles without
+  resolving the chat, and a status read of a chat with no row does not open it, so nothing
+  creates the chat again.
+- **The hooks, in order.** Each member, deepest first, goes to every plugin's
+  `conversationDeleting` while its metadata is still readable: `schedules()` archives each task
+  whose target is the member, and `conversationScheduling()` cancels the cron, dynamic and
+  dispatching wakes its metadata names. A wake the delete could not cancel (a successor armed
+  while its wake ran) finds the chat gone when it fires, and its handler treats
+  `ConversationNotFoundError` as done. Then each member's idle stop is cancelled, its held handle
+  forgotten and its sandbox removed with `environment.delete`. Then the stack's
+  `conversationDataCleanup(conversations)` gets every member at once, to remove what the host
+  keeps outside the framework (volumes, object-storage prefixes). A rejection of either hook, or of
+  `environment.delete`, aborts the delete before any row goes, and the retry calls them again.
+- **The tombstone.** Chat ids are client-minted, so a stale tab could otherwise start a fresh,
+  empty session or sandbox under a deleted id. The second admission records each member in
+  `zukhruf_deleted_conversations (chat_id PRIMARY KEY, deleted_at)`, which keeps no owner: a deleted
+  id is refused for every user, on every worker, as Codex never returns a deleted thread.
+  `AgentResidency.admit` refuses it, so every turn, mail delivery and new root does;
+  `createSession` creates a root only through such an admission; and the plugin host's `sandbox()`
+  and `writableSandbox()` refuse it for a chat with no agent. `sessionExists` reads no tombstone,
+  because the rows and the tombstone commit together.
+- **A stale handle never re-creates a deleted chat's sandbox.** Another worker can still hold a
+  handle it opened before the delete. `ConversationSandboxes` opens a chat again only when the
+  host's `reopenable` check, read from the directory, finds the chat an agent of a tree whose
+  root is there and not marked `deletingAt`. Otherwise it forgets the handle, closes it and
+  rejects with `ConversationNotFoundError`.
+- **Residual race.** A borrow that passed its check just before the marker commits can still
+  finish one open after the delete removed the sandbox. That open is already in flight; the
+  deleting worker waits only for its own, and cannot wait for another worker's. Deleting the
+  session again removes the sandbox.
+
+### Archive and unarchive
+
+- **Archive marks every member in one admission.** An archived root rejects a second archive with
+  `ConversationArchivedError` (409 `zukhruf/session-archived`). The same admission schedules the
+  stop of each member's sandbox that can stop (see Archive under Sandbox idle stop). Then the
+  stops each member's latest turn armed are cancelled, and its running turns are cancelled, the
+  root first and then its descendants, deepest first, waiting at most 10 s in all.
+- **Archived means hidden and read-only.** `listHistory` hides an archived root, and
+  `listHistory(userId, { archived: true })` lists only archived ones. Everything stays readable.
+  `enqueue` refuses the tree with `ConversationArchivedError`, a user's turn and a plugin's alike,
+  so an archived chat runs nothing on its own: a `schedules()` run that targets it fails, and a
+  conversation-scheduling occurrence that falls due is skipped while a recurring cron keeps its
+  next occurrence armed. A message turn queued before the archive is parked when a worker claims
+  it. Mail still runs a member's turn, as collaboration resumes an archived sub-agent. A plugin
+  that changes the session borrows through `writableSandbox`, which refuses it (see An archived
+  session is read-only for plugins).
+- **Unarchive clears every member's mark in one admission**, then resumes each member's parked
+  turns, the ones queued before the archive among them, and resolves with the session's history
+  item. A root that is not archived rejects with `ConversationNotArchivedError` (409
+  `zukhruf/session-not-archived`). It starts no sandbox; the next turn's `resume()` does. A turn
+  that a worker parks while the unarchive lands checks the mark again once its park has landed and
+  resumes the chat's parked turns itself when the mark is gone.
 
 ## Stacks: one runtime, explicit adapter composition
 
@@ -1297,35 +1377,11 @@ work({concurrency?}) → AsyncDisposable }`.
 - **Per-chat sandbox GC** — the host closes its per-chat sandbox handles when it ends, which never
   stops or removes a sandbox. Before a turn borrows a held handle it resumes it; a handle whose
   sandbox was removed outside it (`SandboxNotFoundError`) is closed and the turn opens the chat
-  again. The runtime stops an idle chat's sandbox and keeps its files (see Sandbox idle stop).
-  Deleting a chat removes its sandbox (`environment.delete`, #5135); files that must outlive the
-  sandbox live in a volume the app chooses.
-  - **A stale handle never re-creates a deleted chat's sandbox.** Another worker can still hold a
-    handle it opened before the delete. `ConversationSandboxes` opens a chat again only when the
-    host's `reopenable` check, read from the directory, finds the chat an agent of a tree whose
-    root is there and not marked `deletingAt`. Otherwise it forgets the handle, closes it and
-    rejects with `ConversationNotFoundError` (HTTP 404). `host.sandbox()` refuses a chat of a tree
-    being deleted before it borrows, so a worker that holds no handle cannot open it either.
-  - **Residual race.** A borrow that passed its check just before the delete's marker commits can
-    still finish one open after the delete removed the sandbox. That open is already in flight;
-    the deleting worker waits only for its own, and cannot wait for another worker's. Deleting the
-    chat again removes the sandbox.
-  - **Live work stops first.** After the marker, the delete forgets each member's jobs, cancels
-    its queued and running streams (which aborts a running turn on any worker), waits at most
-    10 s (Codex's shutdown bound, no option) for the running turns to exit and carries on after
-    that, then forgets the jobs again for a turn that parked or failed on its way out. A turn that
-    outlives the wait fails on the deleted rows; its orphan finds no stream and settles without
-    resolving the chat, and a status read of a chat with no row does not open it, so nothing
-    creates the chat again.
-  - **Plugins clean up their own state next.** Each member then goes to every plugin's
-    `conversationDeleting`, while its metadata is still readable; a rejection aborts the delete
-    and a retry calls it again. `schedules()` archives each task whose target is the member, and
-    `conversationScheduling()` cancels the cron, dynamic and dispatching wakes its metadata names.
-    A wake the delete could not cancel (a successor armed while its wake ran) finds the chat gone
-    when it fires, and its handler treats `ConversationNotFoundError` as done, so it is not retried.
-  - A chat with no row yet (an upload before the first message) opens its sandbox on a first
-    borrow, so a later first borrow of a deleted chat's id opens a new, empty sandbox (#5135's
-    tombstone question).
+  again. The runtime stops an idle or archived chat's sandbox and keeps its files (see Sandbox
+  idle stop). Deleting the session is the only event that removes anything: each member's sandbox
+  goes through its environment's `delete`, and the stack's `conversationDataCleanup` removes the
+  durable data the host keeps (a volume the app chose, an object-storage prefix); see Session
+  delete and archive. A session nobody deletes keeps its stopped sandboxes.
 - **Queued-turn visibility** — `resume()` only sees executing/executed turns (the chain mutates at
   execution time). `conversationStatus()` reports a queued turn as `active`, but a reconnecting
   client still can't stream a turn that is queued but unstarted; folds into the observe/reconnect
@@ -1347,7 +1403,7 @@ turns, workers, and restarts (durable volumes hold the files that must outlive a
   the same discipline that makes it durable also makes it portable.
 - **The host owns sandbox handles; turns and plugins borrow them.** The host lazily opens one
   handle per declaration and conversation, shares it across turns, and closes it after workers
-  stop. Closing never touches the sandbox; the environment's `stop` and `delete` do. The idle stop
-  is built; removing the sandboxes of deleted chats remains open (#5135).
+  stop. Closing never touches the sandbox; the environment's `stop` and `delete` do. The runtime
+  calls `stop` for an idle or archived chat and `delete` for a deleted one.
 - **Scaffold one primitive at a time**, even erroring, where the error is diagnostic (it pins the
   exact missing dependency).

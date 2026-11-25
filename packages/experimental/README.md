@@ -78,8 +78,10 @@ execute or leave the conversation waiting for client input, so the next queued
 user turn can proceed.
 
 The `AgentHost` returned by `AgentRuntime.initialize()` exposes enqueue, host
-mailbox delivery, observation, approval, denial, worker lifecycle, and
-model-facing collaboration for declared subagents. Its control plane, executor,
+mailbox delivery, observation, approval, denial, worker lifecycle,
+model-facing collaboration for declared subagents, and session deletion and
+archiving (`deleteSession`, `archiveSession`, `unarchiveSession`, and
+`listHistory(userId, { archived })`). Its control plane, executor,
 status projector, mailbox coordinator,
 and injected collaboration-tool implementations are internal wiring. See
 [`src/zukhruf/DESIGN.md`](./src/zukhruf/DESIGN.md) for the decided semantics,
@@ -184,6 +186,29 @@ acquisition is retried on the next request. Host disposal closes the held
 handles after its workers stop; closing a handle never stops or removes the
 chat's sandbox.
 
+`host.deleteSession(conversation)` deletes a session and every sub-agent chat
+under it: it stops their turns, waiting at most 10 s for a running one, removes
+each sandbox through its environment's `delete`, then their mail, streams and
+chats, and refuses the session's id from then on, for every user. Data the
+host keeps per conversation (a volume, an object-storage prefix) is the host's
+to remove: the stack's `conversationDataCleanup` gets every deleted
+conversation once their sandboxes are gone, and its rejection aborts the
+delete, which a second call finishes.
+`host.archiveSession(conversation)` hides a session from `listHistory`,
+refuses its new turns, scheduled ones included, and stops its sandboxes;
+`host.unarchiveSession(conversation)` brings it back and runs the turns that
+were queued. See session delete and archive in
+[`src/zukhruf/DESIGN.md`](./src/zukhruf/DESIGN.md).
+
+```ts
+const stack = defineStack(async (resources) => ({
+  storage: resources.use(await PostgresAgentStorage.create({ pool, boss })),
+  conversationDataCleanup: async (conversations) => {
+    for (const { chatId } of conversations) await removeChatVolume(chatId);
+  },
+}));
+```
+
 Zukhruf discovers immediate `skills/<name>/SKILL.md` children from each
 configured sandbox once per conversation. It persists only the ordered catalog
 (`name`, `description`, and model-visible `path`) in chat metadata so later turns
@@ -196,7 +221,14 @@ when creating the sandbox.
 mount at its chosen path: create or continue sessions with idempotent `POST`
 calls, receive the durable `turnId`, check or cancel a specific turn, cancel the
 active session turn, stream durable UI-message output, and read runtime info
-plus health checks. `GET /info` advertises mount-relative
+plus health checks. `DELETE /session/:sessionId` deletes a session (204),
+`POST /session/:sessionId/archive` archives it (204), and
+`POST /session/:sessionId/unarchive` answers 200 with its history item.
+`GET /history` lists the sessions that are not archived, and
+`GET /history?archived=true` the archived ones. `GET /events` tells the owner
+of each session and sub-agent chat that was deleted, archived or unarchived
+with `{ type: 'change', resource: 'conversation', id, lifecycle }`, where
+`lifecycle` is `deleted`, `archived` or `unarchived`. `GET /info` advertises mount-relative
 `capabilities.history.href` and `capabilities.chat.href`. A runtime plugin's
 `initialize(host)` returns its typed transport-neutral running phase, which
 `host.plugin(definition)` returns. Transport packages bind those exact running
@@ -207,14 +239,19 @@ services and streaming without changing core. The HTTP transport plugin rejects
 duplicate capability names and relative paths.
 Runtime refusals keep their meaning over HTTP, and no answer names another user
 or session: a session the caller does not own answers 404
-`zukhruf/session-not-found`, a turn the session never issued (including a
+`zukhruf/session-not-found` (so does a deleted session's id, for good, even to
+a `POST` that would start it again), a turn the session never issued (including a
 regenerate of a message that never ran) answers 404
 `zukhruf/session-turn-not-found`, an approval continuation for a turn the
 session has moved past answers 409 `zukhruf/session-turn-stale`, and a
 sub-agent turn whose tree has no free agent slot answers 429
-`zukhruf/agent-thread-limit`. Hosts that call the runtime directly catch the
-same refusals as `ConversationNotFoundError`, `TurnNotFoundError`,
-`StaleTurnError` and `AgentThreadLimitError` from the main entry.
+`zukhruf/agent-thread-limit`, a turn or an archive of an archived session
+answers 409 `zukhruf/session-archived`, and an unarchive of a session that is
+not archived answers 409 `zukhruf/session-not-archived`. Hosts that call the
+runtime directly catch the same refusals as `ConversationNotFoundError`,
+`TurnNotFoundError`, `StaleTurnError`, `AgentThreadLimitError`,
+`ConversationArchivedError` and `ConversationNotArchivedError` from the main
+entry.
 Plugins may also contribute one AI SDK telemetry integration per turn through
 `telemetry(context)`; the runtime applies every contribution with the agent's
 declaration-local telemetry policy.
@@ -282,7 +319,10 @@ the accepted `mediaTypes`, and the model receives a turn-local reminder with
 the sandbox paths to read. Every agent in the tree also gets a
 `publish_upload` tool that adopts a file it produced below the session's
 uploads directory and returns the link the user can open; pass `publicUrl`
-(the absolute mount of `http()`) so that link is absolute.
+(the absolute mount of `http()`) so that link is absolute. An archived session
+is read-only: `POST /session/:sessionId/uploads` answers 409
+`zukhruf/session-archived`, while a file uploaded before the archive still
+reads. Both routes answer 404 for a deleted session.
 
 The optional `@deepagents/experimental/zukhruf/mcp` plugin contributes tools
 from an AI SDK `MCPClient`. Provide `mcp({ name, connect })`; Zukhruf connects
