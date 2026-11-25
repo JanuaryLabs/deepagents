@@ -156,6 +156,14 @@ export abstract class TurnQueue {
   abstract resumeParked(chatId: string): Promise<void>;
 
   /**
+   * Whether the turn of a stream that has been queued since `queuedSince`
+   * (epoch ms) is lost: the queue holds no job for it in any state, parked
+   * and dead-lettered ones included, and never will. A queue that deletes no
+   * job it holds answers `false`.
+   */
+  abstract isLost(streamId: string, queuedSince: number): Promise<boolean>;
+
+  /**
    * Removes every job of the conversation that is not running, parked and
    * dead-lettered ones included, as deleting its chat does. A running job
    * keeps its FIFO key until its handler exits.

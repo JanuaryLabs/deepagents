@@ -201,6 +201,10 @@ class InterposedParkQueue extends TurnQueue {
   override forget(conversation: Pick<TurnRef, 'chatId' | 'userId'>) {
     return this.#inner.forget(conversation);
   }
+
+  override isLost(streamId: string, queuedSince: number) {
+    return this.#inner.isLost(streamId, queuedSince);
+  }
 }
 
 /** A real storage whose turn queue is an InterposedParkQueue over its own. */

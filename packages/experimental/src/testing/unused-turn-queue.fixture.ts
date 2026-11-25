@@ -36,4 +36,8 @@ export class UnusedTurnQueue extends TurnQueue {
   override async forget(): Promise<void> {
     throw unusedQueue();
   }
+
+  override async isLost(): Promise<boolean> {
+    throw unusedQueue();
+  }
 }

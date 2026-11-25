@@ -6,7 +6,7 @@
 
 ## 1. `watch()` stream hangs forever when a pending turn's queue job is deleted by retention
 
-**Status:** Resolved for parked and completed turns by `deleteAfterSeconds: 0` plus commit-driven GC in `pg-boss.turn-queue.ts`, test-pinned by `pg-boss.turn-queue.retention.test.ts` and the runtime scenarios. A **parked** turn's job is `cancelled` and is never time-deleted; commit-GC removes a job only after its stream is terminal. **Remaining:** a `created`/queued job is still governed by `retentionSeconds` (14d, which cannot be zero). A sufficiently deep or repeatedly blocked backlog can therefore outlive retention even though each running turn is bounded by `expireInSeconds`, leaving the surviving stream row orphaned. The guard is tracked in **TODO §2 "Startup reconciliation sweep"** (agent-backlog #682): fail every non-terminal stream row with no live or queued job.
+**Status:** Resolved. Parked and completed turns never lose their job: `deleteAfterSeconds: 0` plus commit-driven GC in `pg-boss.turn-queue.ts` (`pg-boss.turn-queue.retention.test.ts`). A `created` job is still deleted once it outlives `retentionSeconds` (14d, which cannot be zero); the turn is then unrecoverable, so the first `work()` after the gap fails its stream instead of letting it hang (agent-backlog #682, DESIGN.md "Lost turns"). Its `watch()` and `observe().resume()` end with the error `turn lost: its queue job was deleted before it ran`.
 
 **Symptom.** `AgentHost.enqueue` returns a conversation-scoped durable `{ id, stream: watch(id) }`.
 If the turn's queue job is deleted by pg-boss retention before it executes, the returned stream
@@ -27,7 +27,7 @@ StreamStore is **not** owned by pg-boss and has no TTL, so a retained status row
 indefinitely after its created job disappears. The half that survives (status) cannot run the turn;
 the half that could (content) is gone.
 
-**Why nothing recovers it.** Retention deletion is a silent maintenance `DELETE` — no dead-letter and no `AgentRuntime` orphan callback (those fire only for crashed _running_ jobs). Nothing flips an orphaned `queued` stream to a terminal state.
+**Why it could not run again.** Retention deletion is a silent maintenance `DELETE` — no dead-letter and no `AgentRuntime` orphan callback (those fire only for crashed _running_ jobs) — and the deleted job held the only copy of the message.
 
 **Repro sketch.** Enqueue a turn; before a worker executes it, delete its queue job (or let retention expire it). Hold the returned `watch(id)` stream → it never resolves. StreamStore status stays `queued`; the turn is un-runnable (no message payload).
 
@@ -36,9 +36,4 @@ the half that could (content) is gone.
 (created/retry), `deleteAfterSeconds` 7d (terminal); no "never" for `created` jobs
 (`retentionSeconds: 0` rejected). Zukhruf overrides only the terminal setting to zero.
 
-**Fix direction.** The tracked direction is startup reconciliation; related options, none of which
-move unexecuted content into the store, are:
-
-- A reconciler/terminal-guard: when a consumer detects the backing queue job is gone, mark the orphaned `queued` stream terminal (e.g. `failed`) so `watch()`/`resume()` resolve instead of hanging.
-- Make `watch()` on a non-executing turn status-aware / bounded rather than tailing forever.
-- A sweep that fails StreamStore rows stuck at `queued` with no live job.
+**Fix.** `AgentRuntime.work()` sweeps queued streams once its consumer is registered: a stream older than the queue's retention whose job is in no state of the turn queue or its dead-letter queue is moved `queued` → `failed` by a compare-and-set on its row. Pinned by the `runtime.integration.test.ts` retention scenarios and `lost-turns.postgres.integration.test.ts`.

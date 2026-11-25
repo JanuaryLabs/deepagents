@@ -69,6 +69,10 @@ export class ControlledTurnQueue extends TurnQueue {
 
   override async resumeParked(): Promise<void> {}
 
+  override async isLost(): Promise<boolean> {
+    return false;
+  }
+
   override async forget(
     conversation: Pick<TurnRef, 'chatId' | 'userId'>,
   ): Promise<void> {

@@ -54,6 +54,7 @@ import { TurnSettlement } from './turn-settlement.ts';
 /** How long a delete waits for a running turn to exit before it carries on: Codex's wait_for_thread_shutdown bound. */
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 const SHUTDOWN_POLL_INTERVAL_MS = 50;
+const LOST_TURN_ERROR = 'turn lost: its queue job was deleted before it ran';
 
 /** Resolving an orphaned continuation's agent failed, so its turn gets the default terminal reconciliation. */
 class OrphanResolveWarning extends Error {
@@ -1073,7 +1074,40 @@ class RuntimeHost implements AsyncDisposable {
           this.#conversationStatus.publish({ chatId, userId }),
       }),
     );
+    await this.#failLostTurns();
     return workers.move();
+  }
+
+  /**
+   * Fails every queued stream whose turn the queue lost, so its watchers end.
+   * A queued stream gets its job only in the transaction that made it
+   * queued, so a stream the queue holds no job for will never run. The CAS
+   * moves only the row this sweep saw, still queued, so concurrent sweeps
+   * fail it once and a reopened stream keeps its new turn.
+   */
+  async #failLostTurns(): Promise<void> {
+    const store = this.#streams.store;
+    for (const streamId of await store.listStreamIds({ status: 'queued' })) {
+      const seen = await store.getStream(streamId);
+      if (seen?.status !== 'queued') continue;
+      if (!(await this.#queue.isLost(streamId, seen.createdAt))) continue;
+      await store
+        .updateStream(streamId, (stream) =>
+          stream.status === 'queued' && stream.createdAt === seen.createdAt
+            ? {
+                status: 'failed',
+                finishedAt: Date.now(),
+                error: LOST_TURN_ERROR,
+              }
+            : undefined,
+        )
+        .catch(async (error: unknown) => {
+          // A session delete between the list and the update removed the
+          // row, so no watcher is left to end; any other failure stops work().
+          if ((await store.getStream(streamId)) === undefined) return;
+          throw error;
+        });
+    }
   }
 
   /**

@@ -174,6 +174,16 @@ export class TurnOutbox {
     );
   }
 
+  holdsStream(streamId: string): boolean {
+    return (
+      this.#database
+        .prepare(
+          'SELECT 1 FROM zukhruf_turn_outbox WHERE stream_id = ? LIMIT 1',
+        )
+        .get(streamId) !== undefined
+    );
+  }
+
   remove(jobId: string): void {
     this.#database
       .prepare('DELETE FROM zukhruf_turn_outbox WHERE job_id = ?')
@@ -434,6 +444,14 @@ export class OutboxTurnQueue extends TurnQueue {
 
   resumeParked(chatId: string): Promise<void> {
     return this.#queue.resumeParked(chatId);
+  }
+
+  /** Outbox first: the relay deletes a row only after pg-boss holds its job. */
+  async isLost(streamId: string, queuedSince: number): Promise<boolean> {
+    const outboxed = await this.#gate.call(async () =>
+      this.#outbox.holdsStream(streamId),
+    );
+    return !outboxed && this.#queue.isLost(streamId, queuedSince);
   }
 
   forget(conversation: Conversation): Promise<void> {

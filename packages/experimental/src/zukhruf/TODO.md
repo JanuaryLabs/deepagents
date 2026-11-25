@@ -26,8 +26,9 @@
       already be canonical.
 - [x] **Root metadata initialization CAS**: worker initialization preserves a concurrent host
       metadata write and retries against the fresh snapshot.
-- [ ] **Startup reconciliation sweep**: non-terminal stream rows with no live/queued job → `failed`
-      (covers register→push orphans beyond the retried-message self-heal). Tracked as agent-backlog #682.
+- [x] **Startup reconciliation sweep**: `work()` fails each queued stream older than the queue's
+      retention whose job is in no state of the turn queue or its dead-letter queue (agent-backlog
+      #682, DESIGN.md "Lost turns"). Running streams are out of its scope.
 - [x] **Host cancel reaches the queue**: `interrupt_agent` and `AgentObservation.cancel()` cancel the
       exact queue job as well as the durable stream. Queued copies are removed immediately while
       active work retains FIFO ownership through handler exit.
@@ -188,5 +189,4 @@
       `TurnQueue.getCurrentTurn`, which includes created (unstarted) jobs, and
       `conversationStatus()` reports them as `active`.
 - [x] CI: affected tests block merging (`continue-on-error` removed from the test step; the JUnit
-      publish step still runs with `if: always()`). The known-red retention re-execution test is
-      marked `todo` until agent-backlog #682 replaces it with orphan-terminal coverage.
+      publish step still runs with `if: always()`).

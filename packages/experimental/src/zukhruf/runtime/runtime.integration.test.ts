@@ -75,6 +75,8 @@ import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 const turn = (text: string) => userTurn(`message:${crypto.randomUUID()}`, text);
 
+const LOST_TURN_ERROR = 'turn lost: its queue job was deleted before it ran';
+
 interface ModelTrack {
   active: number;
   maxActive: number;
@@ -542,6 +544,10 @@ class FailOnceResumeParkedQueue extends TurnQueue {
 
   override forget(conversation: Pick<TurnRef, 'chatId' | 'userId'>) {
     return this.#inner.forget(conversation);
+  }
+
+  override isLost(streamId: string, queuedSince: number) {
+    return this.#inner.isLost(streamId, queuedSince);
   }
 }
 
@@ -2964,55 +2970,128 @@ describe('zukhruf runtime — background executor', () => {
     );
   });
 
-  it(
-    're-executes a queued turn after pg-boss retention deletes its job',
-    {
-      todo: 'Known red: the deleted job held the only message payload (BUGS.md §1 "Remaining"; agent-backlog #682 replaces this expectation with orphan-terminal coverage).',
-    },
-    async (t) => {
-      const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
-      await using h = await harness(scriptedModel(track));
-      await h.boss.updateQueue(h.queue.queue, { retentionSeconds: 1 });
+  it('fails a queued turn whose job pg-boss retention deleted, so its watch() stream ends with an error once a worker starts', async (t) => {
+    const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
+    await using h = await harness(scriptedModel(track));
+    await h.boss.updateQueue(h.queue.queue, { retentionSeconds: 1 });
 
-      const queued = await h.runtime.enqueue(
-        { chatId: 'retained-turn', userId: 'u1' },
-        turn('reexecute me'),
-      );
-      await waitFor(
-        async () => {
-          await h.boss.supervise(h.queue.queue);
-          assert.deepStrictEqual(
-            await h.boss.findJobs(h.queue.queue, {
-              data: { streamId: queued.id },
-            }),
-            [],
-          );
-        },
-        { interval: 100, signal: t.signal },
-      );
-
-      await using _worker = await h.runtime.work();
-
-      void _worker;
-      const reader = queued.stream.getReader();
-      try {
-        let text = '';
-        await untilAborted(
-          (async () => {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) return;
-              if (value.type === 'text-delta') text += value.delta;
-            }
-          })(),
-          t.signal,
+    const queued = await h.runtime.enqueue(
+      { chatId: 'retained-turn', userId: 'u1' },
+      turn('lost me'),
+    );
+    await waitFor(
+      async () => {
+        await h.boss.supervise(h.queue.queue);
+        assert.deepStrictEqual(
+          await h.boss.findJobs(h.queue.queue, {
+            data: { streamId: queued.id },
+          }),
+          [],
         );
-        assert.equal(text, 'reply:reexecute me');
-      } finally {
-        await reader.cancel();
-      }
-    },
-  );
+      },
+      { interval: 100, signal: t.signal },
+    );
+
+    await using _worker = await h.runtime.work();
+    void _worker;
+
+    assert.deepStrictEqual(
+      await untilAborted(Array.fromAsync(queued.stream), t.signal),
+      [{ type: 'error', errorText: LOST_TURN_ERROR }],
+    );
+    assert.deepStrictEqual(track.calls, [], 'the lost turn never ran');
+  });
+
+  it("keeps a parked follow-up queued through a worker restart past the queue's retention, then runs it when its approval resolves", async (t) => {
+    const { track, agent, model } = approvalSetup();
+    await using h = await harness(model, { declaration: agent });
+    const conversation = { chatId: 'parked-restart', userId: 'u1' };
+    const followUp = await (async () => {
+      await using _worker = await h.runtime.work();
+      void _worker;
+      await collectText(
+        (await h.runtime.enqueue(conversation, turn('send it'))).stream,
+      );
+      const queued = await h.runtime.enqueue(conversation, turn('two'));
+      await waitFor(
+        async () =>
+          assert.deepStrictEqual(
+            (
+              await h.boss.findJobs(h.queue.queue, {
+                data: { streamId: queued.id },
+              })
+            ).map((job) => job.state),
+            ['cancelled'],
+          ),
+        { interval: 20, signal: t.signal },
+      );
+      return queued;
+    })();
+    await h.boss.updateQueue(h.queue.queue, { retentionSeconds: 1 });
+    await sleep(1_100);
+
+    await using _worker = await h.runtime.work();
+    void _worker;
+    assert.equal(
+      await h.streamStore.getStreamStatus(followUp.id),
+      'queued',
+      'the parked follow-up is not lost',
+    );
+    const { part } = await pausedToolCall(h.runtime, conversation);
+    await submitApprovalResponses(h.runtime, conversation, {
+      toolCallId: part.toolCallId,
+      approved: true,
+    });
+
+    assert.equal(
+      await untilAborted(collectText(followUp.stream), t.signal),
+      'reply:two',
+    );
+    assert.deepStrictEqual(track.calls, ['send it', 'send it', 'two']);
+  });
+
+  it('fails an approval continuation whose job was lost, so observe().resume() ends with an error', async (t) => {
+    const { track, agent, model } = approvalSetup();
+    await using h = await harness(model, { declaration: agent });
+    const conversation = { chatId: 'lost-continuation', userId: 'u1' };
+    await (async () => {
+      await using _worker = await h.runtime.work();
+      void _worker;
+      await collectText(
+        (await h.runtime.enqueue(conversation, turn('send it'))).stream,
+      );
+    })();
+    await h.boss.updateQueue(h.queue.queue, { retentionSeconds: 1 });
+    const { part } = await pausedToolCall(h.runtime, conversation);
+    const continuation = await submitApprovalResponses(
+      h.runtime,
+      conversation,
+      { toolCallId: part.toolCallId, approved: true },
+    );
+    await waitFor(
+      async () => {
+        await h.boss.supervise(h.queue.queue);
+        assert.deepStrictEqual(
+          await h.boss.findJobs(h.queue.queue, {
+            data: { streamId: continuation.id },
+          }),
+          [],
+        );
+      },
+      { interval: 100, signal: t.signal },
+    );
+
+    await using _worker = await h.runtime.work();
+    void _worker;
+
+    const resumed = await h.runtime.observe(conversation).resume();
+    assert.ok(resumed);
+    assert.deepStrictEqual(
+      await untilAborted(Array.fromAsync(resumed), t.signal),
+      [{ type: 'error', errorText: LOST_TURN_ERROR }],
+    );
+    assert.equal(track.toolRuns, 0, 'the lost continuation never ran');
+  });
 
   it('parked follow-ups survive a maintenance pass while gated, then revive in order and leave no jobs behind', async (t) => {
     const { track, agent, model } = approvalSetup();

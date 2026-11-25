@@ -85,8 +85,8 @@ function deadLetterQueueOf(queue: string): string {
  *   awaits its approval for as long as it takes, with no retention deadline.
  *   Cleanup is commit-driven instead — `consume` deletes a job the moment its
  *   turn runs and commits to the chain — so completed jobs don't accumulate.
- *   (`retentionSeconds`, which governs still-`created` jobs, can't be 0; the
- *   remaining deep-backlog orphan case is tracked for startup reconciliation.)
+ *   (`retentionSeconds`, which governs still-`created` jobs, can't be 0; a
+ *   turn whose job it deletes is reported by `isLost`.)
  * - Interrupting an active turn aborts the adapter-local handler but leaves its
  *   pg-boss row `active` until that handler exits. Cancelling the row itself
  *   would surrender the strict-FIFO key early and let the successor overlap.
@@ -493,6 +493,31 @@ export class PgBossTurnQueue extends TurnQueue {
     if (parked.length > 0) {
       await this.#revive(parked);
     }
+  }
+
+  /**
+   * pg-boss deletes a job only once it has waited past its queue's
+   * `retentionSeconds` (keep_until = start_after + retention), and a turn is
+   * pushed after its stream is registered, so a stream queued for less than
+   * that window still has its job or is about to. The window is read live:
+   * an operator may change it on the queue at any time.
+   */
+  override async isLost(
+    streamId: string,
+    queuedSince: number,
+  ): Promise<boolean> {
+    const queue = await this.#boss.getQueue(this.#queue);
+    if (queue?.retentionSeconds === undefined) {
+      throw new Error(`Queue "${this.#queue}" has no retention window`);
+    }
+    if (Date.now() - queuedSince < queue.retentionSeconds * 1_000) {
+      return false;
+    }
+    for (const name of [this.#queue, this.deadLetterQueue]) {
+      const jobs = await this.#boss.findJobs(name, { data: { streamId } });
+      if (jobs.length > 0) return false;
+    }
+    return true;
   }
 
   /**

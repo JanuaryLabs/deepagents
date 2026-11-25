@@ -285,6 +285,42 @@ semantics live-verified):
   stream still `running`; its source job is deleted anyway, so the chat unblocks, and the failed
   DLQ job stays visible.
 
+### Lost turns _(Built, #682)_
+
+A queued stream's message lives only in its queue job, so a job that pg-boss retention deletes
+(a `created` job past `retentionSeconds`, 14 days by default, which cannot be zero) leaves a turn
+that can never run. `AgentRuntime.work()` fails such a stream, so its `watch()` and
+`observe().resume()` end with the error `turn lost: its queue job was deleted before it ran`
+instead of tailing forever.
+
+- **Invariant: a queued stream gets a job only in the transaction that made it queued.** Admission
+  registers (or reopens) the stream and pushes its turn together; nothing pushes a job for a stream
+  later. A queued stream whose job is gone therefore stays jobless, and failing it loses nothing.
+- **The question belongs to the queue.** `TurnQueue.isLost(streamId, queuedSince)` answers it.
+  `PgBossTurnQueue` looks the job up by `data.streamId` in every state, on the turn queue and on its
+  dead-letter queue: a parked follow-up is `cancelled` and still owns its turn, and a dead-lettered
+  one is reconciled by the orphan path. `OutboxTurnQueue` checks its outbox first, as the relay
+  deletes a row only after pg-boss holds its job.
+- **Age gate = the queue's retention, read live from `boss.getQueue`.** pg-boss sets
+  `keep_until = start_after + retentionSeconds`, and the push follows the stream's registration, so
+  a stream queued for less than that window cannot have lost its job to retention. The gate also
+  covers a storage whose register and push are not atomic (the test `ControlledAgentStorage`);
+  Postgres and embedded storage admit in one transaction. Reading it live follows an operator who
+  changes the queue's retention. Reopening a stream resets its `createdAt`, so a reopened
+  continuation is gated from its reopen.
+- **Compare-and-set, no error chunk.** The sweep moves a row with `updateStream` only while it is
+  still `queued` with the `createdAt` it read, so concurrent sweeps on several hosts fail it once
+  and a stream reopened meanwhile keeps its new turn. It appends no chunk (two sweeps would append
+  twice); `watch()` emits the stored error and closes, and a late worker skips the terminal row.
+- **Startup only, no periodic sweep.** A job is lost only after it sat runnable for a whole retention
+  window with no worker serving its queue, so a loss implies a service gap, and the first `work()`
+  after the gap sweeps it. `work()` resolves after the sweep, which runs once its consumer is
+  registered, and rejects (disposing what it started) if the sweep fails. Starts on several hosts
+  need no lock: the CAS makes them safe.
+- **Out of scope.** Running streams belong to the heartbeat and dead-letter path. A lost mailbox
+  wake fails its stream but is not woken again (see "Wake scheduling is not crash-reconciled"); the
+  mail stays pending for the next turn.
+
 ### Settle follow-ups _(Built, #5546)_
 
 Work owed to a conversation once one of its turns has settled: arming its sandbox's idle stop
@@ -723,8 +759,8 @@ surface; full history lives in the chain, which is the source of truth anyway.
   parked turn survives, polled via `waitFor`) plus the runtime approval scenarios
   (pause/assistant continuation/queue-behind/cancel-while-queued all leave no jobs behind).
   (`retentionSeconds`, which governs still-`created` jobs, cannot be zero. A sufficiently deep or
-  blocked backlog can still outlive its 14-day default; startup reconciliation for that remaining
-  orphan case is tracked in BUGS.md and TODO.md. A gated follow-up becomes `cancelled`, not
+  blocked backlog can still outlive its 14-day default; `work()` then fails that turn's stream, see
+  "Lost turns". A gated follow-up becomes `cancelled`, not
   `created`, and `resumeParked` restarts its retention window from the revival, which pg-boss
   `resume` does not, so a turn parked past its retention is not deleted before a worker fetches it
   (#5365, `pg-boss.turn-queue.retention.integration.test.ts` on real Postgres).)
