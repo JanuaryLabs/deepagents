@@ -40,9 +40,9 @@
   "dependencies": {
     "@deepagents/agent": "7.16.0",
     "@deepagents/context": "7.16.0",
-    "@ai-sdk/groq": "^4.0.78",
-    "@ai-sdk/openai": "^4.0.111",
-    "ai": "^7.0.166",
+    "@ai-sdk/groq": "^4.0.86",
+    "@ai-sdk/openai": "^4.0.123",
+    "ai": "^7.0.181",
     "zod": "^4.6.7",
     "@deepagents/toolbox": "7.16.0",
     "p-limit": "^7.3.0",

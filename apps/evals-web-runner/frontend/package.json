@@ -11,7 +11,7 @@
   "dependencies": {
     "@tanstack/react-query": "^5.101.2",
     "@tanstack/react-table": "^8.21.3",
-    "@zukhruf/shadcn": "^0.8.41",
+    "@zukhruf/shadcn": "^0.8.110",
     "cn": "^0.4.0",
     "fast-content-type-parse": "^4.0.1",
     "html-to-image": "^1.11.13",

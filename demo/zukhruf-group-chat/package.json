@@ -8,11 +8,11 @@
     "start": "node run.ts"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^4.0.111",
+    "@ai-sdk/openai": "^4.0.123",
     "@deepagents/context": "*",
     "@deepagents/devtool": "*",
     "@deepagents/experimental": "*",
-    "ai": "^7.0.166",
+    "ai": "^7.0.181",
     "microsandbox": "^0.7.16"
   }
 }

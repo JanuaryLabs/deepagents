@@ -1,4 +1,4 @@
-import type { Telemetry } from 'ai';
+import type { Telemetry, TelemetryOptions } from 'ai';
 
 import type { AgentDeclaration } from '../../agent.ts';
 import type { Team } from '../../collaboration/team.ts';
@@ -131,7 +131,7 @@ export class PluginManager implements AsyncDisposable {
   configureTelemetry(
     context: AgentPluginToolContext,
     telemetry: AgentDeclaration['telemetry'],
-  ) {
+  ): TelemetryOptions | undefined {
     const integrations: Telemetry[] = [];
     for (const { instance } of this.#plugins) {
       if (instance.telemetry) integrations.push(instance.telemetry(context));

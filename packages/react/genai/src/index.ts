@@ -30,7 +30,7 @@ export * from './lib/copy/copy-image.ts';
 export * from './lib/copy/snapshot-render.tsx';
 export * from './lib/copy/use-copy-element-as-image.ts';
 export * from './lib/dynamic-ui/index.ts';
-export * from './lib/elements/CodeBlock.tsx';
+export * from './lib/elements/code-block.tsx';
 export * from './lib/elements/PromptInput.tsx';
 export * from './lib/elements/Response.tsx';
 export * from './lib/hooks/use-async-generator.ts';

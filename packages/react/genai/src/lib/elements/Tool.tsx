@@ -17,7 +17,7 @@ import {
 import type { ComponentProps, ReactNode } from 'react';
 import { isValidElement } from 'react';
 
-import { CodeBlock } from './CodeBlock.tsx';
+import { CodeBlock } from './code-block.tsx';
 
 export type ToolProps = ComponentProps<typeof Collapsible>;
 

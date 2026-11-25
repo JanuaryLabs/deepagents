@@ -14,12 +14,12 @@
     "mssql": "^12.7.0",
     "zod": "^4.6.7",
     "@deepagents/context": "*",
-    "@ai-sdk/anthropic": "^4.0.99",
-    "@ai-sdk/google": "^4.0.114",
-    "@ai-sdk/groq": "^4.0.78",
-    "@ai-sdk/openai": "^4.0.111",
-    "@ai-sdk/openai-compatible": "^3.0.87",
-    "@ai-sdk/provider": "^4.0.37",
+    "@ai-sdk/anthropic": "^4.0.108",
+    "@ai-sdk/google": "^4.0.126",
+    "@ai-sdk/groq": "^4.0.86",
+    "@ai-sdk/openai": "^4.0.123",
+    "@ai-sdk/openai-compatible": "^3.0.94",
+    "@ai-sdk/provider": "^4.0.39",
     "p-memoize": "^8.0.0"
   },
   "devDependencies": {

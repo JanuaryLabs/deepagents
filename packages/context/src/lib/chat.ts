@@ -199,6 +199,9 @@ export async function chat<const TOOLS extends ToolSet>(
       writer.merge(
         result.toUIMessageStream({
           onError: options?.onError ?? formatChatError,
+          // A stored tool error must be the text the model saw, or the history
+          // the next turn sends differs from what the model answered.
+          redactToolErrors: false,
           sendStart: false,
           sendReasoning: true,
           sendSources: true,

@@ -20,14 +20,14 @@
     }
   },
   "dependencies": {
-    "@ai-sdk/openai": "^4.0.111",
+    "@ai-sdk/openai": "^4.0.123",
     "@deepagents/context": "*",
     "@deepagents/experimental": "*",
-    "ai": "^7.0.166",
+    "ai": "^7.0.181",
     "microsandbox": "^0.7.16"
   },
   "devDependencies": {
-    "ai": "^7.0.166",
+    "ai": "^7.0.181",
     "just-bash": "^3.6.0"
   }
 }
