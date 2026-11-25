@@ -725,7 +725,9 @@ surface; full history lives in the chain, which is the source of truth anyway.
   (`retentionSeconds`, which governs still-`created` jobs, cannot be zero. A sufficiently deep or
   blocked backlog can still outlive its 14-day default; startup reconciliation for that remaining
   orphan case is tracked in BUGS.md and TODO.md. A gated follow-up becomes `cancelled`, not
-  `created`.)
+  `created`, and `resumeParked` restarts its retention window from the revival, which pg-boss
+  `resume` does not, so a turn parked past its retention is not deleted before a worker fetches it
+  (#5365, `pg-boss.turn-queue.retention.integration.test.ts` on real Postgres).)
 - **Tool surface**: `defineTool` preserves the AI SDK's `tool()` inference and adds the optional
   `recovery: 'idempotent'` contract; `AgentDeclaration.tools` merges over sandbox tools in
   `agent()`. Sandbox-bound approval tools (e.g. approve-before-bash) remain deferred — they need

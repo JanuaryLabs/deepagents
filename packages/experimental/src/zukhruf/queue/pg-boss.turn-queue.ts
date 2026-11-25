@@ -491,8 +491,28 @@ export class PgBossTurnQueue extends TurnQueue {
       .filter((job) => job.state === 'cancelled')
       .map((job) => job.id);
     if (parked.length > 0) {
-      await this.#boss.resume(this.#queue, parked);
+      await this.#revive(parked);
     }
+  }
+
+  /**
+   * pg-boss `resume`, with the job's retention window restarted from now.
+   * `resume` keeps the keep_until set at send, so a turn parked past its
+   * retention would be deleted by the next maintenance pass before a worker
+   * fetches it. The window is the job's own, `keep_until - start_after`, as
+   * pg-boss `update` slides it.
+   */
+  async #revive(ids: string[]): Promise<void> {
+    await this.#boss.getDb().executeSql(
+      `UPDATE ${this.#relation()}
+       SET completed_on = NULL,
+           state = 'created',
+           keep_until = now() + (keep_until - start_after)
+       WHERE name = $1
+         AND id = ANY($2::uuid[])
+         AND state = 'cancelled'`,
+      [this.#queue, ids],
+    );
   }
 
   override async forget(
