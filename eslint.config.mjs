@@ -18,7 +18,7 @@ export default defineConfig(
     extends: [
       'zukhruf/base',
       'zukhruf/tests',
-      'zukhruf/shadcn',
+      'zukhruf/react',
       'zukhruf/hono',
       'zukhruf/github-actions',
       'manifest/recommended',
