@@ -12,20 +12,19 @@ import { expect, it, vi } from 'vitest';
 
 import { RuntimeEventsProvider } from '@deepagents/devtool-history';
 
+import { queryClient } from '../app/runtime-data.ts';
 import { DevtoolSidebar, NewChatButton } from '../app/sidebar.tsx';
 import { FakeClock } from '../testing/fake-clock.tsx';
 import { Component, loader } from './chat.tsx';
 
-const { loadRuntime } = vi.hoisted(() => ({ loadRuntime: vi.fn() }));
-
-vi.mock('../app/runtime-data.ts', () => ({ loadRuntime }));
-
 const sessionId = '9d1f5c40-f250-4aa9-8979-2e0ef4fc2c15';
 const api = '/zukhruf/v1/session';
 const eventsHref = '/zukhruf/v1/events';
+const infoHref = '/zukhruf/v1/info';
+const historyHref = '/zukhruf/v1/history';
 const capabilities = {
   chat: { href: api },
-  history: { href: '/zukhruf/v1/history' },
+  history: { href: historyHref },
   events: { href: eventsHref },
 };
 
@@ -76,21 +75,24 @@ it('loads the same query chat ID before creation and after reload', async () => 
     messageCount: 1,
     status: { type: 'idle' as const },
   };
-  loadRuntime
-    .mockResolvedValueOnce({
-      discovery: { capabilities },
-      history: [],
-      historyError: false,
-    })
-    .mockResolvedValueOnce({
-      discovery: { capabilities },
-      history: [history],
-      historyError: false,
-    });
+  const configuration = document.createElement('meta');
+  configuration.name = 'deepagents-zukhruf-info';
+  configuration.content = infoHref;
+  document.head.append(configuration);
+  const runs = vi
+    .fn<() => (typeof history)[]>()
+    .mockReturnValueOnce([])
+    .mockReturnValueOnce([history]);
   const request = vi
     .fn<typeof fetch>()
     .mockResolvedValue(Response.json({ sessionId, messages }));
-  vi.stubGlobal('fetch', request);
+  vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+    if (input === infoHref) {
+      return Promise.resolve(Response.json({ capabilities }));
+    }
+    if (input === historyHref) return Promise.resolve(Response.json(runs()));
+    return request(input, init);
+  });
   try {
     const first = await load(`/chat?chatId=${sessionId}`);
     expect(request).not.toHaveBeenCalled();
@@ -116,6 +118,8 @@ it('loads the same query chat ID before creation and after reload', async () => 
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   } finally {
+    configuration.remove();
+    queryClient.clear();
     vi.unstubAllGlobals();
   }
 });

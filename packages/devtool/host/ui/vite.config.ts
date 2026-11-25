@@ -14,7 +14,6 @@ export default defineConfig({
   test: {
     name: '@deepagents/devtool-ui',
     watch: false,
-    globals: true,
     environment: 'happy-dom',
     include: ['src/routes/**/*.{test,spec}.{ts,tsx}'],
   },
