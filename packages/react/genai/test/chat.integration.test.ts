@@ -7,7 +7,6 @@ import {
 } from 'ai';
 import { Window } from 'happy-dom';
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
 import {
   type ComponentProps,
   StrictMode,
@@ -17,6 +16,7 @@ import {
 } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
+import { test } from 'vitest';
 import { z } from 'zod';
 
 import {

@@ -32,8 +32,9 @@ type TipHistory = Record<string, number>;
 function readHistory(): TipHistory {
   try {
     return JSON.parse(localStorage.getItem(HISTORY_KEY) ?? '{}');
-  } catch {
-    return {};
+  } catch (error) {
+    if (isStorageFailure(error)) return {};
+    throw error;
   }
 }
 
@@ -42,8 +43,8 @@ function writeShown(tipId: string, session: number): void {
     const history = readHistory();
     history[tipId] = session;
     localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-  } catch {
-    /* noop */
+  } catch (error) {
+    if (!isStorageFailure(error)) throw error;
   }
 }
 
@@ -59,9 +60,22 @@ function resolveSession(chatId: string): number {
       localStorage.setItem(SESSION_KEY, JSON.stringify(state));
     }
     return state.n;
-  } catch {
-    return 0;
+  } catch (error) {
+    if (isStorageFailure(error)) return 0;
+    throw error;
   }
+}
+
+/**
+ * Tips work without storage: a corrupt stored value (SyntaxError), a full
+ * quota, or storage the browser denies (a data: URL, blocked site data).
+ */
+function isStorageFailure(error: unknown): boolean {
+  return (
+    error instanceof SyntaxError ||
+    (error instanceof DOMException &&
+      (error.name === 'QuotaExceededError' || error.name === 'SecurityError'))
+  );
 }
 
 function staleness(

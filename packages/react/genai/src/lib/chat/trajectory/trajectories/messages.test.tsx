@@ -1,49 +1,27 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { ChatStatus, UIMessage } from 'ai';
+import type { UIMessage } from 'ai';
+import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
+import { StoredMessagesTransport } from '../../../../testing/stored-messages-transport.ts';
+import { AgentProvider } from '../../agent-context.tsx';
 import { useMessageItem, useMessagesContext } from '../messages-context.ts';
 import { Messages } from './messages.tsx';
 
-const { mockUseAgentStatus } = vi.hoisted(() => ({
-  mockUseAgentStatus: vi.fn((): { status: ChatStatus } => ({
-    status: 'ready',
-  })),
-}));
-
-vi.mock('../../agent-context.tsx', () => ({
-  useAgent: () => ({ debugMode: false, registry: {}, showActions: false }),
-  useAgentStatus: mockUseAgentStatus,
-}));
-
-vi.mock('../../../copy/assistant-snapshot.tsx', () => ({
-  useIsAssistantSnapshotRender: () => false,
-}));
-
-vi.mock('../../../components/InteractiveResponse.tsx', () => ({
-  InteractiveResponse: ({ children }: { children: string }) => (
-    <span>{children}</span>
-  ),
-}));
-
-vi.mock('../../../renderers/render-part.tsx', () => ({
-  RenderPart: () => null,
-}));
-
-vi.mock('../../../components/tool-debug.tsx', () => ({
-  ToolDebug: () => null,
-  DynamicToolDebug: () => null,
-}));
-
-vi.mock('../../../elements/Response.tsx', () => ({
-  Response: ({ children }: { children: string }) => <span>{children}</span>,
-}));
-
-vi.mock('../../usage.ts', () => ({
-  parseMetadataUsage: () => null,
-  formatUsageBreakdown: () => '',
-}));
+function AgentHarness({ children }: { children: ReactNode }) {
+  return (
+    <AgentProvider
+      chatId="messages-test"
+      debugMode={false}
+      registry={{}}
+      transport={new StoredMessagesTransport()}
+      onResetChat={() => undefined}
+    >
+      {children}
+    </AgentProvider>
+  );
+}
 
 let messageCounter = 0;
 
@@ -73,11 +51,15 @@ function makeAssistantMessage(
 
 describe('Messages (Root)', () => {
   it('renders children inside layout wrapper', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const messages = [makeUserMessage('Hello')];
     render(
       <Messages.Root messages={messages}>
         <div>child content</div>
       </Messages.Root>,
+      { wrapper: AgentHarness },
     );
     expect(screen.getByText('child content')).toBeInTheDocument();
   });
@@ -85,6 +67,9 @@ describe('Messages (Root)', () => {
 
 describe('Messages.List', () => {
   it('renders children in flex column', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const messages = [makeUserMessage('Hello')];
     render(
       <Messages.Root messages={messages}>
@@ -93,6 +78,7 @@ describe('Messages.List', () => {
           <div>item 2</div>
         </Messages.List>
       </Messages.Root>,
+      { wrapper: AgentHarness },
     );
     expect(screen.getByText('item 1')).toBeInTheDocument();
     expect(screen.getByText('item 2')).toBeInTheDocument();
@@ -101,6 +87,9 @@ describe('Messages.List', () => {
 
 describe('Messages.Item', () => {
   it('renders children', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const message = makeUserMessage('Hello');
     render(
       <Messages.Root messages={[message]}>
@@ -110,11 +99,15 @@ describe('Messages.Item', () => {
           </Messages.Item>
         </Messages.List>
       </Messages.Root>,
+      { wrapper: AgentHarness },
     );
     expect(screen.getByText('item content')).toBeInTheDocument();
   });
 
   it('provides message context to children', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const message = makeUserMessage('Context test');
 
     function ContextReader() {
@@ -130,6 +123,7 @@ describe('Messages.Item', () => {
           </Messages.Item>
         </Messages.List>
       </Messages.Root>,
+      { wrapper: AgentHarness },
     );
     expect(screen.getByText('role: user')).toBeInTheDocument();
   });
@@ -137,6 +131,9 @@ describe('Messages.Item', () => {
 
 describe('Messages.UserBubble', () => {
   it('shows user text message', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const message = makeUserMessage('Hello world');
     render(
       <Messages.Root messages={[message]}>
@@ -146,11 +143,15 @@ describe('Messages.UserBubble', () => {
           </Messages.Item>
         </Messages.List>
       </Messages.Root>,
+      { wrapper: AgentHarness },
     );
     expect(screen.getByText('Hello world')).toBeInTheDocument();
   });
 
   it('renders persisted skill links as inline skill references', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const message = makeUserMessage(
       'Use [$Revenue Analysis](skill://skill-123) for Q2.',
     );
@@ -162,6 +163,7 @@ describe('Messages.UserBubble', () => {
           </Messages.Item>
         </Messages.List>
       </Messages.Root>,
+      { wrapper: AgentHarness },
     );
 
     const skill = screen
@@ -174,6 +176,9 @@ describe('Messages.UserBubble', () => {
   });
 
   it('shows alias text instead of message parts', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const message = makeUserMessage('original text', {
       metadata: { alias: 'Summarize data' },
     });
@@ -185,6 +190,7 @@ describe('Messages.UserBubble', () => {
           </Messages.Item>
         </Messages.List>
       </Messages.Root>,
+      { wrapper: AgentHarness },
     );
     expect(screen.getByText('Summarize data')).toBeInTheDocument();
     expect(screen.queryByText('original text')).not.toBeInTheDocument();
@@ -193,6 +199,9 @@ describe('Messages.UserBubble', () => {
 
 describe('Messages.AssistantContent', () => {
   it('shows text part content', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const message = makeAssistantMessage('Here is your answer');
     render(
       <Messages.Root messages={[message]}>
@@ -202,11 +211,15 @@ describe('Messages.AssistantContent', () => {
           </Messages.Item>
         </Messages.List>
       </Messages.Root>,
+      { wrapper: AgentHarness },
     );
     expect(screen.getByText('Here is your answer')).toBeInTheDocument();
   });
 
   it('shows file part info', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const message: UIMessage = {
       id: 'asst-file',
       role: 'assistant',
@@ -228,11 +241,15 @@ describe('Messages.AssistantContent', () => {
           </Messages.Item>
         </Messages.List>
       </Messages.Root>,
+      { wrapper: AgentHarness },
     );
     expect(screen.getByText(/output\.json/)).toBeInTheDocument();
   });
 
   it('plays a video file part inline and offers a download link', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const message: UIMessage = {
       id: 'asst-video',
       role: 'assistant',
@@ -254,6 +271,7 @@ describe('Messages.AssistantContent', () => {
           </Messages.Item>
         </Messages.List>
       </Messages.Root>,
+      { wrapper: AgentHarness },
     );
     const video = container.querySelector('video');
     expect(video).toHaveAttribute('src', 'https://reels.test/highlight.mp4');
@@ -268,50 +286,57 @@ describe('Messages.AssistantContent', () => {
 
 describe('Messages.Thinking', () => {
   it('shows nothing when status is ready', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const messages = [makeUserMessage('Hello')];
     render(
       <Messages.Root messages={messages}>
         <Messages.Thinking />
       </Messages.Root>,
+      { wrapper: AgentHarness },
     );
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
   it('shows thinking indicator when streaming', () => {
-    mockUseAgentStatus.mockReturnValue({ status: 'streaming' });
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
 
     const messages = [makeUserMessage('Hello')];
     render(
-      <Messages.Root messages={messages}>
+      <Messages.Root messages={messages} status="streaming">
         <Messages.Thinking />
       </Messages.Root>,
+      { wrapper: AgentHarness },
     );
     expect(screen.getByRole('status')).toBeInTheDocument();
-
-    mockUseAgentStatus.mockReturnValue({ status: 'ready' });
   });
 
   it('shows nothing while streaming before any message exists', () => {
-    mockUseAgentStatus.mockReturnValue({ status: 'streaming' });
-    try {
-      render(
-        <Messages.Root messages={[]}>
-          <Messages.Thinking />
-        </Messages.Root>,
-      );
-      expect(screen.queryByRole('status')).not.toBeInTheDocument();
-    } finally {
-      mockUseAgentStatus.mockReturnValue({ status: 'ready' });
-    }
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    render(
+      <Messages.Root messages={[]} status="streaming">
+        <Messages.Thinking />
+      </Messages.Root>,
+      { wrapper: AgentHarness },
+    );
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 });
 
 describe('Messages.Error', () => {
   it('shows nothing when no error', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     render(
       <Messages.Root messages={[]}>
         <Messages.Error />
       </Messages.Root>,
+      { wrapper: AgentHarness },
     );
     expect(
       screen.queryByRole('button', { name: /try again/i }),
@@ -319,10 +344,14 @@ describe('Messages.Error', () => {
   });
 
   it('shows nothing when no onRetry', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     render(
       <Messages.Root messages={[]}>
         <Messages.Error error={new Error('fail')} />
       </Messages.Root>,
+      { wrapper: AgentHarness },
     );
     expect(
       screen.queryByRole('button', { name: /try again/i }),
@@ -330,6 +359,9 @@ describe('Messages.Error', () => {
   });
 
   it('shows error message and retry button', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const onRetry = vi.fn();
     render(
       <Messages.Root messages={[]}>
@@ -338,6 +370,7 @@ describe('Messages.Error', () => {
           onRetry={onRetry}
         />
       </Messages.Root>,
+      { wrapper: AgentHarness },
     );
     expect(screen.getByText('Something broke')).toBeInTheDocument();
     expect(
@@ -346,12 +379,16 @@ describe('Messages.Error', () => {
   });
 
   it('calls onRetry when retry button is clicked', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     const onRetry = vi.fn();
     render(
       <Messages.Root messages={[]}>
         <Messages.Error error={new Error('fail')} onRetry={onRetry} />
       </Messages.Root>,
+      { wrapper: AgentHarness },
     );
 
     await user.click(screen.getByRole('button', { name: /try again/i }));
@@ -362,6 +399,9 @@ describe('Messages.Error', () => {
 
 describe('context hooks', () => {
   it('useMessagesContext throws outside Messages', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     function Bad() {
       useMessagesContext();
       return null;
@@ -372,6 +412,9 @@ describe('context hooks', () => {
   });
 
   it('useMessageItem throws outside Messages.Item', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     function Bad() {
       useMessageItem();
       return null;

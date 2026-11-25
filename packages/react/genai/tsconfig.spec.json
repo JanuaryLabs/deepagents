@@ -5,7 +5,6 @@
     "lib": ["ESNext", "DOM", "DOM.Iterable", "DOM.AsyncIterable"],
     "jsx": "react-jsx",
     "types": [
-      "vitest/globals",
       "vitest/importMeta",
       "vite/client",
       "node",
@@ -23,6 +22,8 @@
     "src/**/*.test.tsx",
     "src/**/*.spec.tsx",
     "test/**/*.test.ts",
-    "src/**/*.d.ts"
+    "src/**/*.d.ts",
+    "src/testing/**/*.ts",
+    "src/testing/**/*.tsx"
   ]
 }

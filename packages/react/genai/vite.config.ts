@@ -21,9 +21,6 @@ export default defineConfig(() => ({
     emptyOutDir: false,
     reportCompressedSize: true,
     sourcemap: true,
-    commonjsOptions: {
-      transformMixedEsModules: true,
-    },
     lib: {
       entry: 'src/index.ts',
       name: '@deepagents/react-genai',
@@ -47,7 +44,6 @@ export default defineConfig(() => ({
   test: {
     name: '@deepagents/react-genai',
     watch: false,
-    globals: true,
     environment: 'happy-dom',
     // Built workspace packages have no source tsconfig and run directly in Node.
     server: { deps: { external: [/\/dist\//] } },
@@ -55,7 +51,7 @@ export default defineConfig(() => ({
     maxWorkers: 2,
     execArgv: ['--no-experimental-webstorage'],
     setupFiles: ['./src/test-setup.ts'],
-    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    include: ['src/**/*.{test,spec}.{ts,tsx}', 'test/**/*.test.ts'],
     exclude: [
       ...configDefaults.exclude,
       'src/**/*.browser.{test,spec}.{ts,tsx}',

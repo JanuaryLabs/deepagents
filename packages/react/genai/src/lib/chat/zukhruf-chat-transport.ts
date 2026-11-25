@@ -81,9 +81,7 @@ export class ZukhrufChatTransport extends DefaultChatTransport<UIMessage> {
 
         const signal = init?.signal;
         const cancel = () => {
-          void request(`${sessionApi}/cancel`, { method: 'POST' }).catch(
-            () => undefined,
-          );
+          void request(`${sessionApi}/cancel`, { method: 'POST' });
         };
         signal?.addEventListener('abort', cancel, { once: true });
 
@@ -152,7 +150,11 @@ async function describeUploadFailure(
   file: File,
 ): Promise<string> {
   const summary = `Uploading ${file.name} failed with HTTP ${response.status}`;
-  const body: unknown = await response.json().catch(() => null);
+  const body: unknown = await response.json().catch((error: unknown) => {
+    // A body that is not JSON gets the status summary alone.
+    if (error instanceof SyntaxError) return null;
+    throw error;
+  });
   const reason = failureReason(body);
   return reason ? `${summary}: ${reason}` : summary;
 }

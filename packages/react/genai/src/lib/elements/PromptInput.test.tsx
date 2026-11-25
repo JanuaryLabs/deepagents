@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -22,6 +22,9 @@ function stubObjectUrls() {
 
 describe('PromptInput attachments', () => {
   it('revokes the blob URL of every attached file when it unmounts', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     using urls = stubObjectUrls();
     const user = userEvent.setup();
     const { unmount } = render(<PromptInput multiple onSubmit={vi.fn()} />);
@@ -36,6 +39,9 @@ describe('PromptInput attachments', () => {
   });
 
   it('revokes the blob URL of every file attached through the provider when the provider unmounts', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     using urls = stubObjectUrls();
     const user = userEvent.setup();
     const { unmount } = render(
