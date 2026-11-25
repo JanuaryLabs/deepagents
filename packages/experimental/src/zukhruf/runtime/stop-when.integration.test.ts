@@ -262,7 +262,7 @@ test('the turns of one chat borrow one sandbox, which stays open between turns, 
     const completed = await host.enqueue(conversation, message('first'));
     await Array.fromAsync(completed.stream);
     const failed = await host.enqueue(conversation, message('second'));
-    await Array.fromAsync(failed.stream).catch(() => {});
+    await Array.fromAsync(failed.stream);
     const view = host.observe(conversation);
     await waitFor(
       async () =>

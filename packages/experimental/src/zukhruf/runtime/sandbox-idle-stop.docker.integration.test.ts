@@ -179,7 +179,9 @@ async function removeNamespace(namespace: string): Promise<void> {
   for (const { Id } of await namespaceContainers(namespace)) {
     if (Id === undefined) continue;
     const container = await client.containers.find(Id);
-    await container?.unpause().catch(() => undefined);
+    // Unpausing a running container fails with Docker's generic 500, so the
+    // container's own state decides.
+    if ((await container?.inspect())?.State?.Paused) await container?.unpause();
     await container?.remove({ force: true });
   }
 }

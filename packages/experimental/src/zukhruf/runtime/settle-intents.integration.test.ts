@@ -482,7 +482,12 @@ for (const { name, open } of storages) {
 
       assert.deepStrictEqual(
         { calls: plugin.calls, warnings },
-        { calls: 1, warnings: ['state of "non-retryable-chat" is corrupt'] },
+        {
+          calls: 1,
+          warnings: [
+            'Settle follow-up "non-retryable" failed and will not be retried: state of "non-retryable-chat" is corrupt',
+          ],
+        },
       );
     });
 

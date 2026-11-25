@@ -106,7 +106,7 @@ const updateBodySchema = z
     target: targetSchema.optional(),
   })
   .refine((body) => Object.values(body).some((value) => value !== undefined), {
-    message: 'At least one field must be provided',
+    error: 'At least one field must be provided',
   });
 
 const limitBody = bodyLimit({

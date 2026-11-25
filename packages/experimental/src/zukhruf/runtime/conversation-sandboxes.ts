@@ -66,13 +66,13 @@ export class ConversationSandboxes implements AsyncDisposable {
     const key = ConversationSandboxes.#key(declaration, context);
     const held = this.#held.get(key);
     if (held === undefined) return;
-    await this.#checks
-      .get(held)?.()
-      .catch(() => undefined);
+    // Waits for an acquire or check in flight to settle; its caller gets its
+    // failure, so a failed one leaves nothing here to close.
+    await Promise.allSettled([this.#checks.get(held)?.()]);
     const current = this.#held.get(key);
     this.#held.delete(key);
-    const handle = await current?.().catch(() => undefined);
-    await handle?.sandbox.close();
+    const [acquired] = await Promise.allSettled([current?.()]);
+    if (acquired.status === 'fulfilled') await acquired.value?.sandbox.close();
   }
 
   static #key(declaration: AgentDeclaration, context: SandboxContext): string {

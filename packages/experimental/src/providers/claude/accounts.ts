@@ -300,7 +300,11 @@ export function createClaudeAccounts(options: ClaudeAccountsOptions) {
         : fail(owner, signIn, message);
     }
     const parsed = tokenResponse.safeParse(
-      await response.json().catch(() => undefined),
+      await response.json().catch((error: unknown) => {
+        // A body that is not JSON fails the schema below.
+        if (error instanceof SyntaxError) return undefined;
+        throw error;
+      }),
     );
     if (!parsed.data?.refresh_token) {
       return fail(
@@ -441,7 +445,11 @@ async function refreshTokens(
     );
   }
   const parsed = tokenResponse.safeParse(
-    await response.json().catch(() => undefined),
+    await response.json().catch((error: unknown) => {
+      // A body that is not JSON fails the schema below.
+      if (error instanceof SyntaxError) return undefined;
+      throw error;
+    }),
   );
   if (!parsed.success) {
     throw new ClaudeAuthError(

@@ -84,6 +84,14 @@ const EVERYTHING = {
   turn: 'queued',
 };
 
+/** The warning the storage in `directory` emits when its background queue work fails with `failure`. */
+const storageWarning = (directory: string, failure: string) => ({
+  name: 'EmbeddedStorageWarning',
+  code: 'DEEPAGENTS_ZUKHRUF_EMBEDDED_STORAGE_FAILED',
+  detail: `directory: ${directory}`,
+  message: `The embedded storage's background queue work failed with no caller left to take it: ${failure}`,
+});
+
 /**
  * Consumes `storage`'s turns until `streamId` has settled, then reads the
  * conversation's activity: a second job of the turn would still be queued.
@@ -439,6 +447,7 @@ test("a turn whose push fails because the queue's database is gone is reported a
     scope.queue.push(turn),
   );
   const [reported] = await warning;
+  assert.ok(Error.isError(reported));
   // The storage closes its queue database itself, which is already closed.
   await assert.rejects(storage[Symbol.asyncDispose](), /PGlite is closed/);
   await using reopened = await EmbeddedAgentStorage.open({
@@ -447,12 +456,12 @@ test("a turn whose push fails because the queue's database is gone is reported a
 
   assert.deepStrictEqual(
     {
-      reported: String(reported),
+      reported: { ...reported, message: reported.message },
       // A turn the reopened storage never pushes would wait for the whole test timeout.
       deliveries: await deliveries(reopened, turn, t.signal),
     },
     {
-      reported: 'Error: PGlite is closed',
+      reported: storageWarning(directory.path, 'PGlite is closed'),
       deliveries: { delivered: [turn], afterwards: 'idle' },
     },
   );
@@ -473,10 +482,14 @@ test("a failure of the queue's pg-boss with no caller to take it is reported as 
   // pg-boss, whose own polling then fails.
   await storage.queueDatabase.close();
   const [reported] = await warning;
+  assert.ok(Error.isError(reported));
   // The storage closes its queue database itself, which is already closed.
   await assert.rejects(storage[Symbol.asyncDispose](), /PGlite is closed/);
 
-  assert.equal(String(reported), 'Error: PGlite is closed');
+  assert.deepStrictEqual(
+    { ...reported, message: reported.message },
+    storageWarning(directory.path, 'PGlite is closed'),
+  );
 });
 
 test('a sandbox idle wake scheduled before the storage closed waits on the queue named after the turn queue and reaches a consumer after it reopens', async (t) => {

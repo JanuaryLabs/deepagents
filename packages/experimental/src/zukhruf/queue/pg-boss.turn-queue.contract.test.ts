@@ -389,10 +389,10 @@ for (const contract of turnQueueContracts) {
       await using _consumer = await h.queue.consume(
         async (turn) => {
           if (turn.chatId === 'over-a') {
-            outcome.a = await Promise.race([
+            outcome.a = await untilAborted(
               gate.promise.then(() => 'overlapped'),
-              sleep(5000).then(() => 'timed-out'),
-            ]);
+              t.signal,
+            );
           } else {
             gate.resolve();
             outcome.b = 'done';
@@ -775,10 +775,15 @@ for (const contract of turnQueueContracts) {
       const next = ref('settle-rejects', 2);
       const orphans: string[] = [];
       const settled: string[] = [];
-      const warnings: string[] = [];
+      const warnings: object[] = [];
       const record = (warning: Error) => {
-        if (warning.message.includes('"settle-rejects"')) {
-          warnings.push(warning.message);
+        if (
+          warning.name === 'TurnSettleWarning' &&
+          'detail' in warning &&
+          typeof warning.detail === 'string' &&
+          warning.detail.endsWith('chat: settle-rejects')
+        ) {
+          warnings.push({ ...warning, message: warning.message });
         }
       };
       process.on('warning', record);
@@ -806,7 +811,13 @@ for (const contract of turnQueueContracts) {
             orphans: [],
             settled: [done.streamId, next.streamId],
             warnings: [
-              `PgBossTurnQueue: settling turn "${done.streamId}" of chat "settle-rejects" failed: follow-up failed`,
+              {
+                name: 'TurnSettleWarning',
+                code: 'DEEPAGENTS_ZUKHRUF_TURN_SETTLE_FAILED',
+                detail: `turn: ${done.streamId}, chat: settle-rejects`,
+                message:
+                  'Settling a turn failed, and its job is released all the same: follow-up failed',
+              },
             ],
           },
         );
@@ -820,10 +831,15 @@ for (const contract of turnQueueContracts) {
       const boom = ref('orphan-settles', 1);
       const orphans: string[] = [];
       const deadLetterStates: (string | undefined)[] = [];
-      const warnings: string[] = [];
+      const warnings: object[] = [];
       const record = (warning: Error) => {
-        if (warning.message.includes('"orphan-settles"')) {
-          warnings.push(warning.message);
+        if (
+          warning.name === 'TurnSettleWarning' &&
+          'detail' in warning &&
+          typeof warning.detail === 'string' &&
+          warning.detail.endsWith('chat: orphan-settles')
+        ) {
+          warnings.push({ ...warning, message: warning.message });
         }
       };
       process.on('warning', record);
@@ -858,7 +874,13 @@ for (const contract of turnQueueContracts) {
             orphans: [boom.streamId],
             deadLetterStates: ['completed'],
             warnings: [
-              `PgBossTurnQueue: settling turn "${boom.streamId}" of chat "orphan-settles" failed: follow-up failed`,
+              {
+                name: 'TurnSettleWarning',
+                code: 'DEEPAGENTS_ZUKHRUF_TURN_SETTLE_FAILED',
+                detail: `turn: ${boom.streamId}, chat: orphan-settles`,
+                message:
+                  'Settling a turn failed, and its job is released all the same: follow-up failed',
+              },
             ],
           },
         );

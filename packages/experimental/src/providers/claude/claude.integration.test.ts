@@ -443,7 +443,7 @@ test('macOS uses the configured home keychain first and falls back only when abs
     login('keychain', Date.now() - 1000),
   );
   t.mock.module('@napi-rs/keyring', {
-    namedExports: {
+    exports: {
       AsyncEntry: class {
         constructor(service: string, account: string) {
           assert.equal(

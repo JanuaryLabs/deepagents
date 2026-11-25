@@ -131,6 +131,21 @@ interface CronCreateInput {
   recurring?: boolean;
 }
 
+/** Cancelling a scheduling wake failed after its metadata changed; the wake validates against the metadata and does nothing when it fires. */
+class WakeCancelWarning extends Error {
+  readonly code = 'DEEPAGENTS_ZUKHRUF_SCHEDULING_WAKE_CANCEL_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, conversation: ConversationId, wakeId: string) {
+    super(
+      `Cancelling a scheduling wake failed, and the wake does nothing when it fires: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'WakeCancelWarning';
+    this.detail = `chat: ${conversation.chatId}, wake: ${wakeId}`;
+  }
+}
+
 /** Conversation scheduling state, recurrence, and turn conversion. */
 export class ConversationScheduler {
   readonly #scheduler: WakeScheduler<SchedulingWake>;
@@ -226,10 +241,12 @@ export class ConversationScheduler {
       return { ...state, cron };
     });
     if (!removed) throw new Error(`CronDelete could not find job "${id}"`);
+    const wake = this.#cronWake(conversation, removed);
     try {
-      await this.#scheduler.cancel(this.#cronWake(conversation, removed).id);
-    } catch {
+      await this.#scheduler.cancel(wake.id);
+    } catch (error) {
       // Metadata is authoritative; a claimed/stale receipt validates and no-ops.
+      process.emitWarning(new WakeCancelWarning(error, conversation, wake.id));
     }
   }
 
@@ -260,12 +277,14 @@ export class ConversationScheduler {
       return { ...state, dynamic };
     });
     if (previous) {
+      const wake = this.#dynamicWake(conversation, previous);
       try {
-        await this.#scheduler.cancel(
-          this.#dynamicWake(conversation, previous).id,
-        );
-      } catch {
+        await this.#scheduler.cancel(wake.id);
+      } catch (error) {
         // Replacement is committed; stale delivery validates and no-ops.
+        process.emitWarning(
+          new WakeCancelWarning(error, conversation, wake.id),
+        );
       }
     }
     return {
@@ -285,10 +304,12 @@ export class ConversationScheduler {
       return withoutDynamic;
     });
     if (!removed) return 0;
+    const wake = this.#dynamicWake(conversation, removed);
     try {
-      await this.#scheduler.cancel(this.#dynamicWake(conversation, removed).id);
-    } catch {
+      await this.#scheduler.cancel(wake.id);
+    } catch (error) {
       // Metadata is authoritative; stale delivery validates and no-ops.
+      process.emitWarning(new WakeCancelWarning(error, conversation, wake.id));
     }
     return 1;
   }

@@ -32,6 +32,21 @@ const queueCatalogRowSchema = z.object({ table: z.string() });
 
 const withdrawnRecoverySchema = z.object({ chatId: z.string() });
 
+/** A settled turn's onSettled callback failed; the turn's job is released all the same. */
+class TurnSettleWarning extends Error {
+  readonly code = 'DEEPAGENTS_ZUKHRUF_TURN_SETTLE_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, turn: TurnRef) {
+    super(
+      `Settling a turn failed, and its job is released all the same: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'TurnSettleWarning';
+    this.detail = `turn: ${turn.streamId}, chat: ${turn.chatId}`;
+  }
+}
+
 /** Options after defaults and checks, as the queue opens with them. */
 interface PgBossTurnQueueSettings {
   readonly queue: string;
@@ -596,12 +611,7 @@ export class PgBossTurnQueue extends TurnQueue {
     try {
       await options.onSettled(turn);
     } catch (error) {
-      process.emitWarning(
-        new Error(
-          `PgBossTurnQueue: settling turn "${turn.streamId}" of chat "${turn.chatId}" failed: ${Error.isError(error) ? error.message : String(error)}`,
-          { cause: error },
-        ),
-      );
+      process.emitWarning(new TurnSettleWarning(error, turn));
     }
   }
 

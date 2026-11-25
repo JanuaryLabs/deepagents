@@ -142,8 +142,8 @@ function scriptedModel(
 }
 
 function awaitGate(gate?: PromiseWithResolvers<void>): Promise<string> {
-  const opened = gate?.promise.then(() => 'opened ') ?? Promise.resolve('');
-  return Promise.race([opened, sleep(5000).then(() => 'gate-timeout ')]);
+  // A gate that never opens fails the test at its own limit.
+  return gate?.promise.then(() => 'opened ') ?? Promise.resolve('');
 }
 
 function buildStream(

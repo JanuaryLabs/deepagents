@@ -8,7 +8,6 @@ import { Hono } from 'hono';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
-import { setTimeout as delay } from 'node:timers/promises';
 import { type Db, PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
 
@@ -1067,10 +1066,7 @@ for (const { name, open } of storages) {
     await runningTurn(runtime, root, turnId, t.signal);
 
     const response = await answer(await deleteSession(app, sessionId));
-    const aborted = await Promise.race([
-      statusAtAbort.promise,
-      delay(SHUTDOWN_TIMEOUT_MS, 'never aborted'),
-    ]);
+    const aborted = await untilAborted(statusAtAbort.promise, t.signal);
     // Disposing the workers waits for every turn they run to settle.
     await workers[Symbol.asyncDispose]();
 

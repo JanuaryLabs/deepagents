@@ -189,41 +189,36 @@ test('evaluateReminderHook returns guard output before reminders', async () => {
   });
 });
 
-test('a throwing guard predicate denies the tool call instead of failing open', async () => {
-  const originalError = console.error;
-  console.error = () => undefined;
-  try {
-    const output = await evaluateReminderHook(
-      {
-        hook_event_name: 'PreToolUse',
-        tool_name: 'Bash',
-        tool_input: { command: 'unsafe-command' },
-      },
-      {
-        reminders: [],
-        guards: [
-          {
-            id: 'throws',
-            when: () => {
-              throw new Error('broken predicate');
-            },
-            deny: 'unused',
+test('a throwing guard predicate denies the tool call instead of failing open', async (t) => {
+  t.mock.method(console, 'error', () => undefined);
+  const output = await evaluateReminderHook(
+    {
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Bash',
+      tool_input: { command: 'unsafe-command' },
+    },
+    {
+      reminders: [],
+      guards: [
+        {
+          id: 'throws',
+          when: () => {
+            throw new Error('broken predicate');
           },
-        ],
-      },
-    );
+          deny: 'unused',
+        },
+      ],
+    },
+  );
 
-    assert.deepEqual(output, {
-      hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        permissionDecision: 'deny',
-        permissionDecisionReason:
-          'Guard "throws" failed to evaluate; denying by default.',
-      },
-    });
-  } finally {
-    console.error = originalError;
-  }
+  assert.deepEqual(output, {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason:
+        'Guard "throws" failed to evaluate; denying by default.',
+    },
+  });
 });
 
 test('Stop feedback does not fire again while a stop hook continuation is active', async () => {

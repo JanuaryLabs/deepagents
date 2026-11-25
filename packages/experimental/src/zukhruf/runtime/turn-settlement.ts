@@ -34,6 +34,26 @@ const settleIntentSchema: z.ZodType<SettleIntent> = z
   })
   .strict();
 
+/** A settle follow-up failed in a way no retry changes (a NonRetryableError); its intent is done. */
+class SettleFollowUpWarning extends Error {
+  readonly code = 'DEEPAGENTS_ZUKHRUF_SETTLE_FOLLOW_UP_FAILED';
+  readonly detail: string;
+
+  constructor(
+    failure: unknown,
+    followUp: string,
+    conversation: ConversationId,
+    turnId: string,
+  ) {
+    super(
+      `Settle follow-up "${followUp}" failed and will not be retried: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'SettleFollowUpWarning';
+    this.detail = `chat: ${conversation.chatId}, turn: ${turnId}`;
+  }
+}
+
 /** A turn's addressing: what its completion records intents for. */
 type SettledTurn = Pick<TurnRef, 'chatId' | 'userId' | 'streamId'>;
 
@@ -184,7 +204,9 @@ export class TurnSettlement {
       await followUp.run(conversation);
     } catch (error) {
       if (!isNonRetryableError(error)) throw error;
-      process.emitWarning(error);
+      process.emitWarning(
+        new SettleFollowUpWarning(error, followUp.name, conversation, turnId),
+      );
     }
   }
 

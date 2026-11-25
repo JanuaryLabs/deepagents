@@ -550,7 +550,7 @@ test('keyring mode uses the Codex service and canonical-home account', async (t)
   );
   const account = `cli|${hash('sha256', home).slice(0, 16)}`;
   t.mock.module('@napi-rs/keyring', {
-    namedExports: {
+    exports: {
       AsyncEntry: class {
         constructor(service: string, username: string) {
           assert.equal(service, 'Codex Auth');

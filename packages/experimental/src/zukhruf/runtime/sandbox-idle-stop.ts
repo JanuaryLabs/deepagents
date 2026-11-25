@@ -55,6 +55,36 @@ export class UnfinishedIdleTurnError extends NonRetryableError {
   override readonly name = 'UnfinishedIdleTurnError';
 }
 
+/** Cancelling a chat's armed idle stop failed as its next turn started; a late stop finds the chat busy and does nothing. */
+class IdleStopCancelWarning extends Error {
+  readonly code = 'DEEPAGENTS_ZUKHRUF_IDLE_STOP_CANCEL_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, conversation: ConversationId, turnId: string) {
+    super(
+      `Cancelling a chat's idle stop failed, and a late stop finds the chat busy and does nothing: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'IdleStopCancelWarning';
+    this.detail = `chat: ${conversation.chatId}, turn: ${turnId}`;
+  }
+}
+
+/** Arming a chat's idle stop after a plugin borrowed its sandbox failed; the next turn's window stops it instead. */
+class IdleStopArmWarning extends Error {
+  readonly code = 'DEEPAGENTS_ZUKHRUF_IDLE_STOP_ARM_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, conversation: ConversationId) {
+    super(
+      `Arming a chat's idle stop after a plugin borrowed its sandbox failed, and the next turn's window stops it instead: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'IdleStopArmWarning';
+    this.detail = `chat: ${conversation.chatId}`;
+  }
+}
+
 export interface SandboxIdleStopOptions {
   wakes: WakeScheduler<SandboxIdleWake>;
   declarations: AgentDeclarationRegistry;
@@ -153,10 +183,7 @@ export class SandboxIdleStop implements SettleFollowUp {
       );
     } catch (error) {
       process.emitWarning(
-        new Error(
-          `SandboxIdleStop: cancelling the stop of chat "${thread.conversation.chatId}" armed for turn "${turnId}" failed: ${Error.isError(error) ? error.message : String(error)}`,
-          { cause: error },
-        ),
+        new IdleStopCancelWarning(error, thread.conversation, turnId),
       );
     }
   }
@@ -187,12 +214,7 @@ export class SandboxIdleStop implements SettleFollowUp {
         }),
       );
     } catch (error) {
-      process.emitWarning(
-        new Error(
-          `SandboxIdleStop: arming the stop of chat "${chatId}" after a plugin borrowed its sandbox failed: ${Error.isError(error) ? error.message : String(error)}`,
-          { cause: error },
-        ),
-      );
+      process.emitWarning(new IdleStopArmWarning(error, conversation));
     }
   }
 

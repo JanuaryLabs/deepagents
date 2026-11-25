@@ -7,7 +7,7 @@ import type { AgentPluginToolContext } from '../../runtime/agent-runtime.ts';
 import type { ConversationScheduler } from './conversation-scheduler.ts';
 
 const nonBlank = z.string().refine((value) => value.trim().length > 0, {
-  message: 'must not be blank',
+  error: 'must not be blank',
 });
 
 const cronCreateInput = z

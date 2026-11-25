@@ -2255,7 +2255,9 @@ test('resume ignores scheduling metadata while scheduling tools fail closed', as
     },
     {
       list: 'output-error',
-      warnings: ['Invalid metadata.zukhruf.scheduling state'],
+      warnings: [
+        'Settle follow-up "conversation-scheduling" failed and will not be retried: Invalid metadata.zukhruf.scheduling state',
+      ],
       failed: [],
     },
   );

@@ -64,10 +64,23 @@ export class EmbeddedAgentStorageInUseError extends Error {
   }
 }
 
-function emitWarning(error: unknown): void {
-  process.emitWarning(
-    Error.isError(error) ? error : new Error(String(error), { cause: error }),
-  );
+/** The embedded storage's background queue work failed (its pg-boss, or relaying the outbox) with no caller left to take it. */
+class EmbeddedStorageWarning extends Error {
+  readonly code = 'DEEPAGENTS_ZUKHRUF_EMBEDDED_STORAGE_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, directory: string) {
+    super(
+      `The embedded storage's background queue work failed with no caller left to take it: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'EmbeddedStorageWarning';
+    this.detail = `directory: ${directory}`;
+  }
+}
+
+function emitWarning(error: unknown, directory: string): void {
+  process.emitWarning(new EmbeddedStorageWarning(error, directory));
 }
 
 /**
@@ -101,6 +114,7 @@ export class EmbeddedAgentStorage
   readonly #scope: AdmissionScope;
   readonly #relay: OutboxRelay;
   readonly #turnQueue: string;
+  readonly #directory: string;
   readonly #resources: AsyncDisposableStack;
 
   private constructor(parts: {
@@ -116,6 +130,7 @@ export class EmbeddedAgentStorage
     scope: AdmissionScope;
     relay: OutboxRelay;
     turnQueue: string;
+    directory: string;
     resources: AsyncDisposableStack;
   }) {
     super();
@@ -131,6 +146,7 @@ export class EmbeddedAgentStorage
     this.#scope = parts.scope;
     this.#relay = parts.relay;
     this.#turnQueue = parts.turnQueue;
+    this.#directory = parts.directory;
     this.#resources = parts.resources;
   }
 
@@ -165,7 +181,7 @@ export class EmbeddedAgentStorage
       backend: 'pglite',
     });
     // pg-boss reports its background failures here; no caller is left to take them.
-    boss.on('error', emitWarning);
+    boss.on('error', (error) => emitWarning(error, options.directory));
     await boss.start();
     resources.defer(() => boss.stop({ graceful: false }));
     const turns = await PgBossTurnQueue.create(boss, {
@@ -225,6 +241,7 @@ export class EmbeddedAgentStorage
       },
       relay,
       turnQueue: turns.queue,
+      directory: options.directory,
       resources: resources.move(),
     });
   }
@@ -248,7 +265,9 @@ export class EmbeddedAgentStorage
     const result = await this.#gate.admit(() => work(this.#scope));
     // A push that fails keeps its outbox row for the next drain: the next
     // admission's, the next push's, or the next open's.
-    this.#relay.drain().catch(emitWarning);
+    this.#relay.drain().catch((error: unknown) => {
+      emitWarning(error, this.#directory);
+    });
     return result;
   }
 

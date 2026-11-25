@@ -309,7 +309,11 @@ test('an admission to another tree runs while one tree is held', async (t) => {
     { signal: AbortSignal.any([t.signal, watching.signal]), interval: 25 },
   ).then(
     () => 'waited for the held tree',
-    () => 'stopped watching',
+    (error: unknown) => {
+      // The watch is aborted below once the race is decided; any other failure is the test's.
+      if (watching.signal.aborted) return 'stopped watching';
+      throw error;
+    },
   );
   const outcome = await Promise.race([other, waited]);
   watching.abort();

@@ -171,14 +171,28 @@ function rejectingAvailability(settled: string[]): AgentPluginDefinition {
 const availabilityFailure = (chatId: string) =>
   `availability of "${chatId}" failed`;
 
-/** Records the process warnings about `chatId` emitted while `body` runs. */
+const availabilityWarning = (chatId: string, turnId: string) => ({
+  name: 'SettleFollowUpWarning',
+  code: 'DEEPAGENTS_ZUKHRUF_SETTLE_FOLLOW_UP_FAILED',
+  detail: `chat: ${chatId}, turn: ${turnId}`,
+  message: `Settle follow-up "rejecting-availability" failed and will not be retried: ${availabilityFailure(chatId)}`,
+});
+
+/** Records the settle follow-up warnings about `chatId` emitted while `body` runs. */
 async function recordingWarnings<T>(
   chatId: string,
-  body: (warnings: string[]) => Promise<T>,
+  body: (warnings: object[]) => Promise<T>,
 ): Promise<T> {
-  const warnings: string[] = [];
+  const warnings: object[] = [];
   const record = (warning: Error) => {
-    if (warning.message.includes(`"${chatId}"`)) warnings.push(warning.message);
+    if (
+      warning.name === 'SettleFollowUpWarning' &&
+      'detail' in warning &&
+      typeof warning.detail === 'string' &&
+      warning.detail.startsWith(`chat: ${chatId},`)
+    ) {
+      warnings.push({ ...warning, message: warning.message });
+    }
   };
   process.on('warning', record);
   try {
@@ -287,8 +301,8 @@ for (const { name, open } of storages) {
             orphans: [],
             settled: [conversation.chatId, conversation.chatId],
             warnings: [
-              availabilityFailure(conversation.chatId),
-              availabilityFailure(conversation.chatId),
+              availabilityWarning(conversation.chatId, ask.id),
+              availabilityWarning(conversation.chatId, continuation.id),
             ],
             calls: ['ask', 'continuation'],
             continuation: 'completed',
@@ -349,7 +363,7 @@ for (const { name, open } of storages) {
           {
             orphans: [crashed.id],
             settled: [conversation.chatId],
-            warnings: [availabilityFailure(conversation.chatId)],
+            warnings: [availabilityWarning(conversation.chatId, crashed.id)],
             status: 'failed',
           },
         );
