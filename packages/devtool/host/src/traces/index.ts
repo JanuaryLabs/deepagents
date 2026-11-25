@@ -34,6 +34,21 @@ const RECORD_OUTPUTS = 'deepagents.record.outputs';
 const SPAN_STATUS = 'deepagents.span.status';
 const SPAN_TYPE = 'deepagents.span.type';
 
+/** A trace file's onWriteError threw or rejected; the traced operation goes on. */
+class TraceWriteHandlerWarning extends Error {
+  readonly code = 'DEEPAGENTS_DEVTOOL_TRACE_WRITE_HANDLER_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, path: string) {
+    super(
+      `The onWriteError of a trace file failed: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'TraceWriteHandlerWarning';
+    this.detail = `path: ${path}`;
+  }
+}
+
 interface TraceCallState {
   recordInputs: boolean;
   recordOutputs: boolean;
@@ -99,10 +114,14 @@ function fileExporter(
         );
         done({ code: ExportResultCode.SUCCESS });
       } catch (error) {
+        // Telemetry must never affect the observed operation, so a failing
+        // onWriteError is reported, never rethrown.
+        const report = (failure: unknown) =>
+          process.emitWarning(new TraceWriteHandlerWarning(failure, path));
         try {
-          Promise.resolve(onWriteError?.(error)).catch(() => {});
-        } catch {
-          // Telemetry must never affect the observed operation.
+          Promise.resolve(onWriteError?.(error)).catch(report);
+        } catch (failure) {
+          report(failure);
         }
         done({
           code: ExportResultCode.FAILED,

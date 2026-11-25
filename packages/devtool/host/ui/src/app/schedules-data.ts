@@ -241,7 +241,11 @@ async function request(url: string, options: RequestOptions) {
 
 async function scheduleError(response: Response): Promise<Error> {
   const body = errorBodySchema.safeParse(
-    await response.json().catch(() => undefined),
+    await response.json().catch((error: unknown) => {
+      // A body that is not JSON gets the status message below.
+      if (error instanceof SyntaxError) return undefined;
+      throw error;
+    }),
   );
   return new Error(
     body.success ? body.data.error : `Request failed: ${response.status}`,
