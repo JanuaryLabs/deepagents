@@ -1055,6 +1055,16 @@ owns it.
   the declaration's idle time too, and with `false` nothing stops it. It never fails the borrow. A
   later borrow cannot cancel an earlier borrow's wake, so the earlier one still stops the sandbox at
   its own time (#5471).
+- **An archived session is read-only for plugins (#5690).** A plugin that changes what the session
+  holds borrows through `host.writableSandbox(conversation)`, which rejects with
+  `ConversationArchivedError` (HTTP 409 `zukhruf/session-archived`) while the tree is archived, as
+  `enqueue` does, and only then borrows; `host.sandbox()` keeps serving reads. So an upload
+  (`POST /session/:sessionId/uploads`) to an archived session starts no container, while a `GET` of
+  a file still borrows, and so starts the stopped sandbox, which with `idleTimeoutMs: false` nothing stops
+  again (the user kept reads working, 2026-11-25). `publish_upload` borrows with `sandbox()`: it runs
+  in a turn the host admitted (collaboration in an archived sub-agent), which already changes the
+  sandbox through its own tools. The check reads the root before the borrow, so an upload that
+  passed it just before an archive commits still writes once.
 - **Archive.** `archiveSession` stops the tree's sandboxes at once (#5135 step 9). The admission that
   marks every member archived also schedules, for each member whose sandbox can stop, a wake due at
   `archivedAt`, keyed on the member's latest turn, through `AdmissionScope.sandboxIdleWakes`: the

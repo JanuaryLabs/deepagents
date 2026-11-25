@@ -100,7 +100,7 @@ export interface UploadsOptions {
 }
 
 export interface Uploads extends AgentPluginInitialization {
-  /** Stores one file in the session's sandbox. */
+  /** Stores one file in the session's sandbox; rejects with ConversationArchivedError while the session is archived. */
   write(scope: UploadScope, upload: StoredUpload): Promise<WrittenUpload>;
   read(scope: UploadScope, fileId: string): Promise<StoredUpload | undefined>;
   /**
@@ -203,7 +203,10 @@ class RunningUploads implements Uploads {
   ): Promise<WrittenUpload> {
     const fileId = `${randomUUID()}.${extensionByMediaType[mediaType]}`;
     const path = this.#pathFor(scope, fileId);
-    const sandbox = await this.#sandboxFor(scope);
+    const sandbox = await this.#host.writableSandbox({
+      chatId: scope.sessionId,
+      userId: scope.userId,
+    });
     await sandbox.sandbox.writeBinaryFile({ path, content: data });
     return { fileId, path };
   }
@@ -232,6 +235,9 @@ class RunningUploads implements Uploads {
         `publish_upload: unsupported file extension "${extension}"; publishable extensions are ${Object.keys(mediaTypeByExtension).join(', ')}`,
       );
     }
+    // A turn the host admitted runs this tool, and that turn already changes
+    // the sandbox through its own tools, so an archived tree's collaboration
+    // turn publishes too.
     const sandbox = await this.#sandboxFor(scope);
     if ((await sandbox.sandbox.stat({ path })) === null) {
       throw new Error(`publish_upload: ${path} does not exist in the sandbox`);

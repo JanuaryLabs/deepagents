@@ -1,4 +1,6 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import { TemporaryFiles } from '@zukhruf/fs';
+import { Postgres } from '@zukhruf/testing/postgres';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
@@ -6,6 +8,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import test from 'node:test';
+import { PgBoss } from 'pg-boss';
 import { z } from 'zod';
 
 import {
@@ -17,6 +20,9 @@ import {
 } from '@deepagents/context';
 import {
   AgentRuntime,
+  type AgentStorage,
+  EmbeddedAgentStorage,
+  PostgresAgentStorage,
   SqliteMailboxStore,
   defineAgent,
   defineSandbox,
@@ -86,6 +92,42 @@ const MP3_HEADER = Uint8Array.fromHex('494433040000000000');
 const MAX_UPLOAD_BYTES = 4096;
 const PUBLIC_URL = `http://localhost${MOUNT}`;
 
+const testPostgres = new Postgres({ environment: process.env });
+
+const storages = [
+  {
+    name: 'embedded',
+    open: async (resources: AsyncDisposableStack) => {
+      const directory = resources.use(
+        await new TemporaryFiles().directory('zukhruf-uploads-'),
+      );
+      return resources.use(
+        await EmbeddedAgentStorage.open({ directory: directory.path }),
+      );
+    },
+  },
+  {
+    name: 'postgres',
+    open: async (resources: AsyncDisposableStack) => {
+      const database = resources.use(await testPostgres.database());
+      const boss = new PgBoss({ connectionString: database.connectionString });
+      boss.on('error', () => {});
+      await boss.start();
+      resources.defer(() => boss.stop({ graceful: false }));
+      return resources.use(
+        await PostgresAgentStorage.create({
+          pool: database.pool(),
+          boss,
+          queue: { pollingIntervalSeconds: 0.5 },
+        }),
+      );
+    },
+  },
+] satisfies {
+  name: string;
+  open(resources: AsyncDisposableStack): Promise<AgentStorage>;
+}[];
+
 class ParkingTurnQueue extends ControlledTurnQueue {
   protected override async park(): Promise<void> {}
 }
@@ -146,6 +188,8 @@ async function harness(
   options: {
     withUploads?: boolean;
     script?: LanguageModelV4StreamPart[][];
+    /** A real storage in place of the in-memory one whose turns the test runs by hand. */
+    storage?: (resources: AsyncDisposableStack) => Promise<AgentStorage>;
   } = {},
 ) {
   const resources = new AsyncDisposableStack();
@@ -177,14 +221,16 @@ async function harness(
       plugins: [uploaded],
     }),
   );
-  const stack = defineStack(async () => ({
-    storage: new ControlledAgentStorage({
-      store: new InMemoryContextStore(),
-      streams: streamsFor(streamStore),
-      queue,
-      mailboxStore,
-    }),
-  }));
+  const storage =
+    options.storage === undefined
+      ? new ControlledAgentStorage({
+          store: new InMemoryContextStore(),
+          streams: streamsFor(streamStore),
+          queue,
+          mailboxStore,
+        })
+      : await options.storage(resources);
+  const stack = defineStack(async () => ({ storage }));
   const runtime = await runtimeSetup.initialize(stack);
   resources.use(await runtime.work());
 
@@ -207,6 +253,7 @@ async function harness(
     model,
     queue,
     acquisitions,
+    runtime,
     uploads: runtime.plugin(uploaded),
     [Symbol.asyncDispose]: () => resources.disposeAsync(),
   };
@@ -1001,3 +1048,76 @@ test('publish_upload adopts a file the agent rendered into the session and the G
     /outside this session's uploads directory/,
   );
 });
+
+function archive(
+  app: Hono<HttpEnv>,
+  sessionId: string,
+  verb: 'archive' | 'unarchive',
+) {
+  return request(app, `${MOUNT}/session/${sessionId}/${verb}`, {
+    method: 'POST',
+  });
+}
+
+/** The file names below the session's uploads directory, read through a fresh open of its sandbox. */
+async function storedFileIds(
+  environment: SandboxEnvironment,
+  userId: string,
+  sessionId: string,
+): Promise<string[]> {
+  await using sandbox = await environment.open({ chatId: sessionId, userId });
+  const listed = await sandbox.run({
+    command: `ls -1 ${UPLOAD_DIRECTORY}/${userId}/${sessionId}`,
+  });
+  assert.equal(listed.exitCode, 0, listed.stderr);
+  return listed.stdout.split('\n').filter(Boolean).sort();
+}
+
+for (const { name, open } of storages) {
+  test(`${name}: an archived session refuses POST /session/:sessionId/uploads with 409 session-archived and writes nothing, keeps serving a file uploaded before the archive, and takes uploads again once unarchived`, async () => {
+    await using h = await harness({ storage: open });
+    const sessionId = randomUUID();
+    await h.runtime.createSession({ chatId: sessionId, userId: OWNER });
+    const before = receiptSchema.parse(
+      await (await upload(h.app, sessionId, { filename: 'before.png' })).json(),
+    );
+    assert.equal((await archive(h.app, sessionId, 'archive')).status, 204);
+
+    const refused = await upload(h.app, sessionId, {
+      body: MP4_HEADER,
+      contentType: 'video/mp4',
+      filename: 'while-archived.mp4',
+    });
+    const served = await request(h.app, new URL(before.url).pathname);
+    const refusedBody = errorBodySchema.safeParse(await refused.json());
+    const servedBytes = new Uint8Array(await served.arrayBuffer());
+    assert.equal((await archive(h.app, sessionId, 'unarchive')).status, 200);
+    const afterUnarchive = await storedFileIds(h.environment, OWNER, sessionId);
+    const accepted = await upload(h.app, sessionId, {
+      filename: 'after.png',
+    });
+    const after = receiptSchema.parse(await accepted.json());
+
+    assert.deepEqual(
+      {
+        status: refused.status,
+        cache: refused.headers.get('cache-control'),
+        code: refusedBody.data?.cause.code,
+      },
+      { status: 409, cache: 'no-store', code: 'zukhruf/session-archived' },
+    );
+    assert.equal(served.status, 200);
+    assert.deepEqual(servedBytes, PNG_PIXEL);
+    assert.deepEqual(afterUnarchive, [posix.basename(before.path)]);
+    assert.equal(accepted.status, 201);
+    assert.deepEqual(
+      await storedBytes(
+        h.environment,
+        OWNER,
+        sessionId,
+        posix.basename(after.path),
+      ),
+      PNG_PIXEL,
+    );
+  });
+}

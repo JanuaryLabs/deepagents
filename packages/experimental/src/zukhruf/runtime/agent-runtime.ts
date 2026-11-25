@@ -80,6 +80,12 @@ export interface AgentPluginHost {
    * `agent.ts`), and this works before the conversation exists.
    */
   sandbox(conversation: ConversationId): Promise<ZukhrufSandbox>;
+  /**
+   * Borrow the sandbox, as `sandbox` does, to change what the user's session
+   * holds. An archived session is read-only, so this rejects with
+   * ConversationArchivedError while its tree is archived, as `enqueue` does.
+   */
+  writableSandbox(conversation: ConversationId): Promise<ZukhrufSandbox>;
   conversationExists(conversation: ConversationId): Promise<boolean>;
   isConversationAvailable(conversation: ConversationId): Promise<boolean>;
   readConversationMetadata(
@@ -559,27 +565,16 @@ class RuntimeHost implements AsyncDisposable {
       observe: (conversation) => this.observe(conversation),
       subscribeConversationStatus: (signal) =>
         this.subscribeConversationStatus(signal),
-      // Borrows the root declaration's sandbox directly: resolving the
-      // conversation through the control plane would create its root thread.
-      // A chat with no agent yet opens its sandbox (an upload before the
-      // first message); one of a tree being deleted, and a deleted one, reads
-      // as absent.
       sandbox: async (conversation) => {
-        const thread = await this.#directory.load(conversation);
-        const refused =
-          thread === undefined
-            ? await storage.deletedConversations.has(conversation.chatId)
-            : await this.#inDeletedTree(thread);
-        if (refused) {
-          throw new ConversationNotFoundError(conversation.chatId);
+        await this.#borrowableRoot(conversation);
+        return this.#borrowSandbox(conversation);
+      },
+      writableSandbox: async (conversation) => {
+        const root = await this.#borrowableRoot(conversation);
+        if (root?.archivedAt !== undefined) {
+          throw new ConversationArchivedError(conversation.chatId);
         }
-        const sandbox = await sandboxes.acquire(this.#root, {
-          chatId: conversation.chatId,
-          userId: conversation.userId,
-        });
-        // The borrow can start the sandbox, so its idle window starts too.
-        await this.#idleStop?.armAfterBorrow(conversation);
-        return sandbox;
+        return this.#borrowSandbox(conversation);
       },
     };
     resources.use(this.#workers);
@@ -624,6 +619,43 @@ class RuntimeHost implements AsyncDisposable {
     if (!root || !this.#ownsRoot(root) || root.deletingAt !== undefined) {
       throw new ConversationNotFoundError(conversation.chatId);
     }
+  }
+
+  /**
+   * The root of the tree a plugin borrows the sandbox of, or `undefined` for a
+   * chat with no agent yet, which opens its sandbox (an upload before the
+   * first message). One of a tree being deleted, and a deleted one, reads as
+   * absent.
+   */
+  async #borrowableRoot(
+    conversation: ConversationId,
+  ): Promise<AgentThread | undefined> {
+    const thread = await this.#directory.load(conversation);
+    if (thread === undefined) {
+      if (await this.#storage.deletedConversations.has(conversation.chatId)) {
+        throw new ConversationNotFoundError(conversation.chatId);
+      }
+      return undefined;
+    }
+    const root = await this.#directory.rootOf(thread);
+    if (root === undefined || root.deletingAt !== undefined) {
+      throw new ConversationNotFoundError(conversation.chatId);
+    }
+    return root;
+  }
+
+  /**
+   * Borrows the root declaration's sandbox directly: resolving the
+   * conversation through the control plane would create its root thread.
+   */
+  async #borrowSandbox(conversation: ConversationId): Promise<ZukhrufSandbox> {
+    const sandbox = await this.#sandboxes.acquire(this.#root, {
+      chatId: conversation.chatId,
+      userId: conversation.userId,
+    });
+    // The borrow can start the sandbox, so its idle window starts too.
+    await this.#idleStop?.armAfterBorrow(conversation);
+    return sandbox;
   }
 
   /** Whether the tree `thread` is in is being deleted, or its root is gone. */
