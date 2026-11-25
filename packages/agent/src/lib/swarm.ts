@@ -48,15 +48,6 @@ export type SwarmContext = { currentActiveAgent?: string };
  */
 export type SwarmToolSet = Record<string, Tool<any, any, SwarmContext>>;
 
-export type OutputMode = 'full_history' | 'last_message';
-
-export interface ExecuteOptions {
-  contextVariables?: Record<string, unknown>;
-  systemPrompt?: string;
-  abortSignal?: AbortSignal;
-  outputMode?: OutputMode;
-}
-
 export async function generate<O, CIn, COut = CIn>(
   agent: Agent<O, CIn, COut>,
   messages: UIMessage[] | string,

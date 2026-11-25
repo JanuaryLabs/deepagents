@@ -148,34 +148,6 @@ The repair function works as follows:
 
 Because each agent uses its own model for repair, agents with stronger models get more reliable tool call recovery. You do not need to configure this -- it is handled automatically based on the model you pass to `agent()`.
 
-## Output Modes
-
-The `outputMode` option controls what messages are returned:
-
-### `full_history` (default)
-
-Returns all messages generated during execution:
-
-```typescript
-const result = await generate(agent, input, context, {
-  outputMode: 'full_history',
-});
-// result includes all intermediate messages
-```
-
-### `last_message`
-
-Returns only the final message:
-
-```typescript
-const result = await generate(agent, input, context, {
-  outputMode: 'last_message',
-});
-// result includes only the last assistant message
-```
-
-This matches LangChain's behavior for compatibility.
-
 ## Return Types
 
 ### From `execute()`

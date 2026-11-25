@@ -16,7 +16,6 @@ export function createSupervisor<C>(props: {
   subagents: Agent<unknown, C>[];
   name?: string;
   model: AgentModel;
-  outputMode?: 'full_history' | 'last_message';
   handoffDescription?: string;
   tools?: ToolSet;
 }) {
@@ -141,7 +140,6 @@ const critique = agent({
 const supervisor = createSupervisor({
   model: glm('glm-4.5-Flash'),
   subagents: [writer, critique],
-  outputMode: 'last_message',
   prompt: instructions({
     purpose: [
       'You are a content manager coordinating between a writer and critic.',
