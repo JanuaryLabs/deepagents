@@ -30,6 +30,8 @@ export interface PgBossTurnQueueOptions {
 /** A `<schema>.queue` catalog row, selected as `table_name AS "table"`. */
 const queueCatalogRowSchema = z.object({ table: z.string() });
 
+const withdrawnRecoverySchema = z.object({ chatId: z.string() });
+
 /** Options after defaults and checks, as the queue opens with them. */
 interface PgBossTurnQueueSettings {
   readonly queue: string;
@@ -333,7 +335,7 @@ export class PgBossTurnQueue extends TurnQueue {
     // methods do not provide the state predicate needed to close that race.
     // Remote active handlers are stopped by the runtime's durable stream
     // cancellation; their normal handler exit performs commit-driven GC.
-    if (queued.length > 0) await this.#deleteIfStillQueued(queued);
+    if (queued.length > 0) await this.#withdrawQueued(queued);
 
     // Close the inverse race too: a local worker can claim after the first
     // controller scan but before the state-conditional delete.
@@ -458,7 +460,8 @@ export class PgBossTurnQueue extends TurnQueue {
     // Revives every cancelled job for the chat. A revived USER-cancelled
     // turn is harmless — the consumer's terminal-stream check skips it —
     // so no parked-vs-cancelled bookkeeping is needed here. A queued recovery
-    // runs first; its settlement calls this again while it owns the FIFO key.
+    // runs first; its settlement calls this again while it owns the FIFO key,
+    // and a cancel that withdraws it while queued calls this in its place.
     const jobs = await this.#boss.findJobs<TurnRef>(this.#queue, {
       key: chatId,
     });
@@ -540,14 +543,29 @@ export class PgBossTurnQueue extends TurnQueue {
     await this.#boss.resume(queue, id);
   }
 
-  async #deleteIfStillQueued(ids: string[]): Promise<void> {
-    await this.#boss.getDb().executeSql(
-      `DELETE FROM ${this.#relation()}
-       WHERE name = $1
-         AND id = ANY($2::uuid[])
-         AND state IN ('created', 'retry')`,
+  /**
+   * Deletes the rows that are still queued. A withdrawn recovery never
+   * settles, and its chat's parked turns wait for that settlement, so the
+   * withdrawal releases them in its place. A recovery a worker claimed first
+   * stays active and releases them when it settles.
+   */
+  async #withdrawQueued(ids: string[]): Promise<void> {
+    const withdrawn = await this.#boss.getDb().executeSql(
+      `WITH withdrawn AS (
+         DELETE FROM ${this.#relation()}
+         WHERE name = $1
+           AND id = ANY($2::uuid[])
+           AND state IN ('created', 'retry')
+         RETURNING data
+       )
+       SELECT DISTINCT data->>'chatId' AS "chatId"
+       FROM withdrawn
+       WHERE data->>'kind' = 'recovery'`,
       [this.#queue, ids],
     );
+    for (const row of withdrawn.rows) {
+      await this.resumeParked(withdrawnRecoverySchema.parse(row).chatId);
+    }
   }
 
   #relation(): string {

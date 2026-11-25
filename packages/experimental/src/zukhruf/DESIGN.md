@@ -700,7 +700,10 @@ surface; full history lives in the chain, which is the source of truth anyway.
   continuation runs. `resumeParked(chatId)` revives parked jobs with their original `created_on` —
   FIFO order reassembles for free. No polling, no new storage. `park`/`resumeParked` are port
   surface now (`ConsumeContext.park`, `TurnQueue.resumeParked`), pinned by two contract tests
-  (no redelivery until revival + original order; recovery outranks revived turns).
+  (no redelivery until revival + original order; recovery outranks revived turns). A queued
+  recovery defers `resumeParked` to its settlement; a `cancel` that deletes the recovery while it
+  is still queued resumes the chat's parked turns in its place (#1450), and a recovery a worker
+  claimed first resumes them when it settles.
 - **Disambiguation**: parked turn = job `cancelled` + stream row `queued`; user-cancelled turn =
   stream row `cancelled` (its job is also `cancelled`). `resumeParked` revives **every** cancelled
   job for the chat without inspecting stream rows — a revived user-cancelled turn is harmless because

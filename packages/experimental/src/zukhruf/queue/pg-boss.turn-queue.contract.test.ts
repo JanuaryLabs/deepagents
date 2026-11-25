@@ -634,6 +634,116 @@ for (const contract of turnQueueContracts) {
       );
     });
 
+    test('cancelling a queued recovery releases the parked turns that waited for it', async (t) => {
+      await using h = await contract.makeQueue();
+      const parkedTurn = ref('withdrawn-recovery', 1);
+      const recovery = recoveryRef('withdrawn-recovery');
+      const ran: TurnRef[] = [];
+
+      let parkCount = 0;
+      const gatekeeper = await h.queue.consume(async (_turn, context) => {
+        parkCount++;
+        await context.park();
+      }, unobserved);
+      await h.queue.push(parkedTurn);
+      await waitFor(t, () => parkCount === 1, 'turn parked');
+      await gatekeeper[Symbol.asyncDispose]();
+
+      await h.queue.push(recovery);
+      await h.queue.resumeParked(parkedTurn.chatId);
+      await h.queue.cancel(recovery.streamId);
+
+      await using _consumer = await h.queue.consume(async (turn) => {
+        ran.push(turn);
+      }, unobserved);
+      void _consumer;
+
+      await waitFor(
+        t,
+        () => ran.length === 1,
+        'the parked turn is delivered after its recovery is cancelled',
+      );
+      assert.deepStrictEqual(ran, [parkedTurn]);
+    });
+
+    test('cancelling a queued user turn leaves the chat parked turns parked', async (t) => {
+      await using h = await contract.makeQueue();
+      const parkedTurn = ref('cancelled-user-turn', 1);
+      const queuedUserTurn = ref('cancelled-user-turn', 2);
+      const ran: TurnRef[] = [];
+
+      let parkCount = 0;
+      const gatekeeper = await h.queue.consume(async (_turn, context) => {
+        parkCount++;
+        await context.park();
+      }, unobserved);
+      await h.queue.push(parkedTurn);
+      await waitFor(t, () => parkCount === 1, 'turn parked');
+      await gatekeeper[Symbol.asyncDispose]();
+
+      await h.queue.push(queuedUserTurn);
+      await h.queue.cancel(queuedUserTurn.streamId);
+
+      await using _consumer = await h.queue.consume(async (turn) => {
+        ran.push(turn);
+      }, unobserved);
+      void _consumer;
+
+      await sleep(1500);
+      assert.deepStrictEqual(ran, [], 'the parked turn waits for resumeParked');
+
+      await h.queue.resumeParked(parkedTurn.chatId);
+      await waitFor(t, () => ran.length === 1, 'the parked turn is revived');
+      assert.deepStrictEqual(ran, [parkedTurn]);
+    });
+
+    test('a recovery a worker claimed before its cancel releases the parked turns when it settles', async (t) => {
+      await using h = await contract.makeQueue();
+      const parkedTurn = ref('claimed-recovery', 1);
+      const recovery = recoveryRef('claimed-recovery');
+      const ran: string[] = [];
+
+      let parkCount = 0;
+      const gatekeeper = await h.queue.consume(async (_turn, context) => {
+        parkCount++;
+        await context.park();
+      }, unobserved);
+      await h.queue.push(parkedTurn);
+      await waitFor(t, () => parkCount === 1, 'turn parked');
+      await gatekeeper[Symbol.asyncDispose]();
+
+      await h.queue.push(recovery);
+      const started = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      await using _consumer = await h.queue.consume(
+        async (turn) => {
+          ran.push(turn.streamId);
+          if (turn.streamId !== recovery.streamId) return;
+          started.resolve();
+          await release.promise;
+        },
+        { ...unobserved, concurrency: 2 },
+      );
+      void _consumer;
+
+      try {
+        await untilAborted(started.promise, t.signal);
+        await h.queue.cancel(recovery.streamId);
+        await sleep(1500);
+        assert.deepStrictEqual(
+          ran,
+          [recovery.streamId],
+          'the parked turn waits while the recovery is active',
+        );
+
+        release.resolve();
+        await waitFor(t, () => ran.length === 2, 'the parked turn is revived');
+        assert.deepStrictEqual(ran, [recovery.streamId, parkedTurn.streamId]);
+      } finally {
+        release.resolve();
+      }
+    });
+
     test('settlement releases FIFO ownership before follow-up reconciliation', async (t) => {
       await using h = await contract.makeQueue();
       const first = ref('settlement', 1);

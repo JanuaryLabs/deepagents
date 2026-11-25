@@ -126,7 +126,8 @@ export type TurnActivity = 'idle' | 'queued' | 'running';
  *   authority.
  * - A parked turn (`context.park()`) is not delivered again until
  *   `resumeParked(chatId)`; revived turns keep their original FIFO order,
- *   and recovery turns pushed for the chat outrank them.
+ *   and recovery turns pushed for the chat outrank them. A recovery that
+ *   `cancel` removes while queued releases them as its settlement would.
  *
  * On platforms with native per-conversation serialization (e.g. Durable
  * Objects) this port is absorbed by the host rather than implemented.
