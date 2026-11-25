@@ -119,8 +119,9 @@ const list_packages_tool = tool({
             : undefined,
         });
         if (results.length >= limit) break;
-      } catch {
-        // ignore invalid json files
+      } catch (error) {
+        // A package.json that does not parse is skipped; any other failure is reported.
+        if (!(error instanceof SyntaxError)) throw error;
       }
     }
     return { json: results };

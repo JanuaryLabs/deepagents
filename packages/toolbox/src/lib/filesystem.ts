@@ -103,9 +103,20 @@ export const file_exists_tool = tool({
     { filePath },
     { context }: ToolExecutionOptions<RepoContext>,
   ) => {
-    return stat(join(context.repo_path, filePath))
-      .then(() => true)
-      .catch(() => false);
+    try {
+      await stat(join(context.repo_path, filePath));
+      return true;
+    } catch (error) {
+      // No such path, or a parent of it is a file; any other failure is the tool's error.
+      if (
+        Error.isError(error) &&
+        'code' in error &&
+        (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+      ) {
+        return false;
+      }
+      throw error;
+    }
   },
 });
 

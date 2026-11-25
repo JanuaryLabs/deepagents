@@ -20,9 +20,20 @@ export default function (router: Hono<AppBindings>) {
   // Do NOT use '*' here - that would serve index.html before the handler below can inject the base href
   router.use('/assets/*', serveStatic({ root: dir }));
   router.get('*', async (c) => {
-    const exists = await lstat(`${dir}/index.html`)
-      .then(() => true)
-      .catch(() => false);
+    const exists = await lstat(`${dir}/index.html`).then(
+      () => true,
+      (error: unknown) => {
+        // Not built yet; any other failure is the route's error.
+        if (
+          Error.isError(error) &&
+          'code' in error &&
+          error.code === 'ENOENT'
+        ) {
+          return false;
+        }
+        throw error;
+      },
+    );
     if (!exists) {
       console.error(
         `Build the frontend app first. run "nx run frontend:build"`,

@@ -10,7 +10,7 @@ const attributeName = z
   .max(64)
   .regex(kebabName)
   .refine((attribute) => !RESERVED_ELEMENT_ATTRIBUTES.has(attribute), {
-    message:
+    error:
       'Attribute is reserved: the markdown sanitizer rewrites it to "user-content-<value>". Use a domain attribute instead (e.g. "param").',
   });
 

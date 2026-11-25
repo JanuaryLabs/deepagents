@@ -69,8 +69,18 @@ export default function (router: Hono<AppBindings>) {
               event: 'run:end',
               data: JSON.stringify(data),
             });
-          } catch {
-            /* stream write failed */
+          } catch (error) {
+            // A write fails once the client has gone; any other failure has
+            // no caller left to take it.
+            if (!stream.aborted) {
+              process.emitWarning(
+                `Writing run:end of run ${data.runId} to its event stream failed: ${Error.isError(error) ? error.message : String(error)}`,
+                {
+                  type: 'EvalsWebRunnerWarning',
+                  code: 'EVALS_WEB_RUNNER_RUN_END_WRITE_FAILED',
+                },
+              );
+            }
           }
           cleanup();
         };

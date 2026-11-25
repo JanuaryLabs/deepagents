@@ -15,9 +15,6 @@ export default defineConfig(() => ({
     emptyOutDir: false,
     reportCompressedSize: true,
     sourcemap: true,
-    commonjsOptions: {
-      transformMixedEsModules: true,
-    },
     lib: {
       entry: {
         index: 'src/index.ts',

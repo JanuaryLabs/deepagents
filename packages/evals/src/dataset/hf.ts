@@ -94,7 +94,12 @@ export async function downloadHf(options: HfOptions): Promise<string> {
 async function fetchPage(url: string): Promise<HfRowsPage> {
   const response = await fetch(url);
   if (!response.ok) {
-    const body = await response.text().catch(() => '');
+    const body = await response
+      .text()
+      .catch(
+        (error: unknown) =>
+          `(the error body could not be read: ${Error.isError(error) ? error.message : String(error)})`,
+      );
     throw new Error(
       `HuggingFace API error ${response.status}: ${body || response.statusText}`,
     );

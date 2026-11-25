@@ -38,14 +38,10 @@ export default defineConfig(() => {
       reportCompressedSize: true,
       chunkSizeWarningLimit: 600,
       sourcemap: enableSourceMaps,
-      commonjsOptions: {
-        transformMixedEsModules: true,
-      },
     },
     test: {
       name: 'frontend',
       watch: false,
-      globals: true,
       environment: 'jsdom',
       include: ['{src,tests}/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
       reporters: ['default'],

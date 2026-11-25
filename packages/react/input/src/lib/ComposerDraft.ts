@@ -26,8 +26,13 @@ export function writeStoredDraft(
   }
   try {
     localStorage.setItem(storageKey, JSON.stringify(source));
-  } catch {
+  } catch (error) {
     // Quota exhaustion or privacy mode: the draft just won't survive a reload.
+    if (!(
+      error instanceof DOMException && error.name === 'QuotaExceededError'
+    )) {
+      throw error;
+    }
   }
 }
 

@@ -10,6 +10,7 @@ import {
 } from 'react-router';
 
 import '../styles.css';
+import { StaticSearchDialog } from './search-dialog.tsx';
 
 export const meta: MetaFunction = () => [
   { title: 'Text2SQL - Natural Language to SQL | DeepAgents' },
@@ -57,14 +58,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Links />
       </head>
       <body>
-        <RootProvider
-          search={{
-            options: {
-              type: 'static',
-              api: '/deepagents/api/search',
-            },
-          }}
-        >
+        <RootProvider search={{ SearchDialog: StaticSearchDialog }}>
           <>{children}</>
         </RootProvider>
         <ScrollRestoration />
