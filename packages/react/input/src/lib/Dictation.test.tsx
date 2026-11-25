@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -28,6 +28,9 @@ function fieldWithCursor(value: string, cursor: number) {
 
 describe('Dictation without a composer', () => {
   it('offers no dictation in a browser without a recorder', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     render(
       <Dictation.Root
         transcribe={async () => ({ text: 'never heard' })}
@@ -62,6 +65,9 @@ describe('Dictation without a composer', () => {
     ['Dictation.Cancel', <Dictation.Cancel key="cancel" />],
     ['ReadsDictation', <ReadsDictation key="hook" />],
   ])('%s needs Dictation.Root', (name, part) => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     expect(() => render(part)).toThrow(
       `${name} must be used inside Dictation.Root.`,
     );

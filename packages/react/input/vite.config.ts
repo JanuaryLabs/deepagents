@@ -40,7 +40,6 @@ export default defineConfig(() => ({
   test: {
     name: '@deepagents/react-input',
     watch: false,
-    globals: true,
     environment: 'happy-dom',
     // Built workspace packages have no source tsconfig and run directly in Node.
     server: { deps: { external: [/\/dist\//] } },

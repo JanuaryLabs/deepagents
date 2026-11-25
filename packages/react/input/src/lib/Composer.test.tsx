@@ -1,6 +1,7 @@
 import { createClock } from '@sinonjs/fake-timers';
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -580,12 +581,18 @@ function formatSubmissionItem(item: ComposerSubmission['items'][number]) {
 
 describe('Composer compound API', () => {
   it('throws a component-specific error when a compound consumer is rendered outside Root', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     expect(() =>
       render(<OrphanRichConsumer />, { wrapper: FakeClock }),
     ).toThrow('OrphanRichConsumer must be used inside Composer.Root.');
   });
 
   it('renders action triggers as non-submit buttons by default', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     renderRichInput();
 
     expect(
@@ -594,6 +601,9 @@ describe('Composer compound API', () => {
   });
 
   it('labels the editor with the default aria-label and auto direction', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     render(
       <Composer.Root>
         <Composer.Editor />
@@ -608,6 +618,9 @@ describe('Composer compound API', () => {
   });
 
   it('labels the editor from editorAriaLabel', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     render(
       <Composer.Root editorAriaLabel="Message">
         <Composer.Editor />
@@ -621,6 +634,9 @@ describe('Composer compound API', () => {
   });
 
   it('relabels the editor when editorAriaLabel changes', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const view = render(
       <Composer.Root editorAriaLabel="Message">
         <Composer.Editor />
@@ -644,6 +660,9 @@ describe('Composer compound API', () => {
   });
 
   it('supports render action triggers while honoring prevented clicks', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     render(<RichCompoundActionScenario />, { wrapper: FakeClock });
 
@@ -671,6 +690,9 @@ describe('Composer compound API', () => {
   });
 
   it('marks disabled non-native render actions without leaking native disabled', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     render(<RichDisabledAnchorActionScenario />, { wrapper: FakeClock });
 
@@ -689,6 +711,9 @@ describe('Composer compound API', () => {
   });
 
   it('exposes state, actions, and meta to custom compound children', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     render(<RichContextConsumerScenario />, { wrapper: FakeClock });
 
@@ -709,6 +734,9 @@ describe('Composer compound API', () => {
   });
 
   it('lets custom popup children accept a non-highlighted slash suggestion by index', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     render(<RichCustomPopupScenario />, { wrapper: FakeClock });
 
@@ -729,6 +757,9 @@ describe('Composer compound API', () => {
   });
 
   it('lets custom popup children accept a non-highlighted mention suggestion by index', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     render(<RichCustomPopupScenario />, { wrapper: FakeClock });
 
@@ -762,6 +793,9 @@ function OrphanRichConsumer() {
 
 describe('Composer placeholder', () => {
   it('shows the placeholder in the empty editor and exposes it as aria-placeholder', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     render(
       <Composer.Root editorAriaLabel="Message">
         <Composer.Editor placeholder="Ask anything" />
@@ -781,6 +815,9 @@ describe('Composer placeholder', () => {
   });
 
   it('hides the placeholder once the user types', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     render(
       <Composer.Root editorAriaLabel="Message">
@@ -803,6 +840,9 @@ describe('Composer placeholder', () => {
   });
 
   it('updates the placeholder when the placeholder prop changes', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const view = render(
       <Composer.Root editorAriaLabel="Message">
         <Composer.Editor placeholder="Ask anything" />
@@ -835,6 +875,9 @@ describe('Composer placeholder', () => {
   });
 
   it('keeps the placeholder on a disabled editor', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     render(
       <Composer.Root editorAriaLabel="Message" disabled>
         <Composer.Editor placeholder="Ask anything" />
@@ -854,6 +897,9 @@ describe('Composer placeholder', () => {
 
 describe('Composer empty prompt', () => {
   it('submits an empty prompt for the host to decide', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     const submitted = vi.fn();
 
@@ -876,6 +922,9 @@ describe('Composer empty prompt', () => {
   });
 
   it('emits an empty submission on Enter without recording history', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -893,6 +942,9 @@ describe('Composer empty prompt', () => {
   });
 
   it('ignores Tab when there is no prompt content', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -907,6 +959,9 @@ describe('Composer empty prompt', () => {
   });
 
   it('toggles keyboard shortcuts with ? only while the draft is empty', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -938,6 +993,9 @@ describe('Composer empty prompt', () => {
   });
 
   it('inserts a newline with Shift+Enter and submits multiline text with Enter', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -966,6 +1024,9 @@ describe('Composer empty prompt', () => {
   ])(
     'inserts a newline with %s and submits multiline text with Enter',
     async (_shortcut, keyEvent) => {
+      using stack = new DisposableStack();
+      stack.defer(cleanup);
+
       const { user, prompt, submissions } = renderRichInput();
 
       await user.click(prompt);
@@ -998,6 +1059,9 @@ describe('Composer empty prompt', () => {
   );
 
   it('keeps a plain prompt editable when Tab is pressed while idle', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1011,6 +1075,9 @@ describe('Composer empty prompt', () => {
   });
 
   it('does not submit a remote-image-only prompt on Shift+Enter', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(screen.getByRole('button', { name: /add remote image/i }));
@@ -1055,6 +1122,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('expands a custom prompt before submission and stores that snapshot in history', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const slashCommands = [
       {
         trigger: '/',
@@ -1091,6 +1161,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('offers slash commands after words and keeps the completed token editable', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1120,6 +1193,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('offers slash commands after a newline', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -1143,6 +1219,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('moves slash suggestions with Ctrl+N before completing the selected command', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -1164,6 +1243,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('moves slash suggestions with ArrowDown before completing the selected command', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1184,6 +1266,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('scrolls the keyboard-selected suggestion into view', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     const scrollIntoView = vi.fn();
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
@@ -1219,6 +1304,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('completes the clicked slash suggestion instead of the highlighted one', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1243,6 +1331,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('hides hidden and disabled slash commands from suggestions', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -1262,6 +1353,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('matches slash aliases and completes the canonical command', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1283,6 +1377,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('matches slash search terms and completes the canonical command', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -1305,6 +1402,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('runs hidden slash commands only when typed explicitly', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1326,6 +1426,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('rejects disabled slash commands as unknown', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1342,6 +1445,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('dismisses the slash popup with Escape without clearing the draft', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -1363,6 +1469,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('types a second slash instead of accepting the active suggestion', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -1386,6 +1495,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('completes a selected leading slash command with Enter', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1405,6 +1517,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('submits a leading-space slash command as plain text', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, submissions } = renderRichInput({
       initialText: ' /diff',
     });
@@ -1417,6 +1532,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('submits a path-like leading slash as plain text', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1431,6 +1549,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('submits a single-segment absolute path as plain text', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1448,6 +1569,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('submits slash-space text as a plain prompt', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1462,6 +1586,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('completes but does not run embedded slash text with Enter', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1483,6 +1610,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('inserts @ mentions anywhere and submits them as structured items', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1495,6 +1625,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('offers mention candidates after a newline', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -1518,6 +1651,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('moves mention suggestions with ArrowDown before inserting the selected candidate', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -1533,6 +1669,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('inserts the clicked mention suggestion instead of the highlighted one', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -1554,6 +1693,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('inserts $ skill mentions anywhere and submits them as skill items', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1566,6 +1708,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('submits an unmatched mention query as literal prompt text with Enter', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1578,6 +1723,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('dismisses the mention popup with Escape and keeps the literal query', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1607,6 +1755,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('shows all matching mention kinds without scope tabs', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -1630,6 +1781,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('refreshes an open mention popup when the host provides async candidates', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     const withoutFileCandidates = MENTION_CANDIDATES.filter(
       (candidate) => candidate.id !== 'file-layout',
@@ -1675,6 +1829,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('keeps app mentions directly available from @', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1696,6 +1853,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('keeps slash commands composable while a task is running', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput({
       isTaskRunning: true,
     });
@@ -1720,6 +1880,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('preserves an unknown leading slash command and shows an inline error', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1736,6 +1899,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('announces an inline error to assistive technology', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -1748,6 +1914,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('submits slash command args with accepted mentions as structured items', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1765,6 +1934,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('submits slash command args with expanded large paste content', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
     const placeholder = `[Pasted Content ${Array.from(LARGE_PASTE).length} chars]`;
 
@@ -1785,6 +1957,9 @@ describe('Composer slash and mention behavior', () => {
   });
 
   it('keeps slash commands composable after the running prop changes', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(screen.getByRole('button', { name: /toggle running/i }));
@@ -1810,6 +1985,9 @@ describe('Composer slash and mention behavior', () => {
 
 describe('Composer editing shortcuts', () => {
   it('leaves select-all shortcuts in nested text inputs to the browser', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     render(
       <Composer.Root>
@@ -1838,6 +2016,9 @@ describe('Composer editing shortcuts', () => {
   });
 
   it('replaces the whole prompt after select-all instead of inserting at the start', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -1855,6 +2036,9 @@ describe('Composer editing shortcuts', () => {
   });
 
   it('replaces a structured prompt with atoms after select-all', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput({
       initialText: '/review @frontend Please inspect this patch',
       initialRemoteImageUrls: [REMOTE_IMAGE_URL],
@@ -1875,6 +2059,9 @@ describe('Composer editing shortcuts', () => {
   });
 
   it('clears the prompt after select-all delete', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -1899,6 +2086,9 @@ describe('Composer editing shortcuts', () => {
   });
 
   it('kills text to the end of the line and yanks it back', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -1922,6 +2112,9 @@ describe('Composer editing shortcuts', () => {
   });
 
   it('kills text to the start of the line and yanks it back', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -1945,6 +2138,9 @@ describe('Composer editing shortcuts', () => {
   });
 
   it('moves to the end of the current line with Ctrl+E', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -1965,6 +2161,9 @@ describe('Composer editing shortcuts', () => {
   });
 
   it('kills the previous word with Ctrl+W and yanks it back', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -1995,6 +2194,9 @@ describe('Composer editing shortcuts', () => {
   });
 
   it('moves by word with Alt+B and Alt+F', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -2028,6 +2230,9 @@ describe('Composer editing shortcuts', () => {
   });
 
   it('yanks a backward-killed mention atom as a structured item', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -2052,6 +2257,9 @@ describe('Composer editing shortcuts', () => {
   });
 
   it('yanks killed structured atoms back as submission items', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
     const placeholder = `[Pasted Content ${Array.from(LARGE_PASTE).length} chars]`;
 
@@ -2130,6 +2338,9 @@ describe('Composer editing shortcuts', () => {
   });
 
   it('yanks backward-killed structured atoms back as submission items', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
     const placeholder = `[Pasted Content ${Array.from(LARGE_PASTE).length} chars]`;
 
@@ -2196,6 +2407,9 @@ describe('Composer editing shortcuts', () => {
   });
 
   it('preserves the kill buffer after submitting and yanks into the cleared prompt', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -2228,6 +2442,9 @@ describe('Composer editing shortcuts', () => {
   });
 
   it('preserves the kill buffer after a leading command clears the prompt', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -2277,6 +2494,9 @@ describe('Composer editing shortcuts', () => {
   });
 
   it('places the cursor at the end of restored initial text after reset', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput({ initialText: 'seed' });
 
     await user.click(prompt);
@@ -2295,6 +2515,9 @@ describe('Composer editing shortcuts', () => {
   });
 
   it('preserves the kill buffer across reset and yanks at the restored end', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput({ initialText: 'seed ' });
 
     await user.click(prompt);
@@ -2323,6 +2546,9 @@ describe('Composer editing shortcuts', () => {
 
 describe('Composer history behavior', () => {
   it('navigates recalled prompts with ArrowUp and ArrowDown', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -2359,6 +2585,9 @@ describe('Composer history behavior', () => {
   });
 
   it('restores the in-progress draft after recalling history with ArrowUp', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -2398,6 +2627,9 @@ describe('Composer history behavior', () => {
   });
 
   it('navigates recalled prompts with Ctrl+P and Ctrl+N', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -2433,6 +2665,9 @@ describe('Composer history behavior', () => {
   });
 
   it('restores a matching prompt with reverse history search', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -2465,6 +2700,9 @@ describe('Composer history behavior', () => {
   });
 
   it('cycles reverse history search matches with Ctrl+R and Ctrl+S', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -2505,6 +2743,9 @@ describe('Composer history behavior', () => {
   });
 
   it('cancels reverse history search back to the pre-search draft', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -2534,6 +2775,9 @@ describe('Composer history behavior', () => {
   });
 
   it('keeps the current draft on reverse-search misses and closes with Escape', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -2562,6 +2806,9 @@ describe('Composer history behavior', () => {
   });
 
   it('restores persistable history payloads without inventing file attachments', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
     const placeholder = `[Pasted Content ${Array.from(LARGE_PASTE).length} chars]`;
 
@@ -2624,6 +2871,9 @@ describe('Composer history behavior', () => {
   });
 
   it('recalls a remote-image-only submission from history', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(screen.getByRole('button', { name: /add remote image/i }));
@@ -2642,6 +2892,9 @@ describe('Composer history behavior', () => {
   });
 
   it('does not record a file-only submission that history cannot restore', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.upload(
@@ -2663,6 +2916,9 @@ describe('Composer history behavior', () => {
   });
 
   it('keeps repeated prompts with different persistable payloads distinct in history', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -2688,6 +2944,9 @@ describe('Composer history behavior', () => {
 
 describe('Composer task running behavior', () => {
   it('queues a plain prompt while a task is running', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput({
       isTaskRunning: true,
     });
@@ -2705,6 +2964,9 @@ describe('Composer task running behavior', () => {
   });
 
   it('keeps a plain prompt editable when Tab is pressed while a task is running', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput({
       isTaskRunning: true,
     });
@@ -2720,6 +2982,9 @@ describe('Composer task running behavior', () => {
   });
 
   it('queues a leading slash command with args as ParseSlash while a task is running', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput({
       isTaskRunning: true,
     });
@@ -2737,6 +3002,9 @@ describe('Composer task running behavior', () => {
   });
 
   it('queues an unknown leading slash prompt as ParseSlash while a task is running', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput({
       isTaskRunning: true,
     });
@@ -2761,6 +3029,9 @@ describe('Composer task running behavior', () => {
 
 describe('Composer disabled guard', () => {
   it('follows the disabled prop on rerender', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const view = render(
       <Composer.Root editorAriaLabel="Message">
         <Composer.Editor />
@@ -2793,6 +3064,9 @@ describe('Composer disabled guard', () => {
   });
 
   it('blocks typing, paste, toolbar actions, and keyboard submit while disabled', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput({ disabled: true });
 
     expect(prompt).toHaveAttribute('aria-disabled', 'true');
@@ -2834,6 +3108,9 @@ describe('Composer disabled guard', () => {
   });
 
   it('blocks remote-image-only keyboard and button submit while disabled', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput({
       disabled: true,
       initialRemoteImageUrls: [REMOTE_IMAGE_URL],
@@ -2853,6 +3130,9 @@ describe('Composer disabled guard', () => {
 
 describe('Composer prompt length cap', () => {
   it('rejects oversized plain text without clearing the draft', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput({
       maxExpandedTextChars: 12,
     });
@@ -2871,6 +3151,9 @@ describe('Composer prompt length cap', () => {
   });
 
   it('rejects oversized expanded paste content while preserving the atom', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, submissions } = renderRichInput({
       maxExpandedTextChars: 100,
     });
@@ -2891,6 +3174,9 @@ describe('Composer prompt length cap', () => {
   });
 
   it('rejects oversized slash command args after expanding paste content', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput({
       maxExpandedTextChars: 100,
     });
@@ -2969,6 +3255,9 @@ describe('Composer persisted-text restore', () => {
 
 describe('Composer link and paste behavior', () => {
   it('restores Markdown-style text links and skill links as structured state', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, submissions } = renderRichInput({
       initialState: stateFromPersistedPrompt(
         'read [docs](composer-text-link://https%3A%2F%2Fexample.test%2Fdocs) with $react-test',
@@ -2984,6 +3273,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('persists a mention as the host-supplied persistsAs text', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, submissions } = renderRichInput({
       initialState: stateFromPersistedPrompt('use $react-test now'),
     });
@@ -2996,6 +3288,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('persists a mention without persistsAs as its plain token', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, submissions } = renderRichInput({
       initialState: stateFromPersistedPrompt('ask @frontend now'),
     });
@@ -3006,6 +3301,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('keeps prompt links inside code as literal text', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const persistedPrompt = 'use `$react-test` literally';
     const { user, submissions } = renderRichInput({
       initialState: stateFromPersistedPrompt(persistedPrompt),
@@ -3018,6 +3316,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('keeps a Markdown link inside code as literal text', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const persistedPrompt = 'use `[$react-test](skill://react-test)` literally';
     const { user, submissions } = renderRichInput({
       initialState: stateFromPersistedPrompt(persistedPrompt),
@@ -3030,6 +3331,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('decodes a persisted skill link back into an item', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, submissions } = renderRichInput({
       initialState: stateFromPersistedPrompt(
         'use [$react-test](skill://react-test) now',
@@ -3045,6 +3349,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('refreshes restored mention bindings from the current mention catalog', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const text = 'inspect @frontend';
     const label = '@frontend';
     const start = text.indexOf(label);
@@ -3084,6 +3391,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('turns selected text into the label when a URL is pasted over it', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { prompt, submissions } = renderRichInput({
       initialText: 'open docs',
     });
@@ -3111,6 +3421,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('pasting a URL over a selection spanning text and an image atom links the text and prunes the image payload', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const linkLabel = 'docs';
     const imageLabel = '[Image #1]';
     const text = `open ${linkLabel}${imageLabel} tail`;
@@ -3158,6 +3471,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('turns collapsed URL paste into a structured text link', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { prompt, submissions } = renderRichInput();
 
     prompt.focus();
@@ -3182,6 +3498,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('pastes an image URL as a text link, not a bytes-less image atom', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { prompt, submissions } = renderRichInput();
 
     prompt.focus();
@@ -3211,6 +3530,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('replaces a linked selection with non-URL pasted text and clears stale link metadata', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { prompt, submissions } = renderRichInput({
       initialText: 'open docs',
     });
@@ -3246,6 +3568,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('keeps duplicate selected-text URL paste links distinct', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { prompt, submissions } = renderRichInput({
       initialText: 'docs and docs',
     });
@@ -3281,6 +3606,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('pastes file URI references as structured file mentions', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { prompt, submissions } = renderRichInput();
 
     fireEvent.paste(prompt, {
@@ -3302,6 +3630,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('pastes non-image clipboard files as structured file mentions', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { prompt, submissions } = renderRichInput();
     const file = new File(['select 1'], 'query.sql', { type: 'text/sql' });
 
@@ -3324,6 +3655,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('pastes image clipboard files as image attachments', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { prompt, submissions } = renderRichInput();
     const file = new File(['png'], 'clipboard.png', { type: 'image/png' });
 
@@ -3353,6 +3687,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('treats pasted image paths as file references, not attachments', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { prompt, submissions } = renderRichInput();
     const path = '/Users/ezzabuzaid/project/chart.png';
 
@@ -3373,6 +3710,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('drops image files as image attachments', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
     const file = new File(['png'], 'dropped.png', { type: 'image/png' });
 
@@ -3396,6 +3736,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('accepts a file drag over the frame outside the editor', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { prompt } = renderRichInput();
     const frame = composerFrame(prompt);
     const dataTransfer = {
@@ -3414,6 +3757,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('leaves a text drag over the frame outside the editor to the browser', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { prompt } = renderRichInput();
     const frame = composerFrame(prompt);
     const dataTransfer = {
@@ -3432,6 +3778,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('attaches an image file dropped on the frame outside the editor', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
     const file = new File(['png'], 'dropped.png', { type: 'image/png' });
 
@@ -3457,6 +3806,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('drops file URI references as structured file mentions', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -3482,6 +3834,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('pastes a file URI whose name holds a raw percent sign as a file mention', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const sent: ComposerSubmission[] = [];
     const { prompt } = renderRichInput({
       send: (submission) => {
@@ -3510,6 +3865,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('drops a file URI with an encoded hash as a decoded file mention', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const sent: ComposerSubmission[] = [];
     const { user, prompt } = renderRichInput({
       send: (submission) => {
@@ -3543,6 +3901,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('treats image DownloadURL values as links, not attachments', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -3571,6 +3932,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('drops file DownloadURL values as structured file mentions', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -3596,6 +3960,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('drops a DownloadURL without a mime:name prefix as the bare URL', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -3621,6 +3988,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('turns browser pastes over the large-paste threshold into paste atoms', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { prompt, submissions } = renderRichInput();
     const pasted = 'A'.repeat(1001);
     const placeholder = '[Pasted Content 1001 chars]';
@@ -3642,6 +4012,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('shows a paste atom while submitting expanded pasted content', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, submissions } = renderRichInput();
     const placeholder = `[Pasted Content ${Array.from(LARGE_PASTE).length} chars]`;
 
@@ -3661,6 +4034,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('suffixes duplicate-size paste atoms and expands both on submit', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, submissions } = renderRichInput();
     const placeholder = `[Pasted Content ${Array.from(LARGE_PASTE).length} chars]`;
     const duplicatePlaceholder = `${placeholder} #2`;
@@ -3692,6 +4068,9 @@ describe('Composer link and paste behavior', () => {
   });
 
   it('submits explicit rich link atoms as rich link items', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, submissions } = renderRichInput();
 
     await user.click(screen.getByRole('button', { name: /insert rich link/i }));
@@ -3706,6 +4085,9 @@ describe('Composer link and paste behavior', () => {
 
 describe('Composer atomic token deletion', () => {
   it('deletes an image attachment atom and prunes the image item', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.upload(
@@ -3736,6 +4118,9 @@ describe('Composer atomic token deletion', () => {
   });
 
   it('backspaces from an image attachment edge and prunes the image item', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput({
       initialText: 'keep ',
     });
@@ -3769,6 +4154,9 @@ describe('Composer atomic token deletion', () => {
   });
 
   it('deletes a paste atom and prunes expanded pasted content', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
     const placeholder = `[Pasted Content ${Array.from(LARGE_PASTE).length} chars]`;
 
@@ -3799,6 +4187,9 @@ describe('Composer atomic token deletion', () => {
   });
 
   it('deletes a paste atom from its leading edge and prunes expanded pasted content', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput({
       initialText: 'keep ',
     });
@@ -3832,6 +4223,9 @@ describe('Composer atomic token deletion', () => {
   });
 
   it('backspaces from a paste atom trailing edge and prunes expanded pasted content', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput({
       initialText: 'keep ',
     });
@@ -3865,6 +4259,9 @@ describe('Composer atomic token deletion', () => {
   });
 
   it('deletes a mention atom and prunes the mention binding', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -3893,6 +4290,9 @@ describe('Composer atomic token deletion', () => {
   });
 
   it('backspaces from a mention atom edge and prunes the mention binding', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -3921,6 +4321,9 @@ describe('Composer atomic token deletion', () => {
   });
 
   it('deletes a rich-link atom and prunes the rich link item', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(screen.getByRole('button', { name: /insert rich link/i }));
@@ -3948,6 +4351,9 @@ describe('Composer atomic token deletion', () => {
   });
 
   it('deletes a selection spanning a text link and image attachment and prunes both structured items', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const text = 'open docs[Image #1] tail';
     const linkLabel = 'docs';
     const imageLabel = '[Image #1]';
@@ -3992,6 +4398,9 @@ describe('Composer atomic token deletion', () => {
   });
 
   it('deletes a selection spanning image and paste atoms and prunes both payloads', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const imageLabel = '[Image #1]';
     const placeholder = `[Pasted Content ${Array.from(LARGE_PASTE).length} chars]`;
     const { user, prompt, submissions } = renderRichInput({
@@ -4038,6 +4447,9 @@ describe('Composer atomic token deletion', () => {
   });
 
   it('deletes a cross-line selection spanning mention and paste atoms and prunes both payloads', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const mentionLabel = '@frontend';
     const placeholder = `[Pasted Content ${Array.from(LARGE_PASTE).length} chars]`;
     const text = `keep ${mentionLabel}\n${placeholder} tail`;
@@ -4109,6 +4521,9 @@ describe('Composer atomic token deletion', () => {
   });
 
   it('edits a slash token and prunes slash-command metadata', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -4141,6 +4556,9 @@ describe('Composer atomic token deletion', () => {
 
 describe('Composer remote image behavior', () => {
   it('submits a remote-image-only prompt with Enter', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(screen.getByRole('button', { name: /add remote image/i }));
@@ -4151,6 +4569,9 @@ describe('Composer remote image behavior', () => {
   });
 
   it('keeps a remote-image-only prompt editable when Tab is pressed', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(screen.getByRole('button', { name: /add remote image/i }));
@@ -4162,6 +4583,9 @@ describe('Composer remote image behavior', () => {
   });
 
   it('selects and removes a remote image from the keyboard', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(screen.getByRole('button', { name: /add remote image/i }));
@@ -4181,6 +4605,9 @@ describe('Composer remote image behavior', () => {
   });
 
   it('clears a selected remote image when editing or clicking inside the editor', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(screen.getByRole('button', { name: /add remote image/i }));
@@ -4208,6 +4635,9 @@ describe('Composer remote image behavior', () => {
   });
 
   it('clears a selected remote image for navigation, escape, and select-all keys', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt } = renderRichInput();
 
     await user.click(screen.getByRole('button', { name: /add remote image/i }));
@@ -4246,6 +4676,9 @@ describe('Composer remote image behavior', () => {
   });
 
   it('renumbers image attachments when a remote image is added', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.upload(
@@ -4277,6 +4710,9 @@ describe('Composer remote image behavior', () => {
 
 describe('Composer attachments', () => {
   it('owns preview URLs, image fallback, and disabled removal through the composer', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const createObjectUrl = vi.spyOn(URL, 'createObjectURL');
     const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL');
     const user = userEvent.setup();
@@ -4342,6 +4778,9 @@ describe('Composer attachments', () => {
   });
 
   it('attaches images chosen from the file input and submits their bytes', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
     const input = screen.getByLabelText<HTMLInputElement>('Attach media files');
     const openFileDialog = vi.spyOn(input, 'click');
@@ -4384,6 +4823,9 @@ describe('Composer attachments', () => {
   });
 
   it('rejects a non-media file from the file input with an inline error', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     renderRichInput();
     const user = userEvent.setup({ applyAccept: false });
 
@@ -4406,6 +4848,9 @@ describe('Composer attachments', () => {
   });
 
   it('attaches video and audio files under their own placeholders and renumbers across kinds', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.upload(screen.getByLabelText('Attach media files'), [
@@ -4449,6 +4894,9 @@ describe('Composer attachments', () => {
   });
 
   it('removes an attached image from the thumbnail strip and renumbers the rest', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { user, prompt, submissions } = renderRichInput();
 
     await user.upload(screen.getByLabelText('Attach media files'), [
@@ -4484,6 +4932,9 @@ describe('Composer attachments', () => {
   });
 
   it('restores attached image bytes when the send is rejected', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { promise, reject } = Promise.withResolvers<never>();
     let sends = 0;
     const { user, prompt, submissions } = renderRichInput({
@@ -4769,6 +5220,9 @@ function StateChangeCountScenario() {
 
 describe('Composer registry-dependent restore', () => {
   it('rebuilds the slash-command mark and command payload for a known command', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { prompt } = renderRichInput({
       initialText: '/review Please inspect this patch',
     });
@@ -4784,6 +5238,9 @@ describe('Composer registry-dependent restore', () => {
   });
 
   it('rebuilds mention atoms with their bindings when restoring a draft', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { prompt } = renderRichInput({
       initialText: 'Ask @frontend and $react-test about this',
     });
@@ -4799,6 +5256,9 @@ describe('Composer registry-dependent restore', () => {
   });
 
   it('leaves an unknown slash command as plain text with no command payload', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { prompt } = renderRichInput({
       initialText: '/unregistered do the thing',
     });
@@ -4813,6 +5273,9 @@ describe('Composer registry-dependent restore', () => {
   });
 
   it('notifies state changes only for real state changes, not parent re-renders', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     render(<StateChangeCountScenario />, { wrapper: FakeClock });
     const notifications = () =>
@@ -4847,6 +5310,9 @@ describe('Composer registry-dependent restore', () => {
 
 describe('Composer host-declared triggers', () => {
   it('drives suggestions from a non-default command trigger', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     const submitted: ComposerSubmission[] = [];
     render(
@@ -4885,6 +5351,9 @@ describe('Composer host-declared triggers', () => {
   });
 
   it('ignores the former default trigger when the host does not declare it', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     render(
       <Composer.Root>
@@ -4915,6 +5384,9 @@ describe('Composer host-declared triggers', () => {
   });
 
   it('lists only the items belonging to the active trigger', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     render(
       <Composer.Root>
@@ -4952,6 +5424,9 @@ describe('Composer host-declared triggers', () => {
   });
 
   it('takes a mention sigil from its enclosing trigger', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     render(
       <Composer.Root>
@@ -4985,6 +5460,9 @@ describe('Composer host-declared triggers', () => {
   });
 
   it('matches mentions under a multi-character trigger', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     render(
       <Composer.Root>
@@ -5018,6 +5496,9 @@ describe('Composer host-declared triggers', () => {
   });
 
   it('leaves the command menu inert when no command trigger is declared', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     function MenuScenario() {
       return (
@@ -5055,6 +5536,9 @@ describe('Composer host-declared triggers', () => {
   });
 
   it('rejects items placed outside a trigger', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     expect(() =>
       render(
         <Composer.Root>
@@ -5074,6 +5558,9 @@ describe('Composer host-declared triggers', () => {
   });
 
   it('rejects items hidden behind a wrapper component', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     function SkillItem() {
       return (
         <Composer.Mention
@@ -5101,6 +5588,9 @@ describe('Composer host-declared triggers', () => {
   });
 
   it('rejects a trigger that mixes commands and mentions', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     expect(() =>
       render(
         <Composer.Root>
@@ -5131,6 +5621,9 @@ describe('Composer host-declared triggers', () => {
 
 describe('Composer token detection', () => {
   it('does not offer suggestions for a token that repeats its own trigger', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     render(
       <Composer.Root>
@@ -5155,6 +5648,9 @@ describe('Composer token detection', () => {
 
 describe('Composer host clock', () => {
   it('stamps a submission with the time of the host clock', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     const submitted = vi.fn();
     const clock = createClock(Date.UTC(2020, 0, 1, 9, 30, 15));
@@ -5179,6 +5675,9 @@ describe('Composer host clock', () => {
   });
 
   it('reports later state changes only to the current onStateChange', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     const first = vi.fn();
     const second = vi.fn();
@@ -5205,6 +5704,9 @@ describe('Composer host clock', () => {
   });
 
   it('names an added remote image from the time of the host clock', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     const onStateChange = vi.fn();
     const clock = createClock(Date.UTC(2020, 0, 1));

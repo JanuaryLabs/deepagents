@@ -1,5 +1,6 @@
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -36,6 +37,9 @@ function promptElement() {
 
 describe('Composer.Root draftKey', () => {
   it('restores the persisted draft after a remount', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     try {
       localStorage.clear();
       const user = userEvent.setup();
@@ -55,6 +59,9 @@ describe('Composer.Root draftKey', () => {
   });
 
   it('keeps drafts isolated per key', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     try {
       localStorage.clear();
       const user = userEvent.setup();
@@ -83,6 +90,9 @@ describe('Composer.Root draftKey', () => {
   });
 
   it('switches drafts when the key changes without a host remount', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     try {
       localStorage.clear();
       const user = userEvent.setup();
@@ -106,6 +116,9 @@ describe('Composer.Root draftKey', () => {
   });
 
   it('clears the stored draft when the editor is emptied', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     try {
       localStorage.clear();
       const user = userEvent.setup();
@@ -123,6 +136,9 @@ describe('Composer.Root draftKey', () => {
   });
 
   it('clears the stored draft when a submission returns no promise', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     try {
       localStorage.clear();
       const user = userEvent.setup();
@@ -147,6 +163,9 @@ describe('Composer.Root draftKey', () => {
   });
 
   it('keeps the stored draft until the send settles and clears it on success', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     try {
       localStorage.clear();
       const user = userEvent.setup();
@@ -170,6 +189,9 @@ describe('Composer.Root draftKey', () => {
   });
 
   it('restores the draft into the editor and focuses it when the send fails', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     try {
       localStorage.clear();
       const user = userEvent.setup();
@@ -195,6 +217,9 @@ describe('Composer.Root draftKey', () => {
   });
 
   it('persists the text without pretending an unpersistable attachment survived', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     try {
       localStorage.clear();
       const user = userEvent.setup();
@@ -230,6 +255,9 @@ describe('Composer.Root draftKey', () => {
   });
 
   it('ignores corrupted or foreign stored values', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     try {
       localStorage.clear();
       const user = userEvent.setup();

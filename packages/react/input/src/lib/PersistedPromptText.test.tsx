@@ -1,10 +1,13 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { PersistedPromptText } from '@deepagents/react-input/browser';
 
 describe('PersistedPromptText', () => {
   it('renders only the supported prompt markup', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const { container } = render(
       <PersistedPromptText
         text={`Use \`sum()\` and [$report](skill://report) with [docs](https://example.com), [unsafe](javascript:alert(1)), $review, and $[data set].
@@ -34,6 +37,9 @@ select 1
   });
 
   it('copies the canonical source for rendered references and code', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const source =
       'Use [$report](skill://report), $review, and `sum()` for this.';
     const { container } = render(<PersistedPromptText text={source} />);

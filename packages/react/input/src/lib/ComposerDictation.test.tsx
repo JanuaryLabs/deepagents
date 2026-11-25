@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
@@ -25,6 +25,9 @@ function DictationShortcut() {
 
 describe('Composer dictation', () => {
   it('offers no dictation in a browser without a recorder', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     render(
       <Composer.Root
         dictation={{ transcribe: async () => ({ text: 'never heard' }) }}
@@ -53,6 +56,9 @@ describe('Composer dictation', () => {
   });
 
   it('ignores a host start in a browser without a recorder', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     const user = userEvent.setup();
     const rejections: unknown[] = [];
     const recordRejection = (reason: unknown) => {
@@ -93,6 +99,9 @@ describe('Composer dictation', () => {
     ['Composer.CancelDictation', <Composer.CancelDictation key="cancel" />],
     ['ReadsDictation', <ReadsDictation key="hook" />],
   ])('%s needs the dictation of Composer.Root', (name, part) => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
     expect(() =>
       render(
         <Composer.Root>
