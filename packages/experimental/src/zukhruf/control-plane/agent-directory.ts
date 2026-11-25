@@ -76,6 +76,33 @@ export class AgentDirectory {
     });
   }
 
+  /** Marks the agent as archived since `archivedAt`, keeping an earlier mark. */
+  async markArchived(
+    conversation: ConversationId,
+    archivedAt: number,
+  ): Promise<void> {
+    await this.#updateThread(conversation, (thread) =>
+      thread.archivedAt === undefined ? thread.archived(archivedAt) : undefined,
+    );
+  }
+
+  /** Clears the agent's archive mark. */
+  async markUnarchived(conversation: ConversationId): Promise<void> {
+    await this.#updateThread(conversation, (thread) =>
+      thread.archivedAt === undefined ? undefined : thread.unarchived(),
+    );
+  }
+
+  /** The root of the tree `thread` is in: `thread` itself, or the tree's root chat while it is there. */
+  async rootOf(thread: AgentThread): Promise<AgentThread | undefined> {
+    return thread.path.isRoot
+      ? thread
+      : await this.load({
+          chatId: thread.treeId,
+          userId: thread.conversation.userId,
+        });
+  }
+
   async recordLatestTurn(
     conversation: ConversationId,
     streamId: string,
@@ -235,6 +262,24 @@ export class AgentDirectory {
         `invalid Zukhruf parent for chat "${thread.conversation.chatId}"`,
       );
     }
+  }
+
+  /** Writes the agent `update` derives from the stored one, or nothing when it derives none. */
+  async #updateThread(
+    conversation: ConversationId,
+    update: (thread: AgentThread) => AgentThread | undefined,
+  ): Promise<void> {
+    await this.#store.updateChat(conversation.chatId, (chat) => {
+      assertConversationOwner(conversation, chat.userId);
+      const thread = this.#threadFromMetadata(conversation, chat.metadata);
+      if (!thread) {
+        throw new Error(
+          `AgentDirectory: chat "${conversation.chatId}" is not an agent`,
+        );
+      }
+      const updated = update(thread);
+      return updated && { metadata: updated.toMetadata(chat.metadata) };
+    });
   }
 
   async #updateLatestTurn(

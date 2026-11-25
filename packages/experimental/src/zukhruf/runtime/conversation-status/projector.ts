@@ -57,8 +57,24 @@ export interface ConversationDeleted {
   conversation: ConversationId;
 }
 
+/** Codex's `thread/archived`: the conversation's tree was archived. */
+export interface ConversationArchived {
+  type: 'archived';
+  conversation: ConversationId;
+}
+
+/** Codex's `thread/unarchived`: the conversation's tree is no longer archived. */
+export interface ConversationUnarchived {
+  type: 'unarchived';
+  conversation: ConversationId;
+}
+
 export type ConversationStatusEvent =
-  ConversationStatusChange | ConversationDeleted | { type: 'reset' };
+  | ConversationStatusChange
+  | ConversationDeleted
+  | ConversationArchived
+  | ConversationUnarchived
+  | { type: 'reset' };
 
 type ProjectorEvent =
   ConversationStatusEvent | { type: 'error'; error: unknown };
@@ -118,6 +134,8 @@ export class ConversationStatusProjector {
     string,
     ConversationStatusChange | ConversationDeleted
   >();
+  /** The archivedAt each conversation had when this process last projected it. */
+  readonly #archivedAt = new Map<string, number | undefined>();
   readonly #publishing = new Mutex(new MemoryStore());
   #subscribers = 0;
   #remote: RemoteAttachment | Detached = DETACHED;
@@ -272,13 +290,19 @@ export class ConversationStatusProjector {
 
   async #project(conversation: ConversationId, key: string): Promise<boolean> {
     let change: ConversationStatusChange | ConversationDeleted;
+    let archivedAt: number | undefined;
+    let archiving = false;
+    const id = { chatId: conversation.chatId, userId: conversation.userId };
     try {
-      const id = { chatId: conversation.chatId, userId: conversation.userId };
       if (await this.#isGone(conversation)) {
         change = { type: 'deleted', conversation: id };
       } else {
         const status = await this.read(conversation);
         const thread = await this.#directory.load(conversation);
+        archivedAt = thread?.archivedAt;
+        // A mark this process has not seen yet is an archive; a mark it
+        // saw that is gone is an unarchive.
+        archiving = archivedAt !== this.#archivedAt.get(key);
         const child = thread ? await this.#child(thread) : undefined;
         change = {
           type: 'change',
@@ -292,7 +316,14 @@ export class ConversationStatusProjector {
       // the next transition re-reads from durable state anyway.
       return false;
     }
-    if (isDeepStrictEqual(this.#last.get(key), change)) return false;
+    this.#archivedAt.set(key, archivedAt);
+    if (archiving) {
+      this.#emit({
+        type: archivedAt === undefined ? 'unarchived' : 'archived',
+        conversation: id,
+      });
+    }
+    if (isDeepStrictEqual(this.#last.get(key), change)) return archiving;
     this.#last.set(key, change);
     this.#emit(change);
     return true;

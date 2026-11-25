@@ -16,6 +16,10 @@ import { elementsSchema } from '@deepagents/elements';
 
 import type { AgentThreadLimitError } from '../../control-plane/agent-thread-limit-error.ts';
 import { agentTurnIdSchema } from '../../control-plane/agent-turn-id.ts';
+import type {
+  ConversationArchivedError,
+  ConversationNotArchivedError,
+} from '../../control-plane/conversation-archived-error.ts';
 import type { ConversationNotFoundError } from '../../control-plane/conversation-not-found-error.ts';
 import type { StaleTurnError } from '../../control-plane/stale-turn-error.ts';
 import type { TurnNotFoundError } from '../../control-plane/turn-not-found-error.ts';
@@ -80,6 +84,8 @@ export function projectHttp<Running extends object>(
 
 const SESSION_ROUTE_PATH = '/session/:sessionId';
 const SESSION_CANCEL_ROUTE_PATH = '/session/:sessionId/cancel';
+const SESSION_ARCHIVE_ROUTE_PATH = '/session/:sessionId/archive';
+const SESSION_UNARCHIVE_ROUTE_PATH = '/session/:sessionId/unarchive';
 const SESSION_STREAM_ROUTE_PATH = '/session/:sessionId/stream';
 const EVENTS_ROUTE_PATH = '/events';
 const SESSION_TURN_ROUTE_PATH = '/session/:sessionId/turn/:turnId';
@@ -121,6 +127,7 @@ const turnBodySchema = z.strictObject({
 
 export interface HttpRuntime extends Pick<
   AgentHost,
+  | 'archiveSession'
   | 'createSession'
   | 'deleteSession'
   | 'enqueue'
@@ -129,6 +136,7 @@ export interface HttpRuntime extends Pick<
   | 'plugin'
   | 'sessionExists'
   | 'subscribeConversationStatus'
+  | 'unarchiveSession'
 > {
   observe(conversation: ConversationId): Pick<
     AgentObservation,
@@ -220,6 +228,42 @@ export function http(
         NO_STORE,
       );
     }
+    if (
+      isNamedError<ConversationArchivedError>(
+        error,
+        'ConversationArchivedError',
+      )
+    ) {
+      return context.json(
+        {
+          cause: {
+            code: 'zukhruf/session-archived',
+            detail: `Session ${error.chatId} is archived; unarchive it first`,
+          },
+          error: 'Session is archived',
+        },
+        409,
+        NO_STORE,
+      );
+    }
+    if (
+      isNamedError<ConversationNotArchivedError>(
+        error,
+        'ConversationNotArchivedError',
+      )
+    ) {
+      return context.json(
+        {
+          cause: {
+            code: 'zukhruf/session-not-archived',
+            detail: `Session ${error.chatId} is not archived`,
+          },
+          error: 'Session is not archived',
+        },
+        409,
+        NO_STORE,
+      );
+    }
     if (isNamedError<AgentThreadLimitError>(error, 'AgentThreadLimitError')) {
       return context.json(
         {
@@ -280,12 +324,22 @@ export function http(
   });
   app.all(INFO_ROUTE_PATH, (context) => methodNotAllowed(context, 'GET'));
 
-  app.get(HISTORY_ROUTE_PATH, async (context) =>
-    context.json(
-      await runtime.listHistory(context.get('userId')),
-      200,
-      NO_STORE,
-    ),
+  app.get(
+    HISTORY_ROUTE_PATH,
+    validate((payload) => ({
+      archived: {
+        select: payload.query.archived,
+        against: z.enum(['true', 'false']).optional(),
+      },
+    })),
+    async (context) =>
+      context.json(
+        await runtime.listHistory(context.get('userId'), {
+          archived: context.var.input.archived === 'true',
+        }),
+        200,
+        NO_STORE,
+      ),
   );
   app.all(HISTORY_ROUTE_PATH, (context) => methodNotAllowed(context, 'GET'));
 
@@ -450,6 +504,53 @@ export function http(
     },
   );
   app.all(SESSION_TURN_CANCEL_ROUTE_PATH, (context) =>
+    methodNotAllowed(context, 'POST'),
+  );
+
+  app.post(
+    SESSION_ARCHIVE_ROUTE_PATH,
+    validate((payload) => ({
+      sessionId: {
+        select: payload.params.sessionId,
+        against: sessionIdSchema,
+      },
+    })),
+    async (context) => {
+      const conversation = {
+        chatId: context.var.input.sessionId,
+        userId: context.get('userId'),
+      };
+      await requireSession(runtime, conversation);
+      await runtime.archiveSession(conversation);
+      return context.body(null, 204, NO_STORE);
+    },
+  );
+  app.all(SESSION_ARCHIVE_ROUTE_PATH, (context) =>
+    methodNotAllowed(context, 'POST'),
+  );
+
+  app.post(
+    SESSION_UNARCHIVE_ROUTE_PATH,
+    validate((payload) => ({
+      sessionId: {
+        select: payload.params.sessionId,
+        against: sessionIdSchema,
+      },
+    })),
+    async (context) => {
+      const conversation = {
+        chatId: context.var.input.sessionId,
+        userId: context.get('userId'),
+      };
+      await requireSession(runtime, conversation);
+      return context.json(
+        await runtime.unarchiveSession(conversation),
+        200,
+        NO_STORE,
+      );
+    },
+  );
+  app.all(SESSION_UNARCHIVE_ROUTE_PATH, (context) =>
     methodNotAllowed(context, 'POST'),
   );
 

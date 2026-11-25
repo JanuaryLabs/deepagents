@@ -3,6 +3,7 @@ import type { Telemetry } from 'ai';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import {
+  type ChatInfo,
   ContextEngine,
   type ContextStore,
   type StreamManager,
@@ -19,6 +20,10 @@ import { AgentResidency } from '../control-plane/agent-residency.ts';
 import { AgentStatusProjector } from '../control-plane/agent-status-projector.ts';
 import { AgentThread } from '../control-plane/agent-thread.ts';
 import { AgentTurnId } from '../control-plane/agent-turn-id.ts';
+import {
+  ConversationArchivedError,
+  ConversationNotArchivedError,
+} from '../control-plane/conversation-archived-error.ts';
 import {
   ConversationNotFoundError,
   assertConversationOwner,
@@ -205,6 +210,8 @@ export interface AgentHistoryItem {
   readonly chatId: string;
   readonly userId: string;
   readonly title?: string;
+  /** When the session was archived; absent while it is not. */
+  readonly archivedAt?: number;
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly messageCount: number;
@@ -343,6 +350,13 @@ export type AgentStack = (resources: AsyncDisposableStack) => Promise<{
 /** Defines infrastructure without acquiring it; each initialization opens its own scope. */
 export function defineStack(create: AgentStack): AgentStack {
   return create;
+}
+
+/** The agents of a tree, the deepest first, so a tree's root comes last. */
+function deepestFirst(threads: readonly AgentThread[]): AgentThread[] {
+  const depth = (thread: AgentThread) =>
+    thread.path.toString().split('/').length;
+  return threads.toSorted((left, right) => depth(right) - depth(left));
 }
 
 /** Ready operations and ownership, available only after initialize() succeeds. */
@@ -524,6 +538,9 @@ class RuntimeHost implements AsyncDisposable {
       },
       publishConversationStatus: (conversation) =>
         conversationStatus.publish(conversation),
+      inArchivedTree: async (thread) =>
+        (await directory.rootOf(thread))?.archivedAt !== undefined,
+      resumeParked: (chatId) => this.#queue.resumeParked(chatId),
     });
     this.#pluginHost = {
       info: this.info,
@@ -593,25 +610,15 @@ class RuntimeHost implements AsyncDisposable {
     const thread =
       (await this.#directory.load(conversation)) ??
       (await this.#controlPlane.resolve(conversation)).thread;
-    const root = await this.#rootOf(thread);
+    const root = await this.#directory.rootOf(thread);
     if (!root || !this.#ownsRoot(root) || root.deletingAt !== undefined) {
       throw new ConversationNotFoundError(conversation.chatId);
     }
   }
 
-  /** The root of the tree `thread` is in: `thread` itself, or the tree's root chat while it is there. */
-  async #rootOf(thread: AgentThread): Promise<AgentThread | undefined> {
-    return thread.path.isRoot
-      ? thread
-      : await this.#directory.load({
-          chatId: thread.treeId,
-          userId: thread.conversation.userId,
-        });
-  }
-
   /** Whether the tree `thread` is in is being deleted, or its root is gone. */
   async #inDeletedTree(thread: AgentThread): Promise<boolean> {
-    const root = await this.#rootOf(thread);
+    const root = await this.#directory.rootOf(thread);
     return root === undefined || root.deletingAt !== undefined;
   }
 
@@ -652,11 +659,7 @@ class RuntimeHost implements AsyncDisposable {
       await directory.markDeleting(conversation, Date.now());
       return thread;
     });
-    const depth = (thread: AgentThread) =>
-      thread.path.toString().split('/').length;
-    const members = (await this.#directory.listTree(root)).toSorted(
-      (left, right) => depth(right) - depth(left),
-    );
+    const members = deepestFirst(await this.#directory.listTree(root));
     await this.#stopLiveWork(members.map(({ conversation }) => conversation));
     for (const { conversation: member } of members) {
       await this.#plugins.conversationDeleting(member);
@@ -703,17 +706,33 @@ class RuntimeHost implements AsyncDisposable {
   async #stopLiveWork(members: readonly ConversationId[]): Promise<void> {
     for (const member of members) {
       await this.#queue.forget(member);
-      const prefix = AgentTurnId.prefixOf(member);
-      for (const status of ['queued', 'running'] as const) {
-        for (const streamId of await this.#streams.store.listStreamIds({
-          prefix,
-          status,
-        })) {
-          await this.#streams.cancel(streamId);
-          await this.#queue.cancel(streamId);
-        }
+      await this.#cancelTurns(member, ['queued', 'running']);
+    }
+    await this.#awaitShutdown(members);
+    for (const member of members) {
+      await this.#queue.forget(member);
+    }
+  }
+
+  /** Cancels the member's turns whose streams have one of `statuses`, which aborts a running one on any worker. */
+  async #cancelTurns(
+    member: ConversationId,
+    statuses: readonly ('queued' | 'running')[],
+  ): Promise<void> {
+    const prefix = AgentTurnId.prefixOf(member);
+    for (const status of statuses) {
+      for (const streamId of await this.#streams.store.listStreamIds({
+        prefix,
+        status,
+      })) {
+        await this.#streams.cancel(streamId);
+        await this.#queue.cancel(streamId);
       }
     }
+  }
+
+  /** Waits at most 10 s in all for the members' running turns to exit, as Codex waits for a thread's shutdown. */
+  async #awaitShutdown(members: readonly ConversationId[]): Promise<void> {
     const deadline = performance.now() + SHUTDOWN_TIMEOUT_MS;
     for (const member of members) {
       while ((await this.#queue.getTurnActivity(member)) === 'running') {
@@ -722,9 +741,107 @@ class RuntimeHost implements AsyncDisposable {
         await delay(Math.min(SHUTDOWN_POLL_INTERVAL_MS, remaining));
       }
     }
-    for (const member of members) {
-      await this.#queue.forget(member);
+  }
+
+  /**
+   * Archives a root chat this runtime owns and every sub-agent chat under
+   * it, as Codex's thread/archive does. One admission to the tree marks
+   * every member archived, so from then on the tree admits no turn through
+   * enqueue, a user's or a plugin's, and a turn queued before the archive
+   * is parked when a worker claims it. Then its running turns are
+   * cancelled, the root first and then its descendants, deepest first,
+   * waiting at most 10 s for them to exit; then each member's status is
+   * published, which subscribers receive as `archived`. Everything stays
+   * readable, and mail still runs a member's turn, as collaboration resumes
+   * an archived agent. An archived root rejects with
+   * ConversationArchivedError; any other chat, and one being deleted, with
+   * ConversationNotFoundError.
+   */
+  async archiveSession(conversation: ConversationId): Promise<void> {
+    const archivedAt = Date.now();
+    const members = await this.#markTree(
+      conversation,
+      (root) => {
+        if (root.archivedAt !== undefined) {
+          throw new ConversationArchivedError(conversation.chatId);
+        }
+      },
+      (directory, member) => directory.markArchived(member, archivedAt),
+    );
+    // Codex shuts the root down first, then its descendants in reverse.
+    const order = [
+      ...members.filter(({ path }) => path.isRoot),
+      ...deepestFirst(members.filter(({ path }) => !path.isRoot)),
+    ].map(({ conversation: member }) => member);
+    for (const member of order) await this.#cancelTurns(member, ['running']);
+    await this.#awaitShutdown(order);
+    for (const member of order) await this.#conversationStatus.publish(member);
+  }
+
+  /**
+   * Unarchives a root chat this runtime owns and every sub-agent chat under
+   * it, as Codex's thread/unarchive does: one admission to the tree clears
+   * every member's mark, then each member's parked turns are resumed, the
+   * ones queued before the archive among them, and each member's status is
+   * published, which subscribers receive as `unarchived`. It starts no
+   * sandbox; the next turn does. Resolves with the session's history item.
+   * A root that is not archived rejects with ConversationNotArchivedError;
+   * any other chat, and one being deleted, with ConversationNotFoundError.
+   */
+  async unarchiveSession(
+    conversation: ConversationId,
+  ): Promise<AgentHistoryItem> {
+    const members = await this.#markTree(
+      conversation,
+      (root) => {
+        if (root.archivedAt === undefined) {
+          throw new ConversationNotArchivedError(conversation.chatId);
+        }
+      },
+      (directory, member) => directory.markUnarchived(member),
+    );
+    for (const { conversation: member } of members) {
+      await this.#queue.resumeParked(member.chatId);
     }
+    for (const { conversation: member } of members) {
+      await this.#conversationStatus.publish(member);
+    }
+    const chat = (
+      await this.#store.listChats({
+        userId: conversation.userId,
+        metadata: AgentThread.metadataFilter(conversation.chatId),
+      })
+    ).find(({ id }) => id === conversation.chatId);
+    if (!chat) throw new ConversationNotFoundError(conversation.chatId);
+    const root = AgentThread.fromMetadata(conversation, chat.metadata);
+    if (!root) throw new ConversationNotFoundError(conversation.chatId);
+    return this.#historyItem(chat, root);
+  }
+
+  /**
+   * In one admission to the tree of `conversation`, a root this runtime owns
+   * that is not being deleted and that `assertMarkable` accepts, applies
+   * `mark` to every member, and resolves with the members.
+   */
+  async #markTree(
+    conversation: ConversationId,
+    assertMarkable: (root: AgentThread) => void,
+    mark: (directory: AgentDirectory, member: ConversationId) => Promise<void>,
+  ): Promise<AgentThread[]> {
+    const tree = { userId: conversation.userId, treeId: conversation.chatId };
+    return this.#storage.admit(tree, async (scope) => {
+      const directory = new AgentDirectory(scope.store);
+      const root = await directory.load(conversation);
+      if (!root || !this.#ownsRoot(root) || root.deletingAt !== undefined) {
+        throw new ConversationNotFoundError(conversation.chatId);
+      }
+      assertMarkable(root);
+      const members = await directory.listTree(root);
+      for (const { conversation: member } of members) {
+        await mark(directory, member);
+      }
+      return members;
+    });
   }
 
   /** A root thread this runtime's root declaration started. */
@@ -806,7 +923,12 @@ class RuntimeHost implements AsyncDisposable {
     });
   }
 
-  async listHistory(userId?: string): Promise<readonly AgentHistoryItem[]> {
+  /** The sessions of this runtime: by default the ones not archived, and with `archived: true` only the archived ones, like Codex's thread/list. */
+  async listHistory(
+    userId?: string,
+    options?: { archived?: boolean },
+  ): Promise<readonly AgentHistoryItem[]> {
+    const archived = options?.archived ?? false;
     const chats = await this.#store.listChats();
     const roots = chats.flatMap((chat) => {
       if (userId !== undefined && chat.userId !== userId) return [];
@@ -818,23 +940,34 @@ class RuntimeHost implements AsyncDisposable {
         }
         return [];
       }
-      return this.#ownsRoot(thread) && thread.deletingAt === undefined
-        ? [{ chat, conversation }]
+      return this.#ownsRoot(thread) &&
+        thread.deletingAt === undefined &&
+        (thread.archivedAt !== undefined) === archived
+        ? [{ chat, thread }]
         : [];
     });
 
     return Promise.all(
-      roots.map(async ({ chat, conversation }) => ({
-        chatId: chat.id,
-        userId: chat.userId,
-        ...(chat.title === undefined ? {} : { title: chat.title }),
-        createdAt: chat.createdAt,
-        updatedAt: chat.updatedAt,
-        messageCount: chat.messageCount,
-        status: await this.#conversationStatus.read(conversation),
-        children: await this.#conversationStatus.children(conversation),
-      })),
+      roots.map(({ chat, thread }) => this.#historyItem(chat, thread)),
     );
+  }
+
+  async #historyItem(
+    chat: ChatInfo,
+    root: AgentThread,
+  ): Promise<AgentHistoryItem> {
+    const { conversation } = root;
+    return {
+      chatId: chat.id,
+      userId: chat.userId,
+      ...(chat.title === undefined ? {} : { title: chat.title }),
+      ...(root.archivedAt === undefined ? {} : { archivedAt: root.archivedAt }),
+      createdAt: chat.createdAt,
+      updatedAt: chat.updatedAt,
+      messageCount: chat.messageCount,
+      status: await this.#conversationStatus.read(conversation),
+      children: await this.#conversationStatus.children(conversation),
+    };
   }
 
   work(options?: AgentRuntimeWorkOptions): Promise<AsyncDisposable> {

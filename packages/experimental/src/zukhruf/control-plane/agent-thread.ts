@@ -12,6 +12,8 @@ export interface AgentThreadOptions {
   lastTurnId?: string;
   /** When a delete of this root's tree began; set only on a root. */
   deletingAt?: number;
+  /** When this agent's tree was archived; set on every member. */
+  archivedAt?: number;
 }
 
 /** Durable identity and persisted metadata for one agent instance. */
@@ -28,6 +30,11 @@ export class AgentThread {
    * finishes from.
    */
   readonly deletingAt?: number;
+  /**
+   * When this agent's tree was archived. Every member of the tree carries
+   * it; the root's decides whether the tree is archived.
+   */
+  readonly archivedAt?: number;
 
   constructor(options: AgentThreadOptions) {
     AgentThread.#assertTopology(options);
@@ -41,6 +48,7 @@ export class AgentThread {
     this.declarationName = options.declarationName;
     this.lastTurnId = options.lastTurnId;
     this.deletingAt = options.deletingAt;
+    this.archivedAt = options.archivedAt;
   }
 
   static root(
@@ -80,14 +88,21 @@ export class AgentThread {
       return undefined;
     }
 
-    const { path, parentChatId, declarationName, lastTurnId, deletingAt } =
-      zukhruf;
+    const {
+      path,
+      parentChatId,
+      declarationName,
+      lastTurnId,
+      deletingAt,
+      archivedAt,
+    } = zukhruf;
     if (
       typeof path !== 'string' ||
       (parentChatId !== null && typeof parentChatId !== 'string') ||
       typeof declarationName !== 'string' ||
       (lastTurnId !== undefined && typeof lastTurnId !== 'string') ||
-      (deletingAt !== undefined && typeof deletingAt !== 'number')
+      (deletingAt !== undefined && typeof deletingAt !== 'number') ||
+      (archivedAt !== undefined && typeof archivedAt !== 'number')
     ) {
       return undefined;
     }
@@ -109,6 +124,7 @@ export class AgentThread {
         declarationName,
         ...(lastTurnId === undefined ? {} : { lastTurnId }),
         ...(deletingAt === undefined ? {} : { deletingAt }),
+        ...(archivedAt === undefined ? {} : { archivedAt }),
       });
     } catch {
       return undefined;
@@ -124,6 +140,18 @@ export class AgentThread {
     return new AgentThread({ ...this.#options(), deletingAt });
   }
 
+  /** This agent, archived since `archivedAt`. */
+  archived(archivedAt: number): AgentThread {
+    return new AgentThread({ ...this.#options(), archivedAt });
+  }
+
+  /** This agent, no longer archived. */
+  unarchived(): AgentThread {
+    const options = this.#options();
+    delete options.archivedAt;
+    return new AgentThread(options);
+  }
+
   #options(): AgentThreadOptions {
     return {
       conversation: this.conversation,
@@ -133,13 +161,16 @@ export class AgentThread {
       declarationName: this.declarationName,
       ...(this.lastTurnId === undefined ? {} : { lastTurnId: this.lastTurnId }),
       ...(this.deletingAt === undefined ? {} : { deletingAt: this.deletingAt }),
+      ...(this.archivedAt === undefined ? {} : { archivedAt: this.archivedAt }),
     };
   }
 
   toMetadata(
     metadata: Record<string, unknown> | undefined,
   ): Record<string, unknown> {
-    const existing = isRecord(metadata?.zukhruf) ? metadata.zukhruf : {};
+    const existing = isRecord(metadata?.zukhruf) ? { ...metadata.zukhruf } : {};
+    // Written only while it is set, so an unarchived thread clears it.
+    delete existing.archivedAt;
     return {
       ...metadata,
       zukhrufTreeId: this.treeId,
@@ -154,6 +185,9 @@ export class AgentThread {
         ...(this.deletingAt === undefined
           ? {}
           : { deletingAt: this.deletingAt }),
+        ...(this.archivedAt === undefined
+          ? {}
+          : { archivedAt: this.archivedAt }),
       },
     };
   }

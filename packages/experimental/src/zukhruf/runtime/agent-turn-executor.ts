@@ -29,6 +29,7 @@ import type { ZukhrufSandbox } from '../agent.ts';
 import type { AgentToolContext } from '../collaboration/agent-tool-context.ts';
 import type { Team } from '../collaboration/team.ts';
 import type { AgentControlPlane } from '../control-plane/agent-control-plane.ts';
+import type { AgentThread } from '../control-plane/agent-thread.ts';
 import type { MailboxCoordinator } from '../mailbox/coordinator.ts';
 import type {
   ConversationId,
@@ -69,6 +70,10 @@ export interface AgentTurnExecutorOptions {
   settlement: Pick<TurnSettlement, 'complete' | 'completeEmptyWake'>;
   /** Signals that the conversation's status may have changed. Never rejects. */
   publishConversationStatus: (conversation: ConversationId) => Promise<void>;
+  /** Whether the tree `thread` is in is archived. */
+  inArchivedTree: (thread: AgentThread) => Promise<boolean>;
+  /** Revives the chat's parked turns. */
+  resumeParked: (chatId: string) => Promise<void>;
 }
 
 /** How a delivery that did not park ends: a mailbox wake that found no mail completes its stream itself. */
@@ -91,6 +96,8 @@ export class AgentTurnExecutor {
   readonly #idleStop: SandboxIdleStop | undefined;
   readonly #settlement: AgentTurnExecutorOptions['settlement'];
   readonly #publishConversationStatus: AgentTurnExecutorOptions['publishConversationStatus'];
+  readonly #inArchivedTree: AgentTurnExecutorOptions['inArchivedTree'];
+  readonly #resumeParked: AgentTurnExecutorOptions['resumeParked'];
 
   constructor(options: AgentTurnExecutorOptions) {
     this.#store = options.store;
@@ -104,6 +111,8 @@ export class AgentTurnExecutor {
     this.#idleStop = options.idleStop;
     this.#settlement = options.settlement;
     this.#publishConversationStatus = options.publishConversationStatus;
+    this.#inArchivedTree = options.inArchivedTree;
+    this.#resumeParked = options.resumeParked;
   }
 
   /**
@@ -150,6 +159,21 @@ export class AgentTurnExecutor {
     if (await this.#projectSkippedTerminalTurn(turn)) return 'settled';
 
     const { declaration, thread } = await this.#controlPlane.resolve(turn);
+    // A turn of an archived tree that was queued before the archive waits,
+    // parked, for its unarchive; mail still runs, as collaboration resumes
+    // an archived agent.
+    if (turn.kind === 'message' && (await this.#inArchivedTree(thread))) {
+      await park();
+      // An unarchive that cleared the mark after the check above ran its
+      // resumeParked while this job was still active, which revives nothing;
+      // so a mark found cleared once the park has landed is resumed here.
+      // `thread` is the state read before the park: a fresh read decides.
+      const { thread: current } = await this.#controlPlane.resolve(turn);
+      if (!(await this.#inArchivedTree(current))) {
+        await this.#resumeParked(turn.chatId);
+      }
+      return 'settled';
+    }
     const usageHint = this.#team.guidance(
       thread.path.isRoot ? 'root' : 'subagent',
     );

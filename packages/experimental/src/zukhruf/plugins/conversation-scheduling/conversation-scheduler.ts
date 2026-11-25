@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { isRecord } from '@deepagents/context';
 
 import { conversationNamespace } from '../../control-plane/agent-turn-id.ts';
+import type { ConversationArchivedError } from '../../control-plane/conversation-archived-error.ts';
 import type { ConversationNotFoundError } from '../../control-plane/conversation-not-found-error.ts';
 import { isNamedError } from '../../is-named-error.ts';
 import type { ConversationId } from '../../mailbox/types.ts';
@@ -472,15 +473,28 @@ export class ConversationScheduler {
       scheduledFor: wake.scheduledFor,
       occurrenceId,
     };
-    await this.#host.enqueue(wake.conversation, {
-      message: {
-        id: occurrenceId,
-        role: 'user',
-        parts: [{ type: 'text', text: occurrence.prompt }],
-        metadata: { zukhruf: { origin: 'scheduled', schedule } },
-      },
-      trigger: 'submit-message',
-    });
+    try {
+      await this.#host.enqueue(wake.conversation, {
+        message: {
+          id: occurrenceId,
+          role: 'user',
+          parts: [{ type: 'text', text: occurrence.prompt }],
+          metadata: { zukhruf: { origin: 'scheduled', schedule } },
+        },
+        trigger: 'submit-message',
+      });
+    } catch (error) {
+      // An archived conversation runs nothing on its own: the occurrence is
+      // skipped, and a recurring cron's successor is already armed.
+      if (
+        !isNamedError<ConversationArchivedError>(
+          error,
+          'ConversationArchivedError',
+        )
+      ) {
+        throw error;
+      }
+    }
 
     await this.#update(wake.conversation, (current) => {
       if (!this.#matchingDispatching(current, wake)) return current;

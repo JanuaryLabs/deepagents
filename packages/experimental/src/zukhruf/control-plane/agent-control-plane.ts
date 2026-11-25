@@ -29,6 +29,7 @@ import {
 import { AgentThreadLimitError } from './agent-thread-limit-error.ts';
 import type { AgentThread } from './agent-thread.ts';
 import { AgentTurnId } from './agent-turn-id.ts';
+import { ConversationArchivedError } from './conversation-archived-error.ts';
 import type { ForkTurns } from './fork-turns.ts';
 import { StaleTurnError } from './stale-turn-error.ts';
 import { TurnNotFoundError } from './turn-not-found-error.ts';
@@ -119,6 +120,14 @@ export class AgentControlPlane {
     if (!message.id.trim()) throw new Error('enqueue: message id is required');
     await this.#directory.assertOwnerIfExists(conversation);
     return this.#residency.admit(conversation, async (admission) => {
+      // An archived tree runs no turn of its own: neither a user's nor a plugin's.
+      const thread = await admission.directory.load(conversation);
+      if (
+        thread &&
+        (await admission.directory.rootOf(thread))?.archivedAt !== undefined
+      ) {
+        throw new ConversationArchivedError(conversation.chatId);
+      }
       const streamId =
         message.role === 'assistant'
           ? await AgentControlPlane.#continuationStreamId(

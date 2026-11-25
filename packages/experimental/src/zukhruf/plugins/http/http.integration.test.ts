@@ -88,6 +88,12 @@ function createRuntime(overrides: Partial<TestRuntime> = {}) {
     async deleteSession() {
       throw new Error('this test never deletes a session');
     },
+    async archiveSession() {
+      throw new Error('this test never archives a session');
+    },
+    async unarchiveSession() {
+      throw new Error('this test never unarchives a session');
+    },
     async enqueue() {
       return {
         id: 'internal-turn-id',
