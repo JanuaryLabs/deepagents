@@ -11,6 +11,7 @@ import {
   postgresTransaction,
 } from '@deepagents/context';
 
+import { PostgresDeletedConversationStore } from '../deleted-conversations/postgres.store.ts';
 import { PostgresMailboxStore } from '../mailbox/postgres.store.ts';
 import {
   openSettleQueue,
@@ -68,7 +69,7 @@ export interface PostgresAgentStorageOptions {
   pool: Pool;
   /** Borrowed and started: the host stops it. It must use the pool's database. */
   boss: PgBoss;
-  /** PostgreSQL schema of the context, stream and mailbox tables. Default: `public`. */
+  /** PostgreSQL schema of the context, stream, mailbox and deleted-chat tables. Default: `public`. */
   schema?: string;
   queue?: PgBossTurnQueueOptions;
   /**
@@ -96,6 +97,7 @@ export class PostgresAgentStorage
   readonly queue: PgBossTurnQueue;
   readonly mailboxStore: PostgresMailboxStore;
   readonly sandboxIdleWakes: PgBossWakeScheduler<SandboxIdleWake>;
+  readonly deletedConversations: PostgresDeletedConversationStore;
   readonly #pool: Pool;
   readonly #boss: PgBoss;
   readonly #schema: string;
@@ -112,6 +114,7 @@ export class PostgresAgentStorage
     queue: PgBossTurnQueue;
     mailboxStore: PostgresMailboxStore;
     sandboxIdleWakes: PgBossWakeScheduler<SandboxIdleWake>;
+    deletedConversations: PostgresDeletedConversationStore;
     ownedChangeSource: PostgresNotifyChangeSource | undefined;
   }) {
     super();
@@ -124,6 +127,7 @@ export class PostgresAgentStorage
     this.queue = parts.queue;
     this.mailboxStore = parts.mailboxStore;
     this.sandboxIdleWakes = parts.sandboxIdleWakes;
+    this.deletedConversations = parts.deletedConversations;
     this.#ownedChangeSource = parts.ownedChangeSource;
   }
 
@@ -149,6 +153,10 @@ export class PostgresAgentStorage
     const store = await PostgresContextStore.create({ pool, schema });
     const streamStore = await PostgresStreamStore.create({ pool, schema });
     const mailboxStore = await PostgresMailboxStore.create({ pool, schema });
+    const deletedConversations = await PostgresDeletedConversationStore.create({
+      pool,
+      schema,
+    });
     const queue = await PgBossTurnQueue.create(boss, options.queue);
     const sandboxIdleWakes = new PgBossWakeScheduler<SandboxIdleWake>(boss, {
       queue: `${queue.queue}-sandbox-idle`,
@@ -174,6 +182,7 @@ export class PostgresAgentStorage
       queue,
       mailboxStore,
       sandboxIdleWakes,
+      deletedConversations,
       ownedChangeSource,
     });
   }
@@ -210,6 +219,7 @@ export class PostgresAgentStorage
           },
         },
         sandboxIdleWakes: this.sandboxIdleWakes.bind(db),
+        deletedConversations: this.deletedConversations.bind(tx),
       });
     });
   }

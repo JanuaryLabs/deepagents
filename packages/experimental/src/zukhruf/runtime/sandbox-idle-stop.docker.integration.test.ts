@@ -298,6 +298,10 @@ class FailOnceIdleWakesStorage extends AgentStorage {
     return this.#inner.mailboxStore;
   }
 
+  get deletedConversations() {
+    return this.#inner.deletedConversations;
+  }
+
   settleQueue(followUp: string) {
     return this.#inner.settleQueue(followUp);
   }

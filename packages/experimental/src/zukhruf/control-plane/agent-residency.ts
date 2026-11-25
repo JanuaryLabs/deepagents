@@ -172,8 +172,12 @@ export class AgentResidency {
     const pushed = new Map<string, ConversationId>();
     const result = await this.#storage.admit(tree, async (scope) => {
       // A tree whose delete has begun reads as absent, so nothing enters it
-      // while its delete runs, on any worker.
-      if (await AgentResidency.#deleting(scope, tree)) {
+      // while its delete runs, on any worker; a deleted chat's id stays
+      // refused, so nothing opens it again as a new root.
+      if (
+        (await AgentResidency.#deleting(scope, tree)) ||
+        (await scope.deletedConversations.has(conversation.chatId))
+      ) {
         throw new ConversationNotFoundError(conversation.chatId);
       }
       return work(

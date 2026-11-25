@@ -20,6 +20,7 @@ export {
 export { ConversationNotFoundError } from './control-plane/conversation-not-found-error.ts';
 export { StaleTurnError } from './control-plane/stale-turn-error.ts';
 export { TurnNotFoundError } from './control-plane/turn-not-found-error.ts';
+export * from './deleted-conversations/store.ts';
 export * from './instructions.ts';
 export * from './mailbox/postgres.store.ts';
 export * from './mailbox/sqlite.store.ts';

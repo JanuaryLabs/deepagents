@@ -5,6 +5,10 @@ import type {
 } from '@deepagents/context';
 
 import type {
+  DeletedConversationStore,
+  DeletedConversations,
+} from '../deleted-conversations/store.ts';
+import type {
   MailboxStore,
   TransactionalMailboxStore,
 } from '../mailbox/store.ts';
@@ -40,6 +44,8 @@ export interface AdmissionScope {
   settleIntents: TransactionalSettleIntents;
   /** The due stops of chats' sandboxes, on `sandboxIdleWakes`'s queue. */
   sandboxIdleWakes: TransactionalWakeScheduler<SandboxIdleWake>;
+  /** The tombstones of deleted chats: a delete writes them with its rows' removal, and every admission reads them. */
+  deletedConversations: DeletedConversationStore;
 }
 
 /**
@@ -57,6 +63,8 @@ export abstract class AgentStorage {
   abstract readonly mailboxStore: MailboxStore;
   /** Due stops of idle chats' sandboxes, on their own queue beside the turn queue. */
   abstract readonly sandboxIdleWakes: WakeScheduler<SandboxIdleWake>;
+  /** The tombstones of deleted chats, read before a sandbox opens outside an admission. */
+  abstract readonly deletedConversations: DeletedConversations;
 
   /**
    * Opens the queue of `followUp`'s settle intents, creating it when

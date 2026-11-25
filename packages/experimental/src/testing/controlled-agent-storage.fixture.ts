@@ -6,6 +6,7 @@ import {
   type AdmissionScope,
   AgentStorage,
   type AgentTree,
+  DeletedConversationStore,
   type MailboxStore,
   type SandboxIdleWake,
   type SettleQueue,
@@ -42,6 +43,18 @@ class UnusedSandboxIdleWakes extends WakeScheduler<SandboxIdleWake> {
   }
 }
 
+class MemoryDeletedConversations extends DeletedConversationStore {
+  readonly #deleted = new Set<string>();
+
+  override async has(chatId: string): Promise<boolean> {
+    return this.#deleted.has(chatId);
+  }
+
+  override async add(chatId: string): Promise<void> {
+    this.#deleted.add(chatId);
+  }
+}
+
 /**
  * Storage over the in-process parts a test builds. Admissions to one tree
  * take turns inside this process and write straight to the parts: nothing
@@ -54,6 +67,7 @@ export class ControlledAgentStorage extends AgentStorage {
   readonly queue: TurnQueue;
   readonly mailboxStore: MailboxStore;
   readonly sandboxIdleWakes = new UnusedSandboxIdleWakes();
+  readonly deletedConversations = new MemoryDeletedConversations();
   readonly settleQueues: ControlledSettleQueues;
   readonly #trees = new Mutex(new MemoryStore());
 
@@ -82,6 +96,7 @@ export class ControlledAgentStorage extends AgentStorage {
         queue: this.queue,
         settleIntents: this.settleQueues,
         sandboxIdleWakes: this.sandboxIdleWakes,
+        deletedConversations: this.deletedConversations,
       }),
     );
   }

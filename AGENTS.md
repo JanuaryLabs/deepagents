@@ -12,6 +12,7 @@
 
 - Focus on **integration tests** that test entire flows, not unit tests for individual functions.
 - **No test-only side doors to internal classes.** Never add package `imports` aliases, extra build entry points, or `internal.ts` re-exports so tests can construct something the public barrel deliberately hides. If a test can't reach behavior through the public surface, rewrite the test to drive the public API (e.g. `AgentRuntime.deliver`/`work`), not the internals — test as a user would use it.
+- Claims about pg-boss delivery or retry run on the real queue (`PgBossWakeScheduler` on PGlite), never on `RecordingWakeScheduler`: pg-boss moves a failed job's `start_after` on every retry, and the fake redelivers with the original `runAt`, which hid a retry defect until #5135 step 9 (#5695).
 - Before adding test utilities, read [TEST_PRIMITIVES.md](./TEST_PRIMITIVES.md). Prefer its native Node.js APIs; reserve `@zukhruf/testing` for domain-free primitives, not shared fixtures or product-specific harnesses.
 
 ### Running tests

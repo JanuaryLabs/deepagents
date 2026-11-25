@@ -1257,6 +1257,161 @@ for (const { name, open } of storages) {
       },
     );
   });
+
+  test(`${name}: once DELETE /session/:sessionId has deleted a session, neither its id nor its sub-agent's comes back: a POST /session/:sessionId answers 404 on the deleting runtime and on a second runtime of the same storage, and enqueue, createSession and mail for either chat reject with ConversationNotFoundError, leaving no chat and no history item, while a new session id still starts`, async (t) => {
+    await using resources = new AsyncDisposableStack();
+    const { storage } = await open(resources);
+    const sandbox = defineSandbox(new VirtualSandboxEnvironment());
+    const agent = () => {
+      const rootSteps = [spawnWorker()];
+      return {
+        name: 'root',
+        model: new MockLanguageModelV4({
+          doStream: async () => rootSteps.shift() ?? textResult('done'),
+        }),
+        sandbox,
+        subagents: [worker(sandbox)],
+      };
+    };
+    const first = await serveAgent(resources, { storage }, agent());
+    const second = await serveAgent(resources, { storage }, agent());
+    resources.use(await first.runtime.work({ concurrency: 2 }));
+    resources.use(await second.runtime.work({ concurrency: 2 }));
+    const sessionId = randomUUID();
+    const root = { chatId: sessionId, userId: 'user-1' };
+    await startTurn(first.app, sessionId);
+    const child = await idleChild(first.app, storage, sessionId, t.signal);
+    const refusal = async (operation: Promise<unknown>) =>
+      operation.then(
+        () => 'admitted',
+        (error: unknown) => (Error.isError(error) ? error.name : 'rejected'),
+      );
+    const turn = () => ({
+      message: {
+        id: randomUUID(),
+        role: 'user' as const,
+        parts: [{ type: 'text' as const, text: 'again' }],
+      },
+      trigger: 'submit-message' as const,
+    });
+
+    const historyOf = async (app: Hono<HttpEnv>) =>
+      historySchema
+        .parse(await (await app.request(`${MOUNT}/history`)).json())
+        .map(({ chatId }) => chatId);
+    const historyBefore = await historyOf(second.app);
+    const freshId = randomUUID();
+
+    const response = await answer(await deleteSession(first.app, sessionId));
+    const after = {
+      freshPost: (await postTurn(second.app, freshId)).status,
+      deletingRuntimePost: await answer(await postTurn(first.app, sessionId)),
+      secondRuntimePost: await answer(await postTurn(second.app, sessionId)),
+      rootTurn: await refusal(second.runtime.enqueue(root, turn())),
+      childTurn: await refusal(second.runtime.enqueue(child, turn())),
+      childSession: await refusal(second.runtime.createSession(child)),
+      childMail: await refusal(
+        second.runtime.deliver(
+          createInterAgentCommunication({
+            author: root,
+            recipient: child,
+            content: 'run again',
+          }),
+          MessageDeliveryModes.TriggerTurn,
+        ),
+      ),
+    };
+
+    assert.deepStrictEqual(
+      {
+        response,
+        after,
+        chats: {
+          root: await storage.store.getChat(root.chatId),
+          child: await storage.store.getChat(child.chatId),
+        },
+        historyBefore,
+        history: await historyOf(second.app),
+      },
+      {
+        response: deleted,
+        after: {
+          freshPost: 202,
+          deletingRuntimePost: sessionNotFound(sessionId),
+          secondRuntimePost: sessionNotFound(sessionId),
+          rootTurn: 'ConversationNotFoundError',
+          childTurn: 'ConversationNotFoundError',
+          childSession: 'ConversationNotFoundError',
+          childMail: 'ConversationNotFoundError',
+        },
+        chats: { root: undefined, child: undefined },
+        historyBefore: [sessionId],
+        history: [freshId],
+      },
+    );
+  });
+
+  test(`${name}: once DELETE /session/:sessionId has deleted a session, an upload to it and a read of a file uploaded before the delete answer 404 on the deleting runtime, which holds no sandbox handle, and on a second runtime of the same storage, and no container is opened for the session, while a new session id still takes an upload`, async (t) => {
+    const namespace = `tombstone-${randomUUID()}`;
+    try {
+      await using resources = new AsyncDisposableStack();
+      const { storage } = await open(resources);
+      const host = () =>
+        uploadsAgent(
+          resources,
+          storage,
+          defineSandbox(
+            new DockerSandboxEnvironment({ namespace, container: defaults }),
+            { idleTimeoutMs: false },
+          ),
+        );
+      const a = await host();
+      const b = await host();
+      resources.use(await a.runtime.work());
+      const sessionId = randomUUID();
+      await completedTurn(a, sessionId, t.signal);
+      const uploaded = await upload(a.app, sessionId);
+      const held = uploaded.status;
+      const { url } = receiptSchema.parse(await uploaded.json());
+      const before = (await namespaceContainers(namespace, sessionId)).length;
+
+      const response = await answer(await deleteSession(a.app, sessionId));
+      const after = {
+        deletingRuntimeUpload: await answer(await upload(a.app, sessionId)),
+        deletingRuntimeRead: await answer(await a.app.request(url)),
+        secondRuntimeUpload: await answer(await upload(b.app, sessionId)),
+        secondRuntimeRead: await answer(await b.app.request(url)),
+        freshUpload: (await upload(b.app, randomUUID())).status,
+      };
+
+      assert.deepStrictEqual(
+        {
+          held,
+          before,
+          response,
+          after,
+          containers: (await namespaceContainers(namespace, sessionId)).length,
+          chat: await storage.store.getChat(sessionId),
+        },
+        {
+          held: 201,
+          before: 1,
+          response: deleted,
+          after: {
+            deletingRuntimeUpload: sessionNotFound(sessionId),
+            deletingRuntimeRead: sessionNotFound(sessionId),
+            secondRuntimeUpload: sessionNotFound(sessionId),
+            secondRuntimeRead: sessionNotFound(sessionId),
+            freshUpload: 201,
+          },
+          containers: 0,
+          chat: undefined,
+        },
+      );
+    } finally {
+      await removeNamespace(namespace);
+    }
+  });
 }
 
 const UPLOADS = '/workspace/uploads';
@@ -1272,6 +1427,15 @@ async function uploadsHost(
   sandbox: AgentDeclaration['sandbox'],
 ) {
   const { storage } = await postgresStorage(resources, database);
+  return uploadsAgent(resources, storage, sandbox);
+}
+
+/** A runtime of the root agent on `storage`, with its own held sandboxes, serving the agent and its uploads over HTTP. */
+function uploadsAgent(
+  resources: AsyncDisposableStack,
+  storage: AgentStorage,
+  sandbox: AgentDeclaration['sandbox'],
+) {
   const uploaded = uploads({ directory: UPLOADS });
   return serveAgent(
     resources,
@@ -1299,7 +1463,7 @@ function upload(app: Hono<HttpEnv>, sessionId: string) {
   });
 }
 
-test("postgres: a host still holding the sandbox handle of a session another host deleted answers 404 to the session's next upload and opens no container for it", async (t) => {
+test("postgres: a host still holding the sandbox handle of a session another host deleted, and a host that never held one, answer 404 to the session's next upload and turn and open no container for it", async (t) => {
   const namespace = `stale-${randomUUID()}`;
   try {
     await using resources = new AsyncDisposableStack();
@@ -1317,6 +1481,7 @@ test("postgres: a host still holding the sandbox handle of a session another hos
       );
     const a = await host();
     const b = await host();
+    const c = await host();
     resources.use(await a.runtime.work());
     const sessionId = randomUUID();
     await completedTurn(a, sessionId, t.signal);
@@ -1326,6 +1491,8 @@ test("postgres: a host still holding the sandbox handle of a session another hos
 
     const response = await answer(await deleteSession(a.app, sessionId));
     const stale = await answer(await upload(b.app, sessionId));
+    const neverHeld = await answer(await upload(c.app, sessionId));
+    const staleTurn = await answer(await postTurn(c.app, sessionId));
 
     assert.deepStrictEqual(
       {
@@ -1333,6 +1500,8 @@ test("postgres: a host still holding the sandbox handle of a session another hos
         before,
         response,
         stale,
+        neverHeld,
+        staleTurn,
         containers: (await namespaceContainers(namespace, sessionId)).length,
       },
       {
@@ -1340,6 +1509,8 @@ test("postgres: a host still holding the sandbox handle of a session another hos
         before: 1,
         response: deleted,
         stale: sessionNotFound(sessionId),
+        neverHeld: sessionNotFound(sessionId),
+        staleTurn: sessionNotFound(sessionId),
         containers: 0,
       },
     );

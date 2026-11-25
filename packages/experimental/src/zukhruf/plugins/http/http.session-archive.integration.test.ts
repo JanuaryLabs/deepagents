@@ -230,6 +230,10 @@ class InterposedParkStorage extends AgentStorage {
     return this.#inner.sandboxIdleWakes;
   }
 
+  get deletedConversations() {
+    return this.#inner.deletedConversations;
+  }
+
   settleQueue(followUp: string) {
     return this.#inner.settleQueue(followUp);
   }

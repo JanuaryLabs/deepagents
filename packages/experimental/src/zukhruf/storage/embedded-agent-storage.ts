@@ -13,6 +13,8 @@ import {
   StreamManager,
 } from '@deepagents/context';
 
+import { SqliteDeletedConversationStore } from '../deleted-conversations/sqlite.store.ts';
+import type { DeletedConversations } from '../deleted-conversations/store.ts';
 import { SqliteMailboxStore } from '../mailbox/sqlite.store.ts';
 import type { MailboxStore } from '../mailbox/store.ts';
 import {
@@ -39,7 +41,7 @@ import { OutboxRelay, OutboxTurnQueue, TurnOutbox } from './turn-outbox.ts';
 export interface EmbeddedAgentStorageOptions {
   /**
    * Where the storage keeps its files: `zukhruf.sqlite` (conversations,
-   * streams, mail and the turn outbox) and `zukhruf.queue` (the PGlite
+   * streams, mail, deleted chats' tombstones and the turn outbox) and `zukhruf.queue` (the PGlite
    * database of pg-boss), and `zukhruf.lock`, which the open storage holds.
    * Created when missing. One storage at a time: a second open rejects with
    * `EmbeddedAgentStorageInUseError`.
@@ -90,6 +92,7 @@ export class EmbeddedAgentStorage
   readonly queue: TurnQueue;
   readonly mailboxStore: MailboxStore;
   readonly sandboxIdleWakes: WakeScheduler<SandboxIdleWake>;
+  readonly deletedConversations: DeletedConversations;
   /** Started and owned; a host may bind it to plugins that keep jobs beside the turns. */
   readonly boss: PgBoss;
   /** The PGlite database pg-boss runs on, for transactions of such plugins. */
@@ -106,6 +109,7 @@ export class EmbeddedAgentStorage
     queue: TurnQueue;
     mailboxStore: MailboxStore;
     sandboxIdleWakes: WakeScheduler<SandboxIdleWake>;
+    deletedConversations: DeletedConversations;
     boss: PgBoss;
     queueDatabase: PGlite;
     gate: SqliteAdmissionGate;
@@ -120,6 +124,7 @@ export class EmbeddedAgentStorage
     this.queue = parts.queue;
     this.mailboxStore = parts.mailboxStore;
     this.sandboxIdleWakes = parts.sandboxIdleWakes;
+    this.deletedConversations = parts.deletedConversations;
     this.boss = parts.boss;
     this.queueDatabase = parts.queueDatabase;
     this.#gate = parts.gate;
@@ -179,6 +184,7 @@ export class EmbeddedAgentStorage
     const store = new SqliteContextStore(database);
     const streamStore = new SqliteStreamStore(database);
     const mailboxStore = new SqliteMailboxStore(database);
+    const deletedConversations = new SqliteDeletedConversationStore(database);
     const outbox = new TurnOutbox(database);
     const relay = new OutboxRelay(gate, outbox, turns, boss);
     resources.defer(() => relay.between(async () => undefined));
@@ -195,6 +201,7 @@ export class EmbeddedAgentStorage
       queue,
       mailboxStore: gate.view(mailboxStore),
       sandboxIdleWakes,
+      deletedConversations: gate.view(deletedConversations),
       boss,
       queueDatabase,
       gate,
@@ -214,6 +221,7 @@ export class EmbeddedAgentStorage
         sandboxIdleWakes: {
           schedule: async (wake) => outbox.addWake(sandboxIdleQueue, wake),
         },
+        deletedConversations,
       },
       relay,
       turnQueue: turns.queue,

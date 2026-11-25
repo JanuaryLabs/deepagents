@@ -396,6 +396,7 @@ class RuntimeHost implements AsyncDisposable {
   readonly #mailbox: MailboxCoordinator;
   readonly #directory: AgentDirectory;
   readonly #controlPlane: AgentControlPlane;
+  readonly #residency: AgentResidency;
   readonly #approvals: ApprovalController;
   readonly #conversationStatus: ConversationStatusProjector;
   readonly #executor: AgentTurnExecutor;
@@ -480,6 +481,7 @@ class RuntimeHost implements AsyncDisposable {
     this.#mailbox = mailbox;
     this.#directory = directory;
     this.#controlPlane = controlPlane;
+    this.#residency = residency;
     this.#approvals = approvals;
     this.#conversationStatus = conversationStatus;
     this.#root = declarations.root;
@@ -560,10 +562,15 @@ class RuntimeHost implements AsyncDisposable {
       // Borrows the root declaration's sandbox directly: resolving the
       // conversation through the control plane would create its root thread.
       // A chat with no agent yet opens its sandbox (an upload before the
-      // first message); one of a tree being deleted reads as absent.
+      // first message); one of a tree being deleted, and a deleted one, reads
+      // as absent.
       sandbox: async (conversation) => {
         const thread = await this.#directory.load(conversation);
-        if (thread !== undefined && (await this.#inDeletedTree(thread))) {
+        const refused =
+          thread === undefined
+            ? await storage.deletedConversations.has(conversation.chatId)
+            : await this.#inDeletedTree(thread);
+        if (refused) {
           throw new ConversationNotFoundError(conversation.chatId);
         }
         const sandbox = await sandboxes.acquire(this.#root, {
@@ -605,11 +612,14 @@ class RuntimeHost implements AsyncDisposable {
     return this.#plugins.get(definition);
   }
 
-  /** Creates the root chat, or keeps a chat of a tree this runtime owns (its root or a sub-agent); any other chat, and one of a tree being deleted, reads as absent. */
+  /** Creates the root chat, or keeps a chat of a tree this runtime owns (its root or a sub-agent); any other chat, one of a tree being deleted and a deleted one read as absent. */
   async createSession(conversation: ConversationId): Promise<void> {
+    // A new root is created in an admission, which a deleted id's tombstone refuses.
     const thread =
       (await this.#directory.load(conversation)) ??
-      (await this.#controlPlane.resolve(conversation)).thread;
+      (await this.#residency.admit(conversation, (admission) =>
+        admission.directory.loadOrCreateRoot(conversation, this.#root.name),
+      ));
     const root = await this.#directory.rootOf(thread);
     if (!root || !this.#ownsRoot(root) || root.deletingAt !== undefined) {
       throw new ConversationNotFoundError(conversation.chatId);
@@ -642,9 +652,10 @@ class RuntimeHost implements AsyncDisposable {
    * conversationDeleting gets each member, whose metadata is still readable,
    * so it removes its own state, such as wakes; once the sandboxes are
    * deleted, the stack's conversationDataCleanup gets every member; the rows
-   * go last, deepest first and the root last, in one admission for the tree;
-   * then each member's status is published, which subscribers receive as
-   * `deleted`. A delete cut short leaves the marked root, and calling this again
+   * go last, deepest first and the root last, in one admission for the tree,
+   * which leaves each member's tombstone, so its id is refused from then on,
+   * on every worker; then each member's status is published, which
+   * subscribers receive as `deleted`. A delete cut short leaves the marked root, and calling this again
    * finishes it. Any other chat, and one already deleted, rejects with
    * ConversationNotFoundError.
    */
@@ -678,6 +689,7 @@ class RuntimeHost implements AsyncDisposable {
     await this.#conversationDataCleanup?.(
       members.map(({ conversation }) => conversation),
     );
+    const deletedAt = Date.now();
     await this.#storage.admit(tree, async (scope) => {
       for (const { conversation: member } of members) {
         await scope.mailboxStore.forget(member);
@@ -688,6 +700,7 @@ class RuntimeHost implements AsyncDisposable {
           await scope.streams.deleteStream(streamId);
         }
         await scope.store.deleteChat(member.chatId, { userId: member.userId });
+        await scope.deletedConversations.add(member.chatId, deletedAt);
       }
     });
     for (const { conversation: member } of members) {
