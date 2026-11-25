@@ -1,16 +1,62 @@
-# Dictation in the composer
+# Dictation
 
-> Dictation in `Composer` of `@deepagents/react-input/browser`, and `ChatComposer.Dictate` in `@deepagents/react-genai`. Each decision has an ADR in [`adr/`](./adr). The words have one meaning each; see [CONTEXT.md](./CONTEXT.md). Backlog #4920 holds the history and the rulings.
+> Dictation in `@deepagents/react-input/browser`: `useDictation` and `Dictation` for any field, `Composer.Root`'s `dictation` for the composer, and `ChatComposer.Dictate` in `@deepagents/react-genai`. Dictation is its own primitive, and the composer is one consumer ([ADR 0009](./adr/0009-dictation-is-its-own-primitive-and-the-composer-is-one-consumer.md)). Each decision has an ADR in [`adr/`](./adr). The words have one meaning each; see [CONTEXT.md](./CONTEXT.md). Backlog #4920 holds the history and the rulings, and #5658 the plain field.
 >
-> **Tests.** `src/lib/ComposerDictation.test.tsx` covers what happy-dom runs for real: no `MediaRecorder` gives `unavailable`, a host's `start()` then does nothing, and the parts throw without `dictation`. Everything that needs a microphone (the three ends, the space rule, the errors of `getUserMedia`, the permission) has no test: Ezz ruled on 2026-11-20 against vitest browser mode and against a hand-written `MediaRecorder`.
+> **Tests.** `src/lib/ComposerDictation.test.tsx` and `src/lib/Dictation.test.tsx` cover what happy-dom runs for real: no `MediaRecorder` gives `unavailable`, a host's `start()` then does nothing, the parts throw outside their root, and `insertTranscript` on a real textarea. Everything that needs a microphone (the three ends, the composer's space rule, the errors of `getUserMedia`, the permission) has no test: Ezz ruled on 2026-11-20 against vitest browser mode and against a hand-written `MediaRecorder`. A React-controlled field's `onChange` has no test either: happy-dom 20.11.2 (and 21.0.4) writes `setRangeText` through the `value` setter, which React's value tracker watches, so React sees no change there; a browser writes the value natively, and React's `onChange` fires.
 
-The user starts a dictation and speaks. The dictation ends one of three ways, as in the ChatGPT and Codex desktop apps:
+The user starts a dictation and speaks. A dictation into a plain field ends by cancel or stop. A dictation into the composer ends one of three ways, as in the ChatGPT and Codex desktop apps:
 
 - **Cancel**: the clip, or the transcription in flight, is dropped.
 - **Stop**: the host transcribes the clip, and the composer puts the text at the cursor.
 - **Send**: the composer stops the recording, waits for the text, puts it in, and submits the draft ("Transcribe and send" in ChatGPT).
 
 Two copies of the first two steps exist today: text2sql `packages/genui/voice` and blackboard `packages/voice` (its ledger: `packages/voice/docs/copied-from-text2sql.md`). Both are `@genui/voice` 0.1.0. They move here after the two apps use `@deepagents/react-input` (backlog #3158).
+
+## Dictate into a plain field
+
+```tsx
+import { Dictation, insertTranscript } from '@deepagents/react-input/browser';
+
+function Notes() {
+  const [notes, setNotes] = useState('');
+  const field = useRef<HTMLTextAreaElement>(null);
+  return (
+    <Dictation.Root
+      transcribe={(audio, { signal }) => api.transcribe({ audio, signal })}
+      onTranscript={(text) => {
+        if (field.current) insertTranscript(field.current, text);
+      }}
+    >
+      <textarea
+        ref={field}
+        value={notes}
+        onChange={(event) => setNotes(event.target.value)}
+      />
+      <Dictation.Toggle
+        render={(props, dictation) => (
+          <button {...props} aria-label={labelFor(dictation)}>
+            {iconFor(dictation)}
+          </button>
+        )}
+      />
+      <Dictation.Cancel render={<button aria-label="Cancel dictation" />} />
+    </Dictation.Root>
+  );
+}
+```
+
+`insertTranscript` puts the text at the cursor with `setRangeText(…, 'end')`, with a space before it when the character before the cursor is not whitespace, and dispatches a bubbling `input` event, so a controlled field's `onChange` and an uncontrolled field's listeners both see the new value. It trims the text, and an empty text inserts nothing. A host that keeps its text elsewhere passes its own `onTranscript`.
+
+Without the parts, `useDictation` gives the same `{ state, start, stop, cancel }`:
+
+```tsx
+const { state, start, stop, cancel } = useDictation({
+  transcribe,
+  onTranscript: (text) => {
+    if (field.current) insertTranscript(field.current, text);
+  },
+});
+```
 
 ## Dictate into a composer
 
@@ -86,6 +132,46 @@ Codex binds `composer.toggleDictation` to a key, and Esc stops a dictation and k
 
 ```ts
 // @deepagents/react-input/browser
+function useDictation(options: DictationOptions): DictationApi;
+
+type DictationOptions = {
+  transcribe: (
+    audio: Blob,
+    options: { signal: AbortSignal },
+  ) => Promise<{ text: string }>;
+  onTranscript: (text: string) => void;
+  disabled?: boolean; // true refuses a start and ends an active dictation with abort
+};
+
+type DictationApi = {
+  state: DictationState;
+  start(): void;
+  stop(): void;
+  cancel(): void;
+};
+
+type DictationState =
+  | { status: 'unavailable'; reason: 'unsupported' | 'blocked' }
+  | { status: 'idle' }
+  | { status: 'starting' }
+  | { status: 'recording' }
+  | { status: 'finishing' }
+  | { status: 'failed'; error: DictationError };
+
+const Dictation: {
+  Root(
+    props: DictationOptions & { children: React.ReactNode },
+  ): React.ReactNode;
+  Toggle(props: DictationToggleProps): React.ReactNode;
+  Cancel(props: DictationCancelProps): React.ReactNode;
+};
+function useDictationContext(componentName: string): DictationApi;
+
+function insertTranscript(
+  field: HTMLTextAreaElement | HTMLInputElement,
+  text: string,
+): void;
+
 type ComposerRootProps = {
   // … the props of today
   dictation?: ComposerDictation;
@@ -98,13 +184,9 @@ type ComposerDictation = {
   ) => Promise<{ text: string }>;
 };
 
-type DictationState =
-  | { status: 'unavailable'; reason: 'unsupported' | 'blocked' }
-  | { status: 'idle' }
-  | { status: 'starting' }
-  | { status: 'recording' }
-  | { status: 'finishing'; end: 'insert' | 'send' }
-  | { status: 'failed'; error: DictationError };
+type ComposerDictationState =
+  | Exclude<DictationState, { status: 'finishing' }>
+  | { status: 'finishing'; end: 'insert' | 'send' };
 
 class DictationError extends Error {
   readonly code:
@@ -116,7 +198,7 @@ class DictationError extends Error {
 }
 
 function useComposerDictation(componentName?: string): {
-  state: DictationState;
+  state: ComposerDictationState;
   start(): void;
   stop(): void;
   cancel(): void;
@@ -131,18 +213,34 @@ type ComposerDictateProps = Omit<
     | React.ReactElement
     | ((
         props: React.HTMLAttributes<HTMLElement>,
-        state: DictationState,
+        state: ComposerDictationState,
       ) => React.ReactElement);
 };
 type ComposerCancelDictationProps = ComposerDictateProps;
+// DictationToggleProps and DictationCancelProps: the same, with DictationState
 
 // @deepagents/react-genai
 type ChatComposerDictateProps = Pick<ComposerDictateProps, 'disabled'>;
 ```
 
-`Composer.Dictate`, `Composer.CancelDictation` and `useComposerDictation` throw when the root has no `dictation`, as every part throws outside `Composer.Root`. The parts are Base UI `Button`s like the other action triggers, and they carry the state as attributes: `data-status` (`unavailable`, `idle`, …), `data-end` while finishing, `aria-pressed` while recording, and `disabled` when a click can do nothing.
+`Dictation.Toggle`, `Dictation.Cancel` and `useDictationContext` throw outside `Dictation.Root`. `Composer.Dictate`, `Composer.CancelDictation` and `useComposerDictation` throw when the root has no `dictation`, as every part throws outside `Composer.Root`. `Composer.Dictate` and `Composer.CancelDictation` are `Dictation.Toggle` and `Dictation.Cancel` (one implementation, `src/lib/dictation/DictationButtons.tsx`) with the composer's state, its root's `disabled`, and `data-end`. The parts are Base UI `Button`s like the other action triggers, and they carry the state as attributes: `data-status` (`unavailable`, `idle`, …), `data-end` while the composer finishes, `aria-pressed` while recording, and `disabled` when a click can do nothing.
 
 ## The dictation state
+
+In a plain field:
+
+| Status        | Means                                                                               | `Dictation.Toggle` | `Dictation.Cancel` |
+| ------------- | ----------------------------------------------------------------------------------- | ------------------ | ------------------ |
+| `unavailable` | `unsupported`: no `MediaRecorder`. `blocked`: the microphone permission is `denied` | disabled           | disabled           |
+| `idle`        | ready                                                                               | starts             | disabled           |
+| `starting`    | the browser opens the microphone                                                    | disabled           | ends with `abort`  |
+| `recording`   | the clip is being recorded                                                          | ends with `insert` | ends with `abort`  |
+| `finishing`   | the clip closes and the host transcribes it; `onTranscript` gets the text           | disabled           | ends with `abort`  |
+| `failed`      | the last dictation failed; `error.code` says how                                    | starts again       | disabled           |
+
+`disabled` on `Dictation.Toggle` or `Dictation.Root` refuses a start and never an end; `disabled` on the root also ends an active dictation with `abort`.
+
+In the composer:
 
 | Status                | Means                                                                               | `Composer.Dictate` | `Composer.CancelDictation`         | Submit                                                           |
 | --------------------- | ----------------------------------------------------------------------------------- | ------------------ | ---------------------------------- | ---------------------------------------------------------------- |
@@ -158,16 +256,20 @@ type ChatComposerDictateProps = Pick<ComposerDictateProps, 'disabled'>;
 
 ## What each call does underneath
 
-| Call                                          | Underneath                                                                                                                                                                                                                                                |
-| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A root with `dictation` mounts                | It checks for `MediaRecorder` and queries the `microphone` permission once, and it follows the permission's `change` event. No microphone opens.                                                                                                          |
-| `start()` (a click or a command)              | `navigator.mediaDevices.getUserMedia({ audio: true })`, then `new MediaRecorder(stream).start()`. The state goes `starting`, then `recording`. Only event handlers call `start()`, never an effect.                                                       |
-| An end of `insert` or `send`                  | `recorder.stop()`. The state is `finishing` with that end. On the recorder's `stop` event, the clip is `new Blob(chunks, { type: recorder.mimeType })`, the tracks stop, and the composer calls `dictation.transcribe(clip, { signal })` in a transition. |
-| `transcribe` gives `{ text }`                 | The text is trimmed. A non-empty text goes in at the cursor, with a space before it when the character before the cursor is not whitespace. With the end `send`, the composer then submits the draft. The state goes `idle`.                              |
-| `transcribe` rejects                          | An `AbortError` from the composer's own signal ends at `idle`. Any other rejection ends at `failed` with `transcription-failed`, its `cause` the rejection. With the end `send`, the draft is not sent.                                                   |
-| An end of `abort`                             | In `starting` or `recording`, the recorder stops and the clip is dropped. In `finishing`, the signal aborts, and nothing goes in or is sent. The state goes `idle`.                                                                                       |
-| The host disables the root during a dictation | The dictation ends with `abort` (ADR 0008).                                                                                                                                                                                                               |
-| The root unmounts                             | As `abort`.                                                                                                                                                                                                                                               |
+| Call                                                                  | Underneath                                                                                                                                                                                                                                                                                                                                                                           |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A root (`Dictation.Root`, or `Composer.Root` with `dictation`) mounts | It checks for `MediaRecorder` and queries the `microphone` permission once, and it follows the permission's `change` event. No microphone opens.                                                                                                                                                                                                                                     |
+| `start()` (a click or a command)                                      | A new `DictationSession` with the `transcribe` of that render ([ADR 0010](./adr/0010-one-dictationsession-per-dictation-owns-the-recording-the-transcription-and-its-abort.md)): `navigator.mediaDevices.getUserMedia({ audio: true })`, then `new MediaRecorder(stream).start()`. The state goes `starting`, then `recording`. Only event handlers call `start()`, never an effect. |
+| An end of `insert` or `send`                                          | `recorder.stop()`. The state is `finishing` (in the composer, with that end). On the recorder's `stop` event, the clip is `new Blob(chunks, { type: recorder.mimeType })`, the tracks stop, and the session calls `transcribe(clip, { signal })` with its own signal.                                                                                                                |
+| `transcribe` gives `{ text }`                                         | The session gives the text to the host's latest `onTranscript`. The composer's `onTranscript` trims it; a non-empty text goes in at the cursor, with a space before it when the character before the cursor is not whitespace, and with the end `send` the composer then submits the draft. The state goes `idle`.                                                                   |
+| `transcribe` rejects                                                  | An `AbortError` from the session's own signal ends at `idle`. Any other rejection ends at `failed` with `transcription-failed`, its `cause` the rejection. With the end `send`, the draft is not sent.                                                                                                                                                                               |
+| An end of `abort`                                                     | The session's one `AbortController` aborts. In `starting` or `recording`, the recorder stops and the clip is dropped. In `finishing`, the transcription's signal aborts, and nothing goes in or is sent. The state goes `idle`.                                                                                                                                                      |
+| The host disables the root during a dictation                         | The dictation ends with `abort` (ADR 0008).                                                                                                                                                                                                                                                                                                                                          |
+| The root unmounts                                                     | As `abort`.                                                                                                                                                                                                                                                                                                                                                                          |
+
+## The space rule
+
+The space rule has two copies: `insertTranscript` in `src/lib/Composer.tsx` (the editor) and `src/lib/dictation/insertTranscript.ts` (a plain field). That is strike 2 of the Rule of Three; the ledger is [copied-space-rule.md](./copied-space-rule.md). Mirror every fix in both files.
 
 ## Errors
 
@@ -185,26 +287,26 @@ Any other `getUserMedia` rejection (a `TypeError` for bad constraints, a `Securi
 
 ## React APIs it uses
 
-| API                                               | Replaces in the copies                                                                                                                     |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `useSyncExternalStore` over the `Recording` class | `VoiceRecorderController`: its command ids and the `suppressStopRef` that kept React Strict Mode from dropping the clip                    |
-| `useActionState`                                  | The `isTranscribing` prop that each host kept in step with its request, and the separate error state                                       |
-| An `onClip` event of the `Recording`              | The `startRecordingRef` and `stopRecordingRef` of the controller: the click handler makes the recording, and the recording pushes its clip |
-| `ref` as a prop                                   | `forwardRef`                                                                                                                               |
+| API                                                                                  | Replaces in the copies                                                                                                                                                                                                                                                                            |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `useSyncExternalStore` over the `DictationSession` class                             | `VoiceRecorderController`: its command ids and the `suppressStopRef` that kept React Strict Mode from dropping the clip; and the `isTranscribing` prop that each host kept in step with its request, with the separate error state (the session owns the transcription and its failure, ADR 0010) |
+| `useEffectEvent`, called from the session's transcript subscription in a `useEffect` | The latest-value refs of the copies (and of the first composer) for `onTranscription`: the transcript reaches the host's newest `onTranscript`                                                                                                                                                    |
+| The click handler makes the session                                                  | The `startRecordingRef` and `stopRecordingRef` of the controller                                                                                                                                                                                                                                  |
+| `ref` as a prop                                                                      | `forwardRef`                                                                                                                                                                                                                                                                                      |
 
 ## Moving the two copies
 
-| `@genui/voice`                                                 | Here                                                                                                 |
-| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `VoiceRecordButton`                                            | `Composer.Dictate` and `Composer.CancelDictation`, or `ChatComposer.Dictate` for the chat kit's look |
-| `useVoiceTranscription`                                        | `useComposerDictation`                                                                               |
-| `transcribe(audio)`                                            | `Composer.Root`'s `dictation.transcribe(audio, { signal })`                                          |
-| `enabled`                                                      | the host passes `dictation` or not                                                                   |
-| `isTranscribing`                                               | none: the composer owns its request                                                                  |
-| `onTranscription`                                              | none: the composer inserts the text                                                                  |
-| `renderButton({ icon, label, … })`                             | `render(props, state)`; the host picks the icon and the label                                        |
-| `disabled` (blackboard)                                        | `disabled` on `Composer.Dictate`                                                                     |
-| a send during a transcription sent the draft without the words | the send waits for the words                                                                         |
+| `@genui/voice`                                                 | Here                                                                                                                 |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `VoiceRecordButton`                                            | `Composer.Dictate` and `Composer.CancelDictation`, or `ChatComposer.Dictate` for the chat kit's look                 |
+| `useVoiceTranscription`                                        | `useComposerDictation`                                                                                               |
+| `transcribe(audio)`                                            | `Composer.Root`'s `dictation.transcribe(audio, { signal })`                                                          |
+| `enabled`                                                      | the host passes `dictation` or not                                                                                   |
+| `isTranscribing`                                               | none: the dictation session owns its request                                                                         |
+| `onTranscription`                                              | none in the composer, which inserts the text; `onTranscript` of `useDictation` or `Dictation.Root` for a plain field |
+| `renderButton({ icon, label, … })`                             | `render(props, state)`; the host picks the icon and the label                                                        |
+| `disabled` (blackboard)                                        | `disabled` on `Composer.Dictate`                                                                                     |
+| a send during a transcription sent the draft without the words | the send waits for the words                                                                                         |
 
 ## The same concept in other systems
 
@@ -230,11 +332,12 @@ Node has no recorder: a search of the exports of every built-in module of Node 2
 
 | Consumer                                                                                                                    | Uses                                                                                                                                                                                        |
 | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Meddit `apps/web`: the New patient form's "Anything else relevant?" field (Meddit #4936)                                    | `Dictation.Root`, `Dictation.Toggle`, `Dictation.Cancel` and `insertTranscript` on a plain textarea (deepagents #5658)                                                                      |
 | blackboard `apps/web`: ChatComposer                                                                                         | `Composer.Root` `dictation`, `Composer.Dictate` and `Composer.CancelDictation`, with its own look; its send button says "Transcribe and send" while dictating (blackboard 780f88e, 6ada991) |
 | text2sql: 10 sites (ChatBot, Dashboards, SpaceDetailChatbot, EmbedChatbot, ComposerVoiceButton, ReportsView, LimerenceChat) | its own `@genui/voice` copy: text2sql is no longer actively developed (Ezz, 2026-11-20), so it does not move                                                                                |
 
 ## Later and never
 
-Later, each when a consumer needs it, most from the same ChatGPT and Codex app: "Retry transcription" (the clip is kept after a failure), press-and-hold, a maximum duration, the elapsed time, sending the recording itself to a model that takes audio (Codex's `isDictationRecording` attachments), and a hook for a plain form field (Meddit's "Anything else relevant?").
+Later, each when a consumer needs it, most from the same ChatGPT and Codex app: "Retry transcription" (the clip is kept after a failure), press-and-hold, a maximum duration, the elapsed time, and sending the recording itself to a model that takes audio (Codex's `isDictationRecording` attachments).
 
 Never: words or icons in `@deepagents/react-input`, and a composer that picks the endpoint or the model.

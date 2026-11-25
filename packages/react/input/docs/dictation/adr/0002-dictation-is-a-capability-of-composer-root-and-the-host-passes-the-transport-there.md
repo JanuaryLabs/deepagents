@@ -1,6 +1,6 @@
 # Dictation is a capability of Composer.Root, and the host passes the transport there
 
-Status: ruled by Ezz on 2026-11-20 (shipped). It replaces the first ruling of the same day, which kept the transport and the state in `Composer.Dictate`.
+Status: superseded by [ADR 0009](./0009-dictation-is-its-own-primitive-and-the-composer-is-one-consumer.md) (Ezz, 2026-11-25). Ruled by Ezz on 2026-11-20 (shipped). It replaces the first ruling of the same day, which kept the transport and the state in `Composer.Dictate`.
 
 ## Context
 

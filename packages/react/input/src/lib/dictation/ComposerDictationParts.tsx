@@ -1,78 +1,33 @@
-import { Button } from '@base-ui/react/button';
-import type { ReactElement } from 'react';
-
 import { useComposerContext } from '../ComposerContext.ts';
 import {
-  type DictationState,
+  type ComposerDictationState,
   useComposerDictation,
 } from './ComposerDictationContext.ts';
+import {
+  type DictationButtonProps,
+  DictationCancelButton,
+  DictationToggleButton,
+} from './DictationButtons.tsx';
 
-type ButtonRender = NonNullable<Button.Props['render']>;
-type ButtonRenderProps = Parameters<
-  Extract<ButtonRender, (...args: never[]) => unknown>
->[0];
-
-type DictationRender =
-  | ReactElement
-  | ((props: ButtonRenderProps, state: DictationState) => ReactElement);
-
-export type ComposerDictateProps = Omit<Button.Props, 'render' | 'onClick'> & {
-  render?: DictationRender;
-};
+export type ComposerDictateProps = DictationButtonProps<ComposerDictationState>;
 
 export type ComposerCancelDictationProps = ComposerDictateProps;
 
-function withState(
-  render: DictationRender | undefined,
-  state: DictationState,
-): Button.Props['render'] {
-  return typeof render === 'function'
-    ? (props: ButtonRenderProps) => render(props, state)
-    : render;
-}
-
-export function ComposerDictate({
-  render,
-  disabled,
-  ...props
-}: ComposerDictateProps) {
+export function ComposerDictate({ disabled, ...props }: ComposerDictateProps) {
   const { disabled: rootDisabled } = useComposerContext('Composer.Dictate');
-  const { state, start, stop } = useComposerDictation('Composer.Dictate');
-  const recording = state.status === 'recording';
-  const canStart =
-    (state.status === 'idle' || state.status === 'failed') &&
-    disabled !== true &&
-    !rootDisabled;
+  const dictation = useComposerDictation('Composer.Dictate');
+  const { state } = dictation;
   return (
-    <Button
+    <DictationToggleButton
       {...props}
-      data-status={state.status}
       data-end={state.status === 'finishing' ? state.end : undefined}
-      aria-pressed={recording}
-      disabled={!recording && !canStart}
-      onClick={recording ? stop : start}
-      render={withState(render, state)}
+      dictation={dictation}
+      refusesStart={disabled === true || rootDisabled}
     />
   );
 }
 
-export function ComposerCancelDictation({
-  render,
-  disabled,
-  ...props
-}: ComposerCancelDictationProps) {
-  const { state, cancel } = useComposerDictation('Composer.CancelDictation');
-  const active =
-    state.status === 'starting' ||
-    state.status === 'recording' ||
-    state.status === 'finishing';
-  return (
-    <Button
-      {...props}
-      data-status={state.status}
-      disabled={!active || disabled === true}
-      onClick={cancel}
-      render={withState(render, state)}
-    />
-  );
+export function ComposerCancelDictation(props: ComposerCancelDictationProps) {
+  const dictation = useComposerDictation('Composer.CancelDictation');
+  return <DictationCancelButton {...props} dictation={dictation} />;
 }

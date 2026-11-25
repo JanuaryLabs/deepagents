@@ -1,27 +1,18 @@
 import { createContext, use } from 'react';
 
 import { useComposerContext } from '../ComposerContext.ts';
-import type { DictationError } from './DictationError.ts';
+import type { DictationOptions, DictationState } from './useDictation.ts';
 
-export type ComposerDictation = {
-  transcribe: (
-    audio: Blob,
-    options: { signal: AbortSignal },
-  ) => Promise<{ text: string }>;
-};
+export type ComposerDictation = Pick<DictationOptions, 'transcribe'>;
 
 export type DictationEnd = 'insert' | 'send';
 
-export type DictationState =
-  | { status: 'unavailable'; reason: 'unsupported' | 'blocked' }
-  | { status: 'idle' }
-  | { status: 'starting' }
-  | { status: 'recording' }
-  | { status: 'finishing'; end: DictationEnd }
-  | { status: 'failed'; error: DictationError };
+export type ComposerDictationState =
+  | Exclude<DictationState, { status: 'finishing' }>
+  | { status: 'finishing'; end: DictationEnd };
 
 export type ComposerDictationApi = {
-  state: DictationState;
+  state: ComposerDictationState;
   start: () => void;
   stop: () => void;
   cancel: () => void;

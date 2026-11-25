@@ -73,7 +73,7 @@ import {
   ComposerCancelDictation,
   ComposerDictate,
 } from './dictation/ComposerDictationParts.tsx';
-import { useDictationController } from './dictation/useDictationController.ts';
+import { useComposerDictationController } from './dictation/useComposerDictationController.ts';
 import {
   type ComposerAttachImageFile,
   type ComposerTiptapKillBuffer,
@@ -1054,6 +1054,8 @@ function ComposerRootInner({
     return true;
   }
 
+  // The space rule has a copy in dictation/insertTranscript.ts (strike 2;
+  // ledger: docs/dictation/copied-space-rule.md). Mirror every fix in both.
   function insertTranscript(transcript: string) {
     const current = currentStateFromEditor();
     const beforeCursor = current.text.slice(0, current.cursor);
@@ -1739,7 +1741,7 @@ function ComposerRootInner({
     });
   }
 
-  const dictationController = useDictationController({
+  const dictationController = useComposerDictationController({
     dictation,
     disabled,
     insertTranscript,

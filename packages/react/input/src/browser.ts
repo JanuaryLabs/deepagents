@@ -12,13 +12,27 @@ export { useComposerDictation } from './lib/dictation/ComposerDictationContext.t
 export type {
   ComposerDictation,
   ComposerDictationApi,
+  ComposerDictationState,
   DictationEnd,
-  DictationState,
 } from './lib/dictation/ComposerDictationContext.ts';
 export type {
   ComposerCancelDictationProps,
   ComposerDictateProps,
 } from './lib/dictation/ComposerDictationParts.tsx';
+export {
+  Dictation,
+  useDictationContext,
+  type DictationCancelProps,
+  type DictationRootProps,
+  type DictationToggleProps,
+} from './lib/dictation/Dictation.tsx';
+export { insertTranscript } from './lib/dictation/insertTranscript.ts';
+export {
+  useDictation,
+  type DictationApi,
+  type DictationOptions,
+  type DictationState,
+} from './lib/dictation/useDictation.ts';
 export {
   DictationError,
   type DictationErrorCode,

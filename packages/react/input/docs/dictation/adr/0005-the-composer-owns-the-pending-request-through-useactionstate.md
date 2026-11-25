@@ -1,6 +1,6 @@
 # The composer owns the pending request through useActionState
 
-Status: the ownership was ruled by Ezz on 2026-11-20; `useActionState` is this design's choice. Shipped.
+Status: replaced by [ADR 0010](./0010-one-dictationsession-per-dictation-owns-the-recording-the-transcription-and-its-abort.md) (Ezz, 2026-11-25): the dictation session owns the request, not `useActionState`. The ownership was ruled by Ezz on 2026-11-20; `useActionState` was this design's choice. Shipped.
 
 ## Context
 
