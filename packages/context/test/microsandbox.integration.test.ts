@@ -35,8 +35,11 @@ async function vmName(sandbox: SandboxSession): Promise<string> {
 
 /** Destroys the VM `name` when it is still there. */
 async function destroyVm(name: string): Promise<void> {
-  const { Sandbox } = await import('microsandbox');
-  const handle = await Sandbox.get(name).catch(() => undefined);
+  const { Sandbox, SandboxNotFoundError } = await import('microsandbox');
+  const handle = await Sandbox.get(name).catch((error: unknown) => {
+    if (error instanceof SandboxNotFoundError) return undefined;
+    throw error;
+  });
   await handle?.destroy();
 }
 

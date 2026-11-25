@@ -41,12 +41,10 @@ export async function createVirtualSandbox({
   );
 
   if (readiness) {
-    try {
-      await readiness(sandbox);
-    } catch (error) {
-      await sandbox.dispose().catch(() => {});
-      throw error;
-    }
+    await using onFailure = new AsyncDisposableStack();
+    onFailure.defer(() => sandbox.dispose());
+    await readiness(sandbox);
+    onFailure.move();
   }
   return sandbox;
 }

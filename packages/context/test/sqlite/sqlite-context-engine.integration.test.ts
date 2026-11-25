@@ -54,46 +54,37 @@ async function withDiskImage<T>(
   const imagePath = path.join(dir.path, 'disk.img');
   const mountPath = path.join(dir.path, 'mnt');
   try {
-    try {
-      await execFileAsync('hdiutil', [
-        'create',
-        '-size',
-        `${sizeMegabytes}m`,
-        '-fs',
-        'APFS',
-        '-volname',
-        'ContextTest',
-        '-ov',
-        imagePath,
-      ]);
-    } catch (error) {
-      throw new DiskImageUnavailableError(error);
-    }
-    await mkdir(mountPath, { recursive: true });
-    try {
-      await execFileAsync('hdiutil', [
-        'attach',
-        `${imagePath}.dmg`,
-        '-mountpoint',
-        mountPath,
-        '-nobrowse',
-      ]);
-    } catch (error) {
-      throw new DiskImageUnavailableError(error);
-    }
-    return await fn(mountPath);
-  } finally {
-    try {
-      await execFileAsync('hdiutil', ['detach', mountPath]);
-    } catch {
-      // best effort cleanup
-    }
-    try {
-      await execFileAsync('hdiutil', ['detach', mountPath, '-force']);
-    } catch {
-      // best effort cleanup
-    }
+    await execFileAsync('hdiutil', [
+      'create',
+      '-size',
+      `${sizeMegabytes}m`,
+      '-fs',
+      'APFS',
+      '-volname',
+      'ContextTest',
+      '-ov',
+      imagePath,
+    ]);
+  } catch (error) {
+    throw new DiskImageUnavailableError(error);
   }
+  await mkdir(mountPath, { recursive: true });
+  await using mounted = new AsyncDisposableStack();
+  try {
+    await execFileAsync('hdiutil', [
+      'attach',
+      `${imagePath}.dmg`,
+      '-mountpoint',
+      mountPath,
+      '-nobrowse',
+    ]);
+  } catch (error) {
+    throw new DiskImageUnavailableError(error);
+  }
+  mounted.defer(async () => {
+    await execFileAsync('hdiutil', ['detach', mountPath, '-force']);
+  });
+  return await fn(mountPath);
 }
 
 const execFileAsync = promisify(execFile);
@@ -287,16 +278,10 @@ describe('Sqlite ContextEngine Integration', () => {
     });
 
     await untilAborted(
-      (async () => {
-        try {
-          await nextEngine.resolve({
-            renderer,
-            sandbox: await buildSandbox(),
-          });
-        } catch {
-          // No hang is the requirement for this edge case.
-        }
-      })(),
+      nextEngine.resolve({
+        renderer,
+        sandbox: await buildSandbox(),
+      }),
       t.signal,
     );
   });

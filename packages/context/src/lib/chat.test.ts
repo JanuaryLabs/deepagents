@@ -1015,11 +1015,11 @@ describe('chat() abort signal integration', () => {
         }),
     });
 
-    try {
-      await drain(stream);
-    } catch {
-      // AbortError is expected when signal fires mid-stream
-    }
+    await drain(stream).catch((error: unknown) => {
+      // Aborting mid-stream rejects the drain with the signal's AbortError.
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      throw error;
+    });
 
     assert.ok(chunksSeen >= 3, 'at least 3 chunks should process before abort');
 
@@ -1099,11 +1099,11 @@ describe('chat() abort signal integration', () => {
       transform: () => new TransformStream(),
     });
 
-    try {
-      await drain(stream);
-    } catch {
-      // AbortError expected when signal fires during guardrail retry
-    }
+    await drain(stream).catch((error: unknown) => {
+      // Aborting during the guardrail retry rejects the drain with AbortError.
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      throw error;
+    });
 
     assert.strictEqual(
       model.doStreamCalls.length,
@@ -1147,15 +1147,18 @@ describe('chat() abort signal integration', () => {
       model,
     });
 
+    await context.continue(userMessage('test'));
     try {
-      await context.continue(userMessage('test'));
       const stream = await chat(chatAgent, {
         abortSignal: controller.signal,
         transform: () => new TransformStream(),
       });
       await drain(stream);
-    } catch {
-      // Expected: AI SDK throws AbortError with pre-aborted signal
+    } catch (error) {
+      // A pre-aborted signal makes the AI SDK throw its AbortError.
+      if (!(error instanceof DOMException && error.name === 'AbortError')) {
+        throw error;
+      }
     }
 
     const branch = await store.getActiveBranch('pre-abort-chat');

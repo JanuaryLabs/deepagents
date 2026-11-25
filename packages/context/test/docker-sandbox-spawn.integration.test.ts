@@ -386,7 +386,13 @@ describe('Docker Sandbox — spawn', () => {
       });
       await context.continue(userMessage('go'));
 
-      await Array.fromAsync(await chat(chatAgent)).catch(() => undefined);
+      await Array.fromAsync(await chat(chatAgent)).catch((error: unknown) => {
+        // The total timeout ends the turn with its TimeoutError.
+        if (error instanceof DOMException && error.name === 'TimeoutError') {
+          return;
+        }
+        throw error;
+      });
       await sleep(10_500);
 
       const { state, errorText } = await storedBashPart(store, 'total-timeout');

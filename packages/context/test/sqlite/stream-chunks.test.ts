@@ -669,22 +669,27 @@ describe('Stream Chunks', () => {
       });
 
       const persistPromise = streams.persist(source, streamId);
-      try {
-        await waitForStatus(t, store, streamId, 'running');
-        await untilAborted(chunksBuffered.promise, t.signal);
-        await streams.cancel(streamId);
-
-        await assert.rejects(() => persistPromise, /flush failed once/);
-      } finally {
+      await using cleanup = new AsyncDisposableStack();
+      cleanup.defer(() => store.close());
+      cleanup.defer(async () => {
+        await persistPromise.catch(() => undefined);
+      });
+      cleanup.defer(() => streams.cancel(streamId));
+      cleanup.defer(() => {
         try {
           closeSource();
-        } catch {
+        } catch (error) {
           // persist may already have cancelled and closed the source.
+          if (!(error instanceof TypeError && 'code' in error)) throw error;
+          if (error.code !== 'ERR_INVALID_STATE') throw error;
         }
-        await streams.cancel(streamId).catch(() => undefined);
-        await persistPromise.catch(() => undefined);
-        store.close();
-      }
+      });
+
+      await waitForStatus(t, store, streamId, 'running');
+      await untilAborted(chunksBuffered.promise, t.signal);
+      await streams.cancel(streamId);
+
+      await assert.rejects(() => persistPromise, /flush failed once/);
     });
 
     it('should record a stream that ended by abort as cancelled', async () => {
@@ -2287,24 +2292,25 @@ describe('Stream Chunks', () => {
 
         using source = streamHarness.source<UIMessageChunk>();
         const persist = streams.persist(source.stream, streamId);
-        try {
-          await waitForStatus(t, store, streamId, 'running');
-          store.failNextStreamRead();
-
-          let cancelError: unknown;
-          try {
-            await streams.cancel(streamId);
-          } catch (error) {
-            cancelError = error;
-          }
-          assert.equal(cancelError, undefined);
-          await untilAborted(persist, t.signal);
-          assert.equal(await store.getStreamStatus(streamId), 'cancelled');
-        } finally {
-          source[Symbol.dispose]();
-          await streams.cancel(streamId).catch(() => undefined);
+        await using cleanup = new AsyncDisposableStack();
+        cleanup.defer(async () => {
           await persist.catch(() => undefined);
+        });
+        cleanup.defer(() => streams.cancel(streamId));
+        cleanup.defer(() => source[Symbol.dispose]());
+
+        await waitForStatus(t, store, streamId, 'running');
+        store.failNextStreamRead();
+
+        let cancelError: unknown;
+        try {
+          await streams.cancel(streamId);
+        } catch (error) {
+          cancelError = error;
         }
+        assert.equal(cancelError, undefined);
+        await untilAborted(persist, t.signal);
+        assert.equal(await store.getStreamStatus(streamId), 'cancelled');
       } finally {
         store.close();
       }

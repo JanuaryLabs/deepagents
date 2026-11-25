@@ -394,12 +394,8 @@ class AppleContainer implements EngineContainer {
     }
   }
 
-  async stop(): Promise<void> {
-    try {
-      await spawn(CLI, ['stop', this.name]);
-    } catch {
-      // already stopped
-    }
+  stop(): Promise<void> {
+    return endContainer(['stop'], this.name);
   }
 }
 

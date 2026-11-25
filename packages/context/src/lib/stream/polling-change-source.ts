@@ -4,6 +4,21 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { StreamChange, StreamChangeSource } from './change-source.ts';
 import type { StreamStatus } from './stream-store.ts';
 
+/** The onPoll observer failed; polling goes on. */
+class PollTelemetryWarning extends Error {
+  readonly code = 'DEEPAGENTS_CONTEXT_POLL_TELEMETRY_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, event: PollingTelemetryEvent) {
+    super(
+      `The onPoll observer failed, and polling goes on: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'PollTelemetryWarning';
+    this.detail = `stream: ${event.streamId}, event: ${event.type}`;
+  }
+}
+
 export type PollingTelemetryEvent =
   | {
       type: 'poll';
@@ -118,8 +133,8 @@ export class PollingChangeSource implements StreamChangeSource {
     if (!this.#onPoll) return;
     try {
       this.#onPoll(event);
-    } catch {
-      // swallow telemetry errors — polling must not be coupled to observer faults
+    } catch (error) {
+      process.emitWarning(new PollTelemetryWarning(error, event));
     }
   }
 }

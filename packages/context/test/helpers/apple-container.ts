@@ -1,4 +1,4 @@
-import spawn from 'nano-spawn';
+import spawn, { SubprocessError } from 'nano-spawn';
 
 const PROBE_IMAGE = 'docker.io/library/bash:5.3-alpine3.24';
 
@@ -25,10 +25,10 @@ export async function appleContainerUnavailable(): Promise<string | undefined> {
       '-f',
       '/dev/null',
     ]);
-    return undefined;
-  } catch {
+  } catch (error) {
+    if (!(error instanceof SubprocessError)) throw error;
     return 'the Apple `container` CLI cannot start a container on this host';
-  } finally {
-    await spawn('container', ['stop', name]).catch(() => {});
   }
+  await spawn('container', ['stop', name]);
+  return undefined;
 }

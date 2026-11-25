@@ -163,7 +163,12 @@ export class OpenAITracesExporter implements TracingExporter {
         const response = await fetch(url, init);
         if (response.ok) return response;
         if (response.status >= 400 && response.status < 500) {
-          const text = await response.text().catch(() => '');
+          const text = await response
+            .text()
+            .catch(
+              (error: unknown) =>
+                `(the error body could not be read: ${Error.isError(error) ? error.message : String(error)})`,
+            );
           throw new OpenAIExportError(response.status, text);
         }
         lastError = new Error(`Server error ${response.status}`);

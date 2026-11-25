@@ -62,6 +62,36 @@ export interface WithStraceFileChangesOptions {
   traceDir?: string;
 }
 
+/** Removing a parsed trace file failed; the file stays in the sandbox until the trace directory is removed. */
+class TraceRemoveWarning extends Error {
+  readonly code = 'DEEPAGENTS_CONTEXT_STRACE_TRACE_REMOVE_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, traceFile: string) {
+    super(
+      `Removing a parsed trace file failed, and the file stays in the sandbox until the trace directory is removed: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'TraceRemoveWarning';
+    this.detail = `trace file: ${traceFile}`;
+  }
+}
+
+/** The `onError` of a spawned process's file changes threw; the process's exit result is returned as is. */
+class OnErrorWarning extends Error {
+  readonly code = 'DEEPAGENTS_CONTEXT_STRACE_ON_ERROR_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, traceFile: string) {
+    super(
+      `The onError of a spawned process's file changes threw, and the process's exit result is returned as is: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'OnErrorWarning';
+    this.detail = `trace file: ${traceFile}`;
+  }
+}
+
 function warnOnFileChangesError(error: unknown): void {
   console.warn(
     '[withStraceFileChanges] onFileChanges threw on spawn; isolated',
@@ -115,7 +145,9 @@ export async function withStraceFileChanges(
   const removeTrace = (traceFile: string) =>
     void Promise.resolve(
       sandbox.run({ command: `rm -f ${shellQuote(traceFile)}` }),
-    ).catch(() => {});
+    ).catch((error: unknown) => {
+      process.emitWarning(new TraceRemoveWarning(error, traceFile));
+    });
 
   // Parse one call's changes and sweep its trace file — the trace is consumed
   // once parsed, so it's deleted here regardless of what the caller's callback
@@ -191,7 +223,9 @@ export async function withStraceFileChanges(
     // collectSpawn is the isolation boundary: never let it (e.g. a throwing
     // onError) reject and mask the real exit result.
     const exit = Promise.resolve(child.wait()).finally(() =>
-      collectSpawn(traceFile).catch(() => {}),
+      collectSpawn(traceFile).catch((error: unknown) => {
+        process.emitWarning(new OnErrorWarning(error, traceFile));
+      }),
     );
     // An abort rejects `exit` before the caller asks for it.
     exit.catch(() => {});
@@ -205,10 +239,9 @@ export async function withStraceFileChanges(
   }
 
   const dispose = async (): Promise<void> => {
-    await Promise.resolve(
-      sandbox.run({ command: `rm -rf ${shellQuote(traceDir)}` }),
-    ).catch(() => {});
-    await sandbox.dispose();
+    await using disposal = new AsyncDisposableStack();
+    disposal.defer(() => sandbox.dispose());
+    await sandbox.run({ command: `rm -rf ${shellQuote(traceDir)}` });
   };
 
   return {

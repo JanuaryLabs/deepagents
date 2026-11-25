@@ -17,6 +17,21 @@ export interface FileTelemetryOptions {
   clock: { Date: { now(): number } };
 }
 
+/** A telemetry file's onWriteError threw or rejected; the observed operation goes on. */
+class TelemetryWriteHandlerWarning extends Error {
+  readonly code = 'DEEPAGENTS_CONTEXT_TELEMETRY_WRITE_HANDLER_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, path: string) {
+    super(
+      `The onWriteError of a telemetry file failed, and the observed operation goes on: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'TelemetryWriteHandlerWarning';
+    this.detail = `path: ${path}`;
+  }
+}
+
 export function createFileTelemetry(
   options: FileTelemetryOptions,
 ): Telemetry & { readonly traces: { readonly path: string } } {
@@ -24,8 +39,9 @@ export function createFileTelemetry(
   const reportWriteError = async (error: unknown): Promise<void> => {
     try {
       await options.onWriteError?.(error);
-    } catch {
+    } catch (failure) {
       // Telemetry must never affect the observed operation.
+      process.emitWarning(new TelemetryWriteHandlerWarning(failure, path));
     }
   };
   const initialize = mkdir(dirname(path), { recursive: true }).then(

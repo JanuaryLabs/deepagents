@@ -8,6 +8,7 @@ import { MockLanguageModelV4 } from 'ai/test';
 import { HttpResponse, http } from 'msw';
 import assert from 'node:assert';
 import { type TestContext, describe, it } from 'node:test';
+import { setImmediate } from 'node:timers/promises';
 import { z } from 'zod';
 
 import { isRecord } from '@deepagents/context';
@@ -1098,7 +1099,7 @@ describe('OpenAI Traces Integration', () => {
         });
 
         await clock.tickAsync(1000);
-        await new Promise((resolve) => setImmediate(resolve));
+        await setImmediate();
         assert.deepStrictEqual(unhandled, []);
         assert.deepStrictEqual(
           logged.mock.calls.map((call) => call.arguments),
@@ -1146,7 +1147,7 @@ describe('OpenAI Traces Integration', () => {
           span_data: { type: 'agent', name: 'workflow' },
         });
 
-        await new Promise((resolve) => setImmediate(resolve));
+        await setImmediate();
         assert.deepStrictEqual(unhandled, []);
         assert.deepStrictEqual(
           logged.mock.calls.map((call) => call.arguments),

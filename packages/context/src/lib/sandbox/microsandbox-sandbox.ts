@@ -44,6 +44,21 @@ export const MICROSANDBOX_DEFAULT_DESTINATION = '/workspace';
 const MICROSANDBOX_DEFAULT_IMAGE = 'bash:5.3-alpine3.24';
 const COMMAND_TIMEOUT_EXIT_CODE = 124;
 
+/** Killing a command at its timeout failed; the command runs on until it exits. */
+class TimeoutKillWarning extends Error {
+  readonly code = 'DEEPAGENTS_CONTEXT_MICROSANDBOX_TIMEOUT_KILL_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, command: string) {
+    super(
+      `Killing a command at its timeout failed, and the command runs on until it exits: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'TimeoutKillWarning';
+    this.detail = `command: ${command}`;
+  }
+}
+
 // The SDK has no typed not-found error. The guest's errno ends the message, as
 // in "sandbox fs error: stat: No such file or directory (os error 2)": ENOENT
 // is 2, and ENOTDIR (20) is a path under a file.
@@ -365,12 +380,10 @@ export class MicrosandboxSandboxEnvironment implements StoppableSandboxEnvironme
       },
     );
     if (this.#options.readiness) {
-      try {
-        await this.#options.readiness(sandbox);
-      } catch (error) {
-        await sandbox.close().catch(() => {});
-        throw error;
-      }
+      await using onFailure = new AsyncDisposableStack();
+      onFailure.defer(() => sandbox.close());
+      await this.#options.readiness(sandbox);
+      onFailure.move();
     }
     return sandbox;
   }
@@ -617,7 +630,9 @@ function microsandboxSession({
     if (commandTimeout) {
       timer = setTimeout(() => {
         timedOut = true;
-        void control.kill().catch(() => {});
+        void control.kill().catch((error: unknown) => {
+          process.emitWarning(new TimeoutKillWarning(error, command));
+        });
       }, commandTimeout).unref();
     }
 

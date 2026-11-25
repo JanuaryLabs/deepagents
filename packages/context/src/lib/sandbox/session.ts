@@ -174,6 +174,21 @@ export function textCalls({
   };
 }
 
+/** Killing a process on abort failed; the process runs on until it exits. */
+class AbortKillWarning extends Error {
+  readonly code = 'DEEPAGENTS_CONTEXT_ABORT_KILL_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, reason: unknown) {
+    super(
+      `Killing a process on abort failed, and the process runs on until it exits: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'AbortKillWarning';
+    this.detail = `abort reason: ${Error.isError(reason) ? reason.message : String(reason)}`;
+  }
+}
+
 /**
  * The control of a spawned process: a kill that runs once however often it is
  * called, a kill when `abortSignal` aborts (at once when it already has), and
@@ -194,9 +209,9 @@ export function controlProcess({
   let killing: Promise<void> | undefined;
   const kill = () => (killing ??= stop());
   const onAbort = () => {
-    // Observes a failed kill at once; `exitCode` still reports how the
-    // process ended.
-    void kill().catch(() => {});
+    void kill().catch((error: unknown) => {
+      process.emitWarning(new AbortKillWarning(error, abortSignal?.reason));
+    });
   };
   if (abortSignal?.aborted) onAbort();
   else abortSignal?.addEventListener('abort', onAbort, { once: true });

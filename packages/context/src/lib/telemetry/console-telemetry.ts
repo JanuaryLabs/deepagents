@@ -6,6 +6,21 @@ import {
   stringifyTelemetryLogRecord,
 } from './safe-serialize.ts';
 
+/** Writing a telemetry record to the console logger failed; the observed operation goes on. */
+class TelemetryLogWarning extends Error {
+  readonly code = 'DEEPAGENTS_CONTEXT_TELEMETRY_LOG_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, event: string) {
+    super(
+      `Writing a telemetry record failed, and the observed operation goes on: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'TelemetryLogWarning';
+    this.detail = `event: ${event}`;
+  }
+}
+
 export interface ConsoleTelemetryOptions {
   pretty?: boolean;
   logger?: Pick<Console, 'log' | 'error'>;
@@ -26,8 +41,9 @@ export function createConsoleTelemetry(
     );
     try {
       logger[method](stringifyTelemetryLogRecord(record, indentation));
-    } catch {
+    } catch (error) {
       // Telemetry must never affect the observed operation.
+      process.emitWarning(new TelemetryLogWarning(error, event));
     }
   };
   return createTelemetryIntegration(write);

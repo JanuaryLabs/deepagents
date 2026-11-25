@@ -1644,12 +1644,12 @@ await createDockerSandbox({ ...options, dockerfile }).then(
       // Verify sandbox is disposed (command should fail)
       const captured1 = captured.at(0);
       if (captured1) {
-        try {
-          await captured1.run({ command: 'echo test' });
-          // If no error, container might still be stopping - that's ok
-        } catch {
-          // Expected - container is gone
-        }
+        await assert.rejects(
+          async () => captured1.run({ command: 'echo test' }),
+          {
+            message: /^The sandbox ".+" is disposed\.$/,
+          },
+        );
       }
     });
 
@@ -1671,11 +1671,12 @@ await createDockerSandbox({ ...options, dockerfile }).then(
       // Verify sandbox is disposed (command should fail)
       const captured2 = captured.at(0);
       if (captured2) {
-        try {
-          await captured2.run({ command: 'echo test' });
-        } catch {
-          // Expected - container is gone
-        }
+        await assert.rejects(
+          async () => captured2.run({ command: 'echo test' }),
+          {
+            message: /^The sandbox ".+" is disposed\.$/,
+          },
+        );
       }
     });
 

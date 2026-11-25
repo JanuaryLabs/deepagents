@@ -1076,11 +1076,12 @@ describe('onFileChanges failure handling (docker backend)', () => {
         });
         return Number(r.stdout.trim());
       };
-      // The plain-Error throw rejects this call; we only care that its trace
-      // was swept, so swallow the rejection.
-      await Promise.resolve(
-        s.sandbox.run({ command: `echo hi > ${ROOT}/leak.txt` }),
-      ).catch(() => {});
+      // A plain Error from onFileChanges rejects the run; its trace must still
+      // be swept.
+      await assert.rejects(
+        async () => s.sandbox.run({ command: `echo hi > ${ROOT}/leak.txt` }),
+        /boom/,
+      );
       let count = Number.POSITIVE_INFINITY;
       for (let i = 0; i < 20 && count > 1; i++) {
         count = await countTraces();

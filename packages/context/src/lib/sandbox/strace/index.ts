@@ -415,7 +415,12 @@ export async function selfTestStrace(): Promise<void> {
 
   try {
     const result = await runOnHost(wrapped);
-    const raw = await readFile(traceFile, 'utf8').catch(() => '');
+    const raw = await readFile(traceFile, 'utf8').catch((error: unknown) => {
+      if (Error.isError(error) && 'code' in error && error.code === 'ENOENT') {
+        return '';
+      }
+      throw error;
+    });
 
     const diagnostics = `exit=${result.exitCode}\nstderr=${result.stderr}\ntrace[0:600]=${raw.slice(0, 600)}`;
 

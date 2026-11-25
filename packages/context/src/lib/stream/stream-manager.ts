@@ -20,6 +20,66 @@ const CANCEL_WATCHER_RETRY = new Backoff({
   jitter: { kind: 'ratio', ratio: 0.15 },
 });
 
+/** Reading when cancellation was requested failed; cancellation goes on without its latency. */
+class CancelLatencyReadWarning extends Error {
+  readonly code = 'DEEPAGENTS_CONTEXT_CANCEL_LATENCY_READ_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, streamId: string) {
+    super(
+      `Reading when cancellation was requested failed, and cancellation goes on without its latency: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'CancelLatencyReadWarning';
+    this.detail = `stream: ${streamId}`;
+  }
+}
+
+/** The onCancelDetected callback failed; cancellation goes on. */
+class CancelDetectedCallbackWarning extends Error {
+  readonly code = 'DEEPAGENTS_CONTEXT_CANCEL_DETECTED_CALLBACK_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, streamId: string) {
+    super(
+      `The onCancelDetected callback failed, and cancellation goes on: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'CancelDetectedCallbackWarning';
+    this.detail = `stream: ${streamId}`;
+  }
+}
+
+/** Ending the change subscription of a cancelled watch failed; the watch ends anyway. */
+class WatchUnsubscribeWarning extends Error {
+  readonly code = 'DEEPAGENTS_CONTEXT_WATCH_UNSUBSCRIBE_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, streamId: string) {
+    super(
+      `Ending the change subscription of a cancelled watch failed, and the watch ends anyway: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'WatchUnsubscribeWarning';
+    this.detail = `stream: ${streamId}`;
+  }
+}
+
+/** The onWatchEvent observer failed; the observed stream operation goes on. */
+class WatchTelemetryWarning extends Error {
+  readonly code = 'DEEPAGENTS_CONTEXT_WATCH_TELEMETRY_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, event: StreamWatchTelemetryEvent) {
+    super(
+      `The onWatchEvent observer failed, and the observed stream operation goes on: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'WatchTelemetryWarning';
+    this.detail = `stream: ${event.streamId}, event: ${event.type}`;
+  }
+}
+
 function isTerminal(status: StreamStatus) {
   return status !== 'queued' && status !== 'running';
 }
@@ -311,8 +371,9 @@ export class StreamManager {
     let current: StreamData | undefined;
     try {
       current = await this.#store.getStream(streamId);
-    } catch {
+    } catch (error) {
       // Latency is telemetry only; a read failure must never suppress abort.
+      process.emitWarning(new CancelLatencyReadWarning(error, streamId));
     }
     const latencyMs =
       current?.cancelRequestedAt != null
@@ -322,8 +383,8 @@ export class StreamManager {
     if (!options?.onCancelDetected) return;
     try {
       await options.onCancelDetected({ streamId, latencyMs });
-    } catch {
-      /* best-effort — never block cancellation */
+    } catch (error) {
+      process.emitWarning(new CancelDetectedCallbackWarning(error, streamId));
     }
   }
 
@@ -385,8 +446,6 @@ export class StreamManager {
           try {
             result = await iterator.next();
           } catch (error) {
-            // ignore — iterator already terminated by an upstream throw
-            iterator.return?.().catch(() => undefined);
             if (isAbortError(error)) return;
             throw error;
           }
@@ -429,7 +488,9 @@ export class StreamManager {
         ac.abort();
         return iterator?.return?.().then(
           () => undefined,
-          () => undefined,
+          (error: unknown) => {
+            process.emitWarning(new WatchUnsubscribeWarning(error, streamId));
+          },
         );
       },
     });
@@ -450,8 +511,8 @@ export class StreamManager {
     if (!this.#onWatchEvent) return;
     try {
       this.#onWatchEvent(event);
-    } catch {
-      // swallow telemetry errors — watch must not be coupled to observer faults
+    } catch (error) {
+      process.emitWarning(new WatchTelemetryWarning(error, event));
     }
   }
 }

@@ -52,7 +52,7 @@ const SOCRATIC_REVIEW_REMINDER = [
 ].join('\n');
 
 const questionText = nonEmptyString.refine((text) => text.endsWith('?'), {
-  message: 'must end with a question mark',
+  error: 'must end with a question mark',
 });
 const answer = z.strictObject({
   text: nonEmptyString,

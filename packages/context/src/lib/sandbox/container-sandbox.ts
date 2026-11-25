@@ -80,12 +80,10 @@ export abstract class ContainerSandboxStrategy<
 
     const sandbox = this.createSandboxMethods(container);
     if (this.opts.readiness) {
-      try {
-        await this.opts.readiness(sandbox);
-      } catch (error) {
-        await sandbox.dispose().catch(() => {});
-        throw error;
-      }
+      await using onFailure = new AsyncDisposableStack();
+      onFailure.defer(() => sandbox.dispose());
+      await this.opts.readiness(sandbox);
+      onFailure.move();
     }
     return sandbox;
   }

@@ -986,7 +986,10 @@ export class ComposeStrategy extends ContainerSandboxStrategy<DockerCommonOption
     });
     const container = summary && (await containers.find(summary.Id));
     if (!container) {
-      await this.compose(['down']).catch(() => {});
+      await using down = new AsyncDisposableStack();
+      down.defer(async () => {
+        await this.compose(['down']);
+      });
       throw new ComposeStartError(
         this.composeFile,
         `service "${this.service}" has no running container`,
@@ -1004,8 +1007,7 @@ export class ComposeStrategy extends ContainerSandboxStrategy<DockerCommonOption
   }
 
   protected override async release(): Promise<void> {
-    // Cleanup errors are ignored: the stack may already be down.
-    await this.compose(['down']).catch(() => {});
+    await this.compose(['down']);
   }
 }
 
@@ -1149,12 +1151,10 @@ export class DockerSandboxEnvironment implements StoppableSandboxEnvironment {
       () => this.#release(),
     );
     if (this.#options.readiness) {
-      try {
-        await this.#options.readiness(sandbox);
-      } catch (error) {
-        await sandbox.close().catch(() => {});
-        throw error;
-      }
+      await using onFailure = new AsyncDisposableStack();
+      onFailure.defer(() => sandbox.close());
+      await this.#options.readiness(sandbox);
+      onFailure.move();
     }
     return sandbox;
   }

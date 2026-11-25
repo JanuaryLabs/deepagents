@@ -167,12 +167,9 @@ export class PostgresNotifyChangeSource implements StreamChangeSource {
     if (this.#closed.signal.aborted) return;
     this.#closed.abort();
 
-    try {
-      // Joins a LISTEN setup in flight; it sees close() and destroys its client.
-      await this.#listen();
-    } catch {
-      // Listener setup already released the failed client.
-    }
+    // Joins a LISTEN setup in flight; it sees close() and destroys its client.
+    // A failed setup already rejected the subscriber that started it.
+    await Promise.allSettled([this.#listen()]);
     // The last subscription, ended by the abort, may have taken the
     // connection first; this waits until it is back in the pool, so the
     // host can end the pool.

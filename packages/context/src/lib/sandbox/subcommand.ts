@@ -96,6 +96,14 @@ export function repairQuotedArg(rawArgs: string): string | null {
   return `'${escaped}'`;
 }
 
+/** just-bash exports neither `LexerError` nor `ParseException`, so each is told by its name. */
+function isSyntaxError(error: unknown): boolean {
+  return (
+    Error.isError(error) &&
+    (error.name === 'LexerError' || error.name === 'ParseException')
+  );
+}
+
 export function buildSubcommandRepair(
   name: string,
   subcommands: Record<string, SubcommandDefinition>,
@@ -112,8 +120,8 @@ export function buildSubcommandRepair(
     try {
       parse(raw);
       return raw;
-    } catch {
-      // fall through to repair
+    } catch (error) {
+      if (!isSyntaxError(error)) throw error;
     }
 
     const [, prefix, argsPart] = match;
