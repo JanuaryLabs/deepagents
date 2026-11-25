@@ -1,8 +1,12 @@
 import type { MCPClient } from '@ai-sdk/mcp';
 
 import type { AgentPluginDefinition } from '../../runtime/agent-runtime.ts';
+import { modelToolNames } from './model-tool-names.ts';
 
-/** Connect once per runtime and contribute all of the server's AI SDK tools. */
+/**
+ * Connect once per runtime and contribute all of the server's AI SDK tools,
+ * each named `mcp__<server>__<tool>` for the model.
+ */
 export function mcp(options: {
   name: string;
   connect: () => Promise<MCPClient>;
@@ -18,7 +22,7 @@ export function mcp(options: {
         const tools = await client.tools();
         const lifetime = resources.move();
         return {
-          tools,
+          tools: modelToolNames(options.name, tools),
           [Symbol.asyncDispose]: () => lifetime.disposeAsync(),
         };
       },

@@ -50,9 +50,13 @@ test('SimpleAgent discovers and executes a website tool through native WebMCP', 
   const calls: string[] = [];
   const model = new MockLanguageModelV4({
     doStream: async ({ prompt, tools }) => {
-      assert(tools?.some((tool) => tool.name === 'execute_webmcp_tool'));
       assert(
-        tools?.some((tool) => tool.name === 'take_screenshot'),
+        tools?.some(
+          (tool) => tool.name === 'mcp__browser__execute_webmcp_tool',
+        ),
+      );
+      assert(
+        tools?.some((tool) => tool.name === 'mcp__browser__take_screenshot'),
         'tools outside the old six-tool selection are passed directly',
       );
       const results = prompt.flatMap((message) =>
@@ -79,7 +83,7 @@ test('SimpleAgent discovers and executes a website tool through native WebMCP', 
       let toolName: string;
       let input: Record<string, unknown>;
       if (results.length === 0) {
-        toolName = 'new_page';
+        toolName = 'mcp__browser__new_page';
         input = { url: `http://127.0.0.1:${address.port}` };
       } else {
         const page = JSON.stringify(results[0]).match(
@@ -91,13 +95,13 @@ test('SimpleAgent discovers and executes a website tool through native WebMCP', 
         );
         const pageId = Number(page[1]);
         if (results.length === 1) {
-          toolName = 'list_webmcp_tools';
+          toolName = 'mcp__browser__list_webmcp_tools';
           input = { pageId };
         } else {
           const discovery = JSON.stringify(results.at(-1));
           assert.match(discovery, /greet/);
           assert.match(discovery, /inputSchema/);
-          toolName = 'execute_webmcp_tool';
+          toolName = 'mcp__browser__execute_webmcp_tool';
           input = {
             pageId,
             toolName: 'greet',
@@ -177,9 +181,9 @@ test('SimpleAgent discovers and executes a website tool through native WebMCP', 
   }
   assert.equal(text, 'Hello, WebMCP!');
   assert.deepEqual(calls, [
-    'new_page',
-    'list_webmcp_tools',
-    'execute_webmcp_tool',
+    'mcp__browser__new_page',
+    'mcp__browser__list_webmcp_tools',
+    'mcp__browser__execute_webmcp_tool',
   ]);
   // The storage reports queue and relay failures as process warnings.
   assert.deepStrictEqual(warnings, []);

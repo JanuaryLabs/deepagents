@@ -327,7 +327,11 @@ reads. Both routes answer 404 for a deleted session.
 The optional `@deepagents/experimental/zukhruf/mcp` plugin contributes tools
 from an AI SDK `MCPClient`. Provide `mcp({ name, connect })`; Zukhruf connects
 once during host initialization, snapshots the server's current tool catalog,
-and closes the client when that host is disposed.
+and closes the client when that host is disposed. The model sees each tool as
+`mcp__<name>__<tool>`, named as Codex names MCP tools: characters outside
+`[A-Za-z0-9_]` become `_`, and a name over 128 characters, or one that two tools
+sanitize to, gets a 12-hex sha1 suffix. Calls still reach the server under the
+tool's own name, so two servers that both expose `search` run side by side.
 
 Runnable end-to-end showcases live in
 [`demo/zukhruf-simple`](../../demo/zukhruf-simple) (the smallest complete

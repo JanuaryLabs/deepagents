@@ -1057,6 +1057,13 @@ native`AsyncDisposableStack`passed to the recipe owns registered resources. Cons
   client on discovery failure, later initialization failure, or host disposal. Browser,
   transport, and authentication configuration stay with the caller. This is a startup snapshot;
   changes to the server's tool catalog require a new initialized host.
+- The model sees each MCP tool as `mcp__<server>__<tool>`, ported from Codex
+  (`codex-rs/codex-mcp/src/tools.rs` `normalize_tools_for_model_with_prefix`): characters outside
+  `[A-Za-z0-9_]` become `_`; a name over 128 characters, or one that several tools sanitize to,
+  gets a `_<12 hex of sha1>` suffix of the raw server and tool identity, so the names are the same
+  in every process. The MCP call still sends the tool's own name. The old raw names are gone.
+  One plugin is one server, so Codex's namespace suffix for two servers that sanitize alike
+  (`my-server`, `my_server`) is not ported: their tools of the same name conflict at composition.
 
 ## Sandbox idle stop _(Built, #5132)_
 

@@ -61,10 +61,10 @@ Try this in the DevTool chat:
 > Open https://googlechromelabs.github.io/webmcp-tools/demos/explainer/ and use its
 > WebMCP tools to find available appointments on September 15, 2026. Do not book one.
 
-The agent opens the page with `new_page`, discovers website tools with
-`list_webmcp_tools`, then calls `execute_webmcp_tool` using the discovered schema.
-The MCP plugin supplies every tool exposed by the server, including tab management,
-screenshots, and page interaction. Each runtime connects during initialization and
+The agent opens the page with `mcp__browser__new_page`, discovers website tools with
+`mcp__browser__list_webmcp_tools`, then calls `mcp__browser__execute_webmcp_tool` using
+the discovered schema. The MCP plugin supplies every tool exposed by the server, named
+`mcp__browser__<tool>`, including tab management, screenshots, and page interaction. Each runtime connects during initialization and
 owns its connection until disposal; importing the declaration does not connect.
 Websites must expose WebMCP tools for this to work; the demo does not add tools to
 arbitrary websites. Chrome runs on the demo host, alongside the MCP connection.
