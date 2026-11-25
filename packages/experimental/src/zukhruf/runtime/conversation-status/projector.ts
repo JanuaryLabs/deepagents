@@ -115,6 +115,26 @@ class RemoteAttachment {
   readonly ended = new Latch();
 }
 
+/** Hinting other processes of a status change failed; they re-read durable state on their own transitions and on pull. */
+class StatusHintWarning extends Error {
+  readonly code = 'DEEPAGENTS_ZUKHRUF_STATUS_HINT_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, conversation: ConversationId) {
+    super(
+      `Hinting other processes of a status change failed: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'StatusHintWarning';
+    this.detail = `chat: ${conversation.chatId}`;
+  }
+}
+
+/** The events of a subscription that a disposed projector takes: none. */
+async function* ended(): AsyncGenerator<ConversationStatusEvent> {
+  yield* [];
+}
+
 /**
  * Derives conversation status from durable state and publishes changes.
  *
@@ -137,6 +157,7 @@ export class ConversationStatusProjector {
   /** The archivedAt each conversation had when this process last projected it. */
   readonly #archivedAt = new Map<string, number | undefined>();
   readonly #publishing = new Mutex(new MemoryStore());
+  readonly #closing = new AbortController();
   #subscribers = 0;
   #remote: RemoteAttachment | Detached = DETACHED;
 
@@ -239,16 +260,25 @@ export class ConversationStatusProjector {
     if (!(await this.#project(conversation, key))) return;
     try {
       await this.#changeSource?.notify(conversation);
-    } catch {
+    } catch (error) {
       // The hint is best effort; every process re-reads durable state on
       // its own transitions and on pull.
+      process.emitWarning(new StatusHintWarning(error, conversation));
     }
   }
 
+  /**
+   * The status events from now on, until `signal` aborts (which rejects with
+   * its reason) or the projector is disposed (which ends them).
+   */
   async subscribe(
     signal: AbortSignal,
   ): Promise<AsyncIterable<ConversationStatusEvent>> {
-    const events = on(this.#emitter, 'event', { signal });
+    const closing = this.#closing.signal;
+    if (closing.aborted) return ended();
+    const events = on(this.#emitter, 'event', {
+      signal: AbortSignal.any([signal, closing]),
+    });
     try {
       await this.#attachRemote();
     } catch (error) {
@@ -266,11 +296,26 @@ export class ConversationStatusProjector {
             if (event.type === 'error') throw event.error;
             yield event;
           }
+        } catch (error) {
+          if (!closing.aborted || signal.aborted) throw error;
         } finally {
           await detach();
         }
       },
     };
+  }
+
+  /**
+   * Ends every subscription and the attachment to other processes' changes;
+   * a later subscription ends at once.
+   */
+  async [Symbol.asyncDispose](): Promise<void> {
+    this.#closing.abort();
+    const remote = this.#remote;
+    if (!(remote instanceof RemoteAttachment)) return;
+    remote.abort.abort();
+    this.#remote = DETACHED;
+    await remote.ended.wait();
   }
 
   /** Re-reads after a hint from another process, without hinting back. */
@@ -347,7 +392,7 @@ export class ConversationStatusProjector {
   async #attachRemote(): Promise<void> {
     this.#subscribers += 1;
     const source = this.#changeSource;
-    if (!source) return;
+    if (!source || this.#closing.signal.aborted) return;
     let remote = this.#remote;
     if (!(remote instanceof RemoteAttachment)) {
       remote = new RemoteAttachment();

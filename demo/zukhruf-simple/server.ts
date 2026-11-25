@@ -43,3 +43,6 @@ const stopped = Promise.withResolvers<void>();
 process.once('SIGINT', () => stopped.resolve());
 process.once('SIGTERM', () => stopped.resolve());
 await stopped.promise;
+// Ends the open GET /events streams first: the server's close, which runs
+// before `host`'s at the end of this scope, waits for every open response.
+await host[Symbol.asyncDispose]();

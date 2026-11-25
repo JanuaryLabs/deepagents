@@ -55,6 +55,21 @@ import { TurnSettlement } from './turn-settlement.ts';
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 const SHUTDOWN_POLL_INTERVAL_MS = 50;
 
+/** Resolving an orphaned continuation's agent failed, so its turn gets the default terminal reconciliation. */
+class OrphanResolveWarning extends Error {
+  readonly code = 'DEEPAGENTS_ZUKHRUF_ORPHAN_RESOLVE_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, streamId: string) {
+    super(
+      `Resolving an orphaned continuation's agent failed, so it is reconciled as failed: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'OrphanResolveWarning';
+    this.detail = `turn: ${streamId}`;
+  }
+}
+
 export interface AgentPluginToolContext extends Readonly<
   Record<string, unknown>
 > {
@@ -433,13 +448,17 @@ class RuntimeHost implements AsyncDisposable {
     const { storage } = options;
     const directory = new AgentDirectory(storage.store);
     const streams = storage.streams;
-    const conversationStatus = new ConversationStatusProjector({
-      store: storage.store,
-      streams,
-      queue: storage.queue,
-      directory,
-      changeSource: options.conversationStatusChanges,
-    });
+    // Disposing the runtime ends its status subscriptions, so a host's open
+    // GET /events responses end and its server can close.
+    const conversationStatus = resources.use(
+      new ConversationStatusProjector({
+        store: storage.store,
+        streams,
+        queue: storage.queue,
+        directory,
+        changeSource: options.conversationStatusChanges,
+      }),
+    );
     const queue = storage.queue;
     // Every turn pushed to a conversation is admitted here, and publishes the
     // conversation's status once its admission commits.
@@ -1112,8 +1131,9 @@ class RuntimeHost implements AsyncDisposable {
     ) {
       try {
         ({ declaration } = await this.#controlPlane.resolve(turn));
-      } catch {
+      } catch (error) {
         // Default terminal reconciliation below remains the safe fallback.
+        process.emitWarning(new OrphanResolveWarning(error, turn.streamId));
       }
     }
     if (
