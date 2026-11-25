@@ -49,12 +49,24 @@ export type AsyncHookPredicate = (ctx: ClaudeHookInput) => Promise<boolean>;
 export type ReminderTarget =
   'session' | 'prompt' | 'tool-result' | 'tool-batch' | 'stop-feedback';
 
+/**
+ * What a rule does on a continued stop: a `Stop` or `SubagentStop` whose input
+ * has `stop_hook_active: true`, because the agent answered an earlier Stop
+ * hook's feedback.
+ *
+ * - `'skip'` (the default): the rule does not run.
+ * - `'once'`: the rule runs, unless the transcript already holds this rule's
+ *   feedback since the last human turn.
+ */
+export type ContinuedStops = 'skip' | 'once';
+
 export type ReminderRule = {
   id: string;
   target: ReminderTarget;
   events: HookEventName[];
   when: HookPredicate;
   message: string | ((ctx: ClaudeHookInput) => string);
+  continuedStops?: ContinuedStops;
 };
 
 export type GuardRule = {

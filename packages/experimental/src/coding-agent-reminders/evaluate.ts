@@ -1,3 +1,6 @@
+import { readFile } from 'node:fs/promises';
+import { z } from 'zod';
+
 import type {
   ClaudeHookInput,
   ClaudeHookOutput,
@@ -23,14 +26,6 @@ export async function evaluateReminderHook(
           guardMatch.errorReason ?? resolveGuardReason(guardMatch.rule, input),
       },
     };
-  }
-
-  if (
-    input.stop_hook_active === true &&
-    (input.hook_event_name === 'Stop' ||
-      input.hook_event_name === 'SubagentStop')
-  ) {
-    return undefined;
   }
 
   const reminders = await matchingReminders(input, config.reminders);
@@ -66,19 +61,81 @@ async function matchingReminders(
   input: ClaudeHookInput,
   reminders: ReminderRule[],
 ): Promise<string[]> {
+  const continued =
+    input.stop_hook_active === true &&
+    (input.hook_event_name === 'Stop' ||
+      input.hook_event_name === 'SubagentStop');
+  let chainFeedback: Promise<string[]> | undefined;
   const matched: string[] = [];
   for (const rule of reminders) {
     if (!rule.events.some((event) => event === input.hook_event_name)) continue;
+    if (continued && rule.continuedStops !== 'once') continue;
+    const marker = `[${rule.target}:${rule.id}]`;
     try {
+      if (continued) {
+        chainFeedback ??= feedbackSinceHumanTurn(input.transcript_path);
+        if (hasMarker(await chainFeedback, marker)) continue;
+      }
       if (!(await rule.when(input))) continue;
-      matched.push(
-        `[${rule.target}:${rule.id}]\n${resolveText(rule.message, input)}`,
-      );
+      matched.push(`${marker}\n${resolveText(rule.message, input)}`);
     } catch (error) {
       console.error(`Reminder "${rule.id}" evaluation failed`, error);
     }
   }
   return matched;
+}
+
+const transcriptLine = z.union([
+  z.object({
+    type: z.literal('user'),
+    origin: z.object({ kind: z.literal('human') }),
+  }),
+  z.object({
+    type: z.literal('attachment'),
+    attachment: z.object({
+      type: z.literal('hook_additional_context'),
+      content: z.array(z.string()),
+    }),
+  }),
+]);
+
+/**
+ * The additional context that hooks added since the last human turn, read
+ * from the newest transcript line back. A continued stop that names no
+ * transcript cannot show that a rule has not fed back yet, so it throws, and
+ * the rule does not fire.
+ */
+async function feedbackSinceHumanTurn(
+  transcriptPath: string | undefined,
+): Promise<string[]> {
+  if (transcriptPath === undefined) {
+    throw new Error(
+      'The continued stop has no transcript_path, so the chain feedback cannot be read.',
+    );
+  }
+  const lines = (await readFile(transcriptPath, 'utf8')).split('\n');
+  const feedback: string[] = [];
+  for (const line of lines.toReversed()) {
+    const parsed = transcriptLine.safeParse(parseJsonLine(line));
+    if (!parsed.success) continue;
+    if (parsed.data.type === 'user') break;
+    feedback.push(...parsed.data.attachment.content);
+  }
+  return feedback;
+}
+
+function parseJsonLine(line: string): unknown {
+  try {
+    return JSON.parse(line);
+  } catch (error) {
+    // An empty line, or the last line while Claude Code still writes it.
+    if (error instanceof SyntaxError) return undefined;
+    throw error;
+  }
+}
+
+function hasMarker(feedback: string[], marker: string): boolean {
+  return feedback.some((text) => text.split('\n').includes(marker));
 }
 
 function resolveText(

@@ -1,5 +1,7 @@
+import { TemporaryFiles } from '@zukhruf/fs';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import test from 'node:test';
 import { z } from 'zod';
 
@@ -255,6 +257,279 @@ test('Stop feedback does not fire again while a stop hook continuation is active
     ),
     undefined,
   );
+});
+
+test('a rule with continuedStops once fires on a continued stop when the chain holds only feedback of other rules', async () => {
+  await using dir = await new TemporaryFiles().directory('reminders-');
+  const transcriptPath = join(dir.path, 'session.jsonl');
+  await writeFile(
+    transcriptPath,
+    [
+      {
+        type: 'user',
+        origin: { kind: 'human' },
+        message: { role: 'user', content: 'Ship the fix.' },
+      },
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Which option do you want?' }],
+        },
+      },
+      {
+        type: 'attachment',
+        attachment: {
+          type: 'hook_additional_context',
+          content: ['[stop-feedback:ask-in-the-tool]\nAsk in the tool.'],
+          hookName: 'Stop',
+          hookEvent: 'Stop',
+        },
+      },
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Safe to close.' }],
+        },
+      },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join('\n') + '\n',
+  );
+
+  const output = await evaluateReminderHook(
+    {
+      hook_event_name: 'Stop',
+      stop_hook_active: true,
+      transcript_path: transcriptPath,
+    },
+    {
+      guards: [],
+      reminders: [
+        {
+          id: 'close-claim',
+          target: 'stop-feedback',
+          events: ['Stop'],
+          when: () => true,
+          message: 'Prove the close claim.',
+          continuedStops: 'once',
+        },
+      ],
+    },
+  );
+
+  assert.deepEqual(output, {
+    hookSpecificOutput: {
+      hookEventName: 'Stop',
+      additionalContext: '[stop-feedback:close-claim]\nProve the close claim.',
+    },
+  });
+});
+
+test('a rule with continuedStops once does not fire twice in one chain', async () => {
+  await using dir = await new TemporaryFiles().directory('reminders-');
+  const transcriptPath = join(dir.path, 'session.jsonl');
+  await writeFile(
+    transcriptPath,
+    [
+      {
+        type: 'user',
+        origin: { kind: 'human' },
+        message: { role: 'user', content: 'Ship the fix.' },
+      },
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Done.' }],
+        },
+      },
+      {
+        type: 'attachment',
+        attachment: {
+          type: 'hook_additional_context',
+          content: [
+            '[stop-feedback:ask-in-the-tool]\nAsk in the tool.\n\n[stop-feedback:close-claim]\nProve the close claim.',
+          ],
+          hookName: 'Stop',
+          hookEvent: 'Stop',
+        },
+      },
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Safe to close.' }],
+        },
+      },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join('\n') + '\n',
+  );
+
+  const output = await evaluateReminderHook(
+    {
+      hook_event_name: 'Stop',
+      stop_hook_active: true,
+      transcript_path: transcriptPath,
+    },
+    {
+      guards: [],
+      reminders: [
+        {
+          id: 'close-claim',
+          target: 'stop-feedback',
+          events: ['Stop'],
+          when: () => true,
+          message: 'Prove the close claim.',
+          continuedStops: 'once',
+        },
+      ],
+    },
+  );
+
+  assert.equal(output, undefined);
+});
+
+test('a rule without continuedStops still skips a continued stop', async () => {
+  await using dir = await new TemporaryFiles().directory('reminders-');
+  const transcriptPath = join(dir.path, 'session.jsonl');
+  await writeFile(
+    transcriptPath,
+    [
+      {
+        type: 'user',
+        origin: { kind: 'human' },
+        message: { role: 'user', content: 'Ship the fix.' },
+      },
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Safe to close.' }],
+        },
+      },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join('\n') + '\n',
+  );
+
+  const output = await evaluateReminderHook(
+    {
+      hook_event_name: 'Stop',
+      stop_hook_active: true,
+      transcript_path: transcriptPath,
+    },
+    {
+      guards: [],
+      reminders: [
+        {
+          id: 'verify-before-stop',
+          target: 'stop-feedback',
+          events: ['Stop'],
+          when: () => true,
+          message: 'Verify before stopping.',
+        },
+      ],
+    },
+  );
+
+  assert.equal(output, undefined);
+});
+
+test('a rule with continuedStops once fires again after a new human turn', async () => {
+  await using dir = await new TemporaryFiles().directory('reminders-');
+  const transcriptPath = join(dir.path, 'session.jsonl');
+  await writeFile(
+    transcriptPath,
+    [
+      {
+        type: 'user',
+        origin: { kind: 'human' },
+        message: { role: 'user', content: 'Ship the fix.' },
+      },
+      {
+        type: 'attachment',
+        attachment: {
+          type: 'hook_additional_context',
+          content: ['[stop-feedback:close-claim]\nProve the close claim.'],
+          hookName: 'Stop',
+          hookEvent: 'Stop',
+        },
+      },
+      {
+        type: 'user',
+        origin: { kind: 'human' },
+        message: { role: 'user', content: 'Now the docs.' },
+      },
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Safe to close.' }],
+        },
+      },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join('\n') + '\n',
+  );
+
+  const output = await evaluateReminderHook(
+    {
+      hook_event_name: 'Stop',
+      stop_hook_active: true,
+      transcript_path: transcriptPath,
+    },
+    {
+      guards: [],
+      reminders: [
+        {
+          id: 'close-claim',
+          target: 'stop-feedback',
+          events: ['Stop'],
+          when: () => true,
+          message: 'Prove the close claim.',
+          continuedStops: 'once',
+        },
+      ],
+    },
+  );
+
+  assert.deepEqual(output, {
+    hookSpecificOutput: {
+      hookEventName: 'Stop',
+      additionalContext: '[stop-feedback:close-claim]\nProve the close claim.',
+    },
+  });
+});
+
+test('a rule with continuedStops once does not fire when the transcript cannot be read', async (t) => {
+  t.mock.method(console, 'error', () => undefined);
+  await using dir = await new TemporaryFiles().directory('reminders-');
+
+  const output = await evaluateReminderHook(
+    {
+      hook_event_name: 'Stop',
+      stop_hook_active: true,
+      transcript_path: join(dir.path, 'missing.jsonl'),
+    },
+    {
+      guards: [],
+      reminders: [
+        {
+          id: 'close-claim',
+          target: 'stop-feedback',
+          events: ['Stop'],
+          when: () => true,
+          message: 'Prove the close claim.',
+          continuedStops: 'once',
+        },
+      ],
+    },
+  );
+
+  assert.equal(output, undefined);
 });
 
 test('guards are only evaluated for PreToolUse', async () => {

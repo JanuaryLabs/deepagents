@@ -52,9 +52,38 @@ separate post-tool events and return `additionalContext` through Claude's hook
 protocol.
 
 Guards are evaluated only for `PreToolUse` and fail closed if their predicate
-throws. Stop feedback is suppressed when `stop_hook_active` is true so a hook
-cannot continue its own continuation repeatedly. `PostToolBatch` predicates
-inspect every entry in Claude's `tool_calls` array.
+throws. `PostToolBatch` predicates inspect every entry in Claude's `tool_calls`
+array.
+
+### Continued stops
+
+A continued stop is a `Stop` or `SubagentStop` whose input has
+`stop_hook_active: true`: the agent stops again after it answered an earlier
+Stop hook's feedback. A rule declares what it does on a continued stop with
+`continuedStops`:
+
+- `'skip'` (the default): the rule does not run. A rule that runs on every
+  continued stop can keep the agent in a loop, so the default stays.
+- `'once'`: the rule runs, unless the transcript at `transcript_path` already
+  holds this rule's feedback (its `[<target>:<id>]` marker in a
+  `hook_additional_context` attachment) since the last human turn (a `user`
+  line with `origin.kind: "human"`). The rule thus fires at most once per chain,
+  so it cannot loop. Use it for a rule that must see the reply an agent writes
+  to other feedback, such as a claim that the work is done.
+
+If the transcript cannot be read, an opted-in rule does not fire on the
+continued stop, and the evaluator logs the failure.
+
+```ts
+{
+  id: 'close-claim',
+  target: 'stop-feedback',
+  events: ['Stop'],
+  continuedStops: 'once',
+  when: () => true,
+  message: 'Prove the claim before you close.',
+}
+```
 
 ## Usage
 
