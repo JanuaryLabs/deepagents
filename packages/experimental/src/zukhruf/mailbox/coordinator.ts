@@ -1,4 +1,4 @@
-import { setTimeout as delay } from 'node:timers/promises';
+import { poll } from '@zukhruf/async';
 import pMemoize from 'p-memoize';
 
 import type {
@@ -107,16 +107,17 @@ export class MailboxCoordinator {
     recipient: ConversationId,
     options: { timeoutMs: number; signal?: AbortSignal },
   ): Promise<boolean> {
-    const deadline = performance.now() + options.timeoutMs;
-    while (true) {
-      options.signal?.throwIfAborted();
-      if (await this.#store.hasPending(recipient)) return true;
-      const remaining = deadline - performance.now();
-      if (remaining <= 0) return false;
-      await delay(Math.min(WAIT_POLL_INTERVAL_MS, remaining), undefined, {
+    const pending = await poll(
+      async () =>
+        (await this.#store.hasPending(recipient)) ? true : undefined,
+      {
+        interval: WAIT_POLL_INTERVAL_MS,
         signal: options.signal,
-      });
-    }
+        clock: globalThis,
+        deadline: performance.now() + options.timeoutMs,
+      },
+    );
+    return pending === true;
   }
 
   /**

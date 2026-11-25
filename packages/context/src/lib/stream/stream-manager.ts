@@ -308,7 +308,7 @@ export class StreamManager {
           }
           if (isTerminal(initialStatus)) return;
 
-          const subscribedAt = Date.now();
+          const subscribedAt = performance.now();
           let subscriptionStabilized = false;
           for await (const change of this.#changeSource.subscribe(
             streamId,
@@ -316,7 +316,7 @@ export class StreamManager {
           )) {
             if (
               !subscriptionStabilized &&
-              Date.now() - subscribedAt >= CANCEL_WATCHER_RETRY_MAX_MS
+              performance.now() - subscribedAt >= CANCEL_WATCHER_RETRY_MAX_MS
             ) {
               retries = 0;
               subscriptionStabilized = true;
