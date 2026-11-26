@@ -2214,6 +2214,86 @@ describe('Stream Chunks', () => {
     });
   });
 
+  describe('StreamManager.persist() source settlement', () => {
+    it('resolves only after a cancelled source has finished cancelling', async (t) => {
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
+      const events: string[] = [];
+      const source = new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          controller.enqueue({ type: 'text-start', id: 'part-1' });
+        },
+        async cancel() {
+          await sleep(200);
+          events.push('source cancel settled');
+        },
+      });
+
+      const persisted = streams
+        .persist(source, streamId)
+        .then(() => events.push('persist resolved'));
+      await waitForStatus(t, store, streamId, 'running');
+      await streams.cancel(streamId);
+      await persisted;
+
+      assert.deepStrictEqual(events, [
+        'source cancel settled',
+        'persist resolved',
+      ]);
+    });
+
+    it('rejects only after the source cancelled by a store failure has finished cancelling', async () => {
+      await using database = await sqlite.database();
+      const store = new FlakyFlushStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
+      const events: string[] = [];
+      const source = new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          controller.enqueue({ type: 'text-start', id: 'part-1' });
+        },
+        async cancel() {
+          await sleep(200);
+          events.push('source cancel settled');
+        },
+      });
+
+      await assert.rejects(streams.persist(source, streamId), {
+        message: 'flush failed once',
+      });
+      events.push('persist rejected');
+
+      assert.deepStrictEqual(events, [
+        'source cancel settled',
+        'persist rejected',
+      ]);
+    });
+
+    it('settles when the source errors', { timeout: 5_000 }, async () => {
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
+      const source = new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          controller.enqueue({ type: 'text-start', id: 'part-1' });
+        },
+        pull(controller) {
+          controller.error(new Error('model stream broke'));
+        },
+      });
+
+      const result = await streams.persist(source, streamId);
+
+      assert.deepStrictEqual(result, { streamId });
+    });
+  });
+
   describe('StreamManager.persist() onCancelDetected', () => {
     it('should invoke onCancelDetected exactly once when cancelled', async (t) => {
       await using database = await sqlite.database();

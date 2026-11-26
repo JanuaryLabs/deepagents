@@ -229,6 +229,7 @@ export class StreamManager {
 
     const ac = new AbortController();
     const cancelWatcher = this.#runCancelWatcher(streamId, ac, options);
+    const source = settlementTracked(stream);
 
     let pw!: Awaited<ReturnType<typeof persistedWriter>>;
 
@@ -239,7 +240,7 @@ export class StreamManager {
           store: this.#store,
           streamId,
         });
-        pw.writer.merge(stream);
+        pw.writer.merge(source.stream);
       },
     });
 
@@ -272,6 +273,7 @@ export class StreamManager {
     } finally {
       if (!ac.signal.aborted) ac.abort();
       await cancelWatcher;
+      await source.settled;
     }
 
     return { streamId: pw?.streamId ?? streamId };
@@ -556,6 +558,52 @@ function isAbortError(error: unknown): boolean {
     Error.isError(error) &&
     (error.name === 'AbortError' || /aborted/i.test(error.message))
   );
+}
+
+/**
+ * Forwards `stream` and reports when it has settled: it ended, errored, or
+ * finished its `cancel`. A `pipeThrough` between the sink and the stream (the
+ * AI SDK's UI message stream and `persistedWriter.merge` each add one) cancels
+ * it without awaiting that cancel, so the sink settling says nothing about it.
+ */
+function settlementTracked(stream: ReadableStream): {
+  stream: ReadableStream;
+  settled: Promise<void>;
+} {
+  const reader = stream.getReader();
+  const { promise: settled, resolve } = Promise.withResolvers<void>();
+  let cancelled = false;
+  return {
+    settled,
+    stream: new ReadableStream(
+      {
+        async pull(controller) {
+          try {
+            const { done, value } = await reader.read();
+            if (cancelled) return;
+            if (done) {
+              controller.close();
+              resolve();
+            } else {
+              controller.enqueue(value);
+            }
+          } catch (error) {
+            resolve();
+            throw error;
+          }
+        },
+        async cancel(reason) {
+          cancelled = true;
+          try {
+            await reader.cancel(reason);
+          } finally {
+            resolve();
+          }
+        },
+      },
+      { highWaterMark: 0 },
+    ),
+  };
 }
 
 /**
