@@ -372,6 +372,127 @@ test('self-closing elements on lines of their own stay blocks, outside any parag
   }
 });
 
+// The first cited paragraph of a real Meddit answer (#5911): three bold spans
+// and a citation in one paragraph.
+const medditAnswerParagraph =
+  '**1. Dose by indication and the three reduction criteria.** For atrial fibrillation the dose is 5 mg twice daily, reduced to 2.5 mg twice daily if **two or more** of: age ≥80 years, weight ≤60 kg, serum creatinine ≥1.5 mg/dL. Creatinine clearance by itself is not a reduction criterion in the US label — so a frail older patient with CrCl 28 mL/min does not automatically get 2.5 mg, but an 82-year-old, 55-kg woman with SCr 1.6 does. For VTE treatment: 10 mg twice daily for 7 days, then 5 mg twice daily, with the same two-of-three reduction to 2.5 mg twice daily (VTE prophylaxis after hip/knee replacement is 2.5 mg twice daily with no renal adjustment). Use **Cockcroft-Gault CrCl, not eGFR** — eGFR-based dosing misclassified 4.6% of apixaban users with CKD, and underdosing was associated with worse cardiovascular/neurologic outcomes <passage-cite passage="pubmed:36892077" />.';
+
+test.each([
+  ['static', 'static'],
+  ['the chat’s streaming', undefined],
+] as const)(
+  'a real answer paragraph with bold and a citation renders as one <p> in %s mode',
+  (_case, mode) => {
+    try {
+      const { container } = render(
+        <InteractiveResponse elements={[passageCite]} mode={mode}>
+          {medditAnswerParagraph}
+        </InteractiveResponse>,
+      );
+
+      const paragraphs = container.querySelectorAll('p');
+      expect({
+        paragraphs: paragraphs.length,
+        boldInside: paragraphs[0]?.querySelectorAll(
+          'strong, [data-streamdown="strong"]',
+        ).length,
+        citeInside: paragraphs[0]?.contains(screen.getByTestId('cite')),
+        divs: container.querySelectorAll('p div, div > [data-testid="cite"]')
+          .length,
+      }).toEqual({ paragraphs: 1, boldInside: 3, citeInside: true, divs: 0 });
+    } finally {
+      cleanup();
+    }
+  },
+);
+
+test.each([
+  ['a bold word', 'A **bold** claim holds.', 'A bold claim holds.'],
+  [
+    'only bold',
+    '**The whole sentence is bold.**',
+    'The whole sentence is bold.',
+  ],
+])('a sentence with %s stays a <p>', (_case, markdown, text) => {
+  try {
+    const { container } = render(
+      <InteractiveResponse elements={[passageCite]}>
+        {markdown}
+      </InteractiveResponse>,
+    );
+
+    const paragraphs = container.querySelectorAll('p');
+    expect({
+      paragraphs: paragraphs.length,
+      text: paragraphs[0]?.textContent,
+    }).toEqual({ paragraphs: 1, text });
+  } finally {
+    cleanup();
+  }
+});
+
+test('italic, a link and inline code beside a citation stay in the sentence’s one <p>', () => {
+  try {
+    const { container } = render(
+      <InteractiveResponse elements={[passageCite]}>
+        {
+          'An *italic* word, a [label](https://example.org) and `dose` <passage-cite passage="pubmed:1" /> hold.'
+        }
+      </InteractiveResponse>,
+    );
+
+    const paragraphs = container.querySelectorAll('p');
+    expect({
+      paragraphs: paragraphs.length,
+      // streamdown draws a link as a <button data-streamdown="link">.
+      holds: ['em', '[data-streamdown="link"]', 'code'].map(
+        (selector) => paragraphs[0]?.querySelector(selector) !== null,
+      ),
+      citeInside: paragraphs[0]?.contains(screen.getByTestId('cite')),
+    }).toEqual({ paragraphs: 1, holds: [true, true, true], citeInside: true });
+  } finally {
+    cleanup();
+  }
+});
+
+test('a paragraph that is only an image keeps no wrapper: the image sits where a <p> would', () => {
+  const plain = plainSentencePath('Aspirin lowers the risk in adults.');
+  try {
+    const { container } = render(
+      <InteractiveResponse elements={[passageCite]}>
+        {'![the trial chart](https://example.org/chart.png)'}
+      </InteractiveResponse>,
+    );
+
+    expect(
+      tagPath(
+        container.querySelector('[data-streamdown="image-wrapper"]'),
+        container,
+      ),
+    ).toEqual([...plain.slice(0, -1), 'DIV']);
+  } finally {
+    cleanup();
+  }
+});
+
+test('an image in a sentence, which streamdown draws in block wrappers, keeps the paragraph a <div>', () => {
+  try {
+    const { container } = render(
+      <InteractiveResponse elements={[passageCite]}>
+        {'See ![the trial chart](https://example.org/chart.png) for the curve.'}
+      </InteractiveResponse>,
+    );
+
+    expect({
+      paragraphs: container.querySelectorAll('p').length,
+      blockInsideParagraph: container.querySelector('p div') !== null,
+      image: container.querySelector('img[alt="the trial chart"]') !== null,
+    }).toEqual({ paragraphs: 0, blockInsideParagraph: false, image: true });
+  } finally {
+    cleanup();
+  }
+});
+
 test('escaped quotes in a generic attribute survive the rendering pipeline', () => {
   const paramElement = {
     name: 'param-probe',
