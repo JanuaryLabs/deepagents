@@ -388,7 +388,10 @@ export class AgentControlPlane {
     return this.#mailbox.waitForPending(actor.thread.conversation, options);
   }
 
-  async projectTerminal(turn: TurnRef, thread: AgentThread): Promise<void> {
+  async projectTerminal(
+    turn: Pick<TurnRef, 'streamId'>,
+    thread: AgentThread,
+  ): Promise<void> {
     const terminal = await this.#statusProjector.projectTerminal(turn, thread);
     if (!terminal) return;
     await this.#recordActivity(thread, {

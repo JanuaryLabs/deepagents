@@ -312,6 +312,13 @@ instead of tailing forever.
   still `queued` with the `createdAt` it read, so concurrent sweeps on several hosts fail it once
   and a stream reopened meanwhile keeps its new turn. It appends no chunk (two sweeps would append
   twice); `watch()` emits the stored error and closes, and a late worker skips the terminal row.
+- **A lost sub-agent continuation ends the child's turn for its parent.** The sweep that won the
+  CAS runs the orphan path's terminal projection (`AgentControlPlane.projectTerminal`): the parent
+  gets one queue-only `FINAL_ANSWER` `Agent failed: turn lost: …` and the child's `completion`
+  activity records `failed`, as Codex notifies the parent of an errored child turn
+  (`notify_parent_of_terminal_turn`, `core/src/agent/control/completion.rs`). A lost turn that
+  never ran (a child's first task or a `followup_task`) has no message that names its
+  conversation, so the sweep cannot project it (#5829).
 - **Startup only, no periodic sweep.** A job is lost only after it sat runnable for a whole retention
   window with no worker serving its queue, so a loss implies a service gap, and the first `work()`
   after the gap sweeps it. `work()` resolves after the sweep, which runs once its consumer is

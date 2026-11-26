@@ -1119,6 +1119,8 @@ class RuntimeHost implements AsyncDisposable {
    * The continuation never ran, so its approval answer never reached the
    * head: the follow-ups parked behind that head stay parked until the
    * approval is answered again, as after a cancelled queued continuation.
+   * A sub-agent's lost continuation also ends its turn for its parent, so
+   * the parent gets the failure as it gets an orphaned turn's.
    */
   async #publishLostTurn(streamId: string): Promise<void> {
     const message = await this.#store.getMessage(streamId);
@@ -1126,10 +1128,12 @@ class RuntimeHost implements AsyncDisposable {
     const chat = await this.#store.getChat(message.chatId);
     // A session delete since the failure removed the chat with its watchers.
     if (chat === undefined) return;
-    await this.#conversationStatus.publish({
-      chatId: chat.id,
-      userId: chat.userId,
-    });
+    const conversation = { chatId: chat.id, userId: chat.userId };
+    const thread = await this.#directory.load(conversation);
+    if (thread !== undefined) {
+      await this.#controlPlane.projectTerminal({ streamId }, thread);
+    }
+    await this.#conversationStatus.publish(conversation);
   }
 
   /**

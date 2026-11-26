@@ -103,7 +103,7 @@ export class AgentStatusProjector {
   }
 
   async projectTerminal(
-    turn: TurnRef,
+    turn: Pick<TurnRef, 'streamId'>,
     thread: AgentThread,
   ): Promise<
     | {
