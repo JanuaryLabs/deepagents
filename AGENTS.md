@@ -6,7 +6,7 @@
 
 - **Cite a package call site before proposing new capability.** A gap that only a demo, eval, or test exercises is not a gap. Name the `packages/` call site (file:line) that needs the capability, or drop the proposal — never justify it with a deployment scenario nobody has wired up.
 
-- **Own only what the AI SDK lacks.** [docs/aisdk-parity.md](./docs/aisdk-parity.md) gives each concept the repo owns a verdict against the AI SDK and the `vercel` / `vercel-labs` packages. Read its row before building or keeping framework code around model calls, tools, streams or steps. `npx nx run tools:aisdk-delta` lists what upstream shipped since the ledger's check, and the `aisdk-parity` skill turns that into verdicts and backlog items.
+- **Own only what the AI SDK lacks.** [docs/aisdk-parity.md](./docs/aisdk-parity.md) gives each concept the repo owns a verdict against the AI SDK and the `vercel` / `vercel-labs` packages. Read its row before building or keeping framework code around model calls, tools, streams or steps. `node .claude/skills/aisdk-parity/scripts/delta.ts` lists what upstream shipped since the ledger's check, and the `aisdk-parity` skill turns that into verdicts and backlog items.
 
 - **Force the deployment into the design.** Design for several processes on any number of hosts, with ownership held in the shared store. Never shape a design around today's host (one Mac mini, one VM): no "one process is enough for now" and no host-local lock as an option.
 

@@ -2,7 +2,7 @@
 
 deepagents exists to fill gaps in the AI SDK. This ledger lists each concept the repo owns and says whether the AI SDK, or a package from the `vercel` or `vercel-labs` GitHub orgs, now covers it.
 
-Checked on 2026-11-26 against `ai@7.0.183` ([vercel/ai@0411a13d](https://github.com/vercel/ai/tree/0411a13df36b20bf6c67c82c1056e99d0e48257b)), every public `@ai-sdk/*` package, and the packages and repositories recorded in [aisdk-parity.snapshot.json](./aisdk-parity.snapshot.json). The repo had `ai@7.0.181` installed; nothing that shipped between the two changes a row. To recheck, run the `aisdk-parity` skill ([.claude/skills/aisdk-parity](../.claude/skills/aisdk-parity/SKILL.md)). Its first step, `npx nx run tools:aisdk-delta`, lists what shipped since the snapshot.
+Checked on 2026-11-26 against `ai@7.0.183` ([vercel/ai@0411a13d](https://github.com/vercel/ai/tree/0411a13df36b20bf6c67c82c1056e99d0e48257b)), every public `@ai-sdk/*` package, and the packages and repositories recorded in [aisdk-parity.snapshot.json](./aisdk-parity.snapshot.json). The repo had `ai@7.0.181` installed; nothing that shipped between the two changes a row. To recheck, run the `aisdk-parity` skill ([.claude/skills/aisdk-parity](../.claude/skills/aisdk-parity/SKILL.md)). Its first step, `node .claude/skills/aisdk-parity/scripts/delta.ts`, lists what shipped since the snapshot.
 
 ## Bottom line
 

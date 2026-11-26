@@ -3,6 +3,8 @@
 // published npm tarballs and the GitHub API, and the ledger rows whose cited
 // files no longer exist. --write records the live state as the new baseline in
 // docs/aisdk-parity.snapshot.json.
+//
+// Usage, from the repo root: node .claude/skills/aisdk-parity/scripts/delta.ts [--write]
 import { Semaphore } from '@zukhruf/async';
 import { TemporaryFiles, isErrno } from '@zukhruf/fs';
 import { execFile } from 'node:child_process';
@@ -45,14 +47,10 @@ interface Release {
   entries: string[];
 }
 
-const snapshotFile = new URL(
-  '../../docs/aisdk-parity.snapshot.json',
-  import.meta.url,
-);
-const ledgerFile = new URL('../../docs/aisdk-parity.md', import.meta.url);
-const packagesDirectory = fileURLToPath(
-  new URL('../../packages/', import.meta.url),
-);
+const repoRoot = new URL('../../../../', import.meta.url);
+const snapshotFile = new URL('docs/aisdk-parity.snapshot.json', repoRoot);
+const ledgerFile = new URL('docs/aisdk-parity.md', repoRoot);
+const packagesDirectory = fileURLToPath(new URL('packages/', repoRoot));
 const run = promisify(execFile);
 const network = new Semaphore(12);
 const temporaryFiles = new TemporaryFiles();

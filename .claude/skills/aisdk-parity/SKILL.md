@@ -9,12 +9,12 @@ deepagents exists to fill AI SDK gaps. Once upstream covers a concept, we stop o
 
 ## Steps
 
-1. **Delta.** `npx nx run tools:aisdk-delta > <scratchpad>/delta.md`. Since the snapshot it lists each moved package's changelog entries and export changes, new `@ai-sdk/*` packages, and new or removed vercel / vercel-labs repositories. Packages that only bumped dependencies are one line. Under "Ledger rows citing missing files" it lists each row whose `Ours` file under `packages/` no longer exists.
+1. **Delta.** From the repo root, `node .claude/skills/aisdk-parity/scripts/delta.ts > <scratchpad>/delta.md`. It only reads. Since the snapshot it lists each moved package's changelog entries and export changes, new `@ai-sdk/*` packages, and new or removed vercel / vercel-labs repositories. Packages that only bumped dependencies are one line. Under "Ledger rows citing missing files" it lists each row whose `Ours` file under `packages/` no longer exists.
 2. **Match.** Map each delta entry to the ledger rows of the concept it touches. Most entries touch none. For a new package or repository, read its README and its source exports before deciding.
 3. **Verify against source.** Before a verdict changes, read the published code: `npm pack <pkg>@<version>` or the repository at a commit. Cite it pinned (a tarball path with its version, or a GitHub permalink at a SHA). A behavioural claim gets a scratchpad probe against the real package first.
 4. **Update the ledger.** Change the row's verdict, upstream evidence and action. Add a row for a concept we own that the ledger lacks. For each row that cites a missing file, find where the code went and cite it, or delete the row when the code is gone.
 5. **File.** Each row that becomes `covered` or `partial` gets `agent-backlog add --kind debt --work-type change`, and its id goes in the row. Deletions run through `/coding:remove-code`. text2sql rows are file-only.
-6. **Move the baseline.** `npx nx run tools:aisdk-delta --args=--write`, then commit the ledger and the snapshot together.
+6. **Move the baseline.** `node .claude/skills/aisdk-parity/scripts/delta.ts --write`, then commit the ledger and the snapshot together. Run `--write` only after steps 2–5: it marks everything that shipped as reviewed.
 
 ## Verdicts
 
@@ -34,4 +34,5 @@ deepagents exists to fill AI SDK gaps. Once upstream covers a concept, we stop o
 - An `experimental_` prefix, a version pin or an extra install is a cost to report, not a reason to keep our copy.
 - A gap that only a demo, eval or test exercises is not a gap. Name the `packages/` call site.
 - To follow a package outside vercel/ai, add its npm name to the snapshot's `watch` list; the next `--write` records its version.
+- `scripts/delta.ts` belongs to no Nx project, so the push gate never checks it. `scripts/tsconfig.json` gives ESLint typed linting; after editing the script, run `npx eslint` on it and run it once.
 - Each ledger table sits behind a `<!-- prettier-ignore -->` line. Keep it there: without it Prettier pads every column, and the file triples in size for every agent that reads it.
