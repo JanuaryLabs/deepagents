@@ -7,6 +7,10 @@
     "check-consumer-install": {
       "command": "node tools/src/check-consumer-install.ts",
       "cache": false
+    },
+    "aisdk-delta": {
+      "command": "node tools/src/aisdk-delta.ts",
+      "cache": false
     }
   }
 }
