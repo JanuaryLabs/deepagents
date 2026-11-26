@@ -5,10 +5,12 @@ import { TemporaryFiles } from '@zukhruf/fs';
 import { suite, test } from '@zukhruf/parameterized-test';
 import { waitFor } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
+import { isToolUIPart } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import type { TestContext } from 'node:test';
 import { PgBoss } from 'pg-boss';
+import { z } from 'zod';
 
 import {
   type AdmissionScope,
@@ -25,6 +27,7 @@ import {
   WakeScheduler,
   defineAgent,
   defineStack,
+  defineTool,
 } from '@deepagents/experimental/zukhruf';
 import {
   type SchedulingWake,
@@ -265,9 +268,10 @@ function answering(gate?: Promise<unknown>) {
   });
 }
 
-/** A real storage whose first settle intent write fails, as a store outage at that moment would. */
+/** A real storage whose first settle intent write while armed fails, as a store outage at that moment would. */
 class FailFirstSettleWriteStorage extends AgentStorage {
-  failedWrites = 0;
+  readonly failedTurns: string[] = [];
+  armed = true;
   readonly #inner: AgentStorage;
 
   constructor(inner: AgentStorage) {
@@ -312,8 +316,8 @@ class FailFirstSettleWriteStorage extends AgentStorage {
         ...scope,
         settleIntents: {
           record: async (followUp, id, intent) => {
-            if (this.failedWrites === 0) {
-              this.failedWrites++;
+            if (this.armed && this.failedTurns.length === 0) {
+              this.failedTurns.push(intent.turnId);
               throw new Error('settle intent write failed');
             }
             await scope.settleIntents.record(followUp, id, intent);
@@ -524,10 +528,143 @@ void suite.each(storages, ({ name, open }) =>
         });
         assert.deepStrictEqual(
           {
-            failedWrites: storage.failedWrites,
+            failedWrites: storage.failedTurns.length,
             status: (await host.observe(conversation).status(turn.id))?.status,
           },
           { failedWrites: 1, status: 'completed' },
+        );
+      });
+
+      test('an approval continuation whose settle intent write fails is reconciled as a completed orphan: its denial stays recorded, the denied tool never runs, and the message parked behind the approval runs', async (t) => {
+        await using resources = new AsyncDisposableStack();
+        const storage = new FailFirstSettleWriteStorage(
+          (await open(resources)).storage,
+        );
+        storage.armed = false;
+        const plugin = availability('orphaned-continuation', async () => {});
+        const sent: string[] = [];
+        await using host = await new AgentRuntime(
+          defineAgent({
+            name: 'root',
+            sandbox: buildSandbox(),
+            instructions: [],
+            toolApproval: { sendEmail: 'user-approval' },
+            tools: {
+              sendEmail: defineTool({
+                description: 'Send an email',
+                inputSchema: z.object({ to: z.string() }),
+                execute: async ({ to }) => {
+                  sent.push(to);
+                  return `sent:${to}`;
+                },
+              }),
+            },
+            plugins: [plugin],
+            model: new MockLanguageModelV4({
+              doStream: async ({ prompt }) => {
+                const text = lastUserText(prompt);
+                if (text !== 'send it') return textResult(`done:${text}`);
+                return prompt.some(({ role }) => role === 'tool')
+                  ? textResult('not sent')
+                  : toolCallResult({
+                      toolCallId: 'send-1',
+                      toolName: 'sendEmail',
+                      input: JSON.stringify({ to: 'a@b.c' }),
+                    });
+              },
+            }),
+          }),
+        ).initialize(defineStack(async () => ({ storage })));
+        await host.work();
+        const conversation = { chatId: 'orphaned-continuation', userId: 'u1' };
+
+        const ask = await host.enqueue(
+          conversation,
+          userTurn('t-1', 'send it'),
+        );
+        await Array.fromAsync(ask.stream);
+        await waitFor(() => assert.equal(plugin.calls, 1), {
+          signal: t.signal,
+        });
+        const parked = await host.enqueue(
+          conversation,
+          userTurn('t-2', 'and then?'),
+        );
+        const paused = (
+          await host.observe(conversation).engine.getMessages()
+        ).at(-1);
+        assert.ok(paused?.role === 'assistant');
+        storage.armed = true;
+        const continuation = await host.enqueue(conversation, {
+          message: {
+            ...paused,
+            role: 'assistant',
+            parts: paused.parts.map((part) =>
+              isToolUIPart(part) && part.state === 'approval-requested'
+                ? {
+                    ...part,
+                    state: 'approval-responded',
+                    approval: {
+                      ...part.approval,
+                      approved: false,
+                      reason: 'not now',
+                    },
+                  }
+                : part,
+            ),
+          },
+          trigger: 'submit-message',
+        });
+        await Array.fromAsync(continuation.stream);
+
+        await waitFor(
+          async () =>
+            assert.equal(
+              (await host.observe(conversation).status(parked.id))?.status,
+              'completed',
+            ),
+          { signal: t.signal },
+        );
+        const messages = await host.observe(conversation).engine.getMessages();
+        assert.deepStrictEqual(
+          {
+            failedTurns: storage.failedTurns,
+            continuation: (
+              await host.observe(conversation).status(continuation.id)
+            )?.status,
+            sent,
+            denied: messages.flatMap((message) =>
+              message.parts.flatMap((part) =>
+                isToolUIPart(part)
+                  ? [
+                      {
+                        toolCallId: part.toolCallId,
+                        state: part.state,
+                        reason: part.approval?.reason,
+                      },
+                    ]
+                  : [],
+              ),
+            ),
+            answer: messages
+              .at(-1)
+              ?.parts.flatMap((part) =>
+                part.type === 'text' ? [part.text] : [],
+              ),
+          },
+          {
+            failedTurns: [continuation.id],
+            continuation: 'completed',
+            sent: [],
+            denied: [
+              {
+                toolCallId: 'send-1',
+                state: 'output-denied',
+                reason: 'not now',
+              },
+            ],
+            answer: ['done:and then?'],
+          },
         );
       });
 

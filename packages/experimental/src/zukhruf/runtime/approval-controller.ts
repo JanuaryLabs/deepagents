@@ -77,42 +77,6 @@ export class ApprovalController {
     return isPausedHead(message);
   }
 
-  async settleDeniedApprovals(
-    conversation: ConversationId,
-    streamId: string,
-  ): Promise<void> {
-    const engine = this.#engineFor(conversation);
-    const head = (await engine.getMessages()).at(-1);
-    if (head?.role !== 'assistant' || head.id !== streamId) return;
-    const hasDenied = head.parts.some(
-      (part) =>
-        isToolUIPart(part) &&
-        part.state === 'approval-responded' &&
-        part.approval.approved === false,
-    );
-    if (!hasDenied) return;
-
-    const updated: UIMessage = {
-      ...head,
-      parts: head.parts.map((part) => {
-        if (
-          !isToolUIPart(part) ||
-          part.state !== 'approval-responded' ||
-          part.approval.approved !== false
-        ) {
-          return part;
-        }
-        const settled: ApprovalToolPart = {
-          ...part,
-          state: 'output-denied',
-          approval: { ...part.approval, approved: false },
-        };
-        return settled;
-      }),
-    };
-    await engine.continue(assistant(updated));
-  }
-
   async settleFailedApprovals(
     conversation: ConversationId,
     streamId: string,
@@ -158,9 +122,9 @@ export class ApprovalController {
     status: 'completed' | 'failed' | 'cancelled',
     error?: string | null,
   ): Promise<void> {
-    if (status === 'completed') {
-      await this.settleDeniedApprovals(conversation, streamId);
-    } else {
+    // A completed continuation ran the SDK, which settled each denied part
+    // to output-denied itself.
+    if (status !== 'completed') {
       await this.settleFailedApprovals(
         conversation,
         streamId,
