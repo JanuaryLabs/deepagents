@@ -47,7 +47,7 @@
     "remark-directive": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",
-    "streamdown": "^2.5.0",
+    "streamdown": "^2.8.1",
     "unified": "^11.0.5",
     "unist-util-visit": "^5.1.0",
     "use-stick-to-bottom": "^1.1.3",
