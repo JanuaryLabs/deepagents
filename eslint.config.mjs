@@ -49,7 +49,6 @@ export default defineConfig(
       'packages/context/src/lib/fragments/message/user.ts',
       'packages/context/src/lib/fragments/reminders/src/reminders.ts',
       'packages/context/src/lib/fragments/user.ts',
-      'packages/context/src/lib/guardrail.ts',
       'packages/context/src/lib/render.ts',
       'packages/context/src/lib/renderers/abstract.renderer.ts',
       'packages/context/src/lib/skills/fragments.ts',

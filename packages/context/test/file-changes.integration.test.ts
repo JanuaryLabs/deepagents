@@ -1002,7 +1002,7 @@ describe('onFileChanges failure handling (docker backend)', () => {
       });
 
       // The model sees a failed RESULT (the caller's format()), not a thrown
-      // tool call the agent/guardrail would swallow.
+      // tool call.
       const [result] = res.toolResults;
       assert.ok(result && !result.dynamic && result.toolName === 'writeFile');
       const { output } = result;
