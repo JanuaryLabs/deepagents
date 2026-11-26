@@ -4,9 +4,13 @@
 
 - **Reproduce first.** For any bug fix — even with a pre-diagnosed root cause — reproduce the failure live (a throwaway scratchpad script against the real CLI/API/library) before writing the red test or the fix. Reproduction confirms the diagnosis, yields real fixture payloads for tests, and surfaces adjacent breaks the diagnosis missed.
 
+- **Prove a pitch's claims.** A claim about current behavior that a recommendation or a delete rests on ("this branch never fires", "this path settles early") gets a probe or a red test before it drives the decision; until then the pitch calls it unproven. Two #5807/#5804 claims read from source were wrong once probed.
+
 - **Cite a package call site before proposing new capability.** A gap that only a demo, eval, or test exercises is not a gap. Name the `packages/` call site (file:line) that needs the capability, or drop the proposal — never justify it with a deployment scenario nobody has wired up.
 
 - **Own only what the AI SDK lacks.** [docs/aisdk-parity.md](./docs/aisdk-parity.md) gives each concept the repo owns a verdict against the AI SDK and the `vercel` / `vercel-labs` packages. Read its row before building or keeping framework code around model calls, tools, streams or steps. `node .claude/skills/aisdk-parity/scripts/delta.ts` lists what upstream shipped since the ledger's check, and the `aisdk-parity` skill turns that into verdicts and backlog items. Our own packages, `@deepagents/elements` included, are not an AI SDK route: when a native seam exists and our code hides it (a stream transform `defineAgent` does not pass through, #5889), the fix passes the seam through.
+
+- **A live path is no reason to keep a workaround.** When a probe shows our hand-rolled code still fires on some path, find what the AI SDK (or Codex, for parity) owns for that path, adopt it, and move every consumer to it, rather than deleting less (#5804 removed the whole guardrail feature this way).
 
 - **No backward compatibility.** Delete old or unused API outright, public exports of published packages included: no aliases, deprecations, migration paths or "nothing breaks" options, and no question to the owner about breaking npm users. Consumers move to the new form. This overrides a generic skill rule that treats public exports as not removable.
 
@@ -34,6 +38,7 @@ node --test --no-warnings --test-timeout=60000 path/to/package/test/file.test.ts
 - **Always pass `--test-timeout=<ms>` to direct `node --test` runs.** Prefer Nx for
   dependency-aware builds. Database classes share servers without runner setup;
   servers persist until explicit cleanup. See [TEST_PRIMITIVES.md](./TEST_PRIMITIVES.md).
+- **Pin the Docker engine on every test command.** Prefix Nx test, typecheck and affected runs and every `node --test` with `DOCKER_CONTEXT=desktop-linux`. The current Docker context is global; another session can point it at `limerence-dokploy`, Meddit's production host, and `@zukhruf/testing` then starts its databases there (twice on 2026-11-26). A passing sqlserver suite on this Mac means the run went remote.
 - `nx run <project>:typecheck` runs only `tsc --build`: no ESLint and no Prettier. Before committing, run
   `npx eslint <files>` and `npx prettier --check <files>` on what you changed, test files included. The
   commit hook checks formatting and the pre-push gate runs each affected project's `lint`, `build` and
