@@ -122,12 +122,14 @@ import {
 const validated = new ValidatedProducer(
   new MessageExtractor(messages),
   adapter,
-  { execute: true },
+  { execute: true, removeInvalid: true },
 );
 
 const pairs = await validated.toPairs();
-// Only includes pairs where SQL validated/executed successfully
+// Only pairs whose SQL validated, each with the rowCount of its execution
 ```
+
+Without `removeInvalid`, a pair whose SQL fails validation stays, with `success: false` and its `error`. With `execute: true`, an error from the adapter's `execute()` stops `produce()` and `toPairs()` with that error.
 
 ### FilteredProducer
 
