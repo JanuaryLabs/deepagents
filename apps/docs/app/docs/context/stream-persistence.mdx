@@ -215,6 +215,8 @@ await manager.persist(uiStream, 'stream-abc', {
 
 If the stream is already in a terminal status (`completed`, `failed`, `cancelled`), `persist` returns immediately without re-running.
 
+`persist` resolves or rejects only after the source stream has settled. When it stops reading early, after a cancel or a store failure, it waits for the source's own cancel to finish. Whatever the source saves while it cancels, such as the partial answer `chat()` saves from its end callback, is in the store when `persist` returns.
+
 ### watch(streamId)
 
 Returns a `ReadableStream` that replays all persisted chunks, then live-tails new ones until the stream reaches a terminal status.
