@@ -8,6 +8,8 @@
 
 - **Own only what the AI SDK lacks.** [docs/aisdk-parity.md](./docs/aisdk-parity.md) gives each concept the repo owns a verdict against the AI SDK and the `vercel` / `vercel-labs` packages. Read its row before building or keeping framework code around model calls, tools, streams or steps. `node .claude/skills/aisdk-parity/scripts/delta.ts` lists what upstream shipped since the ledger's check, and the `aisdk-parity` skill turns that into verdicts and backlog items.
 
+- **No backward compatibility.** Delete old or unused API outright, public exports of published packages included: no aliases, deprecations, migration paths or "nothing breaks" options, and no question to the owner about breaking npm users. Consumers move to the new form. This overrides a generic skill rule that treats public exports as not removable.
+
 - **Force the deployment into the design.** Design for several processes on any number of hosts, with ownership held in the shared store. Never shape a design around today's host (one Mac mini, one VM): no "one process is enough for now" and no host-local lock as an option.
 
 ## Testing
