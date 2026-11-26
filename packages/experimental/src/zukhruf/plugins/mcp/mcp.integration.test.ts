@@ -45,14 +45,15 @@ interface McpServerOptions {
   /** The tool names `tools/list` returns, or undefined to fail discovery. */
   tools(): string[] | undefined | Promise<never>;
   /**
-   * Answers `tools/call` with the returned text. `disconnected` aborts when
-   * the client drops the call's connection before the answer.
+   * Answers `tools/call` with the returned text, a whole result or a JSON-RPC
+   * error, or drops the connection without an answer. `disconnected` aborts when the client drops the call's connection
+   * before the answer.
    */
   call(
     name: string,
     text: string,
     disconnected: AbortSignal,
-  ): string | Promise<string>;
+  ): ToolAnswer | Promise<ToolAnswer>;
   /**
    * The server answers `initialize` once this settles. `disconnected` aborts
    * when the client drops the handshake's connection first.
@@ -61,6 +62,12 @@ interface McpServerOptions {
   sessions?: string[];
   closed?: string[];
 }
+
+type ToolAnswer =
+  | string
+  | { result: Record<string, unknown> }
+  | { error: { code: number; message: string } }
+  | 'hang up';
 
 /** Aborts when the client drops the connection before the response ends. */
 function disconnectedSignal(response: ServerResponse) {
@@ -126,12 +133,26 @@ async function startMcpServer(options: McpServerOptions) {
         })),
       });
     } else if (message.method === 'tools/call') {
-      const text = await options.call(
+      const answer = await options.call(
         message.params.name,
         message.params.arguments.text,
         disconnectedSignal(response),
       );
-      reply({ content: [{ type: 'text', text }] });
+      if (answer === 'hang up') {
+        request.socket.destroy();
+      } else if (typeof answer === 'string') {
+        reply({ content: [{ type: 'text', text: answer }] });
+      } else if ('result' in answer) {
+        reply(answer.result);
+      } else {
+        response.end(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            error: answer.error,
+          }),
+        );
+      }
     } else {
       response.end(
         JSON.stringify({
@@ -158,19 +179,32 @@ function connectTo(server: { origin: string }) {
 /**
  * Runs one turn of a root agent with the given plugins. The model calls the
  * tools in `toolCalls` on its first step and answers on its second; returns
- * the tool names the model was offered and the tool results it read. Once
- * `cancel.when` settles, the turn is cancelled through its observation, and
- * the runtime stays up until `cancel.observed` settles.
+ * the tool names the model was offered, the tool outputs the stream carried
+ * and, per model call, the tool results the model read. Once `cancel.when`
+ * settles, the turn is cancelled through its observation, and the runtime
+ * stays up until `cancel.observed` settles. `turns` above 1 sends follow-up
+ * messages to the same chat, which the model answers from its history.
  */
 async function runTurn(
   plugins: ReturnType<typeof mcp>[],
   toolCalls: { toolName: string; text: string }[] = [],
   cancel?: { when: Promise<unknown>; observed: Promise<unknown> },
+  turns = 1,
 ) {
   const offered: string[][] = [];
+  const read: unknown[][] = [];
   const model = new MockLanguageModelV4({
     doStream: async ({ prompt, tools }) => {
       offered.push((tools ?? []).map((tool) => tool.name));
+      read.push(
+        prompt.flatMap((message) =>
+          message.role === 'tool'
+            ? message.content.flatMap((part) =>
+                part.type === 'tool-result' ? [part.output] : [],
+              )
+            : [],
+        ),
+      );
       const answered = prompt.some((message) => message.role === 'tool');
       const chunks: LanguageModelV4StreamPart[] =
         answered || toolCalls.length === 0
@@ -226,28 +260,33 @@ async function runTurn(
   );
   resources.use(await host.work());
   const conversation = { chatId: 'mcp', userId: 'test' };
-  const { stream } = await host.enqueue(conversation, {
-    message: {
-      id: 'request',
-      role: 'user',
-      parts: [{ type: 'text', text: 'Use the tools.' }],
-    },
-    trigger: 'submit-message',
-  });
-  const cancelled = cancel?.when.then(() =>
-    host.observe(conversation).cancel(),
-  );
   const results: unknown[] = [];
-  for await (const part of stream) {
-    if (part.type === 'error') assert.fail(part.errorText);
-    if (part.type === 'tool-input-error' || part.type === 'tool-output-error') {
-      assert.fail(part.errorText);
+  for (let turn = 0; turn < turns; turn++) {
+    const { stream } = await host.enqueue(conversation, {
+      message: {
+        id: `request-${turn}`,
+        role: 'user',
+        parts: [{ type: 'text', text: 'Use the tools.' }],
+      },
+      trigger: 'submit-message',
+    });
+    const cancelled = cancel?.when.then(() =>
+      host.observe(conversation).cancel(),
+    );
+    for await (const part of stream) {
+      if (part.type === 'error') assert.fail(part.errorText);
+      if (
+        part.type === 'tool-input-error' ||
+        part.type === 'tool-output-error'
+      ) {
+        assert.fail(part.errorText);
+      }
+      if (part.type === 'tool-output-available') results.push(part.output);
     }
-    if (part.type === 'tool-output-available') results.push(part.output);
+    await cancelled;
+    await cancel?.observed;
   }
-  await cancelled;
-  await cancel?.observed;
-  return { offered, results };
+  return { offered, results, read };
 }
 
 /** Initializes a runtime whose root agent has only the given plugin. */
@@ -275,6 +314,24 @@ function sessionDeleted(server: { server: Server }) {
       if (request.method === 'DELETE') resolve();
     }),
   );
+}
+
+/** Codex's header with the measured seconds replaced by `<s>`. */
+const HEADER = 'Wall time: <s> seconds\nOutput:';
+
+/** `read` with each 4-decimal wall time replaced by `<s>`. */
+function anyWallTime(read: unknown[][]) {
+  return JSON.parse(
+    JSON.stringify(read).replaceAll(
+      /Wall time: \d+\.\d{4} seconds/g,
+      'Wall time: <s> seconds',
+    ),
+  );
+}
+
+/** The tool results the model read on the step after its tool calls. */
+function answerStep(read: unknown[][]) {
+  return anyWallTime(read)[1];
 }
 
 /** The MCP tool names the model is offered, sorted. */
@@ -534,7 +591,7 @@ test(
       },
     });
 
-    const { offered, results } = await runTurn(
+    const { offered, read } = await runTurn(
       [
         mcp({
           name: 'alpha',
@@ -548,16 +605,17 @@ test(
       ],
     );
 
-    assert.deepStrictEqual(results, [
-      { content: [{ type: 'text', text: 'fast y' }], isError: false },
+    assert.deepStrictEqual(answerStep(read), [
       {
-        content: [
-          {
-            type: 'text',
-            text: 'tool call error: tool call failed for `alpha/slow`\n\nCaused by:\n    timed out awaiting tools/call after 2s',
-          },
+        type: 'error-text',
+        value: `${HEADER}\ntool call error: tool call failed for \`alpha/slow\`\n\nCaused by:\n    timed out awaiting tools/call after 2s`,
+      },
+      {
+        type: 'content',
+        value: [
+          { type: 'text', text: HEADER },
+          { type: 'text', text: 'fast y' },
         ],
-        isError: true,
       },
     ]);
     assert.equal(offered.length, 2, 'the model reads the result and answers');
@@ -577,7 +635,7 @@ test(
       },
     });
 
-    const { results } = await runTurn(
+    const { read } = await runTurn(
       [
         mcp({
           name: 'alpha',
@@ -588,8 +646,14 @@ test(
       [{ toolName: 'mcp__alpha__slow', text: 'answer' }],
     );
 
-    assert.deepStrictEqual(results, [
-      { content: [{ type: 'text', text: 'late answer' }], isError: false },
+    assert.deepStrictEqual(answerStep(read), [
+      {
+        type: 'content',
+        value: [
+          { type: 'text', text: HEADER },
+          { type: 'text', text: 'late answer' },
+        ],
+      },
     ]);
   },
 );
@@ -719,3 +783,403 @@ test(
     await deleted;
   },
 );
+
+test('a result with structuredContent reaches the model as that structuredContent serialized under the wall-time header, not its content', async () => {
+  await using server = await startMcpServer({
+    tools: () => ['weather'],
+    call: () => ({
+      result: {
+        content: [{ type: 'text', text: 'It is 21 degrees.' }],
+        structuredContent: { temperature: 21, unit: 'C' },
+      },
+    }),
+  });
+
+  const { read, offered } = await runTurn(
+    [mcp({ name: 'alpha', connect: connectTo(server) })],
+    [{ toolName: 'mcp__alpha__weather', text: 'Paris' }],
+  );
+
+  assert.deepStrictEqual(answerStep(read), [
+    { type: 'text', value: `${HEADER}\n{"temperature":21,"unit":"C"}` },
+  ]);
+  assert.equal(offered.length, 2, 'the model reads the result and answers');
+});
+
+test('a result with only structuredContent is not empty for the model', async () => {
+  await using server = await startMcpServer({
+    tools: () => ['weather'],
+    call: () => ({ result: { content: [], structuredContent: { ok: true } } }),
+  });
+
+  const { read } = await runTurn(
+    [mcp({ name: 'alpha', connect: connectTo(server) })],
+    [{ toolName: 'mcp__alpha__weather', text: 'Paris' }],
+  );
+
+  assert.deepStrictEqual(answerStep(read), [
+    { type: 'text', value: `${HEADER}\n{"ok":true}` },
+  ]);
+});
+
+test('a result with content only reaches the model as the header item followed by its content items', async () => {
+  await using server = await startMcpServer({
+    tools: () => ['echo'],
+    call: () => ({
+      result: {
+        content: [
+          { type: 'text', text: 'first' },
+          { type: 'image', data: 'Zm9v', mimeType: 'image/png' },
+          { type: 'text', text: 'second' },
+        ],
+      },
+    }),
+  });
+
+  const { read } = await runTurn(
+    [mcp({ name: 'alpha', connect: connectTo(server) })],
+    [{ toolName: 'mcp__alpha__echo', text: 'x' }],
+  );
+
+  assert.deepStrictEqual(answerStep(read), [
+    {
+      type: 'content',
+      value: [
+        { type: 'text', text: HEADER },
+        { type: 'text', text: 'first' },
+        {
+          type: 'file',
+          mediaType: 'image/png',
+          data: { type: 'data', data: 'Zm9v' },
+        },
+        { type: 'text', text: 'second' },
+      ],
+    },
+  ]);
+});
+
+test('an isError result reaches the model as an error result, and the turn goes on', async () => {
+  await using server = await startMcpServer({
+    tools: () => ['weather'],
+    call: () => ({
+      result: {
+        content: [
+          { type: 'text', text: 'no such city' },
+          { type: 'text', text: 'try another' },
+        ],
+        isError: true,
+      },
+    }),
+  });
+
+  const { read, offered } = await runTurn(
+    [mcp({ name: 'alpha', connect: connectTo(server) })],
+    [{ toolName: 'mcp__alpha__weather', text: 'Atlantis' }],
+  );
+
+  assert.deepStrictEqual(answerStep(read), [
+    { type: 'error-text', value: `${HEADER}\nno such city\ntry another` },
+  ]);
+  assert.equal(offered.length, 2, 'the model reads the error and answers');
+});
+
+test(
+  'the header carries the measured wall time in seconds with 4 decimals, and a later turn reads the same result from history',
+  { timeout: 10_000 },
+  async () => {
+    await using server = await startMcpServer({
+      tools: () => ['slow'],
+      async call() {
+        await setTimeout(300);
+        return 'late';
+      },
+    });
+
+    const { read } = await runTurn(
+      [mcp({ name: 'alpha', connect: connectTo(server) })],
+      [{ toolName: 'mcp__alpha__slow', text: 'x' }],
+      undefined,
+      2,
+    );
+
+    assert.deepStrictEqual(answerStep(read), [
+      {
+        type: 'content',
+        value: [
+          { type: 'text', text: HEADER },
+          { type: 'text', text: 'late' },
+        ],
+      },
+    ]);
+    const header = /Wall time: (\d+\.\d{4}) seconds/.exec(
+      JSON.stringify(read[1]),
+    );
+    assert.ok(header);
+    const seconds = Number(header[1]);
+    assert.ok(seconds >= 0.3 && seconds < 5, `${seconds} seconds`);
+    assert.deepStrictEqual(
+      read[2],
+      read[1],
+      'the follow-up turn replays the result the model read first',
+    );
+  },
+);
+
+test('an output over Codex budget of 12,000 tokens keeps its head and tail around the truncation marker', async () => {
+  const text = 'a'.repeat(30_000) + 'b'.repeat(30_000);
+  await using server = await startMcpServer({
+    tools: () => ['dump'],
+    call: () => text,
+  });
+
+  const { read } = await runTurn(
+    [mcp({ name: 'alpha', connect: connectTo(server) })],
+    [{ toolName: 'mcp__alpha__dump', text: 'x' }],
+  );
+
+  // The 33-byte header costs 9 tokens, leaving 11,991 (47,964 bytes) for the text.
+  assert.deepStrictEqual(answerStep(read), [
+    {
+      type: 'content',
+      value: [
+        { type: 'text', text: HEADER },
+        {
+          type: 'text',
+          text:
+            'a'.repeat(23_982) + '…3009 tokens truncated…' + 'b'.repeat(23_982),
+        },
+      ],
+    },
+  ]);
+});
+
+test('a serialized structuredContent over the budget is cut in the middle together with its header', async () => {
+  const structured = { log: 'x'.repeat(50_000) };
+  await using server = await startMcpServer({
+    tools: () => ['dump'],
+    call: () => ({ result: { content: [], structuredContent: structured } }),
+  });
+
+  const { read } = await runTurn(
+    [mcp({ name: 'alpha', connect: connectTo(server) })],
+    [{ toolName: 'mcp__alpha__dump', text: 'x' }],
+  );
+
+  // The 33-byte header, a newline and the 50,010-byte JSON make 50,044 bytes,
+  // 2,044 over the 48,000-byte budget; each end keeps 24,000 bytes.
+  assert.deepStrictEqual(answerStep(read), [
+    {
+      type: 'text',
+      value:
+        `${HEADER}\n{"log":"` +
+        'x'.repeat(23_958) +
+        '…511 tokens truncated…' +
+        'x'.repeat(23_998) +
+        '"}',
+    },
+  ]);
+});
+
+test('a tool call the server fails returns Codex tool call error text to the model, and the turn goes on', async () => {
+  await using server = await startMcpServer({
+    tools: () => ['lookup'],
+    call: () => ({ error: { code: -32603, message: 'database offline' } }),
+  });
+
+  const { read, offered } = await runTurn(
+    [mcp({ name: 'alpha', connect: connectTo(server) })],
+    [{ toolName: 'mcp__alpha__lookup', text: 'x' }],
+  );
+
+  assert.deepStrictEqual(answerStep(read), [
+    {
+      type: 'error-text',
+      value: `${HEADER}\ntool call error: tool call failed for \`alpha/lookup\`\n\nCaused by:\n    database offline`,
+    },
+  ]);
+  assert.equal(offered.length, 2, 'the model reads the error and answers');
+});
+
+test('an isError result with structuredContent reaches the model as an error result carrying the serialized structuredContent', async () => {
+  await using server = await startMcpServer({
+    tools: () => ['weather'],
+    call: () => ({
+      result: {
+        content: [{ type: 'text', text: 'no such city' }],
+        structuredContent: { error: 'unknown city', city: 'Atlantis' },
+        isError: true,
+      },
+    }),
+  });
+
+  const { read } = await runTurn(
+    [mcp({ name: 'alpha', connect: connectTo(server) })],
+    [{ toolName: 'mcp__alpha__weather', text: 'Atlantis' }],
+  );
+
+  assert.deepStrictEqual(answerStep(read), [
+    {
+      type: 'error-text',
+      value: `${HEADER}\n{"error":"unknown city","city":"Atlantis"}`,
+    },
+  ]);
+});
+
+test('an isError result with an image reaches the model as content, so the image is kept', async () => {
+  await using server = await startMcpServer({
+    tools: () => ['render'],
+    call: () => ({
+      result: {
+        content: [
+          { type: 'text', text: 'render failed here' },
+          { type: 'image', data: 'Zm9v', mimeType: 'image/png' },
+        ],
+        isError: true,
+      },
+    }),
+  });
+
+  const { read } = await runTurn(
+    [mcp({ name: 'alpha', connect: connectTo(server) })],
+    [{ toolName: 'mcp__alpha__render', text: 'x' }],
+  );
+
+  assert.deepStrictEqual(answerStep(read), [
+    {
+      type: 'content',
+      value: [
+        { type: 'text', text: HEADER },
+        { type: 'text', text: 'render failed here' },
+        {
+          type: 'file',
+          mediaType: 'image/png',
+          data: { type: 'data', data: 'Zm9v' },
+        },
+      ],
+    },
+  ]);
+});
+
+test('text items after the one that spends the budget are counted in an omitted marker', async () => {
+  await using server = await startMcpServer({
+    tools: () => ['dump'],
+    call: () => ({
+      result: {
+        content: [
+          { type: 'text', text: 'a'.repeat(60_000) },
+          { type: 'text', text: 'later' },
+          { type: 'text', text: 'last' },
+        ],
+      },
+    }),
+  });
+
+  const { read } = await runTurn(
+    [mcp({ name: 'alpha', connect: connectTo(server) })],
+    [{ toolName: 'mcp__alpha__dump', text: 'x' }],
+  );
+
+  assert.deepStrictEqual(answerStep(read), [
+    {
+      type: 'content',
+      value: [
+        { type: 'text', text: HEADER },
+        {
+          type: 'text',
+          text:
+            'a'.repeat(23_982) + '…3009 tokens truncated…' + 'a'.repeat(23_982),
+        },
+        { type: 'text', text: '[omitted 2 text items ...]' },
+      ],
+    },
+  ]);
+});
+
+test('a cut that falls inside a multi-byte character moves to the character boundary', async () => {
+  // 60,002 bytes: each é is 2 bytes, so byte 23,982 and byte 36,020 (the cut
+  // points of the 47,964-byte budget) are both second bytes of an é.
+  const text = 'a' + 'é'.repeat(30_000) + 'b';
+  await using server = await startMcpServer({
+    tools: () => ['dump'],
+    call: () => text,
+  });
+
+  const { read } = await runTurn(
+    [mcp({ name: 'alpha', connect: connectTo(server) })],
+    [{ toolName: 'mcp__alpha__dump', text: 'x' }],
+  );
+
+  assert.deepStrictEqual(answerStep(read), [
+    {
+      type: 'content',
+      value: [
+        { type: 'text', text: HEADER },
+        {
+          type: 'text',
+          text:
+            'a' +
+            'é'.repeat(11_990) +
+            '…3010 tokens truncated…' +
+            'é'.repeat(11_990) +
+            'b',
+        },
+      ],
+    },
+  ]);
+});
+
+test('a content block without a model form, such as a resource link, reaches the model as its JSON', async () => {
+  await using server = await startMcpServer({
+    tools: () => ['find'],
+    call: () => ({
+      result: {
+        content: [
+          {
+            type: 'resource_link',
+            uri: 'file:///notes.txt',
+            name: 'notes',
+            mimeType: 'text/plain',
+          },
+        ],
+      },
+    }),
+  });
+
+  const { read } = await runTurn(
+    [mcp({ name: 'alpha', connect: connectTo(server) })],
+    [{ toolName: 'mcp__alpha__find', text: 'x' }],
+  );
+
+  assert.deepStrictEqual(answerStep(read), [
+    {
+      type: 'content',
+      value: [
+        { type: 'text', text: HEADER },
+        {
+          type: 'text',
+          text: '{"type":"resource_link","uri":"file:///notes.txt","name":"notes","mimeType":"text/plain"}',
+        },
+      ],
+    },
+  ]);
+});
+
+test('a server that drops the connection mid-call returns Codex tool call error text with each cause numbered, and the turn goes on', async () => {
+  await using server = await startMcpServer({
+    tools: () => ['lookup'],
+    call: () => 'hang up',
+  });
+
+  const { read, offered } = await runTurn(
+    [mcp({ name: 'alpha', connect: connectTo(server) })],
+    [{ toolName: 'mcp__alpha__lookup', text: 'x' }],
+  );
+
+  assert.deepStrictEqual(answerStep(read), [
+    {
+      type: 'error-text',
+      value: `${HEADER}\ntool call error: tool call failed for \`alpha/lookup\`\n\nCaused by:\n    0: fetch failed\n    1: other side closed`,
+    },
+  ]);
+  assert.equal(offered.length, 2, 'the model reads the error and answers');
+});

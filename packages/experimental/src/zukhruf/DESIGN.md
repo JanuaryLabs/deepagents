@@ -1074,7 +1074,22 @@ native`AsyncDisposableStack`passed to the recipe owns registered resources. Cons
   runs on `AbortSignal.any([turn, AbortSignal.timeout(toolTimeoutMs)])`; when only the deadline
   fired, the tool returns `CallToolResult::from_error_text` of Codex's `tool call error: …
 timed out awaiting tools/call after <d>` (`core/src/mcp_tool_call.rs`) with `isError: true`.
-  A turn cancel rethrows as before.
+  A turn cancel rethrows as before. Any other failed call (a transport error, a JSON-RPC error)
+  returns ``tool call error: tool call failed for `<server>/<tool>` `` with anyhow's `Caused by:`
+  chain of the error and its causes, so the turn goes on.
+- The model reads an MCP result as Codex renders it (`core/src/tools/context.rs`
+  `McpToolOutput::response_payload`, `protocol/src/models.rs` `as_function_call_output_payload`):
+  `Wall time: <s, 4 decimals> seconds\nOutput:` from execute's measured duration, then the
+  serialized `structuredContent` when present (one text), else the header as the first item before
+  the content items. `isError` becomes the AI SDK's `error-text`; the SDK has no error variant of
+  `content`, so an error result with an image stays `content`. The budget is Codex's for every
+  bundled model, 10,000 tokens (`models-manager/models.json`) plus `with_serialization_allowance`'s
+  20%: 12,000 tokens at Codex's 4 bytes per token. Over it, text keeps half the bytes from each end
+  around `…<n> tokens truncated…` (`utils/string/src/truncate.rs` `plan_token_truncation`); items
+  spend the budget in order, later text items become `[omitted <n> text items ...]`, images stay
+  (`utils/output-truncation/src/lib.rs`). The tool's output stores the raw result plus
+  `wallTimeMs`, and `toModelOutput` derives the rest, so a later turn replays the same text. This
+  is Codex's head-and-tail cut, a different rule from the sandbox bash tool's head-only limit.
 
 ## Sandbox idle stop _(Built, #5132)_
 
