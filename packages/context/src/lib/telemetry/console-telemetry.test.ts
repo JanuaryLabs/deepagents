@@ -315,7 +315,7 @@ describe('createConsoleTelemetry()', () => {
     );
     assert.strictEqual(
       toolCallInput.parse(toolStart?.data).toolCall.input,
-      '[Redacted]',
+      '[Undefined]',
     );
 
     const withoutOutputs = await capture(true, false);
@@ -326,7 +326,7 @@ describe('createConsoleTelemetry()', () => {
     );
     assert.strictEqual(
       toolOutputValue.parse(toolEnd?.data).toolOutput.output,
-      '[Redacted]',
+      '[Undefined]',
     );
   });
 
@@ -380,7 +380,6 @@ describe('createConsoleTelemetry()', () => {
     );
     const serialized = output.join('\n');
     assert.doesNotMatch(serialized, /SECRET_/);
-    assert.match(serialized, /\[Redacted\]/);
     assert.deepStrictEqual(
       records.map(({ event }) => event),
       [
@@ -407,6 +406,44 @@ describe('createConsoleTelemetry()', () => {
       assert.strictEqual(Object.hasOwn(data, 'toolCall'), false);
       assert.strictEqual(Object.hasOwn(data, 'toolOutput'), false);
     }
+  });
+
+  it('keeps call and response headers out of the log when inputs and outputs are not recorded', async () => {
+    const capture = async (record: boolean) => {
+      const output: string[] = [];
+      const telemetry = createConsoleTelemetry({
+        clock: createClock(),
+        pretty: false,
+        logger: {
+          log: (value) => output.push(String(value)),
+          error: (value) => output.push(String(value)),
+        },
+      });
+      await generateText({
+        model: new MockLanguageModelV4({
+          doGenerate: {
+            content: [{ type: 'text', text: 'answer' }],
+            finishReason: { unified: 'stop', raw: 'stop' },
+            usage,
+            warnings: [],
+            response: { headers: { 'set-cookie': 'SECRET_RESPONSE_HEADER' } },
+          },
+        }),
+        prompt: 'question',
+        headers: { authorization: 'Bearer SECRET_CALL_HEADER' },
+        telemetry: {
+          integrations: telemetry,
+          recordInputs: record,
+          recordOutputs: record,
+        },
+      });
+      return output.join('\n');
+    };
+
+    const recorded = await capture(true);
+    assert.match(recorded, /SECRET_CALL_HEADER/);
+    assert.match(recorded, /SECRET_RESPONSE_HEADER/);
+    assert.doesNotMatch(await capture(false), /SECRET_/);
   });
 
   it('never lets logger failures break model execution', async () => {

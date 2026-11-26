@@ -14,7 +14,7 @@ export function createTelemetryIntegration(
   write: TelemetryEventWriter,
 ): Telemetry {
   const emit = (level: TelemetryLogLevel, event: string, data: unknown) =>
-    write(level, event, redactTelemetryEvent(event, data));
+    write(level, event, redactTelemetryEvent(data));
   const log = (event: string, data: unknown) => emit('log', event, data);
 
   return {

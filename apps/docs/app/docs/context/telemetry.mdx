@@ -126,9 +126,13 @@ telemetry includes prompts, model outputs, tool inputs, tool outputs, headers,
 and selected runtime or tool context. Treat console output and JSONL files as
 sensitive data, control access to them, and configure retention appropriately.
 
-Both integrations honor AI SDK's per-call recording controls. Sensitive input
-and output fields are replaced with `[Redacted]` while identifiers, timing,
-usage, and finish metadata remain available:
+Both integrations honor AI SDK's per-call recording controls. The AI SDK
+empties prompts, tool inputs and outputs, model output, schemas and provider
+options before an integration sees the event, so those fields arrive empty
+(the console shows an empty value as `[Undefined]`). The SDK still passes the
+call's headers and each model response's headers, so the integrations replace
+those with `[Redacted]`. Identifiers, timing, usage, and finish metadata remain
+available:
 
 ```typescript
 await generateText({
@@ -141,7 +145,8 @@ await generateText({
 });
 ```
 
-`runtimeContext` is redacted with other inputs.
+`runtimeContext` follows the AI SDK's own policy: only the keys you list in
+`includeRuntimeContext` are recorded, whatever `recordInputs` says.
 
 See [Tracing](/docs/context/tracing) to additionally export AI SDK operations
 to OpenAI's Traces API.

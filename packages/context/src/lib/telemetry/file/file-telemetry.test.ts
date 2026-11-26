@@ -188,7 +188,7 @@ describe('createFileTelemetry()', () => {
     assert.match(JSON.stringify(records), /file output/);
   });
 
-  it('redacts runtime context when inputs are not recorded', async () => {
+  it('writes no runtime context the host did not include, and no prompt when inputs are not recorded', async () => {
     await using directory = await temporaryFiles.directory(
       'deepagents-telemetry-',
     );
@@ -203,14 +203,12 @@ describe('createFileTelemetry()', () => {
         integrations: telemetry,
         recordInputs: false,
         recordOutputs: false,
-        // Without this opt-in the SDK hands telemetry an empty runtimeContext.
-        includeRuntimeContext: { private: true },
       },
     });
 
     const [{ event, data }] = await readRecords(path);
     assert.equal(event, 'onStart');
-    assert.equal(data.runtimeContext, '[Redacted]');
+    assert.deepStrictEqual(data.runtimeContext, {});
     assert.doesNotMatch(await readFile(path, 'utf8'), /SECRET_/);
   });
 
