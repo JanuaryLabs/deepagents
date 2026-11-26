@@ -1,5 +1,5 @@
+import { describe, it } from '@zukhruf/parameterized-test';
 import assert from 'node:assert';
-import { describe, it } from 'node:test';
 import { z } from 'zod';
 
 import {
@@ -162,7 +162,7 @@ describe('serialized fragment conversion', () => {
     },
   ];
 
-  for (const testCase of roundTripCases) {
+  void it.each(roundTripCases, (testCase) =>
     it(`round-trips ${testCase.type}`, () => {
       const fragment = toFragment(testCase);
 
@@ -170,8 +170,8 @@ describe('serialized fragment conversion', () => {
         { name: fragment.name, decoded: fromFragment(fragment) },
         { name: testCase.type, decoded: testCase },
       );
-    });
-  }
+    }),
+  );
 
   it('round-trips nested principle and policy fragments', () => {
     const fragment = principle({

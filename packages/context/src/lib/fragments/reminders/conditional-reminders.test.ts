@@ -1,6 +1,7 @@
+import { describe, it } from '@zukhruf/parameterized-test';
 import { type ToolUIPart, type UIMessage, isStaticToolUIPart } from 'ai';
 import assert from 'node:assert';
-import { type TestContext, describe, it } from 'node:test';
+import type { TestContext } from 'node:test';
 
 import {
   ContextEngine,
@@ -1499,11 +1500,11 @@ describe('ContextEngine conditional reminders', () => {
 });
 
 describe('everyNTurns', () => {
-  it('refuses a count that could never fire', () => {
-    for (const n of [0, -1, 1.5, Number.NaN]) {
+  void it.each([0, -1, 1.5, Number.NaN], (n) =>
+    it(`refuses the count ${n}, which could never fire`, () => {
       assert.throws(() => everyNTurns(n), {
         message: 'everyNTurns(n) requires a positive integer',
       });
-    }
-  });
+    }),
+  );
 });

@@ -2,6 +2,7 @@ import { NoSuchModelError } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
 import { untilAborted } from '@zukhruf/async';
 import { TemporaryFiles } from '@zukhruf/fs';
+import { test } from '@zukhruf/parameterized-test';
 import { open } from '@zukhruf/sqlite-open';
 import {
   createProviderRegistry,
@@ -16,7 +17,7 @@ import assert from 'node:assert/strict';
 import { hash } from 'node:crypto';
 import { mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type TestContext, test } from 'node:test';
+import type { TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
@@ -371,7 +372,7 @@ test('authentication is lazy, notices account changes, and never uses an API key
   assert.deepEqual(accounts, ['account-a', 'account-b']);
 });
 
-for (const rotate of [true, false]) {
+void test.each([true, false], (rotate) =>
   test(`concurrent providers refresh once and preserve native fields (rotate=${rotate})`, async (t) => {
     await using home = await localHome(t);
     await writeFile(
@@ -427,8 +428,8 @@ for (const rotate of [true, false]) {
       (await stat(join(home.path, 'auth.json'))).mode & 0o777,
       0o600,
     );
-  });
-}
+  }),
+);
 
 test('a request aborted while another request refreshes the login stops waiting for that refresh', async (t) => {
   await using home = await new TemporaryFiles().directory('chatgpt-provider-');
@@ -681,7 +682,7 @@ test('Zukhruf executes a host tool and persists history across queued turns', as
   await using runtime = await runtimeSetup.initialize(stack);
   await using worker = await runtime.work();
   const conversation = { chatId: 'provider-test', userId: 'user' };
-  for (const text of ['Read the marker.', 'What was the marker?']) {
+  const askAndHearBlue = async (text: string) => {
     const turn = await runtime.enqueue(
       conversation,
       userTurn(crypto.randomUUID(), text),
@@ -696,7 +697,9 @@ test('Zukhruf executes a host tool and persists history across queued turns', as
       (await runtime.observe(conversation).status(turn.id))?.status,
       'completed',
     );
-  }
+  };
+  await askAndHearBlue('Read the marker.');
+  await askAndHearBlue('What was the marker?');
   assert.equal(executions, 1);
   assert.equal(requests.length, 3);
   const history = responsesInput.parse(requests[2].input);

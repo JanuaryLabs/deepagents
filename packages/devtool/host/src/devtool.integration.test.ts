@@ -6,12 +6,12 @@ import {
   ATTR_USER_ID,
 } from '@opentelemetry/semantic-conventions/incubating';
 import { TemporaryFiles } from '@zukhruf/fs';
+import { test } from '@zukhruf/parameterized-test';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import test from 'node:test';
 import { z } from 'zod';
 
 import { VirtualSandboxEnvironment } from '@deepagents/context';
@@ -184,11 +184,6 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
     404,
   );
 
-  for (const path of [DEVTOOL_PREFIX, `${DEVTOOL_PREFIX}/`]) {
-    const shellResponse = await app.request(path);
-    assert.equal(shellResponse.status, 200);
-    assert.match(await shellResponse.text(), /<title>Zukhruf Devtool<\/title>/);
-  }
   const shell = await (await app.request(DEVTOOL_PREFIX)).text();
   assert.match(shell, new RegExp(`<base href="${DEVTOOL_PREFIX}/"`));
   const assets = Array.from(
@@ -203,19 +198,6 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
     assert.equal(assetResponse.status, 200);
     assert((await assetResponse.arrayBuffer()).byteLength > 0);
   }
-  for (const deepLink of [
-    `${DEVTOOL_PREFIX}/history`,
-    `${DEVTOOL_PREFIX}/chat/${crypto.randomUUID()}`,
-    `${DEVTOOL_PREFIX}/history/user-1/chat-1/traces/call-1`,
-    `${DEVTOOL_PREFIX}/scheduled`,
-  ]) {
-    const deepLinkResponse = await app.request(deepLink);
-    assert.equal(deepLinkResponse.status, 200);
-    assert.match(
-      await deepLinkResponse.text(),
-      /<title>Zukhruf Devtool<\/title>/,
-    );
-  }
   for (const path of [
     `${DEVTOOL_PREFIX}/assets/missing.js`,
     `${ZUKHRUF_MOUNT_PATH}/missing`,
@@ -225,6 +207,41 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
     assert.equal((await app.request(path, asUser)).status, 404);
   }
 });
+
+void test.each([DEVTOOL_PREFIX, `${DEVTOOL_PREFIX}/`], (path) =>
+  test(`devtool serves its shell at ${path}`, async () => {
+    const app = new Hono().route(DEVTOOL_PREFIX, devtool());
+
+    const shellResponse = await app.request(path);
+
+    assert.equal(shellResponse.status, 200);
+    assert.match(await shellResponse.text(), /<title>Zukhruf Devtool<\/title>/);
+  }),
+);
+
+void test.each(
+  [
+    { page: 'history', path: `${DEVTOOL_PREFIX}/history` },
+    { page: 'a chat', path: `${DEVTOOL_PREFIX}/chat/${crypto.randomUUID()}` },
+    {
+      page: 'a trace',
+      path: `${DEVTOOL_PREFIX}/history/user-1/chat-1/traces/call-1`,
+    },
+    { page: 'scheduled', path: `${DEVTOOL_PREFIX}/scheduled` },
+  ],
+  ({ page, path }) =>
+    test(`devtool answers the deep link to ${page} with its shell`, async () => {
+      const app = new Hono().route(DEVTOOL_PREFIX, devtool());
+
+      const deepLinkResponse = await app.request(path);
+
+      assert.equal(deepLinkResponse.status, 200);
+      assert.match(
+        await deepLinkResponse.text(),
+        /<title>Zukhruf Devtool<\/title>/,
+      );
+    }),
+);
 
 test('devtool follows the host-selected UI and protocol mounts', async () => {
   const mount = '/host/selected/devtool';

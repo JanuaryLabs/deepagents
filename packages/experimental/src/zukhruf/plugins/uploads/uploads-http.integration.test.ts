@@ -1,5 +1,6 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { TemporaryFiles } from '@zukhruf/fs';
+import { test } from '@zukhruf/parameterized-test';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
@@ -7,7 +8,6 @@ import { Hono } from 'hono';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
-import test from 'node:test';
 import { PgBoss } from 'pg-boss';
 import { z } from 'zod';
 
@@ -748,11 +748,8 @@ test('POST /session/:sessionId/uploads rejects anything but a supported media ty
   }
 });
 
-test('POST /session/:sessionId/uploads answers 415 to a malformed Content-Type before the route reads it', async () => {
-  await using h = await harness();
-  const sessionId = randomUUID();
-
-  for (const contentType of [
+void test.each(
+  [
     'not a type',
     'image',
     'image /png',
@@ -760,49 +757,56 @@ test('POST /session/:sessionId/uploads answers 415 to a malformed Content-Type b
     'image/png; foo',
     'image/png; =x',
     'image/png; a="unterminated',
-  ]) {
-    const response = await upload(h.app, sessionId, {
-      contentType,
-      filename: 'pixel.png',
-    });
+  ],
+  (contentType) =>
+    test(`POST /session/:sessionId/uploads answers 415 to the malformed Content-Type ${JSON.stringify(contentType)} before the route reads it`, async () => {
+      await using h = await harness();
+      const sessionId = randomUUID();
 
-    assert.deepStrictEqual(
-      {
-        status: response.status,
-        code: errorBodySchema.parse(await response.json()).cause.code,
-      },
-      { status: 415, code: 'api/unsupported-media-type' },
-      contentType,
-    );
-  }
-});
+      const response = await upload(h.app, sessionId, {
+        contentType,
+        filename: 'pixel.png',
+      });
 
-test('POST /session/:sessionId/uploads stores the essence of a Content-Type whatever its case and parameters', async () => {
-  await using h = await harness();
-  const sessionId = randomUUID();
+      assert.deepStrictEqual(
+        {
+          status: response.status,
+          code: errorBodySchema.parse(await response.json()).cause.code,
+        },
+        { status: 415, code: 'api/unsupported-media-type' },
+        contentType,
+      );
+    }),
+);
 
-  for (const contentType of [
+void test.each(
+  [
     'Image/PNG',
     'IMAGE/PNG; Charset=Binary',
     'image/png ; charset=binary',
     'image/png;charset="bin ary"',
     'image/png; a=b; a=c',
-  ]) {
-    const response = await upload(h.app, sessionId, {
-      contentType,
-      filename: 'pixel.png',
-    });
+  ],
+  (contentType) =>
+    test(`POST /session/:sessionId/uploads stores the essence of the Content-Type ${JSON.stringify(contentType)} whatever its case and parameters`, async () => {
+      await using h = await harness();
+      const sessionId = randomUUID();
 
-    assert.deepStrictEqual(
-      {
-        status: response.status,
-        mediaType: receiptSchema.parse(await response.json()).mediaType,
-      },
-      { status: 201, mediaType: 'image/png' },
-      contentType,
-    );
-  }
-});
+      const response = await upload(h.app, sessionId, {
+        contentType,
+        filename: 'pixel.png',
+      });
+
+      assert.deepStrictEqual(
+        {
+          status: response.status,
+          mediaType: receiptSchema.parse(await response.json()).mediaType,
+        },
+        { status: 201, mediaType: 'image/png' },
+        contentType,
+      );
+    }),
+);
 
 test('POST /session/:sessionId/uploads reads an empty parameter list as the media type alone', async () => {
   await using h = await harness();
@@ -1073,7 +1077,7 @@ async function storedFileIds(
   return listed.stdout.split('\n').filter(Boolean).sort();
 }
 
-for (const { name, open } of storages) {
+void test.each(storages, ({ name, open }) =>
   test(`${name}: an archived session refuses POST /session/:sessionId/uploads with 409 session-archived and writes nothing, keeps serving a file uploaded before the archive, and takes uploads again once unarchived`, async () => {
     await using h = await harness({ storage: open });
     const sessionId = randomUUID();
@@ -1119,5 +1123,5 @@ for (const { name, open } of storages) {
       ),
       PNG_PIXEL,
     );
-  });
-}
+  }),
+);

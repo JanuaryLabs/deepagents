@@ -19,31 +19,23 @@ export async function withSqlServerSchemaLock<T>(
 ): Promise<T> {
   const holder = new mssql.Transaction(pool);
   await holder.begin();
-  let result: T;
-  try {
-    const lock = new mssql.Request(holder);
-    lock.input(
-      'resource',
-      mssql.NVarChar(255),
-      `deepagents:schema-ddl:${schema}`,
-    );
-    const { recordset } = await lock.query<{ status: number }>(`
+  await using transaction = new AsyncDisposableStack();
+  transaction.defer(() => holder.rollback());
+  const lock = new mssql.Request(holder);
+  lock.input(
+    'resource',
+    mssql.NVarChar(255),
+    `deepagents:schema-ddl:${schema}`,
+  );
+  const { recordset } = await lock.query<{ status: number }>(`
       DECLARE @status int;
       EXEC @status = sp_getapplock @Resource = @resource, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = -1;
       SELECT @status AS status;
     `);
-    if (recordset[0].status < 0) {
-      throw new Error(
-        `Could not lock the DDL of schema "${schema}": sp_getapplock returned ${recordset[0].status}.`,
-      );
-    }
-    result = await run();
-  } catch (error) {
-    // The original error explains the failed open; a failed rollback only
-    // means the connection, and the lock with it, is already gone.
-    await holder.rollback().catch(() => {});
-    throw error;
+  if (recordset[0].status < 0) {
+    throw new Error(
+      `Could not lock the DDL of schema "${schema}": sp_getapplock returned ${recordset[0].status}.`,
+    );
   }
-  await holder.rollback();
-  return result;
+  return await run();
 }

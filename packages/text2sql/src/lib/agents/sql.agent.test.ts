@@ -1,4 +1,5 @@
 import type { LanguageModelV4GenerateResult } from '@ai-sdk/provider';
+import { describe, it } from '@zukhruf/parameterized-test';
 import { Sqlite as TestSqlite } from '@zukhruf/testing/sqlite';
 import {
   APICallError,
@@ -10,7 +11,6 @@ import {
 } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert';
-import { describe, it } from 'node:test';
 import z from 'zod';
 
 import { fragment } from '@deepagents/context';
@@ -641,96 +641,98 @@ describe('toSql', () => {
     );
   });
 
-  it('extracts SQL from markdown code block in response', async () => {
-    await using database = await testSqlite.database();
-    for (const statement of [
-      'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)',
-      'CREATE TABLE "table" ("column" TEXT)',
-    ])
-      database.connection.exec(statement);
-    const adapter = new Sqlite({
-      execute: (sql) => database.connection.prepare(sql).all(),
-      grounding: [tables({ filter: ['users', 'table'] })],
-      validate: () => undefined,
-    });
-
-    const testCases = [
+  void it.each(
+    [
       {
         input: '```sql\nSELECT * FROM users\n```',
-        expected: adapter.format('SELECT * FROM users'),
+        expected: 'SELECT * FROM users',
         name: 'standard sql block',
       },
       {
         input: '```sql\nSELECT 1\n```\ntext\n```sql\nSELECT 2\n```',
-        expected: adapter.format('SELECT 1'),
+        expected: 'SELECT 1',
         name: 'multiple blocks (first extracted)',
       },
       {
         input: 'SELECT `column` FROM `table`',
-        expected: adapter.format('SELECT `column` FROM `table`'),
+        expected: 'SELECT `column` FROM `table`',
         name: 'backticks in query (no code block)',
       },
-    ];
+    ],
+    ({ input, expected, name }) =>
+      it(`extracts SQL from a markdown response: ${name}`, async () => {
+        await using database = await testSqlite.database();
+        for (const statement of [
+          'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)',
+          'CREATE TABLE "table" ("column" TEXT)',
+        ])
+          database.connection.exec(statement);
+        const adapter = new Sqlite({
+          execute: (sql) => database.connection.prepare(sql).all(),
+          grounding: [tables({ filter: ['users', 'table'] })],
+          validate: () => undefined,
+        });
 
-    for (const { input, expected, name } of testCases) {
-      const model = createMockModel({
-        result: { sql: input, reasoning: 'test' },
-      });
-      const result = await toSql({
-        input: 'query',
-        adapter,
-        fragments: [],
-        model,
-        maxRetries: 1,
-      });
-      assert.strictEqual(result.sql, expected, `Failed for case: ${name}`);
-    }
-  });
+        const model = createMockModel({
+          result: { sql: input, reasoning: 'test' },
+        });
+        const result = await toSql({
+          input: 'query',
+          adapter,
+          fragments: [],
+          model,
+          maxRetries: 1,
+        });
+        assert.strictEqual(
+          result.sql,
+          adapter.format(expected),
+          `Failed for case: ${name}`,
+        );
+      }),
+  );
 
-  it('rejects markdown responses that do not extract to valid SQL', async () => {
-    await using database = await testSqlite.database();
-    const adapter = new Sqlite({
-      execute: (sql) => database.connection.prepare(sql).all(),
-      grounding: [],
-      validate: () => undefined,
-    });
-    const invalidCases = [
-      '```SQL\nSELECT * FROM users\n```',
-      '```\nSELECT * FROM users\n```',
-    ];
+  void it.each(
+    ['```SQL\nSELECT * FROM users\n```', '```\nSELECT * FROM users\n```'],
+    (input) =>
+      it(`rejects the markdown response ${JSON.stringify(input)}, which does not extract to valid SQL`, async () => {
+        await using database = await testSqlite.database();
+        const adapter = new Sqlite({
+          execute: (sql) => database.connection.prepare(sql).all(),
+          grounding: [],
+          validate: () => undefined,
+        });
 
-    for (const input of invalidCases) {
-      const model = createMockModel({
-        result: { sql: input, reasoning: 'test' },
-      });
+        const model = createMockModel({
+          result: { sql: input, reasoning: 'test' },
+        });
 
-      await assert.rejects(
-        () =>
-          toSql({
-            input: 'query',
-            adapter,
-            fragments: [],
-            model,
-            maxRetries: 1,
-          }),
-        (error: unknown) => {
-          assert(SQLValidationError.isInstance(error));
-          assert.deepStrictEqual(JSON.parse(error.message), {
-            error:
-              'SQL scope analysis failed before validation/execution: SQL response was fenced markdown, not executable SQL.',
-            error_type: 'SQL_SCOPE_PARSE_ERROR',
-            suggestion:
-              'Rewrite the query into simpler SQL that can be analyzed safely, or extend parser coverage for this dialect feature.',
-            sql_attempted: input,
-            parser_dialect: 'sqlite',
-            parser_error:
-              'SQL response was fenced markdown, not executable SQL.',
-          });
-          return true;
-        },
-      );
-    }
-  });
+        await assert.rejects(
+          () =>
+            toSql({
+              input: 'query',
+              adapter,
+              fragments: [],
+              model,
+              maxRetries: 1,
+            }),
+          (error: unknown) => {
+            assert(SQLValidationError.isInstance(error));
+            assert.deepStrictEqual(JSON.parse(error.message), {
+              error:
+                'SQL scope analysis failed before validation/execution: SQL response was fenced markdown, not executable SQL.',
+              error_type: 'SQL_SCOPE_PARSE_ERROR',
+              suggestion:
+                'Rewrite the query into simpler SQL that can be analyzed safely, or extend parser coverage for this dialect feature.',
+              sql_attempted: input,
+              parser_dialect: 'sqlite',
+              parser_error:
+                'SQL response was fenced markdown, not executable SQL.',
+            });
+            return true;
+          },
+        );
+      }),
+  );
 
   it('does not require a formatter-to-policy mapping for fenced errors', async () => {
     const input = '```SQL\nSELECT * FROM users\n```';

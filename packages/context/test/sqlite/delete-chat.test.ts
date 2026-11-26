@@ -1,6 +1,6 @@
+import { describe, it } from '@zukhruf/parameterized-test';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert';
-import { describe, it } from 'node:test';
 
 import {
   ContextEngine,
@@ -152,32 +152,32 @@ describe('Delete Chat', () => {
       assert.strictEqual(chat, undefined);
     });
 
-    it('should handle chatId with special characters', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const specialIds = [
+    void it.each(
+      [
         'chat-with-dashes',
         'chat_with_underscores',
         'chat.with.dots',
         'chat@with#special$chars',
         'chat/with/slashes',
         'uuid-550e8400-e29b-41d4-a716-446655440000',
-      ];
+      ],
+      (chatId) =>
+        it(`should handle the chatId ${chatId} with special characters`, async () => {
+          await using database = await sqlite.database();
+          const store = new SqliteContextStore(database.connection);
+          await store.upsertChat({ id: chatId, userId: 'alice' });
 
-      for (const chatId of specialIds) {
-        await store.upsertChat({ id: chatId, userId: 'alice' });
+          const result = await store.deleteChat(chatId);
+          assert.strictEqual(result, true, `Failed for chatId: ${chatId}`);
 
-        const result = await store.deleteChat(chatId);
-        assert.strictEqual(result, true, `Failed for chatId: ${chatId}`);
-
-        const chat = await store.getChat(chatId);
-        assert.strictEqual(
-          chat,
-          undefined,
-          `Chat not deleted for chatId: ${chatId}`,
-        );
-      }
-    });
+          const chat = await store.getChat(chatId);
+          assert.strictEqual(
+            chat,
+            undefined,
+            `Chat not deleted for chatId: ${chatId}`,
+          );
+        }),
+    );
 
     it('should handle very long chatId', async () => {
       await using database = await sqlite.database();

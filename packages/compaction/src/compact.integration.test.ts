@@ -1,8 +1,8 @@
+import { test } from '@zukhruf/parameterized-test';
 import { type ModelMessage, generateText } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { test } from 'node:test';
 
 import {
   type CompactOptions,
@@ -107,20 +107,18 @@ test('cache age selects compaction using provider retention or an explicit overr
   });
   assert.equal(result.status, 'compacted');
   assert.equal(model.doGenerateCalls.length, 1);
-  for (const retentionMs of [
-    0,
-    -1,
-    0.5,
-    NaN,
-    Infinity,
-    Number.MAX_SAFE_INTEGER + 1,
-  ]) {
-    assert.throws(
-      () => cacheLikelyCold({ retentionMs }),
-      /positive safe integer/,
-    );
-  }
 });
+
+void test.each(
+  [0, -1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1],
+  (retentionMs) =>
+    test(`cacheLikelyCold rejects retentionMs ${retentionMs}`, () => {
+      assert.throws(
+        () => cacheLikelyCold({ retentionMs }),
+        /positive safe integer/,
+      );
+    }),
+);
 
 test('public triggers select a snapshot for compaction and stop matching its replacement', async () => {
   const context = { messages: history, tokens: estimateTokens(history) };
@@ -648,75 +646,73 @@ test('requires a media token counter and preserves binary content with that coun
   assert.deepEqual(result.messages.slice(1), messages.slice(2));
 });
 
-for (const scenario of [
-  {
-    name: 'oversized',
-    text: 'Very long summary. '.repeat(1_000),
-    finishReason: 'stop',
-    reason: 'summary-too-large',
-  },
-  {
-    name: 'truncated',
-    text: summary,
-    finishReason: 'length',
-    reason: 'incomplete-summary',
-  },
-  { name: 'empty', text: '   ', finishReason: 'stop', reason: 'empty-summary' },
-] as const) {
-  test(`returns original history and usage for an ${scenario.name} summary`, async () => {
-    const model = new MockLanguageModelV4({
-      doGenerate: {
-        ...response,
-        content: [{ type: 'text', text: scenario.text }],
-        finishReason: {
-          unified: scenario.finishReason,
-          raw: scenario.finishReason,
+void test.each(
+  [
+    {
+      name: 'oversized',
+      text: 'Very long summary. '.repeat(1_000),
+      finishReason: 'stop',
+      reason: 'summary-too-large',
+    },
+    {
+      name: 'truncated',
+      text: summary,
+      finishReason: 'length',
+      reason: 'incomplete-summary',
+    },
+    {
+      name: 'empty',
+      text: '   ',
+      finishReason: 'stop',
+      reason: 'empty-summary',
+    },
+  ] as const,
+  (scenario) =>
+    test(`returns original history and usage for an ${scenario.name} summary`, async () => {
+      const model = new MockLanguageModelV4({
+        doGenerate: {
+          ...response,
+          content: [{ type: 'text', text: scenario.text }],
+          finishReason: {
+            unified: scenario.finishReason,
+            raw: scenario.finishReason,
+          },
         },
-      },
-    });
-    const result = await compact({
-      messages: history,
-      model,
-      targetTokens: 300,
-      keepLastMessages: 2,
-    });
-    assert.equal(result.status, 'cannot-fit');
-    if (result.status === 'cannot-fit')
-      assert.equal(result.reason, scenario.reason);
-    assert.deepEqual(result.messages, history);
-    assert.equal(result.tokens.after, result.tokens.before);
-    assert.equal(result.usage?.totalTokens, 135);
-    assert.equal(model.doGenerateCalls.length, 1);
-    assert.ok((model.doGenerateCalls[0].maxOutputTokens ?? 0) > 0);
-    assert.ok((model.doGenerateCalls[0].maxOutputTokens ?? 0) <= 300);
-  });
-}
-
-test('validates budgets, counters, and native messages before calling a model', async () => {
-  const model = new MockLanguageModelV4();
-  for (const targetTokens of [
-    0,
-    -1,
-    1.5,
-    Infinity,
-    NaN,
-    Number.MAX_SAFE_INTEGER + 1,
-  ]) {
-    await assert.rejects(
-      compact({ messages: history, model, targetTokens }),
-      /targetTokens/,
-    );
-  }
-  await assert.rejects(
-    compact({
-      messages: history,
-      model,
-      targetTokens: 300,
-      keepLastMessages: 0,
+      });
+      const result = await compact({
+        messages: history,
+        model,
+        targetTokens: 300,
+        keepLastMessages: 2,
+      });
+      assert.equal(result.status, 'cannot-fit');
+      if (result.status === 'cannot-fit')
+        assert.equal(result.reason, scenario.reason);
+      assert.deepEqual(result.messages, history);
+      assert.equal(result.tokens.after, result.tokens.before);
+      assert.equal(result.usage?.totalTokens, 135);
+      assert.equal(model.doGenerateCalls.length, 1);
+      assert.ok((model.doGenerateCalls[0].maxOutputTokens ?? 0) > 0);
+      assert.ok((model.doGenerateCalls[0].maxOutputTokens ?? 0) <= 300);
     }),
-    /keepLastMessages/,
-  );
-  for (const tokens of [-1, NaN, Infinity, 0.5]) {
+);
+
+void test.each(
+  [0, -1, 1.5, Infinity, NaN, Number.MAX_SAFE_INTEGER + 1],
+  (targetTokens) =>
+    test(`rejects targetTokens ${targetTokens} before calling a model`, async () => {
+      const model = new MockLanguageModelV4();
+      await assert.rejects(
+        compact({ messages: history, model, targetTokens }),
+        /targetTokens/,
+      );
+      assert.equal(model.doGenerateCalls.length, 0);
+    }),
+);
+
+void test.each([-1, NaN, Infinity, 0.5], (tokens) =>
+  test(`rejects a countTokens result of ${tokens} before calling a model`, async () => {
+    const model = new MockLanguageModelV4();
     await assert.rejects(
       compact({
         messages: history,
@@ -726,7 +722,21 @@ test('validates budgets, counters, and native messages before calling a model', 
       }),
       /countTokens/,
     );
-  }
+    assert.equal(model.doGenerateCalls.length, 0);
+  }),
+);
+
+test('validates keepLastMessages and native messages before calling a model', async () => {
+  const model = new MockLanguageModelV4();
+  await assert.rejects(
+    compact({
+      messages: history,
+      model,
+      targetTokens: 300,
+      keepLastMessages: 0,
+    }),
+    /keepLastMessages/,
+  );
   await assert.rejects(
     compact({
       messages: JSON.parse('[{"role":"bad","content":"hello"}]'),

@@ -1,7 +1,7 @@
+import { describe, it } from '@zukhruf/parameterized-test';
 import type { DynamicToolUIPart, ToolUIPart, UIMessage } from 'ai';
 import { generateId } from 'ai';
 import assert from 'node:assert';
-import { describe, it } from 'node:test';
 
 import {
   ContextEngine,
@@ -173,8 +173,8 @@ describe('toolCalled', () => {
     assert.ok((await lastUserText(engine)).includes('bash-fired'));
   });
 
-  it('fires for output-available and output-error completed states', async () => {
-    for (const state of ['output-available', 'output-error'] as const) {
+  void it.each(['output-available', 'output-error'] as const, (state) =>
+    it(`fires for the completed state ${state}`, async () => {
       const { engine } = await setupTurn(`tc-${state}`, [
         {
           name: 'bash',
@@ -193,8 +193,8 @@ describe('toolCalled', () => {
         (await lastUserText(engine)).includes('bash-fired'),
         `state=${state}`,
       );
-    }
-  });
+    }),
+  );
 
   it('does NOT fire when only an input-streaming tool part exists', async () => {
     const { engine } = await setupTurn('tc-streaming', [

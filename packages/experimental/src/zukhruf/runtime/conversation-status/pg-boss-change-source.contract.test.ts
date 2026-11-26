@@ -1,9 +1,10 @@
 import { PGlite } from '@electric-sql/pglite';
 import { untilAborted } from '@zukhruf/async';
+import { suite, test } from '@zukhruf/parameterized-test';
 import { waitFor } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import assert from 'node:assert/strict';
-import { type TestContext, suite, test } from 'node:test';
+import type { TestContext } from 'node:test';
 import { type Db, PgBoss, fromPglite } from 'pg-boss';
 
 import {
@@ -116,7 +117,7 @@ const contracts = [
   { name: 'postgres', makeHarness: postgresHarness },
 ];
 
-for (const contract of contracts) {
+void suite.each(contracts, (contract) =>
   suite(`ConversationStatusChangeSource contract — ${contract.name}`, () => {
     test('a hint raised through one pg-boss instance reaches a subscriber on another', async (t) => {
       await using h = await contract.makeHarness();
@@ -162,8 +163,8 @@ for (const contract of contracts) {
       await new Promise((resolve) => setTimeout(resolve, 200));
       assert.equal(hints.length, seen);
     });
-  });
-}
+  }),
+);
 
 test('a pg-boss database without LISTEN support is rejected at subscribe time', async () => {
   const pglite = new PGlite();

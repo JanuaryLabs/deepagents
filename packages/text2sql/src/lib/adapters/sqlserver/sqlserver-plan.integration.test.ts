@@ -1,7 +1,7 @@
 /** The plan policy of SQL Server on a real server, as a restricted principal. */
+import { describe, it } from '@zukhruf/parameterized-test';
 import { SqlServer as TestSqlServer } from '@zukhruf/testing/sqlserver';
 import assert from 'node:assert';
-import { describe, it } from 'node:test';
 
 import type {
   SQLScopeErrorPayload,
@@ -141,15 +141,10 @@ describe('SQL Server plan policy', () => {
     );
   });
 
-  it('refuses a batch that is not exactly one SELECT as read-only, and runs none of it', async () => {
-    await using w = await warehouse();
-    // dbo may write, so a statement that ran would change the tables.
-    const dbo = w.principal('dbo');
-    const adapter = w.adapter(dbo, planPolicy(dbo));
-
-    // SQL Server compiles DDL without a permission check, so DDL is a plan
-    // of a statement that is not a SELECT.
-    for (const sql of [
+  // SQL Server compiles DDL without a permission check, so DDL is a plan
+  // of a statement that is not a SELECT.
+  void it.each(
+    [
       'SELECT 1; DROP TABLE dbo.orders',
       'DROP TABLE dbo.orders',
       'CREATE TABLE dbo.copy (a INT)',
@@ -159,101 +154,100 @@ describe('SQL Server plan policy', () => {
       'DECLARE @x INT = 1; SELECT @x AS x',
       'REVERT; SELECT 1',
       'SELECT 1 AS a; SELECT 2 AS b',
-    ]) {
-      assert.deepStrictEqual(await adapter.run(sql), readOnly, sql);
-    }
-    const tables = await w.owner
-      .request()
-      .query(
-        "SELECT (SELECT COUNT(*) FROM dbo.orders) AS orders, OBJECT_ID(N'dbo.copy') AS copy",
-      );
-    assert.deepStrictEqual(tables.recordset, [{ orders: 2, copy: null }]);
-  });
+    ],
+    (sql) =>
+      it(`refuses the batch ${JSON.stringify(sql)}, which is not exactly one SELECT, as read-only, and runs none of it`, async () => {
+        await using w = await warehouse();
+        // dbo may write, so a statement that ran would change the tables.
+        const dbo = w.principal('dbo');
+        const adapter = w.adapter(dbo, planPolicy(dbo));
 
-  it("refuses what the principal may not read or write as OUT_OF_SCOPE in SQL Server's words", async () => {
-    await using w = await warehouse();
-    const adapter = w.adapter(w.analyst, planPolicy(w.analyst));
-    const denied = (permission: string, object: string, schema: string) =>
-      `The ${permission} permission was denied on the object '${object}', database '${w.database}', schema '${schema}'.`;
+        assert.deepStrictEqual(await adapter.run(sql), readOnly, sql);
+        const tables = await w.owner
+          .request()
+          .query(
+            "SELECT (SELECT COUNT(*) FROM dbo.orders) AS orders, OBJECT_ID(N'dbo.copy') AS copy",
+          );
+        assert.deepStrictEqual(tables.recordset, [{ orders: 2, copy: null }]);
+      }),
+  );
 
-    const cases = [
-      ['SELECT id FROM audit.secrets', denied('SELECT', 'secrets', 'audit')],
-      [
-        'SELECT id FROM dbo.secret_view',
-        denied('SELECT', 'secret_view', 'dbo'),
-      ],
-      [
-        'SELECT id FROM dbo.secret_rows()',
-        denied('SELECT', 'secret_rows', 'dbo'),
-      ],
-      ['SELECT NEXT VALUE FOR dbo.ids AS id', denied('UPDATE', 'ids', 'dbo')],
-      [
-        'INSERT INTO dbo.orders VALUES (3, 1, 1.00)',
-        denied('INSERT', 'orders', 'dbo'),
-      ],
-      ['UPDATE dbo.orders SET total = 0', denied('UPDATE', 'orders', 'dbo')],
-    ];
-    for (const [sql, error] of cases) {
-      assert.deepStrictEqual(
-        scopePayload(await adapter.run(sql)),
-        {
-          error,
-          error_type: 'OUT_OF_SCOPE',
-          suggestion:
-            'Read only the tables and views that the database grants, in one SELECT that writes nothing.',
-          sql_attempted: sql,
-        },
-        sql,
-      );
-    }
-  });
+  void it.each(
+    [
+      ['SELECT id FROM audit.secrets', 'SELECT', 'secrets', 'audit'],
+      ['SELECT id FROM dbo.secret_view', 'SELECT', 'secret_view', 'dbo'],
+      ['SELECT id FROM dbo.secret_rows()', 'SELECT', 'secret_rows', 'dbo'],
+      ['SELECT NEXT VALUE FOR dbo.ids AS id', 'UPDATE', 'ids', 'dbo'],
+      ['INSERT INTO dbo.orders VALUES (3, 1, 1.00)', 'INSERT', 'orders', 'dbo'],
+      ['UPDATE dbo.orders SET total = 0', 'UPDATE', 'orders', 'dbo'],
+    ] as const,
+    ([sql, permission, object, schema]) =>
+      it(`refuses ${JSON.stringify(sql)}, which the principal may not run, as OUT_OF_SCOPE in SQL Server's words`, async () => {
+        await using w = await warehouse();
+        const adapter = w.adapter(w.analyst, planPolicy(w.analyst));
+        const error = `The ${permission} permission was denied on the object '${object}', database '${w.database}', schema '${schema}'.`;
 
-  it('reports SQL that SQL Server cannot compile as a parse error with its message', async () => {
-    await using w = await warehouse();
-    const adapter = w.adapter(w.analyst, planPolicy(w.analyst));
+        assert.deepStrictEqual(
+          scopePayload(await adapter.run(sql)),
+          {
+            error,
+            error_type: 'OUT_OF_SCOPE',
+            suggestion:
+              'Read only the tables and views that the database grants, in one SELECT that writes nothing.',
+            sql_attempted: sql,
+          },
+          sql,
+        );
+      }),
+  );
 
-    const cases = [
+  void it.each(
+    [
       ['SELECT id FROM marts.users LIMIT 1', "Incorrect syntax near '1'."],
       ['SELECT id FROM marts.nothing', "Invalid object name 'marts.nothing'."],
       ['SELECT nope FROM marts.users', "Invalid column name 'nope'."],
-    ];
-    for (const [sql, message] of cases) {
-      const payload = scopePayload(await adapter.run(sql));
-      assert.strictEqual(payload.error_type, 'SQL_SCOPE_PARSE_ERROR', sql);
-      assert.strictEqual(payload.parser_dialect, 'transactsql', sql);
-      assert.strictEqual(payload.parser_error, message, sql);
-    }
-  });
+    ] as const,
+    ([sql, message]) =>
+      it(`reports ${JSON.stringify(sql)}, which SQL Server cannot compile, as a parse error with its message`, async () => {
+        await using w = await warehouse();
+        const adapter = w.adapter(w.analyst, planPolicy(w.analyst));
 
-  it('compiles each SQL in a session of its own, so a SET of one check never reaches the next', async () => {
-    await using w = await warehouse();
-    const sessions = { opened: 0, disposed: 0 };
-    const counted: SqlServerPrincipal = {
-      name: 'analyst',
-      session: async () => {
-        const session = await w.analyst.session();
-        sessions.opened += 1;
-        return {
-          batch: (sql) => session.batch(sql),
-          [Symbol.asyncDispose]: async () => {
-            sessions.disposed += 1;
-            await session[Symbol.asyncDispose]();
-          },
-        };
-      },
-    };
-    const adapter = w.adapter(w.analyst, planPolicy(counted));
+        const payload = scopePayload(await adapter.run(sql));
+        assert.strictEqual(payload.error_type, 'SQL_SCOPE_PARSE_ERROR', sql);
+        assert.strictEqual(payload.parser_dialect, 'transactsql', sql);
+        assert.strictEqual(payload.parser_error, message, sql);
+      }),
+  );
 
-    for (const sql of ['SET PARSEONLY ON', 'SET SHOWPLAN_XML OFF']) {
+  void it.each(['SET PARSEONLY ON', 'SET SHOWPLAN_XML OFF'], (sql) =>
+    it(`compiles each SQL in a session of its own, so the ${sql} of one check never reaches the next`, async () => {
+      await using w = await warehouse();
+      const sessions = { opened: 0, disposed: 0 };
+      const counted: SqlServerPrincipal = {
+        name: 'analyst',
+        session: async () => {
+          const session = await w.analyst.session();
+          sessions.opened += 1;
+          return {
+            batch: (sql) => session.batch(sql),
+            [Symbol.asyncDispose]: async () => {
+              sessions.disposed += 1;
+              await session[Symbol.asyncDispose]();
+            },
+          };
+        },
+      };
+      const adapter = w.adapter(w.analyst, planPolicy(counted));
+
       assert.deepStrictEqual(await adapter.run(sql), readOnly, sql);
       assert.deepStrictEqual(
         await adapter.run('SELECT id FROM dbo.orders WHERE id = 1'),
         { result: [{ id: 1 }] },
         `after ${sql}`,
       );
-    }
-    assert.deepStrictEqual(sessions, { opened: 4, disposed: 4 });
-  });
+      assert.deepStrictEqual(sessions, { opened: 2, disposed: 2 });
+    }),
+  );
 
   it('rejects the check when the session fails without an error number of SQL Server, and runs nothing', async () => {
     // A real server cannot be made to drop a connection at one batch, so the
@@ -349,15 +343,8 @@ describe('SQL Server plan policy', () => {
     );
   });
 
-  it('passes the T-SQL that node-sql-parser refuses', async () => {
-    await using w = await warehouse();
-    const adapter = w.adapter(w.analyst, planPolicy(w.analyst));
-    const text = textPolicy();
-    const scope = {
-      resolveAllowedEntities: async () => ['marts.users', 'dbo.orders'],
-    };
-
-    const cases: [string, unknown[]][] = [
+  void it.each(
+    [
       [
         "SELECT STRING_AGG(name, N', ') WITHIN GROUP (ORDER BY name DESC) AS names FROM marts.users",
         [{ names: 'Bob, Ada' }],
@@ -381,14 +368,64 @@ describe('SQL Server plan policy', () => {
         "SELECT id FROM marts.users WHERE name LIKE N'B!%' ESCAPE N'!' OR name LIKE N'A%'",
         [{ id: 1 }],
       ],
-    ];
-    for (const [sql, rows] of cases) {
-      assert.notStrictEqual(await text.analyze(sql, scope), null, sql);
-      assert.deepStrictEqual(await adapter.run(sql), { result: rows }, sql);
-    }
-  });
+    ] satisfies [string, unknown[]][],
+    ([sql, rows]) =>
+      it(`passes ${JSON.stringify(sql)}, T-SQL that node-sql-parser refuses`, async () => {
+        await using w = await warehouse();
+        const adapter = w.adapter(w.analyst, planPolicy(w.analyst));
+        const text = textPolicy();
+        const scope = {
+          resolveAllowedEntities: async () => ['marts.users', 'dbo.orders'],
+        };
 
-  it('refuses a plan that reads a linked server as read-only', async () => {
+        assert.notStrictEqual(await text.analyze(sql, scope), null, sql);
+        assert.deepStrictEqual(await adapter.run(sql), { result: rows }, sql);
+      }),
+  );
+
+  void it.each(
+    [
+      {
+        reads: 'a four-part name',
+        sql: (server: string, database: string) =>
+          `SELECT id FROM [${server}].[${database}].dbo.orders`,
+      },
+      {
+        reads: 'OPENQUERY',
+        sql: (server: string) =>
+          `SELECT a FROM OPENQUERY([${server}], 'SELECT 1 AS a')`,
+      },
+    ],
+    ({ reads, sql: sqlOf }) =>
+      it(`refuses a plan that reads a linked server through ${reads} as read-only`, async () => {
+        await using w = await warehouse();
+        const server = `loopback_${w.database}`;
+        // A loopback linked server is an object of the shared server, so the
+        // test removes it. TRUSTWORTHY lets an impersonated user leave the
+        // database, which it needs to reach a linked server.
+        await w.owner
+          .request()
+          .batch(
+            `ALTER DATABASE [${w.database}] SET TRUSTWORTHY ON; EXEC sp_addlinkedserver @server = N'${server}', @srvproduct = N'', @provider = N'MSOLEDBSQL', @datasrc = N'localhost', @provstr = N'Encrypt=no;TrustServerCertificate=yes'; EXEC sp_addlinkedsrvlogin @rmtsrvname = N'${server}', @useself = N'FALSE', @locallogin = NULL, @rmtuser = N'sa', @rmtpassword = N'${w.password}';`,
+          );
+        try {
+          // A user without a login has no mapping to the remote login (7416), so
+          // the database owner compiles the remote reads.
+          const dbo = w.principal('dbo');
+          const adapter = w.adapter(dbo, planPolicy(dbo));
+          const sql = sqlOf(server, w.database);
+          assert.deepStrictEqual(await adapter.run(sql), readOnly, sql);
+        } finally {
+          await w.owner
+            .request()
+            .batch(
+              `EXEC sp_dropserver @server = N'${server}', @droplogins = 'droplogins'`,
+            );
+        }
+      }),
+  );
+
+  it('refuses the remote read of a principal that has no login mapping as a parse error', async () => {
     await using w = await warehouse();
     const server = `loopback_${w.database}`;
     // A loopback linked server is an object of the shared server, so the
@@ -400,17 +437,6 @@ describe('SQL Server plan policy', () => {
         `ALTER DATABASE [${w.database}] SET TRUSTWORTHY ON; EXEC sp_addlinkedserver @server = N'${server}', @srvproduct = N'', @provider = N'MSOLEDBSQL', @datasrc = N'localhost', @provstr = N'Encrypt=no;TrustServerCertificate=yes'; EXEC sp_addlinkedsrvlogin @rmtsrvname = N'${server}', @useself = N'FALSE', @locallogin = NULL, @rmtuser = N'sa', @rmtpassword = N'${w.password}';`,
       );
     try {
-      // A user without a login has no mapping to the remote login (7416), so
-      // the database owner compiles the remote reads.
-      const dbo = w.principal('dbo');
-      const adapter = w.adapter(dbo, planPolicy(dbo));
-      for (const sql of [
-        `SELECT id FROM [${server}].[${w.database}].dbo.orders`,
-        `SELECT a FROM OPENQUERY([${server}], 'SELECT 1 AS a')`,
-      ]) {
-        assert.deepStrictEqual(await adapter.run(sql), readOnly, sql);
-      }
-
       const analyst = w.adapter(w.analyst, planPolicy(w.analyst));
       const payload = scopePayload(
         await analyst.run(

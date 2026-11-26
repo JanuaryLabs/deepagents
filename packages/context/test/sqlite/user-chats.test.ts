@@ -1,6 +1,6 @@
+import { describe, it } from '@zukhruf/parameterized-test';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert';
-import { describe, it } from 'node:test';
 
 import {
   ContextEngine,
@@ -525,10 +525,8 @@ describe('User Chat Management', () => {
       assert.strictEqual(chat.userId, '');
     });
 
-    it('should handle userId with special characters', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const specialUserIds = [
+    void it.each(
+      [
         'user@example.com',
         'user-with-dashes',
         'user_with_underscores',
@@ -536,22 +534,24 @@ describe('User Chat Management', () => {
         'user+plus',
         '12345-numeric-prefix',
         'uuid-550e8400-e29b-41d4-a716-446655440000',
-      ];
+      ],
+      (userId) =>
+        it(`should handle the userId ${userId} with special characters`, async () => {
+          await using database = await sqlite.database();
+          const store = new SqliteContextStore(database.connection);
 
-      for (const userId of specialUserIds) {
-        await store.upsertChat({ id: `chat-${userId}`, userId });
-        const chats = await store.listChats({ userId });
-        assert.strictEqual(chats.length, 1, `Failed for userId: ${userId}`);
-        assert.strictEqual(chats[0].userId, userId);
-      }
-    });
+          await store.upsertChat({ id: `chat-${userId}`, userId });
+          const chats = await store.listChats({ userId });
+          assert.strictEqual(chats.length, 1, `Failed for userId: ${userId}`);
+          assert.strictEqual(chats[0].userId, userId);
+        }),
+    );
 
-    it('should handle userId with unicode characters', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const unicodeUserIds = ['用户123', 'пользователь', 'المستخدم', '🎉user'];
+    void it.each(['用户123', 'пользователь', 'المستخدم', '🎉user'], (userId) =>
+      it(`should handle the unicode userId ${userId}`, async () => {
+        await using database = await sqlite.database();
+        const store = new SqliteContextStore(database.connection);
 
-      for (const userId of unicodeUserIds) {
         await store.upsertChat({ id: `chat-${userId}`, userId });
         const chats = await store.listChats({ userId });
         assert.strictEqual(
@@ -560,8 +560,8 @@ describe('User Chat Management', () => {
           `Failed for unicode userId: ${userId}`,
         );
         assert.strictEqual(chats[0].userId, userId);
-      }
-    });
+      }),
+    );
   });
 
   describe('Edge Cases & Boundary Conditions', () => {
@@ -646,25 +646,29 @@ describe('User Chat Management', () => {
   });
 
   describe('Concurrent Operations', () => {
-    it('should handle concurrent chat creation for different users', async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      // Create chats for multiple users concurrently
-      const users = ['user-a', 'user-b', 'user-c', 'user-d', 'user-e'];
-      const createPromises = users.flatMap((userId, userIndex) =>
-        Array.from({ length: 5 }, (_, i) =>
-          store.upsertChat({
-            id: `multi-${userId}-${i}`,
-            userId,
-            title: `Chat ${userIndex}-${i}`,
-          }),
+    const users = ['user-a', 'user-b', 'user-c', 'user-d', 'user-e'];
+
+    /** Creates 5 chats for each of the users, all at once. */
+    async function createConcurrently(store: SqliteContextStore) {
+      await Promise.all(
+        users.flatMap((owner, userIndex) =>
+          Array.from({ length: 5 }, (_, i) =>
+            store.upsertChat({
+              id: `multi-${owner}-${i}`,
+              userId: owner,
+              title: `Chat ${userIndex}-${i}`,
+            }),
+          ),
         ),
       );
+    }
 
-      await Promise.all(createPromises);
+    void it.each(users, (userId) =>
+      it(`should give ${userId} exactly 5 chats when chats for different users are created concurrently`, async () => {
+        await using database = await sqlite.database();
+        const store = new SqliteContextStore(database.connection);
+        await createConcurrently(store);
 
-      // Each user should have exactly 5 chats
-      for (const userId of users) {
         const userChats = await store.listChats({ userId });
         assert.strictEqual(
           userChats.length,
@@ -672,9 +676,14 @@ describe('User Chat Management', () => {
           `User ${userId} should have 5 chats`,
         );
         assert.ok(userChats.every((c) => c.userId === userId));
-      }
+      }),
+    );
 
-      // Total should be 25 chats
+    it('should create all 25 chats when chats for different users are created concurrently', async () => {
+      await using database = await sqlite.database();
+      const store = new SqliteContextStore(database.connection);
+      await createConcurrently(store);
+
       const allChats = await store.listChats();
       assert.strictEqual(allChats.length, 25);
     });

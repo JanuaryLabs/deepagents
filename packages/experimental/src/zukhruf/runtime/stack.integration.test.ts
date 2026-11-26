@@ -1,9 +1,9 @@
 import { PGlite } from '@electric-sql/pglite';
+import { test } from '@zukhruf/parameterized-test';
 import { open } from '@zukhruf/sqlite-open';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
 import assert from 'node:assert/strict';
-import test from 'node:test';
 import { PgBoss, fromPglite } from 'pg-boss';
 
 import {
@@ -279,7 +279,7 @@ test('borrowed adapters survive their initialized host', async () => {
   assert.equal(await reopened.sessionExists(conversation), true);
 });
 
-for (const ownership of ['owned', 'borrowed']) {
+void test.each(['owned', 'borrowed'], (ownership) =>
   test(`a host with ${ownership} adapters drains an active turn before closing resources`, async () => {
     await using sharedResources = new AsyncDisposableStack();
     const entered = Promise.withResolvers<void>();
@@ -387,5 +387,5 @@ for (const ownership of ['owned', 'borrowed']) {
       await disposing;
       await host[Symbol.asyncDispose]();
     }
-  });
-}
+  }),
+);

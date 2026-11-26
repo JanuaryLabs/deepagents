@@ -1,5 +1,5 @@
+import { test } from '@zukhruf/parameterized-test';
 import assert from 'node:assert/strict';
-import test from 'node:test';
 
 import {
   DockerSandboxEnvironment,
@@ -7,10 +7,10 @@ import {
 } from '@deepagents/context';
 import { defineSandbox } from '@deepagents/experimental/zukhruf';
 
-test('defineSandbox rejects an idle time that is not a non-negative safe integer or false', () => {
-  const environment = new DockerSandboxEnvironment({ namespace: 'app' });
+void test.each([-1, 1.5, NaN, Number.MAX_SAFE_INTEGER + 1], (idleTimeoutMs) =>
+  test(`defineSandbox rejects the idle time ${idleTimeoutMs}, which is not a non-negative safe integer or false`, () => {
+    const environment = new DockerSandboxEnvironment({ namespace: 'app' });
 
-  for (const idleTimeoutMs of [-1, 1.5, NaN, Number.MAX_SAFE_INTEGER + 1]) {
     assert.throws(
       () => defineSandbox(environment, { idleTimeoutMs }),
       {
@@ -19,8 +19,8 @@ test('defineSandbox rejects an idle time that is not a non-negative safe integer
       },
       `idleTimeoutMs ${idleTimeoutMs}`,
     );
-  }
-});
+  }),
+);
 
 test('defineSandbox declares the idle time of a stoppable environment', () => {
   const environment = new DockerSandboxEnvironment({ namespace: 'app' });

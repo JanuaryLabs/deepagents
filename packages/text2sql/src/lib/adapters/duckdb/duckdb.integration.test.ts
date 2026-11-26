@@ -1,6 +1,6 @@
+import { it } from '@zukhruf/parameterized-test';
 import { DuckDB as TestDuckDB } from '@zukhruf/testing/duckdb';
 import assert from 'node:assert/strict';
-import { it } from 'node:test';
 import { z } from 'zod';
 
 import { Text2Sql, Text2SqlValidationError } from '@deepagents/text2sql';
@@ -115,30 +115,32 @@ it('rejects an execute() result that holds no rows array', async () => {
   );
 });
 
-for (const [shape, wrap] of [
-  ['{ data }', (rows: unknown[]) => ({ data: rows })],
-  ['{ rows }', (rows: unknown[]) => ({ rows })],
-] as const) {
-  it(`reads the rows of an execute() result shaped ${shape}`, async () => {
-    await using database = await duckdb.database();
-    const { connection } = database;
-    await connection.run(`
+void it.each(
+  [
+    ['{ data }', (rows: unknown[]) => ({ data: rows })],
+    ['{ rows }', (rows: unknown[]) => ({ rows })],
+  ] as const,
+  ([shape, wrap]) =>
+    it(`reads the rows of an execute() result shaped ${shape}`, async () => {
+      await using database = await duckdb.database();
+      const { connection } = database;
+      await connection.run(`
       CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR NOT NULL);
       INSERT INTO users VALUES (1, 'Ada'), (2, 'Grace');
     `);
-    const execute = async (sql: string) =>
-      wrap((await connection.runAndReadAll(sql)).getRowObjectsJson());
-    const adapter = new DuckDB({ execute, grounding: [tables()] });
+      const execute = async (sql: string) =>
+        wrap((await connection.runAndReadAll(sql)).getRowObjectsJson());
+      const adapter = new DuckDB({ execute, grounding: [tables()] });
 
-    assert.deepEqual(
-      await adapter.execute('SELECT id, name FROM users ORDER BY id'),
-      [
-        { id: 1, name: 'Ada' },
-        { id: 2, name: 'Grace' },
-      ],
-    );
-  });
-}
+      assert.deepEqual(
+        await adapter.execute('SELECT id, name FROM users ORDER BY id'),
+        [
+          { id: 1, name: 'Ada' },
+          { id: 2, name: 'Grace' },
+        ],
+      );
+    }),
+);
 
 it('supports native DuckDB pivot and as-of join syntax', async () => {
   await using database = await duckdb.database();
@@ -187,7 +189,7 @@ it('supports native DuckDB pivot and as-of join syntax', async () => {
   );
 });
 
-it('enforces DuckDB read-only and grounded-scope policy before execution', async () => {
+it('enforces DuckDB grounded-scope policy before execution and reports unparsable SQL', async () => {
   await using database = await duckdb.database();
   const { connection } = database;
 
@@ -245,7 +247,21 @@ it('enforces DuckDB read-only and grounded-scope policy before execution', async
   });
   assert.ok(!executed.includes(attachedCatalog));
 
-  for (const sql of [
+  const invalid = await adapter.validate('SELCT 1');
+  assert.ok(typeof invalid === 'string');
+  assert.equal(
+    errorPayload.parse(JSON.parse(invalid)).error_type,
+    'SQL_SCOPE_PARSE_ERROR',
+  );
+
+  const rows = await connection.runAndReadAll(
+    'SELECT count(*) AS count FROM users',
+  );
+  assert.deepEqual(rows.getRowObjectsJson(), [{ count: '1' }]);
+});
+
+void it.each(
+  [
     'DROP TABLE users',
     'SELECT 1; DROP TABLE users',
     "COPY users TO '/nonexistent/blocked/users.csv'",
@@ -259,23 +275,44 @@ it('enforces DuckDB read-only and grounded-scope policy before execution', async
     'SELECT * FROM duckdb_secrets()',
     "SELECT nextval('ids')",
     'SELECT hidden_count()',
-  ]) {
-    await assert.rejects(adapter.execute(sql), { name: 'SQLReadOnlyError' });
-    assert.ok(!executed.includes(sql));
-  }
+  ],
+  (sql) =>
+    it(`refuses ${JSON.stringify(sql)} as read-only before execution`, async () => {
+      await using database = await duckdb.database();
+      const { connection } = database;
 
-  const invalid = await adapter.validate('SELCT 1');
-  assert.ok(typeof invalid === 'string');
-  assert.equal(
-    errorPayload.parse(JSON.parse(invalid)).error_type,
-    'SQL_SCOPE_PARSE_ERROR',
-  );
+      await connection.run(`
+        CREATE TABLE users (id INTEGER, name VARCHAR);
+        CREATE TABLE secrets (value VARCHAR);
+        CREATE SEQUENCE ids;
+        CREATE MACRO hidden_count() AS (SELECT count(*) FROM secrets);
+        ATTACH ':memory:' AS other;
+        CREATE TABLE other.main.users (id INTEGER);
+        INSERT INTO users VALUES (1, 'Ada');
+        INSERT INTO secrets VALUES ('hidden');
+        INSERT INTO other.main.users VALUES (99);
+      `);
 
-  const rows = await connection.runAndReadAll(
-    'SELECT count(*) AS count FROM users',
-  );
-  assert.deepEqual(rows.getRowObjectsJson(), [{ count: '1' }]);
-});
+      const executed: string[] = [];
+      const execute = async (sql: string) => {
+        executed.push(sql);
+        const reader = await connection.runAndReadAll(sql);
+        return reader.getRowObjectsJson();
+      };
+      const adapter = new DuckDB({
+        execute,
+        grounding: [tables({ filter: ['users'] })],
+      });
+
+      await assert.rejects(adapter.execute(sql), { name: 'SQLReadOnlyError' });
+      assert.ok(!executed.includes(sql));
+
+      const rows = await connection.runAndReadAll(
+        'SELECT count(*) AS count FROM users',
+      );
+      assert.deepEqual(rows.getRowObjectsJson(), [{ count: '1' }]);
+    }),
+);
 
 it('isolates named DuckDB connections with different grounded scopes', async () => {
   await using crm = await duckdb.database();

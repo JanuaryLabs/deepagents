@@ -6,6 +6,7 @@ import type {
 import { PGlite } from '@electric-sql/pglite';
 import { untilAborted } from '@zukhruf/async';
 import { TemporaryFiles } from '@zukhruf/fs';
+import { describe, it } from '@zukhruf/parameterized-test';
 import { waitFor } from '@zukhruf/testing/async';
 import {
   type ToolSet,
@@ -21,7 +22,6 @@ import { Hono } from 'hono';
 import assert from 'node:assert/strict';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { describe, it } from 'node:test';
 import { setImmediate, setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { PgBoss, fromPglite } from 'pg-boss';
@@ -1651,10 +1651,12 @@ describe('zukhruf runtime — background executor', () => {
     await using worker = await h.runtime.work();
     void worker;
     const conversation = { chatId: 'preinstalled-skills', userId: 'u1' };
-    for (const input of ['use the skill', 'use it again']) {
+    const answers = async (input: string) => {
       const result = await h.runtime.enqueue(conversation, turn(input));
       assert.equal(await collectText(result.stream), 'ok');
-    }
+    };
+    await answers('use the skill');
+    await answers('use it again');
 
     assert.equal(discoveryCount, 1);
     assert.equal(modelPrompts.length, 2);
@@ -1781,11 +1783,13 @@ describe('zukhruf runtime — background executor', () => {
     await using worker = await h.runtime.work();
     void worker;
     const conversation = { chatId: 'declaration-reminder', userId: 'u1' };
-
-    for (const input of ['first', 'second']) {
+    const answers = async (input: string) => {
       const result = await h.runtime.enqueue(conversation, turn(input));
       assert.equal(await collectText(result.stream), 'ok');
-    }
+    };
+
+    await answers('first');
+    await answers('second');
 
     assert.equal(modelInputs.length, 2);
     assert.match(modelInputs[0], /DECLARATION_REMINDER/);
@@ -2512,7 +2516,7 @@ describe('zukhruf runtime — background executor', () => {
     );
   });
 
-  for (const tamper of [false, true]) {
+  void it.each([false, true], (tamper) =>
     it(`native approval policy ${tamper ? 'rejects a forged signature' : 'resumes signed approval after a host restart'}`, async () => {
       const { track, agent, model } = approvalSetup();
       const root = defineAgent({
@@ -2578,8 +2582,8 @@ describe('zukhruf runtime — background executor', () => {
         assert.equal(request.reasoning, 'low');
         assert.equal(request.maxOutputTokens, 128);
       }
-    });
-  }
+    }),
+  );
 
   it('continues once after AI SDK submits every sibling approval response', async (t) => {
     const { track, agent, model } = siblingApprovalSetup();
@@ -4256,7 +4260,7 @@ describe('zukhruf runtime — skill limits', () => {
     await using worker = await h.runtime.work();
     void worker;
     const conversation = { chatId: 'skill-budget', userId: 'u1' };
-    for (const input of ['use a skill', 'use another skill']) {
+    const streamsOneBudgetWarning = async (input: string) => {
       const result = await h.runtime.enqueue(conversation, turn(input));
       const chunks = await Array.fromAsync(result.stream);
 
@@ -4272,7 +4276,9 @@ describe('zukhruf runtime — skill limits', () => {
           },
         ],
       );
-    }
+    };
+    await streamsOneBudgetWarning('use a skill');
+    await streamsOneBudgetWarning('use another skill');
     assert.equal(prompts.length, 2);
     for (const prompt of prompts) {
       assert.equal(availableSkillLines(prompt).length, 216);

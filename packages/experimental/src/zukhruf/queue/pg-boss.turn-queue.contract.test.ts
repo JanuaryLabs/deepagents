@@ -1,12 +1,13 @@
 import { PGlite } from '@electric-sql/pglite';
 import { untilAborted } from '@zukhruf/async';
+import { suite, test } from '@zukhruf/parameterized-test';
 import { waitFor as pollFor } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { type UIMessage, isTextUIPart, isToolUIPart } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { type TestContext, suite, test } from 'node:test';
+import type { TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
   type ConstructorOptions,
@@ -157,7 +158,7 @@ const turnQueueContracts = [
   },
 ] satisfies TurnQueueContract[];
 
-for (const contract of turnQueueContracts) {
+void suite.each(turnQueueContracts, (contract) =>
   suite(`TurnQueue contract — ${contract.name}`, () => {
     test('delivers a turn pushed before any consumer existed, payload intact', async (t) => {
       await using h = await contract.makeQueue();
@@ -972,8 +973,8 @@ for (const contract of turnQueueContracts) {
         'new consumer drains the backlog',
       );
     });
-  });
-}
+  }),
+);
 
 /** One worker process: its own PgBoss and pool on the shared database; disposal is its shutdown. */
 async function agentProcess(

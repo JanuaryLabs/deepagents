@@ -3,10 +3,10 @@ import type {
   LanguageModelV4StreamPart,
   LanguageModelV4ToolCall,
 } from '@ai-sdk/provider';
+import { it } from '@zukhruf/parameterized-test';
 import { ToolChoiceViolationError, tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
-import { it } from 'node:test';
 import { setImmediate, setTimeout } from 'node:timers/promises';
 import { z } from 'zod';
 
@@ -21,7 +21,7 @@ import {
 import { buildSandbox } from '../../test/helpers/build-sandbox.ts';
 import { usage } from '../../test/helpers/usage.ts';
 
-for (const mode of ['generate', 'stream'] as const) {
+void it.each(['generate', 'stream'] as const, (mode) =>
   it(`${mode} rejects forbidden tool calls before execution or actionable output`, async () => {
     let toolRuns = 0;
     const call: LanguageModelV4ToolCall = {
@@ -88,8 +88,8 @@ for (const mode of ['generate', 'stream'] as const) {
     }
     assert.equal(toolRuns, 0);
     assert.equal(model.doGenerateCalls.length + model.doStreamCalls.length, 1);
-  });
-}
+  }),
+);
 
 it('structured generation selects the final OpenAI JSON message', async () => {
   let requests = 0;
@@ -136,150 +136,156 @@ it('structured generation selects the final OpenAI JSON message', async () => {
   assert.equal(requests, 1);
 });
 
-for (const mode of [
-  'generate',
-  'stream',
-  'structured-generate',
-  'structured-stream',
-  'asTool',
-] as const) {
-  it(`${mode} applies native model controls, sequential tools, and approval policy`, async () => {
-    let active = 0;
-    let maxActive = 0;
-    let blockedRuns = 0;
-    const completed: number[] = [];
-    const calls: LanguageModelV4ToolCall[] = [
-      {
-        type: 'tool-call',
-        toolCallId: 'first',
-        toolName: 'record',
-        input: '{"id":1}',
-      },
-      {
-        type: 'tool-call',
-        toolCallId: 'second',
-        toolName: 'record',
-        input: '{"id":2}',
-      },
-      {
-        type: 'tool-call',
-        toolCallId: 'blocked',
-        toolName: 'blocked',
-        input: '{}',
-      },
-    ];
-    const model: MockLanguageModelV4 = new MockLanguageModelV4({
-      doGenerate: async () => ({
-        content:
-          model.doGenerateCalls.length === 1
-            ? calls
-            : [{ type: 'text', text: '{"answer":"done"}' }],
-        finishReason: {
-          unified: model.doGenerateCalls.length === 1 ? 'tool-calls' : 'stop',
-          raw: undefined,
+void it.each(
+  [
+    'generate',
+    'stream',
+    'structured-generate',
+    'structured-stream',
+    'asTool',
+  ] as const,
+  (mode) =>
+    it(`${mode} applies native model controls, sequential tools, and approval policy`, async () => {
+      let active = 0;
+      let maxActive = 0;
+      let blockedRuns = 0;
+      const completed: number[] = [];
+      const calls: LanguageModelV4ToolCall[] = [
+        {
+          type: 'tool-call',
+          toolCallId: 'first',
+          toolName: 'record',
+          input: '{"id":1}',
         },
-        usage,
-        warnings: [],
-      }),
-      doStream: async () => ({
-        stream: ReadableStream.from<LanguageModelV4StreamPart>([
-          ...(model.doStreamCalls.length === 1
-            ? calls
-            : [
-                { type: 'text-start' as const, id: 'answer' },
-                {
-                  type: 'text-delta' as const,
-                  id: 'answer',
-                  delta: '{"answer":"done"}',
-                },
-                { type: 'text-end' as const, id: 'answer' },
-              ]),
-          {
-            type: 'finish',
-            finishReason: {
-              unified: model.doStreamCalls.length === 1 ? 'tool-calls' : 'stop',
-              raw: undefined,
+        {
+          type: 'tool-call',
+          toolCallId: 'second',
+          toolName: 'record',
+          input: '{"id":2}',
+        },
+        {
+          type: 'tool-call',
+          toolCallId: 'blocked',
+          toolName: 'blocked',
+          input: '{}',
+        },
+      ];
+      const model: MockLanguageModelV4 = new MockLanguageModelV4({
+        doGenerate: async () => ({
+          content:
+            model.doGenerateCalls.length === 1
+              ? calls
+              : [{ type: 'text', text: '{"answer":"done"}' }],
+          finishReason: {
+            unified: model.doGenerateCalls.length === 1 ? 'tool-calls' : 'stop',
+            raw: undefined,
+          },
+          usage,
+          warnings: [],
+        }),
+        doStream: async () => ({
+          stream: ReadableStream.from<LanguageModelV4StreamPart>([
+            ...(model.doStreamCalls.length === 1
+              ? calls
+              : [
+                  { type: 'text-start' as const, id: 'answer' },
+                  {
+                    type: 'text-delta' as const,
+                    id: 'answer',
+                    delta: '{"answer":"done"}',
+                  },
+                  { type: 'text-end' as const, id: 'answer' },
+                ]),
+            {
+              type: 'finish',
+              finishReason: {
+                unified:
+                  model.doStreamCalls.length === 1 ? 'tool-calls' : 'stop',
+                raw: undefined,
+              },
+              usage,
             },
-            usage,
-          },
-        ]),
-      }),
-    });
-    const context = new ContextEngine({
-      store: new InMemoryContextStore(),
-      chatId: mode,
-      userId: 'user',
-    }).set(user('Run the tools.'));
-    const sandbox = await buildSandbox();
-    const options = {
-      name: 'controls',
-      context,
-      sandbox,
-      model,
-      reasoning: 'low' as const,
-      maxOutputTokens: 128,
-      timeout: { totalMs: 5_000, toolMs: 1_000 },
-      toolCallConcurrency: 1,
-      toolApproval: { blocked: 'denied' as const },
-      tools: {
-        record: tool({
-          inputSchema: z.object({ id: z.number() }),
-          execute: async ({ id }) => {
-            maxActive = Math.max(maxActive, ++active);
-            await setImmediate();
-            active--;
-            completed.push(id);
-            return id;
-          },
+          ]),
         }),
-        blocked: tool({
-          inputSchema: z.object({}),
-          execute: () => ++blockedRuns,
-        }),
-      },
-    };
-
-    if (mode === 'generate') {
-      assert.equal((await agent(options).generate()).text, '{"answer":"done"}');
-    } else if (mode === 'stream') {
-      const { result } = await agent(options).stream();
-      await result.consumeStream();
-      assert.equal(await result.text, '{"answer":"done"}');
-    } else if (mode === 'asTool') {
-      assert.equal(
-        await agent(options)
-          .asTool()
-          .execute(
-            { input: 'Run the tools.' },
-            { toolCallId: 'subagent', messages: [], context: {} },
-          ),
-        '{"answer":"done"}',
-      );
-    } else {
-      const output = structuredOutput({
-        ...options,
-        schema: z.object({ answer: z.string() }),
       });
-      if (mode === 'structured-generate') {
-        assert.deepEqual(await output.generate(), { answer: 'done' });
-      } else {
-        const result = await output.stream();
-        await result.consumeStream();
-        assert.deepEqual(await result.output, { answer: 'done' });
-      }
-    }
+      const context = new ContextEngine({
+        store: new InMemoryContextStore(),
+        chatId: mode,
+        userId: 'user',
+      }).set(user('Run the tools.'));
+      const sandbox = await buildSandbox();
+      const options = {
+        name: 'controls',
+        context,
+        sandbox,
+        model,
+        reasoning: 'low' as const,
+        maxOutputTokens: 128,
+        timeout: { totalMs: 5_000, toolMs: 1_000 },
+        toolCallConcurrency: 1,
+        toolApproval: { blocked: 'denied' as const },
+        tools: {
+          record: tool({
+            inputSchema: z.object({ id: z.number() }),
+            execute: async ({ id }) => {
+              maxActive = Math.max(maxActive, ++active);
+              await setImmediate();
+              active--;
+              completed.push(id);
+              return id;
+            },
+          }),
+          blocked: tool({
+            inputSchema: z.object({}),
+            execute: () => ++blockedRuns,
+          }),
+        },
+      };
 
-    assert.deepEqual(completed, [1, 2]);
-    assert.equal(maxActive, 1);
-    assert.equal(blockedRuns, 0);
-    const requests = [...model.doGenerateCalls, ...model.doStreamCalls];
-    assert.equal(requests.length, 2);
-    for (const request of requests) {
-      assert.equal(request.reasoning, 'low');
-      assert.equal(request.maxOutputTokens, 128);
-    }
-  });
-}
+      if (mode === 'generate') {
+        assert.equal(
+          (await agent(options).generate()).text,
+          '{"answer":"done"}',
+        );
+      } else if (mode === 'stream') {
+        const { result } = await agent(options).stream();
+        await result.consumeStream();
+        assert.equal(await result.text, '{"answer":"done"}');
+      } else if (mode === 'asTool') {
+        assert.equal(
+          await agent(options)
+            .asTool()
+            .execute(
+              { input: 'Run the tools.' },
+              { toolCallId: 'subagent', messages: [], context: {} },
+            ),
+          '{"answer":"done"}',
+        );
+      } else {
+        const output = structuredOutput({
+          ...options,
+          schema: z.object({ answer: z.string() }),
+        });
+        if (mode === 'structured-generate') {
+          assert.deepEqual(await output.generate(), { answer: 'done' });
+        } else {
+          const result = await output.stream();
+          await result.consumeStream();
+          assert.deepEqual(await result.output, { answer: 'done' });
+        }
+      }
+
+      assert.deepEqual(completed, [1, 2]);
+      assert.equal(maxActive, 1);
+      assert.equal(blockedRuns, 0);
+      const requests = [...model.doGenerateCalls, ...model.doStreamCalls];
+      assert.equal(requests.length, 2);
+      for (const request of requests) {
+        assert.equal(request.reasoning, 'low');
+        assert.equal(request.maxOutputTokens, 128);
+      }
+    }),
+);
 
 it('native tool timeout aborts execution and returns a tool error to the next model step', async () => {
   let toolAborted = false;

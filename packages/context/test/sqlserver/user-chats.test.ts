@@ -1,7 +1,7 @@
+import { describe, it } from '@zukhruf/parameterized-test';
 import { waitFor } from '@zukhruf/testing/async';
 import { SqlServer } from '@zukhruf/testing/sqlserver';
 import assert from 'node:assert';
-import { describe, it } from 'node:test';
 
 import {
   ContextEngine,
@@ -271,33 +271,34 @@ describe('User Chat Management', () => {
   });
 
   describe('Concurrent Operations', () => {
-    it('should handle concurrent chat creation for different users', async () => {
-      await using container = await testSqlServer.database();
+    const users = [
+      'conc-user-a',
+      'conc-user-b',
+      'conc-user-c',
+      'conc-user-d',
+      'conc-user-e',
+    ];
 
-      const store = await SqlServerContextStore.create({
-        pool: container.connectionString,
-      });
-      try {
-        const users = [
-          'conc-user-a',
-          'conc-user-b',
-          'conc-user-c',
-          'conc-user-d',
-          'conc-user-e',
-        ];
-        const createPromises = users.flatMap((userId, userIndex) =>
-          Array.from({ length: 5 }, (_, i) =>
-            store.upsertChat({
-              id: `multi-conc-${userId}-${i}`,
-              userId,
-              title: `Chat ${userIndex}-${i}`,
-            }),
-          ),
-        );
+    void it.each(users, (userId) =>
+      it(`should give ${userId} its own 5 chats when chats for different users are created concurrently`, async () => {
+        await using container = await testSqlServer.database();
 
-        await Promise.all(createPromises);
+        const store = await SqlServerContextStore.create({
+          pool: container.connectionString,
+        });
+        try {
+          const createPromises = users.flatMap((owner, userIndex) =>
+            Array.from({ length: 5 }, (_, i) =>
+              store.upsertChat({
+                id: `multi-conc-${owner}-${i}`,
+                userId: owner,
+                title: `Chat ${userIndex}-${i}`,
+              }),
+            ),
+          );
 
-        for (const userId of users) {
+          await Promise.all(createPromises);
+
           const userChats = await store.listChats({ userId });
           assert.strictEqual(
             userChats.length,
@@ -305,11 +306,11 @@ describe('User Chat Management', () => {
             `User ${userId} should have 5 chats`,
           );
           assert.ok(userChats.every((c) => c.userId === userId));
+        } finally {
+          await store.close();
         }
-      } finally {
-        await store.close();
-      }
-    });
+      }),
+    );
   });
 });
 

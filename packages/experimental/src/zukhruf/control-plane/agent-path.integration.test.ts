@@ -1,5 +1,5 @@
+import { test } from '@zukhruf/parameterized-test';
 import assert from 'node:assert/strict';
-import test from 'node:test';
 
 import { AgentPath } from '@deepagents/experimental/zukhruf';
 
@@ -27,8 +27,8 @@ test('agent paths expose root and prefix membership semantics', () => {
   assert.equal(researcher.contains(coordinator), false);
 });
 
-test('agent paths reject malformed and escaping segments', () => {
-  for (const path of ['/other/agent', '/root//agent', '/root/../agent']) {
+void test.each(['/other/agent', '/root//agent', '/root/../agent'], (path) =>
+  test(`agent paths reject the malformed or escaping path ${path}`, () => {
     assert.throws(() => AgentPath.parse(path), /agent path/);
-  }
-});
+  }),
+);

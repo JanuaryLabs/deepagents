@@ -75,26 +75,26 @@ export class IndexCommand extends SqlCommand {
         explicitEventsPath,
         ctx.stderr,
       );
-      try {
-        const fragments = await ctx.text2Sql.index({
-          names,
-          onProgress: createProgressHandler(eventsStream, verbose, ctx.stderr),
-        });
-
-        await writeFile(fragmentsPath, JSON.stringify(fragments, null, 2));
-
-        const manifest: IndexManifest = {
-          fragmentsPath,
-          eventsPath,
-          adapters: names,
-        };
-
-        ctx.stdout.write(JSON.stringify(manifest, null, 2) + '\n');
-        return 0;
-      } finally {
+      await using events = new AsyncDisposableStack();
+      events.defer(async () => {
         eventsStream.end();
-        await finished(eventsStream).catch(() => {});
-      }
+        await finished(eventsStream);
+      });
+      const fragments = await ctx.text2Sql.index({
+        names,
+        onProgress: createProgressHandler(eventsStream, verbose, ctx.stderr),
+      });
+
+      await writeFile(fragmentsPath, JSON.stringify(fragments, null, 2));
+
+      const manifest: IndexManifest = {
+        fragmentsPath,
+        eventsPath,
+        adapters: names,
+      };
+
+      ctx.stdout.write(JSON.stringify(manifest, null, 2) + '\n');
+      return 0;
     } catch (error) {
       this.fail(errorMessage(error));
     }
@@ -150,6 +150,8 @@ async function openEventsWriter(
   const probe = explicitEventsPath
     ? await probeFifoWriter(explicitEventsPath, stderr)
     : null;
+  await using cleanup = new AsyncDisposableStack();
+  if (probe) cleanup.defer(() => probe.close());
   const stream = createWriteStream(eventsPath, {
     flags: 'a',
     encoding: 'utf-8',
@@ -160,8 +162,6 @@ async function openEventsWriter(
   } catch (err) {
     stream.destroy();
     throw err;
-  } finally {
-    await probe?.close().catch(() => {});
   }
 }
 

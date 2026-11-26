@@ -1,8 +1,8 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import { describe, it } from '@zukhruf/parameterized-test';
 import { type UIMessage, tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
-import { it } from 'node:test';
 import { z } from 'zod';
 
 import {
@@ -19,72 +19,71 @@ const usage = {
   outputTokens: { total: 1, text: 1, reasoning: 0 },
 };
 
-for (const mode of ['generate', 'execute'] as const) {
-  for (const decisions of [
+const approvalCases = (['generate', 'execute'] as const).flatMap((mode) =>
+  [
     [true, true],
     [true, false],
     [false, true],
-  ]) {
-    it(`${mode} handles duplicate or conflicting UI approvals ${decisions.join('/')} without repeating execution`, async () => {
-      let runs = 0;
-      const finishReason = { unified: 'stop' as const, raw: undefined };
-      const model = new MockLanguageModelV4({
-        doGenerate: async () => ({
-          content: [{ type: 'text', text: 'Done.' }],
-          finishReason,
-          usage,
-          warnings: [],
-        }),
-        doStream: async () => ({
-          stream: ReadableStream.from<LanguageModelV4StreamPart>([
-            { type: 'text-start', id: 'answer' },
-            { type: 'text-delta', id: 'answer', delta: 'Done.' },
-            { type: 'text-end', id: 'answer' },
-            { type: 'finish', finishReason, usage },
-          ]),
-        }),
-      });
-      const assistant = agent({
-        name: 'approvals',
-        prompt: 'Help.',
-        model,
-        toolApproval: { record: 'user-approval' },
-        tools: {
-          record: tool({
-            inputSchema: z.object({}),
-            execute: () => ++runs,
-          }),
-        },
-      });
-      const messages: UIMessage[] = [
-        {
-          id: 'response',
-          role: 'assistant',
-          parts: decisions.map((approved) => ({
-            type: 'tool-record',
-            toolCallId: 'record-once',
-            state: 'approval-responded',
-            input: {},
-            approval: { id: 'approval', approved },
-          })),
-        },
-      ];
+  ].map((decisions) => ({ mode, decisions })),
+);
 
-      if (mode === 'generate') {
-        assert.equal((await generate(assistant, messages, {})).text, 'Done.');
-      } else {
-        const result = await execute(assistant, messages, {});
-        await result.consumeStream();
-        assert.equal(await result.text, 'Done.');
-      }
-      assert.equal(runs, decisions.every(Boolean) ? 1 : 0);
-      assert.equal(
-        model.doGenerateCalls.length + model.doStreamCalls.length,
-        1,
-      );
+void it.each(approvalCases, ({ mode, decisions }) =>
+  it(`${mode} handles duplicate or conflicting UI approvals ${decisions.join('/')} without repeating execution`, async () => {
+    let runs = 0;
+    const finishReason = { unified: 'stop' as const, raw: undefined };
+    const model = new MockLanguageModelV4({
+      doGenerate: async () => ({
+        content: [{ type: 'text', text: 'Done.' }],
+        finishReason,
+        usage,
+        warnings: [],
+      }),
+      doStream: async () => ({
+        stream: ReadableStream.from<LanguageModelV4StreamPart>([
+          { type: 'text-start', id: 'answer' },
+          { type: 'text-delta', id: 'answer', delta: 'Done.' },
+          { type: 'text-end', id: 'answer' },
+          { type: 'finish', finishReason, usage },
+        ]),
+      }),
     });
-  }
-}
+    const assistant = agent({
+      name: 'approvals',
+      prompt: 'Help.',
+      model,
+      toolApproval: { record: 'user-approval' },
+      tools: {
+        record: tool({
+          inputSchema: z.object({}),
+          execute: () => ++runs,
+        }),
+      },
+    });
+    const messages: UIMessage[] = [
+      {
+        id: 'response',
+        role: 'assistant',
+        parts: decisions.map((approved) => ({
+          type: 'tool-record',
+          toolCallId: 'record-once',
+          state: 'approval-responded',
+          input: {},
+          approval: { id: 'approval', approved },
+        })),
+      },
+    ];
+
+    if (mode === 'generate') {
+      assert.equal((await generate(assistant, messages, {})).text, 'Done.');
+    } else {
+      const result = await execute(assistant, messages, {});
+      await result.consumeStream();
+      assert.equal(await result.text, 'Done.');
+    }
+    assert.equal(runs, decisions.every(Boolean) ? 1 : 0);
+    assert.equal(model.doGenerateCalls.length + model.doStreamCalls.length, 1);
+  }),
+);
 
 /**
  * A model whose first step calls the given tools and whose second step answers
@@ -173,132 +172,138 @@ async function run(
   return { text: String(text), content };
 }
 
-for (const mode of modes) {
-  it(`${mode} sends reasoning and maxOutputTokens on every model request, including a step whose active agent is unknown`, async () => {
-    const model = toolCallingModel(['lookup']);
-    const assistant = agent({
-      name: 'controls',
-      prompt: 'Help.',
-      model,
-      reasoning: 'low',
-      maxOutputTokens: 128,
-      tools: { lookup: tool({ inputSchema: z.object({}), execute: () => 1 }) },
-    });
-
-    const { text } = await run(mode, assistant, {
-      currentActiveAgent: 'missing',
-    });
-
-    assert.equal(text, 'Done.');
-    const requests = [...model.doGenerateCalls, ...model.doStreamCalls];
-    assert.equal(requests.length, 2);
-    for (const request of requests) {
-      assert.equal(request.reasoning, 'low');
-      assert.equal(request.maxOutputTokens, 128);
-    }
-  });
-
-  it(`${mode} denies a tool by toolApproval before it executes`, async () => {
-    let runs = 0;
-    const assistant = agent({
-      name: 'controls',
-      prompt: 'Help.',
-      model: toolCallingModel(['blocked']),
-      toolApproval: { blocked: 'denied' },
-      tools: {
-        blocked: tool({ inputSchema: z.object({}), execute: () => ++runs }),
-      },
-    });
-
-    const { text } = await run(mode, assistant);
-
-    assert.equal(text, 'Done.');
-    assert.equal(runs, 0);
-  });
-
-  it(`${mode} runs one tool call at a time with toolCallConcurrency 1`, async () => {
-    let running = 0;
-    let mostAtOnce = 0;
-    const slow = tool({
-      inputSchema: z.object({}),
-      execute: async () => {
-        mostAtOnce = Math.max(mostAtOnce, ++running);
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        running--;
-        return 'ok';
-      },
-    });
-    const assistant = agent({
-      name: 'controls',
-      prompt: 'Help.',
-      model: toolCallingModel(['slow', 'slow']),
-      toolCallConcurrency: 1,
-      tools: { slow },
-    });
-
-    const { text } = await run(mode, assistant);
-
-    assert.equal(text, 'Done.');
-    assert.equal(mostAtOnce, 1);
-  });
-
-  it(
-    `${mode} ends a model call that never answers when the timeout passes`,
-    { timeout: 2_000 },
-    async () => {
-      const never = (abortSignal: AbortSignal | undefined) =>
-        new Promise<never>((_, reject) => {
-          abortSignal?.addEventListener('abort', () =>
-            reject(abortSignal.reason),
-          );
-        });
+void describe.each(modes, (mode) =>
+  describe(mode, () => {
+    it(`${mode} sends reasoning and maxOutputTokens on every model request, including a step whose active agent is unknown`, async () => {
+      const model = toolCallingModel(['lookup']);
       const assistant = agent({
         name: 'controls',
         prompt: 'Help.',
-        model: new MockLanguageModelV4({
-          doGenerate: ({ abortSignal }) => never(abortSignal),
-          doStream: ({ abortSignal }) => never(abortSignal),
-        }),
-        timeout: { totalMs: 20 },
+        model,
+        reasoning: 'low',
+        maxOutputTokens: 128,
+        tools: {
+          lookup: tool({ inputSchema: z.object({}), execute: () => 1 }),
+        },
       });
 
-      const outcome = await run(mode, assistant).then(
-        ({ text }) => text,
-        (error: unknown) => String(error),
-      );
+      const { text } = await run(mode, assistant, {
+        currentActiveAgent: 'missing',
+      });
 
-      assert.match(outcome, /aborted due to timeout/);
-    },
-  );
-
-  it(`${mode} signs a tool approval request with experimental_toolApprovalSecret`, async () => {
-    const assistant = agent({
-      name: 'controls',
-      prompt: 'Help.',
-      model: toolCallingModel(['guarded']),
-      experimental_toolApprovalSecret: 'secret',
-      toolApproval: { guarded: 'user-approval' },
-      tools: {
-        guarded: tool({
-          inputSchema: z.object({}),
-          execute: () => 'ran',
-        }),
-      },
+      assert.equal(text, 'Done.');
+      const requests = [...model.doGenerateCalls, ...model.doStreamCalls];
+      assert.equal(requests.length, 2);
+      for (const request of requests) {
+        assert.equal(request.reasoning, 'low');
+        assert.equal(request.maxOutputTokens, 128);
+      }
     });
 
-    const { content } = await run(mode, assistant);
+    it(`${mode} denies a tool by toolApproval before it executes`, async () => {
+      let runs = 0;
+      const assistant = agent({
+        name: 'controls',
+        prompt: 'Help.',
+        model: toolCallingModel(['blocked']),
+        toolApproval: { blocked: 'denied' },
+        tools: {
+          blocked: tool({ inputSchema: z.object({}), execute: () => ++runs }),
+        },
+      });
 
-    const request = content.find(
-      (part) =>
-        typeof part === 'object' &&
-        part !== null &&
-        'type' in part &&
-        part.type === 'tool-approval-request',
+      const { text } = await run(mode, assistant);
+
+      assert.equal(text, 'Done.');
+      assert.equal(runs, 0);
+    });
+
+    it(`${mode} runs one tool call at a time with toolCallConcurrency 1`, async () => {
+      let running = 0;
+      let mostAtOnce = 0;
+      const slow = tool({
+        inputSchema: z.object({}),
+        execute: async () => {
+          mostAtOnce = Math.max(mostAtOnce, ++running);
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          running--;
+          return 'ok';
+        },
+      });
+      const assistant = agent({
+        name: 'controls',
+        prompt: 'Help.',
+        model: toolCallingModel(['slow', 'slow']),
+        toolCallConcurrency: 1,
+        tools: { slow },
+      });
+
+      const { text } = await run(mode, assistant);
+
+      assert.equal(text, 'Done.');
+      assert.equal(mostAtOnce, 1);
+    });
+
+    it(
+      `${mode} ends a model call that never answers when the timeout passes`,
+      { timeout: 2_000 },
+      async () => {
+        const never = (abortSignal: AbortSignal | undefined) =>
+          new Promise<never>((_, reject) => {
+            abortSignal?.addEventListener('abort', () =>
+              reject(abortSignal.reason),
+            );
+          });
+        const assistant = agent({
+          name: 'controls',
+          prompt: 'Help.',
+          model: new MockLanguageModelV4({
+            doGenerate: ({ abortSignal }) => never(abortSignal),
+            doStream: ({ abortSignal }) => never(abortSignal),
+          }),
+          timeout: { totalMs: 20 },
+        });
+
+        const outcome = await run(mode, assistant).then(
+          ({ text }) => text,
+          (error: unknown) => String(error),
+        );
+
+        assert.match(outcome, /aborted due to timeout/);
+      },
     );
-    assert.ok(request && typeof request === 'object');
-    assert.ok('signature' in request && typeof request.signature === 'string');
-  });
-}
+
+    it(`${mode} signs a tool approval request with experimental_toolApprovalSecret`, async () => {
+      const assistant = agent({
+        name: 'controls',
+        prompt: 'Help.',
+        model: toolCallingModel(['guarded']),
+        experimental_toolApprovalSecret: 'secret',
+        toolApproval: { guarded: 'user-approval' },
+        tools: {
+          guarded: tool({
+            inputSchema: z.object({}),
+            execute: () => 'ran',
+          }),
+        },
+      });
+
+      const { content } = await run(mode, assistant);
+
+      const request = content.find(
+        (part) =>
+          typeof part === 'object' &&
+          part !== null &&
+          'type' in part &&
+          part.type === 'tool-approval-request',
+      );
+      assert.ok(request && typeof request === 'object');
+      assert.ok(
+        'signature' in request && typeof request.signature === 'string',
+      );
+    });
+  }),
+);
 
 it('an agent handed off to as a clone answers with its own reasoning and maxOutputTokens', async () => {
   const subagentModel = new MockLanguageModelV4({

@@ -9,6 +9,26 @@ import {
 import { numericValue } from '../groundings/rows.ts';
 import type { BigQuery } from './bigquery.ts';
 
+/** A source of BigQuery row counts failed; the grounding tries the next source, or goes on without row counts. */
+class RowCountSourceWarning extends Error {
+  readonly code = 'DEEPAGENTS_TEXT2SQL_BIGQUERY_ROW_COUNT_SOURCE_FAILED';
+  readonly detail: string;
+
+  constructor(
+    failure: unknown,
+    source: 'INFORMATION_SCHEMA.TABLE_STORAGE' | '__TABLES__',
+    next: string,
+    dataset: string,
+  ) {
+    super(
+      `Reading row counts from ${source} failed, and ${next}: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'RowCountSourceWarning';
+    this.detail = `dataset: ${dataset}`;
+  }
+}
+
 /** TABLE_STORAGE: total_rows is an INT64. */
 const tableStorageRow = z.object({
   table_name: z.string().nullable(),
@@ -80,14 +100,30 @@ export class BigQueryRowCountGrounding extends RowCountGrounding {
 
     try {
       return await this.#fromTableStorage(dataset, inList);
-    } catch {
+    } catch (error) {
       // TABLE_STORAGE may not be accessible on cross-project public datasets
+      process.emitWarning(
+        new RowCountSourceWarning(
+          error,
+          'INFORMATION_SCHEMA.TABLE_STORAGE',
+          'the grounding reads __TABLES__ instead',
+          dataset,
+        ),
+      );
     }
 
     try {
       return await this.#fromLegacyTables(dataset, inList);
-    } catch {
+    } catch (error) {
       // __TABLES__ may also be unavailable in some contexts
+      process.emitWarning(
+        new RowCountSourceWarning(
+          error,
+          '__TABLES__',
+          'the dataset has no row counts',
+          dataset,
+        ),
+      );
     }
 
     return new Map();

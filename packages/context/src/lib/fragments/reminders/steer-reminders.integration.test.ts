@@ -1,4 +1,5 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import { describe, it } from '@zukhruf/parameterized-test';
 import {
   type UIMessage,
   convertToModelMessages,
@@ -13,7 +14,6 @@ import {
 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
-import { describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { z } from 'zod';
 
@@ -766,8 +766,8 @@ describe('steer reminders integration (chat flow)', () => {
     );
   });
 
-  it('once(id) is order-independent inside and()', async () => {
-    for (const order of ['after', 'before'] as const) {
+  void it.each(['after', 'before'] as const, (order) =>
+    it(`once(id) is order-independent inside and(): once ${order} everyNTurns`, async () => {
       const store = new InMemoryContextStore();
       const context = new ContextEngine({
         store,
@@ -799,8 +799,8 @@ describe('steer reminders integration (chat flow)', () => {
         1,
         `once() must latch once regardless of position in and() (${order}); got ${synthCount}`,
       );
-    }
-  });
+    }),
+  );
 
   it('single-step (no tool) generation does NOT steer — there is no mid-loop moment', async () => {
     const store = new InMemoryContextStore();

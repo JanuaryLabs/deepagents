@@ -1,5 +1,5 @@
+import { describe, it } from '@zukhruf/parameterized-test';
 import assert from 'node:assert';
-import { describe, it } from 'node:test';
 import { z } from 'zod';
 
 import { BigQuery } from '@deepagents/text2sql/bigquery';
@@ -93,26 +93,28 @@ const adapters: Array<{
   },
 ];
 
-for (const { name, create, accepts, rejects } of adapters) {
+void describe.each(adapters, ({ name, create, accepts, rejects }) =>
   describe(`${name} runQuery`, () => {
-    for (const [shape, result] of Object.entries(accepts)) {
+    void it.each(Object.entries(accepts), ([shape, result]) =>
       it(`reads the rows of ${shape}`, async () => {
         const adapter = create(async () => result);
         assert.deepStrictEqual(await adapter.runQuery('SELECT 1', idRow), rows);
-      });
-    }
+      }),
+    );
 
-    for (const [shape, result] of Object.entries({
-      ...rejects,
-      'a string': 'not rows',
-    })) {
-      it(`rejects ${shape}`, async () => {
-        const adapter = create(async () => result);
-        await assert.rejects(
-          () => adapter.runQuery('SELECT 1', idRow),
-          new RegExp(`${name}.*execute\\(\\) must return an array of rows`),
-        );
-      });
-    }
-  });
-}
+    void it.each(
+      Object.entries({
+        ...rejects,
+        'a string': 'not rows',
+      }),
+      ([shape, result]) =>
+        it(`rejects ${shape}`, async () => {
+          const adapter = create(async () => result);
+          await assert.rejects(
+            () => adapter.runQuery('SELECT 1', idRow),
+            new RegExp(`${name}.*execute\\(\\) must return an array of rows`),
+          );
+        }),
+    );
+  }),
+);

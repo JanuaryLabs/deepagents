@@ -7,6 +7,21 @@ import {
 } from '../groundings/constraint.grounding.ts';
 import { currentDatabaseRow } from './mysql-rows.ts';
 
+/** Reading the CHECK constraints of a table failed; its other constraints are kept. */
+class CheckConstraintsWarning extends Error {
+  readonly code = 'DEEPAGENTS_TEXT2SQL_MYSQL_CHECK_CONSTRAINTS_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, database: string, table: string) {
+    super(
+      `Reading the CHECK constraints of a table failed, and the table keeps its other constraints: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'CheckConstraintsWarning';
+    this.detail = `table: ${database}.${table}`;
+  }
+}
+
 /**
  * TABLE_CONSTRAINTS LEFT JOIN KEY_COLUMN_USAGE: the key columns are NULL for a
  * constraint without key columns.
@@ -213,8 +228,9 @@ export class MysqlConstraintGrounding extends ConstraintGrounding {
           definition: row.CHECK_CLAUSE ?? undefined,
         });
       }
-    } catch {
+    } catch (error) {
       // CHECK_CONSTRAINTS table might not exist in older MySQL versions
+      process.emitWarning(new CheckConstraintsWarning(error, database, table));
     }
 
     return constraints;

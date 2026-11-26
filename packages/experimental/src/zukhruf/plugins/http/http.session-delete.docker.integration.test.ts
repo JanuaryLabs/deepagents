@@ -1,5 +1,6 @@
 import { untilAborted } from '@zukhruf/async';
 import { TemporaryFiles } from '@zukhruf/fs';
+import { describe, test } from '@zukhruf/parameterized-test';
 import { waitFor } from '@zukhruf/testing/async';
 import { DockerTestbed } from '@zukhruf/testing/docker';
 import { Postgres, type PostgresDatabase } from '@zukhruf/testing/postgres';
@@ -7,7 +8,6 @@ import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import test from 'node:test';
 import { type Db, PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
 
@@ -471,143 +471,68 @@ async function wakeStates(boss: PgBoss, queue: string) {
   return (await boss.findJobs(queue)).map(({ state }) => state).toSorted();
 }
 
-for (const { name, open } of storages) {
-  test(`${name}: DELETE /session/:sessionId answers 404 for an unknown session, another user's session, another runtime's root and a deleted session, and leaves the session to its owner until its owner deletes it`, async (t) => {
-    await using resources = new AsyncDisposableStack();
-    const { storage } = await open(resources);
-    const sandbox = defineSandbox(new VirtualSandboxEnvironment());
-    const model = () =>
-      new MockLanguageModelV4({ doStream: async () => textResult('done') });
-    const owner = await serveAgent(
-      resources,
-      { storage },
-      {
-        name: 'owner',
-        model: model(),
-        sandbox,
-      },
-    );
-    const other = await serveAgent(
-      resources,
-      { storage },
-      {
-        name: 'other',
-        model: model(),
-        sandbox,
-      },
-    );
-    resources.use(await owner.runtime.work());
-    const sessionId = randomUUID();
-    const unknownId = randomUUID();
-    await completedTurn(owner, sessionId, t.signal);
-    const ownerSession = async () =>
-      (await owner.app.request(`${MOUNT}/session/${sessionId}`)).status;
-
-    const unknown = await answer(await deleteSession(owner.app, unknownId));
-    const otherUser = await answer(
-      await deleteSession(owner.app, sessionId, 'user-2'),
-    );
-    const otherRuntime = await answer(
-      await deleteSession(other.app, sessionId),
-    );
-    const keptForOwner = await ownerSession();
-    const first = await answer(await deleteSession(owner.app, sessionId));
-    const second = await answer(await deleteSession(owner.app, sessionId));
-
-    assert.deepStrictEqual(
-      { unknown, otherUser, otherRuntime, keptForOwner, first, second },
-      {
-        unknown: sessionNotFound(unknownId),
-        otherUser: sessionNotFound(sessionId),
-        otherRuntime: sessionNotFound(sessionId),
-        keptForOwner: 200,
-        first: deleted,
-        second: sessionNotFound(sessionId),
-      },
-    );
-  });
-
-  test(`${name}: GET /events tells the owner that DELETE /session/:sessionId deleted the session and its sub-agent's chat, with one lifecycle 'deleted' change for each`, async (t) => {
-    await using resources = new AsyncDisposableStack();
-    const { storage } = await open(resources);
-    const sandbox = defineSandbox(new VirtualSandboxEnvironment());
-    const rootSteps = [spawnWorker()];
-    const { app, runtime } = await serveAgent(
-      resources,
-      { storage },
-      {
-        name: 'root',
-        model: new MockLanguageModelV4({
-          doStream: async () => rootSteps.shift() ?? textResult('done'),
-        }),
-        sandbox,
-        subagents: [worker(sandbox)],
-      },
-    );
-    resources.use(await runtime.work({ concurrency: 2 }));
-    const sessionId = randomUUID();
-    await startTurn(app, sessionId);
-    const child = await idleChild(app, storage, sessionId, t.signal);
-    // The stream ends when the test's limit aborts it.
-    const subscription = await app.request(`${MOUNT}/events`, {
-      signal: t.signal,
-    });
-    const events = ownerEvents(subscription);
-    const first = await events.next();
-
-    const response = await answer(await deleteSession(app, sessionId));
-    const lifecycle: Record<string, unknown>[] = [];
-    for await (const event of events) {
-      if (event.lifecycle === undefined) continue;
-      lifecycle.push(event);
-      if (lifecycle.length === 2) break;
-    }
-
-    const change = (id: string) => ({
-      type: 'change',
-      resource: 'conversation',
-      id,
-      lifecycle: 'deleted',
-    });
-    assert.deepStrictEqual(
-      {
-        first: first.value,
-        response,
-        lifecycle: lifecycle.toSorted((left, right) =>
-          String(left.id).localeCompare(String(right.id)),
-        ),
-      },
-      {
-        first: { type: 'ready' },
-        response: deleted,
-        lifecycle: [change(sessionId), change(child.chatId)].toSorted(
-          (left, right) => left.id.localeCompare(right.id),
-        ),
-      },
-    );
-  });
-
-  test(`${name}: DELETE /session/:sessionId of a session whose turn spawned a sub-agent, with mail and a turn queued for the sub-agent, removes the root and the sub-agent: their chats, streams, mail, queued turns and containers`, async (t) => {
-    const namespace = `delete-${randomUUID()}`;
-    try {
+void describe.each(storages, ({ name, open }) =>
+  describe(name, () => {
+    test(`${name}: DELETE /session/:sessionId answers 404 for an unknown session, another user's session, another runtime's root and a deleted session, and leaves the session to its owner until its owner deletes it`, async (t) => {
       await using resources = new AsyncDisposableStack();
       const { storage } = await open(resources);
-      const environment = new DockerSandboxEnvironment({
-        namespace,
-        container: defaults,
-      });
-      const sandbox = defineSandbox(environment, { idleTimeoutMs: false });
-      const rootSteps = [
-        toolCallResult({
-          toolCallId: randomUUID(),
-          toolName: 'bash',
-          input: JSON.stringify({
-            command: 'echo kept > /tmp/kept.txt',
-            reasoning: 'leave a file in the chat sandbox',
-          }),
-        }),
-        spawnWorker(),
-      ];
+      const sandbox = defineSandbox(new VirtualSandboxEnvironment());
+      const model = () =>
+        new MockLanguageModelV4({ doStream: async () => textResult('done') });
+      const owner = await serveAgent(
+        resources,
+        { storage },
+        {
+          name: 'owner',
+          model: model(),
+          sandbox,
+        },
+      );
+      const other = await serveAgent(
+        resources,
+        { storage },
+        {
+          name: 'other',
+          model: model(),
+          sandbox,
+        },
+      );
+      resources.use(await owner.runtime.work());
+      const sessionId = randomUUID();
+      const unknownId = randomUUID();
+      await completedTurn(owner, sessionId, t.signal);
+      const ownerSession = async () =>
+        (await owner.app.request(`${MOUNT}/session/${sessionId}`)).status;
+
+      const unknown = await answer(await deleteSession(owner.app, unknownId));
+      const otherUser = await answer(
+        await deleteSession(owner.app, sessionId, 'user-2'),
+      );
+      const otherRuntime = await answer(
+        await deleteSession(other.app, sessionId),
+      );
+      const keptForOwner = await ownerSession();
+      const first = await answer(await deleteSession(owner.app, sessionId));
+      const second = await answer(await deleteSession(owner.app, sessionId));
+
+      assert.deepStrictEqual(
+        { unknown, otherUser, otherRuntime, keptForOwner, first, second },
+        {
+          unknown: sessionNotFound(unknownId),
+          otherUser: sessionNotFound(sessionId),
+          otherRuntime: sessionNotFound(sessionId),
+          keptForOwner: 200,
+          first: deleted,
+          second: sessionNotFound(sessionId),
+        },
+      );
+    });
+
+    test(`${name}: GET /events tells the owner that DELETE /session/:sessionId deleted the session and its sub-agent's chat, with one lifecycle 'deleted' change for each`, async (t) => {
+      await using resources = new AsyncDisposableStack();
+      const { storage } = await open(resources);
+      const sandbox = defineSandbox(new VirtualSandboxEnvironment());
+      const rootSteps = [spawnWorker()];
       const { app, runtime } = await serveAgent(
         resources,
         { storage },
@@ -620,204 +545,406 @@ for (const { name, open } of storages) {
           subagents: [worker(sandbox)],
         },
       );
-      const workers = await runtime.work({ concurrency: 2 });
+      resources.use(await runtime.work({ concurrency: 2 }));
       const sessionId = randomUUID();
-      const root = { chatId: sessionId, userId: 'user-1' };
-      const turnId = await startTurn(app, sessionId);
+      await startTurn(app, sessionId);
       const child = await idleChild(app, storage, sessionId, t.signal);
-      // With no worker left, the mail's turn stays queued.
-      await workers[Symbol.asyncDispose]();
-      await runtime.deliver(
-        createInterAgentCommunication({
-          author: root,
-          recipient: child,
-          content: 'run again',
-        }),
-        MessageDeliveryModes.TriggerTurn,
-      );
-      const streamIds = await storage.streams.store.listStreamIds();
-      const fileBefore = await readKept(environment, root);
-      const before = {
-        file: fileBefore,
-        rootTurn: streamIds.includes(turnId),
-        // A turn id names its conversation's namespace second.
-        conversationsWithStreams: new Set(
-          streamIds.map((id) => id.split(':')[1]),
-        ).size,
-        childMail: await storage.mailboxStore.hasPending(child),
-        childActivity: await storage.queue.getTurnActivity(child),
-        containers: (await namespaceContainers(namespace)).length,
-      };
+      // The stream ends when the test's limit aborts it.
+      const subscription = await app.request(`${MOUNT}/events`, {
+        signal: t.signal,
+      });
+      const events = ownerEvents(subscription);
+      const first = await events.next();
 
       const response = await answer(await deleteSession(app, sessionId));
+      const lifecycle: Record<string, unknown>[] = [];
+      for await (const event of events) {
+        if (event.lifecycle === undefined) continue;
+        lifecycle.push(event);
+        if (lifecycle.length === 2) break;
+      }
 
-      const containers = (await namespaceContainers(namespace)).length;
-      const history = historySchema.parse(
-        await (await app.request(`${MOUNT}/history`)).json(),
-      );
+      const change = (id: string) => ({
+        type: 'change',
+        resource: 'conversation',
+        id,
+        lifecycle: 'deleted',
+      });
       assert.deepStrictEqual(
         {
-          before,
+          first: first.value,
           response,
-          session: await answer(
-            await app.request(`${MOUNT}/session/${sessionId}`),
+          lifecycle: lifecycle.toSorted((left, right) =>
+            String(left.id).localeCompare(String(right.id)),
           ),
-          history: history.map(({ chatId }) => chatId),
-          chats: {
-            root: await storage.store.getChat(root.chatId),
-            child: await storage.store.getChat(child.chatId),
-          },
-          streams: await Promise.all(
-            streamIds.map((id) => storage.streams.store.getStream(id)),
-          ),
-          childMail: await storage.mailboxStore.hasPending(child),
-          activity: {
-            root: await storage.queue.getTurnActivity(root),
-            child: await storage.queue.getTurnActivity(child),
-          },
-          containers,
-          fileAfterReopen: await readKept(environment, root),
         },
         {
-          before: {
-            file: 'kept\n',
-            rootTurn: true,
-            conversationsWithStreams: 2,
-            childMail: true,
-            childActivity: 'queued',
-            containers: 2,
-          },
+          first: { type: 'ready' },
           response: deleted,
-          session: sessionNotFound(sessionId),
-          history: [],
-          chats: { root: undefined, child: undefined },
-          streams: streamIds.map(() => undefined),
-          childMail: false,
-          activity: { root: 'idle', child: 'idle' },
-          containers: 0,
-          fileAfterReopen: 'gone',
+          lifecycle: [change(sessionId), change(child.chatId)].toSorted(
+            (left, right) => left.id.localeCompare(right.id),
+          ),
         },
       );
-    } finally {
-      await removeNamespace(namespace);
-    }
-  });
+    });
 
-  test(`${name}: a DELETE cut short by a failing sandbox delete leaves the session absent and admitting nothing, and a second DELETE finishes it`, async (t) => {
-    await using resources = new AsyncDisposableStack();
-    const { storage } = await open(resources);
-    const virtual = new VirtualSandboxEnvironment();
-    const deletes: string[] = [];
-    let backendDown = true;
-    const environment: SandboxEnvironment = {
-      open: (chat) => virtual.open(chat),
-      delete: async (chat) => {
-        deletes.push(chat.chatId);
-        if (backendDown) {
-          backendDown = false;
-          throw new Error('the sandbox backend is down');
-        }
-        await virtual.delete(chat);
-      },
-    };
-    const sandbox = defineSandbox(environment);
-    const rootSteps = [spawnWorker()];
-    const { app, runtime } = await serveAgent(
-      resources,
-      { storage },
-      {
-        name: 'root',
-        model: new MockLanguageModelV4({
-          doStream: async () => rootSteps.shift() ?? textResult('done'),
-        }),
-        sandbox,
-        subagents: [worker(sandbox)],
-      },
-    );
-    resources.use(await runtime.work({ concurrency: 2 }));
-    const sessionId = randomUUID();
-    const root = { chatId: sessionId, userId: 'user-1' };
-    await startTurn(app, sessionId);
-    const child = await idleChild(app, storage, sessionId, t.signal);
-    const refusal = async (operation: Promise<unknown>) =>
-      operation.then(
-        () => 'admitted',
-        (error: unknown) => (Error.isError(error) ? error.name : 'rejected'),
-      );
-
-    const cutShort = (await deleteSession(app, sessionId)).status;
-    const meanwhile = {
-      session: await answer(await app.request(`${MOUNT}/session/${sessionId}`)),
-      history: historySchema
-        .parse(await (await app.request(`${MOUNT}/history`)).json())
-        .map(({ chatId }) => chatId),
-      createSession: await refusal(runtime.createSession(root)),
-      rootTurn: await refusal(
-        runtime.enqueue(root, {
-          message: {
-            id: randomUUID(),
-            role: 'user',
-            parts: [{ type: 'text', text: 'again' }],
+    test(`${name}: DELETE /session/:sessionId of a session whose turn spawned a sub-agent, with mail and a turn queued for the sub-agent, removes the root and the sub-agent: their chats, streams, mail, queued turns and containers`, async (t) => {
+      const namespace = `delete-${randomUUID()}`;
+      try {
+        await using resources = new AsyncDisposableStack();
+        const { storage } = await open(resources);
+        const environment = new DockerSandboxEnvironment({
+          namespace,
+          container: defaults,
+        });
+        const sandbox = defineSandbox(environment, { idleTimeoutMs: false });
+        const rootSteps = [
+          toolCallResult({
+            toolCallId: randomUUID(),
+            toolName: 'bash',
+            input: JSON.stringify({
+              command: 'echo kept > /tmp/kept.txt',
+              reasoning: 'leave a file in the chat sandbox',
+            }),
+          }),
+          spawnWorker(),
+        ];
+        const { app, runtime } = await serveAgent(
+          resources,
+          { storage },
+          {
+            name: 'root',
+            model: new MockLanguageModelV4({
+              doStream: async () => rootSteps.shift() ?? textResult('done'),
+            }),
+            sandbox,
+            subagents: [worker(sandbox)],
           },
-          trigger: 'submit-message',
-        }),
-      ),
-      childMail: await refusal(
-        runtime.deliver(
+        );
+        const workers = await runtime.work({ concurrency: 2 });
+        const sessionId = randomUUID();
+        const root = { chatId: sessionId, userId: 'user-1' };
+        const turnId = await startTurn(app, sessionId);
+        const child = await idleChild(app, storage, sessionId, t.signal);
+        // With no worker left, the mail's turn stays queued.
+        await workers[Symbol.asyncDispose]();
+        await runtime.deliver(
           createInterAgentCommunication({
             author: root,
             recipient: child,
             content: 'run again',
           }),
           MessageDeliveryModes.TriggerTurn,
-        ),
-      ),
-      rowsKept: {
-        root: (await storage.store.getChat(root.chatId)) !== undefined,
-        child: (await storage.store.getChat(child.chatId)) !== undefined,
-      },
-    };
-    const retried = await answer(await deleteSession(app, sessionId));
+        );
+        const streamIds = await storage.streams.store.listStreamIds();
+        const fileBefore = await readKept(environment, root);
+        const before = {
+          file: fileBefore,
+          rootTurn: streamIds.includes(turnId),
+          // A turn id names its conversation's namespace second.
+          conversationsWithStreams: new Set(
+            streamIds.map((id) => id.split(':')[1]),
+          ).size,
+          childMail: await storage.mailboxStore.hasPending(child),
+          childActivity: await storage.queue.getTurnActivity(child),
+          containers: (await namespaceContainers(namespace)).length,
+        };
 
-    assert.deepStrictEqual(
-      {
-        cutShort,
-        meanwhile,
-        retried,
-        deletes,
-        chats: {
-          root: await storage.store.getChat(root.chatId),
-          child: await storage.store.getChat(child.chatId),
-        },
-      },
-      {
-        cutShort: 500,
-        meanwhile: {
-          session: sessionNotFound(sessionId),
-          history: [],
-          createSession: 'ConversationNotFoundError',
-          rootTurn: 'ConversationNotFoundError',
-          childMail: 'ConversationNotFoundError',
-          rowsKept: { root: true, child: true },
-        },
-        retried: deleted,
-        deletes: [child.chatId, child.chatId, root.chatId],
-        chats: { root: undefined, child: undefined },
-      },
-    );
-  });
+        const response = await answer(await deleteSession(app, sessionId));
 
-  test(`${name}: a DELETE whose host data cleanup rejects answers 500 and keeps every chat row, and its retry calls the cleanup again with the same conversations and deletes the session; each cleanup call comes once every container of the session is gone`, async (t) => {
-    const namespace = `cleanup-${randomUUID()}`;
-    try {
+        const containers = (await namespaceContainers(namespace)).length;
+        const history = historySchema.parse(
+          await (await app.request(`${MOUNT}/history`)).json(),
+        );
+        assert.deepStrictEqual(
+          {
+            before,
+            response,
+            session: await answer(
+              await app.request(`${MOUNT}/session/${sessionId}`),
+            ),
+            history: history.map(({ chatId }) => chatId),
+            chats: {
+              root: await storage.store.getChat(root.chatId),
+              child: await storage.store.getChat(child.chatId),
+            },
+            streams: await Promise.all(
+              streamIds.map((id) => storage.streams.store.getStream(id)),
+            ),
+            childMail: await storage.mailboxStore.hasPending(child),
+            activity: {
+              root: await storage.queue.getTurnActivity(root),
+              child: await storage.queue.getTurnActivity(child),
+            },
+            containers,
+            fileAfterReopen: await readKept(environment, root),
+          },
+          {
+            before: {
+              file: 'kept\n',
+              rootTurn: true,
+              conversationsWithStreams: 2,
+              childMail: true,
+              childActivity: 'queued',
+              containers: 2,
+            },
+            response: deleted,
+            session: sessionNotFound(sessionId),
+            history: [],
+            chats: { root: undefined, child: undefined },
+            streams: streamIds.map(() => undefined),
+            childMail: false,
+            activity: { root: 'idle', child: 'idle' },
+            containers: 0,
+            fileAfterReopen: 'gone',
+          },
+        );
+      } finally {
+        await removeNamespace(namespace);
+      }
+    });
+
+    test(`${name}: a DELETE cut short by a failing sandbox delete leaves the session absent and admitting nothing, and a second DELETE finishes it`, async (t) => {
       await using resources = new AsyncDisposableStack();
       const { storage } = await open(resources);
-      const sandbox = defineSandbox(
-        new DockerSandboxEnvironment({ namespace, container: defaults }),
-        { idleTimeoutMs: false },
-      );
-      const cleanups: { conversations: string[]; containers: number }[] = [];
+      const virtual = new VirtualSandboxEnvironment();
+      const deletes: string[] = [];
+      let backendDown = true;
+      const environment: SandboxEnvironment = {
+        open: (chat) => virtual.open(chat),
+        delete: async (chat) => {
+          deletes.push(chat.chatId);
+          if (backendDown) {
+            backendDown = false;
+            throw new Error('the sandbox backend is down');
+          }
+          await virtual.delete(chat);
+        },
+      };
+      const sandbox = defineSandbox(environment);
       const rootSteps = [spawnWorker()];
+      const { app, runtime } = await serveAgent(
+        resources,
+        { storage },
+        {
+          name: 'root',
+          model: new MockLanguageModelV4({
+            doStream: async () => rootSteps.shift() ?? textResult('done'),
+          }),
+          sandbox,
+          subagents: [worker(sandbox)],
+        },
+      );
+      resources.use(await runtime.work({ concurrency: 2 }));
+      const sessionId = randomUUID();
+      const root = { chatId: sessionId, userId: 'user-1' };
+      await startTurn(app, sessionId);
+      const child = await idleChild(app, storage, sessionId, t.signal);
+      const refusal = async (operation: Promise<unknown>) =>
+        operation.then(
+          () => 'admitted',
+          (error: unknown) => (Error.isError(error) ? error.name : 'rejected'),
+        );
+
+      const cutShort = (await deleteSession(app, sessionId)).status;
+      const meanwhile = {
+        session: await answer(
+          await app.request(`${MOUNT}/session/${sessionId}`),
+        ),
+        history: historySchema
+          .parse(await (await app.request(`${MOUNT}/history`)).json())
+          .map(({ chatId }) => chatId),
+        createSession: await refusal(runtime.createSession(root)),
+        rootTurn: await refusal(
+          runtime.enqueue(root, {
+            message: {
+              id: randomUUID(),
+              role: 'user',
+              parts: [{ type: 'text', text: 'again' }],
+            },
+            trigger: 'submit-message',
+          }),
+        ),
+        childMail: await refusal(
+          runtime.deliver(
+            createInterAgentCommunication({
+              author: root,
+              recipient: child,
+              content: 'run again',
+            }),
+            MessageDeliveryModes.TriggerTurn,
+          ),
+        ),
+        rowsKept: {
+          root: (await storage.store.getChat(root.chatId)) !== undefined,
+          child: (await storage.store.getChat(child.chatId)) !== undefined,
+        },
+      };
+      const retried = await answer(await deleteSession(app, sessionId));
+
+      assert.deepStrictEqual(
+        {
+          cutShort,
+          meanwhile,
+          retried,
+          deletes,
+          chats: {
+            root: await storage.store.getChat(root.chatId),
+            child: await storage.store.getChat(child.chatId),
+          },
+        },
+        {
+          cutShort: 500,
+          meanwhile: {
+            session: sessionNotFound(sessionId),
+            history: [],
+            createSession: 'ConversationNotFoundError',
+            rootTurn: 'ConversationNotFoundError',
+            childMail: 'ConversationNotFoundError',
+            rowsKept: { root: true, child: true },
+          },
+          retried: deleted,
+          deletes: [child.chatId, child.chatId, root.chatId],
+          chats: { root: undefined, child: undefined },
+        },
+      );
+    });
+
+    test(`${name}: a DELETE whose host data cleanup rejects answers 500 and keeps every chat row, and its retry calls the cleanup again with the same conversations and deletes the session; each cleanup call comes once every container of the session is gone`, async (t) => {
+      const namespace = `cleanup-${randomUUID()}`;
+      try {
+        await using resources = new AsyncDisposableStack();
+        const { storage } = await open(resources);
+        const sandbox = defineSandbox(
+          new DockerSandboxEnvironment({ namespace, container: defaults }),
+          { idleTimeoutMs: false },
+        );
+        const cleanups: { conversations: string[]; containers: number }[] = [];
+        const rootSteps = [spawnWorker()];
+        const runtime = resources.use(
+          await new AgentRuntime(
+            defineAgent({
+              name: 'root',
+              instructions: [],
+              model: new MockLanguageModelV4({
+                doStream: async () => rootSteps.shift() ?? textResult('done'),
+              }),
+              sandbox,
+              subagents: [worker(sandbox)],
+            }),
+          ).initialize(
+            defineStack(async () => ({
+              storage,
+              conversationDataCleanup: async (conversations) => {
+                cleanups.push({
+                  conversations: conversations
+                    .map(({ userId, chatId }) => `${userId}/${chatId}`)
+                    .toSorted(),
+                  containers: (await namespaceContainers(namespace)).length,
+                });
+                if (cleanups.length === 1) {
+                  throw new Error('the volume service is down');
+                }
+              },
+            })),
+          ),
+        );
+        const app = new Hono<HttpEnv>();
+        app.use(`${MOUNT}/*`, (context, next) => {
+          context.set('userId', 'user-1');
+          return next();
+        });
+        app.route(MOUNT, http(runtime));
+        resources.use(await runtime.work({ concurrency: 2 }));
+        const sessionId = randomUUID();
+        await startTurn(app, sessionId);
+        const child = await idleChild(app, storage, sessionId, t.signal);
+        const members = [
+          `user-1/${sessionId}`,
+          `user-1/${child.chatId}`,
+        ].toSorted();
+        const containersBefore = (await namespaceContainers(namespace)).length;
+
+        const cutShort = (await deleteSession(app, sessionId)).status;
+        const meanwhile = {
+          session: await answer(
+            await app.request(`${MOUNT}/session/${sessionId}`),
+          ),
+          rowsKept: {
+            root: (await storage.store.getChat(sessionId)) !== undefined,
+            child: (await storage.store.getChat(child.chatId)) !== undefined,
+          },
+        };
+        const retried = await answer(await deleteSession(app, sessionId));
+
+        assert.deepStrictEqual(
+          {
+            containersBefore,
+            cutShort,
+            meanwhile,
+            retried,
+            session: await answer(
+              await app.request(`${MOUNT}/session/${sessionId}`),
+            ),
+            cleanups,
+            chats: {
+              root: await storage.store.getChat(sessionId),
+              child: await storage.store.getChat(child.chatId),
+            },
+          },
+          {
+            containersBefore: 2,
+            cutShort: 500,
+            meanwhile: {
+              session: sessionNotFound(sessionId),
+              rowsKept: { root: true, child: true },
+            },
+            retried: deleted,
+            session: sessionNotFound(sessionId),
+            cleanups: [
+              { conversations: members, containers: 0 },
+              { conversations: members, containers: 0 },
+            ],
+            chats: { root: undefined, child: undefined },
+          },
+        );
+      } finally {
+        await removeNamespace(namespace);
+      }
+    });
+
+    test(`${name}: DELETE /session/:sessionId archives the schedules task that targets the session and keeps the one that does not, cancels the cron and dynamic wakes the agent armed through conversation-scheduling, and a wake of the session left armed comes due after the delete and finishes without a retry`, async (t) => {
+      await using resources = new AsyncDisposableStack();
+      const { storage, boss, transaction } = await open(resources);
+      const scheduled = schedules({
+        queue: `scheduled-${randomUUID()}`,
+        reconciliationIntervalMs: 50,
+      });
+      const wakeQueue = `scheduling-${randomUUID()}`;
+      const wakes = new FirstCancelFails(boss, {
+        queue: wakeQueue,
+        pollingIntervalSeconds: 0.5,
+      });
+      await wakes.initialize();
+      const wakeup = () =>
+        toolCallResult({
+          toolCallId: randomUUID(),
+          toolName: 'ScheduleWakeup',
+          input: JSON.stringify({
+            delaySeconds: 60,
+            reason: 'check back',
+            prompt: 'check back',
+          }),
+        });
+      const rootSteps = [
+        toolCallResult({
+          toolCallId: randomUUID(),
+          toolName: 'CronCreate',
+          input: JSON.stringify({ cron: '0 0 1 1 *', prompt: 'new year' }),
+        }),
+        wakeup(),
+        wakeup(),
+      ];
       const runtime = resources.use(
         await new AgentRuntime(
           defineAgent({
@@ -826,23 +953,19 @@ for (const { name, open } of storages) {
             model: new MockLanguageModelV4({
               doStream: async () => rootSteps.shift() ?? textResult('done'),
             }),
-            sandbox,
-            subagents: [worker(sandbox)],
+            sandbox: defineSandbox(new VirtualSandboxEnvironment()),
+            plugins: [scheduled, conversationScheduling()],
           }),
         ).initialize(
           defineStack(async () => ({
             storage,
-            conversationDataCleanup: async (conversations) => {
-              cleanups.push({
-                conversations: conversations
-                  .map(({ userId, chatId }) => `${userId}/${chatId}`)
-                  .toSorted(),
-                containers: (await namespaceContainers(namespace)).length,
-              });
-              if (cleanups.length === 1) {
-                throw new Error('the volume service is down');
-              }
-            },
+            bindings: [
+              schedulesCapabilities.boss.bind(boss),
+              schedulesCapabilities.transaction.bind(transaction),
+              conversationSchedulingCapabilities.scheduler.bind(wakes),
+              conversationSchedulingCapabilities.timezone.bind('UTC'),
+              conversationSchedulingCapabilities.clock.bind(globalThis),
+            ],
           })),
         ),
       );
@@ -852,563 +975,445 @@ for (const { name, open } of storages) {
         return next();
       });
       app.route(MOUNT, http(runtime));
-      resources.use(await runtime.work({ concurrency: 2 }));
+      resources.use(await runtime.work());
       const sessionId = randomUUID();
-      await startTurn(app, sessionId);
-      const child = await idleChild(app, storage, sessionId, t.signal);
-      const members = [
-        `user-1/${sessionId}`,
-        `user-1/${child.chatId}`,
-      ].toSorted();
-      const containersBefore = (await namespaceContainers(namespace)).length;
+      await completedTurn({ app, runtime }, sessionId, t.signal);
+      const tasks = runtime.plugin(scheduled);
+      const task = (target: ScheduleTarget) =>
+        tasks.create('user-1', {
+          idempotencyKey: randomUUID(),
+          name: target.kind,
+          prompt: 'yearly',
+          recurrence: '0 0 1 1 *',
+          timezone: 'UTC',
+          executionConfig: { target },
+        });
+      const targeting = await task({
+        kind: 'existing-conversation',
+        chatId: sessionId,
+      });
+      const elsewhere = await task({ kind: 'new-conversation' });
+      const before = await wakeStates(boss, wakeQueue);
 
-      const cutShort = (await deleteSession(app, sessionId)).status;
-      const meanwhile = {
-        session: await answer(
-          await app.request(`${MOUNT}/session/${sessionId}`),
-        ),
-        rowsKept: {
-          root: (await storage.store.getChat(sessionId)) !== undefined,
-          child: (await storage.store.getChat(child.chatId)) !== undefined,
-        },
-      };
-      const retried = await answer(await deleteSession(app, sessionId));
+      const response = await answer(await deleteSession(app, sessionId));
 
       assert.deepStrictEqual(
         {
-          containersBefore,
-          cutShort,
-          meanwhile,
-          retried,
+          before,
+          response,
+          wakes: await wakeStates(boss, wakeQueue),
+          tasks: {
+            targeting: (await tasks.get('user-1', targeting.id)).status,
+            elsewhere: (await tasks.get('user-1', elsewhere.id)).status,
+          },
+        },
+        {
+          // The cron, the dynamic wake and the dynamic wake it replaced.
+          before: ['created', 'created', 'created'],
+          response: deleted,
+          // The replaced wake, whose cancel failed, is still armed.
+          wakes: ['cancelled', 'cancelled', 'created'],
+          tasks: { targeting: 'archived', elsewhere: 'active' },
+        },
+      );
+      const handled = await waitFor(
+        async () => {
+          const states = await wakeStates(boss, wakeQueue);
+          assert.ok(!states.includes('created') && !states.includes('active'));
+          return states;
+        },
+        { signal: t.signal, interval: 500 },
+      );
+      assert.deepStrictEqual(
+        { handled, chat: await storage.store.getChat(sessionId) },
+        { handled: ['cancelled', 'cancelled'], chat: undefined },
+      );
+    });
+
+    test(`${name}: DELETE /session/:sessionId of a session with a running turn cancels the turn, so its model is aborted while the turn's stream reads cancelled, and once the turn has settled no chat of the session is left`, async (t) => {
+      await using resources = new AsyncDisposableStack();
+      const { storage } = await open(resources);
+      const turn = Promise.withResolvers<string>();
+      const statusAtAbort = Promise.withResolvers<string | undefined>();
+      const { app, runtime } = await serveAgent(
+        resources,
+        { storage },
+        {
+          name: 'root',
+          model: new MockLanguageModelV4({
+            doStream: ({ abortSignal }) =>
+              new Promise((_resolve, reject) => {
+                abortSignal?.addEventListener(
+                  'abort',
+                  () => {
+                    statusAtAbort.resolve(
+                      turn.promise.then((turnId) =>
+                        storage.streams.store.getStreamStatus(turnId),
+                      ),
+                    );
+                    reject(abortSignal.reason);
+                  },
+                  { once: true },
+                );
+              }),
+          }),
+          sandbox: defineSandbox(new VirtualSandboxEnvironment()),
+        },
+      );
+      // Disposed again by the test once the DELETE answers; a second dispose does nothing.
+      const workers = resources.use(await runtime.work());
+      const sessionId = randomUUID();
+      const root = { chatId: sessionId, userId: 'user-1' };
+      const turnId = await startTurn(app, sessionId);
+      turn.resolve(turnId);
+      await runningTurn(runtime, root, turnId, t.signal);
+
+      const response = await answer(await deleteSession(app, sessionId));
+      const aborted = await untilAborted(statusAtAbort.promise, t.signal);
+      // Disposing the workers waits for every turn they run to settle.
+      await workers[Symbol.asyncDispose]();
+
+      assert.deepStrictEqual(
+        {
+          response,
+          aborted,
+          chat: await storage.store.getChat(root.chatId),
           session: await answer(
             await app.request(`${MOUNT}/session/${sessionId}`),
           ),
-          cleanups,
-          chats: {
-            root: await storage.store.getChat(sessionId),
-            child: await storage.store.getChat(child.chatId),
-          },
         },
         {
-          containersBefore: 2,
-          cutShort: 500,
-          meanwhile: {
-            session: sessionNotFound(sessionId),
-            rowsKept: { root: true, child: true },
-          },
-          retried: deleted,
+          response: deleted,
+          aborted: 'cancelled',
+          chat: undefined,
           session: sessionNotFound(sessionId),
-          cleanups: [
-            { conversations: members, containers: 0 },
-            { conversations: members, containers: 0 },
-          ],
-          chats: { root: undefined, child: undefined },
         },
       );
-    } finally {
-      await removeNamespace(namespace);
-    }
-  });
+    });
 
-  test(`${name}: DELETE /session/:sessionId archives the schedules task that targets the session and keeps the one that does not, cancels the cron and dynamic wakes the agent armed through conversation-scheduling, and a wake of the session left armed comes due after the delete and finishes without a retry`, async (t) => {
-    await using resources = new AsyncDisposableStack();
-    const { storage, boss, transaction } = await open(resources);
-    const scheduled = schedules({
-      queue: `scheduled-${randomUUID()}`,
-      reconciliationIntervalMs: 50,
-    });
-    const wakeQueue = `scheduling-${randomUUID()}`;
-    const wakes = new FirstCancelFails(boss, {
-      queue: wakeQueue,
-      pollingIntervalSeconds: 0.5,
-    });
-    await wakes.initialize();
-    const wakeup = () =>
-      toolCallResult({
-        toolCallId: randomUUID(),
-        toolName: 'ScheduleWakeup',
-        input: JSON.stringify({
-          delaySeconds: 60,
-          reason: 'check back',
-          prompt: 'check back',
-        }),
-      });
-    const rootSteps = [
-      toolCallResult({
-        toolCallId: randomUUID(),
-        toolName: 'CronCreate',
-        input: JSON.stringify({ cron: '0 0 1 1 *', prompt: 'new year' }),
-      }),
-      wakeup(),
-      wakeup(),
-    ];
-    const runtime = resources.use(
-      await new AgentRuntime(
-        defineAgent({
+    test(`${name}: DELETE /session/:sessionId waits at most 10 s for a running turn that ignores its abort, then deletes the session, and when that turn fails afterwards, settling it as an orphan leaves no chat of the session behind`, async (t) => {
+      await using resources = new AsyncDisposableStack();
+      const { storage, boss } = await open(resources);
+      const stall = stallingDiscovery();
+      const { app, runtime } = await serveAgent(
+        resources,
+        { storage },
+        {
           name: 'root',
-          instructions: [],
           model: new MockLanguageModelV4({
-            doStream: async () => rootSteps.shift() ?? textResult('done'),
+            doStream: async () => textResult('never reached'),
           }),
-          sandbox: defineSandbox(new VirtualSandboxEnvironment()),
-          plugins: [scheduled, conversationScheduling()],
-        }),
-      ).initialize(
-        defineStack(async () => ({
-          storage,
-          bindings: [
-            schedulesCapabilities.boss.bind(boss),
-            schedulesCapabilities.transaction.bind(transaction),
-            conversationSchedulingCapabilities.scheduler.bind(wakes),
-            conversationSchedulingCapabilities.timezone.bind('UTC'),
-            conversationSchedulingCapabilities.clock.bind(globalThis),
-          ],
-        })),
-      ),
-    );
-    const app = new Hono<HttpEnv>();
-    app.use(`${MOUNT}/*`, (context, next) => {
-      context.set('userId', 'user-1');
-      return next();
-    });
-    app.route(MOUNT, http(runtime));
-    resources.use(await runtime.work());
-    const sessionId = randomUUID();
-    await completedTurn({ app, runtime }, sessionId, t.signal);
-    const tasks = runtime.plugin(scheduled);
-    const task = (target: ScheduleTarget) =>
-      tasks.create('user-1', {
-        idempotencyKey: randomUUID(),
-        name: target.kind,
-        prompt: 'yearly',
-        recurrence: '0 0 1 1 *',
-        timezone: 'UTC',
-        executionConfig: { target },
-      });
-    const targeting = await task({
-      kind: 'existing-conversation',
-      chatId: sessionId,
-    });
-    const elsewhere = await task({ kind: 'new-conversation' });
-    const before = await wakeStates(boss, wakeQueue);
-
-    const response = await answer(await deleteSession(app, sessionId));
-
-    assert.deepStrictEqual(
-      {
-        before,
-        response,
-        wakes: await wakeStates(boss, wakeQueue),
-        tasks: {
-          targeting: (await tasks.get('user-1', targeting.id)).status,
-          elsewhere: (await tasks.get('user-1', elsewhere.id)).status,
+          sandbox: defineSandbox(stall.environment),
         },
-      },
-      {
-        // The cron, the dynamic wake and the dynamic wake it replaced.
-        before: ['created', 'created', 'created'],
-        response: deleted,
-        // The replaced wake, whose cancel failed, is still armed.
-        wakes: ['cancelled', 'cancelled', 'created'],
-        tasks: { targeting: 'archived', elsewhere: 'active' },
-      },
-    );
-    const handled = await waitFor(
-      async () => {
-        const states = await wakeStates(boss, wakeQueue);
-        assert.ok(!states.includes('created') && !states.includes('active'));
-        return states;
-      },
-      { signal: t.signal, interval: 500 },
-    );
-    assert.deepStrictEqual(
-      { handled, chat: await storage.store.getChat(sessionId) },
-      { handled: ['cancelled', 'cancelled'], chat: undefined },
-    );
-  });
+      );
+      resources.use(await runtime.work());
+      const sessionId = randomUUID();
+      const root = { chatId: sessionId, userId: 'user-1' };
+      await startTurn(app, sessionId);
+      await untilAborted(stall.entered, t.signal);
 
-  test(`${name}: DELETE /session/:sessionId of a session with a running turn cancels the turn, so its model is aborted while the turn's stream reads cancelled, and once the turn has settled no chat of the session is left`, async (t) => {
-    await using resources = new AsyncDisposableStack();
-    const { storage } = await open(resources);
-    const turn = Promise.withResolvers<string>();
-    const statusAtAbort = Promise.withResolvers<string | undefined>();
-    const { app, runtime } = await serveAgent(
-      resources,
-      { storage },
-      {
-        name: 'root',
-        model: new MockLanguageModelV4({
-          doStream: ({ abortSignal }) =>
-            new Promise((_resolve, reject) => {
-              abortSignal?.addEventListener(
-                'abort',
-                () => {
-                  statusAtAbort.resolve(
-                    turn.promise.then((turnId) =>
-                      storage.streams.store.getStreamStatus(turnId),
-                    ),
-                  );
-                  reject(abortSignal.reason);
-                },
-                { once: true },
-              );
-            }),
-        }),
-        sandbox: defineSandbox(new VirtualSandboxEnvironment()),
-      },
-    );
-    // Disposed again by the test once the DELETE answers; a second dispose does nothing.
-    const workers = resources.use(await runtime.work());
-    const sessionId = randomUUID();
-    const root = { chatId: sessionId, userId: 'user-1' };
-    const turnId = await startTurn(app, sessionId);
-    turn.resolve(turnId);
-    await runningTurn(runtime, root, turnId, t.signal);
+      const started = performance.now();
+      const response = await answer(await deleteSession(app, sessionId));
+      const elapsed = performance.now() - started;
+      stall.fail();
+      const settled = await settledOrphans(boss, sessionId, t.signal);
 
-    const response = await answer(await deleteSession(app, sessionId));
-    const aborted = await untilAborted(statusAtAbort.promise, t.signal);
-    // Disposing the workers waits for every turn they run to settle.
-    await workers[Symbol.asyncDispose]();
+      assert.deepStrictEqual(
+        {
+          response,
+          waited: elapsed >= SHUTDOWN_TIMEOUT_MS,
+          bounded: elapsed < SHUTDOWN_TIMEOUT_MS + SHUTDOWN_MARGIN_MS,
+          settled,
+          chat: await storage.store.getChat(root.chatId),
+          history: historySchema
+            .parse(await (await app.request(`${MOUNT}/history`)).json())
+            .map(({ chatId }) => chatId),
+          session: await answer(
+            await app.request(`${MOUNT}/session/${sessionId}`),
+          ),
+        },
+        {
+          response: deleted,
+          waited: true,
+          bounded: true,
+          settled: ['completed'],
+          chat: undefined,
+          history: [],
+          session: sessionNotFound(sessionId),
+        },
+      );
+    });
 
-    assert.deepStrictEqual(
-      {
-        response,
-        aborted,
-        chat: await storage.store.getChat(root.chatId),
-        session: await answer(
-          await app.request(`${MOUNT}/session/${sessionId}`),
-        ),
-      },
-      {
-        response: deleted,
-        aborted: 'cancelled',
-        chat: undefined,
-        session: sessionNotFound(sessionId),
-      },
-    );
-  });
+    test(`${name}: a running turn that fails while its session's DELETE waits for it leaves no job of the session in the turn queue once the DELETE answers`, async (t) => {
+      await using resources = new AsyncDisposableStack();
+      const { storage, boss } = await open(resources);
+      const turn = Promise.withResolvers<string>();
+      // The turn's sandbox fails it once the DELETE has cancelled its stream.
+      const stall = stallingDiscovery(async () => {
+        const turnId = await turn.promise;
+        await waitFor(
+          async () =>
+            assert.equal(
+              await storage.streams.store.getStreamStatus(turnId),
+              'cancelled',
+            ),
+          { signal: t.signal },
+        );
+      });
+      const { app, runtime } = await serveAgent(
+        resources,
+        { storage },
+        {
+          name: 'root',
+          model: new MockLanguageModelV4({
+            doStream: async () => textResult('never reached'),
+          }),
+          sandbox: defineSandbox(stall.environment),
+        },
+      );
+      resources.use(await runtime.work());
+      const sessionId = randomUUID();
+      turn.resolve(await startTurn(app, sessionId));
+      await untilAborted(stall.entered, t.signal);
 
-  test(`${name}: DELETE /session/:sessionId waits at most 10 s for a running turn that ignores its abort, then deletes the session, and when that turn fails afterwards, settling it as an orphan leaves no chat of the session behind`, async (t) => {
-    await using resources = new AsyncDisposableStack();
-    const { storage, boss } = await open(resources);
-    const stall = stallingDiscovery();
-    const { app, runtime } = await serveAgent(
-      resources,
-      { storage },
-      {
-        name: 'root',
-        model: new MockLanguageModelV4({
-          doStream: async () => textResult('never reached'),
-        }),
-        sandbox: defineSandbox(stall.environment),
-      },
-    );
-    resources.use(await runtime.work());
-    const sessionId = randomUUID();
-    const root = { chatId: sessionId, userId: 'user-1' };
-    await startTurn(app, sessionId);
-    await untilAborted(stall.entered, t.signal);
+      const response = await answer(await deleteSession(app, sessionId));
+      const turns = await boss.findJobs('zukhruf-turns', { key: sessionId });
+      await settledOrphans(boss, sessionId, t.signal, { orphanOptional: true });
 
-    const started = performance.now();
-    const response = await answer(await deleteSession(app, sessionId));
-    const elapsed = performance.now() - started;
-    stall.fail();
-    const settled = await settledOrphans(boss, sessionId, t.signal);
+      assert.deepStrictEqual(
+        { response, turns: turns.map(({ state }) => state) },
+        { response: deleted, turns: [] },
+      );
+    });
 
-    assert.deepStrictEqual(
-      {
-        response,
-        waited: elapsed >= SHUTDOWN_TIMEOUT_MS,
-        bounded: elapsed < SHUTDOWN_TIMEOUT_MS + SHUTDOWN_MARGIN_MS,
-        settled,
-        chat: await storage.store.getChat(root.chatId),
-        history: historySchema
-          .parse(await (await app.request(`${MOUNT}/history`)).json())
-          .map(({ chatId }) => chatId),
-        session: await answer(
-          await app.request(`${MOUNT}/session/${sessionId}`),
-        ),
-      },
-      {
-        response: deleted,
-        waited: true,
-        bounded: true,
-        settled: ['completed'],
-        chat: undefined,
-        history: [],
-        session: sessionNotFound(sessionId),
-      },
-    );
-  });
-
-  test(`${name}: a running turn that fails while its session's DELETE waits for it leaves no job of the session in the turn queue once the DELETE answers`, async (t) => {
-    await using resources = new AsyncDisposableStack();
-    const { storage, boss } = await open(resources);
-    const turn = Promise.withResolvers<string>();
-    // The turn's sandbox fails it once the DELETE has cancelled its stream.
-    const stall = stallingDiscovery(async () => {
-      const turnId = await turn.promise;
+    test(`${name}: DELETE /session/:sessionId of a session waiting on a tool approval, with a follow-up turn parked behind it, removes the parked turn's job, so resuming the session's parked turns revives nothing and neither turn runs`, async (t) => {
+      await using resources = new AsyncDisposableStack();
+      const { storage, boss } = await open(resources);
+      let modelCalls = 0;
+      const { app, runtime } = await serveAgent(
+        resources,
+        { storage },
+        {
+          name: 'root',
+          model: new MockLanguageModelV4({
+            doStream: async () => {
+              modelCalls += 1;
+              return toolCallResult({
+                toolCallId: randomUUID(),
+                toolName: 'bash',
+                input: JSON.stringify({
+                  command: 'echo approved',
+                  reasoning: 'a command the user approves',
+                }),
+              });
+            },
+          }),
+          toolApproval: { bash: 'user-approval' },
+          sandbox: defineSandbox(new VirtualSandboxEnvironment()),
+        },
+      );
+      resources.use(await runtime.work());
+      const sessionId = randomUUID();
+      const root = { chatId: sessionId, userId: 'user-1' };
+      await startTurn(app, sessionId);
       await waitFor(
         async () =>
-          assert.equal(
-            await storage.streams.store.getStreamStatus(turnId),
-            'cancelled',
+          assert.deepStrictEqual(
+            await runtime.observe(root).conversationStatus(),
+            { type: 'active', activeFlags: ['waitingOnApproval'] },
           ),
         { signal: t.signal },
       );
-    });
-    const { app, runtime } = await serveAgent(
-      resources,
-      { storage },
-      {
-        name: 'root',
-        model: new MockLanguageModelV4({
-          doStream: async () => textResult('never reached'),
-        }),
-        sandbox: defineSandbox(stall.environment),
-      },
-    );
-    resources.use(await runtime.work());
-    const sessionId = randomUUID();
-    turn.resolve(await startTurn(app, sessionId));
-    await untilAborted(stall.entered, t.signal);
-
-    const response = await answer(await deleteSession(app, sessionId));
-    const turns = await boss.findJobs('zukhruf-turns', { key: sessionId });
-    await settledOrphans(boss, sessionId, t.signal, { orphanOptional: true });
-
-    assert.deepStrictEqual(
-      { response, turns: turns.map(({ state }) => state) },
-      { response: deleted, turns: [] },
-    );
-  });
-
-  test(`${name}: DELETE /session/:sessionId of a session waiting on a tool approval, with a follow-up turn parked behind it, removes the parked turn's job, so resuming the session's parked turns revives nothing and neither turn runs`, async (t) => {
-    await using resources = new AsyncDisposableStack();
-    const { storage, boss } = await open(resources);
-    let modelCalls = 0;
-    const { app, runtime } = await serveAgent(
-      resources,
-      { storage },
-      {
-        name: 'root',
-        model: new MockLanguageModelV4({
-          doStream: async () => {
-            modelCalls += 1;
-            return toolCallResult({
-              toolCallId: randomUUID(),
-              toolName: 'bash',
-              input: JSON.stringify({
-                command: 'echo approved',
-                reasoning: 'a command the user approves',
-              }),
-            });
-          },
-        }),
-        toolApproval: { bash: 'user-approval' },
-        sandbox: defineSandbox(new VirtualSandboxEnvironment()),
-      },
-    );
-    resources.use(await runtime.work());
-    const sessionId = randomUUID();
-    const root = { chatId: sessionId, userId: 'user-1' };
-    await startTurn(app, sessionId);
-    await waitFor(
-      async () =>
-        assert.deepStrictEqual(
-          await runtime.observe(root).conversationStatus(),
-          { type: 'active', activeFlags: ['waitingOnApproval'] },
-        ),
-      { signal: t.signal },
-    );
-    await startTurn(app, sessionId);
-    const parked = await waitFor(
-      async () => {
-        const states = (
-          await boss.findJobs('zukhruf-turns', { key: sessionId })
-        ).map(({ state }) => state);
-        assert.deepStrictEqual(states, ['cancelled']);
-        return states;
-      },
-      { signal: t.signal },
-    );
-
-    const response = await answer(await deleteSession(app, sessionId));
-    await storage.queue.resumeParked(sessionId);
-
-    assert.deepStrictEqual(
-      {
-        parked,
-        response,
-        turns: await boss.findJobs('zukhruf-turns', { key: sessionId }),
-        modelCalls,
-        chat: await storage.store.getChat(root.chatId),
-      },
-      {
-        parked: ['cancelled'],
-        response: deleted,
-        turns: [],
-        modelCalls: 1,
-        chat: undefined,
-      },
-    );
-  });
-
-  test(`${name}: once DELETE /session/:sessionId has deleted a session, neither its id nor its sub-agent's comes back: a POST /session/:sessionId answers 404 on the deleting runtime and on a second runtime of the same storage, and enqueue, createSession and mail for either chat reject with ConversationNotFoundError, leaving no chat and no history item, while a new session id still starts`, async (t) => {
-    await using resources = new AsyncDisposableStack();
-    const { storage } = await open(resources);
-    const sandbox = defineSandbox(new VirtualSandboxEnvironment());
-    const agent = () => {
-      const rootSteps = [spawnWorker()];
-      return {
-        name: 'root',
-        model: new MockLanguageModelV4({
-          doStream: async () => rootSteps.shift() ?? textResult('done'),
-        }),
-        sandbox,
-        subagents: [worker(sandbox)],
-      };
-    };
-    const first = await serveAgent(resources, { storage }, agent());
-    const second = await serveAgent(resources, { storage }, agent());
-    resources.use(await first.runtime.work({ concurrency: 2 }));
-    resources.use(await second.runtime.work({ concurrency: 2 }));
-    const sessionId = randomUUID();
-    const root = { chatId: sessionId, userId: 'user-1' };
-    await startTurn(first.app, sessionId);
-    const child = await idleChild(first.app, storage, sessionId, t.signal);
-    const refusal = async (operation: Promise<unknown>) =>
-      operation.then(
-        () => 'admitted',
-        (error: unknown) => (Error.isError(error) ? error.name : 'rejected'),
+      await startTurn(app, sessionId);
+      const parked = await waitFor(
+        async () => {
+          const states = (
+            await boss.findJobs('zukhruf-turns', { key: sessionId })
+          ).map(({ state }) => state);
+          assert.deepStrictEqual(states, ['cancelled']);
+          return states;
+        },
+        { signal: t.signal },
       );
-    const turn = () => ({
-      message: {
-        id: randomUUID(),
-        role: 'user' as const,
-        parts: [{ type: 'text' as const, text: 'again' }],
-      },
-      trigger: 'submit-message' as const,
+
+      const response = await answer(await deleteSession(app, sessionId));
+      await storage.queue.resumeParked(sessionId);
+
+      assert.deepStrictEqual(
+        {
+          parked,
+          response,
+          turns: await boss.findJobs('zukhruf-turns', { key: sessionId }),
+          modelCalls,
+          chat: await storage.store.getChat(root.chatId),
+        },
+        {
+          parked: ['cancelled'],
+          response: deleted,
+          turns: [],
+          modelCalls: 1,
+          chat: undefined,
+        },
+      );
     });
 
-    const historyOf = async (app: Hono<HttpEnv>) =>
-      historySchema
-        .parse(await (await app.request(`${MOUNT}/history`)).json())
-        .map(({ chatId }) => chatId);
-    const historyBefore = await historyOf(second.app);
-    const freshId = randomUUID();
-
-    const response = await answer(await deleteSession(first.app, sessionId));
-    const after = {
-      freshPost: (await postTurn(second.app, freshId)).status,
-      deletingRuntimePost: await answer(await postTurn(first.app, sessionId)),
-      secondRuntimePost: await answer(await postTurn(second.app, sessionId)),
-      rootTurn: await refusal(second.runtime.enqueue(root, turn())),
-      childTurn: await refusal(second.runtime.enqueue(child, turn())),
-      childSession: await refusal(second.runtime.createSession(child)),
-      childMail: await refusal(
-        second.runtime.deliver(
-          createInterAgentCommunication({
-            author: root,
-            recipient: child,
-            content: 'run again',
-          }),
-          MessageDeliveryModes.TriggerTurn,
-        ),
-      ),
-    };
-
-    assert.deepStrictEqual(
-      {
-        response,
-        after,
-        chats: {
-          root: await storage.store.getChat(root.chatId),
-          child: await storage.store.getChat(child.chatId),
-        },
-        historyBefore,
-        history: await historyOf(second.app),
-      },
-      {
-        response: deleted,
-        after: {
-          freshPost: 202,
-          deletingRuntimePost: sessionNotFound(sessionId),
-          secondRuntimePost: sessionNotFound(sessionId),
-          rootTurn: 'ConversationNotFoundError',
-          childTurn: 'ConversationNotFoundError',
-          childSession: 'ConversationNotFoundError',
-          childMail: 'ConversationNotFoundError',
-        },
-        chats: { root: undefined, child: undefined },
-        historyBefore: [sessionId],
-        history: [freshId],
-      },
-    );
-  });
-
-  test(`${name}: once DELETE /session/:sessionId has deleted a session, an upload to it and a read of a file uploaded before the delete answer 404 on the deleting runtime, which holds no sandbox handle, and on a second runtime of the same storage, and no container is opened for the session, while a new session id still takes an upload`, async (t) => {
-    const namespace = `tombstone-${randomUUID()}`;
-    try {
+    test(`${name}: once DELETE /session/:sessionId has deleted a session, neither its id nor its sub-agent's comes back: a POST /session/:sessionId answers 404 on the deleting runtime and on a second runtime of the same storage, and enqueue, createSession and mail for either chat reject with ConversationNotFoundError, leaving no chat and no history item, while a new session id still starts`, async (t) => {
       await using resources = new AsyncDisposableStack();
       const { storage } = await open(resources);
-      const host = () =>
-        uploadsAgent(
-          resources,
-          storage,
-          defineSandbox(
-            new DockerSandboxEnvironment({ namespace, container: defaults }),
-            { idleTimeoutMs: false },
-          ),
-        );
-      const a = await host();
-      const b = await host();
-      resources.use(await a.runtime.work());
+      const sandbox = defineSandbox(new VirtualSandboxEnvironment());
+      const agent = () => {
+        const rootSteps = [spawnWorker()];
+        return {
+          name: 'root',
+          model: new MockLanguageModelV4({
+            doStream: async () => rootSteps.shift() ?? textResult('done'),
+          }),
+          sandbox,
+          subagents: [worker(sandbox)],
+        };
+      };
+      const first = await serveAgent(resources, { storage }, agent());
+      const second = await serveAgent(resources, { storage }, agent());
+      resources.use(await first.runtime.work({ concurrency: 2 }));
+      resources.use(await second.runtime.work({ concurrency: 2 }));
       const sessionId = randomUUID();
-      await completedTurn(a, sessionId, t.signal);
-      const uploaded = await upload(a.app, sessionId);
-      const held = uploaded.status;
-      const { url } = receiptSchema.parse(await uploaded.json());
-      const before = (await namespaceContainers(namespace, sessionId)).length;
+      const root = { chatId: sessionId, userId: 'user-1' };
+      await startTurn(first.app, sessionId);
+      const child = await idleChild(first.app, storage, sessionId, t.signal);
+      const refusal = async (operation: Promise<unknown>) =>
+        operation.then(
+          () => 'admitted',
+          (error: unknown) => (Error.isError(error) ? error.name : 'rejected'),
+        );
+      const turn = () => ({
+        message: {
+          id: randomUUID(),
+          role: 'user' as const,
+          parts: [{ type: 'text' as const, text: 'again' }],
+        },
+        trigger: 'submit-message' as const,
+      });
 
-      const response = await answer(await deleteSession(a.app, sessionId));
+      const historyOf = async (app: Hono<HttpEnv>) =>
+        historySchema
+          .parse(await (await app.request(`${MOUNT}/history`)).json())
+          .map(({ chatId }) => chatId);
+      const historyBefore = await historyOf(second.app);
+      const freshId = randomUUID();
+
+      const response = await answer(await deleteSession(first.app, sessionId));
       const after = {
-        deletingRuntimeUpload: await answer(await upload(a.app, sessionId)),
-        deletingRuntimeRead: await answer(await a.app.request(url)),
-        secondRuntimeUpload: await answer(await upload(b.app, sessionId)),
-        secondRuntimeRead: await answer(await b.app.request(url)),
-        freshUpload: (await upload(b.app, randomUUID())).status,
+        freshPost: (await postTurn(second.app, freshId)).status,
+        deletingRuntimePost: await answer(await postTurn(first.app, sessionId)),
+        secondRuntimePost: await answer(await postTurn(second.app, sessionId)),
+        rootTurn: await refusal(second.runtime.enqueue(root, turn())),
+        childTurn: await refusal(second.runtime.enqueue(child, turn())),
+        childSession: await refusal(second.runtime.createSession(child)),
+        childMail: await refusal(
+          second.runtime.deliver(
+            createInterAgentCommunication({
+              author: root,
+              recipient: child,
+              content: 'run again',
+            }),
+            MessageDeliveryModes.TriggerTurn,
+          ),
+        ),
       };
 
       assert.deepStrictEqual(
         {
-          held,
-          before,
           response,
           after,
-          containers: (await namespaceContainers(namespace, sessionId)).length,
-          chat: await storage.store.getChat(sessionId),
+          chats: {
+            root: await storage.store.getChat(root.chatId),
+            child: await storage.store.getChat(child.chatId),
+          },
+          historyBefore,
+          history: await historyOf(second.app),
         },
         {
-          held: 201,
-          before: 1,
           response: deleted,
           after: {
-            deletingRuntimeUpload: sessionNotFound(sessionId),
-            deletingRuntimeRead: sessionNotFound(sessionId),
-            secondRuntimeUpload: sessionNotFound(sessionId),
-            secondRuntimeRead: sessionNotFound(sessionId),
-            freshUpload: 201,
+            freshPost: 202,
+            deletingRuntimePost: sessionNotFound(sessionId),
+            secondRuntimePost: sessionNotFound(sessionId),
+            rootTurn: 'ConversationNotFoundError',
+            childTurn: 'ConversationNotFoundError',
+            childSession: 'ConversationNotFoundError',
+            childMail: 'ConversationNotFoundError',
           },
-          containers: 0,
-          chat: undefined,
+          chats: { root: undefined, child: undefined },
+          historyBefore: [sessionId],
+          history: [freshId],
         },
       );
-    } finally {
-      await removeNamespace(namespace);
-    }
-  });
-}
+    });
+
+    test(`${name}: once DELETE /session/:sessionId has deleted a session, an upload to it and a read of a file uploaded before the delete answer 404 on the deleting runtime, which holds no sandbox handle, and on a second runtime of the same storage, and no container is opened for the session, while a new session id still takes an upload`, async (t) => {
+      const namespace = `tombstone-${randomUUID()}`;
+      try {
+        await using resources = new AsyncDisposableStack();
+        const { storage } = await open(resources);
+        const host = () =>
+          uploadsAgent(
+            resources,
+            storage,
+            defineSandbox(
+              new DockerSandboxEnvironment({ namespace, container: defaults }),
+              { idleTimeoutMs: false },
+            ),
+          );
+        const a = await host();
+        const b = await host();
+        resources.use(await a.runtime.work());
+        const sessionId = randomUUID();
+        await completedTurn(a, sessionId, t.signal);
+        const uploaded = await upload(a.app, sessionId);
+        const held = uploaded.status;
+        const { url } = receiptSchema.parse(await uploaded.json());
+        const before = (await namespaceContainers(namespace, sessionId)).length;
+
+        const response = await answer(await deleteSession(a.app, sessionId));
+        const after = {
+          deletingRuntimeUpload: await answer(await upload(a.app, sessionId)),
+          deletingRuntimeRead: await answer(await a.app.request(url)),
+          secondRuntimeUpload: await answer(await upload(b.app, sessionId)),
+          secondRuntimeRead: await answer(await b.app.request(url)),
+          freshUpload: (await upload(b.app, randomUUID())).status,
+        };
+
+        assert.deepStrictEqual(
+          {
+            held,
+            before,
+            response,
+            after,
+            containers: (await namespaceContainers(namespace, sessionId))
+              .length,
+            chat: await storage.store.getChat(sessionId),
+          },
+          {
+            held: 201,
+            before: 1,
+            response: deleted,
+            after: {
+              deletingRuntimeUpload: sessionNotFound(sessionId),
+              deletingRuntimeRead: sessionNotFound(sessionId),
+              secondRuntimeUpload: sessionNotFound(sessionId),
+              secondRuntimeRead: sessionNotFound(sessionId),
+              freshUpload: 201,
+            },
+            containers: 0,
+            chat: undefined,
+          },
+        );
+      } finally {
+        await removeNamespace(namespace);
+      }
+    });
+  }),
+);
 
 const UPLOADS = '/workspace/uploads';
 const PNG_PIXEL = Uint8Array.fromBase64(

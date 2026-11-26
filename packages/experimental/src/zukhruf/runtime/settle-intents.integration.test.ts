@@ -2,11 +2,12 @@ import type { LanguageModelV4Prompt } from '@ai-sdk/provider';
 import { createClock } from '@sinonjs/fake-timers';
 import { Latch } from '@zukhruf/async';
 import { TemporaryFiles } from '@zukhruf/fs';
+import { suite, test } from '@zukhruf/parameterized-test';
 import { waitFor } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
-import { type TestContext, suite, test } from 'node:test';
+import type { TestContext } from 'node:test';
 import { PgBoss } from 'pg-boss';
 
 import {
@@ -323,304 +324,327 @@ class FailFirstSettleWriteStorage extends AgentStorage {
   }
 }
 
-for (const { name, open } of storages) {
-  suite(`settle follow-ups run from durable intents (${name})`, () => {
-    test("a turn's follow-up that its worker never finished runs on another runtime on the same storage: the cron occurrence that fell due while the turn ran dispatches there", async (t) => {
-      await using resources = new AsyncDisposableStack();
-      const { storage, boss } = await open(resources);
-      const clock = createClock(Date.now());
-      const plugin = conversationScheduling();
-      const conversation = { chatId: 'crash-window', userId: 'u1' };
-      const seen: string[] = [];
-      const root = plainAgent([plugin], cronModel(seen, clock));
-      // This worker can finish no follow-up of the turn, as one dying would not.
-      const dying = await schedulingHost(
-        root,
-        plugin,
-        storage,
-        new FailingScheduler(
-          await schedulingQueue(boss),
-          Number.POSITIVE_INFINITY,
-        ),
-        clock,
-      );
-      await dying.work();
-      await Array.fromAsync(
-        (await dying.enqueue(conversation, userTurn('t-1', 'create cron')))
-          .stream,
-      );
-      await dying[Symbol.asyncDispose]();
-
-      await using next = await schedulingHost(
-        root,
-        plugin,
-        storage,
-        await schedulingQueue(boss),
-        clock,
-      );
-      await next.work();
-
-      await waitFor(() => assert.ok(seen.includes('scheduled prompt')), {
-        signal: t.signal,
-      });
-      assert.deepStrictEqual(seen, ['create cron', 'scheduled prompt']);
-    });
-
-    test('an availability follow-up that fails once with an ordinary error is retried, and the cron occurrence that fell due while the turn ran dispatches', async (t) => {
-      await using resources = new AsyncDisposableStack();
-      const { storage, boss } = await open(resources);
-      const clock = createClock(Date.now());
-      const plugin = conversationScheduling();
-      const conversation = { chatId: 'retried', userId: 'u1' };
-      const seen: string[] = [];
-      const scheduler = new FailingScheduler(await schedulingQueue(boss), 1);
-      await using host = await schedulingHost(
-        plainAgent([plugin], cronModel(seen, clock)),
-        plugin,
-        storage,
-        scheduler,
-        clock,
-      );
-      await host.work();
-
-      await Array.fromAsync(
-        (await host.enqueue(conversation, userTurn('t-1', 'create cron')))
-          .stream,
-      );
-
-      await waitFor(() => assert.ok(seen.includes('scheduled prompt')), {
-        signal: t.signal,
-      });
-      assert.deepStrictEqual(
-        { seen, failing: scheduler.failing },
-        { seen: ['create cron', 'scheduled prompt'], failing: 0 },
-      );
-    });
-
-    test("a follow-up intent of a turn a later turn superseded is done without running: the later turn's own intent runs it", async (t) => {
-      await using resources = new AsyncDisposableStack();
-      const { storage, boss } = await open(resources);
-      const laterEnded = new Latch();
-      // The first attempt fails only once the later turn has run, so its retry
-      // comes after that turn became the chat's latest.
-      const plugin = availability('superseded', async (call) => {
-        if (call !== 1) return;
-        await laterEnded.wait();
-        throw new Error('first availability attempt fails');
-      });
-      const release = new Latch();
-      await using host = await new AgentRuntime(
-        plainAgent([plugin], answering(release.wait())),
-      ).initialize(defineStack(async () => ({ storage })));
-      await host.work();
-      const conversation = { chatId: 'superseded', userId: 'u1' };
-
-      const earlier = await host.enqueue(conversation, userTurn('t-1', 'held'));
-      const later = await host.enqueue(conversation, userTurn('t-2', 'later'));
-      release.open();
-      await Array.fromAsync(earlier.stream);
-      await Array.fromAsync(later.stream);
-      laterEnded.open();
-      await waitFor(() => assert.ok(plugin.calls >= 2), { signal: t.signal });
-      await settled(boss, settleQueue(plugin.name), t);
-
-      // One failed attempt, and one run for the later turn: the earlier
-      // turn's intent, retried after the later turn started, did not run.
-      assert.equal(plugin.calls, 2);
-    });
-
-    test("a deleted chat's follow-up intent is done without running", async (t) => {
-      await using resources = new AsyncDisposableStack();
-      const { storage, boss } = await open(resources);
-      const plugin = availability('deleted', async (call) => {
-        if (call === 1) throw new Error('first availability attempt fails');
-      });
-      await using host = await new AgentRuntime(
-        plainAgent([plugin]),
-      ).initialize(defineStack(async () => ({ storage })));
-      await host.work();
-      const conversation = { chatId: 'deleted', userId: 'u1' };
-
-      await Array.fromAsync(
-        (await host.enqueue(conversation, userTurn('t-1', 'hello'))).stream,
-      );
-      await waitFor(() => assert.equal(plugin.calls, 1), { signal: t.signal });
-      await host.deleteSession(conversation);
-      await settled(boss, settleQueue(plugin.name), t);
-
-      assert.equal(plugin.calls, 1);
-    });
-
-    test('a follow-up that throws a NonRetryableError is reported once as a process warning and not retried', async (t) => {
-      class CorruptStateError extends NonRetryableError {
-        override readonly name = 'CorruptStateError';
-      }
-      await using resources = new AsyncDisposableStack();
-      const { storage, boss } = await open(resources);
-      const plugin = availability('non-retryable', async () => {
-        throw new CorruptStateError('state of "non-retryable-chat" is corrupt');
-      });
-      await using host = await new AgentRuntime(
-        plainAgent([plugin]),
-      ).initialize(defineStack(async () => ({ storage })));
-      const conversation = { chatId: 'non-retryable-chat', userId: 'u1' };
-
-      const warnings = await recordingWarnings(
-        '"non-retryable-chat" is corrupt',
-        async (warnings) => {
-          await host.work();
-          await Array.fromAsync(
-            (await host.enqueue(conversation, userTurn('t-1', 'hello'))).stream,
-          );
-          await waitFor(() => assert.equal(plugin.calls, 1), {
-            signal: t.signal,
-          });
-          await settled(boss, settleQueue(plugin.name), t);
-          return warnings;
-        },
-      );
-
-      assert.deepStrictEqual(
-        { calls: plugin.calls, warnings },
-        {
-          calls: 1,
-          warnings: [
-            'Settle follow-up "non-retryable" failed and will not be retried: state of "non-retryable-chat" is corrupt',
-          ],
-        },
-      );
-    });
-
-    test('a turn whose settle intent write fails is completed again by its orphan reconciliation, which records the intent, and the follow-up runs', async (t) => {
-      await using resources = new AsyncDisposableStack();
-      const storage = new FailFirstSettleWriteStorage(
-        (await open(resources)).storage,
-      );
-      const plugin = availability('write-failure', async () => {});
-      await using host = await new AgentRuntime(
-        plainAgent([plugin]),
-      ).initialize(defineStack(async () => ({ storage })));
-      await host.work();
-      const conversation = { chatId: 'write-failure', userId: 'u1' };
-
-      const turn = await host.enqueue(conversation, userTurn('t-1', 'hello'));
-      await Array.fromAsync(turn.stream);
-
-      await waitFor(() => assert.equal(plugin.calls, 1), { signal: t.signal });
-      assert.deepStrictEqual(
-        {
-          failedWrites: storage.failedWrites,
-          status: (await host.observe(conversation).status(turn.id))?.status,
-        },
-        { failedWrites: 1, status: 'completed' },
-      );
-    });
-
-    test('cancelling a queued turn resolves though its availability follow-up fails, and the follow-up is retried', async (t) => {
-      await using resources = new AsyncDisposableStack();
-      const { storage } = await open(resources);
-      const plugin = availability('cancel', async (call) => {
-        if (call === 1) throw new Error('first availability attempt fails');
-      });
-      const release = new Latch();
-      await using host = await new AgentRuntime(
-        plainAgent([plugin], answering(release.wait())),
-      ).initialize(defineStack(async () => ({ storage })));
-      await host.work();
-      const conversation = { chatId: 'cancelled', userId: 'u1' };
-      const running = await host.enqueue(conversation, userTurn('t-1', 'held'));
-      const queued = await host.enqueue(conversation, userTurn('t-2', 'later'));
-      await waitFor(
-        async () =>
-          assert.equal(
-            (await host.observe(conversation).status(running.id))?.status,
-            'running',
+void suite.each(storages, ({ name, open }) =>
+  suite(name, () => {
+    suite(`settle follow-ups run from durable intents (${name})`, () => {
+      test("a turn's follow-up that its worker never finished runs on another runtime on the same storage: the cron occurrence that fell due while the turn ran dispatches there", async (t) => {
+        await using resources = new AsyncDisposableStack();
+        const { storage, boss } = await open(resources);
+        const clock = createClock(Date.now());
+        const plugin = conversationScheduling();
+        const conversation = { chatId: 'crash-window', userId: 'u1' };
+        const seen: string[] = [];
+        const root = plainAgent([plugin], cronModel(seen, clock));
+        // This worker can finish no follow-up of the turn, as one dying would not.
+        const dying = await schedulingHost(
+          root,
+          plugin,
+          storage,
+          new FailingScheduler(
+            await schedulingQueue(boss),
+            Number.POSITIVE_INFINITY,
           ),
-        { signal: t.signal },
-      );
+          clock,
+        );
+        await dying.work();
+        await Array.fromAsync(
+          (await dying.enqueue(conversation, userTurn('t-1', 'create cron')))
+            .stream,
+        );
+        await dying[Symbol.asyncDispose]();
 
-      await host.observe(conversation).cancel(queued.id);
-      // The running turn holds its chat, so only the cancel's intent runs:
-      // its first attempt fails, and its retry succeeds.
-      await waitFor(() => assert.equal(plugin.calls, 2), { signal: t.signal });
-      release.open();
-      await Array.fromAsync(running.stream);
+        await using next = await schedulingHost(
+          root,
+          plugin,
+          storage,
+          await schedulingQueue(boss),
+          clock,
+        );
+        await next.work();
 
-      assert.equal(
-        (await host.observe(conversation).status(queued.id))?.status,
-        'cancelled',
-      );
-    });
-  });
-
-  suite(`scheduling wakes on the real queue (${name})`, () => {
-    test('a cron occurrence whose wake delivery fails is delivered again by pg-boss, later than its due time, and the occurrence dispatches with its successor armed', async (t) => {
-      await using resources = new AsyncDisposableStack();
-      const { storage, boss } = await open(resources);
-      // One minute before the latest noon that real time has passed: the
-      // occurrence is not due by the plugin's clock, so the chat's settle
-      // dispatches nothing, while pg-boss delivers its wake at once.
-      const noon = new Date();
-      noon.setUTCHours(12, 0, 0, 0);
-      if (noon.getTime() > Date.now()) noon.setUTCDate(noon.getUTCDate() - 1);
-      const clock = { Date: { now: () => noon.getTime() - 60_000 } };
-      const plugin = conversationScheduling();
-      const conversation = { chatId: 'redelivered', userId: 'u1' };
-      const seen: string[] = [];
-      const root = plainAgent(
-        [plugin],
-        new MockLanguageModelV4({
-          doStream: async ({ prompt }) => {
-            if (prompt.at(-1)?.role === 'tool') return textResult('created');
-            const text = lastUserText(prompt);
-            seen.push(text);
-            return text === 'create cron'
-              ? toolCallResult({
-                  toolCallId: crypto.randomUUID(),
-                  toolName: 'CronCreate',
-                  input: JSON.stringify({
-                    cron: '0 12 * * *',
-                    prompt: 'daily',
-                  }),
-                })
-              : textResult(`done:${text}`);
-          },
-        }),
-      );
-      // Takes no wake, so the occurrence is first delivered to the next host,
-      // with the chat idle.
-      const creating = await schedulingHost(
-        root,
-        plugin,
-        storage,
-        new ScheduleOnlyScheduler(await schedulingQueue(boss)),
-        clock,
-      );
-      await creating.work();
-      await Array.fromAsync(
-        (await creating.enqueue(conversation, userTurn('t-1', 'create cron')))
-          .stream,
-      );
-      await creating[Symbol.asyncDispose]();
-
-      // Its first delivery fails as it arms the successor.
-      const scheduler = new FailingScheduler(await schedulingQueue(boss), 1);
-      await using next = await schedulingHost(
-        root,
-        plugin,
-        storage,
-        scheduler,
-        clock,
-      );
-      await next.work();
-
-      await waitFor(() => assert.ok(seen.includes('daily')), {
-        signal: t.signal,
+        await waitFor(() => assert.ok(seen.includes('scheduled prompt')), {
+          signal: t.signal,
+        });
+        assert.deepStrictEqual(seen, ['create cron', 'scheduled prompt']);
       });
-      assert.deepStrictEqual(
-        { seen, failing: scheduler.failing },
-        { seen: ['create cron', 'daily'], failing: 0 },
-      );
+
+      test('an availability follow-up that fails once with an ordinary error is retried, and the cron occurrence that fell due while the turn ran dispatches', async (t) => {
+        await using resources = new AsyncDisposableStack();
+        const { storage, boss } = await open(resources);
+        const clock = createClock(Date.now());
+        const plugin = conversationScheduling();
+        const conversation = { chatId: 'retried', userId: 'u1' };
+        const seen: string[] = [];
+        const scheduler = new FailingScheduler(await schedulingQueue(boss), 1);
+        await using host = await schedulingHost(
+          plainAgent([plugin], cronModel(seen, clock)),
+          plugin,
+          storage,
+          scheduler,
+          clock,
+        );
+        await host.work();
+
+        await Array.fromAsync(
+          (await host.enqueue(conversation, userTurn('t-1', 'create cron')))
+            .stream,
+        );
+
+        await waitFor(() => assert.ok(seen.includes('scheduled prompt')), {
+          signal: t.signal,
+        });
+        assert.deepStrictEqual(
+          { seen, failing: scheduler.failing },
+          { seen: ['create cron', 'scheduled prompt'], failing: 0 },
+        );
+      });
+
+      test("a follow-up intent of a turn a later turn superseded is done without running: the later turn's own intent runs it", async (t) => {
+        await using resources = new AsyncDisposableStack();
+        const { storage, boss } = await open(resources);
+        const laterEnded = new Latch();
+        // The first attempt fails only once the later turn has run, so its retry
+        // comes after that turn became the chat's latest.
+        const plugin = availability('superseded', async (call) => {
+          if (call !== 1) return;
+          await laterEnded.wait();
+          throw new Error('first availability attempt fails');
+        });
+        const release = new Latch();
+        await using host = await new AgentRuntime(
+          plainAgent([plugin], answering(release.wait())),
+        ).initialize(defineStack(async () => ({ storage })));
+        await host.work();
+        const conversation = { chatId: 'superseded', userId: 'u1' };
+
+        const earlier = await host.enqueue(
+          conversation,
+          userTurn('t-1', 'held'),
+        );
+        const later = await host.enqueue(
+          conversation,
+          userTurn('t-2', 'later'),
+        );
+        release.open();
+        await Array.fromAsync(earlier.stream);
+        await Array.fromAsync(later.stream);
+        laterEnded.open();
+        await waitFor(() => assert.ok(plugin.calls >= 2), { signal: t.signal });
+        await settled(boss, settleQueue(plugin.name), t);
+
+        // One failed attempt, and one run for the later turn: the earlier
+        // turn's intent, retried after the later turn started, did not run.
+        assert.equal(plugin.calls, 2);
+      });
+
+      test("a deleted chat's follow-up intent is done without running", async (t) => {
+        await using resources = new AsyncDisposableStack();
+        const { storage, boss } = await open(resources);
+        const plugin = availability('deleted', async (call) => {
+          if (call === 1) throw new Error('first availability attempt fails');
+        });
+        await using host = await new AgentRuntime(
+          plainAgent([plugin]),
+        ).initialize(defineStack(async () => ({ storage })));
+        await host.work();
+        const conversation = { chatId: 'deleted', userId: 'u1' };
+
+        await Array.fromAsync(
+          (await host.enqueue(conversation, userTurn('t-1', 'hello'))).stream,
+        );
+        await waitFor(() => assert.equal(plugin.calls, 1), {
+          signal: t.signal,
+        });
+        await host.deleteSession(conversation);
+        await settled(boss, settleQueue(plugin.name), t);
+
+        assert.equal(plugin.calls, 1);
+      });
+
+      test('a follow-up that throws a NonRetryableError is reported once as a process warning and not retried', async (t) => {
+        class CorruptStateError extends NonRetryableError {
+          override readonly name = 'CorruptStateError';
+        }
+        await using resources = new AsyncDisposableStack();
+        const { storage, boss } = await open(resources);
+        const plugin = availability('non-retryable', async () => {
+          throw new CorruptStateError(
+            'state of "non-retryable-chat" is corrupt',
+          );
+        });
+        await using host = await new AgentRuntime(
+          plainAgent([plugin]),
+        ).initialize(defineStack(async () => ({ storage })));
+        const conversation = { chatId: 'non-retryable-chat', userId: 'u1' };
+
+        const warnings = await recordingWarnings(
+          '"non-retryable-chat" is corrupt',
+          async (warnings) => {
+            await host.work();
+            await Array.fromAsync(
+              (await host.enqueue(conversation, userTurn('t-1', 'hello')))
+                .stream,
+            );
+            await waitFor(() => assert.equal(plugin.calls, 1), {
+              signal: t.signal,
+            });
+            await settled(boss, settleQueue(plugin.name), t);
+            return warnings;
+          },
+        );
+
+        assert.deepStrictEqual(
+          { calls: plugin.calls, warnings },
+          {
+            calls: 1,
+            warnings: [
+              'Settle follow-up "non-retryable" failed and will not be retried: state of "non-retryable-chat" is corrupt',
+            ],
+          },
+        );
+      });
+
+      test('a turn whose settle intent write fails is completed again by its orphan reconciliation, which records the intent, and the follow-up runs', async (t) => {
+        await using resources = new AsyncDisposableStack();
+        const storage = new FailFirstSettleWriteStorage(
+          (await open(resources)).storage,
+        );
+        const plugin = availability('write-failure', async () => {});
+        await using host = await new AgentRuntime(
+          plainAgent([plugin]),
+        ).initialize(defineStack(async () => ({ storage })));
+        await host.work();
+        const conversation = { chatId: 'write-failure', userId: 'u1' };
+
+        const turn = await host.enqueue(conversation, userTurn('t-1', 'hello'));
+        await Array.fromAsync(turn.stream);
+
+        await waitFor(() => assert.equal(plugin.calls, 1), {
+          signal: t.signal,
+        });
+        assert.deepStrictEqual(
+          {
+            failedWrites: storage.failedWrites,
+            status: (await host.observe(conversation).status(turn.id))?.status,
+          },
+          { failedWrites: 1, status: 'completed' },
+        );
+      });
+
+      test('cancelling a queued turn resolves though its availability follow-up fails, and the follow-up is retried', async (t) => {
+        await using resources = new AsyncDisposableStack();
+        const { storage } = await open(resources);
+        const plugin = availability('cancel', async (call) => {
+          if (call === 1) throw new Error('first availability attempt fails');
+        });
+        const release = new Latch();
+        await using host = await new AgentRuntime(
+          plainAgent([plugin], answering(release.wait())),
+        ).initialize(defineStack(async () => ({ storage })));
+        await host.work();
+        const conversation = { chatId: 'cancelled', userId: 'u1' };
+        const running = await host.enqueue(
+          conversation,
+          userTurn('t-1', 'held'),
+        );
+        const queued = await host.enqueue(
+          conversation,
+          userTurn('t-2', 'later'),
+        );
+        await waitFor(
+          async () =>
+            assert.equal(
+              (await host.observe(conversation).status(running.id))?.status,
+              'running',
+            ),
+          { signal: t.signal },
+        );
+
+        await host.observe(conversation).cancel(queued.id);
+        // The running turn holds its chat, so only the cancel's intent runs:
+        // its first attempt fails, and its retry succeeds.
+        await waitFor(() => assert.equal(plugin.calls, 2), {
+          signal: t.signal,
+        });
+        release.open();
+        await Array.fromAsync(running.stream);
+
+        assert.equal(
+          (await host.observe(conversation).status(queued.id))?.status,
+          'cancelled',
+        );
+      });
     });
-  });
-}
+
+    suite(`scheduling wakes on the real queue (${name})`, () => {
+      test('a cron occurrence whose wake delivery fails is delivered again by pg-boss, later than its due time, and the occurrence dispatches with its successor armed', async (t) => {
+        await using resources = new AsyncDisposableStack();
+        const { storage, boss } = await open(resources);
+        // One minute before the latest noon that real time has passed: the
+        // occurrence is not due by the plugin's clock, so the chat's settle
+        // dispatches nothing, while pg-boss delivers its wake at once.
+        const noon = new Date();
+        noon.setUTCHours(12, 0, 0, 0);
+        if (noon.getTime() > Date.now()) noon.setUTCDate(noon.getUTCDate() - 1);
+        const clock = { Date: { now: () => noon.getTime() - 60_000 } };
+        const plugin = conversationScheduling();
+        const conversation = { chatId: 'redelivered', userId: 'u1' };
+        const seen: string[] = [];
+        const root = plainAgent(
+          [plugin],
+          new MockLanguageModelV4({
+            doStream: async ({ prompt }) => {
+              if (prompt.at(-1)?.role === 'tool') return textResult('created');
+              const text = lastUserText(prompt);
+              seen.push(text);
+              return text === 'create cron'
+                ? toolCallResult({
+                    toolCallId: crypto.randomUUID(),
+                    toolName: 'CronCreate',
+                    input: JSON.stringify({
+                      cron: '0 12 * * *',
+                      prompt: 'daily',
+                    }),
+                  })
+                : textResult(`done:${text}`);
+            },
+          }),
+        );
+        // Takes no wake, so the occurrence is first delivered to the next host,
+        // with the chat idle.
+        const creating = await schedulingHost(
+          root,
+          plugin,
+          storage,
+          new ScheduleOnlyScheduler(await schedulingQueue(boss)),
+          clock,
+        );
+        await creating.work();
+        await Array.fromAsync(
+          (await creating.enqueue(conversation, userTurn('t-1', 'create cron')))
+            .stream,
+        );
+        await creating[Symbol.asyncDispose]();
+
+        // Its first delivery fails as it arms the successor.
+        const scheduler = new FailingScheduler(await schedulingQueue(boss), 1);
+        await using next = await schedulingHost(
+          root,
+          plugin,
+          storage,
+          scheduler,
+          clock,
+        );
+        await next.work();
+
+        await waitFor(() => assert.ok(seen.includes('daily')), {
+          signal: t.signal,
+        });
+        assert.deepStrictEqual(
+          { seen, failing: scheduler.failing },
+          { seen: ['create cron', 'daily'], failing: 0 },
+        );
+      });
+    });
+  }),
+);

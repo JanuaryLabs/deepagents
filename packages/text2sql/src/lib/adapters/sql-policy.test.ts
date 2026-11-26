@@ -1,5 +1,5 @@
+import { describe, it } from '@zukhruf/parameterized-test';
 import assert from 'node:assert';
-import { describe, it } from 'node:test';
 
 import * as text2sql from '@deepagents/text2sql';
 import type { SqlPolicyAnalyzer } from '@deepagents/text2sql';
@@ -51,54 +51,55 @@ const cases: Array<{
 ];
 
 describe('dialect SQL policies', () => {
-  for (const { name, analyzer, sql, referencedEntity } of cases) {
-    it(`${name} accepts in-scope dialect SQL`, async () => {
-      const violation = await analyzer.analyze(sql, {
-        async resolveAllowedEntities() {
-          return [referencedEntity];
-        },
+  void describe.each(cases, ({ name, analyzer, sql, referencedEntity }) =>
+    describe(name, () => {
+      it(`${name} accepts in-scope dialect SQL`, async () => {
+        const violation = await analyzer.analyze(sql, {
+          async resolveAllowedEntities() {
+            return [referencedEntity];
+          },
+        });
+
+        assert.strictEqual(violation, null);
       });
 
-      assert.strictEqual(violation, null);
-    });
-
-    it(`${name} rejects out-of-scope dialect SQL`, async () => {
-      const violation = await analyzer.analyze(sql, {
-        async resolveAllowedEntities() {
-          return [];
-        },
-      });
-
-      assert.strictEqual(violation?.kind, 'scope');
-      if (violation?.kind !== 'scope') return;
-      assert.strictEqual(violation.payload.error_type, 'OUT_OF_SCOPE');
-      assert.deepStrictEqual(violation.payload.referenced_entities, [
-        referencedEntity,
-      ]);
-    });
-
-    it(`${name} rejects an out-of-scope relation in an unused CTE`, async () => {
-      const violation = await analyzer.analyze(
-        'WITH hidden AS (SELECT * FROM secrets) SELECT 1',
-        {
+      it(`${name} rejects out-of-scope dialect SQL`, async () => {
+        const violation = await analyzer.analyze(sql, {
           async resolveAllowedEntities() {
             return [];
           },
-        },
-      );
+        });
 
-      assert.strictEqual(violation?.kind, 'scope');
-      if (violation?.kind !== 'scope') return;
-      assert.strictEqual(violation.payload.error_type, 'OUT_OF_SCOPE');
-      assert.deepStrictEqual(violation.payload.referenced_entities, [
-        'secrets',
-      ]);
-    });
-  }
+        assert.strictEqual(violation?.kind, 'scope');
+        if (violation?.kind !== 'scope') return;
+        assert.strictEqual(violation.payload.error_type, 'OUT_OF_SCOPE');
+        assert.deepStrictEqual(violation.payload.referenced_entities, [
+          referencedEntity,
+        ]);
+      });
 
-  it('MySQL rejects SELECT operations that can mutate state, lock, read files, or exhaust the connection', async () => {
-    const analyzer = mysql.policy();
-    const unsafeQueries = [
+      it(`${name} rejects an out-of-scope relation in an unused CTE`, async () => {
+        const violation = await analyzer.analyze(
+          'WITH hidden AS (SELECT * FROM secrets) SELECT 1',
+          {
+            async resolveAllowedEntities() {
+              return [];
+            },
+          },
+        );
+
+        assert.strictEqual(violation?.kind, 'scope');
+        if (violation?.kind !== 'scope') return;
+        assert.strictEqual(violation.payload.error_type, 'OUT_OF_SCOPE');
+        assert.deepStrictEqual(violation.payload.referenced_entities, [
+          'secrets',
+        ]);
+      });
+    }),
+  );
+
+  void it.each(
+    [
       'SELECT 1 INTO OUTFILE "/tmp/x"',
       'SELECT 1 INTO DUMPFILE "/tmp/x"',
       'SELECT * FROM users FOR UPDATE',
@@ -114,27 +115,28 @@ describe('dialect SQL policies', () => {
       'SELECT MASTER_POS_WAIT("log", 1)',
       'SELECT SOURCE_POS_WAIT("binlog.000001", 1, 60)',
       'SELECT WAIT_FOR_EXECUTED_GTID_SET("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee:1", 60)',
-    ];
+    ],
+    (sql) =>
+      it(`MySQL rejects SELECT operations that can mutate state, lock, read files, or exhaust the connection: ${sql}`, async () => {
+        const analyzer = mysql.policy();
 
-    for (const sql of unsafeQueries) {
-      assert.deepStrictEqual(
-        await analyzer.analyze(sql, {
-          async resolveAllowedEntities() {
-            return ['users'];
+        assert.deepStrictEqual(
+          await analyzer.analyze(sql, {
+            async resolveAllowedEntities() {
+              return ['users'];
+            },
+          }),
+          {
+            kind: 'read-only',
+            message: 'only SELECT or WITH queries allowed',
           },
-        }),
-        {
-          kind: 'read-only',
-          message: 'only SELECT or WITH queries allowed',
-        },
-        sql,
-      );
-    }
-  });
+          sql,
+        );
+      }),
+  );
 
-  it('PostgreSQL rejects SELECT operations that create relations, mutate state, lock, or access server files', async () => {
-    const analyzer = postgres.policy();
-    const unsafeQueries = [
+  void it.each(
+    [
       'SELECT * INTO copied_users FROM users',
       'SELECT pg_advisory_lock(1)',
       'SELECT setval("s", 2)',
@@ -159,27 +161,28 @@ describe('dialect SQL policies', () => {
       'SELECT pg_reload_conf()',
       'SELECT pg_rotate_logfile()',
       'SELECT pg_terminate_backend(123)',
-    ];
+    ],
+    (sql) =>
+      it(`PostgreSQL rejects SELECT operations that create relations, mutate state, lock, or access server files: ${sql}`, async () => {
+        const analyzer = postgres.policy();
 
-    for (const sql of unsafeQueries) {
-      assert.deepStrictEqual(
-        await analyzer.analyze(sql, {
-          async resolveAllowedEntities() {
-            return ['users'];
+        assert.deepStrictEqual(
+          await analyzer.analyze(sql, {
+            async resolveAllowedEntities() {
+              return ['users'];
+            },
+          }),
+          {
+            kind: 'read-only',
+            message: 'only SELECT or WITH queries allowed',
           },
-        }),
-        {
-          kind: 'read-only',
-          message: 'only SELECT or WITH queries allowed',
-        },
-        sql,
-      );
-    }
-  });
+          sql,
+        );
+      }),
+  );
 
-  it('SQL Server rejects SELECT operations that create relations, acquire write locks, or query external data sources', async () => {
-    const analyzer = sqlserver.textPolicy();
-    const unsafeQueries = [
+  void it.each(
+    [
       'SELECT * INTO copied_users FROM users',
       'SELECT * FROM users WITH (UPDLOCK)',
       'SELECT * FROM OPENQUERY(linked_server, "SELECT * FROM secrets")',
@@ -187,23 +190,25 @@ describe('dialect SQL policies', () => {
       'SELECT * FROM users WITH (XLOCK)',
       'SELECT * FROM OPENROWSET("SQLNCLI", "Server=x", "SELECT * FROM secrets")',
       'SELECT * FROM sys.fn_get_audit_file("C:\\\\audit\\\\*.sqlaudit", DEFAULT, DEFAULT)',
-    ];
+    ],
+    (sql) =>
+      it(`SQL Server rejects SELECT operations that create relations, acquire write locks, or query external data sources: ${sql}`, async () => {
+        const analyzer = sqlserver.textPolicy();
 
-    for (const sql of unsafeQueries) {
-      assert.deepStrictEqual(
-        await analyzer.analyze(sql, {
-          async resolveAllowedEntities() {
-            return ['users'];
+        assert.deepStrictEqual(
+          await analyzer.analyze(sql, {
+            async resolveAllowedEntities() {
+              return ['users'];
+            },
+          }),
+          {
+            kind: 'read-only',
+            message: 'only SELECT or WITH queries allowed',
           },
-        }),
-        {
-          kind: 'read-only',
-          message: 'only SELECT or WITH queries allowed',
-        },
-        sql,
-      );
-    }
-  });
+          sql,
+        );
+      }),
+  );
 
   it('SQL Server rejects linked-server relations that share an allowed local suffix', async () => {
     const sql = 'SELECT * FROM linked_server.database.dbo.users';
@@ -219,56 +224,58 @@ describe('dialect SQL policies', () => {
     });
   });
 
-  it('SQLite rejects SELECT functions that load executable extensions or access host files', async () => {
-    const analyzer = sqlite.policy();
-    const unsafeQueries = [
+  void it.each(
+    [
       'SELECT load_extension("/tmp/x")',
       'SELECT readfile("/etc/passwd")',
       // Same structural host-file function operation represented by the AST.
       'SELECT writefile("/tmp/x", "secret")',
-    ];
+    ],
+    (sql) =>
+      it(`SQLite rejects SELECT functions that load executable extensions or access host files: ${sql}`, async () => {
+        const analyzer = sqlite.policy();
 
-    for (const sql of unsafeQueries) {
-      assert.deepStrictEqual(
-        await analyzer.analyze(sql, {
-          async resolveAllowedEntities() {
-            return [];
+        assert.deepStrictEqual(
+          await analyzer.analyze(sql, {
+            async resolveAllowedEntities() {
+              return [];
+            },
+          }),
+          {
+            kind: 'read-only',
+            message: 'only SELECT or WITH queries allowed',
           },
-        }),
-        {
-          kind: 'read-only',
-          message: 'only SELECT or WITH queries allowed',
-        },
-        sql,
-      );
-    }
-  });
+          sql,
+        );
+      }),
+  );
 
-  it('BigQuery rejects SELECT operations that escape through external queries or persistent routines', async () => {
-    const analyzer = bigquery.policy();
-    const unsafeQueries = [
+  void it.each(
+    [
       'SELECT * FROM EXTERNAL_QUERY("conn", "SELECT * FROM secrets")',
       'SELECT project.dataset.remote_function(secret) FROM users',
       // Persistent routines have the same qualified function structure.
       'SELECT dataset.user_defined_function(secret) FROM users',
       'SELECT `project.dataset.remote_function`(secret) FROM users',
-    ];
+    ],
+    (sql) =>
+      it(`BigQuery rejects SELECT operations that escape through external queries or persistent routines: ${sql}`, async () => {
+        const analyzer = bigquery.policy();
 
-    for (const sql of unsafeQueries) {
-      assert.deepStrictEqual(
-        await analyzer.analyze(sql, {
-          async resolveAllowedEntities() {
-            return ['users'];
+        assert.deepStrictEqual(
+          await analyzer.analyze(sql, {
+            async resolveAllowedEntities() {
+              return ['users'];
+            },
+          }),
+          {
+            kind: 'read-only',
+            message: 'only SELECT or WITH queries allowed',
           },
-        }),
-        {
-          kind: 'read-only',
-          message: 'only SELECT or WITH queries allowed',
-        },
-        sql,
-      );
-    }
-  });
+          sql,
+        );
+      }),
+  );
 
   it('accepts ordinary read-only SELECT and WITH queries in every dialect', async () => {
     const analyzers: SqlPolicyAnalyzer[] = [
@@ -414,23 +421,40 @@ describe('SQL policy building blocks', () => {
     assert.strictEqual(cascade?.kind, 'scope');
     if (cascade?.kind !== 'scope') return;
     assert.strictEqual(cascade.payload.parser_dialect, 'mysql');
+  });
 
-    for (const sql of [
+  void it.each(
+    [
       'WITH t AS (SELECT 1) DELETE FROM users WHERE',
       'SELECT 1; DROP TABLE users WHERE',
-    ]) {
-      const violation = await policy.analyze(sql, context);
-      assert.strictEqual(violation?.kind, 'scope', sql);
-    }
-    // An unterminated comment parses in no grammar and holds no statement.
-    for (const sql of ['DROP TABLE users (', '/* no statement']) {
+    ],
+    (sql) =>
+      it(`refuses ${JSON.stringify(sql)}, which no grammar parses, as a scope violation when the only rule reads statements`, async () => {
+        const policy = new sqlPolicy.SourcePolicy(
+          new sqlPolicy.SqlText({ dialects: ['sqlite'] }),
+          [new sqlPolicy.OneSelect()],
+        );
+
+        const violation = await policy.analyze(sql, context);
+        assert.strictEqual(violation?.kind, 'scope', sql);
+      }),
+  );
+
+  // An unterminated comment parses in no grammar and holds no statement.
+  void it.each(['DROP TABLE users (', '/* no statement'], (sql) =>
+    it(`refuses ${JSON.stringify(sql)}, which holds no statement, as read-only when the only rule reads statements`, async () => {
+      const policy = new sqlPolicy.SourcePolicy(
+        new sqlPolicy.SqlText({ dialects: ['sqlite'] }),
+        [new sqlPolicy.OneSelect()],
+      );
+
       assert.deepStrictEqual(
         await policy.analyze(sql, context),
         { kind: 'read-only', message: 'only SELECT or WITH queries allowed' },
         sql,
       );
-    }
-  });
+    }),
+  );
 
   it('reports UnreadableSql of a source as a parse error naming its dialect and rejects with any other error', async () => {
     const outage = new Error('the database is unreachable');
@@ -508,18 +532,20 @@ describe('PostgreSQL typed literals', () => {
     assert.strictEqual(violation.payload.sql_attempted, sql);
   });
 
-  it('keeps invalid SQL and unsupported types fail closed', async () => {
-    for (const sql of [
-      "SELECT TIMESTAMPTZ 'epoch' FROM",
-      "SELECT custom_type 'value'",
-    ]) {
-      const violation = await analyze(sql, ['allowed_table']);
-      assert.strictEqual(violation?.kind, 'scope', sql);
-      if (violation?.kind !== 'scope') continue;
-      assert.strictEqual(violation.payload.error_type, 'SQL_SCOPE_PARSE_ERROR');
-      assert.strictEqual(violation.payload.sql_attempted, sql);
-    }
-  });
+  void it.each(
+    ["SELECT TIMESTAMPTZ 'epoch' FROM", "SELECT custom_type 'value'"],
+    (sql) =>
+      it(`keeps the invalid or unsupported-type SQL ${JSON.stringify(sql)} fail closed`, async () => {
+        const violation = await analyze(sql, ['allowed_table']);
+        assert.strictEqual(violation?.kind, 'scope', sql);
+        if (violation?.kind !== 'scope') return;
+        assert.strictEqual(
+          violation.payload.error_type,
+          'SQL_SCOPE_PARSE_ERROR',
+        );
+        assert.strictEqual(violation.payload.sql_attempted, sql);
+      }),
+  );
 
   it('does not rewrite typed-literal text inside lexical boundaries', async () => {
     const sql = String.raw`SELECT
@@ -534,8 +560,8 @@ describe('PostgreSQL typed literals', () => {
     assert.strictEqual(await analyze(sql, ['allowed_table']), null);
   });
 
-  it('accepts PostgreSQL general typed constants that the parser rejects', async () => {
-    const queries = [
+  void it.each(
+    [
       "SELECT TIMETZ '04:05:06+01'",
       "SELECT UUID 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'",
       `SELECT JSONB '{"ok":true}'`,
@@ -545,12 +571,12 @@ describe('PostgreSQL typed literals', () => {
       "SELECT TIME(3) WITH TIME ZONE '04:05:06.123+01'",
       "SELECT BIT VARYING '1001'",
       "SELECT DOUBLE PRECISION '1.23'",
-    ];
-
-    for (const sql of queries) {
-      assert.strictEqual(await analyze(sql), null, sql);
-    }
-  });
+    ],
+    (sql) =>
+      it(`accepts PostgreSQL general typed constants that the parser rejects: ${sql}`, async () => {
+        assert.strictEqual(await analyze(sql), null, sql);
+      }),
+  );
 });
 
 describe('SQL policy public surface', () => {

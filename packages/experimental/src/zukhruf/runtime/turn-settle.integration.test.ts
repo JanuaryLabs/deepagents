@@ -1,10 +1,10 @@
 import { TemporaryFiles } from '@zukhruf/fs';
+import { suite, test } from '@zukhruf/parameterized-test';
 import { waitFor } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { type UIMessage, isToolUIPart } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
-import { suite, test } from 'node:test';
 import { setTimeout } from 'node:timers/promises';
 import { PgBoss } from 'pg-boss';
 import { z } from 'zod';
@@ -206,7 +206,7 @@ async function recordingWarnings<T>(
   }
 }
 
-for (const { name, open } of storages) {
+void suite.each(storages, ({ name, open }) =>
   suite(`a settle follow-up that fails (${name})`, () => {
     test('an approval continuation that completes is not orphaned, and no recovery runs its model again', async (t) => {
       await using resources = new AsyncDisposableStack();
@@ -373,5 +373,5 @@ for (const { name, open } of storages) {
         );
       });
     });
-  });
-}
+  }),
+);

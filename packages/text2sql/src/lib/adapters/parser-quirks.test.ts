@@ -1,6 +1,6 @@
+import { describe, it } from '@zukhruf/parameterized-test';
 import nodeSqlParser from 'node-sql-parser';
 import assert from 'node:assert';
-import { describe, it } from 'node:test';
 
 const { Parser } = nodeSqlParser;
 const parser = new Parser();
@@ -41,7 +41,7 @@ describe('node-sql-parser dialect divergences (documents WHY we cascade sqlite -
       },
     ];
 
-    for (const { name, sql } of queries) {
+    void it.each(queries, ({ name, sql }) =>
       it(`[${name}] sqlite rejects, mysql accepts`, () => {
         const sqliteOutcome = probe(sql, 'sqlite');
         const mysqlOutcome = probe(sql, 'mysql');
@@ -68,8 +68,8 @@ describe('node-sql-parser dialect divergences (documents WHY we cascade sqlite -
           true,
           'expected mysql parser to accept this query',
         );
-      });
-    }
+      }),
+    );
   });
 
   describe('queries that pass under sqlite but fail under mysql', () => {
@@ -85,7 +85,7 @@ describe('node-sql-parser dialect divergences (documents WHY we cascade sqlite -
       },
     ];
 
-    for (const { name, sql } of queries) {
+    void it.each(queries, ({ name, sql }) =>
       it(`[${name}] sqlite accepts, mysql rejects`, () => {
         const sqliteOutcome = probe(sql, 'sqlite');
         const mysqlOutcome = probe(sql, 'mysql');
@@ -112,8 +112,8 @@ describe('node-sql-parser dialect divergences (documents WHY we cascade sqlite -
           false,
           'expected mysql parser to reject this query',
         );
-      });
-    }
+      }),
+    );
   });
 
   describe('queries that pass under both dialects (cascade picks sqlite, fast path)', () => {
@@ -122,11 +122,11 @@ describe('node-sql-parser dialect divergences (documents WHY we cascade sqlite -
       'SELECT id, name FROM users WHERE id = 1',
     ];
 
-    for (const sql of queries) {
+    void it.each(queries, (sql) =>
       it(`[${sql}] both parsers accept`, () => {
         assert.strictEqual(probe(sql, 'sqlite').ok, true);
         assert.strictEqual(probe(sql, 'mysql').ok, true);
-      });
-    }
+      }),
+    );
   });
 });

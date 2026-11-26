@@ -1,5 +1,6 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
+import { test } from '@zukhruf/parameterized-test';
 import { waitFor } from '@zukhruf/testing/async';
 import { StreamHarness } from '@zukhruf/testing/streams';
 import { simulateReadableStream } from 'ai';
@@ -7,7 +8,7 @@ import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import test, { type TestContext } from 'node:test';
+import type { TestContext } from 'node:test';
 import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
 
@@ -463,24 +464,30 @@ test('task lifecycle is idempotent, owner-scoped, and free of scheduler bookkeep
   );
 });
 
-test('malformed schedule definitions are rejected at the boundary', async () => {
-  await using h = await harness();
-  const { app } = h;
-
-  const cases: Array<[string, Record<string, unknown>]> = [
+void test.each(
+  [
     ['bad timezone', { ...definition, timezone: 'Not/A_Zone' }],
     ['bad cron', { ...definition, recurrence: 'not a cron' }],
     ['unknown field', { ...definition, notifications: 'important' }],
     ['blank name', { ...definition, name: '   ' }],
-  ];
-  for (const [label, body] of cases) {
-    const response = await request(app, `${SCHEDULES}/tasks`, {
-      ...json(body),
-      idempotencyKey: randomUUID(),
-    });
-    assert.equal(response.status, 400, label);
-    assert.equal(response.headers.get('cache-control'), 'no-store');
-  }
+  ] satisfies Array<[string, Record<string, unknown>]>,
+  ([label, body]) =>
+    test(`a schedule definition with a ${label} is rejected at the boundary`, async () => {
+      await using h = await harness();
+      const { app } = h;
+
+      const response = await request(app, `${SCHEDULES}/tasks`, {
+        ...json(body),
+        idempotencyKey: randomUUID(),
+      });
+      assert.equal(response.status, 400, label);
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+    }),
+);
+
+test('a create without an Idempotency-Key, an empty patch and a malformed task id are rejected at the boundary', async () => {
+  await using h = await harness();
+  const { app } = h;
 
   const withoutKey = await request(app, `${SCHEDULES}/tasks`, json(definition));
   assert.equal(withoutKey.status, 400, 'Idempotency-Key is required');

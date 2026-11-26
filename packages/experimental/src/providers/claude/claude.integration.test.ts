@@ -1,6 +1,7 @@
 import { NoSuchModelError } from '@ai-sdk/provider';
 import { untilAborted } from '@zukhruf/async';
 import { TemporaryFiles } from '@zukhruf/fs';
+import { test } from '@zukhruf/parameterized-test';
 import {
   createProviderRegistry,
   generateText,
@@ -12,7 +13,7 @@ import assert from 'node:assert/strict';
 import { hash } from 'node:crypto';
 import { readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type TestContext, test } from 'node:test';
+import type { TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { z } from 'zod';
 
@@ -119,7 +120,7 @@ function response(text: string, stream = false, toolCall = false) {
   );
 }
 
-for (const streaming of [true, false]) {
+void test.each([true, false], (streaming) =>
   test(`native Anthropic ${streaming ? 'streaming' : 'generation'} preserves host tools, caching and follow-up history`, async (t) => {
     await using _home = await localHome(t);
     void _home;
@@ -205,8 +206,8 @@ for (const streaming of [true, false]) {
     assert.deepEqual(requests[2].cache_control, { type: 'ephemeral' });
     assert.ok(JSON.stringify(requests[2].messages).includes('blue'));
     assert.throws(() => claude.imageModel('unsupported'), NoSuchModelError);
-  });
-}
+  }),
+);
 
 test('authentication is lazy and observes account changes without using API credentials', async (t) => {
   await using home = await localHome(t);
@@ -353,7 +354,7 @@ test('an empty Claude Code OAuth token variable uses the stored login', async (t
   assert.deepEqual(tokens, ['Bearer access-a']);
 });
 
-for (const rotate of [true, false]) {
+void test.each([true, false], (rotate) =>
   test(`concurrent providers refresh once and preserve native fields (rotate=${rotate})`, async (t) => {
     await using home = await localHome(t);
     const path = join(home.path, '.credentials.json');
@@ -402,8 +403,8 @@ for (const rotate of [true, false]) {
     assert.equal(saved.claudeAiOauth.subscriptionType, 'max');
     assert.deepEqual(saved.extra, { preserve: true });
     assert.equal((await stat(path)).mode & 0o777, 0o600);
-  });
-}
+  }),
+);
 
 test('refresh cannot overwrite a newer native login', async (t) => {
   await using home = await localHome(t);
@@ -527,7 +528,7 @@ test('refresh failures preserve credentials and hide server response bodies', as
   assert.equal(await readFile(path, 'utf8'), original);
 });
 
-for (const refresh of [true, false]) {
+void test.each([true, false], (refresh) =>
   test(`cancellation reaches ${refresh ? 'refresh' : 'model'} requests`, async (t) => {
     await using home = await localHome(t);
     if (refresh)
@@ -554,8 +555,8 @@ for (const refresh of [true, false]) {
       }),
       { name: 'AbortError' },
     );
-  });
-}
+  }),
+);
 
 test('a request aborted while another request refreshes the login stops waiting for that refresh', async (t) => {
   await using home = await new TemporaryFiles().directory('claude-provider-');

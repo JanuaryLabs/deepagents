@@ -1,11 +1,11 @@
 import { TemporaryFiles } from '@zukhruf/fs';
+import { describe, it } from '@zukhruf/parameterized-test';
 import { DockerTestbed } from '@zukhruf/testing/docker';
 import assert from 'node:assert';
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { symlink, writeFile } from 'node:fs/promises';
 import { basename, delimiter, dirname, join } from 'node:path';
 import { text } from 'node:stream/consumers';
-import { describe, it } from 'node:test';
 import { promisify } from 'node:util';
 
 import {
@@ -1036,36 +1036,42 @@ describe('Docker Sandbox', () => {
         assert.notStrictEqual((await child.wait()).exitCode, 0);
       });
 
-      for (const [setup, HostConfig] of [
-        ['without /dev/shm', { IpcMode: 'none' }],
-        ['on a read-only rootfs with /dev/shm', { ReadonlyRootfs: true }],
-      ] as const) {
-        it(`stops the process tree of an aborted spawn ${setup}`, async () => {
-          await using sandbox = await createDockerSandbox(
-            withContainer({ HostConfig }),
-          );
-          const controller = new AbortController();
-          const reason = new Error('stop');
+      void it.each(
+        [
+          ['without /dev/shm', { IpcMode: 'none' }],
+          ['on a read-only rootfs with /dev/shm', { ReadonlyRootfs: true }],
+        ] as const,
+        ([setup, HostConfig]) =>
+          it(`stops the process tree of an aborted spawn ${setup}`, async () => {
+            await using sandbox = await createDockerSandbox(
+              withContainer({ HostConfig }),
+            );
+            const controller = new AbortController();
+            const reason = new Error('stop');
 
-          const child = await sandbox.spawn({
-            command: 'printf started; sleep 300 & sleep 301',
-            abortSignal: controller.signal,
-          });
-          const started = await readFirstChunk(child.stdout);
-          controller.abort(reason);
+            const child = await sandbox.spawn({
+              command: 'printf started; sleep 300 & sleep 301',
+              abortSignal: controller.signal,
+            });
+            const started = await readFirstChunk(child.stdout);
+            controller.abort(reason);
 
-          assert.strictEqual(started, 'started');
-          await assert.rejects(
-            Promise.resolve(child.wait()),
-            (error) => error === reason,
-          );
-          // PID 1 is not an init, so killed processes stay as zombies.
-          const live = await sandbox.run({
-            command: `ps -o stat,comm | awk '$2 == "sleep" && $1 !~ /^Z/'`,
-          });
-          assert.deepStrictEqual(live, { stdout: '', stderr: '', exitCode: 0 });
-        });
-      }
+            assert.strictEqual(started, 'started');
+            await assert.rejects(
+              Promise.resolve(child.wait()),
+              (error) => error === reason,
+            );
+            // PID 1 is not an init, so killed processes stay as zombies.
+            const live = await sandbox.run({
+              command: `ps -o stat,comm | awk '$2 == "sleep" && $1 !~ /^Z/'`,
+            });
+            assert.deepStrictEqual(live, {
+              stdout: '',
+              stderr: '',
+              exitCode: 0,
+            });
+          }),
+      );
 
       it('does not run a spawned command when neither /dev/shm nor /tmp is writable', async () => {
         await using sandbox = await createDockerSandbox(

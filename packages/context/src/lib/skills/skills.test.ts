@@ -1,5 +1,5 @@
+import { describe, it } from '@zukhruf/parameterized-test';
 import assert from 'node:assert';
-import { describe, it } from 'node:test';
 
 import {
   type AvailableSkill,
@@ -85,29 +85,32 @@ function createContext(...availableSkills: AvailableSkill[]) {
 }
 
 describe('skills()', () => {
-  for (const [format, renderer] of [
-    ['XML', new XmlRenderer()],
-    ['Markdown', new MarkdownRenderer()],
-    ['TOML', new TomlRenderer()],
-    ['TOON', new ToonRenderer()],
-  ] as const) {
-    it(`renders Codex's skills catalog as written in ${format}`, async () => {
-      const availableSkills: AvailableSkill[] = [
-        {
-          name: 'deploy',
-          description: 'Deploy services to production.',
-          path: '/skills/deploy/SKILL.md',
-        },
-        { name: 'lint', description: '', path: '/skills/lint/SKILL.md' },
-      ];
-      const context = createContext(...availableSkills);
+  void it.each(
+    [
+      ['XML', XmlRenderer],
+      ['Markdown', MarkdownRenderer],
+      ['TOML', TomlRenderer],
+      ['TOON', ToonRenderer],
+    ] as const,
+    ([format, Renderer]) =>
+      it(`renders Codex's skills catalog as written in ${format}`, async () => {
+        const renderer = new Renderer();
+        const availableSkills: AvailableSkill[] = [
+          {
+            name: 'deploy',
+            description: 'Deploy services to production.',
+            path: '/skills/deploy/SKILL.md',
+          },
+          { name: 'lint', description: '', path: '/skills/lint/SKILL.md' },
+        ];
+        const context = createContext(...availableSkills);
 
-      const { systemPrompt } = await context.resolve({ renderer });
+        const { systemPrompt } = await context.resolve({ renderer });
 
-      assert.strictEqual(systemPrompt, catalog);
-      assert.deepStrictEqual(context.getAvailableSkills(), availableSkills);
-    });
-  }
+        assert.strictEqual(systemPrompt, catalog);
+        assert.deepStrictEqual(context.getAvailableSkills(), availableSkills);
+      }),
+  );
 
   it('renders the catalog at the top level beside other fragments', async () => {
     const context = new ContextEngine({

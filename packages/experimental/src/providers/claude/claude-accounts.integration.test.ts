@@ -80,7 +80,7 @@ function interceptWire(
   );
   return Object.assign(requests, {
     [Symbol.asyncDispose]: async () => {
-      interception.cleanup();
+      await interception.cleanup();
       await replaceGlobalPool();
     },
   });

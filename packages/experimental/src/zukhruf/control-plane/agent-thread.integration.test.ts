@@ -1,5 +1,5 @@
+import { test } from '@zukhruf/parameterized-test';
 import assert from 'node:assert/strict';
-import test from 'node:test';
 
 import { AgentPath, AgentThread } from '@deepagents/experimental/zukhruf';
 
@@ -51,41 +51,6 @@ test('agent threads reject malformed reserved metadata', () => {
     undefined,
   );
 
-  for (const metadata of [
-    {
-      zukhrufTreeId: 'other-tree',
-      zukhruf: {
-        path: '/root',
-        parentChatId: null,
-        declarationName: 'root',
-      },
-    },
-    {
-      zukhrufTreeId: 'root-chat',
-      zukhruf: {
-        path: '/root',
-        parentChatId: 'victim-chat',
-        declarationName: 'root',
-      },
-    },
-    {
-      zukhrufTreeId: 'root-chat',
-      zukhruf: {
-        path: '/root/reviewer',
-        parentChatId: null,
-        declarationName: 'reviewer',
-      },
-    },
-  ]) {
-    assert.equal(
-      AgentThread.fromMetadata(
-        { chatId: 'root-chat', userId: 'user-1' },
-        metadata,
-      ),
-      undefined,
-    );
-  }
-
   assert.throws(
     () =>
       new AgentThread({
@@ -110,6 +75,54 @@ test('agent threads reject malformed reserved metadata', () => {
     /child agent thread cannot parent itself/,
   );
 });
+
+void test.each(
+  [
+    {
+      name: 'a root thread whose tree is another chat',
+      metadata: {
+        zukhrufTreeId: 'other-tree',
+        zukhruf: {
+          path: '/root',
+          parentChatId: null,
+          declarationName: 'root',
+        },
+      },
+    },
+    {
+      name: 'a root thread with a parent chat',
+      metadata: {
+        zukhrufTreeId: 'root-chat',
+        zukhruf: {
+          path: '/root',
+          parentChatId: 'victim-chat',
+          declarationName: 'root',
+        },
+      },
+    },
+    {
+      name: 'a child thread with no parent chat',
+      metadata: {
+        zukhrufTreeId: 'root-chat',
+        zukhruf: {
+          path: '/root/reviewer',
+          parentChatId: null,
+          declarationName: 'reviewer',
+        },
+      },
+    },
+  ],
+  ({ name, metadata }) =>
+    test(`agent threads reject the reserved metadata of ${name}`, () => {
+      assert.equal(
+        AgentThread.fromMetadata(
+          { chatId: 'root-chat', userId: 'user-1' },
+          metadata,
+        ),
+        undefined,
+      );
+    }),
+);
 
 test('agent threads reject non-canonical persisted paths', () => {
   assert.equal(

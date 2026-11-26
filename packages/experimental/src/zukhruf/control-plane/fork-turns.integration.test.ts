@@ -1,7 +1,7 @@
+import { test } from '@zukhruf/parameterized-test';
 import { type ToolSet, type UIMessage, isToolUIPart, tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
-import test from 'node:test';
 import { z } from 'zod';
 
 import { InMemoryContextStore, SqliteStreamStore } from '@deepagents/context';
@@ -226,7 +226,7 @@ test('forked history keeps final assistant content without tool traffic', async 
   assert.doesNotMatch(history, /private tool result/);
 });
 
-for (const forkTurns of ['2', 3, 'recent']) {
+void test.each(['2', 3, 'recent'], (forkTurns) =>
   test(`spawn_agent rejects fork_turns ${JSON.stringify(forkTurns)} before creating a child`, async () => {
     const result = await spawnAfter({
       history: [{ input: 'first question', answer: 'first answer' }],
@@ -241,5 +241,5 @@ for (const forkTurns of ['2', 3, 'recent']) {
       .find((part) => part.type === 'tool-spawn_agent');
     assert.ok(spawn?.state === 'output-error', JSON.stringify(spawn));
     assert.match(spawn.errorText, /fork_turns must be `none` or `all`/);
-  });
-}
+  }),
+);

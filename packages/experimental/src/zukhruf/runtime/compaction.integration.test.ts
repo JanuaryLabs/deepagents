@@ -4,6 +4,7 @@ import type {
   LanguageModelV4Usage,
 } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
+import { test } from '@zukhruf/parameterized-test';
 import { open } from '@zukhruf/sqlite-open';
 import { waitFor } from '@zukhruf/testing/async';
 import {
@@ -18,7 +19,6 @@ import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import test from 'node:test';
 import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
 
@@ -741,7 +741,7 @@ test(
         cacheWrite: 0,
       },
     };
-    for (const native of ['anthropic', 'openai'] as const) {
+    const sendNativeContent = async (native: 'anthropic' | 'openai') => {
       chunks =
         native === 'anthropic'
           ? [
@@ -772,17 +772,19 @@ test(
         true,
         native,
       );
-    }
+    };
+    await sendNativeContent('anthropic');
+    await sendNativeContent('openai');
   },
 );
 
-test(
-  'full request estimates include instructions and tools and enforce the input target',
-  { timeout: 30_000 },
-  async () => {
-    await using resources = new AsyncDisposableStack();
-    const { store, stack } = await infrastructure(resources);
-    for (const kind of ['instructions', 'tools'] as const) {
+void test.each(['instructions', 'tools'] as const, (kind) =>
+  test(
+    `full request estimates include ${kind} and enforce the input target`,
+    { timeout: 30_000 },
+    async () => {
+      await using resources = new AsyncDisposableStack();
+      const { store, stack } = await infrastructure(resources);
       const summary = summarizer();
       const model = new MockLanguageModelV4({ doStream: answer });
       let armed = false;
@@ -857,8 +859,8 @@ test(
         ).zukhruf.compaction,
         previous,
       );
-    }
-  },
+    },
+  ),
 );
 
 test(
@@ -1589,179 +1591,188 @@ test(
   },
 );
 
-for (const [name, triggers] of [
-  ['tokens', [tokensExceed(7_000)]],
-  ['messages', [tokensExceed(Number.MAX_SAFE_INTEGER), messagesExceed(5)]],
-] as const) {
-  test(
-    `${name} trigger compacts within a tool loop, preserves the transcript, and reuses checkpoints in a fresh host`,
-    { timeout: 30_000 },
-    async () => {
-      await using resources = new AsyncDisposableStack();
-      const { store, stack } = await infrastructure(resources);
-      const summary = summarizer();
-      const executed: number[] = [];
-      const model: MockLanguageModelV4 = new MockLanguageModelV4({
-        doStream: async () => {
-          const step = model.doStreamCalls.length;
-          if (step > 6) return answer();
-          return stream(
-            [
-              {
-                type: 'tool-call',
-                toolCallId: `read-${step}`,
-                toolName: 'inspect',
-                input: JSON.stringify({ step }),
+void test.each(
+  [
+    ['tokens', [tokensExceed(7_000)]],
+    ['messages', [tokensExceed(Number.MAX_SAFE_INTEGER), messagesExceed(5)]],
+  ] as const,
+  ([name, triggers]) =>
+    test(
+      `${name} trigger compacts within a tool loop, preserves the transcript, and reuses checkpoints in a fresh host`,
+      { timeout: 30_000 },
+      async () => {
+        await using resources = new AsyncDisposableStack();
+        const { store, stack } = await infrastructure(resources);
+        const summary = summarizer();
+        const executed: number[] = [];
+        const model: MockLanguageModelV4 = new MockLanguageModelV4({
+          doStream: async () => {
+            const step = model.doStreamCalls.length;
+            if (step > 6) return answer();
+            return stream(
+              [
+                {
+                  type: 'tool-call',
+                  toolCallId: `read-${step}`,
+                  toolName: 'inspect',
+                  input: JSON.stringify({ step }),
+                },
+              ],
+              true,
+            );
+          },
+        });
+        const root = declaration(
+          model,
+          { ...compaction(summary), targetTokens: 6_000, triggers },
+          {
+            inspect: defineTool({
+              description: 'Read a file',
+              inputSchema: z.object({ step: z.number() }),
+              execute: ({ step }) => {
+                executed.push(step);
+                return `File ${step} evidence: ${'x'.repeat(2_500)}`;
               },
-            ],
-            true,
-          );
-        },
-      });
-      const root = declaration(
-        model,
-        { ...compaction(summary), targetTokens: 6_000, triggers },
-        {
-          inspect: defineTool({
-            description: 'Read a file',
-            inputSchema: z.object({ step: z.number() }),
-            execute: ({ step }) => {
-              executed.push(step);
-              return `File ${step} evidence: ${'x'.repeat(2_500)}`;
-            },
-          }),
-        },
-      );
-      const runtime = new AgentRuntime(root);
-      const host = await runtime.initialize(stack);
-      resources.use(host);
-      await host.work();
-      const result = await send(host, 'Inspect six files for CASE-42.');
-      assert.equal(result.status?.status, 'completed');
-      assert.deepEqual(executed, [1, 2, 3, 4, 5, 6]);
-      const events = compactionEvents(result.chunks);
-      const completed = events.filter((event) => event.status === 'completed');
-      assert.equal(completed.length, summary.doGenerateCalls.length);
-      for (const event of completed) {
-        const start = events.find((candidate) => candidate.id === event.id);
-        assert.ok(start?.status === 'started');
-        assert.ok(event.tokens.after < event.tokens.before);
-        assert.ok(event.tokens.after <= 6_000);
-        assert.ok(event.replacedRange.end > event.replacedRange.start);
-        assert.ok(event.usage);
-        assert.ok(events.indexOf(start) < events.indexOf(event));
-      }
-      const replay = await host.observe(conversation).resume();
-      assert.ok(replay);
-      const replayed = await Array.fromAsync(replay);
-      assert.deepEqual(
-        compactionEvents(replayed),
-        events,
-        'persisted stream replays lifecycle data',
-      );
-      assert.ok(
-        summary.doGenerateCalls.length >= 2,
-        'repeated compaction occurred within one user turn',
-      );
-      const app = new Hono<HttpEnv>();
-      app.use('*', (context, next) => {
-        context.set('userId', conversation.userId);
-        return next();
-      });
-      app.route('/api', http(host));
-      const response = await app.request(
-        `/api/session/${conversation.chatId}/stream`,
-      );
-      assert.equal(response.status, 200);
-      assert.equal(response.headers.get('x-vercel-ai-ui-message-stream'), 'v1');
-      assert.ok(response.body);
-      const chunks = await Array.fromAsync(
-        parseJsonEventStream({
-          stream: response.body,
-          schema: uiMessageChunkSchema,
-        }),
-        (chunk) => {
-          assert.ok(chunk.success, 'every SSE frame is a UI message chunk');
-          return chunk.value;
-        },
-      );
-      assert.deepEqual(
-        compactionEvents(chunks),
-        events,
-        'DevTool HTTP transport preserves the events',
-      );
-      const finalPrompt = JSON.stringify(model.doStreamCalls.at(-1)?.prompt);
-      assert.match(finalPrompt, /Previous conversation summary/);
-      assert.match(finalPrompt, /Inspect six files for CASE-42/);
-      assert.doesNotMatch(finalPrompt, /File 1 evidence/);
-      const original = await host.observe(conversation).engine.getMessages();
-      for (let step = 1; step <= 6; step++)
-        assert.match(
-          JSON.stringify(original),
-          new RegExp(`File ${step} evidence`),
+            }),
+          },
         );
-      assert.doesNotMatch(
-        JSON.stringify(original),
-        /Previous conversation summary/,
-      );
-      assert.doesNotMatch(finalPrompt, /data-compaction/);
-      const session = await app.request(`/api/session/${conversation.chatId}`);
-      assert.equal(session.status, 200);
-      const transcript = transcriptSchema.parse(await session.json());
-      assert.deepEqual(
-        transcript.messages.flatMap((message) =>
-          message.parts.flatMap((part) =>
-            part.type === 'data-compaction' ? [part.data] : [],
+        const runtime = new AgentRuntime(root);
+        const host = await runtime.initialize(stack);
+        resources.use(host);
+        await host.work();
+        const result = await send(host, 'Inspect six files for CASE-42.');
+        assert.equal(result.status?.status, 'completed');
+        assert.deepEqual(executed, [1, 2, 3, 4, 5, 6]);
+        const events = compactionEvents(result.chunks);
+        const completed = events.filter(
+          (event) => event.status === 'completed',
+        );
+        assert.equal(completed.length, summary.doGenerateCalls.length);
+        for (const event of completed) {
+          const start = events.find((candidate) => candidate.id === event.id);
+          assert.ok(start?.status === 'started');
+          assert.ok(event.tokens.after < event.tokens.before);
+          assert.ok(event.tokens.after <= 6_000);
+          assert.ok(event.replacedRange.end > event.replacedRange.start);
+          assert.ok(event.usage);
+          assert.ok(events.indexOf(start) < events.indexOf(event));
+        }
+        const replay = await host.observe(conversation).resume();
+        assert.ok(replay);
+        const replayed = await Array.fromAsync(replay);
+        assert.deepEqual(
+          compactionEvents(replayed),
+          events,
+          'persisted stream replays lifecycle data',
+        );
+        assert.ok(
+          summary.doGenerateCalls.length >= 2,
+          'repeated compaction occurred within one user turn',
+        );
+        const app = new Hono<HttpEnv>();
+        app.use('*', (context, next) => {
+          context.set('userId', conversation.userId);
+          return next();
+        });
+        app.route('/api', http(host));
+        const response = await app.request(
+          `/api/session/${conversation.chatId}/stream`,
+        );
+        assert.equal(response.status, 200);
+        assert.equal(
+          response.headers.get('x-vercel-ai-ui-message-stream'),
+          'v1',
+        );
+        assert.ok(response.body);
+        const chunks = await Array.fromAsync(
+          parseJsonEventStream({
+            stream: response.body,
+            schema: uiMessageChunkSchema,
+          }),
+          (chunk) => {
+            assert.ok(chunk.success, 'every SSE frame is a UI message chunk');
+            return chunk.value;
+          },
+        );
+        assert.deepEqual(
+          compactionEvents(chunks),
+          events,
+          'DevTool HTTP transport preserves the events',
+        );
+        const finalPrompt = JSON.stringify(model.doStreamCalls.at(-1)?.prompt);
+        assert.match(finalPrompt, /Previous conversation summary/);
+        assert.match(finalPrompt, /Inspect six files for CASE-42/);
+        assert.doesNotMatch(finalPrompt, /File 1 evidence/);
+        const original = await host.observe(conversation).engine.getMessages();
+        for (let step = 1; step <= 6; step++)
+          assert.match(
+            JSON.stringify(original),
+            new RegExp(`File ${step} evidence`),
+          );
+        assert.doesNotMatch(
+          JSON.stringify(original),
+          /Previous conversation summary/,
+        );
+        assert.doesNotMatch(finalPrompt, /data-compaction/);
+        const session = await app.request(
+          `/api/session/${conversation.chatId}`,
+        );
+        assert.equal(session.status, 200);
+        const transcript = transcriptSchema.parse(await session.json());
+        assert.deepEqual(
+          transcript.messages.flatMap((message) =>
+            message.parts.flatMap((part) =>
+              part.type === 'data-compaction' ? [part.data] : [],
+            ),
           ),
-        ),
-        events,
-        'reopening the conversation retains each lifecycle event exactly once',
-      );
-      const saved = (await store.getChat(conversation.chatId))?.metadata
-        ?.zukhruf;
-      assert.ok(saved && typeof saved === 'object' && 'compaction' in saved);
+          events,
+          'reopening the conversation retains each lifecycle event exactly once',
+        );
+        const saved = (await store.getChat(conversation.chatId))?.metadata
+          ?.zukhruf;
+        assert.ok(saved && typeof saved === 'object' && 'compaction' in saved);
 
-      await host[Symbol.asyncDispose]();
-      const resumedRuntime = new AgentRuntime(root);
-      await using resumed = await resumedRuntime.initialize(stack);
-      await resumed.work();
-      const calls = summary.doGenerateCalls.length;
-      const restored = await send(resumed, 'What did you find?');
-      assert.equal(restored.status?.status, 'completed');
-      assert.equal(compactionEvents(restored.chunks)[0]?.status, 'restored');
-      assert.equal(
-        summary.doGenerateCalls.length,
-        calls + (name === 'messages' ? 1 : 0),
-        'restart restores the checkpoint, then evaluates triggers on the new context',
-      );
-      assert.match(
-        JSON.stringify(model.doStreamCalls.at(-1)?.prompt),
-        /Previous conversation summary/,
-      );
-      assert.doesNotMatch(
-        JSON.stringify(model.doStreamCalls.at(-1)?.prompt),
-        /File 1 evidence/,
-      );
+        await host[Symbol.asyncDispose]();
+        const resumedRuntime = new AgentRuntime(root);
+        await using resumed = await resumedRuntime.initialize(stack);
+        await resumed.work();
+        const calls = summary.doGenerateCalls.length;
+        const restored = await send(resumed, 'What did you find?');
+        assert.equal(restored.status?.status, 'completed');
+        assert.equal(compactionEvents(restored.chunks)[0]?.status, 'restored');
+        assert.equal(
+          summary.doGenerateCalls.length,
+          calls + (name === 'messages' ? 1 : 0),
+          'restart restores the checkpoint, then evaluates triggers on the new context',
+        );
+        assert.match(
+          JSON.stringify(model.doStreamCalls.at(-1)?.prompt),
+          /Previous conversation summary/,
+        );
+        assert.doesNotMatch(
+          JSON.stringify(model.doStreamCalls.at(-1)?.prompt),
+          /File 1 evidence/,
+        );
 
-      // A rewind before the checkpoint must not apply a summary from the future.
-      assert.equal(
-        (
-          await send(
-            resumed,
-            'Inspect six files for CASE-42.',
-            'regenerate-message',
-            original[0].id,
-          )
-        ).status?.status,
-        'completed',
-      );
-      assert.doesNotMatch(
-        JSON.stringify(model.doStreamCalls.at(-1)?.prompt),
-        /Previous conversation summary/,
-      );
-    },
-  );
-}
+        // A rewind before the checkpoint must not apply a summary from the future.
+        assert.equal(
+          (
+            await send(
+              resumed,
+              'Inspect six files for CASE-42.',
+              'regenerate-message',
+              original[0].id,
+            )
+          ).status?.status,
+          'completed',
+        );
+        assert.doesNotMatch(
+          JSON.stringify(model.doStreamCalls.at(-1)?.prompt),
+          /Previous conversation summary/,
+        );
+      },
+    ),
+);
 
 test(
   'summary failures stop sampling without replacing history or an existing checkpoint',
@@ -1894,25 +1905,23 @@ test(
   },
 );
 
-test('compaction is opt-in and validates its budget and triggers', () => {
+void test.each(
+  [0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1],
+  (targetTokens) =>
+    test(`compaction rejects targetTokens ${targetTokens}`, () => {
+      assert.throws(
+        () =>
+          declaration(new MockLanguageModelV4(), {
+            ...compaction(summarizer()),
+            targetTokens,
+          }),
+        /targetTokens/,
+      );
+    }),
+);
+
+test('compaction is opt-in and validates its triggers', () => {
   assert.equal(declaration(new MockLanguageModelV4()).compaction, undefined);
-  for (const targetTokens of [
-    0,
-    -1,
-    1.5,
-    NaN,
-    Infinity,
-    Number.MAX_SAFE_INTEGER + 1,
-  ]) {
-    assert.throws(
-      () =>
-        declaration(new MockLanguageModelV4(), {
-          ...compaction(summarizer()),
-          targetTokens,
-        }),
-      /targetTokens/,
-    );
-  }
   assert.throws(
     () =>
       declaration(new MockLanguageModelV4(), {

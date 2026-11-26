@@ -4,6 +4,7 @@
  * `TIMESTAMPTZ 'epoch'`. Remove this module and its parser retry once
  * node-sql-parser supports PostgreSQL typed string constants natively.
  */
+import z from 'zod';
 
 const TYPE_BEFORE_LITERAL =
   /(?<type>(?:pg_catalog\.)?[A-Za-z_][A-Za-z0-9_$]*(?:\s+(?:varying|precision))?(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?(?:\s+(?:with|without)\s+time\s+zone)?)\s*$/i;
@@ -45,14 +46,17 @@ export function recoverPostgresTypedLiteralParserGap(
   );
 }
 
+/**
+ * The peggy syntax error that node-sql-parser 5.4.0 throws: a plain object,
+ * not an Error, with the position where parsing stopped.
+ */
+const parserSyntaxError = z.object({
+  location: z.object({ start: z.object({ offset: z.number() }) }),
+});
+
 function parserErrorOffset(error: unknown): number | null {
-  if (typeof error !== 'object' || error === null) return null;
-  const location = Reflect.get(error, 'location');
-  if (typeof location !== 'object' || location === null) return null;
-  const start = Reflect.get(location, 'start');
-  if (typeof start !== 'object' || start === null) return null;
-  const offset = Reflect.get(start, 'offset');
-  return typeof offset === 'number' ? offset : null;
+  const parsed = parserSyntaxError.safeParse(error);
+  return parsed.success ? parsed.data.location.start.offset : null;
 }
 
 function findLiteralEnd(sql: string, start: number): number | null {

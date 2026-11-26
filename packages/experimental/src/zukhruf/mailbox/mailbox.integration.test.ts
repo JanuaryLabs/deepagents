@@ -1,9 +1,9 @@
 import { TemporaryFiles } from '@zukhruf/fs';
+import { describe, it } from '@zukhruf/parameterized-test';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { describe, it } from 'node:test';
 
 import {
   type InterAgentCommunication,
@@ -82,7 +82,7 @@ const backings = [
   { name: 'PostgreSQL', create: postgresBacking },
 ];
 
-for (const backing of backings) {
+void describe.each(backings, (backing) =>
   describe(`zukhruf mailbox on ${backing.name}`, () => {
     it('drains only the leading queue-only prefix before a trigger', async () => {
       await using mailbox = await backing.create();
@@ -310,8 +310,8 @@ for (const backing of backings) {
         turnEnded: false,
       });
     });
-  });
-}
+  }),
+);
 
 describe('SqliteMailboxStore', () => {
   it('waits for cross-process writers while enqueueing and draining in FIFO order', async () => {

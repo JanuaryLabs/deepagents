@@ -133,8 +133,9 @@ const pages: Array<{
   },
 ];
 
-for (const { name, path, route, Page, endpoint, body } of pages) {
-  it(`shows the finished run on the ${name} as soon as the run ends`, async () => {
+it.each(pages.map((page) => [page.name, page] as const))(
+  'shows the finished run on the %s as soon as the run ends',
+  async (_name, { path, route, Page, endpoint, body }) => {
     let finished = false;
     const unexpected: string[] = [];
     vi.stubGlobal(
@@ -177,5 +178,5 @@ for (const { name, path, route, Page, endpoint, body } of pages) {
       FakeEventSource.instances = [];
       vi.unstubAllGlobals();
     }
-  });
-}
+  },
+);

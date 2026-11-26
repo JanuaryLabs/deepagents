@@ -1,7 +1,7 @@
 import { createOpenAI } from '@ai-sdk/openai';
+import { it } from '@zukhruf/parameterized-test';
 import { streamText, toUIMessageStream } from 'ai';
 import assert from 'node:assert/strict';
-import { it } from 'node:test';
 
 import {
   PollingChangeSource,
@@ -9,7 +9,7 @@ import {
   StreamManager,
 } from '@deepagents/context';
 
-for (const complete of [false, true]) {
+void it.each([false, true], (complete) =>
   it(`persists a provider stream that ${complete ? 'finishes normally' : 'closes before its finish event'}`, async () => {
     const store = new SqliteStreamStore(':memory:');
     let requests = 0;
@@ -83,5 +83,5 @@ for (const complete of [false, true]) {
     } finally {
       store.close();
     }
-  });
-}
+  }),
+);

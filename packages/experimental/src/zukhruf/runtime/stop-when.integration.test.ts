@@ -1,11 +1,11 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
+import { test } from '@zukhruf/parameterized-test';
 import { open } from '@zukhruf/sqlite-open';
 import { waitFor } from '@zukhruf/testing/async';
 import { hasToolCall, isStepCount, tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
-import test from 'node:test';
 import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
 
@@ -52,73 +52,72 @@ const stack = defineStack(async (resources) => {
   };
 });
 
-for (const stopWhen of [
-  isStepCount(1),
-  [hasToolCall('notify'), isStepCount(6)],
-]) {
-  test(`queued sandboxed agent honors ${Array.isArray(stopWhen) ? 'tool' : 'step'} stop condition`, async () => {
-    // Only inference is prescribed; queue, runtime, tools, history and streams are real.
-    const model: MockLanguageModelV4 = new MockLanguageModelV4({
-      doStream: async () => {
-        assert.equal(
-          model.doStreamCalls.length,
-          1,
-          'stopWhen must prevent another sample',
-        );
-        return {
-          stream: ReadableStream.from([
-            {
-              type: 'tool-call' as const,
-              toolCallId: 'notify-1',
-              toolName: 'notify',
-              input: '{}',
-            },
-            {
-              type: 'finish' as const,
-              finishReason: {
-                unified: 'tool-calls' as const,
-                raw: undefined,
+void test.each(
+  [isStepCount(1), [hasToolCall('notify'), isStepCount(6)]],
+  (stopWhen) =>
+    test(`queued sandboxed agent honors ${Array.isArray(stopWhen) ? 'tool' : 'step'} stop condition`, async () => {
+      // Only inference is prescribed; queue, runtime, tools, history and streams are real.
+      const model: MockLanguageModelV4 = new MockLanguageModelV4({
+        doStream: async () => {
+          assert.equal(
+            model.doStreamCalls.length,
+            1,
+            'stopWhen must prevent another sample',
+          );
+          return {
+            stream: ReadableStream.from([
+              {
+                type: 'tool-call' as const,
+                toolCallId: 'notify-1',
+                toolName: 'notify',
+                input: '{}',
               },
-              usage,
-            },
-          ]),
-        };
-      },
-    });
-    let deliveries = 0;
-    const declaration = defineAgent({
-      name: 'observer',
-      model,
-      instructions: [],
-      stopWhen,
-      sandbox: defineSandbox(new VirtualSandboxEnvironment()),
-      tools: {
-        notify: tool({
-          inputSchema: z.object({}),
-          execute: () => ++deliveries,
-        }),
-      },
-    });
-    const runtime = new AgentRuntime(declaration);
-    await using host = await runtime.initialize(stack);
-    const conversation = { chatId: 'observations', userId: 'owner' };
-    const turn = await host.enqueue(
-      conversation,
-      userTurn('event-1', 'Notify once.'),
-    );
-    await host.work();
-    await Array.fromAsync(turn.stream);
-    assert.equal(
-      (await host.observe(conversation).status(turn.id))?.status,
-      'completed',
-    );
-    assert.equal(deliveries, 1);
-    assert.equal(model.doStreamCalls.length, 1);
-    const names = model.doStreamCalls[0].tools?.map((tool) => tool.name);
-    for (const name of ['bash', 'readFile', 'writeFile'])
-      assert.equal(names?.includes(name), true);
-  });
-}
+              {
+                type: 'finish' as const,
+                finishReason: {
+                  unified: 'tool-calls' as const,
+                  raw: undefined,
+                },
+                usage,
+              },
+            ]),
+          };
+        },
+      });
+      let deliveries = 0;
+      const declaration = defineAgent({
+        name: 'observer',
+        model,
+        instructions: [],
+        stopWhen,
+        sandbox: defineSandbox(new VirtualSandboxEnvironment()),
+        tools: {
+          notify: tool({
+            inputSchema: z.object({}),
+            execute: () => ++deliveries,
+          }),
+        },
+      });
+      const runtime = new AgentRuntime(declaration);
+      await using host = await runtime.initialize(stack);
+      const conversation = { chatId: 'observations', userId: 'owner' };
+      const turn = await host.enqueue(
+        conversation,
+        userTurn('event-1', 'Notify once.'),
+      );
+      await host.work();
+      await Array.fromAsync(turn.stream);
+      assert.equal(
+        (await host.observe(conversation).status(turn.id))?.status,
+        'completed',
+      );
+      assert.equal(deliveries, 1);
+      assert.equal(model.doStreamCalls.length, 1);
+      const names = model.doStreamCalls[0].tools?.map((tool) => tool.name);
+      for (const name of ['bash', 'readFile', 'writeFile'])
+        assert.equal(names?.includes(name), true);
+    }),
+);
 
 test('a truncated tool input cannot park the next queued user turn', async (t) => {
   let queryExecutions = 0;

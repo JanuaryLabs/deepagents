@@ -17,6 +17,21 @@ const indexHintRow = z.object({
   clustering_ordinal_position: int64.nullable(),
 });
 
+/** Reading the index hints of a dataset failed; the run goes on without them. */
+class IndexHintsWarning extends Error {
+  readonly code = 'DEEPAGENTS_TEXT2SQL_BIGQUERY_INDEX_HINTS_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, dataset: string) {
+    super(
+      `Reading the partitioning and clustering columns of a dataset failed, and indexing goes on without its index hints: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'IndexHintsWarning';
+    this.detail = `dataset: ${dataset}`;
+  }
+}
+
 export interface BigQueryIndexesGroundingConfig extends IndexesGroundingConfig {}
 
 export class BigQueryIndexesGrounding extends IndexesGrounding {
@@ -52,8 +67,9 @@ export class BigQueryIndexesGrounding extends IndexesGrounding {
       }
       try {
         await this.#batchIndexes(dataset, tables);
-      } catch {
-        // Skip silently — indexes are non-critical
+      } catch (error) {
+        // Indexes are non-critical: the run goes on without them.
+        process.emitWarning(new IndexHintsWarning(error, dataset));
       }
     }
   }

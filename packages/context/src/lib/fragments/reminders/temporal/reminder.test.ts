@@ -1,6 +1,7 @@
+import { describe, it } from '@zukhruf/parameterized-test';
 import type { UIMessage } from 'ai';
 import assert from 'node:assert';
-import { type TestContext, describe, it } from 'node:test';
+import type { TestContext } from 'node:test';
 
 import {
   ContextEngine,
@@ -654,40 +655,40 @@ describe('seasonReminder', () => {
     });
   });
 
-  it('computes seasons correctly', async (t) => {
-    const cases: Array<{ date: string; expected: string }> = [
+  void it.each(
+    [
       { date: '2026-01-15T00:00:00.000Z', expected: 'Winter' },
       { date: '2026-04-15T00:00:00.000Z', expected: 'Spring' },
       { date: '2026-07-15T00:00:00.000Z', expected: 'Summer' },
       { date: '2026-10-15T00:00:00.000Z', expected: 'Fall' },
       { date: '2026-12-01T00:00:00.000Z', expected: 'Winter' },
-    ];
+    ],
+    ({ date, expected }) =>
+      it(`computes the season of ${date} as ${expected}`, async (t) => {
+        await useFakeTime(t.mock, date, async () => {
+          const store = new InMemoryContextStore();
+          const engine = new ContextEngine({
+            store,
+            chatId: `season-${date}`,
+            userId: 'u1',
+          });
 
-    for (const { date, expected } of cases) {
-      await useFakeTime(t.mock, date, async () => {
-        const store = new InMemoryContextStore();
-        const engine = new ContextEngine({
-          store,
-          chatId: `season-${date}`,
-          userId: 'u1',
+          engine.set(seasonReminder(), user('hello'));
+          await engine.save();
+
+          const { messages } = await engine.resolve({
+            renderer: new XmlRenderer(),
+            sandbox: await buildSandbox(),
+          });
+          const allText = getTextParts(getLastUserMessage(messages)).join('');
+
+          assert.ok(
+            allText.includes(expected),
+            `${date} should be ${expected}. Got: ${allText}`,
+          );
         });
-
-        engine.set(seasonReminder(), user('hello'));
-        await engine.save();
-
-        const { messages } = await engine.resolve({
-          renderer: new XmlRenderer(),
-          sandbox: await buildSandbox(),
-        });
-        const allText = getTextParts(getLastUserMessage(messages)).join('');
-
-        assert.ok(
-          allText.includes(expected),
-          `${date} should be ${expected}. Got: ${allText}`,
-        );
-      });
-    }
-  });
+      }),
+  );
 });
 
 describe('localeReminder', () => {

@@ -8,6 +8,19 @@ import {
 import type { Column, GroundingContext } from '../groundings/context.ts';
 import { numericValue } from '../groundings/rows.ts';
 
+/** Reading the distinct-value estimates from the statistics histograms failed; the columns get no cached estimate. */
+class DistinctEstimatesWarning extends Error {
+  readonly code = 'DEEPAGENTS_TEXT2SQL_SQLSERVER_DISTINCT_ESTIMATES_FAILED';
+
+  constructor(failure: unknown) {
+    super(
+      `Reading the distinct-value estimates of the statistics histograms failed, and column stats go on without them: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'DistinctEstimatesWarning';
+  }
+}
+
 /**
  * Distinct-value estimate per statistics column. OBJECT_SCHEMA_NAME,
  * OBJECT_NAME and COL_NAME return NULL for an object the caller cannot see;
@@ -92,8 +105,9 @@ export class SqlServerColumnStatsGrounding extends ColumnStatsGrounding {
         }
         map.set(row.column_name, nDistinct);
       }
-    } catch {
+    } catch (error) {
       // sys.dm_db_stats_histogram requires SQL Server 2016 SP1+
+      process.emitWarning(new DistinctEstimatesWarning(error));
     }
   }
 

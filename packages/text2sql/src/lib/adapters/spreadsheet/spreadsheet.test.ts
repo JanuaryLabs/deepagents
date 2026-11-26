@@ -1,9 +1,9 @@
 import { TemporaryFiles } from '@zukhruf/fs';
+import { describe, it } from '@zukhruf/parameterized-test';
 import { open } from '@zukhruf/sqlite-open';
 import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
-import { describe, it } from 'node:test';
 import XLSX from 'xlsx';
 
 import {
@@ -624,59 +624,61 @@ describe('Spreadsheet Adapter', () => {
       );
     });
 
-    for (const { failing, maxPages, write } of [
-      {
-        failing: 'loading a sheet',
-        maxPages: 3,
-        write: (directory: string) => {
-          const file = path.join(directory, 'notes.csv');
-          createCSV(
-            file,
-            Array.from({ length: 20 }, (_, id) => ({
-              id,
-              note: 'x'.repeat(2000),
-            })),
-          );
-          return file;
-        },
-      },
-      {
-        // The first sheet fits in two pages; the second sheet's table needs
-        // a third, so its CREATE TABLE fails.
-        failing: "creating a later sheet's table",
-        maxPages: 2,
-        write: (directory: string) => {
-          const file = path.join(directory, 'book.xlsx');
-          createExcel(file, { first: [{ id: 1 }], second: [{ id: 2 }] });
-          return file;
-        },
-      },
-    ]) {
-      it(`closes its database when ${failing} fails`, async () => {
-        await using directory = await temporaryFiles.directory(
-          'text2sql-spreadsheet-',
-        );
-        const file = write(directory.path);
-        const database = `file:sheet-${crypto.randomUUID()}?mode=memory&cache=shared`;
+    void it.each(
+      [
         {
-          using holder = open(database);
-          holder.exec(`PRAGMA max_page_count = ${maxPages}`);
-          assert.throws(
-            () => new Spreadsheet({ file, database, grounding: [] }),
-            { errcode: 13, message: /database or disk is full/ },
+          failing: 'loading a sheet',
+          maxPages: 3,
+          write: (directory: string) => {
+            const file = path.join(directory, 'notes.csv');
+            createCSV(
+              file,
+              Array.from({ length: 20 }, (_, id) => ({
+                id,
+                note: 'x'.repeat(2000),
+              })),
+            );
+            return file;
+          },
+        },
+        {
+          // The first sheet fits in two pages; the second sheet's table needs
+          // a third, so its CREATE TABLE fails.
+          failing: "creating a later sheet's table",
+          maxPages: 2,
+          write: (directory: string) => {
+            const file = path.join(directory, 'book.xlsx');
+            createExcel(file, { first: [{ id: 1 }], second: [{ id: 2 }] });
+            return file;
+          },
+        },
+      ],
+      ({ failing, maxPages, write }) =>
+        it(`closes its database when ${failing} fails`, async () => {
+          await using directory = await temporaryFiles.directory(
+            'text2sql-spreadsheet-',
           );
-        }
+          const file = write(directory.path);
+          const database = `file:sheet-${crypto.randomUUID()}?mode=memory&cache=shared`;
+          {
+            using holder = open(database);
+            holder.exec(`PRAGMA max_page_count = ${maxPages}`);
+            assert.throws(
+              () => new Spreadsheet({ file, database, grounding: [] }),
+              { errcode: 13, message: /database or disk is full/ },
+            );
+          }
 
-        // A shared-cache in-memory database lives only while a connection
-        // holds it, so a fresh one finds it empty unless the adapter's
-        // connection is still open.
-        using fresh = open(database);
-        assert.deepStrictEqual(
-          fresh.prepare('SELECT name FROM sqlite_schema').all(),
-          [],
-        );
-      });
-    }
+          // A shared-cache in-memory database lives only while a connection
+          // holds it, so a fresh one finds it empty unless the adapter's
+          // connection is still open.
+          using fresh = open(database);
+          assert.deepStrictEqual(
+            fresh.prepare('SELECT name FROM sqlite_schema').all(),
+            [],
+          );
+        }),
+    );
   });
 
   describe('Data type handling', () => {

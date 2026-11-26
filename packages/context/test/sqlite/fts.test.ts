@@ -1,6 +1,6 @@
+import { describe, it } from '@zukhruf/parameterized-test';
 import { Sqlite } from '@zukhruf/testing/sqlite';
 import assert from 'node:assert';
-import { describe, it } from 'node:test';
 
 import {
   ContextEngine,
@@ -14,60 +14,64 @@ const sqlite = new Sqlite();
 
 describe('Full-Text Search', () => {
   describe('Search Query Syntax', () => {
-    it("throws SearchQuerySyntaxError with SQLite's error as the cause when a query is not valid FTS5 syntax", async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'syntax-chat',
-        userId: 'alice',
-      });
-      engine.set(user('A well-known fix: now'));
-      await engine.save();
-
-      for (const [query, cause] of [
+    void it.each(
+      [
         ['well-known', 'no such column: known'],
         ['fix: now', 'no such column: fix'],
-      ]) {
-        const error = await store.searchMessages('syntax-chat', query).then(
-          () => assert.fail(`expected ${query} to be rejected`),
-          (rejection: unknown) => rejection,
-        );
-        assert.ok(error instanceof SearchQuerySyntaxError);
-        assert.match(error.message, /not valid FTS5 syntax.*"well-known"/);
-        assert.ok(Error.isError(error.cause));
-        assert.strictEqual(error.cause.message, cause);
-        assert.ok('errcode' in error.cause);
-        assert.strictEqual(error.cause.errcode, 1);
-      }
-    });
+      ] as const,
+      ([query, cause]) =>
+        it(`throws SearchQuerySyntaxError with SQLite's error as the cause when the query ${query} is not valid FTS5 syntax`, async () => {
+          await using database = await sqlite.database();
+          const store = new SqliteContextStore(database.connection);
+          const engine = new ContextEngine({
+            store,
+            chatId: 'syntax-chat',
+            userId: 'alice',
+          });
+          engine.set(user('A well-known fix: now'));
+          await engine.save();
 
-    it("throws SearchQuerySyntaxError with SQLite's error as the cause for an unknown special query and a NEAR distance that is not an integer", async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteContextStore(database.connection);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'syntax-chat',
-        userId: 'alice',
-      });
-      engine.set(user('hello world'));
-      await engine.save();
+          const error = await store.searchMessages('syntax-chat', query).then(
+            () => assert.fail(`expected ${query} to be rejected`),
+            (rejection: unknown) => rejection,
+          );
+          assert.ok(error instanceof SearchQuerySyntaxError);
+          assert.match(error.message, /not valid FTS5 syntax.*"well-known"/);
+          assert.ok(Error.isError(error.cause));
+          assert.strictEqual(error.cause.message, cause);
+          assert.ok('errcode' in error.cause);
+          assert.strictEqual(error.cause.errcode, 1);
+        }),
+    );
 
-      for (const [query, cause] of [
+    void it.each(
+      [
         ['*', 'unknown special query: '],
         ['NEAR(hello world, x)', 'expected integer, got "x"'],
-      ]) {
-        const error = await store.searchMessages('syntax-chat', query).then(
-          () => assert.fail(`expected ${query} to be rejected`),
-          (rejection: unknown) => rejection,
-        );
-        assert.ok(error instanceof SearchQuerySyntaxError);
-        assert.ok(Error.isError(error.cause));
-        assert.strictEqual(error.cause.message, cause);
-        assert.ok('errcode' in error.cause);
-        assert.strictEqual(error.cause.errcode, 1);
-      }
-    });
+      ] as const,
+      ([query, cause]) =>
+        it(`throws SearchQuerySyntaxError with SQLite's error as the cause for the query ${query}, an unknown special query or a NEAR distance that is not an integer`, async () => {
+          await using database = await sqlite.database();
+          const store = new SqliteContextStore(database.connection);
+          const engine = new ContextEngine({
+            store,
+            chatId: 'syntax-chat',
+            userId: 'alice',
+          });
+          engine.set(user('hello world'));
+          await engine.save();
+
+          const error = await store.searchMessages('syntax-chat', query).then(
+            () => assert.fail(`expected ${query} to be rejected`),
+            (rejection: unknown) => rejection,
+          );
+          assert.ok(error instanceof SearchQuerySyntaxError);
+          assert.ok(Error.isError(error.cause));
+          assert.strictEqual(error.cause.message, cause);
+          assert.ok('errcode' in error.cause);
+          assert.strictEqual(error.cause.errcode, 1);
+        }),
+    );
 
     it("keeps SQLite's own error when a search fails for a reason other than the query", async () => {
       await using database = await sqlite.database();

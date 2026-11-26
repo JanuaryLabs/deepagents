@@ -1,6 +1,7 @@
 /** Live adapter contract tests for SQL policy enforcement. */
 import type { Dataset } from '@google-cloud/bigquery';
 import { TemporaryFiles } from '@zukhruf/fs';
+import { describe, it } from '@zukhruf/parameterized-test';
 import { BigQuery as TestBigQuery } from '@zukhruf/testing/bigquery';
 import { type MysqlDatabase, Mysql as TestMysql } from '@zukhruf/testing/mysql';
 import { Postgres as TestPostgres } from '@zukhruf/testing/postgres';
@@ -10,7 +11,7 @@ import sql from 'mssql';
 import assert from 'node:assert';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { type MockTracker, type TestContext, describe, it } from 'node:test';
+import type { MockTracker, TestContext } from 'node:test';
 import type pg from 'pg';
 import { z } from 'zod';
 
@@ -490,11 +491,6 @@ async function startBigQueryRuntime(): Promise<BigQueryRuntime | undefined> {
       [Symbol.asyncDispose]: () => owned.disposeAsync(),
     };
   } catch (error) {
-    try {
-      await resources.disposeAsync();
-    } catch {
-      // Preserve the fixture's skip policy even if cleanup also fails.
-    }
     console.log(
       `Skipping BigQuery SQL policy tests: ${
         Error.isError(error) ? error.message : String(error)
@@ -669,7 +665,7 @@ const adapterCases: AdapterCase[] = [
   },
 ];
 
-for (const adapterCase of adapterCases) {
+void describe.each(adapterCases, (adapterCase) =>
   describe(`${adapterCase.name} SQL policy`, () => {
     async function acquireRuntime(t: TestContext) {
       const runtime = await adapterCase.setup();
@@ -865,8 +861,8 @@ for (const adapterCase of adapterCases) {
       assert.strictEqual(probes.validate.mock.callCount(), 0);
       assert.strictEqual(probes.execute.mock.callCount(), 0);
     });
-  });
-}
+  }),
+);
 
 describe('sqlite SQL policy traversal', () => {
   it('uses the closest supported parser dialect for sqlite reserved identifiers', async (t) => {

@@ -1,12 +1,12 @@
 import { serve } from '@hono/node-server';
 import { TemporaryFiles } from '@zukhruf/fs';
+import { test } from '@zukhruf/parameterized-test';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { MockLanguageModelV4 } from 'ai/test';
 import { Hono } from 'hono';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { Server } from 'node:http';
-import test from 'node:test';
 import { PgBoss } from 'pg-boss';
 
 import { VirtualSandboxEnvironment } from '@deepagents/context';
@@ -94,9 +94,16 @@ async function readToEnd(reader: ReadableStreamDefaultReader<string>) {
   }
 }
 
-for (const { name, open } of storages) {
-  for (const crossProcess of [false, true]) {
-    const statusChanges = crossProcess ? 'cross-process' : 'in-process';
+void test.each(
+  storages.flatMap(({ name, open }) =>
+    [false, true].map((crossProcess) => ({
+      name,
+      open,
+      crossProcess,
+      statusChanges: crossProcess ? 'cross-process' : 'in-process',
+    })),
+  ),
+  ({ name, open, crossProcess, statusChanges }) =>
     test(`${name}, ${statusChanges} status: disposing the runtime ends an open GET /events stream and every later one, and the server's close then completes`, async (t) => {
       await using resources = new AsyncDisposableStack();
       const { storage, boss } = await open(resources);
@@ -163,6 +170,5 @@ for (const { name, open } of storages) {
         error ? closed.reject(error) : closed.resolve(),
       );
       await closed.promise;
-    });
-  }
-}
+    }),
+);

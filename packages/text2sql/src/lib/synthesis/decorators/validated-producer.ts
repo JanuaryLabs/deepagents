@@ -61,12 +61,8 @@ export class ValidatedProducer extends PairProducer<ValidatedPair> {
 
         let rowCount: number | undefined;
         if (this.#options.execute) {
-          try {
-            const result = await this.#adapter.execute(pair.sql);
-            rowCount = Array.isArray(result) ? result.length : undefined;
-          } catch {
-            // no op
-          }
+          const result = await this.#adapter.execute(pair.sql);
+          rowCount = Array.isArray(result) ? result.length : undefined;
         }
 
         validated.push({

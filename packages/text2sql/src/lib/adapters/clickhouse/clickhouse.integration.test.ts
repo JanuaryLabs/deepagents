@@ -1,7 +1,7 @@
+import { describe, it } from '@zukhruf/parameterized-test';
 import { ClickHouse as TestClickHouse } from '@zukhruf/testing/clickhouse';
 import type { ServiceContainer } from '@zukhruf/testing/docker';
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
 import { z } from 'zod';
 
 import {
@@ -132,7 +132,7 @@ async function createSchema(service: ServiceContainer): Promise<void> {
   assert.strictEqual(exitCode, 0, output);
 }
 
-for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
+void describe.each(CLICKHOUSE_IMAGES, (CLICKHOUSE_IMAGE) =>
   describe(`ClickHouse adapter (${CLICKHOUSE_IMAGE})`, () => {
     it('executes a grounded SELECT through the public adapter', async () => {
       const container = await new TestClickHouse({
@@ -503,183 +503,204 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
       }
     });
 
-    it('rejects table functions before they reach the consumer validator', async () => {
-      const container = await new TestClickHouse({
-        environment: process.env,
-        image: CLICKHOUSE_IMAGE,
-      }).start();
-      try {
-        await createSchema(container);
+    void it.each(
+      [
+        'SELECT * FROM numbers(10)',
+        "SELECT * FROM file('fixture.csv', CSV, 'value String')",
+        "SELECT * FROM url('https://example.com/data.csv', CSV, 'value String')",
+        "SELECT * FROM s3('https://example.com/bucket/file.csv', CSV, 'value String')",
+        "SELECT * FROM remote('127.0.0.1', 'analytics.users')",
+      ],
+      (sql) =>
+        it(`rejects the table function in ${JSON.stringify(sql)} before it reaches the consumer validator`, async () => {
+          const container = await new TestClickHouse({
+            environment: process.env,
+            image: CLICKHOUSE_IMAGE,
+          }).start();
+          try {
+            await createSchema(container);
 
-        const databaseQueries: string[] = [];
-        const endpoint = new URL(`http://${container.host}:${container.port}/`);
-        endpoint.searchParams.set('user', USER);
-        endpoint.searchParams.set('password', PASSWORD);
-        endpoint.searchParams.set('database', DATABASE);
-        endpoint.searchParams.set('default_format', 'JSON');
+            const databaseQueries: string[] = [];
+            const endpoint = new URL(
+              `http://${container.host}:${container.port}/`,
+            );
+            endpoint.searchParams.set('user', USER);
+            endpoint.searchParams.set('password', PASSWORD);
+            endpoint.searchParams.set('database', DATABASE);
+            endpoint.searchParams.set('default_format', 'JSON');
 
-        const query = async (sql: string) => {
-          databaseQueries.push(sql);
-          const response = await fetch(endpoint, { method: 'POST', body: sql });
-          if (!response.ok) {
-            throw new Error(await response.text());
+            const query = async (sql: string) => {
+              databaseQueries.push(sql);
+              const response = await fetch(endpoint, {
+                method: 'POST',
+                body: sql,
+              });
+              if (!response.ok) {
+                throw new Error(await response.text());
+              }
+              const result = clickHouseJsonResult.parse(await response.json());
+              if (result.exception) throw new Error(result.exception);
+              return result;
+            };
+
+            let validatorCalls = 0;
+            const adapter = new ClickHouse({
+              defaultDatabase: DATABASE,
+              execute: query,
+              grounding: [],
+              validate: async () => {
+                validatorCalls++;
+              },
+            });
+
+            assert.equal(
+              await adapter.validate(sql),
+              'only SELECT or WITH queries allowed',
+            );
+            assert.ok(!databaseQueries.includes(sql));
+
+            assert.equal(validatorCalls, 0);
+            assert.ok(
+              !databaseQueries.some((queryText) =>
+                queryText.startsWith('EXPLAIN QUERY TREE'),
+              ),
+            );
+          } finally {
+            await container.cleanup();
           }
-          const result = clickHouseJsonResult.parse(await response.json());
-          if (result.exception) throw new Error(result.exception);
-          return result;
-        };
+        }),
+    );
 
-        let validatorCalls = 0;
-        const adapter = new ClickHouse({
-          defaultDatabase: DATABASE,
-          execute: query,
-          grounding: [],
-          validate: async () => {
-            validatorCalls++;
-          },
-        });
-        const statements = [
-          'SELECT * FROM numbers(10)',
-          "SELECT * FROM file('fixture.csv', CSV, 'value String')",
-          "SELECT * FROM url('https://example.com/data.csv', CSV, 'value String')",
-          "SELECT * FROM s3('https://example.com/bucket/file.csv', CSV, 'value String')",
-          "SELECT * FROM remote('127.0.0.1', 'analytics.users')",
-        ];
+    void it.each(
+      [
+        "SELECT * FROM users INTO OUTFILE '/tmp/users.tsv'",
+        'ALTER TABLE users DELETE WHERE id = 1',
+        'SELECT * FROM users; SELECT * FROM users',
+        'SELECT FROM users',
+      ],
+      (sql) =>
+        it(`rejects ${JSON.stringify(sql)}: outfile, mutations, multiple statements, and malformed SQL`, async () => {
+          const container = await new TestClickHouse({
+            environment: process.env,
+            image: CLICKHOUSE_IMAGE,
+          }).start();
+          try {
+            await createSchema(container);
 
-        for (const sql of statements) {
-          assert.equal(
-            await adapter.validate(sql),
-            'only SELECT or WITH queries allowed',
-          );
-          assert.ok(!databaseQueries.includes(sql));
-        }
+            const databaseQueries: string[] = [];
+            const endpoint = new URL(
+              `http://${container.host}:${container.port}/`,
+            );
+            endpoint.searchParams.set('user', USER);
+            endpoint.searchParams.set('password', PASSWORD);
+            endpoint.searchParams.set('database', DATABASE);
+            endpoint.searchParams.set('default_format', 'JSON');
 
-        assert.equal(validatorCalls, 0);
-        assert.ok(
-          !databaseQueries.some((queryText) =>
-            queryText.startsWith('EXPLAIN QUERY TREE'),
-          ),
-        );
-      } finally {
-        await container.cleanup();
-      }
-    });
+            const query = async (sql: string) => {
+              databaseQueries.push(sql);
+              const response = await fetch(endpoint, {
+                method: 'POST',
+                body: sql,
+              });
+              if (!response.ok) {
+                throw new Error(await response.text());
+              }
+              const result = clickHouseJsonResult.parse(await response.json());
+              if (result.exception) throw new Error(result.exception);
+              return result;
+            };
 
-    it('rejects outfile, mutations, multiple statements, and malformed SQL', async () => {
-      const container = await new TestClickHouse({
-        environment: process.env,
-        image: CLICKHOUSE_IMAGE,
-      }).start();
-      try {
-        await createSchema(container);
+            let validatorCalls = 0;
+            const adapter = new ClickHouse({
+              defaultDatabase: DATABASE,
+              execute: query,
+              grounding: [tables({ filter: [`${DATABASE}.users`] })],
+              validate: async () => {
+                validatorCalls++;
+              },
+            });
 
-        const databaseQueries: string[] = [];
-        const endpoint = new URL(`http://${container.host}:${container.port}/`);
-        endpoint.searchParams.set('user', USER);
-        endpoint.searchParams.set('password', PASSWORD);
-        endpoint.searchParams.set('database', DATABASE);
-        endpoint.searchParams.set('default_format', 'JSON');
-
-        const query = async (sql: string) => {
-          databaseQueries.push(sql);
-          const response = await fetch(endpoint, { method: 'POST', body: sql });
-          if (!response.ok) {
-            throw new Error(await response.text());
+            const result = await adapter.validate(sql);
+            assert.ok(typeof result === 'string');
+            assert.ok(
+              result === 'only SELECT or WITH queries allowed' ||
+                JSON.parse(result).error_type === 'SQL_SCOPE_PARSE_ERROR',
+            );
+            assert.ok(!databaseQueries.includes(sql));
+            assert.equal(validatorCalls, 0);
+          } finally {
+            await container.cleanup();
           }
-          const result = clickHouseJsonResult.parse(await response.json());
-          if (result.exception) throw new Error(result.exception);
-          return result;
-        };
+        }),
+    );
 
-        let validatorCalls = 0;
-        const adapter = new ClickHouse({
-          defaultDatabase: DATABASE,
-          execute: query,
-          grounding: [tables({ filter: [`${DATABASE}.users`] })],
-          validate: async () => {
-            validatorCalls++;
-          },
-        });
-        const statements = [
-          "SELECT * FROM users INTO OUTFILE '/tmp/users.tsv'",
-          'ALTER TABLE users DELETE WHERE id = 1',
-          'SELECT * FROM users; SELECT * FROM users',
-          'SELECT FROM users',
-        ];
+    void it.each(
+      [
+        {
+          sql: 'SELECT * EXCEPT team_id FROM users',
+          unknownNode: 'ColumnsTransformerList',
+        },
+        {
+          sql: 'SELECT id FROM users ORDER BY id WITH FILL FROM 0 TO 10 STEP 1',
+          unknownNode: 'FILL FROM',
+        },
+      ],
+      (fixture) =>
+        it(`fails closed on the unapproved real AST or query-tree node ${fixture.unknownNode}`, async () => {
+          const container = await new TestClickHouse({
+            environment: process.env,
+            image: CLICKHOUSE_IMAGE,
+          }).start();
+          try {
+            await createSchema(container);
 
-        for (const sql of statements) {
-          const result = await adapter.validate(sql);
-          assert.ok(typeof result === 'string');
-          assert.ok(
-            result === 'only SELECT or WITH queries allowed' ||
-              JSON.parse(result).error_type === 'SQL_SCOPE_PARSE_ERROR',
-          );
-          assert.ok(!databaseQueries.includes(sql));
-        }
-        assert.equal(validatorCalls, 0);
-      } finally {
-        await container.cleanup();
-      }
-    });
+            const databaseQueries: string[] = [];
+            const endpoint = new URL(
+              `http://${container.host}:${container.port}/`,
+            );
+            endpoint.searchParams.set('user', USER);
+            endpoint.searchParams.set('password', PASSWORD);
+            endpoint.searchParams.set('database', DATABASE);
+            endpoint.searchParams.set('default_format', 'JSON');
 
-    it('fails closed on unapproved real AST and query-tree nodes', async () => {
-      const container = await new TestClickHouse({
-        environment: process.env,
-        image: CLICKHOUSE_IMAGE,
-      }).start();
-      try {
-        await createSchema(container);
+            const query = async (sql: string) => {
+              databaseQueries.push(sql);
+              const response = await fetch(endpoint, {
+                method: 'POST',
+                body: sql,
+              });
+              if (!response.ok) {
+                throw new Error(await response.text());
+              }
+              const result = clickHouseJsonResult.parse(await response.json());
+              if (result.exception) throw new Error(result.exception);
+              return result;
+            };
 
-        const databaseQueries: string[] = [];
-        const endpoint = new URL(`http://${container.host}:${container.port}/`);
-        endpoint.searchParams.set('user', USER);
-        endpoint.searchParams.set('password', PASSWORD);
-        endpoint.searchParams.set('database', DATABASE);
-        endpoint.searchParams.set('default_format', 'JSON');
+            let validatorCalls = 0;
+            const adapter = new ClickHouse({
+              defaultDatabase: DATABASE,
+              execute: query,
+              grounding: [tables({ filter: [`${DATABASE}.users`] })],
+              validate: async () => {
+                validatorCalls++;
+              },
+            });
 
-        const query = async (sql: string) => {
-          databaseQueries.push(sql);
-          const response = await fetch(endpoint, { method: 'POST', body: sql });
-          if (!response.ok) {
-            throw new Error(await response.text());
+            const result = await adapter.validate(fixture.sql);
+            assert.ok(typeof result === 'string');
+            assert.equal(
+              JSON.parse(result).error_type,
+              'SQL_SCOPE_PARSE_ERROR',
+            );
+            assert.match(result, new RegExp(fixture.unknownNode));
+            assert.ok(!databaseQueries.includes(fixture.sql));
+            assert.equal(validatorCalls, 0);
+          } finally {
+            await container.cleanup();
           }
-          const result = clickHouseJsonResult.parse(await response.json());
-          if (result.exception) throw new Error(result.exception);
-          return result;
-        };
-
-        let validatorCalls = 0;
-        const adapter = new ClickHouse({
-          defaultDatabase: DATABASE,
-          execute: query,
-          grounding: [tables({ filter: [`${DATABASE}.users`] })],
-          validate: async () => {
-            validatorCalls++;
-          },
-        });
-        const cases = [
-          {
-            sql: 'SELECT * EXCEPT team_id FROM users',
-            unknownNode: 'ColumnsTransformerList',
-          },
-          {
-            sql: 'SELECT id FROM users ORDER BY id WITH FILL FROM 0 TO 10 STEP 1',
-            unknownNode: 'FILL FROM',
-          },
-        ];
-
-        for (const fixture of cases) {
-          const result = await adapter.validate(fixture.sql);
-          assert.ok(typeof result === 'string');
-          assert.equal(JSON.parse(result).error_type, 'SQL_SCOPE_PARSE_ERROR');
-          assert.match(result, new RegExp(fixture.unknownNode));
-          assert.ok(!databaseQueries.includes(fixture.sql));
-        }
-        assert.equal(validatorCalls, 0);
-      } finally {
-        await container.cleanup();
-      }
-    });
+        }),
+    );
 
     it('rejects non-system functions before they reach the consumer validator', async () => {
       const container = await new TestClickHouse({
@@ -733,61 +754,69 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
       }
     });
 
-    it('rejects scalar functions whose data sources bypass relation scope', async () => {
-      const container = await new TestClickHouse({
-        environment: process.env,
-        image: CLICKHOUSE_IMAGE,
-      }).start();
-      try {
-        await createSchema(container);
+    void it.each(
+      [
+        "SELECT dictGet('missing_dictionary', 'value', id) FROM users",
+        "SELECT joinGet('missing_join', 'value', id) FROM users",
+      ],
+      (sql) =>
+        it(`rejects the scalar function call ${JSON.stringify(sql)}, whose data source bypasses relation scope`, async () => {
+          const container = await new TestClickHouse({
+            environment: process.env,
+            image: CLICKHOUSE_IMAGE,
+          }).start();
+          try {
+            await createSchema(container);
 
-        const databaseQueries: string[] = [];
-        const endpoint = new URL(`http://${container.host}:${container.port}/`);
-        endpoint.searchParams.set('user', USER);
-        endpoint.searchParams.set('password', PASSWORD);
-        endpoint.searchParams.set('database', DATABASE);
-        endpoint.searchParams.set('default_format', 'JSON');
+            const databaseQueries: string[] = [];
+            const endpoint = new URL(
+              `http://${container.host}:${container.port}/`,
+            );
+            endpoint.searchParams.set('user', USER);
+            endpoint.searchParams.set('password', PASSWORD);
+            endpoint.searchParams.set('database', DATABASE);
+            endpoint.searchParams.set('default_format', 'JSON');
 
-        const query = async (sql: string) => {
-          databaseQueries.push(sql);
-          const response = await fetch(endpoint, { method: 'POST', body: sql });
-          if (!response.ok) {
-            throw new Error(await response.text());
+            const query = async (sql: string) => {
+              databaseQueries.push(sql);
+              const response = await fetch(endpoint, {
+                method: 'POST',
+                body: sql,
+              });
+              if (!response.ok) {
+                throw new Error(await response.text());
+              }
+              const result = clickHouseJsonResult.parse(await response.json());
+              if (result.exception) throw new Error(result.exception);
+              return result;
+            };
+
+            let validatorCalls = 0;
+            const adapter = new ClickHouse({
+              defaultDatabase: DATABASE,
+              execute: query,
+              grounding: [tables({ filter: [`${DATABASE}.users`] })],
+              validate: async () => {
+                validatorCalls++;
+              },
+            });
+
+            assert.equal(
+              await adapter.validate(sql),
+              'only SELECT or WITH queries allowed',
+            );
+            assert.ok(!databaseQueries.includes(sql));
+            assert.equal(validatorCalls, 0);
+            assert.ok(
+              !databaseQueries.some((sql) =>
+                sql.startsWith('EXPLAIN QUERY TREE'),
+              ),
+            );
+          } finally {
+            await container.cleanup();
           }
-          const result = clickHouseJsonResult.parse(await response.json());
-          if (result.exception) throw new Error(result.exception);
-          return result;
-        };
-
-        let validatorCalls = 0;
-        const adapter = new ClickHouse({
-          defaultDatabase: DATABASE,
-          execute: query,
-          grounding: [tables({ filter: [`${DATABASE}.users`] })],
-          validate: async () => {
-            validatorCalls++;
-          },
-        });
-        const statements = [
-          "SELECT dictGet('missing_dictionary', 'value', id) FROM users",
-          "SELECT joinGet('missing_join', 'value', id) FROM users",
-        ];
-
-        for (const sql of statements) {
-          assert.equal(
-            await adapter.validate(sql),
-            'only SELECT or WITH queries allowed',
-          );
-          assert.ok(!databaseQueries.includes(sql));
-        }
-        assert.equal(validatorCalls, 0);
-        assert.ok(
-          !databaseQueries.some((sql) => sql.startsWith('EXPLAIN QUERY TREE')),
-        );
-      } finally {
-        await container.cleanup();
-      }
-    });
+        }),
+    );
 
     it('validates a join when both resolved physical tables are grounded', async () => {
       const container = await new TestClickHouse({
@@ -1167,5 +1196,5 @@ for (const CLICKHOUSE_IMAGE of CLICKHOUSE_IMAGES) {
         await container.cleanup();
       }
     });
-  });
-}
+  }),
+);

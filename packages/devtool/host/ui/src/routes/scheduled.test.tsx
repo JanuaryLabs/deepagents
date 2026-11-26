@@ -149,8 +149,9 @@ const failedCreates = {
     Response.json({ id: createdTask.id }),
 };
 
-for (const [failure, firstAnswer] of Object.entries(failedCreates)) {
-  it(`retries a create with the same idempotency key after the create ${failure}`, async () => {
+it.each(Object.entries(failedCreates))(
+  'retries a create with the same idempotency key after the create %s',
+  async (failure, firstAnswer) => {
     const posts = keyedPosts([firstAnswer, () => Response.json(createdTask)]);
     const api = schedulesApi({
       [`GET ${SCHEDULES}/tasks`]: () => Response.json([task]),
@@ -178,8 +179,8 @@ for (const [failure, firstAnswer] of Object.entries(failedCreates)) {
       queryClient.clear();
       vi.unstubAllGlobals();
     }
-  });
-}
+  },
+);
 
 it('sends an edited draft with a new idempotency key after a failed create', async () => {
   const posts = keyedPosts([
@@ -318,8 +319,9 @@ const unreadableRuns = {
     Response.json([{ id: 'run-1' }]),
 };
 
-for (const [failure, answer] of Object.entries(unreadableRuns)) {
-  it(`says a task's runs are unavailable when the runs request ${failure}`, async () => {
+it.each(Object.entries(unreadableRuns))(
+  "says a task's runs are unavailable when the runs request %s",
+  async (failure, answer) => {
     const api = schedulesApi({
       [`GET ${SCHEDULES}/tasks`]: () => Response.json([task]),
       [`GET ${SCHEDULES}/runs/inbox`]: () => Response.json([]),
@@ -339,5 +341,5 @@ for (const [failure, answer] of Object.entries(unreadableRuns)) {
       queryClient.clear();
       vi.unstubAllGlobals();
     }
-  });
-}
+  },
+);

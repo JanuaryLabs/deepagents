@@ -1,7 +1,7 @@
+import { describe, it } from '@zukhruf/parameterized-test';
 import type { ToolUIPart, UIMessage } from 'ai';
 import { generateId } from 'ai';
 import assert from 'node:assert';
-import { describe, it } from 'node:test';
 
 import {
   type WhenContext,
@@ -155,12 +155,12 @@ describe('withinLastN', () => {
     );
   });
 
-  it('returns false when n <= 0 even with full history', async () => {
-    const history: UIMessage[] = [
-      assistantWithTool('bash'),
-      assistantWithTool('bash'),
-    ];
-    for (const n of [0, -1, -5]) {
+  void it.each([0, -1, -5], (n) =>
+    it(`returns false when n is ${n} even with full history`, async () => {
+      const history: UIMessage[] = [
+        assistantWithTool('bash'),
+        assistantWithTool('bash'),
+      ];
       const pred = withinLastN(n, toolCalled('bash'));
       assert.strictEqual(
         await pred(
@@ -169,8 +169,8 @@ describe('withinLastN', () => {
         false,
         `n=${n}`,
       );
-    }
-  });
+    }),
+  );
 
   it('only rebinds lastAssistantMessage — content stays frozen', async () => {
     const history: UIMessage[] = [
@@ -239,13 +239,13 @@ describe('everyOfLastN', () => {
     assert.strictEqual(await pred(wctx({ turn: 1, content: '' })), false);
   });
 
-  it('returns false when n <= 0 even with full history', async () => {
-    const history: UIMessage[] = [
-      assistantTextOnly('a'),
-      assistantTextOnly('b'),
-      assistantTextOnly('c'),
-    ];
-    for (const n of [0, -1, -5]) {
+  void it.each([0, -1, -5], (n) =>
+    it(`returns false when n is ${n} even with full history`, async () => {
+      const history: UIMessage[] = [
+        assistantTextOnly('a'),
+        assistantTextOnly('b'),
+        assistantTextOnly('c'),
+      ];
       const pred = everyOfLastN(n, not(anyToolCalled()));
       assert.strictEqual(
         await pred(
@@ -254,6 +254,6 @@ describe('everyOfLastN', () => {
         false,
         `n=${n}`,
       );
-    }
-  });
+    }),
+  );
 });

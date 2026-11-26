@@ -1,4 +1,5 @@
 import { Backoff, Latch, untilAborted } from '@zukhruf/async';
+import { describe, it } from '@zukhruf/parameterized-test';
 import { open } from '@zukhruf/sqlite-open';
 import { waitFor } from '@zukhruf/testing/async';
 import { Sqlite } from '@zukhruf/testing/sqlite';
@@ -10,7 +11,7 @@ import {
   simulateReadableStream,
 } from 'ai';
 import assert from 'node:assert';
-import { type TestContext, describe, it } from 'node:test';
+import type { TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
@@ -449,24 +450,22 @@ describe('Stream Chunks', () => {
       const streams = makeManager(store);
       const streamId = crypto.randomUUID();
       await streams.register(streamId);
-      const parts: UIMessageChunk[] = [
-        { type: 'start', messageId: 'answer' },
-        { type: 'text-start', id: 'text-1' },
-        { type: 'text-delta', id: 'text-1', delta: 'Hel' },
-        { type: 'text-delta', id: 'text-1', delta: 'lo' },
-        { type: 'text-end', id: 'text-1' },
-      ];
       using source = streamHarness.source<UIMessageChunk>();
       const persisted = streams.persist(source.stream, streamId);
       await using watcher = streamHarness.reader(streams.watch(streamId));
+      const sendAndWatch = async (part: UIMessageChunk) => {
+        source.enqueue(part);
+        assert.deepStrictEqual(await untilAborted(watcher.read(), t.signal), {
+          done: false,
+          value: part,
+        });
+      };
       try {
-        for (const part of parts) {
-          source.enqueue(part);
-          assert.deepStrictEqual(await untilAborted(watcher.read(), t.signal), {
-            done: false,
-            value: part,
-          });
-        }
+        await sendAndWatch({ type: 'start', messageId: 'answer' });
+        await sendAndWatch({ type: 'text-start', id: 'text-1' });
+        await sendAndWatch({ type: 'text-delta', id: 'text-1', delta: 'Hel' });
+        await sendAndWatch({ type: 'text-delta', id: 'text-1', delta: 'lo' });
+        await sendAndWatch({ type: 'text-end', id: 'text-1' });
         source.close();
         await persisted;
         assert.deepStrictEqual(await watcher.read(), {
@@ -1469,16 +1468,17 @@ describe('Stream Chunks', () => {
       assert.deepStrictEqual(idleDelays, [1, 2, 4, 1, 2]);
     });
 
-    it('should throw a RangeError when statusCheckEvery is not a positive integer', () => {
-      const reads = { getStreamStatus: async () => 'running' as const };
-      for (const statusCheckEvery of [0, -1, 1.5, Number.NaN]) {
+    void it.each([0, -1, 1.5, Number.NaN], (statusCheckEvery) =>
+      it(`should throw a RangeError when statusCheckEvery is ${statusCheckEvery}, not a positive integer`, () => {
+        const reads = { getStreamStatus: async () => 'running' as const };
+
         assert.throws(
           () => new PollingChangeSource({ reads, statusCheckEvery }),
           RangeError,
           `statusCheckEvery=${statusCheckEvery}`,
         );
-      }
-    });
+      }),
+    );
   });
 
   describe('StreamManager.register', () => {

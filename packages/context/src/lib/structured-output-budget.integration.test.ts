@@ -1,7 +1,7 @@
+import { test } from '@zukhruf/parameterized-test';
 import { isStepCount, tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
 import { z } from 'zod';
 
 import {
@@ -13,7 +13,7 @@ import {
 
 import { usage } from '../../test/helpers/usage.ts';
 
-for (const mode of ['generate', 'stream'] as const) {
+void test.each(['generate', 'stream'] as const, (mode) =>
   test(`structured ${mode} respects the caller's retrieval budget`, async () => {
     let requests = 0;
     let lookups = 0;
@@ -101,5 +101,5 @@ for (const mode of ['generate', 'stream'] as const) {
     }
     assert.equal(requests, 1);
     assert.equal(lookups, 1);
-  });
-}
+  }),
+);

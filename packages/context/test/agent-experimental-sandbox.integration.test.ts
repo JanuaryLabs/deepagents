@@ -1,8 +1,8 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import { it } from '@zukhruf/parameterized-test';
 import { tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
-import { it } from 'node:test';
 import { z } from 'zod';
 
 import {
@@ -18,7 +18,7 @@ import { usage } from './helpers/usage.ts';
 const toolCalls = { unified: 'tool-calls' as const, raw: undefined };
 const stop = { unified: 'stop' as const, raw: undefined };
 
-for (const mode of ['generate', 'stream'] as const) {
+void it.each(['generate', 'stream'] as const, (mode) =>
   it(`${mode} hands the agent's sandbox to user tools`, async () => {
     const toolkit = await buildSandbox();
     await toolkit.sandbox.writeTextFile({
@@ -93,5 +93,5 @@ for (const mode of ['generate', 'stream'] as const) {
     }
 
     assert.equal(seen, 'from the agent sandbox');
-  });
-}
+  }),
+);
