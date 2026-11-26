@@ -15,7 +15,7 @@ chat flows, and Text2SQL assistants.
 | `@deepagents/experimental`     | Ship unstable provider, reminder, and Zukhruf runtime surfaces before they graduate into stable packages.                      |
 | `@deepagents/orchestrator`     | Prototype deep-research and plan-and-solve orchestration flows.                                                                |
 | `@deepagents/text2sql`         | Convert natural language to SQL, index database schemas, and run validated SQL through the package `sql` CLI inside a sandbox. |
-| `@deepagents/toolbox`          | Provide reusable tools for web search, filesystems, containers, stocks, weather, and repo inspection.                          |
+| `@deepagents/toolbox`          | Provide reusable tools for Hacker News search, a scratchpad reflection step, and repo inspection.                              |
 | `@deepagents/devtool`          | Serve the Zukhruf development UI and expose correlated trace recording through `@deepagents/devtool/traces`.                   |
 | `@deepagents/devtool-history`  | Render the reusable DevTool history view for Zukhruf conversations.                                                            |
 | `@deepagents/react-input`      | Provide the reusable structured prompt composer used by browser chat surfaces.                                                 |

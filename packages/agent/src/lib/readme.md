@@ -283,8 +283,9 @@ const weather_assistant = agent({
 The system includes several pre-built tools:
 
 ```typescript
+import { openai } from '@ai-sdk/openai';
+
 import { agent, instructions } from './agent.ts';
-import { duckDuckGoSearch } from './tools/ddg-search.ts';
 
 const research_agent = agent({
   name: 'research_agent',
@@ -293,7 +294,7 @@ const research_agent = agent({
     routine: ['Search for information and summarize findings'],
   }),
   tools: {
-    web_search: duckDuckGoSearch,
+    web_search: openai.tools.webSearch({}),
   },
 });
 ```
@@ -495,9 +496,10 @@ console.log(await response.text);
 ### 2. Research Agent with Web Search
 
 ```typescript
+import { openai } from '@ai-sdk/openai';
+
 import { agent, instructions } from './agent.ts';
 import { execute } from './swarm.ts';
-import { duckDuckGoSearch } from './tools/ddg-search.ts';
 
 const research_agent = agent({
   name: 'research_agent',
@@ -513,7 +515,7 @@ const research_agent = agent({
     ],
   }),
   tools: {
-    search: duckDuckGoSearch,
+    search: openai.tools.webSearch({}),
   },
 });
 

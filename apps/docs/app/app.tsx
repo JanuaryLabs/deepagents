@@ -28,7 +28,7 @@ const packages = [
   },
   {
     name: '@deepagents/toolbox',
-    description: 'Common utilities: web search, shell execution, and helpers.',
+    description: 'Hacker News search, a scratchpad tool, and repo inspection.',
     href: '/docs/toolbox',
   },
 ];

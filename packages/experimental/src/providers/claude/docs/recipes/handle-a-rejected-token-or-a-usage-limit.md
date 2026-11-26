@@ -2,7 +2,7 @@
 
 **Use case.** Explain a failed model call and the next step: sign in again for a rejected token, or wait for an account usage limit to reset. For other HTTP 429 responses, show the available rate-limit headers.
 
-**What you need.** The AI SDK's `APICallError` for model request failures, including calls using an [environment token](../../README.md#environment-token) or a [stored login](../../README.md#stored-claude-code-login). Use the provider's `ClaudeAuthError` for authentication failures from [application-owned accounts](../../README.md#application-owned-accounts).
+**What you need.** The AI SDK's `APICallError` for model request failures, including calls using an [environment token](../../README.md#environment-token) or a [stored login](../../README.md#stored-claude-code-login). Use the provider's `ClaudeAuthError` for authentication failures from [application-owned accounts](../../README.md#application-owned-accounts), which keep their tokens in a Postgres database through `PostgresAccountStore`; this program reads its address from `DATABASE_URL`.
 
 ## The steps
 
@@ -17,11 +17,12 @@
 The program makes two model calls: one through `claude`, and one through an application-owned account with no connected tokens.
 
 ```ts title="handle-failures.ts"
-import { MemoryStore } from '@opencoredev/loginwithchatgpt-core';
 import { APICallError, type LanguageModel, generateText } from 'ai';
+import pg from 'pg';
 
 import {
   ClaudeAuthError,
+  PostgresAccountStore,
   claude,
   createClaudeAccounts,
 } from '@deepagents/experimental/providers/claude';
@@ -70,12 +71,14 @@ function describe(error: unknown) {
 
 console.log('login:', await ask(claude('claude-haiku-5-5')));
 
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const accounts = createClaudeAccounts({
-  store: new MemoryStore(),
+  store: await PostgresAccountStore.create({ pool }),
   clock: globalThis,
 });
 const model = accounts.provider('user-42')('claude-haiku-5-5');
 console.log('account:', await ask(model));
+await pool.end();
 ```
 
 Output with `CLAUDE_CODE_OAUTH_TOKEN=not-a-real-token`:
