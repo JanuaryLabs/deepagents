@@ -34,5 +34,6 @@
 
 export * from './fragments.ts';
 export * from './frontmatter.ts';
+export * from './mentions.ts';
 export * from './skill-reminder.ts';
 export * from './types.ts';

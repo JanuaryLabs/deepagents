@@ -50,11 +50,13 @@ import {
   type ClientToolSet,
   type ConversationActiveFlag,
   type ConversationStatus,
+  MessageDeliveryModes,
   PgBossConversationStatusChangeSource,
   PgBossTurnQueue,
   SqliteMailboxStore,
   TurnQueue,
   type TurnRef,
+  createInterAgentCommunication,
   defineAgent,
   defineSandbox,
   defineStack,
@@ -69,6 +71,7 @@ import {
 
 import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
 import { ControlledAgentStorage } from '../../testing/controlled-agent-storage.fixture.ts';
+import { toolCallResult } from '../../testing/stream-results.fixture.ts';
 import { streamsFor } from '../../testing/streams-for.fixture.ts';
 import { usage } from '../../testing/usage.fixture.ts';
 import { userTurn } from '../../testing/user-turn.fixture.ts';
@@ -4274,5 +4277,467 @@ describe('zukhruf runtime — skill limits', () => {
     for (const prompt of prompts) {
       assert.equal(availableSkillLines(prompt).length, 216);
     }
+  });
+});
+
+function userTexts(prompt: LanguageModelV4Prompt | undefined): string[] {
+  assert.ok(prompt, 'the model was not called');
+  return prompt.flatMap((message) =>
+    message.role === 'user'
+      ? message.content.flatMap((part) =>
+          part.type === 'text' ? [part.text] : [],
+        )
+      : [],
+  );
+}
+
+function skillMd(name: string, body = `# ${name}`): string {
+  return `---\nname: ${name}\ndescription: Use ${name}.\n---\n\n${body}`;
+}
+
+function skillBlock(name: string, contents: string): string {
+  return `<skill>\n<name>${name}</name>\n<path>skills/${name}/SKILL.md</path>\n${contents}\n</skill>`;
+}
+
+async function sandboxSkills(
+  environment: VirtualSandboxEnvironment,
+  conversation: SandboxContext,
+  names: readonly string[],
+): Promise<void> {
+  await using files = await environment.open(conversation);
+  for (const name of names) {
+    await files.writeTextFile({
+      path: `/workspace/skills/${name}/SKILL.md`,
+      content: skillMd(name),
+    });
+  }
+}
+
+function environmentSandbox(environment: VirtualSandboxEnvironment) {
+  return defineSandbox({
+    open: (chat) => environment.open(chat),
+    delete: (chat) => environment.delete(chat),
+  });
+}
+
+describe('zukhruf runtime — explicit skill mentions', () => {
+  it('injects each mentioned skill once, in catalog order, after the user message, and keeps it in history', async () => {
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = promptRecordingModel(prompts);
+    const environment = new VirtualSandboxEnvironment();
+    const conversation = { chatId: 'skill-mentions', userId: 'u1' };
+    await sandboxSkills(environment, conversation, ['alpha', 'beta', 'gamma']);
+    const agentDeclaration = declaration(model);
+    agentDeclaration.sandbox = environmentSandbox(environment);
+
+    await using h = await harness(model, { declaration: agentDeclaration });
+    await using worker = await h.runtime.work();
+    void worker;
+    const input = 'use $gamma and $alpha, then $gamma again';
+    const first = await h.runtime.enqueue(conversation, turn(input));
+    const chunks = await Array.fromAsync(first.stream);
+    const second = await h.runtime.enqueue(conversation, turn('thanks'));
+    assert.equal(await collectText(second.stream), 'ok');
+
+    const injected = [
+      input,
+      skillBlock('alpha', skillMd('alpha')),
+      skillBlock('gamma', skillMd('gamma')),
+    ];
+    assert.deepStrictEqual(userTexts(prompts[0]), injected);
+    assert.deepStrictEqual(userTexts(prompts[1]), [...injected, 'thanks']);
+    assert.deepStrictEqual(
+      chunks.filter((chunk) => chunk.type === 'data-warning'),
+      [],
+    );
+  });
+
+  it('selects a skill by plain name, linked path or code span, and ignores unknown and environment variable names', async () => {
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = promptRecordingModel(prompts);
+    const environment = new VirtualSandboxEnvironment();
+    const cases = [
+      ['$unknown and $PATH', []],
+      ['use $alpha.x now', ['alpha']],
+      ['read [$anything](skills/beta/SKILL.md)', ['beta']],
+      ['run `$gamma`', ['gamma']],
+    ] as const;
+    const conversations = cases.map((_, index) => ({
+      chatId: `skill-selection-${index}`,
+      userId: 'u1',
+    }));
+    for (const conversation of conversations) {
+      await sandboxSkills(environment, conversation, [
+        'alpha',
+        'beta',
+        'gamma',
+      ]);
+    }
+    const agentDeclaration = declaration(model);
+    agentDeclaration.sandbox = environmentSandbox(environment);
+
+    await using h = await harness(model, { declaration: agentDeclaration });
+    await using worker = await h.runtime.work();
+    void worker;
+    for (const [index, [input]] of cases.entries()) {
+      const result = await h.runtime.enqueue(conversations[index], turn(input));
+      assert.equal(await collectText(result.stream), 'ok');
+    }
+
+    assert.deepStrictEqual(
+      prompts.map(userTexts),
+      cases.map(([input, names]) => [
+        input,
+        ...names.map((name) => skillBlock(name, skillMd(name))),
+      ]),
+    );
+  });
+
+  it('warns about a mentioned skill whose SKILL.md is gone, leaves it out, and still injects the others', async () => {
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = promptRecordingModel(prompts);
+    const environment = new VirtualSandboxEnvironment();
+    const conversation = { chatId: 'skill-mention-missing', userId: 'u1' };
+    await sandboxSkills(environment, conversation, ['alpha', 'beta']);
+    const agentDeclaration = declaration(model);
+    agentDeclaration.sandbox = environmentSandbox(environment);
+
+    await using h = await harness(model, { declaration: agentDeclaration });
+    await using worker = await h.runtime.work();
+    void worker;
+    const first = await h.runtime.enqueue(conversation, turn('hi'));
+    assert.equal(await collectText(first.stream), 'ok');
+    {
+      await using files = await environment.open(conversation);
+      assert.equal(
+        await files.deleteFile({ path: '/workspace/skills/alpha/SKILL.md' }),
+        true,
+      );
+    }
+    const second = await h.runtime.enqueue(
+      conversation,
+      turn('$alpha and $beta'),
+    );
+    const chunks = await Array.fromAsync(second.stream);
+
+    assert.deepStrictEqual(
+      chunks.filter((chunk) => chunk.type === 'data-warning'),
+      [
+        {
+          type: 'data-warning',
+          data: {
+            message:
+              'Failed to load skill alpha at skills/alpha/SKILL.md: No such file or directory (os error 2)',
+          },
+        },
+      ],
+    );
+    assert.deepStrictEqual(
+      chunks.flatMap((chunk) =>
+        chunk.type === 'text-delta' ? [chunk.delta] : [],
+      ),
+      ['ok'],
+    );
+    assert.deepStrictEqual(userTexts(prompts[1]), [
+      'hi',
+      '$alpha and $beta',
+      skillBlock('beta', skillMd('beta')),
+    ]);
+  });
+
+  it('injects no skill that only inter-agent mail mentions', async (t) => {
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = promptRecordingModel(prompts);
+    const environment = new VirtualSandboxEnvironment();
+    const conversation = { chatId: 'skill-mention-mail', userId: 'u1' };
+    await sandboxSkills(environment, conversation, ['alpha']);
+    const agentDeclaration = declaration(model);
+    agentDeclaration.sandbox = environmentSandbox(environment);
+
+    await using h = await harness(model, { declaration: agentDeclaration });
+    await using worker = await h.runtime.work();
+    void worker;
+    const first = await h.runtime.enqueue(conversation, turn('hi'));
+    assert.equal(await collectText(first.stream), 'ok');
+    await h.runtime.deliver(
+      createInterAgentCommunication({
+        author: { chatId: 'skill-mention-mail-peer', userId: 'u1' },
+        recipient: conversation,
+        content: 'use $alpha',
+      }),
+      MessageDeliveryModes.TriggerTurn,
+    );
+    await waitFor(() => assert.equal(prompts.length, 2), {
+      interval: 25,
+      signal: t.signal,
+    });
+
+    const texts = userTexts(prompts[1]);
+    assert.equal(texts.length, 2);
+    assert.match(texts[1] ?? '', /Payload:\nuse \$alpha$/);
+    assert.ok(!texts.some((text) => text.startsWith('<skill>')));
+  });
+
+  it('injects the mentioned skill again when the turn is regenerated', async () => {
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = promptRecordingModel(prompts);
+    const environment = new VirtualSandboxEnvironment();
+    const conversation = { chatId: 'skill-mention-regenerate', userId: 'u1' };
+    await sandboxSkills(environment, conversation, ['alpha']);
+    const agentDeclaration = declaration(model);
+    agentDeclaration.sandbox = environmentSandbox(environment);
+
+    await using h = await harness(model, { declaration: agentDeclaration });
+    await using worker = await h.runtime.work();
+    void worker;
+    const request = turn('use $alpha');
+    const first = await h.runtime.enqueue(conversation, request);
+    assert.equal(await collectText(first.stream), 'ok');
+    const regenerated = await h.runtime.enqueue(conversation, {
+      message: request.message,
+      trigger: 'regenerate-message',
+    });
+    assert.equal(await collectText(regenerated.stream), 'ok');
+
+    const injected = ['use $alpha', skillBlock('alpha', skillMd('alpha'))];
+    assert.deepStrictEqual(prompts.map(userTexts), [injected, injected]);
+  });
+
+  it('cuts a plugin skill at 8000 bytes with Codex’s warning and injects a sandbox skill whole', async () => {
+    await using directory = await new TemporaryFiles().directory(
+      'zukhruf-plugin-skill-cut-',
+    );
+    const bigSkill = join(directory.path, 'big');
+    await mkdir(bigSkill);
+    const header = skillMd('big', '');
+    const kept = header + 'x'.repeat(7999 - Buffer.byteLength(header));
+    const bigMd = `${kept}é and more`;
+    await writeFile(join(bigSkill, 'SKILL.md'), bigMd);
+    const largeMd = skillMd('large', 'y'.repeat(9000));
+
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = promptRecordingModel(prompts);
+    const environment = new VirtualSandboxEnvironment();
+    const conversation = { chatId: 'skill-mention-plugin-cut', userId: 'u1' };
+    {
+      await using files = await environment.open(conversation);
+      await files.writeTextFile({
+        path: '/workspace/skills/large/SKILL.md',
+        content: largeMd,
+      });
+    }
+    const agentDeclaration = declaration(model);
+    agentDeclaration.sandbox = environmentSandbox(environment);
+    agentDeclaration.skills = ['big'];
+
+    await using h = await harness(model, {
+      declaration: agentDeclaration,
+      composition: () => ({
+        definitions: [
+          {
+            name: 'big-skills',
+            create: () => ({ skills: [pathToFileURL(bigSkill)] }),
+          },
+        ],
+      }),
+    });
+    await using worker = await h.runtime.work();
+    void worker;
+    const result = await h.runtime.enqueue(
+      conversation,
+      turn('use $big and $large'),
+    );
+    const chunks = await Array.fromAsync(result.stream);
+
+    assert.deepStrictEqual(userTexts(prompts[0]), [
+      'use $big and $large',
+      skillBlock('large', largeMd),
+      skillBlock('big', kept),
+    ]);
+    assert.deepStrictEqual(
+      chunks.filter((chunk) => chunk.type === 'data-warning'),
+      [
+        {
+          type: 'data-warning',
+          data: {
+            message:
+              'Skill `big` exceeded the main prompt context limit and was truncated.',
+          },
+        },
+      ],
+    );
+  });
+
+  it('injects no skill that only a spawned child’s task mentions', async (t) => {
+    const childPrompts: LanguageModelV4Prompt[] = [];
+    const sandbox = sandboxWithFiles({
+      '/workspace/skills/alpha/SKILL.md': skillMd('alpha'),
+    });
+    let rootCalls = 0;
+    const rootModel = new MockLanguageModelV4({
+      doStream: async () =>
+        ++rootCalls === 1
+          ? toolCallResult({
+              toolCallId: 'spawn-1',
+              toolName: 'spawn_agent',
+              input: JSON.stringify({
+                agent_type: 'worker',
+                task_name: 'skilled',
+                message: 'use $alpha',
+                fork_turns: 'none',
+              }),
+            })
+          : { stream: buildStream(['spawned'], 0) },
+    });
+    const worker: AgentDeclaration = {
+      name: 'worker',
+      model: promptRecordingModel(childPrompts),
+      sandbox,
+      instructions: [],
+    };
+    const root: AgentDeclaration = {
+      name: 'root',
+      model: rootModel,
+      sandbox,
+      instructions: [],
+      subagents: [worker],
+    };
+
+    await using h = await harness(rootModel, { declaration: root });
+    await using _worker = await h.runtime.work();
+    void _worker;
+    const result = await h.runtime.enqueue(
+      { chatId: 'skill-mention-spawn', userId: 'u1' },
+      turn('spawn a worker'),
+    );
+    assert.equal(await collectText(result.stream), 'spawned');
+    await waitFor(() => assert.equal(childPrompts.length, 1), {
+      interval: 25,
+      signal: t.signal,
+    });
+
+    assert.deepStrictEqual(userTexts(childPrompts[0]), ['use $alpha']);
+  });
+
+  it('fails a turn whose mentioned SKILL.md the sandbox cannot read, without a warning, and keeps its message for the next turn', async (t) => {
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = promptRecordingModel(prompts);
+    const environment = new VirtualSandboxEnvironment();
+    const conversation = { chatId: 'skill-mention-read-error', userId: 'u1' };
+    await sandboxSkills(environment, conversation, ['alpha']);
+    let readsFail = false;
+    const agentDeclaration = declaration(model);
+    agentDeclaration.sandbox = defineSandbox({
+      open: async (chat) => {
+        const backend = await environment.open(chat);
+        const readTextFile = backend.readTextFile.bind(backend);
+        Object.assign(backend, {
+          readTextFile: (input: Parameters<typeof readTextFile>[0]) =>
+            readsFail && input.path === '/workspace/skills/alpha/SKILL.md'
+              ? Promise.reject(new Error('sandbox read failed'))
+              : readTextFile(input),
+        });
+        return backend;
+      },
+      delete: (chat) => environment.delete(chat),
+    });
+
+    await using h = await harness(model, { declaration: agentDeclaration });
+    await using worker = await h.runtime.work();
+    void worker;
+    const first = await h.runtime.enqueue(conversation, turn('hi'));
+    assert.equal(await collectText(first.stream), 'ok');
+    readsFail = true;
+    const failed = await h.runtime.enqueue(conversation, turn('use $alpha'));
+    const chunks = await Array.fromAsync(failed.stream);
+    assert.equal(
+      await waitForStatus(
+        h.streamStore,
+        failed.id,
+        ['completed', 'failed'],
+        t.signal,
+      ),
+      'failed',
+    );
+    const next = await h.runtime.enqueue(conversation, turn('next'));
+    assert.equal(await collectText(next.stream), 'ok');
+
+    assert.deepStrictEqual(
+      chunks.filter((chunk) => chunk.type === 'data-warning'),
+      [],
+    );
+    assert.equal(prompts.length, 2);
+    assert.deepStrictEqual(userTexts(prompts[1]), ['hi', 'use $alpha', 'next']);
+  });
+
+  it('scans every text part of the user message', async () => {
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = promptRecordingModel(prompts);
+    const environment = new VirtualSandboxEnvironment();
+    const conversation = { chatId: 'skill-mention-parts', userId: 'u1' };
+    await sandboxSkills(environment, conversation, ['alpha', 'beta']);
+    const agentDeclaration = declaration(model);
+    agentDeclaration.sandbox = environmentSandbox(environment);
+
+    await using h = await harness(model, { declaration: agentDeclaration });
+    await using worker = await h.runtime.work();
+    void worker;
+    const result = await h.runtime.enqueue(conversation, {
+      message: {
+        id: `message:${crypto.randomUUID()}`,
+        role: 'user',
+        parts: [
+          { type: 'text', text: '$alpha' },
+          { type: 'text', text: '$beta' },
+        ],
+      },
+      trigger: 'submit-message',
+    });
+    assert.equal(await collectText(result.stream), 'ok');
+
+    assert.deepStrictEqual(userTexts(prompts[0]), [
+      '$alpha',
+      '$beta',
+      skillBlock('alpha', skillMd('alpha')),
+      skillBlock('beta', skillMd('beta')),
+    ]);
+  });
+
+  it('reads no skill that an assistant continuation mentions', async () => {
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = promptRecordingModel(prompts);
+    const environment = new VirtualSandboxEnvironment();
+    const conversation = { chatId: 'skill-mention-continuation', userId: 'u1' };
+    await sandboxSkills(environment, conversation, ['alpha']);
+    const agentDeclaration = declaration(model);
+    agentDeclaration.sandbox = environmentSandbox(environment);
+
+    await using h = await harness(model, { declaration: agentDeclaration });
+    await using worker = await h.runtime.work();
+    void worker;
+    const first = await h.runtime.enqueue(conversation, turn('hi'));
+    assert.equal(await collectText(first.stream), 'ok');
+    {
+      await using files = await environment.open(conversation);
+      assert.equal(
+        await files.deleteFile({ path: '/workspace/skills/alpha/SKILL.md' }),
+        true,
+      );
+    }
+    const continued = await h.runtime.enqueue(conversation, {
+      message: {
+        id: first.id,
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'use $alpha' }],
+      },
+      trigger: 'submit-message',
+    });
+    const chunks = await Array.fromAsync(continued.stream);
+
+    assert.deepStrictEqual(
+      chunks.filter((chunk) => chunk.type === 'data-warning'),
+      [],
+    );
+    assert.deepStrictEqual(userTexts(prompts[1]), ['hi']);
   });
 });

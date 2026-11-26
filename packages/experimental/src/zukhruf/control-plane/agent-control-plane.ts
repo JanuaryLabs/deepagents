@@ -450,6 +450,14 @@ export class AgentControlPlane {
     return { target: target.path.toString() };
   }
 
+  /**
+   * Whether `message` is the task `spawn` gave a child. Codex sends it as
+   * inter-agent input (`AgentCommunicationKind::Spawn`), not as user input.
+   */
+  isSpawnTask(conversation: ConversationId, message: UIMessage): boolean {
+    return message.id === AgentControlPlane.#initialTurnId(conversation.chatId);
+  }
+
   static #initialTurnId(chatId: string): string {
     return uuidv5(`urn:deepagents:zukhruf:initial-turn:${chatId}`, uuidv5.URL);
   }

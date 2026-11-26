@@ -7,16 +7,26 @@ import {
   type ContextFragment,
   SkillParseError,
   parseSkillFrontmatter,
+  skillInstructions,
   skills,
 } from '@deepagents/context';
 
 import type { AgentDeclaration, ZukhrufSandbox } from '../../agent.ts';
 
 export interface AgentSkills {
+  /** The catalog: the sandbox's skills, then the plugin skills selected for the agent. */
   available: readonly AvailableSkill[];
+  /** The plugin skills of `available`, whose injected `SKILL.md` Codex cuts to its prompt limit. */
+  plugin: ReadonlySet<AvailableSkill>;
   fragments: readonly ContextFragment[];
   /** Codex's skills budget warning when the catalog left skills out. */
   warning: string | undefined;
+}
+
+/** The `<skill>` texts of the selected skills that loaded, and Codex's warning for each that did not or was cut. */
+export interface SkillPrompts {
+  prompts: { name: string; path: string; text: string }[];
+  warnings: string[];
 }
 
 export interface PluginSkills {
@@ -26,9 +36,12 @@ export interface PluginSkills {
 
 const EMPTY_SKILLS: AgentSkills = {
   available: [],
+  plugin: new Set(),
   fragments: [],
   warning: undefined,
 };
+/** Codex's `MAX_SKILL_PROMPT_BYTES` (`codex-rs/ext/skills/src/render.rs`). */
+const MAX_SKILL_PROMPT_BYTES = 8000;
 const EMPTY_PLUGIN_SKILLS: PluginSkills = { available: [], files: [] };
 
 /** A SKILL.md failed to load, so the skills list leaves that skill out. */
@@ -164,39 +177,101 @@ export class PluginSkillComposition {
 export async function discoverAgentSkills(
   sandbox: ZukhrufSandbox,
   signal?: AbortSignal,
-): Promise<AgentSkills> {
-  if (sandbox.workingDirectory === undefined) return EMPTY_SKILLS;
+): Promise<AvailableSkill[]> {
+  if (sandbox.workingDirectory === undefined) return [];
   const skillsDirectory = path.posix.join(sandbox.workingDirectory, 'skills');
   const entries = await sandbox.sandbox.listDirectory({
     path: skillsDirectory,
     abortSignal: signal,
   });
-  if (entries === null) return EMPTY_SKILLS;
+  if (entries === null) return [];
 
   const skillDirectories = entries
     .filter(({ type, name }) => type === 'directory' && !name.startsWith('.'))
     .map(({ name }) => path.posix.join(skillsDirectory, name))
     .toSorted();
-  if (skillDirectories.length === 0) return EMPTY_SKILLS;
-
   const discovered = await Promise.all(
     skillDirectories.map((directory) => loadSkill(sandbox, directory)),
   );
-
-  return createAgentSkills(discovered.filter((skill) => skill !== undefined));
+  return discovered.filter((skill) => skill !== undefined);
 }
 
 export function createAgentSkills(
-  available: readonly AvailableSkill[],
+  sandboxSkills: readonly AvailableSkill[],
+  pluginSkills: readonly AvailableSkill[],
 ): AgentSkills {
-  if (available.length === 0) return EMPTY_SKILLS;
-  const snapshot = [...available];
+  const snapshot = [...sandboxSkills, ...pluginSkills];
+  if (snapshot.length === 0) return EMPTY_SKILLS;
   const fragment = skills(snapshot);
   return {
     available: snapshot,
+    plugin: new Set(pluginSkills),
     fragments: [fragment],
     warning: fragment.metadata.warning,
   };
+}
+
+/**
+ * Read the selected skills' `SKILL.md` from the sandbox, as Codex's
+ * `load_skill_prompts` does (`codex-rs/ext/skills/src/host_prompt.rs`): a
+ * plugin skill is cut to 8000 bytes with Codex's warning, and a `SKILL.md`
+ * that is gone leaves its skill out with Codex's warning. A sandbox that
+ * fails to read rejects.
+ */
+export async function loadSkillPrompts(
+  agentSkills: AgentSkills,
+  selected: readonly AvailableSkill[],
+  sandbox: ZukhrufSandbox,
+): Promise<SkillPrompts> {
+  const loaded: SkillPrompts = { prompts: [], warnings: [] };
+  if (selected.length === 0) return loaded;
+  const workingDirectory = sandbox.workingDirectory;
+  if (workingDirectory === undefined) {
+    throw new Error('AgentRuntime: skills require a sandbox workingDirectory');
+  }
+  const contents = await Promise.all(
+    selected.map((skill) =>
+      sandbox.sandbox.readTextFile({
+        path: path.posix.join(workingDirectory, skill.path),
+      }),
+    ),
+  );
+  for (const [index, skill] of selected.entries()) {
+    const skillMd = contents[index];
+    if (skillMd === null || skillMd === undefined) {
+      loaded.warnings.push(
+        `Failed to load skill ${skill.name} at ${skill.path}: No such file or directory (os error 2)`,
+      );
+      continue;
+    }
+    const prompt = agentSkills.plugin.has(skill)
+      ? truncateUtf8ToBytes(skillMd, MAX_SKILL_PROMPT_BYTES)
+      : skillMd;
+    if (prompt.length < skillMd.length) {
+      loaded.warnings.push(
+        `Skill \`${skill.name}\` exceeded the main prompt context limit and was truncated.`,
+      );
+    }
+    loaded.prompts.push({
+      name: skill.name,
+      path: skill.path,
+      text: skillInstructions({
+        name: skill.name,
+        path: skill.path,
+        contents: prompt,
+      }),
+    });
+  }
+  return loaded;
+}
+
+/** Codex's `truncate_utf8_to_bytes`: the longest prefix of at most `maxBytes` UTF-8 bytes that ends on a character boundary. */
+function truncateUtf8ToBytes(contents: string, maxBytes: number): string {
+  const bytes = Buffer.from(contents);
+  if (bytes.length <= maxBytes) return contents;
+  let end = maxBytes;
+  while (((bytes[end] ?? 0) & 0xc0) === 0x80) end -= 1;
+  return bytes.subarray(0, end).toString('utf8');
 }
 
 /** Codex discovers a skill by its SKILL.md, so a directory without one is no skill. */

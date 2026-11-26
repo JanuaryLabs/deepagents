@@ -1329,7 +1329,20 @@ the full Node+Postgres and Durable Object platform bundles.
   (`DEEPAGENTS_ZUKHRUF_SKILL_LOAD_FAILED`, Codex's `failed to load skill {path}: {message}` log
   line). The catalog follows `skills()`'s order and its Codex budget; when the budget leaves skills
   out, the executor streams Codex's warning once per turn as `{ type: 'data-warning', data:
-{ message } }`, Codex's `WarningEvent`.
+{ message } }`, Codex's `WarningEvent`. A user message that names a skill (`$name`, or
+  `[$name](path)`) injects it as Codex does (`codex-rs/skills/src/selection.rs`,
+  `ext/skills/src/host_prompt.rs`, `core/src/session/turn.rs`): `collectExplicitSkillMentions` from
+  `@deepagents/context` selects from the catalog, the executor reads each `SKILL.md` from the
+  sandbox, and records one user message per skill, `skillInstructions`' `<skill>` block with
+  `metadata.skillInstructions = { name, path }`, after the user message and before the turn's
+  assistant placeholder, so later turns keep it in history and a regenerated turn injects it again.
+  Only the user's own message is scanned, never inter-agent mail. A plugin skill's `SKILL.md` is cut
+  to 8000 bytes with Codex's ``Skill `{name}` exceeded the main prompt context limit and was
+truncated.``; a sandbox skill is injected whole. A `SKILL.md` that is gone leaves its skill out with
+  Codex's `Failed to load skill {name} at {path}: …` as a `data-warning`, and the turn runs; a
+  sandbox read that throws fails the turn. The sandbox and the skills load before the chain is
+  recorded; when that setup fails, the turn's message and placeholder are still recorded, as Codex
+  records the input before it loads skills.
 - `runtime/agent-runtime.ts` —
   `const runtime = new AgentRuntime(rootDeclaration);` then
   `await using host = await runtime.initialize(stack);` gives an `AgentHost` with

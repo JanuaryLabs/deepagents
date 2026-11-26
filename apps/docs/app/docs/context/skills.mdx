@@ -213,6 +213,48 @@ const { name, description } = parseSkillFrontmatter(source, 'deploy');
   ``missing field `description` `` or
   `invalid name: exceeds maximum length of 64 characters`.
 
+## Explicit Skill Mentions
+
+A user who names a skill as `$deploy`, or links it as
+`[$deploy](/skills/deploy/SKILL.md)`, asks for that skill. Codex then injects
+the whole `SKILL.md` after the user's message. Three exports follow Codex's
+rules for that:
+
+```typescript
+import {
+  collectExplicitSkillMentions,
+  extractToolMentions,
+  skillInstructions,
+} from '@deepagents/context';
+
+const selected = collectExplicitSkillMentions(
+  ['use $deploy, then $lint'],
+  availableSkills,
+);
+const text = skillInstructions({
+  name: selected[0].name,
+  path: selected[0].path,
+  contents: skillMd,
+});
+// '<skill>\n<name>deploy</name>\n<path>/skills/deploy/SKILL.md</path>\n---\nname: deploy\n…\n</skill>'
+```
+
+- `extractToolMentions(text)` returns the `names`, linked `paths` and
+  `plainNames` of one text. A name is `[A-Za-z0-9_:-]+` after `$`. A link with
+  an empty path counts as a plain `$name`. `$PATH`, `$HOME`, `$USER`,
+  `$SHELL`, `$PWD`, `$TMPDIR`, `$TEMP`, `$TMP`, `$LANG`, `$TERM` and
+  `$XDG_CONFIG_HOME` are dropped in any case. Code spans are read like any
+  other text.
+- `collectExplicitSkillMentions(inputs, skills)` scans each input in turn: its
+  linked paths select first (a `skill://` prefix is ignored), then its plain
+  names, both in the order of `skills`. A skill is selected once. A plain name
+  that more than one skill uses selects none of them, and an unknown name is
+  ignored.
+- `skillInstructions({ name, path, contents })` builds Codex's `<skill>`
+  block. `contents` is the whole `SKILL.md`, frontmatter included.
+
+Reading the files and placing the messages belong to the application.
+
 ## Skill Reminders
 
 The baseline `skills()` fragment lists the entire explicit catalog.

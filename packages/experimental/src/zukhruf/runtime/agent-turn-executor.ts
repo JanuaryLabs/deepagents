@@ -15,6 +15,7 @@ import {
   agent,
   assistant,
   chat,
+  collectExplicitSkillMentions,
   isRecord,
   role,
   user,
@@ -26,7 +27,7 @@ import {
   elementsStreamTransform,
 } from '@deepagents/elements/context';
 
-import type { ZukhrufSandbox } from '../agent.ts';
+import type { AgentDeclaration, ZukhrufSandbox } from '../agent.ts';
 import type { AgentToolContext } from '../collaboration/agent-tool-context.ts';
 import type { Team } from '../collaboration/team.ts';
 import type { AgentControlPlane } from '../control-plane/agent-control-plane.ts';
@@ -43,8 +44,10 @@ import { createCompaction } from './compaction.ts';
 import type { ConversationSandboxes } from './conversation-sandboxes.ts';
 import {
   type AgentSkills,
+  type SkillPrompts,
   createAgentSkills,
   discoverAgentSkills,
+  loadSkillPrompts,
 } from './plugin/agent-skills.ts';
 import type { PluginManager } from './plugin/plugin-manager.ts';
 import type { SandboxIdleStop } from './sandbox-idle-stop.ts';
@@ -210,19 +213,28 @@ export class AgentTurnExecutor {
     // `thread` still names the previous turn as the latest until this records.
     await this.#idleStop?.cancel(thread);
     await this.#controlPlane.recordLatestTurn(turn, turn.streamId);
-    await this.#prepareChain(turn, engine, communications);
 
-    const sandbox = await this.#sandboxes.acquire(declaration, {
-      chatId: turn.chatId,
-      userId: turn.userId,
-    });
-    const agentSkills = await this.#skillsFor(
+    const { sandbox, agentSkills, skillPrompts } = await this.#loadSkills(
       turn,
-      declaration.name,
-      sandbox,
+      declaration,
       signal,
+    ).catch(async (error: unknown) => {
+      // Codex records the turn's input before it loads skills, so a turn
+      // whose setup fails still holds its message.
+      await this.#prepareChain(turn, engine, communications, []);
+      throw error;
+    });
+    await this.#prepareChain(
+      turn,
+      engine,
+      communications,
+      skillPrompts.prompts,
     );
     engine.set(...agentSkills.fragments);
+    const warnings = [
+      ...(agentSkills.warning === undefined ? [] : [agentSkills.warning]),
+      ...skillPrompts.warnings,
+    ];
     const elements = await this.#elementsFor(turn);
     if (elements.length > 0) {
       engine.set(elementsFragment(elements));
@@ -332,11 +344,8 @@ export class AgentTurnExecutor {
       {
         onStream: (streamWriter) => {
           writer = streamWriter;
-          if (agentSkills.warning !== undefined) {
-            writer.write({
-              type: 'data-warning',
-              data: { message: agentSkills.warning },
-            });
+          for (const message of warnings) {
+            writer.write({ type: 'data-warning', data: { message } });
           }
         },
         abortSignal: turnSignal,
@@ -414,17 +423,32 @@ export class AgentTurnExecutor {
     await this.#streams.reopen(streamId);
   }
 
+  /**
+   * Record the turn's input, then one user message per `<skill>` prompt after
+   * the user message, as Codex records them (`core/src/session/turn.rs`), so
+   * the skills stay in history.
+   */
   async #prepareChain(
     turn: TurnRef,
     engine: ContextEngine,
     communications: InterAgentCommunication[],
+    skillPrompts: SkillPrompts['prompts'],
   ): Promise<void> {
+    const skillMessages = skillPrompts.map(({ name, path, text }) =>
+      user({
+        id: crypto.randomUUID(),
+        role: 'user',
+        parts: [{ type: 'text', text }],
+        metadata: { skillInstructions: { name, path } },
+      }),
+    );
     if (turn.kind === 'message') {
       if (turn.message.role === 'assistant') {
         await engine.continue(assistant(turn.message));
       } else if (turn.trigger === 'regenerate-message') {
         await engine.rewind(turn.message.id);
         engine.set(
+          ...skillMessages,
           assistant({ id: turn.streamId, role: 'assistant', parts: [] }),
         );
         await engine.save({ branch: false });
@@ -434,6 +458,7 @@ export class AgentTurnExecutor {
             user(this.#mailboxInputMessage(communication)),
           ),
           user(turn.message),
+          ...skillMessages,
           assistant({ id: turn.streamId, role: 'assistant', parts: [] }),
         );
         await engine.save({ branch: true });
@@ -493,6 +518,44 @@ export class AgentTurnExecutor {
     return readElements(chat?.metadata) ?? [];
   }
 
+  /** The turn's sandbox, the agent's skills, and the skills the user's message mentions, read for injection. */
+  async #loadSkills(
+    turn: TurnRef,
+    declaration: AgentDeclaration,
+    signal: AbortSignal,
+  ): Promise<{
+    sandbox: ZukhrufSandbox;
+    agentSkills: AgentSkills;
+    skillPrompts: SkillPrompts;
+  }> {
+    const sandbox = await this.#sandboxes.acquire(declaration, {
+      chatId: turn.chatId,
+      userId: turn.userId,
+    });
+    const agentSkills = await this.#skillsFor(
+      turn,
+      declaration.name,
+      sandbox,
+      signal,
+    );
+    const mentioned =
+      turn.kind === 'message' &&
+      turn.message.role === 'user' &&
+      !this.#controlPlane.isSpawnTask(turn, turn.message)
+        ? collectExplicitSkillMentions(
+            turn.message.parts.flatMap((part) =>
+              part.type === 'text' ? [part.text] : [],
+            ),
+            agentSkills.available,
+          )
+        : [];
+    return {
+      sandbox,
+      agentSkills,
+      skillPrompts: await loadSkillPrompts(agentSkills, mentioned, sandbox),
+    };
+  }
+
   async #skillsFor(
     turn: TurnRef,
     agentName: string,
@@ -507,8 +570,10 @@ export class AgentTurnExecutor {
       return this.#withPluginSkills([], agentName, sandbox);
     }
 
-    const discovered = await discoverAgentSkills(sandbox, signal);
-    let available = discovered.available;
+    let available: readonly AvailableSkill[] = await discoverAgentSkills(
+      sandbox,
+      signal,
+    );
     await this.#store.updateChat(turn.chatId, ({ metadata }) => {
       const persisted = readSkills(metadata);
       if (persisted !== undefined) {
@@ -534,7 +599,7 @@ export class AgentTurnExecutor {
   ): Promise<AgentSkills> {
     const pluginSkills = this.#plugins.skillsByAgent.get(agentName);
     if (!pluginSkills || pluginSkills.available.length === 0) {
-      return createAgentSkills(available);
+      return createAgentSkills(available, []);
     }
     if (sandbox.workingDirectory === undefined) {
       throw new Error(
@@ -557,7 +622,7 @@ export class AgentTurnExecutor {
         }),
       ),
     );
-    return createAgentSkills([...available, ...pluginSkills.available]);
+    return createAgentSkills(available, pluginSkills.available);
   }
 
   #engineFor({ chatId, userId }: ConversationId): ContextEngine {
