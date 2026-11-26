@@ -297,9 +297,10 @@ instead of tailing forever.
   registers (or reopens) the stream and pushes its turn together; nothing pushes a job for a stream
   later. A queued stream whose job is gone therefore stays jobless, and failing it loses nothing.
 - **The question belongs to the queue.** `TurnQueue.isLost(streamId, queuedSince)` answers it.
-  `PgBossTurnQueue` looks the job up by `data.streamId` in every state, on the turn queue and on its
-  dead-letter queue: a parked follow-up is `cancelled` and still owns its turn, and a dead-lettered
-  one is reconciled by the orphan path. `OutboxTurnQueue` checks its outbox first, as the relay
+  `PgBossTurnQueue` looks the job up by `data.streamId`: a turn-queue job in any state owns its
+  turn (a parked follow-up is `cancelled`), and a dead-letter job owns it until it is completed or
+  failed, since the orphan path reconciles it and a failed one never runs again (a `cancelled` one
+  is mid hand-back) (#5870). `OutboxTurnQueue` checks its outbox first, as the relay
   deletes a row only after pg-boss holds its job.
 - **Age gate = the queue's retention, read live from `boss.getQueue`.** pg-boss sets
   `keep_until = start_after + retentionSeconds`, and the push follows the stream's registration, so

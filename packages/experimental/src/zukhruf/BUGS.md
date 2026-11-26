@@ -36,4 +36,4 @@ the half that could (content) is gone.
 (created/retry), `deleteAfterSeconds` 7d (terminal); no "never" for `created` jobs
 (`retentionSeconds: 0` rejected). Zukhruf overrides only the terminal setting to zero.
 
-**Fix.** `AgentRuntime.work()` sweeps queued streams once its consumer is registered: a stream older than the queue's retention whose job is in no state of the turn queue or its dead-letter queue is moved `queued` → `failed` by a compare-and-set on its row. Pinned by the `runtime.integration.test.ts` retention scenarios and `lost-turns.postgres.integration.test.ts`.
+**Fix.** `AgentRuntime.work()` sweeps queued streams once its consumer is registered: a stream older than the queue's retention that has no turn-queue job in any state and no pending dead-letter job (a completed or failed one is done, #5870) is moved `queued` → `failed` by a compare-and-set on its row. Pinned by the `runtime.integration.test.ts` retention scenarios and `lost-turns.postgres.integration.test.ts`.

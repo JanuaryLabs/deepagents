@@ -27,8 +27,8 @@
 - [x] **Root metadata initialization CAS**: worker initialization preserves a concurrent host
       metadata write and retries against the fresh snapshot.
 - [x] **Startup reconciliation sweep**: `work()` fails each queued stream older than the queue's
-      retention whose job is in no state of the turn queue or its dead-letter queue (agent-backlog
-      #682, DESIGN.md "Lost turns"). Running streams are out of its scope.
+      retention that has no turn-queue job in any state and no pending dead-letter job (agent-backlog
+      #682, #5870, DESIGN.md "Lost turns"). Running streams are out of its scope.
 - [x] **Host cancel reaches the queue**: `interrupt_agent` and `AgentObservation.cancel()` cancel the
       exact queue job as well as the durable stream. Queued copies are removed immediately while
       active work retains FIFO ownership through handler exit.
