@@ -648,12 +648,10 @@ describe('zukhruf runtime — a recovery turn that never runs', () => {
     const conversation = { chatId: 'lost-recovery', userId: 'u1' };
     const setup = recoverySetup(conversation);
     await using h = await harness(setup.agent);
-    // Platform setup: a tiny retention, and dead-lettered jobs deleted before
-    // it, as the 7-day dead-letter default goes before the 14-day retention.
+    // Platform setup: a tiny retention. The dead-letter queue keeps its
+    // default 7-day deletion, so the crashed attempt's completed dead-letter
+    // job outlives the recovery's deleted job.
     await h.boss.updateQueue(h.queue.queue, { retentionSeconds: 2 });
-    await h.boss.updateQueue(h.queue.deadLetterQueue, {
-      deleteAfterSeconds: 1,
-    });
     const { continuation, hold, jobs } = await pushRecoveryBehindHold(
       h,
       setup,
@@ -673,10 +671,12 @@ describe('zukhruf runtime — a recovery turn that never runs', () => {
           await h.boss.supervise(h.queue.deadLetterQueue);
           assert.deepStrictEqual(await jobs(), []);
           assert.deepStrictEqual(
-            await h.boss.findJobs(h.queue.deadLetterQueue, {
-              data: { streamId: continuation.id },
-            }),
-            [],
+            (
+              await h.boss.findJobs(h.queue.deadLetterQueue, {
+                data: { streamId: continuation.id },
+              })
+            ).map((job) => job.state),
+            ['completed'],
           );
         },
         { interval: 100, signal: t.signal },

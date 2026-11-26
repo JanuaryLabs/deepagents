@@ -157,9 +157,11 @@ export abstract class TurnQueue {
 
   /**
    * Whether the turn of a stream that has been queued since `queuedSince`
-   * (epoch ms) is lost: the queue holds no job for it in any state, parked
-   * and dead-lettered ones included, and never will. A queue that deletes no
-   * job it holds answers `false`.
+   * (epoch ms) is lost: the queue holds no job for it that can still run,
+   * parked and pending dead-lettered ones included, and never will. A
+   * dead-letter job that is done (it reconciled its attempt, or spent its
+   * retries) does not hold the stream. A queue that deletes no job it holds
+   * answers `false`.
    */
   abstract isLost(streamId: string, queuedSince: number): Promise<boolean>;
 

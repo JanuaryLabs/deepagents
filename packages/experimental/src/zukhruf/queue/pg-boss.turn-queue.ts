@@ -501,6 +501,12 @@ export class PgBossTurnQueue extends TurnQueue {
    * pushed after its stream is registered, so a stream queued for less than
    * that window still has its job or is about to. The window is read live:
    * an operator may change it on the queue at any time.
+   *
+   * A turn job holds the stream in any state: parked is cancelled, and a
+   * failed one waits for its dead-letter job. A dead-letter job holds it only
+   * until it is done: a completed one reconciled its attempt, and a failed
+   * one spent its retries on a queue with no dead letter of its own, so
+   * neither runs again. A cancelled one is mid hand-back and resumes.
    */
   override async isLost(
     streamId: string,
@@ -513,11 +519,16 @@ export class PgBossTurnQueue extends TurnQueue {
     if (Date.now() - queuedSince < queue.retentionSeconds * 1_000) {
       return false;
     }
-    for (const name of [this.#queue, this.deadLetterQueue]) {
-      const jobs = await this.#boss.findJobs(name, { data: { streamId } });
-      if (jobs.length > 0) return false;
-    }
-    return true;
+    const turns = await this.#boss.findJobs(this.#queue, {
+      data: { streamId },
+    });
+    if (turns.length > 0) return false;
+    const deadLetters = await this.#boss.findJobs(this.deadLetterQueue, {
+      data: { streamId },
+    });
+    return deadLetters.every(
+      (job) => job.state === 'completed' || job.state === 'failed',
+    );
   }
 
   /**
