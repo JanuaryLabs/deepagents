@@ -577,6 +577,89 @@ describe('PostgreSQL StreamStore Integration', () => {
       );
     }));
 
+  it('fails a PostgreSQL persisted stream with the error of a source that errors, and rejects with it', async () =>
+    await withStore(async (store) => {
+      const manager = new StreamManager({
+        store,
+        changeSource: new PollingChangeSource({ reads: store }),
+      });
+      const streamId = crypto.randomUUID();
+      await manager.register(streamId);
+      const sourceError = new Error('postgres source broke');
+      const source = new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          controller.enqueue({ type: 'text-start', id: 'part-1' });
+        },
+        pull(controller) {
+          controller.error(sourceError);
+        },
+      });
+
+      const rejection = await manager.persist(source, streamId).then(
+        () => 'resolved',
+        (error: unknown) => error,
+      );
+
+      const stored = await store.getStream(streamId);
+      assert.deepStrictEqual(
+        {
+          rejection,
+          status: stored?.status,
+          error: stored?.error,
+          chunks: (await store.getChunks(streamId)).map(({ data }) => data),
+        },
+        {
+          rejection: sourceError,
+          status: 'failed',
+          error: 'postgres source broke',
+          chunks: [{ type: 'text-start', id: 'part-1' }],
+        },
+      );
+      assert.strictEqual(rejection, sourceError);
+    }));
+
+  it('cancels a PostgreSQL persisted stream whose source sends an abort chunk and then errors with an AbortError, and resolves', async () =>
+    await withStore(async (store) => {
+      const manager = new StreamManager({
+        store,
+        changeSource: new PollingChangeSource({ reads: store }),
+      });
+      const streamId = crypto.randomUUID();
+      await manager.register(streamId);
+      const source = new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          controller.enqueue({ type: 'text-start', id: 'part-1' });
+          controller.enqueue({ type: 'abort' });
+        },
+        pull(controller) {
+          controller.error(
+            new DOMException('This operation was aborted', 'AbortError'),
+          );
+        },
+      });
+
+      const outcome = await manager.persist(source, streamId).then(
+        (result) => ({ result }),
+        (error: unknown) => ({ error }),
+      );
+
+      const stored = await store.getStream(streamId);
+      assert.deepStrictEqual(
+        {
+          outcome,
+          status: stored?.status,
+          error: stored?.error,
+          chunks: (await store.getChunks(streamId)).map(({ data }) => data),
+        },
+        {
+          outcome: { result: { streamId } },
+          status: 'cancelled',
+          error: null,
+          chunks: [{ type: 'text-start', id: 'part-1' }, { type: 'abort' }],
+        },
+      );
+    }));
+
   it('should retain partial output and fail a PostgreSQL interrupted stream', async () =>
     withStore(async (store) => {
       const manager = new StreamManager({

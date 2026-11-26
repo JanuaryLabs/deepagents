@@ -249,8 +249,19 @@ export class StreamManager {
 
       if (ac.signal.aborted) {
         if (pw) await pw.flush();
-      } else {
+      } else if (!source.failure) {
         await pw.complete();
+      } else if (
+        Error.isError(source.failure.error) &&
+        source.failure.error.name === 'AbortError'
+      ) {
+        // The source was aborted: chat() raises its abort signal's reason
+        // after the abort chunk, once its end callback has saved the answer.
+        // By name only: a store error that says "aborted" is a failure.
+        await pw.flush();
+        await this.#store.updateStreamStatus(streamId, 'cancelled');
+      } else {
+        throw source.failure.error;
       }
     } catch (err) {
       if (ac.signal.aborted) {
@@ -565,16 +576,24 @@ function isAbortError(error: unknown): boolean {
  * finished its `cancel`. A `pipeThrough` between the sink and the stream (the
  * AI SDK's UI message stream and `persistedWriter.merge` each add one) cancels
  * it without awaiting that cancel, so the sink settling says nothing about it.
+ * It also keeps the error `stream` failed with: the UI message stream's merge
+ * turns that error into an `error` chunk, which it writes past
+ * `persistedWriter`, and the sink then ends normally.
  */
 function settlementTracked(stream: ReadableStream): {
   stream: ReadableStream;
   settled: Promise<void>;
+  readonly failure: { error: unknown } | undefined;
 } {
   const reader = stream.getReader();
   const { promise: settled, resolve } = Promise.withResolvers<void>();
   let cancelled = false;
+  let failure: { error: unknown } | undefined;
   return {
     settled,
+    get failure() {
+      return failure;
+    },
     stream: new ReadableStream(
       {
         async pull(controller) {
@@ -588,6 +607,7 @@ function settlementTracked(stream: ReadableStream): {
               controller.enqueue(value);
             }
           } catch (error) {
+            failure = { error };
             resolve();
             throw error;
           }

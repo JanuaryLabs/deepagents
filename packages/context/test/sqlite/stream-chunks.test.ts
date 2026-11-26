@@ -2273,25 +2273,246 @@ describe('Stream Chunks', () => {
       ]);
     });
 
-    it('settles when the source errors', { timeout: 5_000 }, async () => {
-      await using database = await sqlite.database();
-      const store = new SqliteStreamStore(database.connection);
-      const streams = makeManager(store);
-      const streamId = crypto.randomUUID();
-      await streams.register(streamId);
-      const source = new ReadableStream<UIMessageChunk>({
-        start(controller) {
-          controller.enqueue({ type: 'text-start', id: 'part-1' });
-        },
-        pull(controller) {
-          controller.error(new Error('model stream broke'));
-        },
-      });
+    it(
+      'fails the stream with the error of a source that errors, and rejects with it',
+      {
+        timeout: 5_000,
+      },
+      async () => {
+        await using database = await sqlite.database();
+        const store = new SqliteStreamStore(database.connection);
+        const streams = makeManager(store);
+        const streamId = crypto.randomUUID();
+        await streams.register(streamId);
+        const sourceError = new Error('model stream broke');
+        const source = new ReadableStream<UIMessageChunk>({
+          start(controller) {
+            controller.enqueue({ type: 'text-start', id: 'part-1' });
+          },
+          pull(controller) {
+            controller.error(sourceError);
+          },
+        });
 
-      const result = await streams.persist(source, streamId);
+        const rejection = await streams.persist(source, streamId).then(
+          () => 'resolved',
+          (error: unknown) => error,
+        );
 
-      assert.deepStrictEqual(result, { streamId });
-    });
+        const stored = await store.getStream(streamId);
+        assert.deepStrictEqual(
+          {
+            rejection,
+            status: stored?.status,
+            error: stored?.error,
+            chunks: (await store.getChunks(streamId)).map(({ data }) => data),
+          },
+          {
+            rejection: sourceError,
+            status: 'failed',
+            error: 'model stream broke',
+            chunks: [{ type: 'text-start', id: 'part-1' }],
+          },
+        );
+        assert.strictEqual(rejection, sourceError);
+      },
+    );
+
+    it(
+      'cancels the stream of a source that sends an abort chunk and then errors with an AbortError, and resolves',
+      {
+        timeout: 5_000,
+      },
+      async () => {
+        await using database = await sqlite.database();
+        const store = new SqliteStreamStore(database.connection);
+        const streams = makeManager(store);
+        const streamId = crypto.randomUUID();
+        await streams.register(streamId);
+        const source = new ReadableStream<UIMessageChunk>({
+          start(controller) {
+            controller.enqueue({ type: 'text-start', id: 'part-1' });
+            controller.enqueue({ type: 'abort' });
+          },
+          pull(controller) {
+            controller.error(
+              new DOMException('This operation was aborted', 'AbortError'),
+            );
+          },
+        });
+
+        const outcome = await streams.persist(source, streamId).then(
+          (result) => ({ result }),
+          (error: unknown) => ({ error }),
+        );
+
+        const stored = await store.getStream(streamId);
+        assert.deepStrictEqual(
+          {
+            outcome,
+            status: stored?.status,
+            error: stored?.error,
+            chunks: (await store.getChunks(streamId)).map(({ data }) => data),
+          },
+          {
+            outcome: { result: { streamId } },
+            status: 'cancelled',
+            error: null,
+            chunks: [{ type: 'text-start', id: 'part-1' }, { type: 'abort' }],
+          },
+        );
+      },
+    );
+
+    it(
+      'cancels the stream of a source that errors with an AbortError without an abort chunk, and resolves',
+      {
+        timeout: 5_000,
+      },
+      async () => {
+        await using database = await sqlite.database();
+        const store = new SqliteStreamStore(database.connection);
+        const streams = makeManager(store);
+        const streamId = crypto.randomUUID();
+        await streams.register(streamId);
+        const source = new ReadableStream<UIMessageChunk>({
+          start(controller) {
+            controller.enqueue({ type: 'text-start', id: 'part-1' });
+          },
+          pull(controller) {
+            controller.error(
+              new DOMException('This operation was aborted', 'AbortError'),
+            );
+          },
+        });
+
+        const outcome = await streams.persist(source, streamId).then(
+          (result) => ({ result }),
+          (error: unknown) => ({ error }),
+        );
+
+        const stored = await store.getStream(streamId);
+        assert.deepStrictEqual(
+          {
+            outcome,
+            status: stored?.status,
+            error: stored?.error,
+            chunks: (await store.getChunks(streamId)).map(({ data }) => data),
+          },
+          {
+            outcome: { result: { streamId } },
+            status: 'cancelled',
+            error: null,
+            chunks: [{ type: 'text-start', id: 'part-1' }],
+          },
+        );
+      },
+    );
+
+    it(
+      'fails the stream of a source whose error only says aborted, such as a store transaction error, and rejects with it',
+      {
+        timeout: 5_000,
+      },
+      async () => {
+        await using database = await sqlite.database();
+        const store = new SqliteStreamStore(database.connection);
+        const streams = makeManager(store);
+        const streamId = crypto.randomUUID();
+        await streams.register(streamId);
+        const sourceError = new Error(
+          'current transaction is aborted, commands ignored until end of transaction block',
+        );
+        const source = new ReadableStream<UIMessageChunk>({
+          start(controller) {
+            controller.enqueue({ type: 'text-start', id: 'part-1' });
+          },
+          pull(controller) {
+            controller.error(sourceError);
+          },
+        });
+
+        const outcome = await streams.persist(source, streamId).then(
+          (result) => ({ result }),
+          (error: unknown) => ({ error }),
+        );
+
+        const stored = await store.getStream(streamId);
+        assert.deepStrictEqual(
+          { outcome, status: stored?.status, error: stored?.error },
+          {
+            outcome: { error: sourceError },
+            status: 'failed',
+            error: sourceError.message,
+          },
+        );
+        assert.ok('error' in outcome);
+        assert.strictEqual(outcome.error, sourceError);
+      },
+    );
+
+    it(
+      'fails the stream of a source that errors with an AbortError when its chunks then fail to store, and rejects with the store error',
+      {
+        timeout: 5_000,
+      },
+      async (t) => {
+        const store = new HeldAppendStore(':memory:');
+        const streams = makeManager(store);
+        const streamId = crypto.randomUUID();
+        await streams.register(streamId);
+        const aborted = new Latch();
+        let pulls = 0;
+        const source = new ReadableStream<UIMessageChunk>(
+          {
+            async pull(controller) {
+              if (pulls++ === 0) {
+                controller.enqueue({ type: 'text-start', id: 'part-1' });
+                return;
+              }
+              await store.entered(0);
+              controller.error(
+                new DOMException('This operation was aborted', 'AbortError'),
+              );
+              aborted.open();
+            },
+          },
+          { highWaterMark: 0 },
+        );
+        const storeError = new Error('store down');
+
+        const persisted = streams.persist(source, streamId).then(
+          (result) => ({ result }),
+          (error: unknown) => ({ error }),
+        );
+        try {
+          await untilAborted(aborted.wait(), t.signal);
+          await sleep(20);
+          store.release(0, storeError);
+          const outcome = await persisted;
+
+          const stored = await store.getStream(streamId);
+          assert.deepStrictEqual(
+            {
+              outcome,
+              status: stored?.status,
+              error: stored?.error,
+              chunks: await store.getChunks(streamId),
+            },
+            {
+              outcome: { error: storeError },
+              status: 'failed',
+              error: 'store down',
+              chunks: [],
+            },
+          );
+        } finally {
+          store.release(0);
+          await persisted;
+          store.close();
+        }
+      },
+    );
   });
 
   describe('StreamManager.persist() onCancelDetected', () => {

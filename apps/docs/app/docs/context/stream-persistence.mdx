@@ -189,8 +189,10 @@ if (!created) {
 
 Consumes a `ReadableStream`, persists every chunk to the store, and transitions status from `running` to a terminal state. Streams fail in two ways:
 
-- `persist()` throws while draining the source stream
-- Any persisted chunk has `type: 'error'` (the store marks the stream as `failed` and records `errorText`)
+- The source stream errors, or the store fails while `persist()` drains the source: the stream is marked `failed` with the error's message, and `persist()` rejects with that error
+- Any persisted chunk has `type: 'error'` (the store marks the stream as `failed` and records `errorText`, and `persist()` resolves)
+
+A source that errors with an abort error, such as the `AbortError` a `chat()` stream raises after its `abort` chunk when its `abortSignal` fires, has not failed: the stream is marked `cancelled` and `persist()` resolves.
 
 ```typescript
 import { createUIMessageStream } from 'ai';
