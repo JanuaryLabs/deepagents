@@ -20,7 +20,7 @@ chat flows, and Text2SQL assistants.
 | `@deepagents/devtool-history`  | Render the reusable DevTool history view for Zukhruf conversations.                                                            |
 | `@deepagents/react-input`      | Provide the reusable structured prompt composer used by browser chat surfaces.                                                 |
 | `@deepagents/react-formatters` | Format dates, durations, bytes, numbers, booleans, and generic display values for React UIs.                                   |
-| `@deepagents/react-genai`      | Render AI SDK chat flows, trajectories, tools, citations, dynamic UI, and interactive responses.                               |
+| `@deepagents/react-genai`      | Render AI SDK chat flows, trajectories, tools, citations and interactive responses.                                            |
 
 `@deepagents/react-genai` needs the host to import stylesheets and give a
 `ClockProvider`. See [its README](./packages/react/genai/README.md).
