@@ -19,6 +19,7 @@ import {
   term,
   toFragment,
   user,
+  verbatim,
 } from '@deepagents/context/browser';
 
 describe('browser export path', () => {
@@ -125,5 +126,24 @@ describe('browser export path', () => {
       name: 'ARR',
       definition: 'Annual Recurring Revenue',
     });
+  });
+
+  it('renders a verbatim fragment as-is through the browser entrypoint', () => {
+    const output = new XmlRenderer().render([
+      term('LTV', 'Lifetime Value'),
+      verbatim(
+        '## Skills\n- deploy: Ship it & check (file: /skills/deploy/SKILL.md)',
+      ),
+    ]);
+
+    assert.strictEqual(
+      output,
+      `<term>
+  <name>LTV</name>
+  <definition>Lifetime Value</definition>
+</term>
+## Skills
+- deploy: Ship it & check (file: /skills/deploy/SKILL.md)`,
+    );
   });
 });

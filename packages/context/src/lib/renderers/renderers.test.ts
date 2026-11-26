@@ -5,7 +5,10 @@ import {
   type ContextFragment,
   MarkdownRenderer,
   TomlRenderer,
+  ToonRenderer,
   XmlRenderer,
+  fragment,
+  verbatim,
 } from '@deepagents/context';
 
 describe('XmlRenderer', () => {
@@ -175,5 +178,106 @@ retry = true`;
     };
     const result = renderer.render([fragment]);
     assert.ok(result.includes('message = "Hello \\"world\\""'));
+  });
+});
+
+describe('verbatim fragment', () => {
+  const literal = `<skills_instructions>
+## Skills
+Read a skill's "SKILL.md" & follow it when a < b.
+  - nested: keep this indent
+</skills_instructions>`;
+
+  const around: ContextFragment[] = [
+    { name: 'hint', data: 'Keep it short & clear' },
+    verbatim(literal),
+    { name: 'style', data: { prefer: 'CTEs' } },
+  ];
+
+  it('XmlRenderer emits the text as-is between its escaped siblings', () => {
+    const result = new XmlRenderer().render(around);
+    assert.strictEqual(
+      result,
+      `<hint>Keep it short &amp; clear</hint>
+<skills_instructions>
+## Skills
+Read a skill's "SKILL.md" & follow it when a < b.
+  - nested: keep this indent
+</skills_instructions>
+<style>
+  <prefer>CTEs</prefer>
+</style>`,
+    );
+  });
+
+  it('MarkdownRenderer emits the text as-is without a section heading', () => {
+    const result = new MarkdownRenderer().render(around);
+    assert.strictEqual(
+      result,
+      `## Hint
+Keep it short & clear
+
+<skills_instructions>
+## Skills
+Read a skill's "SKILL.md" & follow it when a < b.
+  - nested: keep this indent
+</skills_instructions>
+
+## Style
+- **prefer**: CTEs`,
+    );
+  });
+
+  it('TomlRenderer emits the text as-is, not as a quoted string', () => {
+    const result = new TomlRenderer().render(around);
+    assert.strictEqual(
+      result,
+      `hint = "Keep it short & clear"
+
+<skills_instructions>
+## Skills
+Read a skill's "SKILL.md" & follow it when a < b.
+  - nested: keep this indent
+</skills_instructions>
+
+[style]
+prefer = "CTEs"`,
+    );
+  });
+
+  it('ToonRenderer emits the text as-is, not as a quoted value', () => {
+    const result = new ToonRenderer().render(around);
+    assert.strictEqual(
+      result,
+      `hint: Keep it short & clear
+<skills_instructions>
+## Skills
+Read a skill's "SKILL.md" & follow it when a < b.
+  - nested: keep this indent
+</skills_instructions>
+style:
+  prefer: CTEs`,
+    );
+  });
+
+  it('every renderer refuses a verbatim fragment nested in another fragment', () => {
+    const nested = [fragment('instructions', verbatim(literal))];
+    for (const renderer of [
+      new XmlRenderer(),
+      new MarkdownRenderer(),
+      new TomlRenderer(),
+      new ToonRenderer(),
+    ]) {
+      assert.throws(() => renderer.render(nested), {
+        message:
+          'A verbatim fragment renders only at the top level, but one is nested in "instructions"',
+      });
+    }
+  });
+
+  it('refuses empty text', () => {
+    assert.throws(() => verbatim(''), {
+      message: 'verbatim() needs non-empty text',
+    });
   });
 });

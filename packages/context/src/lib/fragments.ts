@@ -7,8 +7,9 @@ import type { LoadContext } from './resolvers/types.ts';
  * Fragment type identifier.
  * - 'fragment': Regular context fragment (default)
  * - 'message': Conversation message (user/assistant)
+ * - 'verbatim': Literal prompt text every renderer emits as-is
  */
-export type FragmentType = 'fragment' | 'message';
+export type FragmentType = 'fragment' | 'message' | 'verbatim';
 
 /**
  * A context fragment containing a name and associated data.
@@ -169,6 +170,44 @@ export function fragment(
     name,
     data: children,
   };
+}
+
+/**
+ * Literal prompt text that every renderer emits exactly as written.
+ */
+export interface VerbatimFragment extends ContextFragment<string> {
+  name: 'verbatim';
+  type: 'verbatim';
+  data: string;
+}
+
+export function isVerbatimFragment(
+  fragment: ContextFragment,
+): fragment is VerbatimFragment {
+  return fragment.type === 'verbatim';
+}
+
+/**
+ * Create a fragment whose text reaches the prompt as-is: every renderer
+ * (XML, Markdown, TOML, TOON) emits it unescaped, unindented and without a
+ * tag, heading or key of its own, at its position among the top-level
+ * fragments, separated from its siblings the way that renderer separates any
+ * two fragments. Use it for prompt text whose exact bytes matter, such as a
+ * catalog copied from another harness.
+ *
+ * A verbatim fragment renders only at the top level: nested inside another
+ * fragment it would sit inside that fragment's markup, so renderers throw.
+ *
+ * @example
+ * ```ts
+ * context.set(role('You are a helpful assistant.'), verbatim('## Skills\n...'));
+ * ```
+ */
+export function verbatim(text: string): VerbatimFragment {
+  if (text === '') {
+    throw new Error('verbatim() needs non-empty text');
+  }
+  return { name: 'verbatim', type: 'verbatim', data: text };
 }
 
 /**

@@ -8,6 +8,7 @@ import {
   getFragmentData,
   isFragment,
   isFragmentObject,
+  isVerbatimFragment,
 } from '../fragments.ts';
 
 /**
@@ -88,7 +89,7 @@ export abstract class ContextRenderer {
     fragment: ContextFragment,
     seen: WeakSet<object>,
   ): ContextFragment | null {
-    const data = this.sanitizeData(getFragmentData(fragment), seen);
+    const data = this.sanitizeData(getFragmentData(fragment), seen, fragment);
     if (data == null) {
       return null;
     }
@@ -101,12 +102,18 @@ export abstract class ContextRenderer {
   protected sanitizeData(
     data: FragmentData,
     seen: WeakSet<object>,
+    owner: ContextFragment,
   ): FragmentData | undefined {
     if (data == null) {
       return undefined;
     }
 
     if (isFragment(data)) {
+      if (isVerbatimFragment(data)) {
+        throw new Error(
+          `A verbatim fragment renders only at the top level, but one is nested in "${owner.name}"`,
+        );
+      }
       return this.sanitizeFragment(data, seen) ?? undefined;
     }
 
@@ -118,7 +125,7 @@ export abstract class ContextRenderer {
 
       const cleaned: FragmentData[] = [];
       for (const item of data) {
-        const sanitizedItem = this.sanitizeData(item, seen);
+        const sanitizedItem = this.sanitizeData(item, seen, owner);
         if (sanitizedItem != null) {
           cleaned.push(sanitizedItem);
         }
@@ -134,7 +141,7 @@ export abstract class ContextRenderer {
 
       const cleaned: FragmentObject = {};
       for (const [key, value] of Object.entries(data)) {
-        const sanitizedValue = this.sanitizeData(value, seen);
+        const sanitizedValue = this.sanitizeData(value, seen, owner);
         if (sanitizedValue != null) {
           cleaned[key] = sanitizedValue;
         }
@@ -216,6 +223,9 @@ export class XmlRenderer extends ContextRenderer {
   }
 
   #renderTopLevel(fragment: ContextFragment): string {
+    if (isVerbatimFragment(fragment)) {
+      return fragment.data;
+    }
     const data = getFragmentData(fragment);
     if (this.isPrimitive(data)) {
       return this.#leafRoot(fragment.name, String(data));
@@ -581,6 +591,9 @@ export class MarkdownRenderer extends ContextRenderer {
   render(fragments: ContextFragment[]): string {
     return this.sanitizeFragments(fragments)
       .map((f) => {
+        if (isVerbatimFragment(f)) {
+          return f.data;
+        }
         const title = `## ${titlecase(f.name)}`;
         const data = getFragmentData(f);
         if (this.isPrimitive(data)) {
@@ -724,7 +737,9 @@ export class TomlRenderer extends ContextRenderer {
     const rendered: string[] = [];
     for (const it of this.sanitizeFragments(fragments)) {
       const data = getFragmentData(it);
-      if (this.isPrimitive(data)) {
+      if (isVerbatimFragment(it)) {
+        rendered.push(it.data);
+      } else if (this.isPrimitive(data)) {
         rendered.push(`${it.name} = ${this.#formatValue(data)}`);
       } else if (Array.isArray(data)) {
         rendered.push(this.#renderTopLevelArray(it.name, data));
@@ -928,6 +943,9 @@ export class ToonRenderer extends ContextRenderer {
   }
 
   #renderTopLevel(fragment: ContextFragment): string {
+    if (isVerbatimFragment(fragment)) {
+      return fragment.data;
+    }
     const data = getFragmentData(fragment);
     if (this.isPrimitive(data)) {
       return `${fragment.name}: ${this.#formatValue(data)}`;

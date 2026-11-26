@@ -98,6 +98,34 @@ fragment(
 );
 ```
 
+### verbatim(text)
+
+Puts literal prompt text into the rendered context. Every renderer (XML,
+Markdown, TOML, TOON) emits the text exactly as written: no escaping, no
+re-indenting, and no tag, heading or key of its own. Use it when the exact
+bytes matter, such as a catalog copied from another harness.
+
+```typescript
+import { XmlRenderer, hint, verbatim } from '@deepagents/context';
+
+new XmlRenderer().render([
+  hint('Keep it short & clear'),
+  verbatim('## Skills\n- deploy: Ship it & check'),
+]);
+```
+
+```
+<hint>Keep it short &amp; clear</hint>
+## Skills
+- deploy: Ship it & check
+```
+
+The text sits at its position among the top-level fragments, separated from
+its siblings the way the renderer separates any two fragments (one newline in
+XML and TOON, a blank line in Markdown and TOML). A verbatim fragment renders
+only at the top level: nested inside another fragment, including through
+`render(tag, ...)`, the renderer throws. `verbatim('')` throws too.
+
 ## Message vs Regular Fragments
 
 Fragments are categorized into two types:
@@ -208,6 +236,7 @@ import {
   isFragment,
   isFragmentObject,
   isMessageFragment,
+  isVerbatimFragment,
 } from '@deepagents/context';
 
 isFragment(role('Be concise.')); // true
@@ -216,6 +245,8 @@ isFragment('just a string'); // false
 
 isMessageFragment(user('Hello')); // true
 isMessageFragment(hint('Be helpful')); // false
+
+isVerbatimFragment(verbatim('## Skills')); // true
 
 isFragmentObject({ key: 'value' }); // true
 isFragmentObject([1, 2, 3]); // false

@@ -265,6 +265,11 @@ Builder functions for user-specific context:
 | ----------------------------- | ---------------------------------------------- |
 | `fragment(name, ...children)` | Create a wrapper fragment with nested children |
 | `role(content)`               | System role/instructions fragment              |
+| `verbatim(text)`              | Literal text every renderer emits as-is        |
+
+`verbatim(text)` emits its text unescaped, unindented and without a tag, heading
+or key, at its position among the top-level fragments. It renders only at the
+top level; nested inside another fragment, the renderer throws.
 
 ### Message Fragments
 
@@ -554,7 +559,7 @@ All renderers automatically skip `null` and `undefined` values.
 ```typescript
 interface ContextFragment {
   name: string;
-  type?: 'fragment' | 'message';
+  type?: 'fragment' | 'message' | 'verbatim';
   persist?: boolean;
   codec?: FragmentCodec;
 }
