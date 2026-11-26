@@ -48,12 +48,17 @@ for chat state and stream reconnection. `initialMessages` seeds each new
 `chatId`; use `useAgent().setChat(messages)` to replace loaded history.
 Changing `chatId` or unmounting the provider stops its active stream.
 
-Submissions queue by default and send in order when the chat is ready.
-`useAgent().submit()` resolves when the message is queued or handed to the
-chat, before the assistant finishes responding. A failed file upload rejects
-that submission without sending it. Errors pause queued sends. A successful
-`useAgentMessages().resumeStream()` lets the queue continue; an explicit
-submission clears the current error and joins the end of the queue.
+A submission made while a response is in flight waits in the AI SDK's queue,
+`useAgentMessages().experimental_queuedMessages`, and the queued messages send
+in order, one per finished response. `useAgent().submit()` resolves when the
+message is queued or handed to the chat, before the assistant finishes
+responding. A failed file upload rejects that submission without sending it.
+A stop, an error or a network disconnect holds the queue, even after a
+successful `useAgentMessages().resumeStream()`; the next submission clears the
+current error, joins the end of the queue, and the held messages send first.
+Label a queued message with `persistedPromptOf(message)`, the prompt as the
+user typed it, and remove one with
+`useAgentMessages().experimental_removeQueuedMessage(id)`.
 
 Set `resume` to enable automatic stream resumption when opening an existing
 conversation and when a page becomes visible after a network disconnect.

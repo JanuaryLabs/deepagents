@@ -1,7 +1,7 @@
 # @deepagents/react-genai
 
-This package provides reusable chat, composer, message, trajectory, dynamic
-rendering, and interactive-element primitives for React hosts.
+This package provides reusable chat, composer, message, trajectory and
+interactive-element primitives for React hosts.
 
 ## Module seam
 

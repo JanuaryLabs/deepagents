@@ -1,6 +1,6 @@
 # @deepagents/react-genai
 
-React components that render AI SDK chat flows, trajectories, tools, citations, dynamic UI and interactive responses. A host is the app that renders these components. The host gives the transport, the tools and the clock.
+React components that render AI SDK chat flows, trajectories, tools, citations and interactive responses. A host is the app that renders these components. The host gives the transport, the tools and the clock.
 
 ## Install
 
