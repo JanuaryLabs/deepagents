@@ -229,6 +229,12 @@ export class StreamManager {
 
     const ac = new AbortController();
     const cancelWatcher = this.#runCancelWatcher(streamId, ac, options);
+    // The watcher stops before persist writes the stream's terminal status,
+    // so it never reads persist's own 'cancelled' back as a cancel.
+    const stopCancelWatcher = async () => {
+      ac.abort();
+      await cancelWatcher;
+    };
     const source = settlementTracked(stream);
 
     let pw!: Awaited<ReturnType<typeof persistedWriter>>;
@@ -244,10 +250,13 @@ export class StreamManager {
       },
     });
 
+    let cancelled: boolean | undefined;
     try {
       await drain(sink, ac.signal);
+      cancelled = ac.signal.aborted;
+      await stopCancelWatcher();
 
-      if (ac.signal.aborted) {
+      if (cancelled) {
         if (pw) await pw.flush();
       } else if (!source.failure) {
         await pw.complete();
@@ -264,7 +273,8 @@ export class StreamManager {
         throw source.failure.error;
       }
     } catch (err) {
-      if (ac.signal.aborted) {
+      cancelled ??= ac.signal.aborted;
+      if (cancelled) {
         if (isAbortError(err)) {
           if (pw) await pw.flush();
         } else {
@@ -282,8 +292,7 @@ export class StreamManager {
         throw err;
       }
     } finally {
-      if (!ac.signal.aborted) ac.abort();
-      await cancelWatcher;
+      await stopCancelWatcher();
       await source.settled;
     }
 
@@ -297,7 +306,7 @@ export class StreamManager {
   ): Promise<void> {
     let detected = false;
     const detect = async () => {
-      if (detected) return;
+      if (detected || ac.signal.aborted) return;
       detected = true;
       ac.abort();
       await this.#notifyCancellation(streamId, options);
@@ -311,11 +320,9 @@ export class StreamManager {
       while (!ac.signal.aborted && !detected) {
         try {
           const initialStatus = await this.#store.getStreamStatus(streamId);
-          if (initialStatus === undefined) {
-            ac.abort();
-            return;
-          }
-          if (initialStatus === 'cancelled') {
+          // A stream deleted under its producer is cancelled too: only the
+          // host can abort the producer, so it has to hear of it.
+          if (initialStatus === undefined || initialStatus === 'cancelled') {
             await detect();
             return;
           }
@@ -336,11 +343,7 @@ export class StreamManager {
             }
             if (change.kind === 'chunks') continue;
             const status = await this.#store.getStreamStatus(streamId);
-            if (status === undefined) {
-              ac.abort();
-              return;
-            }
-            if (status === 'cancelled') {
+            if (status === undefined || status === 'cancelled') {
               await detect();
               return;
             }

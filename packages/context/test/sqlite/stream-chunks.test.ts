@@ -11,6 +11,7 @@ import {
   simulateReadableStream,
 } from 'ai';
 import assert from 'node:assert';
+import { once } from 'node:events';
 import type { TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -207,6 +208,44 @@ class FailNextStreamReadStore extends SqliteStreamStore {
     const fault = this.#readFaults.shift();
     if (fault) throw fault;
     return super.getStream(streamId);
+  }
+}
+
+/**
+ * Answers a status write 60 ms after it commits, three polls of makeManager's
+ * 20 ms backoff: a network store answers the writer late while other
+ * connections already read the row.
+ */
+class LateStatusWriteAckStore extends SqliteStreamStore {
+  override async updateStreamStatus(
+    streamId: string,
+    status: StreamStatus,
+    options?: { error?: string },
+  ): Promise<void> {
+    await super.updateStreamStatus(streamId, status, options);
+    await sleep(60);
+  }
+}
+
+/** Holds every status read until released; a released read reads the row then. */
+class HeldStatusReadStore extends SqliteStreamStore {
+  readonly #readHeld = new Latch();
+  readonly #released = new Latch();
+
+  readHeld(): Promise<void> {
+    return this.#readHeld.wait();
+  }
+
+  releaseStatusReads(): void {
+    this.#released.open();
+  }
+
+  override async getStreamStatus(
+    streamId: string,
+  ): Promise<StreamStatus | undefined> {
+    this.#readHeld.open();
+    await this.#released.wait();
+    return super.getStreamStatus(streamId);
   }
 }
 
@@ -2722,6 +2761,165 @@ describe('Stream Chunks', () => {
       const stream = await store.getStream(streamId);
       assert.ok(stream);
       assert.strictEqual(stream.status, 'cancelled');
+    });
+  });
+
+  describe('StreamManager.persist() onCancelDetected and its own terminal write', () => {
+    it('does not report a cancel for a source that ends by an abort chunk when nobody cancelled', async (t) => {
+      await using database = await sqlite.database();
+      const store = new LateStatusWriteAckStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
+      using source = streamHarness.source<UIMessageChunk>();
+      source.enqueue({ type: 'text-start', id: 'part-1' });
+
+      const detected: string[] = [];
+      const persisted = streams.persist(source.stream, streamId, {
+        onCancelDetected: (info) => {
+          detected.push(info.streamId);
+        },
+      });
+      await waitForStatus(t, store, streamId, 'running');
+      source.enqueue({ type: 'abort' });
+      source.close();
+      await untilAborted(persisted, t.signal);
+
+      assert.deepStrictEqual(
+        { detected, status: await store.getStreamStatus(streamId) },
+        { detected: [], status: 'cancelled' },
+      );
+    });
+
+    it('does not report a cancel for a source that errors with an AbortError when nobody cancelled', async (t) => {
+      await using database = await sqlite.database();
+      const store = new LateStatusWriteAckStore(database.connection);
+      const streams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
+      using source = streamHarness.source<UIMessageChunk>();
+      source.enqueue({ type: 'text-start', id: 'part-1' });
+
+      const detected: string[] = [];
+      const persisted = streams.persist(source.stream, streamId, {
+        onCancelDetected: (info) => {
+          detected.push(info.streamId);
+        },
+      });
+      await waitForStatus(t, store, streamId, 'running');
+      source.enqueue({ type: 'abort' });
+      source.error(
+        new DOMException('This operation was aborted', 'AbortError'),
+      );
+      await untilAborted(persisted, t.signal);
+
+      assert.deepStrictEqual(
+        { detected, status: await store.getStreamStatus(streamId) },
+        { detected: [], status: 'cancelled' },
+      );
+    });
+
+    it('reports a cancel requested by another writer while the source runs exactly once', async (t) => {
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const workerStreams = makeManager(store);
+      const controllingStreams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await workerStreams.register(streamId);
+      using source = streamHarness.source<UIMessageChunk>();
+      source.enqueue({ type: 'text-start', id: 'part-1' });
+
+      const detected: string[] = [];
+      const persisted = workerStreams.persist(source.stream, streamId, {
+        onCancelDetected: (info) => {
+          detected.push(info.streamId);
+        },
+      });
+      await waitForStatus(t, store, streamId, 'running');
+      await controllingStreams.cancel(streamId);
+      await untilAborted(persisted, t.signal);
+
+      assert.deepStrictEqual(
+        { detected, status: await store.getStreamStatus(streamId) },
+        { detected: [streamId], status: 'cancelled' },
+      );
+    });
+
+    it('does not report a cancel that lands after the source has ended, and the cancel wins over the terminal write of persist', async (t) => {
+      await using database = await sqlite.database();
+      const store = new HeldStatusReadStore(database.connection);
+      const observer = new SqliteStreamStore(database.connection);
+      const workerStreams = makeManager(store);
+      const controllingStreams = makeManager(observer);
+      const streamId = crypto.randomUUID();
+      await workerStreams.register(streamId);
+      using source = streamHarness.source<UIMessageChunk>();
+      source.enqueue({ type: 'text-start', id: 'part-1' });
+
+      const detected: string[] = [];
+      const persisted = workerStreams.persist(source.stream, streamId, {
+        onCancelDetected: (info) => {
+          detected.push(info.streamId);
+        },
+      });
+      try {
+        await waitForStatus(t, observer, streamId, 'running');
+        await untilAborted(store.readHeld(), t.signal);
+        source.close();
+        // The source's end reaches persist within microtasks; no store
+        // operation tells the test that persist has left its drain.
+        await sleep(50);
+        await controllingStreams.cancel(streamId);
+      } finally {
+        store.releaseStatusReads();
+      }
+      await untilAborted(persisted, t.signal);
+
+      assert.deepStrictEqual(
+        { detected, status: await observer.getStreamStatus(streamId) },
+        { detected: [], status: 'cancelled' },
+      );
+    });
+
+    it('reports a stream deleted while the source runs as a cancel once, and resolves once the host aborts its source', async (t) => {
+      await using database = await sqlite.database();
+      const store = new SqliteStreamStore(database.connection);
+      const workerStreams = makeManager(store);
+      const controllingStreams = makeManager(store);
+      const streamId = crypto.randomUUID();
+      await workerStreams.register(streamId);
+      const host = new AbortController();
+      const hostAborted = once(host.signal, 'abort');
+      const source = new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          controller.enqueue({ type: 'text-start', id: 'part-1' });
+        },
+        async cancel() {
+          await hostAborted;
+        },
+      });
+
+      const detected: string[] = [];
+      const persisted = workerStreams.persist(source, streamId, {
+        onCancelDetected: (info) => {
+          detected.push(info.streamId);
+          host.abort();
+        },
+      });
+      await waitForStatus(t, store, streamId, 'running');
+      await controllingStreams.cleanup(streamId);
+      const outcome = await untilAborted(
+        persisted.then(
+          (result) => ({ result }),
+          (error: unknown) => ({ error }),
+        ),
+        t.signal,
+      );
+
+      assert.deepStrictEqual(
+        { detected, outcome },
+        { detected: [streamId], outcome: { result: { streamId } } },
+      );
     });
   });
 
