@@ -1091,7 +1091,7 @@ class RuntimeHost implements AsyncDisposable {
       const seen = await store.getStream(streamId);
       if (seen?.status !== 'queued') continue;
       if (!(await this.#queue.isLost(streamId, seen.createdAt))) continue;
-      await store
+      const failed = await store
         .updateStream(streamId, (stream) =>
           stream.status === 'queued' && stream.createdAt === seen.createdAt
             ? {
@@ -1107,7 +1107,29 @@ class RuntimeHost implements AsyncDisposable {
           if ((await store.getStream(streamId)) === undefined) return;
           throw error;
         });
+      if (failed?.updated) await this.#publishLostTurn(streamId);
     }
+  }
+
+  /**
+   * Publishes the status a lost turn's failure leaves. Only a turn that ran
+   * before, a continuation, is its conversation's latest turn, and so its
+   * status; its assistant message carries the stream's id and names the
+   * conversation. A turn that never ran has no message and changed no status.
+   * The continuation never ran, so its approval answer never reached the
+   * head: the follow-ups parked behind that head stay parked until the
+   * approval is answered again, as after a cancelled queued continuation.
+   */
+  async #publishLostTurn(streamId: string): Promise<void> {
+    const message = await this.#store.getMessage(streamId);
+    if (message === undefined) return;
+    const chat = await this.#store.getChat(message.chatId);
+    // A session delete since the failure removed the chat with its watchers.
+    if (chat === undefined) return;
+    await this.#conversationStatus.publish({
+      chatId: chat.id,
+      userId: chat.userId,
+    });
   }
 
   /**
