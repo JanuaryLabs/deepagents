@@ -1,4 +1,5 @@
 /// <reference types='vitest' />
+import { nxReadySignal } from '@nx/vite/plugins/nx-ready-signal.plugin';
 import { reactRouter } from '@react-router/dev/vite';
 import tailwindcss from '@tailwindcss/vite';
 import mdx from 'fumadocs-mdx/vite';
@@ -22,6 +23,7 @@ export default defineConfig(() => ({
     !process.env.VITEST && reactRouter(),
     tailwindcss(),
     mdx(MdxConfig),
+    nxReadySignal(),
   ],
   // Uncomment this if you are using workers.
   // worker: {

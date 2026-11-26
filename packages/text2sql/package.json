@@ -100,7 +100,7 @@
     "@ai-sdk/groq": "^4.0.86",
     "@deepagents/agent": "7.16.0",
     "@deepagents/context": "7.16.0",
-    "@google-cloud/bigquery": "8.3.1",
+    "@google-cloud/bigquery": "9.6.1",
     "@zukhruf/async": "^0.8.144",
     "@zukhruf/docker": "^0.8.144",
     "@zukhruf/fs": "^0.8.144",
@@ -123,13 +123,13 @@
     "@ai-sdk/openai": "^4.0.123",
     "@ai-sdk/react": "^4.0.186",
     "@deepagents/evals": "7.16.0",
-    "@duckdb/node-api": "^1.5.5-r.3",
-    "@google-cloud/bigquery": "^8.3.1",
+    "@duckdb/node-api": "^2.0.1-r.1",
+    "@google-cloud/bigquery": "^9.6.1",
     "@zukhruf/parameterized-test": "^0.8.144",
     "openai": "6.48.0"
   },
   "peerDependencies": {
-    "@duckdb/node-api": "^1.5.5-r.3",
+    "@duckdb/node-api": "^2.0.1-r.1",
     "mssql": "^12.7.0",
     "pg": "^8.22.0",
     "xlsx": "^0.20.3"

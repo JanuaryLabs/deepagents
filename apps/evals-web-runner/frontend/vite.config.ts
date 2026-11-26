@@ -1,4 +1,5 @@
 /// <reference types='vitest' />
+import { nxReadySignal } from '@nx/vite/plugins/nx-ready-signal.plugin';
 import babel from '@rolldown/plugin-babel';
 import sdkIt from '@sdk-it/vite';
 import tailwindcss from '@tailwindcss/vite';
@@ -30,6 +31,7 @@ export default defineConfig(() => {
       babel({ presets: [reactCompilerPreset()] }),
       tailwindcss(),
       sdkIt.imports(),
+      nxReadySignal(),
     ],
     base: './',
     build: {
