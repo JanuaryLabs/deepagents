@@ -75,10 +75,14 @@ its own native login transport.
 ## Application-owned accounts
 
 ```ts
-import { createCodexAccounts } from '@deepagents/experimental/providers/codex';
+import {
+  PostgresAccountStore,
+  createCodexAccounts,
+} from '@deepagents/experimental/providers/codex';
 
+const store = await PostgresAccountStore.create({ pool }); // the host's pg Pool
 const accounts = createCodexAccounts({
-  store, // KeyValueStore<ChatGPTTokens>, keyed by owner
+  store,
   onChange: (owner, state) => notify(owner, state),
 });
 
@@ -96,7 +100,9 @@ const modelIds = await accounts.listModels(userId);
 Each owner connects a ChatGPT account through device sign-in; the Codex CLI is
 not involved. `connect` resolves with the pending code and polls in the
 background until the code expires (15 minutes), the owner authorizes, or
-`cancel`/`disconnect` abandons it. The store, states, single-instance rule,
+`cancel`/`disconnect` abandons it. The poll runs in the process that called
+`connect`; every other instance sees the sign-in as `pending`, and a cancel or
+disconnect there makes its save fail. The store, states, cross-host locking,
 refresh, and 401 behavior match the [Claude accounts](../claude/README.md#application-owned-accounts);
 `connected.user` comes from the id token (`accountId`, `email`, `plan`). Failures
 throw `CodexAuthError` with a `code`, including `missing-account-id`.

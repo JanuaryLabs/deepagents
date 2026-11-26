@@ -72,10 +72,14 @@ token. For credentials your application owns, see
 ## Application-owned accounts
 
 ```ts
-import { createClaudeAccounts } from '@deepagents/experimental/providers/claude';
+import {
+  PostgresAccountStore,
+  createClaudeAccounts,
+} from '@deepagents/experimental/providers/claude';
 
+const store = await PostgresAccountStore.create({ pool }); // the host's pg Pool
 const accounts = createClaudeAccounts({
-  store, // KeyValueStore<ClaudeTokens>, keyed by owner
+  store,
   clock: globalThis,
   onChange: (owner, state) => notify(owner, state),
 });
@@ -92,10 +96,11 @@ const modelIds = await accounts.listModels(userId);
 ```
 
 Each owner (for example, your application's user ID) connects a Claude Pro or Max account
-through PKCE sign-in; neither Claude Code nor a local login is involved. The
-store is the `KeyValueStore` from `@opencoredev/loginwithchatgpt-core`
-(`get`/`set`/`delete`), so any encrypted backend works. Values that do not parse
-as tokens read as `unauthenticated`.
+through PKCE sign-in; neither Claude Code nor a local login is involved.
+`PostgresAccountStore.create({ pool, schema? })` creates its tables and
+sequence in `schema` (default `public`) on the host's `pg` Pool, which the store
+never ends. One store serves both the Claude and the ChatGPT accounts. Values
+that do not parse as tokens read as `unauthenticated`.
 
 `state(owner)` and `onChange` report `unauthenticated`, `pending`
 (`authorizationUrl`, `expiresAt`, an optional retry `message`), `connected`
@@ -103,11 +108,15 @@ as tokens read as `unauthenticated`.
 expires after ten minutes. Invalid input, a code from another sign-in, network
 failures, HTTP 429, and server errors keep it `pending` with a retry message.
 Other token endpoint rejections end sign-in with `error`. `cancel(owner)`
-abandons a sign-in, and `disconnect(owner)` also deletes the tokens.
+abandons a sign-in, and `disconnect(owner)` also clears the tokens.
 
-Create one instance per store. Revisions and refresh serialization live in the
-instance, so a late refresh or sign-in cannot overwrite a disconnect, and
-rotated refresh tokens are used once. Refresh ignores request cancellation so a
+Every instance on every host that reaches the database shares the accounts and
+the pending sign-ins, so a sign-in started on one host can finish on another. A
+refresh holds the owner's Postgres advisory lock from its read to its write, so
+one host at a time uses a rotating refresh token. Each write carries the lock's
+fencing token and the row refuses an older one: a refresh that finishes after a
+disconnect, a holder that lost its lock, or a sign-in whose account changed
+since `connect` saves nothing. Refresh ignores request cancellation so a
 rotated token is never dropped. Tokens are refreshed when expired or within one
 minute of expiry. A 401 forces one refresh and retries the
 request; a rejected refresh token deletes the tokens and reports

@@ -2,11 +2,11 @@
 
 **Use case.** Let each user connect their own Claude Pro or Max account. Keep each user's tokens separate and select their account for every model call.
 
-**What you need.** [Application-owned accounts](../../README.md#application-owned-accounts) and a `KeyValueStore` from `@opencoredev/loginwithchatgpt-core`, keyed by your application's user ID. This program uses `MemoryStore`; use an encrypted, persistent store to retain tokens across restarts.
+**What you need.** [Application-owned accounts](../../README.md#application-owned-accounts) and a Postgres database for `PostgresAccountStore`. This program reads its address from `DATABASE_URL`.
 
 ## The steps
 
-1. Create one account manager per store with `createClaudeAccounts({ store, clock, onChange })`.
+1. Open the store on your `pg` Pool with `PostgresAccountStore.create({ pool })`, and create the account manager with `createClaudeAccounts({ store, clock, onChange })`.
 2. When a user starts connecting, call `accounts.connect(owner)`, using your application's user ID as `owner`.
 3. Show `authorizationUrl` to the user. The user signs in at claude.ai, and Claude shows a code.
 4. Give the code to `accounts.complete(owner, code)`. If the state stays `pending`, show its `message` and ask for the code again.
@@ -18,14 +18,18 @@
 This CLI program prints the URL and reads the code from the terminal.
 
 ```ts title="connect-account.ts"
-import { MemoryStore } from '@opencoredev/loginwithchatgpt-core';
 import { generateText } from 'ai';
 import { createInterface } from 'node:readline/promises';
+import pg from 'pg';
 
-import { createClaudeAccounts } from '@deepagents/experimental/providers/claude';
+import {
+  PostgresAccountStore,
+  createClaudeAccounts,
+} from '@deepagents/experimental/providers/claude';
 
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const accounts = createClaudeAccounts({
-  store: new MemoryStore(), // A real app uses an encrypted store.
+  store: await PostgresAccountStore.create({ pool }),
   clock: globalThis,
   onChange: (owner, state) => console.log(`[${owner}] ${state.status}`),
 });
@@ -60,6 +64,7 @@ const { text } = await generateText({
 console.log(text);
 
 await accounts.disconnect(owner);
+await pool.end();
 ```
 
 Output, until the program asks for the code. The URL is shortened: `…` replaces the end of the long query values.
@@ -73,11 +78,11 @@ Code:
 
 ## Why it works
 
-`connect` starts a PKCE sign-in for the owner and keeps it in memory for ten minutes. `complete` exchanges the authorization code for tokens and saves them under the owner's key. Models created by `provider(owner)` read that owner's tokens on each request, refreshing and saving them when they are expired or within one minute of expiry. `onChange` reports state changes: `pending` during sign-in, `connected` after sign-in, and `unauthenticated` after `disconnect`.
+`connect` starts a PKCE sign-in for the owner and keeps it in the database for ten minutes. `complete` exchanges the authorization code for tokens and saves them in the owner's row. Models created by `provider(owner)` read that owner's tokens on each request, refreshing and saving them when they are expired or within one minute of expiry. `onChange` reports state changes: `pending` during sign-in, `connected` after sign-in, and `unauthenticated` after `disconnect`.
 
 ## Things to know
 
-- **Create one instance per store.** Refreshes are serialized within that instance. Two instances sharing a store can both try to use the same refresh token.
+- **Run as many instances as you like.** Every instance on the database shares the accounts: a sign-in started on one host can finish on another, and an owner's refresh holds a Postgres advisory lock, so only one host at a time uses its refresh token.
 - **A sign-in expires after ten minutes.** Then `complete` returns `error`. Call `connect` again.
 - **A code rejected by the token endpoint ends sign-in** with the state `error`, except for HTTP 429 and server errors, which keep it `pending`. Invalid input, a code from another sign-in, and network failures also keep it `pending` so the user can retry.
 - **`connect` does not replace a connection.** For an owner that is `connected` or `pending`, it returns that state. To connect another account, call `disconnect` first.

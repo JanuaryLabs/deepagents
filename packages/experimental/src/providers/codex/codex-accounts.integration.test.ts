@@ -1,5 +1,5 @@
-import { MemoryStore } from '@opencoredev/loginwithchatgpt-core';
 import { Msw } from '@zukhruf/testing/msw';
+import { Postgres } from '@zukhruf/testing/postgres';
 import { generateText } from 'ai';
 import { http } from 'msw';
 import assert from 'node:assert/strict';
@@ -9,8 +9,11 @@ import { Agent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
 import {
   CodexAuthError,
   type CodexConnectionState,
+  PostgresAccountStore,
   createCodexAccounts,
 } from '@deepagents/experimental/providers/codex';
+
+const testPostgres = new Postgres({ environment: process.env });
 
 const USERCODE_URL = 'https://auth.openai.com/api/accounts/deviceauth/usercode';
 const POLL_URL = 'https://auth.openai.com/api/accounts/deviceauth/token';
@@ -183,10 +186,13 @@ function reply(text: string) {
   );
 }
 
-function connectedAccounts(changes: CodexConnectionState[] = []) {
+function connectedAccounts(
+  store: PostgresAccountStore,
+  changes: CodexConnectionState[] = [],
+) {
   const settled = new Map<string, PromiseWithResolvers<void>>();
   const accounts = createCodexAccounts({
-    store: new MemoryStore(),
+    store,
     onChange: (owner, state) => {
       changes.push(state);
       if (state.status === 'connected') settled.get(owner)?.resolve();
@@ -215,8 +221,12 @@ function ask(accounts: ReturnType<typeof createCodexAccounts>, owner: string) {
 }
 
 test('device sign-in connects the account and authenticates its models', async () => {
+  await using db = await testPostgres.database();
   const changes: CodexConnectionState[] = [];
-  const { accounts, signIn } = connectedAccounts(changes);
+  const { accounts, signIn } = connectedAccounts(
+    await PostgresAccountStore.create({ pool: db.pool() }),
+    changes,
+  );
   let polls = 0;
   await using requests = interceptWire((request) => {
     if (request.url === POLL_URL && ++polls === 1) {
@@ -260,17 +270,18 @@ test('device sign-in connects the account and authenticates its models', async (
     assert.equal(modelRequest?.headers.get('authorization'), 'Bearer access-1');
     assert.equal(modelRequest?.headers.get('chatgpt-account-id'), 'account-1');
   } finally {
-    accounts.cancel('owner-a');
+    await accounts.cancel('owner-a');
   }
 });
 
 test('an authorization arriving after the owner cancelled the sign-in saves nothing', async () => {
+  await using db = await testPostgres.database();
   const polling = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   const reported = Promise.withResolvers<CodexConnectionState>();
   let released = false;
   const accounts = createCodexAccounts({
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     onChange: (_owner, state) => {
       if (released) reported.resolve(state);
     },
@@ -289,7 +300,7 @@ test('an authorization arriving after the owner cancelled the sign-in saves noth
   try {
     await accounts.connect('owner-a');
     await polling.promise;
-    accounts.cancel('owner-a');
+    await accounts.cancel('owner-a');
     released = true;
     release.resolve();
     const report = await reported.promise;
@@ -302,7 +313,7 @@ test('an authorization arriving after the owner cancelled the sign-in saves noth
     assert.ok(failure instanceof CodexAuthError);
     assert.equal(failure.code, 'not-connected');
   } finally {
-    accounts.cancel('owner-a');
+    await accounts.cancel('owner-a');
   }
 });
 
@@ -310,10 +321,11 @@ test(
   'cancelling a sign-in aborts its device poll in flight and polls no more',
   { timeout: 5_000 },
   async () => {
+    await using db = await testPostgres.database();
     const polling = Promise.withResolvers<AbortSignal>();
     const reported = Promise.withResolvers<CodexConnectionState>();
     const accounts = createCodexAccounts({
-      store: new MemoryStore(),
+      store: await PostgresAccountStore.create({ pool: db.pool() }),
       onChange: (_owner, state) => {
         if (state.status === 'unauthenticated') reported.resolve(state);
       },
@@ -329,14 +341,14 @@ test(
     try {
       await accounts.connect('owner-a');
       const poll = await polling.promise;
-      accounts.cancel('owner-a');
+      await accounts.cancel('owner-a');
       await abortOf(poll);
       const report = await reported.promise;
 
       assert.deepStrictEqual(report, { status: 'unauthenticated' });
       assert.equal(requests.filter(({ url }) => url === POLL_URL).length, 1);
     } finally {
-      accounts.cancel('owner-a');
+      await accounts.cancel('owner-a');
     }
   },
 );
@@ -345,8 +357,11 @@ test(
   'disconnecting during sign-in aborts the device poll in flight',
   { timeout: 5_000 },
   async () => {
+    await using db = await testPostgres.database();
     const polling = Promise.withResolvers<AbortSignal>();
-    const accounts = createCodexAccounts({ store: new MemoryStore() });
+    const accounts = createCodexAccounts({
+      store: await PostgresAccountStore.create({ pool: db.pool() }),
+    });
     await using _wire = interceptWire((request) => {
       if (request.url === POLL_URL) {
         polling.resolve(request.signal);
@@ -363,7 +378,7 @@ test(
 
       assert.deepStrictEqual(disconnected, { status: 'unauthenticated' });
     } finally {
-      accounts.cancel('owner-a');
+      await accounts.cancel('owner-a');
     }
   },
 );
@@ -372,10 +387,11 @@ test(
   'cancelling a sign-in aborts its code exchange in flight and saves nothing',
   { timeout: 5_000 },
   async () => {
+    await using db = await testPostgres.database();
     const exchanging = Promise.withResolvers<AbortSignal>();
     const reported = Promise.withResolvers<CodexConnectionState>();
     const accounts = createCodexAccounts({
-      store: new MemoryStore(),
+      store: await PostgresAccountStore.create({ pool: db.pool() }),
       onChange: (_owner, state) => {
         if (state.status === 'unauthenticated') reported.resolve(state);
       },
@@ -391,7 +407,7 @@ test(
     try {
       await accounts.connect('owner-a');
       const exchange = await exchanging.promise;
-      accounts.cancel('owner-a');
+      await accounts.cancel('owner-a');
       await abortOf(exchange);
 
       assert.deepStrictEqual(await reported.promise, {
@@ -401,13 +417,16 @@ test(
         status: 'unauthenticated',
       });
     } finally {
-      accounts.cancel('owner-a');
+      await accounts.cancel('owner-a');
     }
   },
 );
 
 test('a failed device code request is reported and sign-in can start again', async () => {
-  const accounts = createCodexAccounts({ store: new MemoryStore() });
+  await using db = await testPostgres.database();
+  const accounts = createCodexAccounts({
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
+  });
   let codeRequests = 0;
   await using _wire = interceptWire((request) => {
     if (request.url === USERCODE_URL && ++codeRequests === 1) {
@@ -424,13 +443,17 @@ test('a failed device code request is reported and sign-in can start again', asy
     assert.doesNotMatch(JSON.stringify(failed), /secret-device-detail/);
     assert.equal(retried.status, 'pending');
   } finally {
-    accounts.cancel('owner-a');
+    await accounts.cancel('owner-a');
   }
 });
 
 test('a revoked refresh token disconnects the account and reports it', async () => {
+  await using db = await testPostgres.database();
   const changes: CodexConnectionState[] = [];
-  const { accounts, signIn } = connectedAccounts(changes);
+  const { accounts, signIn } = connectedAccounts(
+    await PostgresAccountStore.create({ pool: db.pool() }),
+    changes,
+  );
   await using _wire = interceptWire((request) => {
     if (
       request.url === TOKEN_URL &&
@@ -462,12 +485,15 @@ test('a revoked refresh token disconnects the account and reports it', async () 
     });
     assert.deepStrictEqual(changes.at(-1), { status: 'unauthenticated' });
   } finally {
-    accounts.cancel('owner-a');
+    await accounts.cancel('owner-a');
   }
 });
 
 test('concurrent requests on an expiring token refresh once and keep the account connected', async () => {
-  const { accounts, signIn } = connectedAccounts();
+  await using db = await testPostgres.database();
+  const { accounts, signIn } = connectedAccounts(
+    await PostgresAccountStore.create({ pool: db.pool() }),
+  );
   let validRefreshToken = 'refresh-1';
   let refreshes = 0;
   await using requests = interceptWire(async (request) => {
@@ -515,12 +541,15 @@ test('concurrent requests on an expiring token refresh once and keep the account
     );
     assert.equal((await accounts.state('owner-a')).status, 'connected');
   } finally {
-    accounts.cancel('owner-a');
+    await accounts.cancel('owner-a');
   }
 });
 
 test('a failed refresh keeps the account and hides the token endpoint body', async () => {
-  const { accounts, signIn } = connectedAccounts();
+  await using db = await testPostgres.database();
+  const { accounts, signIn } = connectedAccounts(
+    await PostgresAccountStore.create({ pool: db.pool() }),
+  );
   let refreshes = 0;
   await using _wire = interceptWire((request) => {
     if (
@@ -549,12 +578,15 @@ test('a failed refresh keeps the account and hides the token endpoint body', asy
     assert.doesNotMatch(failure.message, /secret-outage-detail/);
     assert.equal(retried.text, 'recovered');
   } finally {
-    accounts.cancel('owner-a');
+    await accounts.cancel('owner-a');
   }
 });
 
 test('a rejected access token is refreshed once and the request retried', async () => {
-  const { accounts, signIn } = connectedAccounts();
+  await using db = await testPostgres.database();
+  const { accounts, signIn } = connectedAccounts(
+    await PostgresAccountStore.create({ pool: db.pool() }),
+  );
   let refreshes = 0;
   await using requests = interceptWire((request) => {
     if (
@@ -588,12 +620,15 @@ test('a rejected access token is refreshed once and the request retried', async 
       ['Bearer access-1', 'Bearer access-2'],
     );
   } finally {
-    accounts.cancel('owner-a');
+    await accounts.cancel('owner-a');
   }
 });
 
 test('a refresh finishing after a disconnect cannot reconnect the account', async () => {
-  const { accounts, signIn } = connectedAccounts();
+  await using db = await testPostgres.database();
+  const { accounts, signIn } = connectedAccounts(
+    await PostgresAccountStore.create({ pool: db.pool() }),
+  );
   const refreshing = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   await using _wire = interceptWire(async (request) => {
@@ -625,12 +660,15 @@ test('a refresh finishing after a disconnect cannot reconnect the account', asyn
       status: 'unauthenticated',
     });
   } finally {
-    accounts.cancel('owner-a');
+    await accounts.cancel('owner-a');
   }
 });
 
 test('models are listed for the connected account', async () => {
-  const { accounts, signIn } = connectedAccounts();
+  await using db = await testPostgres.database();
+  const { accounts, signIn } = connectedAccounts(
+    await PostgresAccountStore.create({ pool: db.pool() }),
+  );
   await using requests = interceptWire((request) => {
     if (request.url === TOKEN_URL) return tokens('access-1', 'refresh-1');
     if (request.url === MODELS_URL) {
@@ -650,15 +688,16 @@ test('models are listed for the connected account', async () => {
     assert.equal(listing?.headers.get('authorization'), 'Bearer access-1');
     assert.equal(listing?.headers.get('chatgpt-account-id'), 'account-1');
   } finally {
-    accounts.cancel('owner-a');
+    await accounts.cancel('owner-a');
   }
 });
 
 test('a sign-in rejected at authorization is reported without the response body and can start again', async () => {
+  await using db = await testPostgres.database();
   const changes: CodexConnectionState[] = [];
   const failed = Promise.withResolvers<void>();
   const accounts = createCodexAccounts({
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     onChange: (_owner, state) => {
       changes.push(state);
       if (state.status === 'error') failed.resolve();
@@ -683,12 +722,15 @@ test('a sign-in rejected at authorization is reported without the response body 
     assert.doesNotMatch(JSON.stringify(changes), /secret-exchange-detail/);
     assert.equal(restarted.status, 'pending');
   } finally {
-    accounts.cancel('owner-a');
+    await accounts.cancel('owner-a');
   }
 });
 
 test('connecting again while a sign-in is pending keeps the same code', async () => {
-  const accounts = createCodexAccounts({ store: new MemoryStore() });
+  await using db = await testPostgres.database();
+  const accounts = createCodexAccounts({
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
+  });
   await using requests = interceptWire((request) => {
     if (request.url === POLL_URL) return new Response(null, { status: 403 });
     return deviceSignIn(request) ?? unexpected();
@@ -704,12 +746,15 @@ test('connecting again while a sign-in is pending keeps the same code', async ()
       1,
     );
   } finally {
-    accounts.cancel('owner-a');
+    await accounts.cancel('owner-a');
   }
 });
 
 test('a connection without an account identifier fails model requests before sending them', async () => {
-  const { accounts, signIn } = connectedAccounts();
+  await using db = await testPostgres.database();
+  const { accounts, signIn } = connectedAccounts(
+    await PostgresAccountStore.create({ pool: db.pool() }),
+  );
   await using requests = interceptWire((request) => {
     if (request.url === TOKEN_URL) {
       return Response.json({
@@ -730,6 +775,174 @@ test('a connection without an account identifier fails model requests before sen
     assert.equal(failure.code, 'missing-account-id');
     assert.ok(requests.every((request) => request.url !== RESPONSES_URL));
   } finally {
-    accounts.cancel('owner-a');
+    await accounts.cancel('owner-a');
+  }
+});
+
+test('two hosts refreshing one owner at once spend its refresh token once', async () => {
+  await using db = await testPostgres.database();
+  const hostA = connectedAccounts(
+    await PostgresAccountStore.create({ pool: db.pool() }),
+  );
+  const hostB = createCodexAccounts({
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
+  });
+  let validRefreshToken = 'refresh-1';
+  let refreshes = 0;
+  await using requests = interceptWire(async (request) => {
+    if (
+      request.url === TOKEN_URL &&
+      request.body?.grant_type === 'authorization_code'
+    ) {
+      return tokens('access-1', 'refresh-1', 30);
+    }
+    if (request.url === TOKEN_URL) {
+      refreshes++;
+      // OpenAI rotates refresh tokens: a second use of the old one fails.
+      if (request.body?.refresh_token !== validRefreshToken) {
+        return Response.json(
+          { error: 'refresh_token_reused' },
+          { status: 401 },
+        );
+      }
+      validRefreshToken = 'refresh-2';
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return tokens('access-2', 'refresh-2');
+    }
+    if (request.url === RESPONSES_URL) return reply('hi');
+    return deviceSignIn(request) ?? unexpected();
+  });
+
+  try {
+    await hostA.signIn('owner-a');
+    const results = await Promise.all([
+      ask(hostA.accounts, 'owner-a'),
+      ask(hostB, 'owner-a'),
+    ]);
+
+    assert.deepStrictEqual(
+      {
+        texts: results.map((result) => result.text),
+        refreshes,
+        authorizations: requests
+          .filter((request) => request.url === RESPONSES_URL)
+          .map((request) => request.headers.get('authorization')),
+        states: [
+          (await hostA.accounts.state('owner-a')).status,
+          (await hostB.state('owner-a')).status,
+        ],
+      },
+      {
+        texts: ['hi', 'hi'],
+        refreshes: 1,
+        authorizations: ['Bearer access-2', 'Bearer access-2'],
+        states: ['connected', 'connected'],
+      },
+    );
+  } finally {
+    await hostA.accounts.cancel('owner-a');
+  }
+});
+
+test('a disconnect on one host wins over a refresh in flight on another', async () => {
+  await using db = await testPostgres.database();
+  const hostA = connectedAccounts(
+    await PostgresAccountStore.create({ pool: db.pool() }),
+  );
+  const hostB = createCodexAccounts({
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
+  });
+  const refreshing = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  await using _wire = interceptWire(async (request) => {
+    if (
+      request.url === TOKEN_URL &&
+      request.body?.grant_type === 'authorization_code'
+    ) {
+      return tokens('access-1', 'refresh-1', 30);
+    }
+    if (request.url === TOKEN_URL) {
+      refreshing.resolve();
+      await release.promise;
+      return tokens('access-2', 'refresh-2');
+    }
+    return deviceSignIn(request) ?? unexpected();
+  });
+
+  try {
+    await hostA.signIn('owner-a');
+    const asking = ask(hostA.accounts, 'owner-a').catch((error) => error);
+    await refreshing.promise;
+    await hostB.disconnect('owner-a');
+    release.resolve();
+    const failure = await asking;
+
+    assert.ok(failure instanceof CodexAuthError);
+    assert.deepStrictEqual(
+      {
+        code: failure.code,
+        hostA: await hostA.accounts.state('owner-a'),
+        hostB: await hostB.state('owner-a'),
+      },
+      {
+        code: 'not-connected',
+        hostA: { status: 'unauthenticated' },
+        hostB: { status: 'unauthenticated' },
+      },
+    );
+  } finally {
+    await hostA.accounts.cancel('owner-a');
+  }
+});
+
+test('a sign-in pending on one host shows on another, and a cancel there saves nothing', async () => {
+  await using db = await testPostgres.database();
+  const polling = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const reported = Promise.withResolvers<CodexConnectionState>();
+  let released = false;
+  const hostA = createCodexAccounts({
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
+    onChange: (_owner, state) => {
+      if (released) reported.resolve(state);
+    },
+  });
+  const hostB = createCodexAccounts({
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
+  });
+  await using _wire = interceptWire(async (request) => {
+    if (request.url === POLL_URL) {
+      polling.resolve();
+      await release.promise;
+    }
+    if (request.url === TOKEN_URL) return tokens('access-1', 'refresh-1');
+    return deviceSignIn(request) ?? unexpected();
+  });
+
+  try {
+    const pending = await hostA.connect('owner-a');
+    await polling.promise;
+    const seenOnB = await hostB.state('owner-a');
+    await hostB.cancel('owner-a');
+    released = true;
+    release.resolve();
+    const report = await reported.promise;
+
+    assert.deepStrictEqual(
+      {
+        seenOnB,
+        report,
+        hostA: await hostA.state('owner-a'),
+        hostB: await hostB.state('owner-a'),
+      },
+      {
+        seenOnB: pending,
+        report: { status: 'unauthenticated' },
+        hostA: { status: 'unauthenticated' },
+        hostB: { status: 'unauthenticated' },
+      },
+    );
+  } finally {
+    await hostA.cancel('owner-a');
   }
 });

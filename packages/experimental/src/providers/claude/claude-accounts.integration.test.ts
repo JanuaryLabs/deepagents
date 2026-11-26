@@ -1,7 +1,7 @@
-import { MemoryStore } from '@opencoredev/loginwithchatgpt-core';
 import { createClock } from '@sinonjs/fake-timers';
 import { untilAborted } from '@zukhruf/async';
 import { Msw } from '@zukhruf/testing/msw';
+import { Postgres } from '@zukhruf/testing/postgres';
 import { generateText } from 'ai';
 import { http } from 'msw';
 import assert from 'node:assert/strict';
@@ -13,8 +13,11 @@ import { Agent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
 import {
   ClaudeAuthError,
   type ClaudeConnectionState,
+  PostgresAccountStore,
   createClaudeAccounts,
 } from '@deepagents/experimental/providers/claude';
+
+const testPostgres = new Postgres({ environment: process.env });
 
 const TOKEN_URL = 'https://platform.claude.com/v1/oauth/token';
 const MESSAGES_URL = 'https://api.anthropic.com/v1/messages';
@@ -139,10 +142,11 @@ function ask(accounts: ReturnType<typeof createClaudeAccounts>, owner: string) {
 }
 
 test('signing in with the pasted code connects the account and authenticates its models', async () => {
+  await using db = await testPostgres.database();
   const changes: ClaudeConnectionState[] = [];
   const accounts = createClaudeAccounts({
     clock: createClock(),
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     onChange: (_owner, state) => changes.push(state),
   });
   await using requests = interceptWire((request) => {
@@ -195,8 +199,9 @@ test('signing in with the pasted code connects the account and authenticates its
 });
 
 test('a code from another sign-in attempt keeps the sign-in pending without contacting Anthropic', async () => {
+  await using db = await testPostgres.database();
   const accounts = createClaudeAccounts({
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     clock: createClock(),
   });
   await using requests = interceptWire((request) => {
@@ -225,8 +230,9 @@ test('a code from another sign-in attempt keeps the sign-in pending without cont
 });
 
 test('Anthropic throttling keeps the sign-in retryable', async () => {
+  await using db = await testPostgres.database();
   const accounts = createClaudeAccounts({
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     clock: createClock(),
   });
   let exchanges = 0;
@@ -251,8 +257,9 @@ test('Anthropic throttling keeps the sign-in retryable', async () => {
 });
 
 test('a rejected code ends the sign-in without exposing the response body', async () => {
+  await using db = await testPostgres.database();
   const accounts = createClaudeAccounts({
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     clock: createClock(),
   });
   await using _wire = interceptWire((request) => {
@@ -272,10 +279,11 @@ test('a rejected code ends the sign-in without exposing the response body', asyn
 });
 
 test('disconnecting while the code exchange is in flight saves nothing', async () => {
+  await using db = await testPostgres.database();
   const changes: ClaudeConnectionState[] = [];
   const accounts = createClaudeAccounts({
     clock: createClock(),
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     onChange: (_owner, state) => changes.push(state),
   });
   const exchanging = Promise.withResolvers<void>();
@@ -301,8 +309,9 @@ test('disconnecting while the code exchange is in flight saves nothing', async (
 });
 
 test('concurrent requests on an expiring token refresh once and keep the account connected', async () => {
+  await using db = await testPostgres.database();
   const accounts = createClaudeAccounts({
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     clock: createClock(),
   });
   let validRefreshToken = 'refresh-1';
@@ -350,10 +359,11 @@ test('concurrent requests on an expiring token refresh once and keep the account
 });
 
 test('a revoked refresh token disconnects the account and reports it', async () => {
+  await using db = await testPostgres.database();
   const changes: ClaudeConnectionState[] = [];
   const accounts = createClaudeAccounts({
     clock: createClock(),
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     onChange: (_owner, state) => changes.push(state),
   });
   await using _wire = interceptWire((request) => {
@@ -385,8 +395,9 @@ test('a revoked refresh token disconnects the account and reports it', async () 
 });
 
 test('a failed refresh keeps the account and hides the token endpoint body', async () => {
+  await using db = await testPostgres.database();
   const accounts = createClaudeAccounts({
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     clock: createClock(),
   });
   let refreshes = 0;
@@ -418,8 +429,9 @@ test('a failed refresh keeps the account and hides the token endpoint body', asy
 });
 
 test('a rejected access token is refreshed once and the request retried', async () => {
+  await using db = await testPostgres.database();
   const accounts = createClaudeAccounts({
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     clock: createClock(),
   });
   let refreshes = 0;
@@ -457,8 +469,9 @@ test('a rejected access token is refreshed once and the request retried', async 
 });
 
 test('a request aborted while another request refreshes the token stops waiting for that refresh', async (t) => {
+  await using db = await testPostgres.database();
   const accounts = createClaudeAccounts({
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     clock: createClock(),
   });
   const refreshing = Promise.withResolvers<void>();
@@ -517,8 +530,9 @@ test('a request aborted while another request refreshes the token stops waiting 
 });
 
 test('a retry aborted while another retry refreshes a rejected token stops waiting for that refresh', async (t) => {
+  await using db = await testPostgres.database();
   const accounts = createClaudeAccounts({
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     clock: createClock(),
   });
   const waitingAtApi = Promise.withResolvers<void>();
@@ -587,8 +601,9 @@ test('a retry aborted while another retry refreshes a rejected token stops waiti
 });
 
 test('an access token still rejected after refresh fails the request but keeps the account', async () => {
+  await using db = await testPostgres.database();
   const accounts = createClaudeAccounts({
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     clock: createClock(),
   });
   await using _wire = interceptWire((request) => {
@@ -614,8 +629,9 @@ test('an access token still rejected after refresh fails the request but keeps t
 });
 
 test('a refresh finishing after a disconnect cannot reconnect the account', async () => {
+  await using db = await testPostgres.database();
   const accounts = createClaudeAccounts({
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     clock: createClock(),
   });
   const refreshing = Promise.withResolvers<void>();
@@ -650,8 +666,9 @@ test('a refresh finishing after a disconnect cannot reconnect the account', asyn
 });
 
 test('models are listed across every page for the connected account', async () => {
+  await using db = await testPostgres.database();
   const accounts = createClaudeAccounts({
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     clock: createClock(),
   });
   await using requests = interceptWire((request) => {
@@ -696,8 +713,9 @@ test('models are listed across every page for the connected account', async () =
 });
 
 test('a profile outage keeps the connection and a later read fills in the identity', async () => {
+  await using db = await testPostgres.database();
   const accounts = createClaudeAccounts({
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     clock: createClock(),
   });
   let profileAvailable = false;
@@ -732,8 +750,9 @@ test('a profile outage keeps the connection and a later read fills in the identi
 });
 
 test('each owner authenticates with its own account', async () => {
+  await using db = await testPostgres.database();
   const accounts = createClaudeAccounts({
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     clock: createClock(),
   });
   await using requests = interceptWire((request) => {
@@ -764,8 +783,9 @@ test('each owner authenticates with its own account', async () => {
 });
 
 test('owners sign in independently at the same time', async () => {
+  await using db = await testPostgres.database();
   const accounts = createClaudeAccounts({
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     clock: createClock(),
   });
   await using _wire = interceptWire((request) => {
@@ -799,8 +819,9 @@ test('owners sign in independently at the same time', async () => {
 });
 
 test("disconnecting one owner does not disturb another owner's refresh", async () => {
+  await using db = await testPostgres.database();
   const accounts = createClaudeAccounts({
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     clock: createClock(),
   });
   const refreshing = Promise.withResolvers<void>();
@@ -845,10 +866,11 @@ test("disconnecting one owner does not disturb another owner's refresh", async (
 });
 
 test('a sign-in abandoned during the code exchange cannot report over a new sign-in', async () => {
+  await using db = await testPostgres.database();
   const changes: ClaudeConnectionState[] = [];
   const accounts = createClaudeAccounts({
     clock: createClock(),
-    store: new MemoryStore(),
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
     onChange: (_owner, state) => changes.push(state),
   });
   const exchanging = Promise.withResolvers<void>();
@@ -876,8 +898,12 @@ test('a sign-in abandoned during the code exchange cannot report over a new sign
 });
 
 test('an abandoned sign-in expires after ten minutes', async () => {
+  await using db = await testPostgres.database();
   const clock = createClock();
-  const accounts = createClaudeAccounts({ store: new MemoryStore(), clock });
+  const accounts = createClaudeAccounts({
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
+    clock,
+  });
   await using requests = interceptWire(unexpected);
 
   const pending = await accounts.connect('owner-a');
@@ -896,8 +922,12 @@ test('an abandoned sign-in expires after ten minutes', async () => {
 });
 
 test('a token refreshes when the clock reaches its expiry margin, and the new token lasts from that time', async () => {
+  await using db = await testPostgres.database();
   const clock = createClock();
-  const accounts = createClaudeAccounts({ store: new MemoryStore(), clock });
+  const accounts = createClaudeAccounts({
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
+    clock,
+  });
   let issued = 0;
   await using requests = interceptWire((request) => {
     if (request.url === TOKEN_URL) {
@@ -935,13 +965,15 @@ test('a token refreshes when the clock reaches its expiry margin, and the new to
 });
 
 test('unreadable stored tokens read as a disconnected account', async () => {
-  const store = new MemoryStore<any>();
-  // A blob written by an older or broken writer of the caller's store.
-  store.set('owner-a', { apiKey: 'not-a-subscription' });
-  const accounts = createClaudeAccounts({
-    store,
-    clock: createClock(),
-  });
+  await using db = await testPostgres.database();
+  const pool = db.pool();
+  const store = await PostgresAccountStore.create({ pool });
+  // A blob written by an older or broken writer of the database.
+  await pool.query(
+    `INSERT INTO provider_accounts (provider, owner, tokens, fence)
+     VALUES ('claude', 'owner-a', '{"apiKey":"not-a-subscription"}', 1)`,
+  );
+  const accounts = createClaudeAccounts({ store, clock: createClock() });
   await using _wire = interceptWire(unexpected);
 
   const state = await accounts.state('owner-a');
@@ -953,19 +985,17 @@ test('unreadable stored tokens read as a disconnected account', async () => {
 });
 
 test('a store that cannot save ends the sign-in with an error instead of throwing', async () => {
-  const memory = new MemoryStore<any>();
-  // The caller's encrypted storage can be unavailable (Linux basic_text).
-  const store = {
-    get: (key: string) => memory.get(key),
-    set: () => {
-      throw new Error('Secure storage is unavailable on this system.');
-    },
-    delete: (key: string) => memory.delete(key),
-  };
-  const accounts = createClaudeAccounts({
-    store,
-    clock: createClock(),
-  });
+  await using db = await testPostgres.database();
+  const pool = db.pool();
+  const store = await PostgresAccountStore.create({ pool });
+  // The database can refuse a write, for example a full disk or a revoked grant.
+  await pool.query(`
+    CREATE FUNCTION refuse_write() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN RAISE EXCEPTION 'The database refused the write.'; END $$;
+    CREATE TRIGGER refuse_write BEFORE INSERT OR UPDATE ON provider_accounts
+    FOR EACH ROW EXECUTE FUNCTION refuse_write();
+  `);
+  const accounts = createClaudeAccounts({ store, clock: createClock() });
   await using _wire = interceptWire((request) => {
     if (request.url === TOKEN_URL) return tokens('access-1', 'refresh-1');
     return unexpected();
@@ -975,9 +1005,167 @@ test('a store that cannot save ends the sign-in with an error instead of throwin
 
   assert.deepStrictEqual(completed, {
     status: 'error',
-    message: 'Secure storage is unavailable on this system.',
+    message: 'The database refused the write.',
   });
   assert.deepStrictEqual(await accounts.state('owner-a'), {
     status: 'unauthenticated',
   });
+});
+
+test('two hosts refreshing one owner at once spend its refresh token once', async () => {
+  await using db = await testPostgres.database();
+  const hostA = createClaudeAccounts({
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
+    clock: createClock(),
+  });
+  const hostB = createClaudeAccounts({
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
+    clock: createClock(),
+  });
+  let validRefreshToken = 'refresh-1';
+  let refreshes = 0;
+  await using requests = interceptWire(async (request) => {
+    if (
+      request.url === TOKEN_URL &&
+      request.body?.grant_type === 'authorization_code'
+    ) {
+      return tokens('access-1', 'refresh-1', { expires_in: 30 });
+    }
+    if (request.url === TOKEN_URL) {
+      refreshes++;
+      // Anthropic rotates refresh tokens: a second use of the old one fails.
+      if (request.body?.refresh_token !== validRefreshToken) {
+        return Response.json({ error: 'invalid_grant' }, { status: 400 });
+      }
+      validRefreshToken = 'refresh-2';
+      await sleep(20);
+      return tokens('access-2', 'refresh-2');
+    }
+    if (request.url === MESSAGES_URL) return message('hi');
+    return unexpected();
+  });
+
+  await signIn(hostA, 'owner-a');
+  const results = await Promise.all([
+    ask(hostA, 'owner-a'),
+    ask(hostB, 'owner-a'),
+  ]);
+
+  assert.deepStrictEqual(
+    {
+      texts: results.map((result) => result.text),
+      refreshes,
+      authorizations: requests
+        .filter((request) => request.url === MESSAGES_URL)
+        .map((request) => request.authorization),
+      states: [
+        (await hostA.state('owner-a')).status,
+        (await hostB.state('owner-a')).status,
+      ],
+    },
+    {
+      texts: ['hi', 'hi'],
+      refreshes: 1,
+      authorizations: ['Bearer access-2', 'Bearer access-2'],
+      states: ['connected', 'connected'],
+    },
+  );
+});
+
+test('a disconnect on one host wins over a refresh in flight on another', async () => {
+  await using db = await testPostgres.database();
+  const hostA = createClaudeAccounts({
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
+    clock: createClock(),
+  });
+  const hostB = createClaudeAccounts({
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
+    clock: createClock(),
+  });
+  const refreshing = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  await using _wire = interceptWire(async (request) => {
+    if (
+      request.url === TOKEN_URL &&
+      request.body?.grant_type === 'authorization_code'
+    ) {
+      return tokens('access-1', 'refresh-1', { expires_in: 30 });
+    }
+    if (request.url === TOKEN_URL) {
+      refreshing.resolve();
+      await release.promise;
+      return tokens('access-2', 'refresh-2');
+    }
+    return unexpected();
+  });
+
+  await signIn(hostA, 'owner-a');
+  const asking = ask(hostA, 'owner-a').catch((error) => error);
+  await refreshing.promise;
+  await hostB.disconnect('owner-a');
+  release.resolve();
+  const failure = await asking;
+
+  assert.ok(failure instanceof ClaudeAuthError);
+  assert.deepStrictEqual(
+    {
+      code: failure.code,
+      hostA: await hostA.state('owner-a'),
+      hostB: await hostB.state('owner-a'),
+    },
+    {
+      code: 'not-connected',
+      hostA: { status: 'unauthenticated' },
+      hostB: { status: 'unauthenticated' },
+    },
+  );
+});
+
+test('a sign-in started on one host completes on another', async () => {
+  await using db = await testPostgres.database();
+  const hostA = createClaudeAccounts({
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
+    clock: createClock(),
+  });
+  const hostB = createClaudeAccounts({
+    store: await PostgresAccountStore.create({ pool: db.pool() }),
+    clock: createClock(),
+  });
+  await using requests = interceptWire((request) => {
+    if (request.url === TOKEN_URL) return tokens('access-1', 'refresh-1');
+    if (request.url === MESSAGES_URL) return message('hi');
+    return unexpected();
+  });
+
+  const pending = await hostA.connect('owner-a');
+  assert.ok(pending.status === 'pending');
+  const seenOnB = await hostB.state('owner-a');
+  const connected = await hostB.complete(
+    'owner-a',
+    `pasted-code#${new URL(pending.authorizationUrl).searchParams.get('state')}`,
+  );
+  await ask(hostA, 'owner-a');
+
+  assert.deepStrictEqual(
+    {
+      seenOnB,
+      connected,
+      verifierMatches:
+        hash(
+          'sha256',
+          requests.find((request) => request.url === TOKEN_URL)?.body
+            ?.code_verifier,
+          'base64url',
+        ) ===
+        new URL(pending.authorizationUrl).searchParams.get('code_challenge'),
+      authorization: requests.find((request) => request.url === MESSAGES_URL)
+        ?.authorization,
+    },
+    {
+      seenOnB: pending,
+      connected: { status: 'connected', user: { email: 'ada@example.com' } },
+      verifierMatches: true,
+      authorization: 'Bearer access-1',
+    },
+  );
 });

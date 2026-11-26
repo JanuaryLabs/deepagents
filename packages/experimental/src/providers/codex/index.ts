@@ -26,3 +26,7 @@ export {
   createCodexAccounts,
 } from './accounts.ts';
 export { CodexAuthError, type CodexAuthErrorCode } from './errors.ts';
+export {
+  PostgresAccountStore,
+  type PostgresAccountStoreOptions,
+} from '../postgres-account-store.ts';

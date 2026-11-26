@@ -38,3 +38,7 @@ export {
   createClaudeAccounts,
 } from './accounts.ts';
 export { ClaudeAuthError, type ClaudeAuthErrorCode } from './errors.ts';
+export {
+  PostgresAccountStore,
+  type PostgresAccountStoreOptions,
+} from '../postgres-account-store.ts';

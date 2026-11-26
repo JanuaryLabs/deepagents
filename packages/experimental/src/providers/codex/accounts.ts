@@ -3,7 +3,6 @@ import {
   type ChatGPTUser,
   type CodexAuth,
   type DeviceCode,
-  type KeyValueStore,
   type ResolvedConfig,
   createCodexFetch,
   deriveAccountId,
@@ -16,19 +15,21 @@ import {
   resolveConfig,
   waitForDeviceTokens,
 } from '@opencoredev/loginwithchatgpt-core';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import {
   type RefreshResult,
   createTokenResolver,
-  createTokenVault,
   retryUnauthorized,
 } from '../account-tokens.ts';
+import type { PostgresAccountStore } from '../postgres-account-store.ts';
 import { requestSignal } from '../request-signal.ts';
 import { CodexAuthError } from './errors.ts';
 import { codexProvider } from './provider.ts';
 
 const REQUEST_TIMEOUT_MS = 30_000;
+const PROVIDER = 'codex';
 
 const chatgptTokens = z.object({
   accessToken: z.string().min(1),
@@ -36,6 +37,12 @@ const chatgptTokens = z.object({
   idToken: z.string().optional(),
   accountId: z.string().optional(),
   expiresAt: z.number().optional(),
+});
+
+const pendingSignIn = z.object({
+  userCode: z.string(),
+  verificationUrl: z.string(),
+  expiresAt: z.string(),
 });
 
 export type CodexConnectionState =
@@ -50,33 +57,31 @@ export type CodexConnectionState =
   | { status: 'error'; message: string };
 
 export interface CodexAccountsOptions {
-  /** Holds each owner's tokens, keyed by the owner passed to every method. */
-  store: KeyValueStore<ChatGPTTokens>;
+  /** Holds each owner's tokens and sign-ins, shared by every instance on the database. */
+  store: PostgresAccountStore;
   /** Receives every connection change, including device sign-in completion. */
   onChange?: (owner: string, state: CodexConnectionState) => void;
 }
 
-interface PendingSignIn {
-  userCode: string;
-  verificationUrl: string;
-  expiresAt: string;
-  revision: number;
-  abort: AbortController;
-}
+type PendingSignIn = z.infer<typeof pendingSignIn>;
 
 /**
  * ChatGPT subscriptions owned by the application rather than the local Codex
- * login: device sign-in, refresh, and models per owner. Create one instance
- * per store; refresh serialization lives in the instance.
+ * login: device sign-in, refresh, and models per owner. Every instance on one
+ * store's database shares the accounts: each sees a sign-in another started,
+ * and one host refreshes an owner at a time. The device poll runs in the
+ * process that started the sign-in.
  */
 export function createCodexAccounts(options: CodexAccountsOptions) {
-  const vault = createTokenVault(
-    options.store,
-    (value) => chatgptTokens.safeParse(value).data,
-  );
-  const signIns = new Map<string, PendingSignIn>();
+  const { store } = options;
+  const parse = (value: unknown) => chatgptTokens.safeParse(value).data;
+  // The device sign-ins this process polls, by sign-in state, so a cancel
+  // here stops the poll in flight; a cancel elsewhere makes its save fail.
+  const polls = new Map<string, AbortController>();
   const tokens = createTokenResolver<ChatGPTTokens>({
-    vault,
+    store,
+    provider: PROVIDER,
+    parse,
     isFresh: (current) => !isAccessTokenExpired(current),
     refresh: refreshTokens,
     notConnected: () =>
@@ -117,10 +122,12 @@ export function createCodexAccounts(options: CodexAccountsOptions) {
   }
 
   async function state(owner: string): Promise<CodexConnectionState> {
-    const signIn = signIns.get(owner);
-    if (signIn) return pending(signIn);
     try {
-      const { tokens: current } = await vault.snapshot(owner);
+      const signIn = await store.signIn(PROVIDER, owner);
+      if (signIn && signIn.expiresAt > Date.now()) {
+        return pending(pendingSignIn.parse(signIn.pending));
+      }
+      const current = parse((await store.account(PROVIDER, owner)).tokens);
       if (!current) return { status: 'unauthenticated' };
       return { status: 'connected', user: parseUser(current.idToken) ?? null };
     } catch (error) {
@@ -140,41 +147,60 @@ export function createCodexAccounts(options: CodexAccountsOptions) {
     return emit(owner, await state(owner));
   }
 
-  function cancel(owner: string) {
-    const signIn = signIns.get(owner);
-    if (!signIn) return;
-    signIns.delete(owner);
-    signIn.abort.abort();
+  async function cancel(owner: string) {
+    const ended = await store.takeSignIn(PROVIDER, owner);
+    if (ended) polls.get(ended)?.abort();
   }
 
   async function waitForSignIn(
     owner: string,
-    signIn: PendingSignIn,
+    state: string,
+    abort: AbortController,
     config: ResolvedConfig,
     device: DeviceCode,
   ) {
     // Every sign-in ends with a report. One abandoned by cancel or disconnect
-    // reports the current state and never saves its tokens: cancel leaves the
-    // store revision unchanged, so only this check stops a late save.
+    // reports the current state and never saves its tokens: its save ends the
+    // stored sign-in in the same statement, so a sign-in already ended saves
+    // nothing.
     try {
       const fresh = await waitForDeviceTokens(config, device, {
-        signal: signIn.abort.signal,
+        signal: abort.signal,
       });
-      if (signIns.get(owner) === signIn) {
-        await vault.commit(owner, fresh, signIn.revision);
-      }
+      await store.exclusive(PROVIDER, owner, (lease) =>
+        lease.finishSignIn(state, fresh, Date.now()),
+      );
     } catch (error) {
-      if (signIns.get(owner) === signIn) {
-        signIns.delete(owner);
-        emit(owner, {
-          status: 'error',
-          message: messageOf(error, 'ChatGPT sign-in failed.'),
-        });
+      const failure = await endSignIn(owner, state, error);
+      if (failure) {
+        emit(owner, failure);
         return;
       }
+    } finally {
+      if (polls.get(state) === abort) polls.delete(state);
     }
-    if (signIns.get(owner) === signIn) signIns.delete(owner);
     await publish(owner);
+  }
+
+  /** The error to report when sign-in `state` is still the owner's, once. */
+  async function endSignIn(
+    owner: string,
+    state: string,
+    error: unknown,
+  ): Promise<CodexConnectionState | undefined> {
+    try {
+      if (!(await store.takeSignIn(PROVIDER, owner, state))) return undefined;
+    } catch (storeError) {
+      // Nothing can end the sign-in, so its report is the store's failure.
+      return {
+        status: 'error',
+        message: messageOf(storeError, 'Ending the ChatGPT sign-in failed.'),
+      };
+    }
+    return {
+      status: 'error',
+      message: messageOf(error, 'ChatGPT sign-in failed.'),
+    };
   }
 
   /**
@@ -184,7 +210,7 @@ export function createCodexAccounts(options: CodexAccountsOptions) {
   async function connect(owner: string): Promise<CodexConnectionState> {
     const existing = await state(owner);
     if (existing.status !== 'unauthenticated') return existing;
-    const { revision } = await vault.snapshot(owner);
+    const { fence } = await store.account(PROVIDER, owner);
 
     // The library sends the device code request, the polls and the code
     // exchange without a signal. This fetch gives each the sign-in's, so a
@@ -211,23 +237,28 @@ export function createCodexAccounts(options: CodexAccountsOptions) {
       });
     }
 
-    cancel(owner);
+    await cancel(owner);
     const signIn: PendingSignIn = {
       userCode: device.userCode,
       verificationUrl: device.verificationUrl,
       expiresAt: new Date(device.expiresAt).toISOString(),
-      revision,
-      abort,
     };
-    signIns.set(owner, signIn);
+    const attempt = randomUUID();
+    await store.beginSignIn(PROVIDER, owner, {
+      state: attempt,
+      pending: signIn,
+      fence,
+      expiresAt: new Date(device.expiresAt).getTime(),
+    });
+    polls.set(attempt, abort);
     const current = emit(owner, pending(signIn));
-    void waitForSignIn(owner, signIn, config, device);
+    void waitForSignIn(owner, attempt, abort, config, device);
     return current;
   }
 
   async function disconnect(owner: string): Promise<CodexConnectionState> {
-    cancel(owner);
-    await vault.clear(owner);
+    const ended = await store.disconnect(PROVIDER, owner);
+    if (ended) polls.get(ended)?.abort();
     return publish(owner);
   }
 
@@ -289,12 +320,16 @@ function codexAuth(tokens: ChatGPTTokens): CodexAuth {
 
 async function refreshTokens(
   current: ChatGPTTokens,
+  signal: AbortSignal,
 ): Promise<RefreshResult<ChatGPTTokens>> {
   const config = resolveConfig({
     fetch: (input, init) =>
       globalThis.fetch(input, {
         ...init,
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.any([
+          signal,
+          AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        ]),
       }),
   });
   try {

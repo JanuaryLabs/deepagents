@@ -1,13 +1,12 @@
-import type { KeyValueStore } from '@opencoredev/loginwithchatgpt-core';
 import { hash, randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import {
   type RefreshResult,
   createTokenResolver,
-  createTokenVault,
   retryUnauthorized,
 } from '../account-tokens.ts';
+import type { PostgresAccountStore } from '../postgres-account-store.ts';
 import { requestSignal } from '../request-signal.ts';
 import { ClaudeAuthError } from './errors.ts';
 import { CLAUDE_CLIENT_ID, CLAUDE_TOKEN_URL } from './oauth.ts';
@@ -22,6 +21,7 @@ const SIGN_IN_TIMEOUT_MS = 10 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const PROFILE_TIMEOUT_MS = 10_000;
 const EXPIRY_MARGIN_MS = 60_000;
+const PROVIDER = 'claude';
 
 const claudeUser = z.object({
   email: z.string(),
@@ -45,6 +45,11 @@ const profileResponse = z.object({
     display_name: z.string().optional(),
   }),
 });
+const pendingSignIn = z.object({
+  authorizationUrl: z.string(),
+  verifier: z.string(),
+  message: z.string().optional(),
+});
 const modelsPage = z.object({
   data: z.array(z.object({ id: z.string() })),
   has_more: z.boolean(),
@@ -66,41 +71,43 @@ export type ClaudeConnectionState =
   | { status: 'error'; message: string };
 
 export interface ClaudeAccountsOptions {
-  /** Holds each owner's tokens, keyed by the owner passed to every method. */
-  store: KeyValueStore<ClaudeTokens>;
+  /** Holds each owner's tokens and sign-ins, shared by every instance on the database. */
+  store: PostgresAccountStore;
   /** An entry gives `globalThis`; a test gives `createClock()`. */
   clock: { Date: { now(): number } };
   /** Receives every connection change, including a revoked refresh token. */
   onChange?: (owner: string, state: ClaudeConnectionState) => void;
 }
 
-interface PendingSignIn {
-  authorizationUrl: string;
-  verifier: string;
+interface PendingSignIn extends z.infer<typeof pendingSignIn> {
   state: string;
+  fence: bigint;
   expiresAt: number;
-  revision: number;
-  abort: AbortController;
-  message?: string;
 }
 
 /**
  * Claude Pro/Max subscriptions owned by the application rather than the local
- * Claude Code login: PKCE sign-in, refresh, and models per owner. Create one
- * instance per store; refresh serialization lives in the instance.
+ * Claude Code login: PKCE sign-in, refresh, and models per owner. Every
+ * instance on one store's database shares the accounts: a sign-in started on
+ * one host finishes on another, and one host refreshes an owner at a time.
  */
 export function createClaudeAccounts(options: ClaudeAccountsOptions) {
-  const { clock } = options;
-  const vault = createTokenVault(
-    options.store,
-    (value) => claudeTokens.safeParse(value).data,
-  );
-  const signIns = new Map<string, PendingSignIn>();
+  const { clock, store } = options;
+  const parse = (value: unknown) => claudeTokens.safeParse(value).data;
+  // The code exchanges this process runs, by sign-in state, so a cancel here
+  // stops the request in flight and waits for its report; a cancel elsewhere
+  // makes its save fail.
+  const exchanges = new Map<
+    string,
+    { abort: AbortController; settled: Promise<unknown> }
+  >();
   const tokens = createTokenResolver<ClaudeTokens>({
-    vault,
+    store,
+    provider: PROVIDER,
+    parse,
     isFresh: (current) =>
       current.expiresAt > clock.Date.now() + EXPIRY_MARGIN_MS,
-    refresh: (current) => refreshTokens(current, clock),
+    refresh: (current, signal) => refreshTokens(current, clock, signal),
     notConnected: () =>
       new ClaudeAuthError(
         'not-connected',
@@ -137,32 +144,42 @@ export function createClaudeAccounts(options: ClaudeAccountsOptions) {
     };
   }
 
-  async function state(owner: string): Promise<ClaudeConnectionState> {
-    const signIn = signIns.get(owner);
-    if (signIn) {
-      if (signIn.expiresAt > clock.Date.now()) return pending(signIn);
-      cancel(owner);
-    }
-    try {
-      const snapshot = await vault.snapshot(owner);
-      if (!snapshot.tokens) return { status: 'unauthenticated' };
-      if (snapshot.tokens.user) {
-        return { status: 'connected', user: snapshot.tokens.user };
+  async function readSignIn(owner: string): Promise<PendingSignIn | undefined> {
+    const stored = await store.signIn(PROVIDER, owner);
+    return (
+      stored && {
+        ...pendingSignIn.parse(stored.pending),
+        state: stored.state,
+        fence: stored.fence,
+        expiresAt: stored.expiresAt,
       }
+    );
+  }
+
+  async function state(owner: string): Promise<ClaudeConnectionState> {
+    try {
+      const signIn = await readSignIn(owner);
+      if (signIn) {
+        if (signIn.expiresAt > clock.Date.now()) return pending(signIn);
+        // Not awaited: this read can run inside that sign-in's own exchange.
+        void abandon(await store.takeSignIn(PROVIDER, owner));
+      }
+      const account = await store.account(PROVIDER, owner);
+      const current = parse(account.tokens);
+      if (!current) return { status: 'unauthenticated' };
+      if (current.user) return { status: 'connected', user: current.user };
       // Identity is display-only and fetched lazily, so a profile outage never
       // breaks a working connection; the next read retries.
-      const user = await fetchProfile(snapshot.tokens.accessToken);
+      const user = await fetchProfile(current.accessToken);
       if (!user) return { status: 'connected', user: null };
       if (
-        await vault.commit(
-          owner,
-          { ...snapshot.tokens, user },
-          snapshot.revision,
+        await store.exclusive(PROVIDER, owner, (lease) =>
+          lease.writeIfUnchanged({ ...current, user }, account.fence),
         )
       ) {
         return { status: 'connected', user };
       }
-      const latest = (await vault.snapshot(owner)).tokens;
+      const latest = parse((await store.account(PROVIDER, owner)).tokens);
       return latest
         ? { status: 'connected', user: latest.user ?? null }
         : { status: 'unauthenticated' };
@@ -183,11 +200,15 @@ export function createClaudeAccounts(options: ClaudeAccountsOptions) {
     return emit(owner, await state(owner));
   }
 
-  function cancel(owner: string) {
-    const signIn = signIns.get(owner);
-    if (!signIn) return;
-    signIns.delete(owner);
-    signIn.abort.abort();
+  /** Aborts this process's exchange of an ended sign-in; settles once it reported. */
+  function abandon(ended: string | undefined) {
+    const running = ended === undefined ? undefined : exchanges.get(ended);
+    running?.abort.abort();
+    return running?.settled;
+  }
+
+  async function cancel(owner: string) {
+    await abandon(await store.takeSignIn(PROVIDER, owner));
   }
 
   // Cancel and disconnect abort the code exchange, so an abandoned sign-in
@@ -198,21 +219,31 @@ export function createClaudeAccounts(options: ClaudeAccountsOptions) {
     signIn: PendingSignIn,
     message: string,
   ) {
-    if (signIns.get(owner) !== signIn) return publish(owner);
-    signIn.message = message;
-    return emit(owner, pending(signIn));
+    const shown = { ...signIn, message };
+    if (
+      !(await store.updateSignIn(
+        PROVIDER,
+        owner,
+        signIn.state,
+        pendingValue(shown),
+      ))
+    ) {
+      return publish(owner);
+    }
+    return emit(owner, pending(shown));
   }
 
   async function fail(owner: string, signIn: PendingSignIn, message: string) {
-    if (signIns.get(owner) !== signIn) return publish(owner);
-    cancel(owner);
+    if (!(await store.takeSignIn(PROVIDER, owner, signIn.state))) {
+      return publish(owner);
+    }
     return emit(owner, { status: 'error', message });
   }
 
   async function connect(owner: string): Promise<ClaudeConnectionState> {
     const existing = await state(owner);
     if (existing.status !== 'unauthenticated') return existing;
-    const { revision } = await vault.snapshot(owner);
+    const { fence } = await store.account(PROVIDER, owner);
 
     const verifier = randomBytes(64).toString('base64url');
     const oauthState = randomUUID().replaceAll('-', '');
@@ -229,14 +260,12 @@ export function createClaudeAccounts(options: ClaudeAccountsOptions) {
     url.searchParams.set('code_challenge_method', 'S256');
     url.searchParams.set('state', oauthState);
 
-    cancel(owner);
-    signIns.set(owner, {
-      authorizationUrl: url.href,
-      verifier,
+    await cancel(owner);
+    await store.beginSignIn(PROVIDER, owner, {
       state: oauthState,
+      pending: pendingValue({ authorizationUrl: url.href, verifier }),
+      fence,
       expiresAt: clock.Date.now() + SIGN_IN_TIMEOUT_MS,
-      revision,
-      abort: new AbortController(),
     });
     return publish(owner);
   }
@@ -245,9 +274,9 @@ export function createClaudeAccounts(options: ClaudeAccountsOptions) {
     owner: string,
     input: string,
   ): Promise<ClaudeConnectionState> {
-    const signIn = signIns.get(owner);
+    const signIn = await readSignIn(owner);
     if (!signIn || signIn.expiresAt <= clock.Date.now()) {
-      cancel(owner);
+      await cancel(owner);
       return emit(owner, {
         status: 'error',
         message: 'Claude sign-in expired. Start the connection again.',
@@ -262,7 +291,34 @@ export function createClaudeAccounts(options: ClaudeAccountsOptions) {
       );
     }
 
-    signIn.message = undefined;
+    if (signIn.message) {
+      signIn.message = undefined;
+      await store.updateSignIn(
+        PROVIDER,
+        owner,
+        signIn.state,
+        pendingValue(signIn),
+      );
+    }
+    const abort = new AbortController();
+    const exchanging = exchange(owner, signIn, callback, abort.signal);
+    const running = { abort, settled: Promise.allSettled([exchanging]) };
+    exchanges.set(signIn.state, running);
+    try {
+      return await exchanging;
+    } finally {
+      if (exchanges.get(signIn.state) === running) {
+        exchanges.delete(signIn.state);
+      }
+    }
+  }
+
+  async function exchange(
+    owner: string,
+    signIn: PendingSignIn,
+    callback: { code: string; state: string },
+    signal: AbortSignal,
+  ): Promise<ClaudeConnectionState> {
     let response: Response;
     try {
       response = await globalThis.fetch(CLAUDE_TOKEN_URL, {
@@ -280,7 +336,7 @@ export function createClaudeAccounts(options: ClaudeAccountsOptions) {
           code_verifier: signIn.verifier,
         }),
         signal: AbortSignal.any([
-          signIn.abort.signal,
+          signal,
           AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         ]),
       });
@@ -315,16 +371,15 @@ export function createClaudeAccounts(options: ClaudeAccountsOptions) {
     }
 
     const email = parsed.data.account?.email_address;
+    const connected: ClaudeTokens = {
+      accessToken: parsed.data.access_token,
+      refreshToken: parsed.data.refresh_token,
+      expiresAt: clock.Date.now() + parsed.data.expires_in * 1000,
+      ...(email && { user: { email } }),
+    };
     try {
-      await vault.commit(
-        owner,
-        {
-          accessToken: parsed.data.access_token,
-          refreshToken: parsed.data.refresh_token,
-          expiresAt: clock.Date.now() + parsed.data.expires_in * 1000,
-          ...(email && { user: { email } }),
-        },
-        signIn.revision,
+      await store.exclusive(PROVIDER, owner, (lease) =>
+        lease.finishSignIn(signIn.state, connected, clock.Date.now()),
       );
     } catch (error) {
       return fail(
@@ -333,13 +388,12 @@ export function createClaudeAccounts(options: ClaudeAccountsOptions) {
         messageOf(error, 'Saving the Claude connection failed.'),
       );
     }
-    if (signIns.get(owner) === signIn) signIns.delete(owner);
     return publish(owner);
   }
 
   async function disconnect(owner: string): Promise<ClaudeConnectionState> {
-    cancel(owner);
-    await vault.clear(owner);
+    const ended = await store.disconnect(PROVIDER, owner);
+    await abandon(ended);
     return publish(owner);
   }
 
@@ -399,6 +453,14 @@ export function createClaudeAccounts(options: ClaudeAccountsOptions) {
 
 export type ClaudeAccounts = ReturnType<typeof createClaudeAccounts>;
 
+function pendingValue({
+  authorizationUrl,
+  verifier,
+  message,
+}: z.infer<typeof pendingSignIn>): z.infer<typeof pendingSignIn> {
+  return { authorizationUrl, verifier, ...(message && { message }) };
+}
+
 function pending(signIn: PendingSignIn): ClaudeConnectionState {
   return {
     status: 'pending',
@@ -411,6 +473,7 @@ function pending(signIn: PendingSignIn): ClaudeConnectionState {
 async function refreshTokens(
   current: ClaudeTokens,
   clock: ClaudeAccountsOptions['clock'],
+  signal: AbortSignal,
 ): Promise<RefreshResult<ClaudeTokens>> {
   let response: Response;
   try {
@@ -425,7 +488,10 @@ async function refreshTokens(
         refresh_token: current.refreshToken,
         client_id: CLAUDE_CLIENT_ID,
       }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.any([
+        signal,
+        AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      ]),
     });
   } catch {
     throw new ClaudeAuthError(

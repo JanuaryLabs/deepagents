@@ -1,111 +1,74 @@
-import type { KeyValueStore } from '@opencoredev/loginwithchatgpt-core';
-import { Mutex } from '@zukhruf/mutex';
-import { MemoryStore } from '@zukhruf/mutex/memory';
-
-export interface TokenSnapshot<T> {
-  tokens: T | undefined;
-  revision: number;
-}
+import type {
+  AccountProvider,
+  PostgresAccountStore,
+} from './postgres-account-store.ts';
 
 export type RefreshResult<T> =
   { status: 'refreshed'; tokens: T } | { status: 'revoked' };
 
 /**
- * Compare-and-swap over an app-owned store, so a stale refresh or sign-in
- * cannot overwrite a disconnect or a newly connected account. Revisions live
- * in this process: one instance must own each store.
- */
-export function createTokenVault<T>(
-  store: KeyValueStore<T>,
-  parse: (value: unknown) => T | undefined,
-) {
-  const revisions = new Map<string, number>();
-  const serialized = new Mutex(new MemoryStore());
-  const revision = (owner: string) => revisions.get(owner) ?? 0;
-
-  return {
-    snapshot: (owner: string) =>
-      serialized.acquire(owner, async (): Promise<TokenSnapshot<T>> => ({
-        tokens: parse(await store.get(owner)),
-        revision: revision(owner),
-      })),
-    commit: (owner: string, tokens: T, expectedRevision: number) =>
-      serialized.acquire(owner, async () => {
-        if (revision(owner) !== expectedRevision) return false;
-        await store.set(owner, tokens);
-        revisions.set(owner, revision(owner) + 1);
-        return true;
-      }),
-    clear: (owner: string, expectedRevision?: number) =>
-      serialized.acquire(owner, async () => {
-        if (
-          expectedRevision !== undefined &&
-          revision(owner) !== expectedRevision
-        ) {
-          return false;
-        }
-        await store.delete(owner);
-        revisions.set(owner, revision(owner) + 1);
-        return true;
-      }),
-  };
-}
-
-export type TokenVault<T> = ReturnType<typeof createTokenVault<T>>;
-
-/**
- * Resolves usable tokens per owner. Refresh tokens rotate on use, so every
- * resolution for one owner runs exclusively and refreshes ignore the caller's
- * abort signal: dropping a rotated response would strand the account.
+ * Resolves usable tokens per owner. Refresh tokens rotate on use, so a
+ * refresh holds the owner's lock on every host from its read to its write,
+ * and it runs on the lock's signal instead of the caller's: dropping a
+ * rotated response would strand the account.
  */
 export function createTokenResolver<
   T extends { accessToken: string },
 >(options: {
-  vault: TokenVault<T>;
+  store: PostgresAccountStore;
+  provider: AccountProvider;
+  parse(value: unknown): T | undefined;
   isFresh(tokens: T): boolean;
-  refresh(tokens: T): Promise<RefreshResult<T>>;
+  refresh(tokens: T, signal: AbortSignal): Promise<RefreshResult<T>>;
   notConnected(): Error;
   revoked(): Error;
   conflicted(): Error;
   onRevoked(owner: string): void;
 }) {
-  const exclusive = new Mutex(new MemoryStore());
+  const { store, provider } = options;
+  const read = async (owner: string) =>
+    options.parse((await store.account(provider, owner)).tokens);
 
   async function resolve(
     owner: string,
     rejected: string | undefined,
     signal: AbortSignal | undefined,
   ): Promise<T> {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      signal?.throwIfAborted();
-      const { tokens, revision } = await options.vault.snapshot(owner);
-      if (!tokens) throw options.notConnected();
-      if (tokens.accessToken !== rejected && options.isFresh(tokens)) {
-        return tokens;
-      }
-      const result = await options.refresh(tokens);
-      if (result.status === 'revoked') {
-        if (!(await options.vault.clear(owner, revision))) continue;
-        options.onRevoked(owner);
-        throw options.revoked();
-      }
-      if (await options.vault.commit(owner, result.tokens, revision)) {
-        return result.tokens;
-      }
-    }
-    throw options.conflicted();
+    const usable = (tokens: T) =>
+      tokens.accessToken !== rejected && options.isFresh(tokens);
+    signal?.throwIfAborted();
+    const current = await read(owner);
+    if (!current) throw options.notConnected();
+    if (usable(current)) return current;
+    return store.exclusive(
+      provider,
+      owner,
+      async (lease) => {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          signal?.throwIfAborted();
+          const tokens = await read(owner);
+          if (!tokens) throw options.notConnected();
+          if (usable(tokens)) return tokens;
+          const result = await options.refresh(tokens, lease.signal);
+          if (result.status === 'revoked') {
+            if (!(await lease.write(null))) continue;
+            options.onRevoked(owner);
+            throw options.revoked();
+          }
+          if (await lease.write(result.tokens)) return result.tokens;
+        }
+        throw options.conflicted();
+      },
+      signal,
+    );
   }
 
   return {
     fresh: (owner: string, signal?: AbortSignal) =>
-      exclusive.acquire(owner, () => resolve(owner, undefined, signal), {
-        signal,
-      }),
+      resolve(owner, undefined, signal),
     /** Replaces an access token the server rejected, refreshing at most once. */
     replace: (owner: string, rejected: string, signal?: AbortSignal) =>
-      exclusive.acquire(owner, () => resolve(owner, rejected, signal), {
-        signal,
-      }),
+      resolve(owner, rejected, signal),
   };
 }
 
