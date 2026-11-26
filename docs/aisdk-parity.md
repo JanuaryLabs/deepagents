@@ -59,7 +59,7 @@ Checked on 2026-11-26 against `ai@7.0.183` ([vercel/ai@0411a13d](https://github.
 | #5815 | O1–O5                   | Orchestrator: delete or port (owner question)                         |
 | #5816 | A1, A2, A4–A7, C44, S10 | Move consumers off legacy `@deepagents/agent`                         |
 | #5817 | X33                     | Done: tokens and sign-ins in `PostgresAccountStore`                   |
-| #5818 | none                    | Lint ban on Vercel Workflow and eve imports                           |
+| #5818 | none                    | Dropped: no lint ban on Vercel Workflow and eve imports (owner)       |
 
 Already open: #5100 (A3), #5694 (A8), #4043 (C35), #5411 (the C20 copy), #3881 (retire `@deepagents/evals`, which moots V2).
 
