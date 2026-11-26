@@ -118,6 +118,7 @@ AI-powered natural language to SQL. Ask questions in plain English, get executab
 - A chat-composer part that consumer repos copy (the `@genui/*` packages of text2sql and blackboard, such as dictation) moves here, not to zukhruf: headless in react-input, the look in react-genai.
 - Composer behavior follows the ChatGPT/Codex desktop app. Read its installed Electron bundle with the `baoyu-electron-extract` skill (with `--skip-format`), not docs or memory.
 - react-genai's chat rendering came from text2sql's `packages/genai` (71eeb1e6), so its reasons live in that repo. Before you change how it renders (`normalizeStreamdownChildren`, `MarkdownParagraph`), read the history there: `git log --all -- '**/<file>*'` in `~/Desktop/January/text2sql`, each commit's message and test cases. Its 63 normalizer cases are block layout elements on lines of their own (#5901).
+- Test a react-genai rendering change on a consumer's real model output, with its bold, italic, links and inline code, in both static and streaming mode, and run the consumer's own render probe before the release. #5901 passed 14 tests of plain sentences. Then real answers, whose cited paragraphs mostly hold bold, still rendered as a `<div>` (#5911).
 
 ---
 
