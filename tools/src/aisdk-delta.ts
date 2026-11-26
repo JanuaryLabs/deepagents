@@ -1,12 +1,14 @@
 // Prints what the AI SDK and the vercel / vercel-labs orgs shipped since the
 // AI SDK parity ledger was last checked (docs/aisdk-parity.md), from the
-// published npm tarballs and the GitHub API. --write records the live state as
-// the new baseline in docs/aisdk-parity.snapshot.json.
+// published npm tarballs and the GitHub API, and the ledger rows whose cited
+// files no longer exist. --write records the live state as the new baseline in
+// docs/aisdk-parity.snapshot.json.
 import { Semaphore } from '@zukhruf/async';
 import { TemporaryFiles, isErrno } from '@zukhruf/fs';
 import { execFile } from 'node:child_process';
-import { readFile, writeFile } from 'node:fs/promises';
+import { glob, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import ts from 'typescript';
 
@@ -46,6 +48,10 @@ interface Release {
 const snapshotFile = new URL(
   '../../docs/aisdk-parity.snapshot.json',
   import.meta.url,
+);
+const ledgerFile = new URL('../../docs/aisdk-parity.md', import.meta.url);
+const packagesDirectory = fileURLToPath(
+  new URL('../../packages/', import.meta.url),
 );
 const run = promisify(execFile);
 const network = new Semaphore(12);
@@ -446,6 +452,41 @@ for (const org of ORGS) {
       '',
     );
   }
+}
+
+/**
+ * Each ledger row's `Ours` citation of a file under packages/ that no longer
+ * exists. Only paths that start with a package directory count: a bare file
+ * name after a full path ("…/filesystem.ts:12; container.ts:7") has no
+ * directory of its own.
+ */
+async function staleCitations(): Promise<string[]> {
+  const roots = (await readdir(packagesDirectory, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+  const citation = new RegExp(
+    String.raw`(?:^|[\s;(])((?:${roots.join('|')})/[\w./*@-]+)`,
+    'g',
+  );
+  const stale: string[] = [];
+  for (const line of (await readFile(ledgerFile, 'utf8')).split('\n')) {
+    const id = /^\| ([A-Z]\d+) \| /.exec(line)?.[1];
+    const ours = line.split(/(?<!\\) \| /)[3];
+    if (!id || !ours) continue;
+    for (const [, cited = ''] of ours.replaceAll('`', '').matchAll(citation)) {
+      const path = cited.replace(/[.,]+$/, '');
+      const found = await Array.fromAsync(
+        glob(path, { cwd: packagesDirectory }),
+      );
+      if (!found.length) stale.push(`- ${id}: \`${path}\``);
+    }
+  }
+  return stale;
+}
+
+const stale = await staleCitations();
+if (stale.length) {
+  report.push('## Ledger rows citing missing files', '', ...stale, '');
 }
 
 console.log(report.join('\n'));
