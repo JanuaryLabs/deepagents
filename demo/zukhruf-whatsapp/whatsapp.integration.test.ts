@@ -137,7 +137,7 @@ test('every member sees a group message concurrently and only volunteers publish
   };
 
   const calls: Record<string, ResponsesRequest[]> = {};
-  using _openaiApi = new Msw().intercept(
+  await using _openaiApi = new Msw().intercept(
     http.post(RESPONSES, async ({ request }) => {
       const body = responsesRequestSchema.parse(await request.json());
       const name = /You are (?<name>\w+) in a WhatsApp-style group chat/.exec(
