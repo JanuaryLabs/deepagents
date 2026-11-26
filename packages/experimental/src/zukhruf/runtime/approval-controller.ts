@@ -170,6 +170,36 @@ export class ApprovalController {
     await this.#queue.resumeParked(conversation.chatId);
   }
 
+  /**
+   * Settles a recovery that will never run: its job was lost or withdrawn
+   * while the head still records the approval answer it was to act on. A
+   * head without a recorded answer, as a lost or cancelled continuation
+   * leaves, keeps waiting for the answer instead.
+   */
+  async reconcileUnrunRecovery(
+    conversation: ConversationId,
+    streamId: string,
+    status: 'failed' | 'cancelled',
+    error?: string,
+  ): Promise<void> {
+    const head = (await this.#engineFor(conversation).getMessages()).at(-1);
+    if (
+      head?.role !== 'assistant' ||
+      head.id !== streamId ||
+      !head.parts.some(
+        (part) => isToolUIPart(part) && part.state === 'approval-responded',
+      )
+    ) {
+      return;
+    }
+    await this.reconcileTerminalContinuation(
+      conversation,
+      streamId,
+      status,
+      error,
+    );
+  }
+
   async retryIdempotentContinuation(
     conversation: ConversationId,
     streamId: string,
@@ -232,10 +262,14 @@ export class ApprovalController {
   /**
    * A head with a responded approval has not settled, so its conversation is
    * resident and holds its own slot: the recovery is admitted at the limit.
+   * The push queues the terminal stream it re-executes, as every admission
+   * queues its turn's stream with its job, so a recovery whose job is lost
+   * is a queued stream the lost-turn sweep fails.
    */
   #pushRecovery(turn: TurnRef & { kind: 'recovery' }): Promise<void> {
     return this.#residency.admit(turn, async (admission) => {
       if (!(await admission.admits(turn))) throw new AgentThreadLimitError();
+      await admission.streams.reopenStream(turn.streamId);
       await admission.queue.push(turn);
     });
   }

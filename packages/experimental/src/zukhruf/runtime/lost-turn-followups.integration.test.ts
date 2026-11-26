@@ -28,6 +28,7 @@ import {
   type ConversationStatus,
   PgBossTurnQueue,
   SqliteMailboxStore,
+  type TurnRef,
   defineAgent,
   defineStack,
   defineTool,
@@ -505,5 +506,265 @@ describe('zukhruf runtime — a lost child-agent continuation', () => {
       ],
       'the parent gets the completion once, at its next turn',
     );
+  });
+});
+
+/**
+ * A conversation whose approved idempotent `sendEmail` continuation crashes
+ * when it resumes its sandbox, as a dying worker's turn would, so orphan
+ * cleanup pushes a recovery turn for it. Asks other than "send it" answer
+ * `reply:<ask>`; "hold" first waits for `releaseHold`.
+ */
+function recoverySetup(conversation: { chatId: string; userId: string }) {
+  const track: { calls: string[]; toolRuns: number; explode: boolean } = {
+    calls: [],
+    toolRuns: 0,
+    explode: false,
+  };
+  const releaseHold = Promise.withResolvers<void>();
+  const virtual = buildSandbox();
+  const agent = defineAgent({
+    name: 'test-agent',
+    instructions: [],
+    toolApproval: { sendEmail: 'user-approval' },
+    tools: {
+      sendEmail: defineTool({
+        description: 'Send an email',
+        inputSchema: z.object({ to: z.string() }),
+        recovery: 'idempotent',
+        execute: async ({ to }) => {
+          track.toolRuns++;
+          return `sent:${to}`;
+        },
+      }),
+    },
+    sandbox: {
+      environment: virtual.environment,
+      open: async (chat) => {
+        const handle = await virtual.open(chat);
+        const resume = handle.sandbox.resume.bind(handle.sandbox);
+        handle.sandbox.resume = async () => {
+          if (track.explode && chat.chatId === conversation.chatId) {
+            track.explode = false;
+            throw new Error('continuation sandbox exploded');
+          }
+          return resume();
+        };
+        return handle;
+      },
+    },
+    model: new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        const text = lastUserText(prompt);
+        track.calls.push(text);
+        if (text === 'hold') await releaseHold.promise;
+        const chunks: LanguageModelV4StreamPart[] =
+          text === 'send it'
+            ? [
+                {
+                  type: 'tool-call',
+                  toolCallId: 'tc-send',
+                  toolName: 'sendEmail',
+                  input: JSON.stringify({ to: 'a@b.c' }),
+                },
+                {
+                  type: 'finish',
+                  finishReason: { unified: 'tool-calls', raw: '' },
+                  usage,
+                },
+              ]
+            : [
+                { type: 'text-start', id: 't1' },
+                { type: 'text-delta', id: 't1', delta: `reply:${text}` },
+                { type: 'text-end', id: 't1' },
+                {
+                  type: 'finish',
+                  finishReason: { unified: 'stop', raw: '' },
+                  usage,
+                },
+              ];
+        return { stream: simulateReadableStream({ chunks }) };
+      },
+    }),
+  });
+  return { track, agent, releaseHold };
+}
+
+/**
+ * Pauses "send it" on its approval, approves it with the continuation armed
+ * to crash, and pushes another conversation's "hold" turn after it. A worker
+ * of concurrency 1 runs the continuation, then "hold" holds its only slot,
+ * so the recovery the crash pushes waits, queued, until "hold" is released.
+ */
+async function pushRecoveryBehindHold(
+  h: Awaited<ReturnType<typeof harness>>,
+  setup: ReturnType<typeof recoverySetup>,
+  conversation: { chatId: string; userId: string },
+) {
+  await (async () => {
+    await using _worker = await h.runtime.work();
+    void _worker;
+    await collectText(
+      (await h.runtime.enqueue(conversation, turn('send it'))).stream,
+    );
+  })();
+  setup.track.explode = true;
+  const continuation = await approve(
+    h.runtime,
+    conversation,
+    await pausedToolCallId(h.runtime, conversation),
+  );
+  const hold = await h.runtime.enqueue(
+    { chatId: `${conversation.chatId}-hold`, userId: conversation.userId },
+    turn('hold'),
+  );
+  const jobs = async () =>
+    (
+      await h.boss.findJobs<TurnRef>(h.queue.queue, {
+        data: { streamId: continuation.id },
+      })
+    ).map((job) => [job.data.kind, job.state]);
+  return { continuation, hold, jobs };
+}
+
+async function headTool(
+  runtime: AgentHost,
+  conversation: { chatId: string; userId: string },
+) {
+  const head = (await runtime.observe(conversation).engine.getMessages()).at(
+    -1,
+  );
+  const part = head?.parts.find(isToolUIPart);
+  return (
+    part && {
+      state: part.state,
+      errorText: 'errorText' in part ? part.errorText : undefined,
+    }
+  );
+}
+
+describe('zukhruf runtime — a recovery turn that never runs', () => {
+  it("fails a lost recovery's stream, settles the approval it carried, and lets the conversation's next turn run", async (t) => {
+    const conversation = { chatId: 'lost-recovery', userId: 'u1' };
+    const setup = recoverySetup(conversation);
+    await using h = await harness(setup.agent);
+    // Platform setup: a tiny retention, and dead-lettered jobs deleted before
+    // it, as the 7-day dead-letter default goes before the 14-day retention.
+    await h.boss.updateQueue(h.queue.queue, { retentionSeconds: 2 });
+    await h.boss.updateQueue(h.queue.deadLetterQueue, {
+      deleteAfterSeconds: 1,
+    });
+    const { continuation, hold, jobs } = await pushRecoveryBehindHold(
+      h,
+      setup,
+      conversation,
+    );
+    await (async () => {
+      await using _worker = await h.runtime.work({ concurrency: 1 });
+      void _worker;
+      await waitFor(
+        async () =>
+          assert.deepStrictEqual(await jobs(), [['recovery', 'created']]),
+        { interval: 20, signal: t.signal },
+      );
+      await waitFor(
+        async () => {
+          await h.boss.supervise(h.queue.queue);
+          await h.boss.supervise(h.queue.deadLetterQueue);
+          assert.deepStrictEqual(await jobs(), []);
+          assert.deepStrictEqual(
+            await h.boss.findJobs(h.queue.deadLetterQueue, {
+              data: { streamId: continuation.id },
+            }),
+            [],
+          );
+        },
+        { interval: 100, signal: t.signal },
+      );
+      setup.releaseHold.resolve();
+      assert.equal(
+        await untilAborted(collectText(hold.stream), t.signal),
+        'reply:hold',
+      );
+    })();
+
+    await using _worker = await h.runtime.work();
+    void _worker;
+    const stream = await h.streamStore.getStream(continuation.id);
+    assert.deepStrictEqual(
+      {
+        stream: stream && { status: stream.status, error: stream.error },
+        tool: await headTool(h.runtime, conversation),
+      },
+      {
+        stream: { status: 'failed', error: LOST_TURN_ERROR },
+        tool: { state: 'output-error', errorText: LOST_TURN_ERROR },
+      },
+      'the sweep failed the lost recovery and settled the approval it carried',
+    );
+    assert.equal(
+      await untilAborted(
+        collectText(
+          (await h.runtime.enqueue(conversation, turn('two'))).stream,
+        ),
+        t.signal,
+      ),
+      'reply:two',
+    );
+    assert.deepStrictEqual(setup.track.calls, ['send it', 'hold', 'two']);
+    assert.equal(setup.track.toolRuns, 0);
+  });
+
+  it("cancelling a queued recovery settles the approval it carried and lets the conversation's next turn run", async (t) => {
+    const conversation = { chatId: 'cancelled-recovery', userId: 'u1' };
+    const setup = recoverySetup(conversation);
+    await using h = await harness(setup.agent);
+    const { continuation, hold, jobs } = await pushRecoveryBehindHold(
+      h,
+      setup,
+      conversation,
+    );
+    await using _worker = await h.runtime.work({ concurrency: 1 });
+    void _worker;
+    await waitFor(
+      async () =>
+        assert.deepStrictEqual(await jobs(), [['recovery', 'created']]),
+      { interval: 20, signal: t.signal },
+    );
+
+    await h.runtime.observe(conversation).cancel();
+    setup.releaseHold.resolve();
+    assert.equal(
+      await untilAborted(collectText(hold.stream), t.signal),
+      'reply:hold',
+    );
+
+    assert.deepStrictEqual(
+      {
+        jobs: await jobs(),
+        stream: await h.streamStore.getStreamStatus(continuation.id),
+        tool: await headTool(h.runtime, conversation),
+      },
+      {
+        jobs: [],
+        stream: 'cancelled',
+        tool: {
+          state: 'output-error',
+          errorText: 'approval continuation cancelled',
+        },
+      },
+      'the cancel withdrew the recovery and settled the approval it carried',
+    );
+    assert.equal(
+      await untilAborted(
+        collectText(
+          (await h.runtime.enqueue(conversation, turn('two'))).stream,
+        ),
+        t.signal,
+      ),
+      'reply:two',
+    );
+    assert.deepStrictEqual(setup.track.calls, ['send it', 'hold', 'two']);
+    assert.equal(setup.track.toolRuns, 0);
   });
 });

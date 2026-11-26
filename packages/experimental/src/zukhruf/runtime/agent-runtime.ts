@@ -261,7 +261,10 @@ export class AgentObservation {
   readonly #streams: StreamManager;
   readonly #queue: TurnQueue;
   readonly #status: AgentObservationStatus;
-  readonly #recordCancelled: (streamId: string) => Promise<void>;
+  readonly #recordCancelled: (
+    streamId: string,
+    status: 'queued' | 'running' | 'cancelled',
+  ) => Promise<void>;
 
   constructor(
     conversation: ConversationId,
@@ -270,7 +273,10 @@ export class AgentObservation {
     streams: StreamManager,
     queue: TurnQueue,
     status: AgentObservationStatus,
-    recordCancelled: (streamId: string) => Promise<void>,
+    recordCancelled: (
+      streamId: string,
+      status: 'queued' | 'running' | 'cancelled',
+    ) => Promise<void>,
   ) {
     this.engine = new ContextEngine({
       store,
@@ -325,7 +331,7 @@ export class AgentObservation {
       await this.#queue.cancel(id);
       await this.#status.publish();
       // A cancelled queued turn never runs, so nothing else settles it.
-      await this.#recordCancelled(id);
+      await this.#recordCancelled(id, status);
     }
   }
 
@@ -949,11 +955,18 @@ class RuntimeHost implements AsyncDisposable {
         read: () => this.#conversationStatus.read(conversation),
         publish: () => this.#conversationStatus.publish(conversation),
       },
-      async (streamId) =>
-        (await this.#settlement.wait()).complete({
-          ...conversation,
-          streamId,
-        }),
+      async (streamId, status) => {
+        // A running recovery settles its own approvals when its run ends.
+        if (status === 'queued') {
+          await this.#approvals.reconcileUnrunRecovery(
+            conversation,
+            streamId,
+            'cancelled',
+          );
+        }
+        const settlement = await this.#settlement.wait();
+        await settlement.complete({ ...conversation, streamId });
+      },
     );
   }
 
@@ -1119,6 +1132,8 @@ class RuntimeHost implements AsyncDisposable {
    * The continuation never ran, so its approval answer never reached the
    * head: the follow-ups parked behind that head stay parked until the
    * approval is answered again, as after a cancelled queued continuation.
+   * A lost recovery's head does record the answer, which nothing will act
+   * on: it settles as a failed continuation's does, and its follow-ups run.
    * A sub-agent's lost continuation also ends its turn for its parent, so
    * the parent gets the failure as it gets an orphaned turn's.
    */
@@ -1129,6 +1144,12 @@ class RuntimeHost implements AsyncDisposable {
     // A session delete since the failure removed the chat with its watchers.
     if (chat === undefined) return;
     const conversation = { chatId: chat.id, userId: chat.userId };
+    await this.#approvals.reconcileUnrunRecovery(
+      conversation,
+      streamId,
+      'failed',
+      LOST_TURN_ERROR,
+    );
     const thread = await this.#directory.load(conversation);
     if (thread !== undefined) {
       await this.#controlPlane.projectTerminal({ streamId }, thread);

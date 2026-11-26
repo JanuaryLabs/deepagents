@@ -319,6 +319,14 @@ instead of tailing forever.
   (`notify_parent_of_terminal_turn`, `core/src/agent/control/completion.rs`). A lost turn that
   never ran (a child's first task or a `followup_task`) has no message that names its
   conversation, so the sweep cannot project it (#5829).
+- **A recovery turn queues its stream with its job.** Orphan cleanup re-executes a terminal
+  continuation stream through a `recovery` job; `ApprovalController` reopens that stream to
+  `queued` in the admission that pushes the job, so the invariant above covers recoveries too and a
+  recovery whose job is lost is swept like any lost turn. Its head still records the approval
+  answer that nothing will act on, so the sweep settles it as a failed continuation's
+  (`output-error` with the lost-turn error) and resumes the parked turns; a cancel of a queued
+  recovery settles it the same way (`approval continuation cancelled`), as only a running recovery
+  settles its own (#5829).
 - **Startup only, no periodic sweep.** A job is lost only after it sat runnable for a whole retention
   window with no worker serving its queue, so a loss implies a service gap, and the first `work()`
   after the gap sweeps it. `work()` resolves after the sweep, which runs once its consumer is
