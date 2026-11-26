@@ -601,6 +601,12 @@ test('default guidance tells root and child agents the Codex concurrency slots',
   );
 });
 
+/** Codex `prompts/src/model_messages/multi_agent.rs` mode texts, tagged. */
+const EXPLICIT_REQUEST_ONLY_BLOCK =
+  '<multi_agent_mode>Any earlier instruction enabling proactive multi-agent delegation no longer applies. Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask for sub-agents, delegation, or parallel agent work.</multi_agent_mode>';
+const PROACTIVE_BLOCK =
+  '<multi_agent_mode>Proactive multi-agent delegation is active. Any earlier developer instruction requiring an explicit user request before spawning sub-agents no longer applies. This mode remains active until a later multi-agent mode developer message changes it. User requests override this hint.\n\nIf at any point you can parallelize work by delegating tasks to another agent (no matter if you are root or subagent), you should do so using collaboration tools if it could save time or improve quality.</multi_agent_mode>';
+
 async function guidanceFor(multiAgent: Team) {
   using h = harness();
   const requests: Record<string, { prompt: unknown; tools: unknown }> = {};
@@ -696,6 +702,7 @@ test('direct collaboration tools: root and subagent receive the full default gui
       '  ',
       '  There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.',
       '</role>',
+      EXPLICIT_REQUEST_ONLY_BLOCK,
     ].join('\n'),
     subagent: [
       '<role>',
@@ -713,6 +720,7 @@ test('direct collaboration tools: root and subagent receive the full default gui
       '  ',
       '  There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.',
       '</role>',
+      EXPLICIT_REQUEST_ONLY_BLOCK,
     ].join('\n'),
     rootTools: [
       'spawn_agent',
@@ -757,6 +765,7 @@ test('namespaced collaboration tools: root and subagent receive the full default
       '  ',
       '  There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.',
       '</role>',
+      EXPLICIT_REQUEST_ONLY_BLOCK,
     ].join('\n'),
     subagent: [
       '<role>',
@@ -774,6 +783,7 @@ test('namespaced collaboration tools: root and subagent receive the full default
       '  ',
       '  There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.',
       '</role>',
+      EXPLICIT_REQUEST_ONLY_BLOCK,
     ].join('\n'),
     rootTools: [
       'spawn_agent',
@@ -818,6 +828,7 @@ test('code-mode collaboration tools: root and subagent receive the full default 
       '  ',
       '  There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.',
       '</role>',
+      EXPLICIT_REQUEST_ONLY_BLOCK,
     ].join('\n'),
     subagent: [
       '<role>',
@@ -835,10 +846,79 @@ test('code-mode collaboration tools: root and subagent receive the full default 
       '  ',
       '  There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.',
       '</role>',
+      EXPLICIT_REQUEST_ONLY_BLOCK,
     ].join('\n'),
     rootTools: ['code_mode'],
     subagentTools: ['code_mode'],
   });
+});
+
+test('a proactive team tells root and subagent the Codex proactive mode, blank line intact, after their guidance', async () => {
+  const actual = await guidanceFor(Team.codex({ multiAgentMode: 'proactive' }));
+
+  assert.deepStrictEqual(
+    {
+      root: actual.root.endsWith(`</role>\n${PROACTIVE_BLOCK}`),
+      subagent: actual.subagent.endsWith(`</role>\n${PROACTIVE_BLOCK}`),
+      explicitAnywhere: [actual.root, actual.subagent].some((text) =>
+        text.includes(EXPLICIT_REQUEST_ONLY_BLOCK),
+      ),
+    },
+    { root: true, subagent: true, explicitAnywhere: false },
+  );
+});
+
+test('a guidance transform that drops the guidance leaves the multi-agent mode in place', async () => {
+  const actual = await guidanceFor(
+    Team.codex({
+      guidance: { root: () => undefined, subagent: () => undefined },
+    }),
+  );
+
+  assert.deepStrictEqual(
+    { root: actual.root, subagent: actual.subagent },
+    {
+      root: EXPLICIT_REQUEST_ONLY_BLOCK,
+      subagent: EXPLICIT_REQUEST_ONLY_BLOCK,
+    },
+  );
+});
+
+test('every turn of a conversation carries the multi-agent mode', async () => {
+  using h = harness();
+  const prompts: unknown[] = [];
+  const runtime = await new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: new MockLanguageModelV4({
+        doStream: async ({ prompt }) => {
+          prompts.push(prompt);
+          return textResult('done');
+        },
+      }),
+      sandbox: buildSandbox(),
+      instructions: [],
+    }),
+  ).initialize(
+    defineStack(async () => ({
+      storage: new ControlledAgentStorage(h),
+      multiAgent: Team.codex({ multiAgentMode: 'proactive' }),
+    })),
+  );
+  const conversation = { chatId: 'root-chat', userId: 'user-1' };
+  await runtime.enqueue(conversation, userTurn('turn-1', 'first'));
+  await using worker = await runtime.work();
+  void worker;
+  await h.queue.runNext();
+  await runtime.enqueue(conversation, userTurn('turn-2', 'second'));
+  await h.queue.runNext();
+
+  assert.deepStrictEqual(
+    prompts.map((prompt) =>
+      systemText(prompt).endsWith(`</role>\n${PROACTIVE_BLOCK}`),
+    ),
+    [true, true],
+  );
 });
 
 const withoutDirectMessaging = (options?: { exposure: CodeModeTools }) =>

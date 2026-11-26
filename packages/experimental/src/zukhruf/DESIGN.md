@@ -570,12 +570,18 @@ instead of introducing a Runner or separate thread database:
   (`spawn_agent`), since every other capability acts on spawned agents. `.with()` returns a team
   that also has `DirectMessaging` (`send_message`, `followup_task`), `Waiting` (`wait_agent`, within
   its `WaitBounds`) or `Supervision` (`interrupt_agent`, `list_agents`); a second tool of one name
-  throws. `Team.codex({ usageHintText?, waitBounds?, maxConcurrentThreads?, exposure?, guidance? })`
+  throws. `Team.codex({ usageHintText?, waitBounds?, maxConcurrentThreads?, exposure?, guidance?, multiAgentMode? })`
   composes all four in Codex order. Each capability writes only its own guidance sentences, so a
   role's guidance names only the team's tools. `guidance: { root?, subagent? }` rewrites a role's
   composed guidance; returning `undefined` gives that role none. The selected guidance is injected
   as a non-persisted role fragment, so forked transcript history never copies a parent's hint into
-  a child. `usageHintText` appends guidance to `spawn_agent`. `new DirectTools(new
+  a child. `multiAgentMode` (`'explicitRequestOnly'` by default, or `'proactive'`) selects Codex's
+  `<multi_agent_mode>` text (`prompts/src/model_messages/multi_agent.rs`), which the executor
+  renders as a `verbatim` fragment right after the role fragment on every root and subagent turn,
+  whatever the guidance transform returns. Codex diffs this world-state section into history and
+  picks proactive from reasoning effort `Ultra` or a custom hint; Zukhruf rebuilds the system
+  prompt each turn, so the mode is a plain team option with no custom text.
+  `usageHintText` appends guidance to `spawn_agent`. `new DirectTools(new
 ToolNamespace(name))` applies a validated native OpenAI Responses namespace to all of the team's
   tools; a reserved, padded, non-ASCII, or over-64-character name throws when the `ToolNamespace`
   is built. Current upstream Codex also injects a dedicated subagent developer instruction and

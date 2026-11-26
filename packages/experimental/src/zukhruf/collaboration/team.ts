@@ -35,6 +35,20 @@ const ROLE_GUIDANCE: Record<
   },
 };
 
+/**
+ * Codex's multi-agent modes: spawn only on an explicit request, or delegate
+ * proactively whenever parallel work could save time or improve quality.
+ */
+export type MultiAgentMode = 'explicitRequestOnly' | 'proactive';
+
+/** Verbatim Codex `prompts/src/model_messages/multi_agent.rs` mode texts. */
+const MULTI_AGENT_MODE_TEXT: Record<MultiAgentMode, string> = {
+  explicitRequestOnly:
+    'Any earlier instruction enabling proactive multi-agent delegation no longer applies. Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask for sub-agents, delegation, or parallel agent work.',
+  proactive:
+    'Proactive multi-agent delegation is active. Any earlier developer instruction requiring an explicit user request before spawning sub-agents no longer applies. This mode remains active until a later multi-agent mode developer message changes it. User requests override this hint.\n\nIf at any point you can parallelize work by delegating tasks to another agent (no matter if you are root or subagent), you should do so using collaboration tools if it could save time or improve quality.',
+};
+
 /** Verbatim Codex `resolve_usage_hints` closing sentence. */
 function concurrencySlotsText(maxConcurrency: number): string {
   return `There are ${maxConcurrency} available concurrency slots, meaning that up to ${maxConcurrency} agents can be active at once, including you.`;
@@ -55,6 +69,11 @@ export interface TeamOptions {
   exposure?: ToolExposure;
   /** Rewrites a role's composed guidance; `undefined` gives that role none. */
   guidance?: Partial<Record<Role, (composed: string) => string | undefined>>;
+  /**
+   * Codex's multi-agent mode, told to the root and every subagent apart from
+   * their guidance. Defaults to `explicitRequestOnly`.
+   */
+  multiAgentMode?: MultiAgentMode;
 }
 
 /**
@@ -159,6 +178,12 @@ export class Team<
     const composed = this.#compose(role);
     const transform = this.#options.guidance?.[role];
     return transform === undefined ? composed : transform(composed);
+  }
+
+  /** Codex's `<multi_agent_mode>` developer message of the team's mode. */
+  get multiAgentModeMessage(): string {
+    const mode = this.#options.multiAgentMode ?? 'explicitRequestOnly';
+    return `<multi_agent_mode>${MULTI_AGENT_MODE_TEXT[mode]}</multi_agent_mode>`;
   }
 
   #compose(role: Role): string {

@@ -5,7 +5,11 @@ export { DirectMessaging } from './collaboration/direct-messaging.ts';
 export { DirectTools } from './collaboration/direct-tools.ts';
 export { Spawning } from './collaboration/spawning.ts';
 export { Supervision } from './collaboration/supervision.ts';
-export { Team, type TeamOptions } from './collaboration/team.ts';
+export {
+  type MultiAgentMode,
+  Team,
+  type TeamOptions,
+} from './collaboration/team.ts';
 export type { ToolExposure } from './collaboration/tool-exposure.ts';
 export { ToolNamespace } from './collaboration/tool-namespace.ts';
 export { WaitBounds } from './collaboration/wait-bounds.ts';

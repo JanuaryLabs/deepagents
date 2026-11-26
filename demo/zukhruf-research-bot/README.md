@@ -51,7 +51,8 @@ remain `running` until the continuation settles.
 - `subagents/researcher/` — a self-contained web researcher declaration that
   sends sourced findings directly to `/root`.
 - Each agent folder owns its declaration, instructions, and per-chat sandbox.
-- `stack.ts` — opens an `EmbeddedAgentStorage` in the demo directory.
+- `stack.ts` — opens an `EmbeddedAgentStorage` in the demo directory and sets
+  Codex's proactive multi-agent mode, since the root spawns on its own.
 - `run.ts` — composes and exports the runtime; it contains no turn submission.
 - `server.ts` — the top-level process that starts the concurrent worker, mounts
   the authenticated Zukhruf protocol at `/zukhruf/v1` and the DevTool UI at

@@ -18,6 +18,7 @@ import {
   isRecord,
   role,
   user,
+  verbatim,
 } from '@deepagents/context';
 import { type ElementDescriptor, elementsSchema } from '@deepagents/elements';
 import {
@@ -180,6 +181,7 @@ export class AgentTurnExecutor {
     const engine = this.#engineFor(turn).set(
       ...declaration.instructions,
       ...(usageHint === undefined ? [] : [role(usageHint)]),
+      verbatim(this.#team.multiAgentModeMessage),
     );
 
     if (

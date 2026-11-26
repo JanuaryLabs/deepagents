@@ -63,5 +63,6 @@ nx run @deepagents/demo-zukhruf-dynamic-subagents:typecheck
 nx run @deepagents/demo-zukhruf-dynamic-subagents:test
 ```
 
-`stack.ts` opens an `EmbeddedAgentStorage` in the demo directory. `run.ts` owns
+`stack.ts` opens an `EmbeddedAgentStorage` in the demo directory and sets Codex's proactive
+multi-agent mode, so agents delegate without being asked. `run.ts` owns
 `runtime = new AgentRuntime(root)`, initializes `host`, and starts its worker explicitly.

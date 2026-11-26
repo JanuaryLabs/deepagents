@@ -122,6 +122,17 @@ const stack = defineStack(async (resources) => ({
 `multiAgent` takes a `Team`, the collaboration tools and guidance every agent
 of the tree gets; omitted, it is `Team.codex()`, all six tools.
 
+Multi-agent mode: every turn of the root and of each subagent ends its system
+prompt with Codex's `<multi_agent_mode>` message, apart from the guidance, so a
+`guidance` rewrite never removes it. `multiAgentMode: 'explicitRequestOnly'`
+(the default) spawns only when the user, AGENTS.md or a skill asks for it;
+`'proactive'` delegates whenever parallel work could save time or improve
+quality.
+
+```ts
+multiAgent: Team.codex({ multiAgentMode: 'proactive' }),
+```
+
 Direct messaging: a team without `DirectMessaging` has no `send_message` or
 `followup_task`, and its guidance does not mention them. Agents still spawn,
 wait, and get each child's final answer, as with Codex's
