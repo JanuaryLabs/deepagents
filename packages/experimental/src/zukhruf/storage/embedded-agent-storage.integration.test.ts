@@ -1,21 +1,33 @@
+import { untilAborted } from '@zukhruf/async';
 import { TemporaryFiles } from '@zukhruf/fs';
+import { open } from '@zukhruf/sqlite-open';
+import { waitFor } from '@zukhruf/testing/async';
+import { MockLanguageModelV4 } from 'ai/test';
 import spawn from 'nano-spawn';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import {
   type AdmissionScope,
   AdmissionScopeError,
+  AgentRuntime,
   EmbeddedAgentStorage,
   InterAgentCommunicationTypes,
   type SandboxIdleWake,
   type TurnRef,
   type Wake,
   createInterAgentCommunication,
+  defineAgent,
+  defineStack,
 } from '@deepagents/experimental/zukhruf';
+
+import { buildSandbox } from '../../testing/build-sandbox.fixture.ts';
+import { textResult } from '../../testing/stream-results.fixture.ts';
+import { userTurn } from '../../testing/user-turn.fixture.ts';
 
 const fixture = join(import.meta.dirname, 'embedded-crash.fixture.ts');
 
@@ -533,5 +545,167 @@ test('a sandbox idle wake scheduled before the storage closed waits on the queue
       delivered: await delivered.promise,
     },
     { waiting: [wake.data], delivered: wake },
+  );
+});
+
+const LOST_TURN_ERROR = 'turn lost: its queue job was deleted before it ran';
+
+/** A host on `storage` whose model answers every turn and counts its calls in `model`. */
+function countingHost(storage: EmbeddedAgentStorage, model: { calls: number }) {
+  return new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: new MockLanguageModelV4({
+        doStream: async () => {
+          model.calls++;
+          return textResult('done');
+        },
+      }),
+      sandbox: buildSandbox(),
+      instructions: [],
+      plugins: [],
+    }),
+  ).initialize(defineStack(async () => ({ storage })));
+}
+
+/**
+ * Waits for the turn queue's job of `streamId`, then past its retention, and
+ * runs pg-boss maintenance, which deletes it. Maintenance runs again only
+ * after pg-boss's maintenance interval, hours by default, so it runs once.
+ */
+async function retentionDeletes(
+  storage: EmbeddedAgentStorage,
+  streamId: string,
+  signal: AbortSignal,
+) {
+  const job = await waitFor(
+    async () => {
+      const [found] = await storage.boss.findJobs('zukhruf-turns', {
+        data: { streamId },
+      });
+      assert.ok(found);
+      return found;
+    },
+    { interval: 20, signal },
+  );
+  await delay(job.keepUntil.getTime() - Date.now() + 100, undefined, {
+    signal,
+  });
+  await storage.boss.supervise('zukhruf-turns');
+  assert.deepStrictEqual(
+    await storage.boss.findJobs('zukhruf-turns', { data: { streamId } }),
+    [],
+  );
+}
+
+test("a worker's startup sweep keeps a queued turn whose outbox row the relay has not deleted, though retention deleted its job, and reopening runs it once", async (t) => {
+  await using directory = await new TemporaryFiles().directory(
+    'embedded-storage-',
+  );
+  const turn = childTurn('child');
+  const model = { calls: 0 };
+  let afterSweep: string | undefined;
+  {
+    await using storage = await EmbeddedAgentStorage.open({
+      directory: directory.path,
+    });
+    await using host = await countingHost(storage, model);
+    await storage.boss.updateQueue('zukhruf-turns', { retentionSeconds: 1 });
+    // Platform setup no storage operation exposes, as embedded-crash.fixture.ts
+    // does at `pushed`: an open PGlite transaction holds the relay's push
+    // until a second connection holds SQLite's write lock, so the relay pushes
+    // the job and then, after its connection's busy timeout, fails to delete
+    // its outbox row. Reopening would push the row before any worker starts,
+    // so only a live storage shows the sweep a turn the outbox still holds.
+    const queueHeld = Promise.withResolvers<void>();
+    const queueReleased = Promise.withResolvers<void>();
+    void storage.queueDatabase.transaction(async () => {
+      queueHeld.resolve();
+      await queueReleased.promise;
+    });
+    await queueHeld.promise;
+    await storage.admit({ userId: 'user-1', treeId: 'root' }, async (scope) => {
+      await scope.store.createChat({ id: turn.chatId, userId: 'user-1' });
+      await scope.queue.push(turn);
+      await scope.streams.createStream({
+        id: turn.streamId,
+        status: 'queued',
+        createdAt: Date.now(),
+        startedAt: null,
+        finishedAt: null,
+        cancelRequestedAt: null,
+        error: null,
+      });
+    });
+    {
+      using writer = open(join(directory.path, 'zukhruf.sqlite'), {
+        timeout: 0,
+      });
+      writer.exec('BEGIN IMMEDIATE');
+      const warning = once(process, 'warning', { signal: t.signal });
+      queueReleased.resolve();
+      const [refused] = await warning;
+      assert.ok(Error.isError(refused));
+      assert.equal(
+        refused.message,
+        storageWarning(directory.path, 'database is locked').message,
+      );
+    }
+    await retentionDeletes(storage, turn.streamId, t.signal);
+
+    await using _worker = await host.work();
+    afterSweep = await storage.streams.store.getStreamStatus(turn.streamId);
+  }
+  await using reopened = await EmbeddedAgentStorage.open({
+    directory: directory.path,
+  });
+  await using restarted = await countingHost(reopened, model);
+  await using _worker = await restarted.work();
+  await waitFor(
+    async () =>
+      assert.equal(
+        await reopened.streams.store.getStreamStatus(turn.streamId),
+        'completed',
+      ),
+    { signal: t.signal },
+  );
+
+  assert.deepStrictEqual(
+    {
+      afterSweep,
+      calls: model.calls,
+      afterwards: await reopened.queue.getTurnActivity(turn),
+    },
+    { afterSweep: 'queued', calls: 1, afterwards: 'idle' },
+  );
+});
+
+test("a worker's startup sweep fails a turn the relay pushed whose job retention deleted, so its watch() stream ends with the lost-turn error", async (t) => {
+  await using directory = await new TemporaryFiles().directory(
+    'embedded-storage-',
+  );
+  await using storage = await EmbeddedAgentStorage.open({
+    directory: directory.path,
+  });
+  const model = { calls: 0 };
+  await using host = await countingHost(storage, model);
+  await storage.boss.updateQueue('zukhruf-turns', { retentionSeconds: 1 });
+
+  const queued = await host.enqueue(
+    { chatId: 'lost', userId: 'user-1' },
+    userTurn('t-1', 'lost me'),
+  );
+  await retentionDeletes(storage, queued.id, t.signal);
+  await using _worker = await host.work();
+
+  assert.deepStrictEqual(
+    {
+      chunks: await untilAborted(Array.fromAsync(queued.stream), t.signal),
+      calls: model.calls,
+    },
+    {
+      chunks: [{ type: 'error', errorText: LOST_TURN_ERROR }],
+      calls: 0,
+    },
   );
 });
