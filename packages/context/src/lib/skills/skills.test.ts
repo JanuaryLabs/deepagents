@@ -417,7 +417,11 @@ describe('parseSkillFrontmatter()', () => {
       { message: 'missing YAML frontmatter delimited by ---' },
     );
     assert.throws(
-      () => parseSkillFrontmatter('---\nname: [lint\n---\n', 'lint'),
+      () =>
+        parseSkillFrontmatter(
+          '---\nname: lint\ndescription: "Build for AWS: ECS\n---\n',
+          'lint',
+        ),
       { message: /^invalid YAML: / },
     );
     assert.throws(
@@ -428,6 +432,116 @@ describe('parseSkillFrontmatter()', () => {
     assert.throws(() => parseSkillFrontmatter('---\njust text\n---\n', 'x'), {
       message: /^invalid YAML: /,
     });
+  });
+
+  it('repairs and sanitizes an unquoted description containing a colon', () => {
+    assert.deepStrictEqual(
+      parseSkillFrontmatter(
+        '---\nname:  deploy  service\ndescription: Build for AWS: ECS\nmetadata:\n  short-description:  Deploy   safely\n---\n',
+        'fallback',
+      ),
+      { name: 'deploy service', description: 'Build for AWS: ECS' },
+    );
+  });
+
+  it('uses the default name and requires a description', () => {
+    assert.deepStrictEqual(
+      parseSkillFrontmatter('---\ndescription: Demo skill\n---\n', 'demo'),
+      { name: 'demo', description: 'Demo skill' },
+    );
+    assert.throws(
+      () => parseSkillFrontmatter('---\nname: demo\n---\n', 'fallback'),
+      { message: 'missing field `description`' },
+    );
+  });
+
+  it('repairs a nested value containing a colon and an apostrophe', () => {
+    assert.deepStrictEqual(
+      parseSkillFrontmatter(
+        "---\nname: short\ndescription: Short skill\nmetadata:\n  short-description: What's included: builds and tests\n---\n",
+        'fallback',
+      ),
+      { name: 'short', description: 'Short skill' },
+    );
+  });
+
+  it('repairs unrecognized fields that need quotes', () => {
+    assert.deepStrictEqual(
+      parseSkillFrontmatter(
+        '---\nname: unknown\ndescription: Unknown fields\nargument-hint: <duration: e.g. 7d, 2w>\ntags: [next,@supabase/ssr]\n---\n',
+        'fallback',
+      ),
+      { name: 'unknown', description: 'Unknown fields' },
+    );
+  });
+
+  it('preserves block scalar bodies while repairing other fields', () => {
+    assert.deepStrictEqual(
+      parseSkillFrontmatter(
+        '---\nname: block\ndescription: |-\n  Build for AWS: ECS\nargument-hint: <duration: e.g. 7d>\n---\n',
+        'fallback',
+      ),
+      { name: 'block', description: 'Build for AWS: ECS' },
+    );
+  });
+
+  it('leaves a block scalar body line that looks repairable as written', () => {
+    assert.deepStrictEqual(
+      parseSkillFrontmatter(
+        '---\nname: block\ndescription: |-\n  Build for AWS: ECS: Fargate\nargument-hint: <duration: e.g. 7d>\n---\n',
+        'fallback',
+      ),
+      { name: 'block', description: 'Build for AWS: ECS: Fargate' },
+    );
+  });
+
+  it('keeps an overlong description whole', () => {
+    const description = '💡'.repeat(1025);
+    assert.deepStrictEqual(
+      parseSkillFrontmatter(
+        `---\nname: long\ndescription: ${description}\nmetadata:\n  short-description: ${'x'.repeat(1025)}\n---\n`,
+        'fallback',
+      ),
+      { name: 'long', description },
+    );
+  });
+
+  it('quotes a repaired value, escaping apostrophes and keeping a trailing comment out', () => {
+    assert.deepStrictEqual(
+      parseSkillFrontmatter(
+        "---\nname: it's: odd # a comment\ndescription: Ops: deploy\n---\n",
+        'fallback',
+      ),
+      { name: "it's: odd", description: 'Ops: deploy' },
+    );
+  });
+
+  it('repairs a value whose type is wrong when it holds a colon separator', () => {
+    assert.deepStrictEqual(
+      parseSkillFrontmatter('---\nname: x\ndescription: {a: b}\n---\n', 'x'),
+      { name: 'x', description: '{a: b}' },
+    );
+  });
+
+  it('repairs an invalid flow-like value, then reports what the repaired YAML lacks', () => {
+    assert.throws(
+      () => parseSkillFrontmatter('---\nname: [lint\n---\n', 'lint'),
+      { message: 'missing field `description`' },
+    );
+  });
+
+  it('reports the original YAML error when the repaired YAML is still invalid', () => {
+    assert.throws(
+      () =>
+        parseSkillFrontmatter(
+          '---\nname: x\ndescription: Build for AWS: ECS\n  bad: [\n---\n',
+          'x',
+        ),
+      {
+        message:
+          /^invalid YAML: Nested mappings are not allowed in compact mappings at line 2/,
+      },
+    );
   });
 });
 

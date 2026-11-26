@@ -205,6 +205,12 @@ import { SkillParseError, parseSkillFrontmatter } from '@deepagents/context';
 const { name, description } = parseSkillFrontmatter(source, 'deploy');
 ```
 
+- When the frontmatter does not parse, a value that holds `: ` or starts like
+  an invalid flow value (`[`, `{`, `@` or a backtick) is single-quoted line by
+  line and the frontmatter is parsed again, so
+  `description: Build for AWS: ECS` loads. Block scalar bodies and quoted
+  values stay as written. If the repaired frontmatter fails too, the original
+  error is reported.
 - The name and description are collapsed to one line.
 - A missing or empty name becomes `defaultName`, such as the skill's
   directory name. The name does not have to match the directory.
