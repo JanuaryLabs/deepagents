@@ -1173,9 +1173,9 @@ describe('zukhruf runtime — setup failure durability', () => {
     agentDeclaration.sandbox = defineSandbox({
       open: async (chat) => {
         const backend = await environment.open(chat);
-        await backend.writeTextFile({
-          path: '/workspace/skills/broken/README.md',
-          content: 'SKILL.md is intentionally missing',
+        Object.assign(backend, {
+          listDirectory: () =>
+            Promise.reject(new Error('skills directory unreadable')),
         });
         return backend;
       },
@@ -3980,6 +3980,299 @@ describe('zukhruf runtime — cross-process conversation status', () => {
     } finally {
       abort.abort();
       await done;
+    }
+  });
+});
+
+function availableSkillLines(prompt: LanguageModelV4Prompt): string[] {
+  const system = prompt
+    .flatMap((message) => (message.role === 'system' ? [message.content] : []))
+    .join('\n');
+  const [, catalog] = system.split('### Available skills\n');
+  assert.ok(catalog, 'the system prompt lists no skills');
+  return catalog.split('\n### How to use skills\n')[0].split('\n');
+}
+
+function sandboxWithFiles(files: Record<string, string>) {
+  const environment = new VirtualSandboxEnvironment();
+  return defineSandbox({
+    open: async (chat) => {
+      const backend = await environment.open(chat);
+      for (const [path, content] of Object.entries(files)) {
+        await backend.writeTextFile({ path, content });
+      }
+      return backend;
+    },
+    delete: (chat) => environment.delete(chat),
+  });
+}
+
+function promptRecordingModel(prompts: LanguageModelV4Prompt[]) {
+  return new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      prompts.push(prompt);
+      return { stream: buildStream(['ok'], 0) };
+    },
+  });
+}
+
+describe('zukhruf runtime — skill limits', () => {
+  it('lists a sandbox skill under its own name, its directory when unnamed, and a one-line description', async () => {
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = promptRecordingModel(prompts);
+    const agentDeclaration = declaration(model);
+    agentDeclaration.sandbox = sandboxWithFiles({
+      '/workspace/skills/reports/SKILL.md':
+        '---\nname: weekly-report\ndescription: Write the weekly report.\n---\n',
+      '/workspace/skills/unnamed/SKILL.md':
+        '---\ndescription: Use the directory name.\n---\n',
+      '/workspace/skills/multi/SKILL.md':
+        '---\nname: multi\ndescription: |\n  First line\n  second   line.\n---\n',
+      '/workspace/skills/notes/README.md': 'A directory without SKILL.md.',
+    });
+
+    await using h = await harness(model, { declaration: agentDeclaration });
+    await using worker = await h.runtime.work();
+    void worker;
+    const result = await h.runtime.enqueue(
+      { chatId: 'skill-names', userId: 'u1' },
+      turn('use a skill'),
+    );
+    const chunks = await Array.fromAsync(result.stream);
+
+    assert.ok(prompts[0]);
+    assert.deepEqual(availableSkillLines(prompts[0]), [
+      '- multi: First line second line. (file: skills/multi/SKILL.md)',
+      '- unnamed: Use the directory name. (file: skills/unnamed/SKILL.md)',
+      '- weekly-report: Write the weekly report. (file: skills/reports/SKILL.md)',
+    ]);
+    assert.deepEqual(
+      chunks.filter((chunk) => chunk.type === 'data-warning'),
+      [],
+    );
+  });
+
+  it('leaves out a sandbox skill that fails to parse with a SkillLoadWarning while the turn runs', async () => {
+    const warnings: Error[] = [];
+    const listener = (warning: Error) => {
+      if (warning.name === 'SkillLoadWarning') warnings.push(warning);
+    };
+    process.on('warning', listener);
+    try {
+      const prompts: LanguageModelV4Prompt[] = [];
+      const model = promptRecordingModel(prompts);
+      const agentDeclaration = declaration(model);
+      agentDeclaration.sandbox = sandboxWithFiles({
+        '/workspace/skills/good/SKILL.md':
+          '---\nname: good\ndescription: Loads.\n---\n',
+        '/workspace/skills/long/SKILL.md': `---\nname: ${'n'.repeat(65)}\ndescription: Too long a name.\n---\n`,
+        '/workspace/skills/bare/SKILL.md': '---\nname: bare\n---\n',
+      });
+
+      await using h = await harness(model, { declaration: agentDeclaration });
+      await using worker = await h.runtime.work();
+      void worker;
+      const result = await h.runtime.enqueue(
+        { chatId: 'skill-load-failures', userId: 'u1' },
+        turn('use a skill'),
+      );
+      assert.equal(await collectText(result.stream), 'ok');
+      await setImmediate();
+
+      assert.ok(prompts[0]);
+      assert.deepEqual(availableSkillLines(prompts[0]), [
+        '- good: Loads. (file: skills/good/SKILL.md)',
+      ]);
+      assert.deepEqual(
+        warnings
+          .map((warning) => ({ ...warning, message: warning.message }))
+          .toSorted((left, right) => (left.message < right.message ? -1 : 1)),
+        [
+          {
+            message:
+              'Loading skill /workspace/skills/bare/SKILL.md failed, and the skills list leaves it out: missing field `description`',
+            name: 'SkillLoadWarning',
+            code: 'DEEPAGENTS_ZUKHRUF_SKILL_LOAD_FAILED',
+            detail: 'skill: /workspace/skills/bare/SKILL.md',
+          },
+          {
+            message:
+              'Loading skill /workspace/skills/long/SKILL.md failed, and the skills list leaves it out: invalid name: exceeds maximum length of 64 characters',
+            name: 'SkillLoadWarning',
+            code: 'DEEPAGENTS_ZUKHRUF_SKILL_LOAD_FAILED',
+            detail: 'skill: /workspace/skills/long/SKILL.md',
+          },
+        ],
+      );
+    } finally {
+      process.off('warning', listener);
+    }
+  });
+
+  it('installs a selected plugin skill from its directory when its name differs, and leaves out one that fails to parse', async () => {
+    const warnings: Error[] = [];
+    const listener = (warning: Error) => {
+      if (warning.name === 'SkillLoadWarning') warnings.push(warning);
+    };
+    process.on('warning', listener);
+    try {
+      await using directory = await new TemporaryFiles().directory(
+        'zukhruf-plugin-skill-name-',
+      );
+      const reviewSkill = join(directory.path, 'review-code');
+      const brokenSkill = join(directory.path, 'broken');
+      const emptySkill = join(directory.path, 'empty');
+      const otherSkill = join(directory.path, 'other');
+      await Promise.all([
+        mkdir(reviewSkill),
+        mkdir(brokenSkill),
+        mkdir(emptySkill),
+        mkdir(otherSkill),
+      ]);
+      const reviewSkillMd =
+        '---\nname: code-review\ndescription: Review code for correctness.\n---\n';
+      await Promise.all([
+        writeFile(join(reviewSkill, 'SKILL.md'), reviewSkillMd),
+        writeFile(join(reviewSkill, 'checklist.md'), '- correctness'),
+        writeFile(join(brokenSkill, 'SKILL.md'), '# no frontmatter'),
+        writeFile(
+          join(otherSkill, 'SKILL.md'),
+          '---\nname: other\ndescription: Not selected.\n---\n',
+        ),
+        writeFile(join(otherSkill, 'notes.md'), 'other notes'),
+      ]);
+
+      const prompts: LanguageModelV4Prompt[] = [];
+      const backends: ChatSandbox[] = [];
+      const model = promptRecordingModel(prompts);
+      const agentDeclaration = declaration(model);
+      const environment = new VirtualSandboxEnvironment();
+      agentDeclaration.sandbox = defineSandbox({
+        open: async (chat) => {
+          const backend = await environment.open(chat);
+          backends.push(backend);
+          return backend;
+        },
+        delete: (chat) => environment.delete(chat),
+      });
+      agentDeclaration.skills = ['code-review'];
+
+      await using h = await harness(model, {
+        declaration: agentDeclaration,
+        composition: () => ({
+          definitions: [
+            {
+              name: 'review-skills',
+              create: () => ({
+                skills: [
+                  pathToFileURL(reviewSkill),
+                  pathToFileURL(brokenSkill),
+                  pathToFileURL(emptySkill),
+                  pathToFileURL(otherSkill),
+                ],
+              }),
+            },
+          ],
+        }),
+      });
+      await using worker = await h.runtime.work();
+      void worker;
+      const result = await h.runtime.enqueue(
+        { chatId: 'plugin-skill-names', userId: 'u1' },
+        turn('review this'),
+      );
+      assert.equal(await collectText(result.stream), 'ok');
+
+      assert.ok(prompts[0]);
+      assert.deepEqual(availableSkillLines(prompts[0]), [
+        '- code-review: Review code for correctness. (file: skills/review-code/SKILL.md)',
+      ]);
+      const [backend] = backends;
+      assert.ok(backend);
+      assert.equal(
+        await backend.readTextFile({
+          path: '/workspace/skills/review-code/SKILL.md',
+        }),
+        reviewSkillMd,
+      );
+      assert.equal(
+        await backend.readTextFile({
+          path: '/workspace/skills/review-code/checklist.md',
+        }),
+        '- correctness',
+      );
+      for (const file of ['SKILL.md', 'notes.md']) {
+        assert.equal(
+          await backend.readTextFile({
+            path: `/workspace/skills/other/${file}`,
+          }),
+          null,
+        );
+      }
+      const brokenPath = join(brokenSkill, 'SKILL.md');
+      const emptyPath = join(emptySkill, 'SKILL.md');
+      assert.deepEqual(
+        warnings.map((warning) => ({ ...warning, message: warning.message })),
+        [
+          {
+            message: `Loading skill ${brokenPath} failed, and the skills list leaves it out: missing YAML frontmatter delimited by ---`,
+            name: 'SkillLoadWarning',
+            code: 'DEEPAGENTS_ZUKHRUF_SKILL_LOAD_FAILED',
+            detail: `skill: ${brokenPath}`,
+          },
+          {
+            message: `Loading skill ${emptyPath} failed, and the skills list leaves it out: ENOENT: no such file or directory, open '${emptyPath}'`,
+            name: 'SkillLoadWarning',
+            code: 'DEEPAGENTS_ZUKHRUF_SKILL_LOAD_FAILED',
+            detail: `skill: ${emptyPath}`,
+          },
+        ],
+      );
+    } finally {
+      process.off('warning', listener);
+    }
+  });
+
+  it('streams one data-warning in each turn when the skills catalog exceeds its budget', async () => {
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = promptRecordingModel(prompts);
+    const agentDeclaration = declaration(model);
+    agentDeclaration.sandbox = sandboxWithFiles(
+      Object.fromEntries(
+        Array.from({ length: 300 }, (_, index) => {
+          const name = `s${String(index).padStart(3, '0')}`;
+          return [
+            `/workspace/skills/${name}/SKILL.md`,
+            `---\nname: ${name}\ndescription: Unused.\n---\n`,
+          ];
+        }),
+      ),
+    );
+
+    await using h = await harness(model, { declaration: agentDeclaration });
+    await using worker = await h.runtime.work();
+    void worker;
+    const conversation = { chatId: 'skill-budget', userId: 'u1' };
+    for (const input of ['use a skill', 'use another skill']) {
+      const result = await h.runtime.enqueue(conversation, turn(input));
+      const chunks = await Array.fromAsync(result.stream);
+
+      assert.deepEqual(
+        chunks.filter((chunk) => chunk.type === 'data-warning'),
+        [
+          {
+            type: 'data-warning',
+            data: {
+              message:
+                'Exceeded skills context budget. All skill descriptions were removed and 84 additional skills were not included in the model-visible skills list.',
+            },
+          },
+        ],
+      );
+    }
+    assert.equal(prompts.length, 2);
+    for (const prompt of prompts) {
+      assert.equal(availableSkillLines(prompt).length, 216);
     }
   });
 });

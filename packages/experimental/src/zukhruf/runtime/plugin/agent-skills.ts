@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import {
   type AvailableSkill,
   type ContextFragment,
-  parseFrontmatter,
+  SkillParseError,
+  parseSkillFrontmatter,
   skills,
 } from '@deepagents/context';
 
@@ -14,6 +15,8 @@ import type { AgentDeclaration, ZukhrufSandbox } from '../../agent.ts';
 export interface AgentSkills {
   available: readonly AvailableSkill[];
   fragments: readonly ContextFragment[];
+  /** Codex's skills budget warning when the catalog left skills out. */
+  warning: string | undefined;
 }
 
 export interface PluginSkills {
@@ -21,8 +24,27 @@ export interface PluginSkills {
   files: readonly { path: string; content: Buffer }[];
 }
 
-const EMPTY_SKILLS: AgentSkills = { available: [], fragments: [] };
+const EMPTY_SKILLS: AgentSkills = {
+  available: [],
+  fragments: [],
+  warning: undefined,
+};
 const EMPTY_PLUGIN_SKILLS: PluginSkills = { available: [], files: [] };
+
+/** A SKILL.md failed to load, so the skills list leaves that skill out. */
+class SkillLoadWarning extends Error {
+  readonly code = 'DEEPAGENTS_ZUKHRUF_SKILL_LOAD_FAILED';
+  readonly detail: string;
+
+  constructor(failure: unknown, skillPath: string) {
+    super(
+      `Loading skill ${skillPath} failed, and the skills list leaves it out: ${Error.isError(failure) ? failure.message : String(failure)}`,
+      { cause: failure },
+    );
+    this.name = 'SkillLoadWarning';
+    this.detail = `skill: ${skillPath}`;
+  }
+}
 
 /** Collects plugin skill sources and composes validated selections per agent. */
 export class PluginSkillComposition {
@@ -56,10 +78,20 @@ export class PluginSkillComposition {
       const directoryPath =
         directory instanceof URL ? fileURLToPath(directory) : directory;
       const directoryName = path.basename(directoryPath);
-      const available = availableSkill(
-        readFileSync(path.join(directoryPath, 'SKILL.md'), 'utf8'),
-        directoryName,
-      );
+      const skillPath = path.join(directoryPath, 'SKILL.md');
+      let available: AvailableSkill;
+      try {
+        available = availableSkill(
+          readFileSync(skillPath, 'utf8'),
+          directoryName,
+        );
+      } catch (error) {
+        if (!(error instanceof SkillParseError) && !isSystemError(error)) {
+          throw error;
+        }
+        process.emitWarning(new SkillLoadWarning(error, skillPath));
+        continue;
+      }
       if (skillsByName.has(available.name)) {
         throw new Error(
           `AgentRuntime: duplicate plugin skill "${available.name}"`,
@@ -85,9 +117,7 @@ export class PluginSkillComposition {
     }
 
     return {
-      available: [...skillsByName.values()].toSorted((left, right) =>
-        left.name.localeCompare(right.name),
-      ),
+      available: [...skillsByName.values()],
       files: files.toSorted((left, right) =>
         left.path.localeCompare(right.path),
       ),
@@ -116,14 +146,17 @@ export class PluginSkillComposition {
         );
       }
     }
+    const available = catalog.available.filter(({ name }) =>
+      selectedNames.has(name),
+    );
+    const directories = new Set(
+      available.map(({ path: skillPath }) => path.posix.dirname(skillPath)),
+    );
     return {
-      available: catalog.available.filter(({ name }) =>
-        selectedNames.has(name),
+      available,
+      files: catalog.files.filter(({ path: file }) =>
+        directories.has(file.split('/', 2).join('/')),
       ),
-      files: catalog.files.filter(({ path: file }) => {
-        const [, skillName] = file.split('/');
-        return skillName !== undefined && selectedNames.has(skillName);
-      }),
     };
   }
 }
@@ -150,7 +183,7 @@ export async function discoverAgentSkills(
     skillDirectories.map((directory) => loadSkill(sandbox, directory)),
   );
 
-  return createAgentSkills(discovered);
+  return createAgentSkills(discovered.filter((skill) => skill !== undefined));
 }
 
 export function createAgentSkills(
@@ -158,36 +191,52 @@ export function createAgentSkills(
 ): AgentSkills {
   if (available.length === 0) return EMPTY_SKILLS;
   const snapshot = [...available];
-  return { available: snapshot, fragments: [skills(snapshot)] };
+  const fragment = skills(snapshot);
+  return {
+    available: snapshot,
+    fragments: [fragment],
+    warning: fragment.metadata.warning,
+  };
 }
 
+/** Codex discovers a skill by its SKILL.md, so a directory without one is no skill. */
 async function loadSkill(
   sandbox: ZukhrufSandbox,
   directory: string,
-): Promise<AvailableSkill> {
-  const directoryName = path.posix.basename(directory);
+): Promise<AvailableSkill | undefined> {
   const skillPath = path.posix.join(directory, 'SKILL.md');
   const skillMd = await sandbox.sandbox.readTextFile({ path: skillPath });
-  if (skillMd === null) {
-    throw new Error(`AgentRuntime: ${skillPath} does not exist`);
+  if (skillMd === null) return undefined;
+  try {
+    return availableSkill(skillMd, path.posix.basename(directory));
+  } catch (error) {
+    if (!(error instanceof SkillParseError)) throw error;
+    process.emitWarning(new SkillLoadWarning(error, skillPath));
+    return undefined;
   }
-  return availableSkill(skillMd, directoryName);
+}
+
+/** A failed read of a SKILL.md, which Codex skips as a load failure (ext/skills/src/loader/host.rs). */
+function isSystemError(error: unknown): error is NodeJS.ErrnoException {
+  return Error.isError(error) && 'syscall' in error;
 }
 
 function availableSkill(
   skillMd: string,
   directoryName: string,
 ): AvailableSkill {
-  const { frontmatter } = parseFrontmatter(skillMd);
-  if (frontmatter.name !== directoryName) {
-    throw new Error(
-      `AgentRuntime: skill "${frontmatter.name}" must use matching directory "${directoryName}"`,
-    );
-  }
-
+  const { name, description } = parseSkillFrontmatter(
+    skillMd,
+    defaultSkillName(directoryName),
+  );
   return {
-    name: frontmatter.name,
-    description: frontmatter.description,
+    name,
+    description,
     path: path.posix.join('skills', directoryName, 'SKILL.md'),
   };
+}
+
+/** ext/skills/src/loader/host.rs default_skill_name. */
+function defaultSkillName(directoryName: string): string {
+  return directoryName.split(/\s+/).filter(Boolean).join(' ') || 'skill';
 }

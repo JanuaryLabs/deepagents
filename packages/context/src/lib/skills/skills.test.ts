@@ -4,12 +4,14 @@ import { describe, it } from 'node:test';
 import {
   type AvailableSkill,
   ContextEngine,
+  type ContextFragment,
   InMemoryContextStore,
   MarkdownRenderer,
   TomlRenderer,
   ToonRenderer,
   XmlRenderer,
   parseFrontmatter,
+  parseSkillFrontmatter,
   role,
   skills,
 } from '@deepagents/context';
@@ -41,6 +43,38 @@ const catalog = [
   "- Safety and fallback: If a skill can't be applied cleanly (missing files, unclear instructions), state the issue, pick the next-best approach, and continue.",
   '</skills_instructions>',
 ].join('\n');
+
+const catalogHead = [
+  '<skills_instructions>',
+  '## Skills',
+  'A skill is a set of instructions provided through a `SKILL.md` source. Below is the list of skills that can be used. Each entry includes a name, description, and source locator. `file` locators are on the host filesystem.',
+  '### Available skills',
+].join('\n');
+
+async function renderedSkillLines(fragment: ContextFragment) {
+  const { systemPrompt } = await new ContextEngine({
+    store: new InMemoryContextStore(),
+    chatId: 'skills-lines-test',
+    userId: 'user',
+  })
+    .set(fragment)
+    .resolve({ renderer: new XmlRenderer() });
+  assert.ok(systemPrompt.startsWith(`${catalogHead}\n`));
+  return systemPrompt
+    .slice(catalogHead.length + 1)
+    .split('\n### How to use skills\n')[0]
+    .split('\n');
+}
+
+function availableSkillsOf(fragment: ContextFragment) {
+  return new ContextEngine({
+    store: new InMemoryContextStore(),
+    chatId: 'skills-metadata-test',
+    userId: 'user',
+  })
+    .set(fragment)
+    .getAvailableSkills();
+}
 
 function createContext(...availableSkills: AvailableSkill[]) {
   return new ContextEngine({
@@ -172,6 +206,228 @@ describe('skills()', () => {
 
     assert.deepStrictEqual(context.getAvailableSkills(), []);
     assert.doesNotMatch(systemPrompt, /SKILL\.md/);
+  });
+});
+
+describe('skills() limits', () => {
+  it("cuts a description longer than 1024 characters to 1021 and '...', and keeps the full skill in the engine", async () => {
+    const description = '0123456789'.repeat(200);
+    const deploy = {
+      name: 'deploy',
+      description,
+      path: '/skills/deploy/SKILL.md',
+    };
+    const fragment = skills([deploy]);
+
+    assert.deepStrictEqual(await renderedSkillLines(fragment), [
+      `- deploy: ${description.slice(0, 1021)}... (file: /skills/deploy/SKILL.md)`,
+    ]);
+    assert.deepStrictEqual(availableSkillsOf(fragment), [deploy]);
+    assert.strictEqual(fragment.metadata.warning, undefined);
+  });
+
+  it('counts descriptions and lines in Unicode scalars, not UTF-16 code units', async () => {
+    const description = '💡'.repeat(1024);
+    const available = Array.from({ length: 4 }, (_, index) => ({
+      name: `i${index}`,
+      description,
+      path: `/i/i${index}/SKILL.md`,
+    }));
+
+    // Each line is 1053 scalars (2077 code units): four fit in 8000.
+    assert.deepStrictEqual(
+      await renderedSkillLines(skills(available)),
+      available.map(
+        ({ name, path }) => `- ${name}: ${description} (file: ${path})`,
+      ),
+    );
+  });
+
+  it('gives what a short description leaves to the others, the remainder to the first in order', async () => {
+    const long = '0123456789'.repeat(100);
+    const available = Array.from({ length: 10 }, (_, index) => ({
+      name: `s${index}`,
+      description: index === 0 ? 'abcdefg' : long,
+      path: `/s/s${index}/SKILL.md`,
+    }));
+
+    // 7710 after the bare lines: s0 takes 8 for its 7 characters, and the
+    // 7702 left give s1-s9 854 characters each with 7 to spare for s1-s7.
+    assert.deepStrictEqual(await renderedSkillLines(skills(available)), [
+      '- s0: abcdefg (file: /s/s0/SKILL.md)',
+      ...available
+        .slice(1)
+        .map(
+          ({ name, path }, index) =>
+            `- ${name}: ${long.slice(0, index < 7 ? 855 : 854)} (file: ${path})`,
+        ),
+    ]);
+  });
+
+  it('still lists later skills that fit after one that does not', async () => {
+    const fragment = skills([
+      { name: 'a', description: 'A.', path: '/a' },
+      { name: 'b', description: 'B.', path: `/${'p'.repeat(7979)}` },
+      { name: 'c', description: 'C.', path: '/c' },
+      { name: 'd', description: 'D.', path: '/d' },
+    ]);
+
+    assert.deepStrictEqual(await renderedSkillLines(fragment), [
+      '- a: (file: /a)',
+      '- c: (file: /c)',
+      '- d: (file: /d)',
+    ]);
+    assert.strictEqual(
+      fragment.metadata.warning,
+      'Exceeded skills context budget. All skill descriptions were removed and 1 additional skill was not included in the model-visible skills list.',
+    );
+  });
+
+  it('shares the 8000-character budget round-robin over descriptions when every bare line fits', async () => {
+    const description = '0123456789'.repeat(100);
+    const available = Array.from({ length: 10 }, (_, index) => ({
+      name: `s${index}`,
+      description,
+      path: `/s/s${index}/SKILL.md`,
+    }));
+    const fragment = skills(available);
+
+    // A bare line costs 29 (28 characters and its newline), 290 for ten; the
+    // 7710 left give each skill 770 characters and the space before them.
+    assert.deepStrictEqual(
+      await renderedSkillLines(fragment),
+      available.map(
+        ({ name, path }) =>
+          `- ${name}: ${description.slice(0, 770)} (file: ${path})`,
+      ),
+    );
+    assert.strictEqual(fragment.metadata.warning, undefined);
+  });
+
+  it("drops every description and the skills past the budget with Codex's warning", async () => {
+    const available = Array.from({ length: 300 }, (_, index) => {
+      const name = `s${String(index).padStart(3, '0')}`;
+      return { name, description: 'Unused.', path: `/s/${name}/SKILL.md` };
+    });
+    const fragment = skills(available.toReversed());
+
+    // A bare line costs 33, so 242 lines fit in 8000 characters.
+    assert.deepStrictEqual(
+      await renderedSkillLines(fragment),
+      available
+        .slice(0, 242)
+        .map(({ name, path }) => `- ${name}: (file: ${path})`),
+    );
+    assert.strictEqual(
+      fragment.metadata.warning,
+      'Exceeded skills context budget. All skill descriptions were removed and 58 additional skills were not included in the model-visible skills list.',
+    );
+    assert.deepStrictEqual(availableSkillsOf(fragment), available.toReversed());
+  });
+
+  it('names one omitted skill in the singular', () => {
+    const available = Array.from({ length: 243 }, (_, index) => {
+      const name = `s${String(index).padStart(3, '0')}`;
+      return { name, description: 'Unused.', path: `/s/${name}/SKILL.md` };
+    });
+
+    assert.strictEqual(
+      skills(available).metadata.warning,
+      'Exceeded skills context budget. All skill descriptions were removed and 1 additional skill was not included in the model-visible skills list.',
+    );
+  });
+
+  it('orders skills by name, then path, in code-unit order', async () => {
+    assert.deepStrictEqual(
+      await renderedSkillLines(
+        skills([
+          { name: 'alpha', description: 'A2.', path: '/b/SKILL.md' },
+          { name: 'alpha', description: 'A1.', path: '/a/SKILL.md' },
+          { name: 'Zeta', description: 'Z.', path: '/z/SKILL.md' },
+        ]),
+      ),
+      [
+        '- Zeta: Z. (file: /z/SKILL.md)',
+        '- alpha: A1. (file: /a/SKILL.md)',
+        '- alpha: A2. (file: /b/SKILL.md)',
+      ],
+    );
+  });
+});
+
+describe('parseSkillFrontmatter()', () => {
+  it('collapses the name and description to one line and defaults a missing name', () => {
+    assert.deepStrictEqual(
+      parseSkillFrontmatter(
+        '---\ndescription: |\n  Deploy services\n  to   production.\n---\n\n# Deploy\n',
+        'deploy-dir',
+      ),
+      { name: 'deploy-dir', description: 'Deploy services to production.' },
+    );
+    assert.deepStrictEqual(
+      parseSkillFrontmatter(
+        '---\nname: "  weekly   report "\ndescription: Report.\n---\n',
+        'reports',
+      ),
+      { name: 'weekly report', description: 'Report.' },
+    );
+    assert.deepStrictEqual(
+      parseSkillFrontmatter(
+        '---\r\nname: "   "\r\ndescription: CRLF.\r\n---\r\n',
+        'crlf-dir',
+      ),
+      { name: 'crlf-dir', description: 'CRLF.' },
+    );
+  });
+
+  it('accepts a 64-character name', () => {
+    const name = 'n'.repeat(64);
+    assert.deepStrictEqual(
+      parseSkillFrontmatter(`---\nname: ${name}\ndescription: D.\n---\n`, 'x'),
+      { name, description: 'D.' },
+    );
+  });
+
+  it("rejects a skill with Codex's error texts", () => {
+    assert.throws(
+      () =>
+        parseSkillFrontmatter(
+          `---\nname: ${'n'.repeat(65)}\ndescription: D.\n---\n`,
+          'x',
+        ),
+      { message: 'invalid name: exceeds maximum length of 64 characters' },
+    );
+    assert.throws(
+      () => parseSkillFrontmatter('---\nname: lint\n---\n', 'lint'),
+      { message: 'missing field `description`' },
+    );
+    assert.throws(
+      () =>
+        parseSkillFrontmatter(
+          '---\nname: lint\ndescription: "  "\n---\n',
+          'lint',
+        ),
+      { message: 'missing field `description`' },
+    );
+    assert.throws(() => parseSkillFrontmatter('# No frontmatter', 'lint'), {
+      message: 'missing YAML frontmatter delimited by ---',
+    });
+    assert.throws(
+      () => parseSkillFrontmatter('---\nname: lint\ndescription: D.\n', 'lint'),
+      { message: 'missing YAML frontmatter delimited by ---' },
+    );
+    assert.throws(
+      () => parseSkillFrontmatter('---\nname: [lint\n---\n', 'lint'),
+      { message: /^invalid YAML: / },
+    );
+    assert.throws(
+      () =>
+        parseSkillFrontmatter('---\nname: 123\ndescription: D.\n---\n', 'x'),
+      { message: /^invalid YAML: / },
+    );
+    assert.throws(() => parseSkillFrontmatter('---\njust text\n---\n', 'x'), {
+      message: /^invalid YAML: /,
+    });
   });
 });
 

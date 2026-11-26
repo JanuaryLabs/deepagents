@@ -17,6 +17,109 @@ const frontmatterSchema = z.looseObject(
   { error: MISSING_NAME },
 );
 
+const MAX_SKILL_NAME_LENGTH = 64;
+
+/** A SKILL.md whose frontmatter Codex's skill parser rejects, with Codex's error text. */
+export class SkillParseError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'SkillParseError';
+  }
+}
+
+/** The model-facing name and description a SKILL.md declares. */
+export interface SkillFrontmatter {
+  name: string;
+  description: string;
+}
+
+/**
+ * Parse a SKILL.md's frontmatter as Codex's skill parser does
+ * (codex-rs/skills/src/parser.rs): the name and description are collapsed to
+ * one line, a missing or empty name becomes `defaultName`, the name has at
+ * most 64 characters, and the description is required.
+ *
+ * @throws {SkillParseError} with Codex's error text when the file is no skill.
+ */
+export function parseSkillFrontmatter(
+  content: string,
+  defaultName: string,
+): SkillFrontmatter {
+  const frontmatter = extractSkillFrontmatter(content);
+  if (frontmatter === undefined) {
+    throw new SkillParseError('missing YAML frontmatter delimited by ---');
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = YAML.parse(frontmatter);
+  } catch (error) {
+    if (!(error instanceof YAML.YAMLError)) throw error;
+    throw new SkillParseError(`invalid YAML: ${error.message}`, {
+      cause: error,
+    });
+  }
+  const fields = parsed ?? {};
+  if (typeof fields !== 'object' || Array.isArray(fields)) {
+    throw new SkillParseError(
+      `invalid YAML: invalid type: ${yamlKind(fields)}, expected struct SkillFrontmatter`,
+    );
+  }
+
+  const name = oneLine(optionalString(fields, 'name') ?? '') || defaultName;
+  const description = oneLine(optionalString(fields, 'description') ?? '');
+
+  if (name === '') {
+    throw new SkillParseError('missing field `name`');
+  }
+  if ([...name].length > MAX_SKILL_NAME_LENGTH) {
+    throw new SkillParseError(
+      `invalid name: exceeds maximum length of ${MAX_SKILL_NAME_LENGTH} characters`,
+    );
+  }
+  if (description === '') {
+    throw new SkillParseError('missing field `description`');
+  }
+
+  return { name, description };
+}
+
+function extractSkillFrontmatter(content: string): string | undefined {
+  const [first, ...rest] = content
+    .split('\n')
+    .map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line));
+  if (first?.trim() !== '---') return undefined;
+  const closing = rest.findIndex((line) => line.trim() === '---');
+  if (closing <= 0) return undefined;
+  return rest.slice(0, closing).join('\n');
+}
+
+function optionalString(
+  fields: object,
+  key: 'name' | 'description',
+): string | undefined {
+  const value: unknown = Object.getOwnPropertyDescriptor(fields, key)?.value;
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') {
+    throw new SkillParseError(
+      `invalid YAML: ${key}: invalid type: ${yamlKind(value)}, expected a string`,
+    );
+  }
+  return value;
+}
+
+function yamlKind(value: unknown): string {
+  if (Array.isArray(value)) return 'sequence';
+  if (typeof value === 'number') return 'number';
+  if (typeof value === 'boolean') return 'boolean';
+  if (typeof value === 'string') return 'string';
+  return 'map';
+}
+
+function oneLine(raw: string): string {
+  return raw.split(/\s+/).filter(Boolean).join(' ');
+}
+
 /**
  * Parse YAML frontmatter from a SKILL.md file content.
  *

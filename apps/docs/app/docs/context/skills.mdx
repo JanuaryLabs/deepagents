@@ -129,6 +129,35 @@ the top level of a context: pass it to `set()`, not inside another fragment.
 It does not check that paths exist. File accessibility remains the
 application's responsibility.
 
+### Limits
+
+The lines follow Codex's rules for host skill files:
+
+- Lines are ordered by name, then path, in code-unit order (`'Zeta'` before
+  `'alpha'`), not in the order supplied.
+- A description longer than 1024 characters is cut to its first 1021 and
+  `...`. Characters are Unicode code points, so an emoji counts as one.
+- All skill lines share a budget of 8000 characters, each line costing its
+  length plus one for its newline. The intro and the how-to text are not
+  counted. When the full lines exceed it, every line keeps its name and path
+  and the rest of the budget is shared over the descriptions one character at
+  a time, round-robin. When even the bare lines exceed it, every description
+  is dropped and skills past the budget are left out.
+
+When skills are left out, the fragment's `metadata.warning` holds Codex's
+warning:
+
+```typescript
+const fragment = skills(manySkills);
+fragment.metadata.warning;
+// 'Exceeded skills context budget. All skill descriptions were removed and
+//  58 additional skills were not included in the model-visible skills list.'
+```
+
+`metadata.warning` is absent when every skill is listed.
+`getAvailableSkills()` still returns every supplied skill, uncut and in the
+order supplied.
+
 ## Read the Catalog from Context
 
 `ContextEngine.getAvailableSkills()` returns the catalog stored by the first
@@ -166,6 +195,23 @@ const { frontmatter, body } = parseFrontmatter(source);
 
 Your discovery code can combine the parsed `name` and `description` with the
 runtime path it assigned to build an `AvailableSkill`.
+
+`parseSkillFrontmatter(content, defaultName)` parses a `SKILL.md` as Codex's
+skill loader does and returns `{ name, description }`:
+
+```typescript
+import { SkillParseError, parseSkillFrontmatter } from '@deepagents/context';
+
+const { name, description } = parseSkillFrontmatter(source, 'deploy');
+```
+
+- The name and description are collapsed to one line.
+- A missing or empty name becomes `defaultName`, such as the skill's
+  directory name. The name does not have to match the directory.
+- A file it rejects throws a `SkillParseError` with Codex's error text:
+  `missing YAML frontmatter delimited by ---`, `invalid YAML: …`,
+  ``missing field `description` `` or
+  `invalid name: exceeds maximum length of 64 characters`.
 
 ## Skill Reminders
 

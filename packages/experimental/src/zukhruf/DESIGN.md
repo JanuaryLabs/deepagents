@@ -1313,11 +1313,18 @@ the full Node+Postgres and Durable Object platform bundles.
   instructions remain the Markdown body.
 - `runtime/plugin/agent-skills.ts` — loads and validates plugin-contributed skill directories once
   during host initialization. Each declaration selects skill names explicitly, and the executor
-  copies only those files into that agent's sandbox and prompt. Plugin skills never implicitly pass
-  to subagents. Separately, it discovers preinstalled `skills/<name>/SKILL.md` children from a
-  configured sandbox on the conversation's first executable turn, persists the ordered
+  copies only those skills' directories into that agent's sandbox and prompt. Plugin skills never
+  implicitly pass to subagents. Separately, it discovers preinstalled `skills/<dir>/SKILL.md`
+  children from a configured sandbox on the conversation's first executable turn, persists the
   `{name, description, path}` catalog, and reconstructs the same stable `@deepagents/context` skills
-  fragment on later turns without rediscovery.
+  fragment on later turns without rediscovery. Both parse with `parseSkillFrontmatter`, as Codex
+  does (Codex origin/main af7194230, `codex-rs/skills/src/parser.rs`, `ext/skills/src/loader/host.rs`):
+  a skill's name defaults to its directory and need not match it, a directory without `SKILL.md` is
+  no skill, and a `SKILL.md` that fails to load is left out with a `SkillLoadWarning`
+  (`DEEPAGENTS_ZUKHRUF_SKILL_LOAD_FAILED`, Codex's `failed to load skill {path}: {message}` log
+  line). The catalog follows `skills()`'s order and its Codex budget; when the budget leaves skills
+  out, the executor streams Codex's warning once per turn as `{ type: 'data-warning', data:
+{ message } }`, Codex's `WarningEvent`.
 - `runtime/agent-runtime.ts` —
   `const runtime = new AgentRuntime(rootDeclaration);` then
   `await using host = await runtime.initialize(stack);` gives an `AgentHost` with

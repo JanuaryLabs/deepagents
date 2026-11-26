@@ -332,6 +332,12 @@ export class AgentTurnExecutor {
       {
         onStream: (streamWriter) => {
           writer = streamWriter;
+          if (agentSkills.warning !== undefined) {
+            writer.write({
+              type: 'data-warning',
+              data: { message: agentSkills.warning },
+            });
+          }
         },
         abortSignal: turnSignal,
         onStart: compaction?.onStart,
@@ -551,11 +557,7 @@ export class AgentTurnExecutor {
         }),
       ),
     );
-    return createAgentSkills(
-      [...available, ...pluginSkills.available].toSorted((left, right) =>
-        left.name.localeCompare(right.name),
-      ),
-    );
+    return createAgentSkills([...available, ...pluginSkills.available]);
   }
 
   #engineFor({ chatId, userId }: ConversationId): ContextEngine {

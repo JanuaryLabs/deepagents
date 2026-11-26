@@ -9,6 +9,12 @@ import type { AvailableSkill } from './types.ts';
  * the instructions for reading a skill's `SKILL.md` when it applies. With no
  * skills it renders nothing.
  *
+ * The lines follow Codex's CoreCompatible policy: ordered by name, then path;
+ * each description cut to 1024 characters (1021 and `...`); and all lines
+ * held to Codex's 8000-character budget. Over the budget the descriptions are
+ * shortened, then dropped, then skills are left out, and `metadata.warning`
+ * carries Codex's warning. `metadata.skills` keeps every skill as given.
+ *
  * Provisioning and discovery belong to the application. This fragment only
  * renders the explicit model-facing metadata it receives. Like every verbatim
  * fragment it renders only at the top level of a context.
@@ -23,22 +29,34 @@ import type { AvailableSkill } from './types.ts';
  * context.set(role('You are a helpful assistant.'), skills(availableSkills));
  * ```
  */
-export function skills(availableSkills: AvailableSkill[]): ContextFragment {
+export function skills(availableSkills: AvailableSkill[]): SkillsFragment {
   const skillSnapshot = availableSkills.map(({ name, description, path }) => ({
     name,
     description,
     path,
   }));
+  const { skillLines, omittedCount } = allocateSkillLines(
+    skillSnapshot
+      .toSorted(
+        (left, right) =>
+          compareCodeUnits(left.name, right.name) ||
+          compareCodeUnits(left.path, right.path),
+      )
+      .map(({ name, description, path }) => ({
+        name,
+        description: [...truncateDescription(description)],
+        path,
+      })),
+  );
+  const metadata: SkillsFragment['metadata'] = {
+    skills: skillSnapshot,
+    ...(omittedCount > 0 ? { warning: budgetWarning(omittedCount) } : {}),
+  };
 
-  if (skillSnapshot.length === 0) {
-    return { name: 'skills_instructions', data: [] };
+  if (skillLines.length === 0) {
+    return { name: 'skills_instructions', data: [], metadata };
   }
 
-  const skillLines = skillSnapshot.map(({ name, description, path }) =>
-    description === ''
-      ? `- ${name}: (file: ${path})`
-      : `- ${name}: ${description} (file: ${path})`,
-  );
   const body = [
     '## Skills',
     SKILLS_INTRO,
@@ -50,8 +68,144 @@ export function skills(availableSkills: AvailableSkill[]): ContextFragment {
 
   return {
     ...verbatim(`<skills_instructions>\n${body}\n</skills_instructions>`),
-    metadata: { skills: skillSnapshot },
+    metadata,
   };
+}
+
+/** The fragment skills() returns, with the catalog it was given. */
+export interface SkillsFragment extends ContextFragment {
+  metadata: {
+    /** Every skill skills() was given, in the order given, uncut. */
+    skills: AvailableSkill[];
+    /** Codex's budget warning, present when the catalog left skills out. */
+    warning?: string;
+  };
+}
+
+/**
+ * Codex's character budget for the skill lines when the model's context
+ * window is unknown (codex-rs/ext/skills/src/render.rs
+ * DEFAULT_SKILL_METADATA_CHAR_BUDGET).
+ */
+const SKILL_LINES_CHARACTER_BUDGET = 8_000;
+const MAX_DESCRIPTION_CHARACTERS = 1_024;
+const TRUNCATED_DESCRIPTION_SUFFIX = '...';
+
+interface SkillLine {
+  name: string;
+  /** The description, one Unicode scalar per element. */
+  description: string[];
+  path: string;
+}
+
+function compareCodeUnits(left: string, right: string): number {
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
+function truncateDescription(description: string): string {
+  const characters = [...description];
+  if (characters.length <= MAX_DESCRIPTION_CHARACTERS) return description;
+  return (
+    characters
+      .slice(
+        0,
+        MAX_DESCRIPTION_CHARACTERS - TRUNCATED_DESCRIPTION_SUFFIX.length,
+      )
+      .join('') + TRUNCATED_DESCRIPTION_SUFFIX
+  );
+}
+
+function renderSkillLine(
+  { name, path }: SkillLine,
+  description: string,
+): string {
+  return description === ''
+    ? `- ${name}: (file: ${path})`
+    : `- ${name}: ${description} (file: ${path})`;
+}
+
+/** A line costs its characters and its newline (render.rs metadata_line_cost). */
+function lineCost(line: string): number {
+  return [...line].length + 1;
+}
+
+/**
+ * Codex's allocation of the skill lines to the budget (render.rs
+ * allocate_skill_lines): every full line when they fit; else every bare line,
+ * with the rest of the budget shared over the descriptions one character at
+ * a time, round-robin; else bare lines in order while they fit, and the rest
+ * left out.
+ */
+function allocateSkillLines(lines: SkillLine[]): {
+  skillLines: string[];
+  omittedCount: number;
+} {
+  const fullLines = lines.map((line) =>
+    renderSkillLine(line, line.description.join('')),
+  );
+  const fullCost = fullLines.reduce((used, line) => used + lineCost(line), 0);
+  if (fullCost <= SKILL_LINES_CHARACTER_BUDGET) {
+    return { skillLines: fullLines, omittedCount: 0 };
+  }
+
+  const bareCosts = lines.map((line) => lineCost(renderSkillLine(line, '')));
+  const bareCost = bareCosts.reduce((used, cost) => used + cost, 0);
+  if (bareCost <= SKILL_LINES_CHARACTER_BUDGET) {
+    const allocated = allocateDescriptionCharacters(
+      lines,
+      SKILL_LINES_CHARACTER_BUDGET - bareCost,
+    );
+    return {
+      skillLines: lines.map((line, index) =>
+        renderSkillLine(
+          line,
+          line.description.slice(0, allocated[index]).join(''),
+        ),
+      ),
+      omittedCount: 0,
+    };
+  }
+
+  const skillLines: string[] = [];
+  let used = 0;
+  for (const [index, line] of lines.entries()) {
+    if (used + bareCosts[index] > SKILL_LINES_CHARACTER_BUDGET) continue;
+    used += bareCosts[index];
+    skillLines.push(renderSkillLine(line, ''));
+  }
+  return { skillLines, omittedCount: lines.length - skillLines.length };
+}
+
+/**
+ * render.rs allocate_description_chars: the first character of a description
+ * also pays for the space before it.
+ */
+function allocateDescriptionCharacters(
+  lines: SkillLine[],
+  budget: number,
+): number[] {
+  const allocated = lines.map(() => 0);
+  let remaining = budget;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [index, line] of lines.entries()) {
+      if (allocated[index] >= line.description.length) continue;
+      const delta = allocated[index] === 0 ? 2 : 1;
+      if (delta > remaining) continue;
+      allocated[index] += 1;
+      remaining -= delta;
+      changed = true;
+    }
+  }
+  return allocated;
+}
+
+/** render.rs SkillRenderReport::warning_message. */
+function budgetWarning(omittedCount: number): string {
+  const skillsWere = omittedCount === 1 ? 'skill was' : 'skills were';
+  return `Exceeded skills context budget. All skill descriptions were removed and ${omittedCount} additional ${skillsWere} not included in the model-visible skills list.`;
 }
 
 /**
