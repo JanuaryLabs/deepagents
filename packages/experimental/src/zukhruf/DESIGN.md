@@ -177,7 +177,17 @@ Mechanism:
    cancellation observation before `chat()` enters provider setup. A cancellation that wins the
    claim race never starts sampling; one that lands after the claim aborts provider setup or the
    active model call. Terminal writes are conditional, so neither path can be overwritten by a late
-   completion or failure.
+   completion or failure. A turn that was running when it was cancelled keeps its partial answer, its
+   unfinished tool calls end `output-error` with Codex's `aborted`, and then the executor records
+   Codex's `<turn_aborted>` marker (`INTERRUPTED_NEUTRAL_GUIDANCE`, `core/src/context/turn_aborted.rs`)
+   as a user message, since the context has no developer role; a sub-agent interrupted through
+   `interrupt_agent` gets it too. `persist` resolves only after its source has settled, so chat's
+   `onEnd` has written the partial answer before the marker. The executor records it when persist's
+   cancel watcher detected the cancel (`onCancelDetected`); a turn cancelled while queued or after it
+   ended never reaches that point. Archiving a session cancels its running turns, which record the
+   marker too, as Codex's `thread/archive` shuts the thread down with
+   `abort_all_tasks(TurnAbortReason::Interrupted)` (`core/src/session/handlers.rs:381-384`). A worker
+   shutdown records none, as Codex's suspension of a turn records none.
 
 Durability comes from **decoupling generation from consumption** through the store: the model keeps
 running even if every consumer drops; chunks pile up; a reconnecting `watch()` replays them. So even
@@ -409,6 +419,7 @@ work (long-running executor process):
     → atomically claim stream queued → running     // orders execution against cancellation
     → monitor cancellation → chat({ toolsContext }) → AWAIT persist(preclaimed)
                                                     // worker holds the job for the whole turn
+    → persist detected a cancel? record <turn_aborted> after the partial answer
     → child terminal? idempotent queue-only FINAL_ANSWER to its direct parent
     → mailbox.endTurn(conversation, streamId)     // stale attempts cannot close a successor
 

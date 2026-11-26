@@ -295,7 +295,7 @@ describe('Docker Sandbox — spawn', () => {
             await storedBashPart(store, 'aborted-turn').then(
               ({ state, errorText }) => ({ state, errorText }),
             ),
-            { state: 'output-error', errorText: 'Cancelled by user' },
+            { state: 'output-error', errorText: 'aborted' },
           ),
         { signal: t.signal },
       );
@@ -310,7 +310,7 @@ describe('Docker Sandbox — spawn', () => {
           .filter((message) => message.role === 'tool')
           .flatMap((message) => message.content)
           .map((part) => part.type === 'tool-result' && part.output),
-        [{ type: 'error-text', value: 'Cancelled by user' }],
+        [{ type: 'error-text', value: 'aborted' }],
       );
       assert.strictEqual(await backend.stat({ path: '/workspace/late' }), null);
     });
@@ -398,7 +398,7 @@ describe('Docker Sandbox — spawn', () => {
       const { state, errorText } = await storedBashPart(store, 'total-timeout');
       assert.deepStrictEqual(
         { state, errorText },
-        { state: 'output-error', errorText: 'Cancelled by user' },
+        { state: 'output-error', errorText: 'aborted' },
       );
       assert.strictEqual(model.doStreamCalls.length, 1);
       assert.strictEqual(await backend.stat({ path: '/workspace/late' }), null);

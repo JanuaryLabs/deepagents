@@ -51,6 +51,7 @@ import {
 } from './plugin/agent-skills.ts';
 import type { PluginManager } from './plugin/plugin-manager.ts';
 import type { SandboxIdleStop } from './sandbox-idle-stop.ts';
+import { recordTurnAborted } from './turn-aborted.ts';
 import type { TurnSettlement } from './turn-settlement.ts';
 
 type TurnPlugins = Pick<
@@ -363,6 +364,12 @@ export class AgentTurnExecutor {
       preclaimed: true,
       onCancelDetected: () => abort.abort(),
     });
+    // Only persist's cancel watcher aborts `abort`: an in-process cancel also
+    // aborts `signal` (the queue's local abort), so `signal` cannot tell a
+    // cancel from a worker shutdown.
+    if (abort.signal.aborted) {
+      await recordTurnAborted(engine);
+    }
     if (
       turn.kind === 'recovery' ||
       (turn.kind === 'message' && turn.message.role === 'assistant')

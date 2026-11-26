@@ -4747,3 +4747,374 @@ describe('zukhruf runtime — explicit skill mentions', () => {
     assert.deepStrictEqual(userTexts(prompts[1]), ['hi']);
   });
 });
+
+const TURN_ABORTED =
+  '<turn_aborted>\nThe previous turn was interrupted on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.\n</turn_aborted>';
+
+/** A non-system message of a prompt: its role and each part, a text part as its text. */
+function conversationOf(prompt: LanguageModelV4Prompt | undefined) {
+  assert.ok(prompt, 'the model was not called');
+  return prompt.flatMap((message) =>
+    message.role === 'system'
+      ? []
+      : [
+          {
+            role: message.role,
+            content: message.content.map((part) =>
+              part.type === 'text' ? part.text : part.type,
+            ),
+          },
+        ],
+  );
+}
+
+/** A stored message: its role and each part but the step boundaries, a text part as its text. */
+function storedConversation(messages: UIMessage[]) {
+  return messages.map((message) => ({
+    role: message.role,
+    content: message.parts.flatMap((part) =>
+      part.type === 'step-start' ? [] : [isTextUIPart(part) ? part.text : part],
+    ),
+  }));
+}
+
+/**
+ * The first call streams `chunks`, then holds its stream open until the call
+ * is aborted; every later call answers "ok".
+ */
+function interruptibleModel(
+  prompts: LanguageModelV4Prompt[],
+  chunks: LanguageModelV4StreamPart[],
+) {
+  return new MockLanguageModelV4({
+    doStream: async ({ prompt, abortSignal }) => {
+      prompts.push(prompt);
+      if (prompts.length > 1) return { stream: buildStream(['ok'], 0) };
+      return {
+        stream: new ReadableStream<LanguageModelV4StreamPart>({
+          start(controller) {
+            for (const chunk of chunks) controller.enqueue(chunk);
+            abortSignal?.addEventListener(
+              'abort',
+              () => controller.error(abortSignal.reason),
+              { once: true },
+            );
+          },
+        }),
+      };
+    },
+  });
+}
+
+/** Reads `stream` until a chunk of `type` arrives; `rest` reads the remainder. */
+async function readUntil(
+  stream: ReadableStream<UIMessageChunk>,
+  type: UIMessageChunk['type'],
+): Promise<{ rest: Promise<void> }> {
+  const reader = stream.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    assert.equal(done, false, `the stream ended before a ${type} chunk`);
+    if (value.type === type) break;
+  }
+  return {
+    rest: (async () => {
+      while (!(await reader.read()).done);
+    })(),
+  };
+}
+
+describe('zukhruf runtime — interrupted turn marker', () => {
+  it('records the partial answer, then the turn_aborted marker, before the next message when a turn is cancelled during its text', async (t) => {
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = interruptibleModel(prompts, [
+      { type: 'text-start', id: 't1' },
+      { type: 'text-delta', id: 't1', delta: 'partial' },
+      { type: 'text-end', id: 't1' },
+    ]);
+    await using h = await harness(model);
+    await using worker = await h.runtime.work();
+    void worker;
+    const conversation = { chatId: 'turn-aborted-text', userId: 'u1' };
+
+    const cancelled = await h.runtime.enqueue(conversation, turn('go'));
+    const { rest } = await readUntil(cancelled.stream, 'text-end');
+    await h.runtime.observe(conversation).cancel();
+    await rest;
+    const next = await h.runtime.enqueue(conversation, turn('again'));
+    assert.equal(await collectText(next.stream), 'ok');
+
+    assert.equal(
+      await waitForStatus(h.streamStore, cancelled.id, ['cancelled'], t.signal),
+      'cancelled',
+    );
+    assert.deepStrictEqual(conversationOf(prompts[1]), [
+      { role: 'user', content: ['go'] },
+      { role: 'assistant', content: ['partial'] },
+      { role: 'user', content: [TURN_ABORTED] },
+      { role: 'user', content: ['again'] },
+    ]);
+    assert.deepStrictEqual(
+      storedConversation(
+        await h.runtime.observe(conversation).engine.getMessages(),
+      ),
+      [
+        { role: 'user', content: ['go'] },
+        { role: 'assistant', content: ['partial'] },
+        { role: 'user', content: [TURN_ABORTED] },
+        { role: 'user', content: ['again'] },
+        { role: 'assistant', content: ['ok'] },
+      ],
+    );
+  });
+
+  it('records the turn_aborted marker as a user message of exactly one text part', async () => {
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = interruptibleModel(prompts, [
+      { type: 'text-start', id: 't1' },
+      { type: 'text-delta', id: 't1', delta: 'partial' },
+      { type: 'text-end', id: 't1' },
+    ]);
+    await using h = await harness(model);
+    await using worker = await h.runtime.work();
+    void worker;
+    const conversation = { chatId: 'turn-aborted-shape', userId: 'u1' };
+
+    const cancelled = await h.runtime.enqueue(conversation, turn('go'));
+    const { rest } = await readUntil(cancelled.stream, 'text-end');
+    await h.runtime.observe(conversation).cancel();
+    await rest;
+    const next = await h.runtime.enqueue(conversation, turn('again'));
+    await collectText(next.stream);
+
+    const marker = (
+      await h.runtime.observe(conversation).engine.getMessages()
+    )[2];
+    assert.ok(marker, 'the chain holds no third message');
+    assert.equal(marker.role, 'user');
+    assert.deepStrictEqual(marker.parts, [
+      { type: 'text', text: TURN_ABORTED },
+    ]);
+  });
+
+  it('settles a running tool call as aborted before the turn_aborted marker', async (t) => {
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = interruptibleModel(prompts, [
+      {
+        type: 'tool-call',
+        toolCallId: 'slow-1',
+        toolName: 'slow',
+        input: JSON.stringify({}),
+      },
+      {
+        type: 'finish',
+        finishReason: { unified: 'tool-calls', raw: '' },
+        usage,
+      },
+    ]);
+    const started = Promise.withResolvers<void>();
+    await using h = await harness(model, {
+      declaration: declaration(model, {
+        slow: defineTool({
+          inputSchema: z.object({}),
+          execute: async (_, { abortSignal }) => {
+            started.resolve();
+            await sleep(60_000, undefined, { signal: abortSignal });
+            return 'unreachable';
+          },
+        }),
+      }),
+    });
+    await using worker = await h.runtime.work();
+    void worker;
+    const conversation = { chatId: 'turn-aborted-tool', userId: 'u1' };
+
+    const cancelled = await h.runtime.enqueue(conversation, turn('go'));
+    const rest = Array.fromAsync(cancelled.stream);
+    await untilAborted(started.promise, t.signal);
+    await h.runtime.observe(conversation).cancel();
+    await rest;
+    const next = await h.runtime.enqueue(conversation, turn('again'));
+    assert.equal(await collectText(next.stream), 'ok');
+
+    assert.deepStrictEqual(
+      storedConversation(
+        await h.runtime.observe(conversation).engine.getMessages(),
+      ),
+      [
+        { role: 'user', content: ['go'] },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool-slow',
+              toolCallId: 'slow-1',
+              state: 'output-error',
+              input: {},
+              errorText: 'aborted',
+            },
+          ],
+        },
+        { role: 'user', content: [TURN_ABORTED] },
+        { role: 'user', content: ['again'] },
+        { role: 'assistant', content: ['ok'] },
+      ],
+    );
+    assert.deepStrictEqual(conversationOf(prompts[1]), [
+      { role: 'user', content: ['go'] },
+      { role: 'assistant', content: ['tool-call'] },
+      { role: 'tool', content: ['tool-result'] },
+      { role: 'user', content: [TURN_ABORTED] },
+      { role: 'user', content: ['again'] },
+    ]);
+  });
+
+  it('records only the message and the turn_aborted marker when a turn is cancelled before its first chunk', async (t) => {
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = interruptibleModel(prompts, []);
+    await using h = await harness(model);
+    await using worker = await h.runtime.work();
+    void worker;
+    const conversation = { chatId: 'turn-aborted-empty', userId: 'u1' };
+
+    const cancelled = await h.runtime.enqueue(conversation, turn('go'));
+    await waitFor(() => assert.equal(prompts.length, 1), {
+      interval: 25,
+      signal: t.signal,
+    });
+    await h.runtime.observe(conversation).cancel();
+    await Array.fromAsync(cancelled.stream);
+    const next = await h.runtime.enqueue(conversation, turn('again'));
+    assert.equal(await collectText(next.stream), 'ok');
+
+    assert.deepStrictEqual(conversationOf(prompts[1]), [
+      { role: 'user', content: ['go'] },
+      { role: 'user', content: [TURN_ABORTED] },
+      { role: 'user', content: ['again'] },
+    ]);
+  });
+
+  it('records no turn_aborted marker for a turn cancelled after it completed', async () => {
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = promptRecordingModel(prompts);
+    await using h = await harness(model);
+    await using worker = await h.runtime.work();
+    void worker;
+    const conversation = { chatId: 'turn-aborted-completed', userId: 'u1' };
+
+    const completed = await h.runtime.enqueue(conversation, turn('go'));
+    assert.equal(await collectText(completed.stream), 'ok');
+    await h.runtime.observe(conversation).cancel(completed.id);
+    const next = await h.runtime.enqueue(conversation, turn('again'));
+    assert.equal(await collectText(next.stream), 'ok');
+
+    assert.deepStrictEqual(conversationOf(prompts[1]), [
+      { role: 'user', content: ['go'] },
+      { role: 'assistant', content: ['ok'] },
+      { role: 'user', content: ['again'] },
+    ]);
+  });
+
+  it("records the turn_aborted marker in a sub-agent's history when its parent interrupts its running turn", async (t) => {
+    const childPrompts: LanguageModelV4Prompt[] = [];
+    const child: AgentDeclaration = {
+      name: 'worker',
+      model: interruptibleModel(childPrompts, []),
+      sandbox: buildSandbox(),
+      instructions: [],
+    };
+    const rootSteps = [
+      toolCallResult({
+        toolCallId: 'spawn-1',
+        toolName: 'spawn_agent',
+        input: JSON.stringify({
+          agent_type: 'worker',
+          task_name: 'blocked',
+          message: 'go',
+          fork_turns: 'none',
+        }),
+      }),
+      { stream: buildStream(['spawned'], 0) },
+      toolCallResult({
+        toolCallId: 'interrupt-1',
+        toolName: 'interrupt_agent',
+        input: JSON.stringify({ target: 'blocked' }),
+      }),
+      toolCallResult({
+        toolCallId: 'followup-1',
+        toolName: 'followup_task',
+        input: JSON.stringify({ target: 'blocked', message: 'again' }),
+      }),
+    ];
+    const rootModel = new MockLanguageModelV4({
+      doStream: async () =>
+        rootSteps.shift() ?? { stream: buildStream(['done'], 0) },
+    });
+    const root: AgentDeclaration = {
+      ...declaration(rootModel),
+      name: 'root',
+      subagents: [child],
+    };
+    await using h = await harness(rootModel, { declaration: root });
+    await using worker = await h.runtime.work({ concurrency: 2 });
+    void worker;
+    const conversation = { chatId: 'turn-aborted-child', userId: 'u1' };
+
+    const spawned = await h.runtime.enqueue(conversation, turn('spawn'));
+    assert.equal(await collectText(spawned.stream), 'spawned');
+    await waitFor(() => assert.equal(childPrompts.length, 1), {
+      interval: 25,
+      signal: t.signal,
+    });
+    const interrupted = await h.runtime.enqueue(conversation, turn('stop it'));
+    assert.equal(await collectText(interrupted.stream), 'done');
+    await waitFor(() => assert.equal(childPrompts.length, 2), {
+      interval: 25,
+      signal: t.signal,
+    });
+
+    const [task, marker, followup, ...rest] = conversationOf(childPrompts[1]);
+    assert.deepStrictEqual(
+      { task, marker, followup: followup?.role, rest },
+      {
+        task: { role: 'user', content: ['go'] },
+        marker: { role: 'user', content: [TURN_ABORTED] },
+        followup: 'user',
+        rest: [],
+      },
+    );
+  });
+
+  it('records no turn_aborted marker when the worker shuts down mid-turn', async (t) => {
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = interruptibleModel(prompts, [
+      { type: 'text-start', id: 't1' },
+      { type: 'text-delta', id: 't1', delta: 'partial' },
+      { type: 'text-end', id: 't1' },
+    ]);
+    await using h = await harness(model);
+    const worker = await h.runtime.work();
+    const conversation = { chatId: 'turn-aborted-shutdown', userId: 'u1' };
+
+    const suspended = await h.runtime.enqueue(conversation, turn('go'));
+    const { rest } = await readUntil(suspended.stream, 'text-end');
+    await h.boss.stop({ graceful: false });
+    await rest;
+    await worker[Symbol.asyncDispose]();
+    await h.boss.start();
+    await using restarted = await h.runtime.work();
+    void restarted;
+    const next = await h.runtime.enqueue(conversation, turn('again'));
+    assert.equal(await collectText(next.stream), 'ok');
+
+    assert.equal(
+      await waitForStatus(h.streamStore, suspended.id, ['cancelled'], t.signal),
+      'cancelled',
+    );
+    assert.deepStrictEqual(conversationOf(prompts[1]), [
+      { role: 'user', content: ['go'] },
+      { role: 'assistant', content: ['partial'] },
+      { role: 'user', content: ['again'] },
+    ]);
+  });
+});

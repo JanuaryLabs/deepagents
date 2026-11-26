@@ -225,6 +225,10 @@ function declaration(
   });
 }
 
+/** Codex's `<turn_aborted>` marker, recorded after a cancelled running turn. */
+const TURN_ABORTED =
+  '<turn_aborted>\nThe previous turn was interrupted on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.\n</turn_aborted>';
+
 const conversation = {
   chatId: '48aca921-341e-4c09-839c-954c1134616b',
   userId: 'user',
@@ -2167,16 +2171,27 @@ test(
       ['started'],
     );
     await waitFor(
-      async () =>
+      async () => {
+        const [interrupted, marker] = (
+          await host.observe(conversation).engine.getMessages()
+        ).slice(-2);
         assert.deepEqual(
-          (await host.observe(conversation).engine.getMessages())
-            .at(-1)
-            ?.parts.flatMap((part) =>
+          {
+            compaction: interrupted?.parts.flatMap((part) =>
               part.type === 'data-compaction' ? [part.data] : [],
             ),
-          compactionEvents(chunks),
-          'an interrupted attempt remains visible after reopening',
-        ),
+            marker: { role: marker?.role, parts: marker?.parts },
+          },
+          {
+            compaction: compactionEvents(chunks),
+            marker: {
+              role: 'user',
+              parts: [{ type: 'text', text: TURN_ABORTED }],
+            },
+          },
+          'an interrupted attempt remains visible after reopening, before the turn_aborted marker',
+        );
+      },
       { signal: t.signal },
     );
     assert.equal(model.doStreamCalls.length, 0);

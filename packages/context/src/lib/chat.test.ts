@@ -726,7 +726,7 @@ describe('chat() abort handling', () => {
     const toolPart = assistantMsg.parts.find(isToolUIPart);
     assert.ok(toolPart, 'tool part should exist');
     assert.strictEqual(toolPart.state, 'output-error');
-    assert.strictEqual(toolPart.errorText, 'Cancelled by user');
+    assert.strictEqual(toolPart.errorText, 'aborted');
   });
 
   it('removes input-streaming tool parts on abort', async () => {
@@ -872,7 +872,7 @@ describe('chat() abort handling', () => {
     const toolPart = assistantMsg.parts.find(isToolUIPart);
     assert.ok(toolPart, 'tool part should exist');
     assert.strictEqual(toolPart.state, 'output-error');
-    assert.strictEqual(toolPart.errorText, 'Cancelled by user');
+    assert.strictEqual(toolPart.errorText, 'aborted');
   });
 
   it('preserves completed tool parts alongside sanitized ones on abort', async () => {
@@ -955,7 +955,7 @@ describe('chat() abort handling', () => {
     const pendingTool = toolParts.find((p) => p.toolCallId === 'tc-pending');
     assert.ok(pendingTool);
     assert.strictEqual(pendingTool.state, 'output-error');
-    assert.strictEqual(pendingTool.errorText, 'Cancelled by user');
+    assert.strictEqual(pendingTool.errorText, 'aborted');
   });
 });
 

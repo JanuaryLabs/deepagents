@@ -131,30 +131,32 @@ export async function chat<const TOOLS extends ToolSet>(
     onStepEnd: async ({ responseMessage }) => {
       await writeAssistantSegment(responseMessage);
     },
-    onEnd: async ({ responseMessage, isAborted }) => {
-      const settled = isAborted
-        ? {
-            ...responseMessage,
-            parts: sanitizeAbortedParts(responseMessage.parts),
-          }
-        : {
-            ...responseMessage,
-            // A provider can end at its token limit midway through arguments.
-            // That call failed; it is not waiting for client input or approval.
-            parts: responseMessage.parts.map((part) => {
-              if (!isToolUIPart(part) || part.state !== 'input-streaming')
-                return part;
-              const failed = {
-                ...part,
-                state: 'output-error' as const,
-                input: part.input,
-                errorText: 'Tool input ended before the call was complete.',
-              };
-              delete failed.rawInput;
-              delete failed.inputEncoding;
-              return failed;
-            }),
-          };
+    onEnd: async ({ responseMessage, isAborted, isCancelled }) => {
+      // A consumer that cancels the stream ends the turn as an abort does.
+      const settled =
+        isAborted || isCancelled
+          ? {
+              ...responseMessage,
+              parts: sanitizeAbortedParts(responseMessage.parts),
+            }
+          : {
+              ...responseMessage,
+              // A provider can end at its token limit midway through arguments.
+              // That call failed; it is not waiting for client input or approval.
+              parts: responseMessage.parts.map((part) => {
+                if (!isToolUIPart(part) || part.state !== 'input-streaming')
+                  return part;
+                const failed = {
+                  ...part,
+                  state: 'output-error' as const,
+                  input: part.input,
+                  errorText: 'Tool input ended before the call was complete.',
+                };
+                delete failed.rawInput;
+                delete failed.inputEncoding;
+                return failed;
+              }),
+            };
 
       const finalMetadata = await options?.finalAssistantMetadata?.(settled);
       const mergedMetadata = {
@@ -167,6 +169,9 @@ export async function chat<const TOOLS extends ToolSet>(
           : settled;
 
       await writeAssistantSegment(message);
+      // A consumer's cancel stops the SDK's stream before it reports usage,
+      // and the usage promise never settles.
+      if (isCancelled) return;
       // A failed model call has no usage: the SDK rejects it with
       // NoOutputGeneratedError, and the error chunk already reported the failure.
       const usage = await Promise.resolve(result?.result.usage).catch(
@@ -236,7 +241,7 @@ function sanitizeAbortedParts(parts: UIMessage['parts']): UIMessage['parts'] {
         sanitized.push({
           ...pending,
           state: 'output-error',
-          errorText: 'Cancelled by user',
+          errorText: 'aborted',
           ...(approval?.approved === true
             ? { approval: { ...approval, approved: true } }
             : {}),
