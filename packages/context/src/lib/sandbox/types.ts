@@ -8,6 +8,13 @@ export interface CommandResult {
   stdout: string;
   stderr: string;
   exitCode: number;
+  /**
+   * The full length of `stdout` when a run with `maxOutputLength` kept only a
+   * prefix of it. A backend that does not bound its output leaves it out.
+   */
+  stdoutLength?: number;
+  /** As `stdoutLength`, for `stderr`. */
+  stderrLength?: number;
   /** Host-only data omitted from model-facing tool output. */
   meta?: Record<string, unknown>;
   teeFiles?: Array<{

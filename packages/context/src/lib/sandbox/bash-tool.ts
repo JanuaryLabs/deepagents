@@ -30,9 +30,18 @@ const COMMAND_TIMEOUT_EXIT_CODE = 124;
 const REASONING_INSTRUCTION =
   'Every bash tool call must include a brief non-empty "reasoning" input explaining why the command is needed.';
 
-function truncateOutput(output: string, maxLength: number): string {
-  if (output.length <= maxLength) return output;
-  return `${output.slice(0, maxLength)}\n[Output truncated: ${output.length - maxLength} characters omitted.]`;
+/**
+ * `totalLength` is the length a bounded backend reports for the prefix it kept;
+ * a backend that does not bound its output reports none, as @ai-sdk/tool-bash's
+ * own `limitOutput` assumes.
+ */
+function truncateOutput(
+  output: string,
+  maxLength: number,
+  totalLength = output.length,
+): string {
+  if (totalLength <= maxLength) return output;
+  return `${output.slice(0, maxLength)}\n[Output truncated: ${totalLength - maxLength} characters omitted.]`;
 }
 
 function makeTeeScriptPortable(script: string): string {
@@ -128,11 +137,13 @@ export async function createBashTool<SANDBOX extends SandboxSession>(
   options: CreateBashToolOptions<SANDBOX>,
 ): Promise<BashToolkit<SANDBOX>> {
   const { workingDirectory, sandbox } = options;
+  const maxOutputLength = options.maxOutputLength ?? DEFAULT_MAX_OUTPUT_LENGTH;
   const initialFiles = await listInitialFiles(options);
 
   const aiSdkBash = await experimental_createBashTool({
     sandbox,
     workingDirectory,
+    maxOutputLength,
   });
   await uploadInitialFiles(sandbox, workingDirectory, initialFiles);
 
@@ -188,6 +199,7 @@ export async function createBashTool<SANDBOX extends SandboxSession>(
           command: script,
           ...(workingDirectory !== undefined ? { workingDirectory } : {}),
           abortSignal,
+          maxOutputLength,
         });
       } catch (error) {
         if (error instanceof BashException) {
@@ -202,12 +214,11 @@ export async function createBashTool<SANDBOX extends SandboxSession>(
           throw error;
         }
       }
-      const maxOutputLength =
-        options.maxOutputLength ?? DEFAULT_MAX_OUTPUT_LENGTH;
+      const { stdoutLength, stderrLength, ...output } = result;
       result = {
-        ...result,
-        stdout: truncateOutput(result.stdout, maxOutputLength),
-        stderr: truncateOutput(result.stderr, maxOutputLength),
+        ...output,
+        stdout: truncateOutput(output.stdout, maxOutputLength, stdoutLength),
+        stderr: truncateOutput(output.stderr, maxOutputLength, stderrLength),
         ...(teeFiles ? { teeFiles } : {}),
       };
 
