@@ -78,3 +78,8 @@ const elements = defineElements<GenAIInteractiveElement>([
   },
 ]);
 ```
+
+A self-closing element written inside a sentence renders inline: the sentence
+stays one paragraph, so its component renders inline HTML such as a `<sup>`, an
+`<a>` or a `<button>`, never a `<div>`. An element on a line of its own renders
+as a block, outside any paragraph.

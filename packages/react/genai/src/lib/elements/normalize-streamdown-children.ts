@@ -31,9 +31,25 @@ export function normalizeStreamdownChildren(
     },
   );
 
-  result = result.replace(/\/>\s*</g, '/>\n\n<');
+  result = result.replace(
+    /\/>(\s*)</g,
+    (match: string, space: string, offset: number, input: string) =>
+      !space.includes('\n') && isProseLine(input, offset) ? match : '/>\n\n<',
+  );
 
   return wrapElements(result, tagNames);
+}
+
+const TAG_PATTERN = /<\w[\w-]*(?:"(?:\\.|[^"])*"|[^>"])*>|<\/[\w-]+\s*>/g;
+
+// A line that holds text besides its tags is prose: a tag there sits inside a
+// sentence, as CommonMark reads inline HTML, while a tag alone on its line is a
+// block.
+function isProseLine(input: string, position: number): boolean {
+  const start = input.lastIndexOf('\n', position - 1) + 1;
+  const newline = input.indexOf('\n', position);
+  const line = input.slice(start, newline < 0 ? input.length : newline);
+  return line.replace(TAG_PATTERN, '').trim() !== '';
 }
 
 /**
@@ -77,10 +93,24 @@ function wrapElements(
     }
 
     if (input[tagEnd - 1] === '/') {
+      const tag = input.slice(i, tagEnd + 1);
       if (nested) {
-        out += '<div>' + input.slice(i, tagEnd + 1) + '</div>';
+        out += '<div>' + tag + '</div>';
+      } else if (isProseLine(input, i)) {
+        // HTML has no self-closing custom elements: the parser would open
+        // this one and take the rest of the sentence as its children.
+        out +=
+          '<span>' + tag.slice(0, -2).trimEnd() + '></' + tagName + '></span>';
       } else {
-        out += input.slice(i, tagEnd + 1);
+        out += tag;
+        // A tag alone on its line is a block. Text on the next line needs a
+        // blank line between, or the parser makes that text the tag's child.
+        if (
+          input[tagEnd + 1] === '\n' &&
+          tagEnd + 2 < input.length &&
+          input[tagEnd + 2] !== '\n'
+        )
+          out += '\n';
       }
       i = tagEnd + 1;
       continue;
