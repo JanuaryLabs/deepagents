@@ -21,10 +21,7 @@ import { isRecord } from './fragments/reminders/index.ts';
 import type { AgentSandbox } from './sandbox/types.ts';
 import { TitleGenerator } from './title.ts';
 
-type ChatConfig<TOOLS extends ToolSet> = Omit<
-  StreamOptions<TOOLS>,
-  'maxRetries'
-> & {
+type ChatConfig<TOOLS extends ToolSet> = StreamOptions<TOOLS> & {
   /** Native writer for data parts, available before the first model request. */
   onStream?: (writer: UIMessageStreamWriter) => void;
   generateTitle?: boolean;

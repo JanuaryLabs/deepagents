@@ -21,10 +21,7 @@ import {
   type UIMessage,
   type UIMessageChunk,
   type UIMessageStreamOptions,
-  type UIMessageStreamWriter,
   convertToModelMessages,
-  createUIMessageStream,
-  generateId,
   generateText,
   isStepCount,
   smoothStream,
@@ -32,7 +29,6 @@ import {
   toUIMessageStream,
   tool,
 } from 'ai';
-import { styleText } from 'node:util';
 import z from 'zod';
 
 import {
@@ -56,13 +52,7 @@ import {
   mapGenerateErrorToCode,
   nullUsage,
 } from './advisor.ts';
-import { assistant } from './fragments.ts';
 import { user } from './fragments/message/user.ts';
-import {
-  type Guardrail,
-  type GuardrailContext,
-  runGuardrailChain,
-} from './guardrail.ts';
 import type { AgentSandbox, SandboxTools } from './sandbox/types.ts';
 
 export type { AgentControls } from '@deepagents/agent';
@@ -107,17 +97,6 @@ type ToolCallOptions<TOOLS extends ToolSet, OPTIONS> = Pick<
 > &
   OPTIONS;
 
-/** The `toolsContext` a caller hands to an agent whose tools are `TOOLS`. */
-type AgentToolsContext<
-  TOOLS extends ToolSet,
-  SANDBOX_TOOLS extends SandboxTools,
-> =
-  | ToolCallOptions<
-      AgentModelTools<TOOLS, SANDBOX_TOOLS>,
-      unknown
-    >['toolsContext']
-  | undefined;
-
 export type ToolCallArguments<TOOLS extends ToolSet, OPTIONS> =
   HasRequiredKey<InferToolSetContext<TOOLS>> extends true
     ? [options: ToolCallOptions<TOOLS, OPTIONS>]
@@ -133,15 +112,11 @@ export type StreamOptions<TOOLS extends ToolSet = ToolSet> = Pick<
 > & {
   abortSignal?: AbortSignal;
   transform?: StreamTextTransform<TOOLS> | StreamTextTransform<TOOLS>[];
-  maxRetries?: number;
 };
 
-/**
- * A streamed agent turn. Read it through `toUIMessageStream()`, which applies
- * the agent's guardrails; `result.stream` bypasses them.
- */
+/** A streamed agent turn. */
 export interface AgentStream<TOOLS extends ToolSet> {
-  /** The first model call. A guardrail retry starts a new call, which this result does not include. */
+  /** The AI SDK `streamText` result of the turn. */
   readonly result: ReturnType<typeof streamText<TOOLS>>;
   /**
    * The reminder session of this stream. Its `writeAssistantSegment` writes the
@@ -181,15 +156,6 @@ export interface CreateAgent<
    * on an untrusted prompt.
    */
   stopWhen?: Parameters<typeof streamText>[0]['stopWhen'];
-  /**
-   * Guardrails to apply during streaming.
-   * Each guardrail inspects text chunks and can trigger self-correction retries.
-   */
-  guardrails?: Guardrail[];
-  /**
-   * Maximum number of retry attempts when guardrails fail (default: 3).
-   */
-  maxGuardrailRetries?: number;
   /** Supplies durable user input before sampling and at safe step boundaries. */
   prepareStepInput?: PrepareStepInputProvider;
   /** Native AI SDK step overrides, applied after context reminders and host input. */
@@ -204,7 +170,6 @@ export const DEFAULT_STOP_WHEN = isStepCount(200);
 
 class Agent<TOOLS extends ToolSet, SANDBOX_TOOLS extends SandboxTools> {
   #options: CreateAgent<TOOLS, SANDBOX_TOOLS>;
-  #guardrails: Guardrail[] = [];
   readonly tools: AgentModelTools<TOOLS, SANDBOX_TOOLS>;
   readonly context?: ContextEngine;
   readonly model?: AgentModel;
@@ -217,7 +182,6 @@ class Agent<TOOLS extends ToolSet, SANDBOX_TOOLS extends SandboxTools> {
     this.context = options.context;
     this.model = options.model;
     this.sandbox = options.sandbox;
-    this.#guardrails = options.guardrails || [];
   }
 
   public async generate(
@@ -279,14 +243,9 @@ class Agent<TOOLS extends ToolSet, SANDBOX_TOOLS extends SandboxTools> {
   /**
    * Stream a response from the agent.
    *
-   * When guardrails are configured, `toUIMessageStream()` provides
-   * self-correction behavior. Direct access to `result.stream` bypasses guardrails.
-   *
    * @example
    * ```typescript
    * const stream = await agent.stream();
-   *
-   * // With guardrails - use toUIMessageStream for protection
    * await printer.readableStream(stream.toUIMessageStream());
    * ```
    */
@@ -296,47 +255,61 @@ class Agent<TOOLS extends ToolSet, SANDBOX_TOOLS extends SandboxTools> {
       StreamOptions<AgentModelTools<TOOLS, SANDBOX_TOOLS>>
     >
   ): Promise<AgentStream<AgentModelTools<TOOLS, SANDBOX_TOOLS>>> {
-    if (!this.#options.context) {
+    const context = this.#options.context;
+    if (!context) {
       throw new Error(`Agent ${this.#options.name} is missing a context.`);
     }
-    if (!this.#options.model) {
+    const model = this.#options.model;
+    if (!model) {
       throw new Error(`Agent ${this.#options.name} is missing a model.`);
     }
 
-    const reminders = this.#options.context.createReminderSession({
+    const reminders = context.createReminderSession({
       additionalInput: this.#options.prepareStepInput,
       sandbox: this.#options.sandbox,
     });
-    const prepareStep = this.#withPrepareStep(reminders.prepareStep);
-    const result = await this.#createRawStream(
-      options?.toolsContext,
-      options,
-      prepareStep,
-    );
-
-    if (this.#guardrails.length === 0) {
-      return {
-        result,
-        reminders,
-        toUIMessageStream: (uiOptions) =>
-          toUIMessageStream({
-            stream: result.stream,
-            tools: this.tools,
-            ...uiOptions,
-          }),
-      };
-    }
+    const { messages, systemPrompt } = await context.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: this.#options.sandbox,
+    });
+    const result = streamText<AgentModelTools<TOOLS, SANDBOX_TOOLS>>({
+      reasoning: this.#options.reasoning,
+      maxOutputTokens: this.#options.maxOutputTokens,
+      timeout: this.#options.timeout,
+      toolCallConcurrency: this.#options.toolCallConcurrency,
+      toolApproval: this.#options.toolApproval,
+      experimental_toolApprovalSecret:
+        this.#options.experimental_toolApprovalSecret,
+      abortSignal: options?.abortSignal,
+      onStart: options?.onStart,
+      onStepStart: options?.onStepStart,
+      onStepEnd: options?.onStepEnd,
+      include: options?.include,
+      providerOptions: this.#options.providerOptions,
+      telemetry: this.#options.telemetry,
+      runtimeContext: this.#options.runtimeContext,
+      model,
+      instructions: systemPrompt,
+      messages: await toModelPrompt(messages, this.tools),
+      stopWhen: this.#options.stopWhen ?? DEFAULT_STOP_WHEN,
+      prepareStep: this.#withPrepareStep(reminders.prepareStep),
+      experimental_transform: options?.transform ?? smoothStream(),
+      experimental_sandbox: this.#options.sandbox.sandbox,
+      tools: this.tools,
+      toolsContext: options?.toolsContext,
+      experimental_toolCallers: this.#options.experimental_toolCallers,
+      toolChoice: this.#options.toolChoice,
+    });
 
     return {
       result,
       reminders,
-      toUIMessageStream: this.#guardedUIMessageStream(
-        result,
-        options?.toolsContext,
-        reminders,
-        prepareStep,
-        options,
-      ),
+      toUIMessageStream: (uiOptions) =>
+        toUIMessageStream({
+          stream: result.stream,
+          tools: this.tools,
+          ...uiOptions,
+        }),
     };
   }
 
@@ -352,220 +325,6 @@ class Agent<TOOLS extends ToolSet, SANDBOX_TOOLS extends SandboxTools> {
         ...context,
       });
       return { ...context, ...overrides };
-    };
-  }
-
-  /**
-   * Create a raw stream without guardrail processing.
-   */
-  async #createRawStream(
-    toolsContext: AgentToolsContext<TOOLS, SANDBOX_TOOLS>,
-    config: StreamOptions<AgentModelTools<TOOLS, SANDBOX_TOOLS>> | undefined,
-    prepareStep: PrepareStepFunction<AgentModelTools<TOOLS, SANDBOX_TOOLS>>,
-  ) {
-    const context = this.#options.context;
-    if (!context) {
-      throw new Error(`Agent ${this.#options.name} is missing a context.`);
-    }
-
-    const model = this.#options.model;
-    if (!model) {
-      throw new Error(`Agent ${this.#options.name} is missing a model.`);
-    }
-
-    const { messages, systemPrompt } = await context.resolve({
-      renderer: new XmlRenderer(),
-      sandbox: this.#options.sandbox,
-    });
-
-    return streamText<AgentModelTools<TOOLS, SANDBOX_TOOLS>>({
-      reasoning: this.#options.reasoning,
-      maxOutputTokens: this.#options.maxOutputTokens,
-      timeout: this.#options.timeout,
-      toolCallConcurrency: this.#options.toolCallConcurrency,
-      toolApproval: this.#options.toolApproval,
-      experimental_toolApprovalSecret:
-        this.#options.experimental_toolApprovalSecret,
-      abortSignal: config?.abortSignal,
-      onStart: config?.onStart,
-      onStepStart: config?.onStepStart,
-      onStepEnd: config?.onStepEnd,
-      include: config?.include,
-      providerOptions: this.#options.providerOptions,
-      telemetry: this.#options.telemetry,
-      runtimeContext: this.#options.runtimeContext,
-      model,
-      instructions: systemPrompt,
-      messages: await toModelPrompt(messages, this.tools),
-      stopWhen: this.#options.stopWhen ?? DEFAULT_STOP_WHEN,
-      prepareStep,
-      experimental_transform: config?.transform ?? smoothStream(),
-      experimental_sandbox: this.#options.sandbox.sandbox,
-      tools: this.tools,
-      toolsContext,
-      experimental_toolCallers: this.#options.experimental_toolCallers,
-      toolChoice: this.#options.toolChoice,
-    });
-  }
-
-  /**
-   * Build a UI message stream with guardrail protection.
-   *
-   * When a guardrail fails:
-   * 1. The feedback is written to the output stream (user sees the correction)
-   * 2. A finish-step is emitted, triggering onStepEnd to persist the self-correction
-   * 3. A new stream is started and the model continues from the correction
-   */
-  #guardedUIMessageStream(
-    result: StreamTextResult<AgentModelTools<TOOLS, SANDBOX_TOOLS>, any, any>,
-    toolsContext: AgentToolsContext<TOOLS, SANDBOX_TOOLS>,
-    reminders: ReminderSession,
-    prepareStep: PrepareStepFunction<AgentModelTools<TOOLS, SANDBOX_TOOLS>>,
-    config?: StreamOptions<AgentModelTools<TOOLS, SANDBOX_TOOLS>>,
-  ): AgentStream<AgentModelTools<TOOLS, SANDBOX_TOOLS>>['toUIMessageStream'] {
-    const maxRetries =
-      config?.maxRetries ?? this.#options.maxGuardrailRetries ?? 3;
-    const context = this.#options.context;
-    if (!context) {
-      throw new Error(`Agent ${this.#options.name} is missing a context.`);
-    }
-
-    return (options) => {
-      const assistantMsgId = options?.generateMessageId?.();
-      let stepSaved: PromiseWithResolvers<void> | null = null;
-
-      return createUIMessageStream({
-        generateId: assistantMsgId ? () => assistantMsgId : generateId,
-        onStepEnd: async ({ responseMessage }) => {
-          if (!stepSaved) return;
-
-          // When chat() reserved an assistant head (the steer-capable path),
-          // write through this stream's reminder session so reminder splits are
-          // honored and we stay idempotent with chat()'s own onStepEnd. For
-          // direct guardrail usage with no reserved placeholder, append a fresh
-          // assistant.
-          const head = await context.headMessage();
-          if (head?.name === 'assistant') {
-            await reminders.writeAssistantSegment(responseMessage);
-          } else {
-            const message = assistantMsgId
-              ? { ...responseMessage, id: assistantMsgId }
-              : responseMessage;
-            context.set(assistant(message));
-            await context.save({ branch: false });
-          }
-
-          stepSaved.resolve();
-          stepSaved = null;
-        },
-        execute: async ({ writer }) => {
-          let currentResult: StreamTextResult<
-            AgentModelTools<TOOLS, SANDBOX_TOOLS>,
-            any,
-            any
-          > = result;
-          let attempt = 0;
-
-          // Create guardrail context with available tools and skills
-          const guardrailContext: GuardrailContext = {
-            availableTools: Object.keys(this.tools),
-            availableSkills: context.getAvailableSkills(),
-          };
-
-          while (attempt < maxRetries) {
-            if (config?.abortSignal?.aborted) {
-              writer.write({ type: 'finish' });
-              return;
-            }
-
-            attempt++;
-            let guardrailFailed = false;
-            let failureFeedback = '';
-            // A guardrail typically rejects a text-delta, by which point the
-            // enclosing text-start has already been forwarded. Track the open
-            // part so the rejection can close it instead of orphaning it in a
-            // permanent `state: 'streaming'`.
-            let openTextId: string | undefined;
-
-            const uiStream = toUIMessageStream({
-              stream: currentResult.stream,
-              tools: this.tools,
-              ...options,
-            });
-
-            for await (const part of uiStream) {
-              if (part.type === 'text-start') openTextId = chunkId(part);
-              if (part.type === 'text-end') openTextId = undefined;
-
-              const checkResult = runGuardrailChain(
-                part,
-                this.#guardrails,
-                guardrailContext,
-              );
-
-              if (checkResult.type === 'fail') {
-                guardrailFailed = true;
-                failureFeedback = checkResult.feedback;
-
-                console.log(
-                  styleText(
-                    'yellow',
-                    `[${this.#options.name}] Guardrail triggered (attempt ${attempt}/${maxRetries}): ${failureFeedback.slice(0, 50)}...`,
-                  ),
-                );
-
-                break;
-              }
-
-              if (checkResult.type === 'stop') {
-                console.log(
-                  styleText(
-                    'red',
-                    `[${this.#options.name}] Guardrail stopped - unrecoverable error, no retry`,
-                  ),
-                );
-                writer.write(part);
-                writer.write({ type: 'finish' });
-                return;
-              }
-
-              writer.write(part);
-            }
-
-            if (!guardrailFailed) {
-              writer.write({ type: 'finish' });
-              return;
-            }
-
-            if (attempt >= maxRetries) {
-              console.error(
-                styleText(
-                  'red',
-                  `[${this.#options.name}] Guardrail retry limit (${maxRetries}) exceeded.`,
-                ),
-              );
-              writer.write({ type: 'finish' });
-              return;
-            }
-
-            writeText(writer, failureFeedback, openTextId);
-
-            stepSaved = Promise.withResolvers<void>();
-            writer.write({ type: 'finish-step' as const });
-            await stepSaved.promise;
-
-            currentResult = await this.#createRawStream(
-              toolsContext,
-              config,
-              prepareStep,
-            );
-          }
-        },
-        onError: (error) => {
-          const message = Error.isError(error) ? error.message : String(error);
-          return `Stream failed: ${message}`;
-        },
-      });
     };
   }
 
@@ -961,46 +720,4 @@ function reasoningItemIdOf(part: AssistantPart): string | undefined {
   if (part.type !== 'reasoning') return undefined;
   const itemId = part.providerOptions?.openai?.itemId;
   return typeof itemId === 'string' ? itemId : undefined;
-}
-
-/**
- * The stream chunk type is generic (`InferUIMessageChunk<UI_MESSAGE>`), so a
- * `type` check does not narrow it enough to reach `id`.
- */
-function chunkId(chunk: unknown): string | undefined {
-  if (typeof chunk !== 'object' || chunk === null || !('id' in chunk)) {
-    return undefined;
-  }
-  return typeof chunk.id === 'string' ? chunk.id : undefined;
-}
-
-/**
- * Emit `text` as a completed text part.
- *
- * When `openPartId` is given, the feedback continues that already-open part and
- * closes it — a guardrail rejects mid-text, so its `text-start` is already on
- * the wire. Opening a second part instead would strand the first one in
- * `state: 'streaming'` forever in the persisted message.
- */
-function writeText(
-  writer: UIMessageStreamWriter,
-  text: string,
-  openPartId?: string,
-) {
-  const feedbackPartId = openPartId ?? generateId();
-  if (openPartId === undefined) {
-    writer.write({
-      id: feedbackPartId,
-      type: 'text-start',
-    });
-  }
-  writer.write({
-    id: feedbackPartId,
-    type: 'text-delta',
-    delta: ` ${text}`,
-  });
-  writer.write({
-    id: feedbackPartId,
-    type: 'text-end',
-  });
 }

@@ -3,7 +3,7 @@ title: Agent wrapper
 description: Convenience wrapper that combines ContextEngine with the AI SDK into a streamable agent
 ---
 
-The `agent()` function combines a `ContextEngine` and an AI SDK model into a single object with `generate()`, `stream()`, `clone()`, `asTool()`, and `asAdvisor()` methods. It resolves context, repairs tool calls when needed, and can retry streamed output through guardrails without extra orchestration in your app.
+The `agent()` function combines a `ContextEngine` and an AI SDK model into a single object with `generate()`, `stream()`, `clone()`, `asTool()`, and `asAdvisor()` methods. It resolves context before each call, without extra orchestration in your app.
 
 Every agent requires a **sandbox** — an `AgentSandbox`: the underlying `sandbox` and the `tools` the model gets for it. `tools` always has `bash`; `readFile` and `writeFile` are there when the host shows them. The sandbox is created externally and passed in; the agent does not create or dispose it. Skills are declared separately on the context with `skills(availableSkills)`.
 
@@ -200,20 +200,18 @@ const assistant = agent({
 
 ## Configuration
 
-| Option                | Type                               | Default            | Description                                                                                                                                                                                                                                                      |
-| --------------------- | ---------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`                | `string`                           | required           | Identifier for logging and error messages                                                                                                                                                                                                                        |
-| `sandbox`             | `AgentSandbox`                     | required           | Sandbox and its model tools (`bash`, plus `readFile` and `writeFile` when the host shows them) — created via `createBashTool()` (optionally chained on top of `createDockerSandbox()` or `createDaytonaSandbox(daytona.v2, options)`) from `@deepagents/context` |
-| `context`             | `ContextEngine`                    | `undefined`        | Engine that resolves system prompt and messages                                                                                                                                                                                                                  |
-| `model`               | `LanguageModelV4`                  | `undefined`        | AI SDK model to use for generation                                                                                                                                                                                                                               |
-| `tools`               | `ToolSet`                          | `{}`               | Additional AI SDK tools — merged with sandbox tools (user tools override sandbox tools on name conflict).                                                                                                                                                        |
-| `toolChoice`          | `ToolChoice`                       | `undefined`        | Controls how the model selects tools                                                                                                                                                                                                                             |
-| `providerOptions`     | `object`                           | `undefined`        | Provider-specific options forwarded to the AI SDK                                                                                                                                                                                                                |
-| `telemetry`           | `object`                           | `undefined`        | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText`                                                                                                                                                                                 |
-| `stopWhen`            | `StopCondition \| StopCondition[]` | `isStepCount(200)` | Stops the tool loop after a completed step meets any supplied condition                                                                                                                                                                                          |
-| `guardrails`          | `Guardrail[]`                      | `[]`               | Guardrails applied during streaming                                                                                                                                                                                                                              |
-| `maxGuardrailRetries` | `number`                           | `3`                | Maximum stream attempts, including the initial attempt                                                                                                                                                                                                           |
-| `logging`             | `boolean`                          | `undefined`        | Enable debug logging                                                                                                                                                                                                                                             |
+| Option            | Type                               | Default            | Description                                                                                                                                                                                                                                                      |
+| ----------------- | ---------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`            | `string`                           | required           | Identifier for logging and error messages                                                                                                                                                                                                                        |
+| `sandbox`         | `AgentSandbox`                     | required           | Sandbox and its model tools (`bash`, plus `readFile` and `writeFile` when the host shows them) — created via `createBashTool()` (optionally chained on top of `createDockerSandbox()` or `createDaytonaSandbox(daytona.v2, options)`) from `@deepagents/context` |
+| `context`         | `ContextEngine`                    | `undefined`        | Engine that resolves system prompt and messages                                                                                                                                                                                                                  |
+| `model`           | `LanguageModelV4`                  | `undefined`        | AI SDK model to use for generation                                                                                                                                                                                                                               |
+| `tools`           | `ToolSet`                          | `{}`               | Additional AI SDK tools — merged with sandbox tools (user tools override sandbox tools on name conflict).                                                                                                                                                        |
+| `toolChoice`      | `ToolChoice`                       | `undefined`        | Controls how the model selects tools                                                                                                                                                                                                                             |
+| `providerOptions` | `object`                           | `undefined`        | Provider-specific options forwarded to the AI SDK                                                                                                                                                                                                                |
+| `telemetry`       | `object`                           | `undefined`        | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText`                                                                                                                                                                                 |
+| `stopWhen`        | `StopCondition \| StopCondition[]` | `isStepCount(200)` | Stops the tool loop after a completed step meets any supplied condition                                                                                                                                                                                          |
+| `logging`         | `boolean`                          | `undefined`        | Enable debug logging                                                                                                                                                                                                                                             |
 
 ### Stopping the tool loop
 
@@ -305,20 +303,15 @@ console.log(result.text);
 | `toolsContext` | `InferToolSetContext` | Required only when a tool declares context; keyed by tool name |
 | `abortSignal`  | `AbortSignal`         | Cancel the request                                             |
 
-`abortSignal` is forwarded to the model call and any tool-call repair attempt, so cancellation stops the full request instead of only the outer wrapper.
+`abortSignal` is forwarded to the model call, so cancellation stops the full request instead of only the outer wrapper.
 
 ## stream()
 
 Resolves the context and returns an `AgentStream` with two members:
 
-- `result` exposes the AI SDK `streamText` result from the first model call,
-  including `text`, `stream`, and `consumeStream()`. It does not include later
-  guardrail retries.
-- `toUIMessageStream(options)` builds the UI message stream and applies any
-  configured guardrails, including their retries.
-
-Consume guarded output through `stream.toUIMessageStream()`. Reading
-`stream.result` directly bypasses guardrails.
+- `result` exposes the AI SDK `streamText` result, including `text`, `stream`,
+  and `consumeStream()`.
+- `toUIMessageStream(options)` builds the UI message stream.
 
 ```typescript
 context.set(user('Write a Python quicksort'));
@@ -340,9 +333,8 @@ for await (const part of stream.toUIMessageStream()) {
 | `toolsContext` | `InferToolSetContext`                          | Required only when a tool declares context              |
 | `abortSignal`  | `AbortSignal`                                  | Cancel the request                                      |
 | `transform`    | `StreamTextTransform \| StreamTextTransform[]` | Custom stream transforms (defaults to `smoothStream()`) |
-| `maxRetries`   | `number`                                       | Override `maxGuardrailRetries` for this call            |
 
-`abortSignal` is reused across repair attempts and guardrail retries, so cancelling a stream stops the active turn cleanly.
+`abortSignal` is forwarded to the model calls of every step, so cancelling a stream stops the active turn.
 
 ## clone()
 
@@ -446,29 +438,6 @@ returned advisor instance.
 The tool returns short machine-readable status codes such as
 `too_many_requests`, `prompt_too_long`, or `execution_time_exceeded` when the
 advisor request cannot complete cleanly.
-
-## Guardrails
-
-Pass `guardrails` and `maxGuardrailRetries` to inspect UI message chunks as
-they stream. When a guardrail fails and another attempt is available, the
-agent emits the feedback, saves the assistant's self-correction, and starts
-a new model call. Despite its name, `maxGuardrailRetries` counts the initial
-attempt: `3` allows the initial attempt and up to two retries.
-
-```typescript
-import { agent, errorRecoveryGuardrail } from '@deepagents/context';
-
-const guarded = agent({
-  name: 'guarded_assistant',
-  sandbox,
-  context,
-  model: groq('gpt-oss-20b'),
-  guardrails: [errorRecoveryGuardrail],
-  maxGuardrailRetries: 3,
-});
-```
-
-See the [Guardrails reference](/docs/context/guardrails) for the full API — writing custom guardrails, the pass/fail/stop model, `GuardrailContext`, chaining, and built-in error patterns. For a practical walkthrough, see the [Error Recovery recipe](/docs/context/recipes/error-recovery).
 
 ## structuredOutput()
 

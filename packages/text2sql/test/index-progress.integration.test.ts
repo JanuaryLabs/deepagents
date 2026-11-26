@@ -16,7 +16,6 @@ import {
   InMemoryContextStore,
   agent,
   chat,
-  errorRecoveryGuardrail,
 } from '@deepagents/context';
 import {
   Adapter,
@@ -215,8 +214,6 @@ function chatStream(args: {
         sandbox,
         model: args.model,
         context: args.engine,
-        guardrails: [errorRecoveryGuardrail],
-        maxGuardrailRetries: 3,
       });
       writer.merge(
         await chat(ai, {

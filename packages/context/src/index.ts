@@ -14,8 +14,6 @@ export * from './lib/fragments/reasoning.ts';
 export * from './lib/fragments/socratic.ts';
 export * from './lib/fragments/socratic-plan.ts';
 export * from './lib/fragments/user.ts';
-export * from './lib/guardrail.ts';
-export * from './lib/guardrails/error-recovery.guardrail.ts';
 export * from './lib/render.ts';
 export * from './lib/renderers/abstract.renderer.ts';
 export * from './lib/resolvers/index.ts';

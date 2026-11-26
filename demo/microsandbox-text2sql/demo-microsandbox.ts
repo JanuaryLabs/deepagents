@@ -7,7 +7,6 @@ import {
   chat,
   createBashTool,
   createMicrosandboxSandbox,
-  errorRecoveryGuardrail,
   user,
   withStraceFileChanges,
 } from '@deepagents/context';
@@ -100,8 +99,6 @@ const demoAgent = agent({
   sandbox,
   model: openai('gpt-5.4-nano'),
   context,
-  guardrails: [errorRecoveryGuardrail],
-  maxGuardrailRetries: 3,
 });
 
 await converse(

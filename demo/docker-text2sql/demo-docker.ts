@@ -8,7 +8,6 @@ import {
   chat,
   createBashTool,
   createDockerSandbox,
-  errorRecoveryGuardrail,
   user,
   withStraceFileChanges,
 } from '@deepagents/context';
@@ -102,8 +101,6 @@ const demoAgent = agent({
   sandbox,
   model: openai('gpt-5.4-mini'),
   context,
-  guardrails: [errorRecoveryGuardrail],
-  maxGuardrailRetries: 3,
 });
 
 const text =

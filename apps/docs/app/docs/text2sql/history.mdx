@@ -23,7 +23,6 @@ import {
   agent,
   createBashTool,
   createDockerSandbox,
-  errorRecoveryGuardrail,
   npm,
   user,
 } from '@deepagents/context';
@@ -60,8 +59,6 @@ const ai = agent({
   sandbox,
   model,
   context,
-  guardrails: [errorRecoveryGuardrail],
-  maxGuardrailRetries: 3,
 });
 ```
 
@@ -78,7 +75,6 @@ import {
   agent,
   createBashTool,
   createDockerSandbox,
-  errorRecoveryGuardrail,
   npm,
   user,
 } from '@deepagents/context';
@@ -115,8 +111,6 @@ const ai = agent({
   sandbox,
   model,
   context,
-  guardrails: [errorRecoveryGuardrail],
-  maxGuardrailRetries: 3,
 });
 ```
 

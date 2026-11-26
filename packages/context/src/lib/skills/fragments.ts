@@ -13,7 +13,7 @@ import type { AvailableSkill } from './types.ts';
  * each description cut to 1024 characters (1021 and `...`); and all lines
  * held to Codex's 8000-character budget. Over the budget the descriptions are
  * shortened, then dropped, then skills are left out, and `metadata.warning`
- * carries Codex's warning. `metadata.skills` keeps every skill as given.
+ * carries Codex's warning.
  *
  * Provisioning and discovery belong to the application. This fragment only
  * renders the explicit model-facing metadata it receives. Like every verbatim
@@ -30,13 +30,8 @@ import type { AvailableSkill } from './types.ts';
  * ```
  */
 export function skills(availableSkills: AvailableSkill[]): SkillsFragment {
-  const skillSnapshot = availableSkills.map(({ name, description, path }) => ({
-    name,
-    description,
-    path,
-  }));
   const { skillLines, omittedCount } = allocateSkillLines(
-    skillSnapshot
+    availableSkills
       .toSorted(
         (left, right) =>
           compareCodeUnits(left.name, right.name) ||
@@ -48,10 +43,8 @@ export function skills(availableSkills: AvailableSkill[]): SkillsFragment {
         path,
       })),
   );
-  const metadata: SkillsFragment['metadata'] = {
-    skills: skillSnapshot,
-    ...(omittedCount > 0 ? { warning: budgetWarning(omittedCount) } : {}),
-  };
+  const metadata: SkillsFragment['metadata'] =
+    omittedCount > 0 ? { warning: budgetWarning(omittedCount) } : {};
 
   if (skillLines.length === 0) {
     return { name: 'skills_instructions', data: [], metadata };
@@ -72,11 +65,9 @@ export function skills(availableSkills: AvailableSkill[]): SkillsFragment {
   };
 }
 
-/** The fragment skills() returns, with the catalog it was given. */
+/** The fragment skills() returns. */
 export interface SkillsFragment extends ContextFragment {
   metadata: {
-    /** Every skill skills() was given, in the order given, uncut. */
-    skills: AvailableSkill[];
     /** Codex's budget warning, present when the catalog left skills out. */
     warning?: string;
   };

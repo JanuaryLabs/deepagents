@@ -20,7 +20,6 @@ import { z } from 'zod';
 import {
   type AgentSandbox,
   ContextEngine,
-  type Guardrail,
   InMemoryContextStore,
   type MessageData,
   type WhenPredicate,
@@ -33,16 +32,13 @@ import {
   elapsedExceeds,
   everyNToolCalls,
   everyNTurns,
-  fail,
   isSyntheticReminderMessage,
   once,
   or,
-  pass,
   plan,
   reminder,
   stripReminders,
   toolCallCount,
-  toolOutput,
 } from '@deepagents/context';
 
 import { buildSandbox } from '../../../../test/helpers/build-sandbox.ts';
@@ -943,161 +939,6 @@ describe('steer reminders integration (chat flow)', () => {
     const first = await context.firstUserMessage();
     assert.ok(first && textOf(first).includes('first real message'));
     assert.ok(!(first && isSyntheticReminderMessage(first)));
-  });
-
-  it('steer + guardrail retry: the steer synth is persisted exactly once and the chain stays coherent', async () => {
-    const store = new InMemoryContextStore();
-    const context = new ContextEngine({ store, chatId: 'gr', userId: 'u1' });
-    // step0 tool (lets steer fire at prepareStep step1), step1 text that the
-    // guardrail rejects once → retry, retry produces the final text.
-    const model = scriptedModel([
-      { tool: 'noop' },
-      { text: 'first attempt' },
-      { text: 'final answer' },
-    ]);
-    let guardrailHits = 0;
-    const failOnce: Guardrail = {
-      id: 'fail-once',
-      name: 'fail-once',
-      handle: (part) => {
-        if (part.type === 'text-delta') {
-          guardrailHits++;
-          if (guardrailHits === 1) return fail('retry please');
-        }
-        return pass(part);
-      },
-    };
-    const sandbox = await buildSandbox();
-    const chatAgent = agent({
-      sandbox,
-      name: 'gr',
-      context,
-      model,
-      tools: { noop: noopTool },
-      guardrails: [failOnce],
-    });
-
-    context.set(reminder('NUDGE', { when: everyNTurns(1), target: 'steer' }));
-
-    await context.continue(userMessage('go'));
-    await drain(
-      await chat(chatAgent, {
-        transform: () => new TransformStream(),
-      }),
-    );
-
-    const chain = await storedEntries(store, 'gr');
-    const names = chain.map((e) => e.name);
-    const synthCount = chain.filter(
-      (e) => e.name === 'user' && isSyntheticEntry(e),
-    ).length;
-
-    assert.strictEqual(
-      synthCount,
-      1,
-      `steer must persist exactly one synth across a guardrail retry; got ${synthCount} in ${JSON.stringify(names)}`,
-    );
-    const storedToolParts = chain
-      .filter((entry) => entry.name === 'assistant')
-      .flatMap((entry) => messageOf(entry).parts)
-      .filter(isToolUIPart);
-    assert.strictEqual(
-      storedToolParts.length,
-      1,
-      'guardrail retry must not duplicate tool parts from the first attempt',
-    );
-    for (let i = 1; i < chain.length; i++) {
-      assert.ok(
-        !(chain[i].name === 'user' && chain[i - 1].name === 'user'),
-        `no two consecutive user nodes; got ${JSON.stringify(names)}`,
-      );
-    }
-  });
-
-  it('keeps tool reminders ordered and cache-stable when a guardrail retry calls another tool', async () => {
-    const store = new InMemoryContextStore();
-    const context = new ContextEngine({
-      store,
-      chatId: 'guardrail-tool-reminders',
-      userId: 'u1',
-    });
-    const model = scriptedModel([
-      { tool: 'firstTool' },
-      { text: 'rejected answer' },
-      { tool: 'secondTool' },
-      { text: 'final answer' },
-      { text: 'second turn answer' },
-    ]);
-    let rejected = false;
-    const failFirstText: Guardrail = {
-      id: 'fail-first-text',
-      name: 'fail-first-text',
-      handle: (part) => {
-        if (part.type === 'text-delta' && !rejected) {
-          rejected = true;
-          return fail('retry with another tool');
-        }
-        return pass(part);
-      },
-    };
-    const sandbox = await buildSandbox();
-    const chatAgent = agent({
-      sandbox,
-      name: 'guardrail-tool-reminders',
-      context,
-      model,
-      tools: { firstTool: noopTool, secondTool: noopTool },
-      guardrails: [failFirstText],
-    });
-    context.set(
-      reminder('FIRST TOOL', {
-        target: 'tool-output',
-        when: toolOutput({ name: 'firstTool' }),
-      }),
-      reminder('SECOND TOOL', {
-        target: 'tool-output',
-        when: toolOutput({ name: 'secondTool' }),
-      }),
-    );
-
-    await context.continue(userMessage('run both tools'));
-    await drain(
-      await chat(chatAgent, {
-        transform: () => new TransformStream(),
-      }),
-    );
-
-    const chain = await storedEntries(store, 'guardrail-tool-reminders');
-    assert.deepStrictEqual(
-      chain.map((entry) => entry.name),
-      ['user', 'assistant', 'user', 'assistant', 'user', 'assistant'],
-    );
-    const toolTypes = chain
-      .filter((entry) => entry.name === 'assistant')
-      .flatMap((entry) => messageOf(entry).parts)
-      .filter(isToolUIPart)
-      .map((part) => part.type);
-    assert.deepStrictEqual(toolTypes, ['tool-firstTool', 'tool-secondTool']);
-    const reminderTexts = chain
-      .filter((entry) => entry.name === 'user' && isSyntheticEntry(entry))
-      .map((entry) => textOf(messageOf(entry)));
-    assert.deepStrictEqual(reminderTexts, [
-      '<system-reminder>FIRST TOOL</system-reminder>',
-      '<system-reminder>SECOND TOOL</system-reminder>',
-    ]);
-
-    const postRetryPrompt = structuredClone(model.doStreamCalls[3].prompt);
-    await context.continue(userMessage('continue'));
-    await drain(
-      await chat(chatAgent, {
-        transform: () => new TransformStream(),
-      }),
-    );
-    const resumedPrompt = model.doStreamCalls[4].prompt;
-    assert.deepStrictEqual(
-      resumedPrompt.slice(0, postRetryPrompt.length),
-      postRetryPrompt,
-    );
   });
 
   it('reminder({ target: "steer" }) without a when predicate throws a steer-specific error', () => {

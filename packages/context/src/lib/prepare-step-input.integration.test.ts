@@ -10,13 +10,10 @@ import { z } from 'zod';
 
 import {
   ContextEngine,
-  type Guardrail,
   InMemoryContextStore,
   agent,
   chat,
   everyNTurns,
-  fail,
-  pass,
   reminder,
 } from '@deepagents/context';
 
@@ -211,82 +208,6 @@ describe('prepare-step input integration', () => {
     const history = textOf(await context.getMessages());
     assert.match(history, /mail at the safe boundary/);
     assert.match(history, /remember the system rule/);
-  });
-
-  it('persists caller input once before a guardrail retry', async () => {
-    const store = new InMemoryContextStore();
-    const context = new ContextEngine({
-      store,
-      chatId: 'prepare-step-guardrail-retry',
-      userId: 'user-1',
-    });
-    const prompts: unknown[] = [];
-    let calls = 0;
-    const model = new MockLanguageModelV4({
-      doStream: async ({ prompt }) => {
-        prompts.push(prompt);
-        calls++;
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              { type: 'text-start', id: `text-${calls}` },
-              {
-                type: 'text-delta',
-                id: `text-${calls}`,
-                delta: calls === 1 ? 'bad response' : 'good response',
-              },
-              { type: 'text-end', id: `text-${calls}` },
-              {
-                type: 'finish',
-                finishReason: { unified: 'stop', raw: '' },
-                usage,
-              },
-            ],
-          }),
-        };
-      },
-    });
-    let guardrailCalls = 0;
-    const failOnce: Guardrail = {
-      id: 'fail-once',
-      name: 'fail-once',
-      handle(part) {
-        if (part.type === 'text-delta') {
-          guardrailCalls++;
-          if (guardrailCalls === 1) return fail('retry');
-        }
-        return pass(part);
-      },
-    };
-    let provided = false;
-    const chatAgent = agent({
-      name: 'prepare-step-agent',
-      context,
-      model,
-      sandbox,
-      guardrails: [failOnce],
-      prepareStepInput: async () => {
-        if (provided) return undefined;
-        provided = true;
-        return [message('mail before guarded request')];
-      },
-    });
-
-    await context.continue(message('original request'));
-    await drain(
-      await chat(chatAgent, {
-        transform: () => new TransformStream(),
-      }),
-    );
-
-    assert.equal(prompts.length, 2);
-    assert.match(JSON.stringify(prompts[0]), /mail before guarded request/);
-    assert.match(JSON.stringify(prompts[1]), /mail before guarded request/);
-    assert.equal(
-      textOf(await context.getMessages()).match(/mail before guarded request/g)
-        ?.length,
-      1,
-    );
   });
 
   it('does not consume durable step input in the non-persisting generate path', async () => {

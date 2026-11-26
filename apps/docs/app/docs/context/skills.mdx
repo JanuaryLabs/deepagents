@@ -155,22 +155,6 @@ fragment.metadata.warning;
 ```
 
 `metadata.warning` is absent when every skill is listed.
-`getAvailableSkills()` still returns every supplied skill, uncut and in the
-order supplied.
-
-## Read the Catalog from Context
-
-`ContextEngine.getAvailableSkills()` returns the catalog stored by the first
-`skills()` fragment:
-
-```typescript
-const catalog = context.getAvailableSkills();
-// [{ name: 'deploy', description: '...', path: '/skills/deploy/SKILL.md' }]
-```
-
-The agent uses this same catalog for `GuardrailContext.availableSkills`, so a
-guardrail that corrects skill/tool confusion refers to the exact path shown to
-the model.
 
 ## Parse Frontmatter Content
 
@@ -279,4 +263,3 @@ by `createBashTool()`.
 
 - [Sandbox](/docs/context/sandbox) — choose and provision a runtime filesystem
 - [Skill Reminders](/docs/context/skill-reminders) — surface relevant skills per query
-- [Guardrails](/docs/context/guardrails) — inspect available skills during streaming

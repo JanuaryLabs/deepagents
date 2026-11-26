@@ -46,7 +46,6 @@ import {
 } from './resolvers/index.ts';
 import type { AgentSandbox } from './sandbox/types.ts';
 import { SavePipeline, type SaveResult } from './save/save-pipeline.ts';
-import type { AvailableSkill } from './skills/types.ts';
 import { InMemoryContextStore } from './store/memory.store.ts';
 import {
   type BranchData,
@@ -209,15 +208,6 @@ function mergeLanguageModelUsage(
   };
 }
 
-function isAvailableSkill(value: unknown): value is AvailableSkill {
-  return (
-    isRecord(value) &&
-    typeof value.name === 'string' &&
-    typeof value.description === 'string' &&
-    typeof value.path === 'string'
-  );
-}
-
 function isEmptyAssistantPlaceholder(message: UIMessage): boolean {
   return message.role === 'assistant' && message.parts.length === 0;
 }
@@ -334,9 +324,8 @@ export type PrepareStepInputProvider = () =>
  * `writeAssistantSegment` fills the assistant segments that same `prepareStep`
  * reserved.
  *
- * Guardrail retries reuse the same session. Running two concurrent streams on
- * ONE engine instance is unsupported: they share the engine's pending messages
- * and chain head.
+ * Running two concurrent streams on ONE engine instance is unsupported: they
+ * share the engine's pending messages and chain head.
  */
 export interface ReminderSession {
   readonly prepareStep: <TOOLS extends Record<string, Tool>>(
@@ -358,10 +347,6 @@ interface ReminderSessionState {
   }>;
   /** Step markers already present before this stream started. */
   initialStepStarts: number | null;
-  /** Step offset accumulated across guardrail retry streams. */
-  stepOffset: number;
-  /** Last prepareStep index, used to detect a guardrail retry reset. */
-  lastStepNumber: number | null;
 }
 
 /**
@@ -689,11 +674,11 @@ export class ContextEngine {
    *
    * A pending fragment that carries the id of an already-stored message is an
    * UPDATE to that message, not a new one — the store upserts by id, and this
-   * must agree. Both chat() and the guardrail-retry path call
-   * writeAssistantSegment for the same step, so the streamed assistant is
-   * routinely persisted while a fragment for it is still pending; appending
-   * blindly duplicated it in the prompt and broke store/prompt parity on the
-   * next turn.
+   * must agree. writeAssistantSegment and continue() set a message and then
+   * save it, and a save keeps its fragments pending until it lands, so a
+   * stored assistant can still have a pending fragment; appending blindly
+   * would duplicate it in the prompt and break store/prompt parity on the next
+   * turn.
    *
    * For id-lookup use `headMessage()` instead — that one keeps placeholders.
    */
@@ -913,8 +898,6 @@ export class ContextEngine {
       terminalToolParts: new Map(),
       segments: [],
       initialStepStarts: null,
-      stepOffset: 0,
-      lastStepNumber: null,
     };
     const enableSteer = options.steer ?? true;
 
@@ -923,12 +906,6 @@ export class ContextEngine {
       stepNumber,
       messages,
     }) => {
-      if (stepNumber === 0 && session.lastStepNumber !== null) {
-        session.stepOffset += session.lastStepNumber + 1;
-      }
-      session.lastStepNumber = stepNumber;
-      const completedSteps = session.stepOffset + stepNumber;
-
       // Steer is mid-loop only: never fire before the model has produced a step
       // with content, so its synthetic user is preceded by an assistant turn.
       const priorStep = stepNumber >= 1 ? steps[stepNumber - 1] : undefined;
@@ -1034,7 +1011,7 @@ export class ContextEngine {
         await this.save({ branch: false });
         session.segments.push({
           id: nextSegmentId,
-          startStep: completedSteps,
+          startStep: stepNumber,
         });
         session.terminalToolParts.clear();
 
@@ -1637,21 +1614,6 @@ export class ContextEngine {
     });
     child.set(...this.#fragments);
     return child;
-  }
-
-  /** Return the explicit skills from the first skills() catalog fragment. */
-  public getAvailableSkills(): AvailableSkill[] {
-    for (const fragment of this.#fragments) {
-      const skills = fragment.metadata?.skills;
-      if (Array.isArray(skills) && skills.every(isAvailableSkill)) {
-        return skills.map(({ name, description, path }) => ({
-          name,
-          description,
-          path,
-        }));
-      }
-    }
-    return [];
   }
 
   /**

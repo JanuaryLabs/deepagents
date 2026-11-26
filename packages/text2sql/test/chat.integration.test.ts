@@ -18,7 +18,6 @@ import {
   InMemoryContextStore,
   agent,
   chat,
-  errorRecoveryGuardrail,
   reminder,
   user,
 } from '@deepagents/context';
@@ -122,8 +121,6 @@ describe('Text2Sql user-constructed chat', () => {
       sandbox,
       model,
       context: engine,
-      guardrails: [errorRecoveryGuardrail],
-      maxGuardrailRetries: 3,
     });
 
     await engine.continue(msg);
@@ -155,8 +152,6 @@ describe('Text2Sql user-constructed chat', () => {
       sandbox,
       model,
       context: engine,
-      guardrails: [errorRecoveryGuardrail],
-      maxGuardrailRetries: 3,
     });
 
     await engine.continue(msg);
@@ -192,8 +187,6 @@ describe('Text2Sql user-constructed chat', () => {
       sandbox,
       model,
       context: engine,
-      guardrails: [errorRecoveryGuardrail],
-      maxGuardrailRetries: 3,
     });
 
     await engine.continue(msg);
@@ -222,8 +215,6 @@ describe('Text2Sql user-constructed chat', () => {
       sandbox,
       model,
       context: engine,
-      guardrails: [errorRecoveryGuardrail],
-      maxGuardrailRetries: 3,
     });
 
     await engine.continue(msg);
@@ -258,8 +249,6 @@ describe('Text2Sql user-constructed chat', () => {
       sandbox,
       model,
       context: engine,
-      guardrails: [errorRecoveryGuardrail],
-      maxGuardrailRetries: 3,
     });
 
     const msg = userMessage('How many users?');
@@ -320,8 +309,6 @@ describe('Text2Sql user-constructed chat', () => {
       sandbox,
       model,
       context: engine,
-      guardrails: [errorRecoveryGuardrail],
-      maxGuardrailRetries: 3,
     });
 
     const msg1 = userMessage('How many users?');
@@ -370,8 +357,6 @@ describe('Text2Sql user-constructed chat', () => {
       sandbox,
       model,
       context: engine,
-      guardrails: [errorRecoveryGuardrail],
-      maxGuardrailRetries: 3,
     });
 
     const msg = userMessage('Hello');
@@ -406,8 +391,6 @@ describe('Text2Sql user-constructed chat', () => {
       sandbox,
       model,
       context: engine,
-      guardrails: [errorRecoveryGuardrail],
-      maxGuardrailRetries: 3,
     });
 
     const msg1 = userMessage('Analyze users');
@@ -517,8 +500,6 @@ describe('Text2Sql user-constructed chat', () => {
       sandbox,
       model,
       context: engine,
-      guardrails: [errorRecoveryGuardrail],
-      maxGuardrailRetries: 3,
     });
 
     const controller = new AbortController();
@@ -554,8 +535,6 @@ describe('Text2Sql user-constructed chat', () => {
       sandbox,
       model,
       context: engine,
-      guardrails: [errorRecoveryGuardrail],
-      maxGuardrailRetries: 3,
     });
 
     await engine.continue(fragment);

@@ -66,16 +66,6 @@ async function renderedSkillLines(fragment: ContextFragment) {
     .split('\n');
 }
 
-function availableSkillsOf(fragment: ContextFragment) {
-  return new ContextEngine({
-    store: new InMemoryContextStore(),
-    chatId: 'skills-metadata-test',
-    userId: 'user',
-  })
-    .set(fragment)
-    .getAvailableSkills();
-}
-
 function createContext(...availableSkills: AvailableSkill[]) {
   return new ContextEngine({
     store: new InMemoryContextStore(),
@@ -108,7 +98,6 @@ describe('skills()', () => {
         const { systemPrompt } = await context.resolve({ renderer });
 
         assert.strictEqual(systemPrompt, catalog);
-        assert.deepStrictEqual(context.getAvailableSkills(), availableSkills);
       }),
   );
 
@@ -136,7 +125,7 @@ describe('skills()', () => {
     assert.strictEqual(systemPrompt, `<role>R</role>\n${catalog}`);
   });
 
-  it('keeps the rendered catalog and engine metadata consistent when the caller mutates its input', async () => {
+  it('keeps the rendered catalog as given when the caller mutates its input', async () => {
     const availableSkills: AvailableSkill[] = [
       {
         name: 'deploy',
@@ -166,38 +155,6 @@ describe('skills()', () => {
     assert.match(systemPrompt, /\/skills\/deploy\/SKILL\.md/);
     assert.doesNotMatch(systemPrompt, /Mutated after fragment construction/);
     assert.doesNotMatch(systemPrompt, /late-addition/);
-    assert.deepStrictEqual(context.getAvailableSkills(), [
-      {
-        name: 'deploy',
-        description: 'Deploy services to production.',
-        path: '/skills/deploy/SKILL.md',
-      },
-    ]);
-  });
-
-  it('returns defensive skill catalog copies from the engine', () => {
-    const context = createContext({
-      name: 'deploy',
-      description: 'Deploy services to production.',
-      path: '/skills/deploy/SKILL.md',
-    });
-
-    const firstRead = context.getAvailableSkills();
-    firstRead[0].description = 'Mutated through the getter.';
-    firstRead[0].path = '/mutated/SKILL.md';
-    firstRead.push({
-      name: 'late-addition',
-      description: 'Added through the getter.',
-      path: '/skills/late-addition/SKILL.md',
-    });
-
-    assert.deepStrictEqual(context.getAvailableSkills(), [
-      {
-        name: 'deploy',
-        description: 'Deploy services to production.',
-        path: '/skills/deploy/SKILL.md',
-      },
-    ]);
   });
 
   it('does not infer skills when the caller supplies none', async () => {
@@ -207,13 +164,12 @@ describe('skills()', () => {
       renderer: new XmlRenderer(),
     });
 
-    assert.deepStrictEqual(context.getAvailableSkills(), []);
     assert.doesNotMatch(systemPrompt, /SKILL\.md/);
   });
 });
 
 describe('skills() limits', () => {
-  it("cuts a description longer than 1024 characters to 1021 and '...', and keeps the full skill in the engine", async () => {
+  it("cuts a description longer than 1024 characters to 1021 and '...', ", async () => {
     const description = '0123456789'.repeat(200);
     const deploy = {
       name: 'deploy',
@@ -225,7 +181,6 @@ describe('skills() limits', () => {
     assert.deepStrictEqual(await renderedSkillLines(fragment), [
       `- deploy: ${description.slice(0, 1021)}... (file: /skills/deploy/SKILL.md)`,
     ]);
-    assert.deepStrictEqual(availableSkillsOf(fragment), [deploy]);
     assert.strictEqual(fragment.metadata.warning, undefined);
   });
 
@@ -325,7 +280,6 @@ describe('skills() limits', () => {
       fragment.metadata.warning,
       'Exceeded skills context budget. All skill descriptions were removed and 58 additional skills were not included in the model-visible skills list.',
     );
-    assert.deepStrictEqual(availableSkillsOf(fragment), available.toReversed());
   });
 
   it('names one omitted skill in the singular', () => {

@@ -29,7 +29,6 @@ export type {
   WhenPredicate,
 } from './lib/fragments/reminders/src/types.ts';
 export * from './lib/fragments/user.ts';
-export * from './lib/guardrail.ts';
 export * from './lib/render.ts';
 export * from './lib/renderers/abstract.renderer.ts';
 export * from './lib/skills/fragments.ts';

@@ -15,13 +15,7 @@ the new incoming message for that turn with `context.continue(...)`.
 ## Basic usage
 
 ```typescript
-import {
-  ContextEngine,
-  agent,
-  chat,
-  errorRecoveryGuardrail,
-  user,
-} from '@deepagents/context';
+import { ContextEngine, agent, chat, user } from '@deepagents/context';
 import { AdapterIndexer, instructions } from '@deepagents/text2sql';
 
 const context = new ContextEngine({ store, chatId, userId });
@@ -33,8 +27,6 @@ const ai = agent({
   sandbox,
   model,
   context,
-  guardrails: [errorRecoveryGuardrail],
-  maxGuardrailRetries: 3,
 });
 
 await context.continue(user('Show me top 10 customers'));
@@ -162,7 +154,6 @@ import {
   chat,
   createBashTool,
   createDockerSandbox,
-  errorRecoveryGuardrail,
   npm,
   user,
 } from '@deepagents/context';
@@ -205,8 +196,6 @@ async function createThread(chatId: string, userId: string) {
     sandbox,
     model,
     context,
-    guardrails: [errorRecoveryGuardrail],
-    maxGuardrailRetries: 3,
   });
 
   return { context, ai };

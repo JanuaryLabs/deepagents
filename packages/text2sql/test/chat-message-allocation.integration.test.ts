@@ -16,7 +16,6 @@ import {
   InMemoryContextStore,
   agent,
   chat,
-  errorRecoveryGuardrail,
 } from '@deepagents/context';
 import {
   AdapterIndexer,
@@ -148,8 +147,6 @@ describe('Text2Sql client message allocation', () => {
                 sandbox,
                 model,
                 context: engine,
-                guardrails: [errorRecoveryGuardrail],
-                maxGuardrailRetries: 3,
               });
               writer.merge(
                 await chat(ai, {

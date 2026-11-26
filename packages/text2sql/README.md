@@ -130,7 +130,6 @@ import {
   chat,
   createBashTool,
   createDockerSandbox,
-  errorRecoveryGuardrail,
   npm,
   user,
 } from '@deepagents/context';
@@ -183,8 +182,6 @@ const ai = agent({
   sandbox,
   model: groq('openai/gpt-oss-20b'),
   context,
-  guardrails: [errorRecoveryGuardrail],
-  maxGuardrailRetries: 3,
 });
 
 await context.continue(user('Show me the top 10 customers by revenue'));

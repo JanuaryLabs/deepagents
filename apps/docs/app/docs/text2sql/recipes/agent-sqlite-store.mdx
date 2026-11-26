@@ -294,15 +294,13 @@ with a remote daemon, the project must exist on that host.
 ## 8. Wire the agent
 
 ```typescript
-import { agent, errorRecoveryGuardrail } from '@deepagents/context';
+import { agent } from '@deepagents/context';
 
 const ai = agent({
   name: 'sql-assistant',
   sandbox,
   model,
   context,
-  guardrails: [errorRecoveryGuardrail],
-  maxGuardrailRetries: 3,
 });
 ```
 
