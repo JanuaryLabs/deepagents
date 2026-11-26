@@ -6,7 +6,7 @@
 
 - **Cite a package call site before proposing new capability.** A gap that only a demo, eval, or test exercises is not a gap. Name the `packages/` call site (file:line) that needs the capability, or drop the proposal — never justify it with a deployment scenario nobody has wired up.
 
-- **Own only what the AI SDK lacks.** [docs/aisdk-parity.md](./docs/aisdk-parity.md) gives each concept the repo owns a verdict against the AI SDK and the `vercel` / `vercel-labs` packages. Read its row before building or keeping framework code around model calls, tools, streams or steps. `node .claude/skills/aisdk-parity/scripts/delta.ts` lists what upstream shipped since the ledger's check, and the `aisdk-parity` skill turns that into verdicts and backlog items.
+- **Own only what the AI SDK lacks.** [docs/aisdk-parity.md](./docs/aisdk-parity.md) gives each concept the repo owns a verdict against the AI SDK and the `vercel` / `vercel-labs` packages. Read its row before building or keeping framework code around model calls, tools, streams or steps. `node .claude/skills/aisdk-parity/scripts/delta.ts` lists what upstream shipped since the ledger's check, and the `aisdk-parity` skill turns that into verdicts and backlog items. Our own packages, `@deepagents/elements` included, are not an AI SDK route: when a native seam exists and our code hides it (a stream transform `defineAgent` does not pass through, #5889), the fix passes the seam through.
 
 - **No backward compatibility.** Delete old or unused API outright, public exports of published packages included: no aliases, deprecations, migration paths or "nothing breaks" options, and no question to the owner about breaking npm users. Consumers move to the new form. This overrides a generic skill rule that treats public exports as not removable.
 
@@ -117,6 +117,7 @@ AI-powered natural language to SQL. Ask questions in plain English, get executab
 
 - A chat-composer part that consumer repos copy (the `@genui/*` packages of text2sql and blackboard, such as dictation) moves here, not to zukhruf: headless in react-input, the look in react-genai.
 - Composer behavior follows the ChatGPT/Codex desktop app. Read its installed Electron bundle with the `baoyu-electron-extract` skill (with `--skip-format`), not docs or memory.
+- react-genai's chat rendering came from text2sql's `packages/genai` (71eeb1e6), so its reasons live in that repo. Before you change how it renders (`normalizeStreamdownChildren`, `MarkdownParagraph`), read the history there: `git log --all -- '**/<file>*'` in `~/Desktop/January/text2sql`, each commit's message and test cases. Its 63 normalizer cases are block layout elements on lines of their own (#5901).
 
 ---
 
