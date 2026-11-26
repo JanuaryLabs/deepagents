@@ -858,6 +858,56 @@ test('a result with content only reaches the model as the header item followed b
   ]);
 });
 
+test('an audio block reaches the model as audio of its data URL, and one without data as its JSON', async () => {
+  await using server = await startMcpServer({
+    tools: () => ['listen'],
+    call: () => ({
+      result: {
+        content: [
+          { type: 'audio', data: 'Zm9v', mimeType: 'audio/wav' },
+          {
+            type: 'audio',
+            data: 'data:audio/ogg;base64,YmFy',
+            mimeType: 'audio/ogg',
+          },
+          { type: 'audio', data: 'YmF6' },
+          { type: 'audio', mimeType: 'audio/wav' },
+        ],
+      },
+    }),
+  });
+
+  const { read } = await runTurn(
+    [mcp({ name: 'alpha', connect: connectTo(server) })],
+    [{ toolName: 'mcp__alpha__listen', text: 'x' }],
+  );
+
+  assert.deepStrictEqual(answerStep(read), [
+    {
+      type: 'content',
+      value: [
+        { type: 'text', text: HEADER },
+        {
+          type: 'file',
+          mediaType: 'audio/wav',
+          data: { type: 'data', data: 'Zm9v' },
+        },
+        {
+          type: 'file',
+          mediaType: 'audio/ogg',
+          data: { type: 'data', data: 'YmFy' },
+        },
+        {
+          type: 'file',
+          mediaType: 'application/octet-stream',
+          data: { type: 'data', data: 'YmF6' },
+        },
+        { type: 'text', text: '{"type":"audio","mimeType":"audio/wav"}' },
+      ],
+    },
+  ]);
+});
+
 test('an isError result reaches the model as an error result, and the turn goes on', async () => {
   await using server = await startMcpServer({
     tools: () => ['weather'],

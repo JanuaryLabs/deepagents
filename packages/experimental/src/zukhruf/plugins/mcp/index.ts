@@ -11,7 +11,7 @@ type ContentItem =
   | {
       type: 'file';
       mediaType: string;
-      data: { type: 'data'; data: string };
+      data: { type: 'data'; data: string } | { type: 'url'; url: URL };
     };
 
 /**
@@ -221,11 +221,32 @@ function modelOutput(output: McpToolOutput): ToolResultOutput {
   return { type: 'content', value: items };
 }
 
-/** @ai-sdk/mcp's mcpToModelOutput mapping of one MCP content block. */
+/**
+ * @ai-sdk/mcp's mcpToModelOutput mapping of one MCP content block, with an
+ * audio block mapped as Codex's FunctionCallOutputContentItem::
+ * from_mcp_content_block does (codex-rs/protocol/src/models/mcp_content.rs).
+ */
 function contentItem(part: {
   type: string;
   [key: string]: unknown;
 }): ContentItem {
+  const mimeType = part.mimeType ?? part.mime_type;
+  if (
+    part.type === 'audio' &&
+    typeof part.data === 'string' &&
+    (mimeType == null || typeof mimeType === 'string')
+  ) {
+    const mediaType = mimeType ?? 'application/octet-stream';
+    const dataUrl = /^data:/i.test(part.data)
+      ? part.data
+      : `data:${mediaType};base64,${part.data}`;
+    // The AI SDK reads a data URL's own media type and base64 payload.
+    return {
+      type: 'file',
+      mediaType,
+      data: { type: 'url', url: new URL(dataUrl) },
+    };
+  }
   if (part.type === 'text' && typeof part.text === 'string') {
     return { type: 'text', text: part.text };
   }

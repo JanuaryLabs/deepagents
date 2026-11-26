@@ -1088,7 +1088,12 @@ timed out awaiting tools/call after <d>` (`core/src/mcp_tool_call.rs`) with `isE
   `Wall time: <s, 4 decimals> seconds\nOutput:` from execute's measured duration, then the
   serialized `structuredContent` when present (one text), else the header as the first item before
   the content items. `isError` becomes the AI SDK's `error-text`; the SDK has no error variant of
-  `content`, so an error result with an image stays `content`. The budget is Codex's for every
+  `content`, so an error result with an image stays `content`. An audio block becomes a `file`
+  part of Codex's data URL (`protocol/src/models/mcp_content.rs`: `data` kept when it already
+  starts with `data:`, else `data:<mimeType or application/octet-stream>;base64,<data>`), which
+  the AI SDK splits into the URL's media type and base64 payload; OpenAI Responses sends it as an
+  `input_file`, Google as `functionResponse.parts[].inlineData`. An audio block without string
+  `data` stays its JSON text, as in Codex. The budget is Codex's for every
   bundled model, 10,000 tokens (`models-manager/models.json`) plus `with_serialization_allowance`'s
   20%: 12,000 tokens at Codex's 4 bytes per token. Over it, text keeps half the bytes from each end
   around `…<n> tokens truncated…` (`utils/string/src/truncate.rs` `plan_token_truncation`); items
