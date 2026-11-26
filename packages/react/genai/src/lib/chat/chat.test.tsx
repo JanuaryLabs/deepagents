@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai';
-import { useState } from 'react';
+import { StrictMode, useState } from 'react';
 import { expect, test, vi } from 'vitest';
 
 import {
@@ -11,6 +11,7 @@ import {
   useAgentMeta,
 } from './agent-context.tsx';
 import { persistedPromptOf } from './chat-manager.ts';
+import { clearPrefill, readPrefill, writePrefill } from './prefill.ts';
 
 type SendRequest = Parameters<ChatTransport<UIMessage>['sendMessages']>[0];
 type ReconnectRequest = Parameters<
@@ -727,6 +728,88 @@ test('sends through the transport given on the latest render', async () => {
     });
     expect(first.sends).toHaveLength(0);
   } finally {
+    cleanup();
+  }
+});
+
+function MessagesProbe() {
+  const { messages } = useAgentMessages();
+  return (
+    <ol>
+      {messages.map((message) => (
+        <li key={message.id} data-role={message.role}>
+          {message.parts
+            .map((part) => (part.type === 'text' ? part.text : ''))
+            .join('')}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+test('under StrictMode a pending prefill is sent once and its answer arrives (#5918)', async () => {
+  const transport = new RecordingTransport([
+    [
+      { type: 'start' },
+      { type: 'text-start', id: 't1' },
+      { type: 'text-delta', id: 't1', delta: 'The answer.' },
+      { type: 'text-end', id: 't1' },
+      { type: 'finish' },
+    ],
+  ]);
+  writePrefill({ prompt: 'first question', targetChatId: 'chat-strict' });
+
+  try {
+    render(
+      <StrictMode>
+        <AgentProvider
+          chatId="chat-strict"
+          transport={transport}
+          onResetChat={() => {}}
+        >
+          <MessagesProbe />
+        </AgentProvider>
+      </StrictMode>,
+    );
+
+    await vi.waitFor(() => {
+      expect(screen.getByText('The answer.')).toBeInTheDocument();
+    });
+    expect({
+      sends: transport.sends.length,
+      aborted: transport.sends.filter((send) => send.abortSignal?.aborted)
+        .length,
+      questions: screen.getAllByText('first question').length,
+    }).toEqual({ sends: 1, aborted: 0, questions: 1 });
+  } finally {
+    clearPrefill();
+    cleanup();
+  }
+});
+
+test('a provider that unmounts before its deferred send sends nothing and keeps the prefill for the next mount (#5918)', async () => {
+  const transport = new RecordingTransport();
+  writePrefill({ prompt: 'first question', targetChatId: 'chat-gone' });
+
+  try {
+    const { unmount } = render(
+      <AgentProvider
+        chatId="chat-gone"
+        transport={transport}
+        onResetChat={() => {}}
+      >
+        <MessagesProbe />
+      </AgentProvider>,
+    );
+    unmount();
+    await Promise.resolve();
+
+    expect({
+      sends: transport.sends.length,
+      pending: readPrefill()?.prompt,
+    }).toEqual({ sends: 0, pending: 'first question' });
+  } finally {
+    clearPrefill();
     cleanup();
   }
 });

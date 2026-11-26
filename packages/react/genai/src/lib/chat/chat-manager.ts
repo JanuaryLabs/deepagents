@@ -62,8 +62,19 @@ export class ChatManager {
     this.chat = chat;
   }
 
-  initialize(chatId?: string): void {
-    if (chatId) this.consumePrefill(chatId);
+  /**
+   * Sends the chat's pending prefill once the provider has mounted, and
+   * returns the effect's cleanup. React's development StrictMode unmounts
+   * right after the first mount, and useChat stops the chat then, which would
+   * abort a send already started; the cleanup cancels the deferred send, so
+   * the remount sends it once.
+   */
+  initialize(chatId: string): () => void {
+    const unmounted = new AbortController();
+    queueMicrotask(() => {
+      if (!unmounted.signal.aborted) this.consumePrefill(chatId);
+    });
+    return () => unmounted.abort();
   }
 
   /**

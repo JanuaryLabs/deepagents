@@ -114,9 +114,7 @@ export function AgentProvider({
   );
   manager.bind(agent);
 
-  useEffect(() => {
-    manager.initialize(chatId);
-  }, [manager, chatId]);
+  useEffect(() => manager.initialize(chatId), [manager, chatId]);
 
   const managerMethods = useMemo(
     () => ({
