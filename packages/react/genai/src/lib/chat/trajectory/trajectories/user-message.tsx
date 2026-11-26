@@ -222,7 +222,11 @@ export function UserMessageContent({
     return (
       <UserBubbleShell
         reminders={reminders}
-        body={<div className="text-sm whitespace-pre-wrap">{alias}</div>}
+        body={
+          <div dir="auto" className="text-sm whitespace-pre-wrap">
+            {alias}
+          </div>
+        }
       />
     );
   }
@@ -237,6 +241,7 @@ export function UserMessageContent({
           part.type === 'text' ? (
             <div
               key={`${message.id}-${partIndex}-text`}
+              dir="auto"
               className="text-sm whitespace-pre-wrap"
             >
               <PersistedPromptText text={part.text} />

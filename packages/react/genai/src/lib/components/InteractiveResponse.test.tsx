@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { expect, test } from 'vitest';
 
+import { Response } from '../elements/Response.tsx';
 import { InteractiveResponse } from './InteractiveResponse.tsx';
 
 function ParamProbe(props: Record<string, unknown>) {
@@ -512,6 +513,79 @@ test('escaped quotes in a generic attribute survive the rendering pipeline', () 
     expect(JSON.parse(screen.getByTestId('probe').textContent ?? '{}')).toEqual(
       { param: 'state', label: 'Revenue by "region"' },
     );
+  } finally {
+    cleanup();
+  }
+});
+
+test.each([
+  ['static', 'static'],
+  ['the chat’s streaming', undefined],
+] as const)(
+  'in a right-to-left page each answer block takes its own text direction in %s mode (#5919)',
+  (_case, mode) => {
+    try {
+      const { container } = render(
+        <div dir="rtl">
+          <InteractiveResponse elements={[passageCite]} mode={mode}>
+            {`${medditAnswerParagraph}\n\nالجرعة القياسية هي ٥ ملغ مرتين يوميا.\n\n- An English item\n- Another English item`}
+          </InteractiveResponse>
+        </div>,
+      );
+
+      // A block's direction is its own dir, or its nearest ancestor's: streaming
+      // mode puts dir on a display:contents wrapper around each block.
+      expect(
+        [...container.querySelectorAll('p, li')].map((block) =>
+          block.closest('[dir]')?.getAttribute('dir'),
+        ),
+      ).toEqual(['ltr', 'rtl', 'ltr', 'ltr']);
+    } finally {
+      cleanup();
+    }
+  },
+);
+
+test('reasoning and error text, which render through Response, take their own text direction in a right-to-left page (#5919)', () => {
+  try {
+    const { container } = render(
+      <div dir="rtl">
+        <Response mode="static">
+          {
+            'The model weighed renal function first.\n\nثم راجع التداخلات الدوائية.'
+          }
+        </Response>
+      </div>,
+    );
+
+    expect(
+      [...container.querySelectorAll('p')].map((block) =>
+        block.closest('[dir]')?.getAttribute('dir'),
+      ),
+    ).toEqual(['ltr', 'rtl']);
+  } finally {
+    cleanup();
+  }
+});
+
+test('in a right-to-left page an English sentence holding an image keeps its own direction (#5919)', () => {
+  try {
+    const { container } = render(
+      <div dir="rtl">
+        <InteractiveResponse elements={[passageCite]} mode="static">
+          {
+            'See ![the trial chart](https://example.org/chart.png) for the curve.'
+          }
+        </InteractiveResponse>
+      </div>,
+    );
+
+    expect(
+      container
+        .querySelector('img[alt="the trial chart"]')
+        ?.closest('[dir]')
+        ?.getAttribute('dir'),
+    ).toBe('ltr');
   } finally {
     cleanup();
   }

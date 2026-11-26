@@ -19,7 +19,9 @@ type InteractiveResponseProps = Omit<
 // Streamdown's Components types every entry, `p` included, as taking untyped
 // props, so only an inline component gets `children` typed from the context.
 const markdownComponents: Components = {
-  p: ({ children }) => <MarkdownParagraph>{children}</MarkdownParagraph>,
+  p: ({ children, dir }) => (
+    <MarkdownParagraph dir={dir}>{children}</MarkdownParagraph>
+  ),
 };
 
 function buildStreamdownRegistry(entries: GenAIInteractiveElement[]) {

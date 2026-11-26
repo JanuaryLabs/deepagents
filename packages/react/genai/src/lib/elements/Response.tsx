@@ -7,7 +7,9 @@ import {
   type TablePanelStreamdownProps,
 } from './table-panel-extension.tsx';
 
-export type ResponseProps = TablePanelStreamdownProps;
+// Every block takes the direction of its own text (streamdown's dir="auto"),
+// so an English answer in a right-to-left page still reads left to right.
+export type ResponseProps = Omit<TablePanelStreamdownProps, 'dir'>;
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -45,6 +47,7 @@ export const Response = memo(({ className, ...props }: ResponseProps) => (
         'size-full space-y-2 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
         className,
       )}
+      dir="auto"
       {...props}
     />
   </StreamdownErrorBoundary>

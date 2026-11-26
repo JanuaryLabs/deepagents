@@ -48,18 +48,20 @@ function isBlock(child: React.ReactNode): boolean {
 // a <div>, and one that holds only blocks keeps no wrapper.
 export function MarkdownParagraph({
   children,
+  dir,
 }: {
   children?: React.ReactNode;
+  dir?: string;
 }) {
   const childArray = React.Children.toArray(children);
 
   if (!childArray.some(isBlock)) {
-    return <p>{children}</p>;
+    return <p dir={dir}>{children}</p>;
   }
 
   if (childArray.every(isBlock)) {
     return children;
   }
 
-  return <div>{children}</div>;
+  return <div dir={dir}>{children}</div>;
 }

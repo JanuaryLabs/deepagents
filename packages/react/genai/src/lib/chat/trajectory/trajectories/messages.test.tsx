@@ -148,6 +148,28 @@ describe('Messages.UserBubble', () => {
     expect(screen.getByText('Hello world')).toBeInTheDocument();
   });
 
+  it('in a right-to-left page a user message takes its own text direction (#5919)', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const message = makeUserMessage('Hello world');
+    render(
+      <div dir="rtl">
+        <Messages.Root messages={[message]}>
+          <Messages.List>
+            <Messages.Item message={message} index={0}>
+              <Messages.UserBubble />
+            </Messages.Item>
+          </Messages.List>
+        </Messages.Root>
+      </div>,
+      { wrapper: AgentHarness },
+    );
+    expect(
+      screen.getByText('Hello world').closest('[dir]')?.getAttribute('dir'),
+    ).toBe('auto');
+  });
+
   it('renders persisted skill links as inline skill references', () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
@@ -194,6 +216,30 @@ describe('Messages.UserBubble', () => {
     );
     expect(screen.getByText('Summarize data')).toBeInTheDocument();
     expect(screen.queryByText('original text')).not.toBeInTheDocument();
+  });
+
+  it('in a right-to-left page an aliased user message takes its own text direction (#5919)', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const message = makeUserMessage('original text', {
+      metadata: { alias: 'Summarize data' },
+    });
+    render(
+      <div dir="rtl">
+        <Messages.Root messages={[message]}>
+          <Messages.List>
+            <Messages.Item message={message} index={0}>
+              <Messages.UserBubble />
+            </Messages.Item>
+          </Messages.List>
+        </Messages.Root>
+      </div>,
+      { wrapper: AgentHarness },
+    );
+    expect(
+      screen.getByText('Summarize data').closest('[dir]')?.getAttribute('dir'),
+    ).toBe('auto');
   });
 });
 
