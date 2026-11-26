@@ -1,4 +1,4 @@
-import { describe, it } from '@zukhruf/testing/node';
+import { describe, it } from '@zukhruf/parameterized-test';
 import * as assert from 'node:assert';
 
 import { fsCases } from './fs-cases.ts';

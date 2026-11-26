@@ -89,6 +89,7 @@
     "@types/debug": "^4.1.13",
     "@types/mssql": "^12.3.0",
     "@types/pg": "^8.20.0",
+    "@zukhruf/parameterized-test": "^0.8.138",
     "microsandbox": "^0.7.16",
     "msw": "^3.0.3"
   },

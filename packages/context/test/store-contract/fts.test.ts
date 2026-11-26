@@ -1,4 +1,4 @@
-import { describe, it } from '@zukhruf/testing/node';
+import { describe, it } from '@zukhruf/parameterized-test';
 import assert from 'node:assert';
 
 import { ContextEngine, assistantText, user } from '@deepagents/context';
