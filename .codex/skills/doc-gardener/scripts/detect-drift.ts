@@ -53,18 +53,15 @@ const EXCLUDED_DIRS = new Set([
 const LINK_REGEX = /\[[^\]]+\]\(([^)]+)\)/g;
 const HEADING_REGEX = /^#{1,6}\s+(.+)$/gm;
 
-let findingCounter = 0;
-
-function nextFindingId(prefix: string): string {
-  findingCounter += 1;
-  return `${prefix}-${String(findingCounter).padStart(4, '0')}`;
+function nextFindingId(prefix: string, findings: SkillFinding[]): string {
+  return `${prefix}-${String(findings.length + 1).padStart(4, '0')}`;
 }
 
 function slugifyHeading(input: string): string {
   return input
     .trim()
     .toLowerCase()
-    .replace(/[`~!@#$%^&*()+={}\[\]|\\:;"'<>,.?/]/g, '')
+    .replace(/[`~!@#$%^&*()+={}[\]|\\:;"'<>,.?/]/g, '')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-');
 }
@@ -187,10 +184,14 @@ async function runCommand(
     });
     return { code: 0, output: `${stdout}${stderr}`.trim() };
   } catch (error) {
-    const err = error as { stdout?: string; stderr?: string; code?: number };
+    if (!Error.isError(error)) throw error;
+    const stdout =
+      'stdout' in error && typeof error.stdout === 'string' ? error.stdout : '';
+    const stderr =
+      'stderr' in error && typeof error.stderr === 'string' ? error.stderr : '';
     return {
-      code: typeof err.code === 'number' ? err.code : 1,
-      output: `${err.stdout ?? ''}${err.stderr ?? ''}`.trim(),
+      code: 'code' in error && typeof error.code === 'number' ? error.code : 1,
+      output: `${stdout}${stderr}`.trim(),
     };
   }
 }
@@ -378,7 +379,7 @@ async function detectApiDrift(
     if (missing.length === 0) continue;
 
     findings.push({
-      id: nextFindingId('api'),
+      id: nextFindingId('api', findings),
       title: `Missing exported API coverage for ${dir.name}`,
       category: 'api-drift',
       severity: 'medium',
@@ -429,7 +430,7 @@ async function detectBehaviorDrift(
   if (result.code === 0) return;
 
   findings.push({
-    id: nextFindingId('behavior'),
+    id: nextFindingId('behavior', findings),
     title: 'Behavior drift signal from failing test gate',
     category: 'behavior-drift',
     severity: 'high',
@@ -458,10 +459,10 @@ async function detectMetaIntegrity(
 
     let parsed: { pages?: string[] };
     try {
-      parsed = JSON.parse(raw) as { pages?: string[] };
+      parsed = JSON.parse(raw);
     } catch {
       findings.push({
-        id: nextFindingId('meta'),
+        id: nextFindingId('meta', findings),
         title: 'Invalid meta.json',
         category: 'docs-integrity',
         severity: 'high',
@@ -473,13 +474,12 @@ async function detectMetaIntegrity(
       continue;
     }
 
-    const hasExplicitPages = Array.isArray(parsed.pages);
-    const pages = hasExplicitPages ? parsed.pages : [];
+    const pages = parsed.pages;
     const directory = path.dirname(metaPath);
     const docsInDir = await collectMetaPageCandidates(directory);
     const docsSet = new Set(docsInDir);
 
-    if (!hasExplicitPages) {
+    if (!Array.isArray(pages)) {
       evidence.push({
         type: 'analysis',
         label: `meta-integrity:${path.relative(input.cwd, metaPath)}`,
@@ -499,7 +499,7 @@ async function detectMetaIntegrity(
       if (!docsSet.has(page)) {
         missingCount += 1;
         findings.push({
-          id: nextFindingId('meta-missing'),
+          id: nextFindingId('meta-missing', findings),
           title: `meta.json references missing page: ${page}`,
           category: 'docs-integrity',
           severity: 'high',
@@ -518,7 +518,7 @@ async function detectMetaIntegrity(
     for (const doc of docsInDir) {
       if (!referencedPages.has(doc)) {
         findings.push({
-          id: nextFindingId('meta-orphan'),
+          id: nextFindingId('meta-orphan', findings),
           title: `Orphan doc not listed in meta.json: ${doc}`,
           category: 'docs-integrity',
           severity: 'medium',
@@ -572,7 +572,7 @@ async function detectLinkIntegrity(
 
         const suggestion = pickClosestAnchor(anchor, headings);
         findings.push({
-          id: nextFindingId('anchor'),
+          id: nextFindingId('anchor', findings),
           title: 'Broken internal anchor',
           category: 'docs-integrity',
           severity: 'medium',
@@ -598,7 +598,7 @@ async function detectLinkIntegrity(
       const resolved = await resolvePathCandidates(resolvedBase);
       if (!resolved) {
         findings.push({
-          id: nextFindingId('link'),
+          id: nextFindingId('link', findings),
           title: 'Broken document link',
           category: 'docs-integrity',
           severity: 'medium',
@@ -618,7 +618,7 @@ async function detectLinkIntegrity(
         if (!targetHeadings.includes(normalized)) {
           const suggestion = pickClosestAnchor(rawAnchor, targetHeadings);
           findings.push({
-            id: nextFindingId('link-anchor'),
+            id: nextFindingId('link-anchor', findings),
             title: 'Broken link anchor in target document',
             category: 'docs-integrity',
             severity: 'medium',
@@ -661,7 +661,6 @@ function dedupeFindings(findings: SkillFinding[]): SkillFinding[] {
 export async function detectDrift(
   input: DetectDriftInput,
 ): Promise<DetectDriftResult> {
-  findingCounter = 0;
   const findings: SkillFinding[] = [];
   const evidence: SkillEvidence[] = [];
 

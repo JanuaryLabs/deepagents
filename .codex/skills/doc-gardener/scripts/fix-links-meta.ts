@@ -27,7 +27,7 @@ function slugifyHeading(input: string): string {
   return input
     .trim()
     .toLowerCase()
-    .replace(/[`~!@#$%^&*()+={}\[\]|\\:;"'<>,.?/]/g, '')
+    .replace(/[`~!@#$%^&*()+={}[\]|\\:;"'<>,.?/]/g, '')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-');
 }
@@ -206,7 +206,7 @@ function fixMetaFiles(cwd: string, fixesApplied: FixRecord[]): void {
     const raw = fs.readFileSync(metaPath, 'utf8');
     let meta: { pages?: string[] };
     try {
-      meta = JSON.parse(raw) as { pages?: string[] };
+      meta = JSON.parse(raw);
     } catch {
       continue;
     }
@@ -310,7 +310,7 @@ function fixLinksAndAnchors(cwd: string, fixesApplied: FixRecord[]): void {
 
         let nextAnchor = anchorPart;
         if (anchorPart) {
-          let targetFile: string | null = null;
+          let targetFile: string | null;
           if (nextPath.startsWith('/docs/')) {
             targetFile = resolveCandidate(
               path.join(cwd, 'apps', 'docs', 'app', nextPath),

@@ -71,8 +71,8 @@ function parseArgs(argv: string[], cwd: string): RunOptions {
     }
   }
 
-  const modeValue = (args.get('mode') ?? 'on-demand') as Mode;
-  const mode: Mode = modeValue === 'scheduled' ? 'scheduled' : 'on-demand';
+  const mode: Mode =
+    args.get('mode') === 'scheduled' ? 'scheduled' : 'on-demand';
   const base = args.get('base') ?? 'origin/main';
   const head = args.get('head') ?? 'HEAD';
   const apply = parseBoolean(args.get('apply'), true);
@@ -106,10 +106,14 @@ async function runCommand(
     });
     return { code: 0, output: `${stdout}${stderr}`.trim() };
   } catch (error) {
-    const err = error as { stdout?: string; stderr?: string; code?: number };
+    if (!Error.isError(error)) throw error;
+    const stdout =
+      'stdout' in error && typeof error.stdout === 'string' ? error.stdout : '';
+    const stderr =
+      'stderr' in error && typeof error.stderr === 'string' ? error.stderr : '';
     return {
-      code: typeof err.code === 'number' ? err.code : 1,
-      output: `${err.stdout ?? ''}${err.stderr ?? ''}`.trim(),
+      code: 'code' in error && typeof error.code === 'number' ? error.code : 1,
+      output: `${stdout}${stderr}`.trim(),
     };
   }
 }
@@ -292,7 +296,7 @@ export async function runDocGardener(
     ...partial,
     cwd,
     reportDir: partial.reportDir ?? defaults.reportDir,
-    mode: (partial.mode ?? defaults.mode) as Mode,
+    mode: partial.mode ?? defaults.mode,
     base: partial.base ?? defaults.base,
     head: partial.head ?? defaults.head,
     apply: partial.apply ?? defaults.apply,

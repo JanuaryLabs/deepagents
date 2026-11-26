@@ -223,14 +223,12 @@ test('autofix corrects meta drift and broken links', async () => {
     reportDir: path.join(root, 'artifacts', 'doc-gardener', 'autofix'),
   });
 
-  const meta = JSON.parse(
+  const meta: { pages: string[] } = JSON.parse(
     readFileSync(
       path.join(root, 'apps', 'docs', 'app', 'docs', 'agent', 'meta.json'),
       'utf8',
     ),
-  ) as {
-    pages: string[];
-  };
+  );
   const indexContent = readFileSync(
     path.join(root, 'apps', 'docs', 'app', 'docs', 'agent', 'index.mdx'),
     'utf8',
@@ -352,15 +350,17 @@ test('autofix preserves sectioned meta ordering and directory pages', async () =
     reportDir: path.join(root, 'artifacts', 'doc-gardener', 'sectioned-meta'),
   });
 
-  const agentMeta = JSON.parse(
+  const agentMeta: { pages: string[] } = JSON.parse(
     readFileSync(
       path.join(root, 'apps', 'docs', 'app', 'docs', 'agent', 'meta.json'),
       'utf8',
     ),
-  ) as {
-    pages: string[];
-  };
-  const orchestratorMeta = JSON.parse(
+  );
+  const orchestratorMeta: {
+    title: string;
+    root: boolean;
+    pages?: string[];
+  } = JSON.parse(
     readFileSync(
       path.join(
         root,
@@ -373,11 +373,7 @@ test('autofix preserves sectioned meta ordering and directory pages', async () =
       ),
       'utf8',
     ),
-  ) as {
-    title: string;
-    root: boolean;
-    pages?: string[];
-  };
+  );
 
   assert.equal(report.exitStatus, 'ok');
   assert.equal(report.unresolved.length, 0);
