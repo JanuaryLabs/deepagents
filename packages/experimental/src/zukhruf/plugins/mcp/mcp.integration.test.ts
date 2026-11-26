@@ -5,8 +5,9 @@ import { HttpServer } from '@zukhruf/testing/http';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import test from 'node:test';
+import { setTimeout } from 'node:timers/promises';
 
 import {
   InMemoryContextStore,
@@ -42,11 +43,32 @@ function adapters(resources: AsyncDisposableStack) {
 
 interface McpServerOptions {
   /** The tool names `tools/list` returns, or undefined to fail discovery. */
-  tools(): string[] | undefined;
-  /** Answers `tools/call` with the returned text. */
-  call(name: string, text: string): string;
+  tools(): string[] | undefined | Promise<never>;
+  /**
+   * Answers `tools/call` with the returned text. `disconnected` aborts when
+   * the client drops the call's connection before the answer.
+   */
+  call(
+    name: string,
+    text: string,
+    disconnected: AbortSignal,
+  ): string | Promise<string>;
+  /**
+   * The server answers `initialize` once this settles. `disconnected` aborts
+   * when the client drops the handshake's connection first.
+   */
+  handshake?(disconnected: AbortSignal): Promise<void>;
   sessions?: string[];
   closed?: string[];
+}
+
+/** Aborts when the client drops the connection before the response ends. */
+function disconnectedSignal(response: ServerResponse) {
+  const disconnected = new AbortController();
+  response.once('close', () => {
+    if (!response.writableFinished) disconnected.abort();
+  });
+  return disconnected.signal;
 }
 
 /** A real Streamable HTTP MCP server whose tools each take `{ text }`. */
@@ -79,8 +101,10 @@ async function startMcpServer(options: McpServerOptions) {
           result,
         }),
       );
-    const tools = message.method === 'tools/list' ? options.tools() : undefined;
+    const tools =
+      message.method === 'tools/list' ? await options.tools() : undefined;
     if (message.method === 'initialize') {
+      await options.handshake?.(disconnectedSignal(response));
       const session = crypto.randomUUID();
       options.sessions?.push(session);
       response.setHeader('mcp-session-id', session);
@@ -102,17 +126,12 @@ async function startMcpServer(options: McpServerOptions) {
         })),
       });
     } else if (message.method === 'tools/call') {
-      reply({
-        content: [
-          {
-            type: 'text',
-            text: options.call(
-              message.params.name,
-              message.params.arguments.text,
-            ),
-          },
-        ],
-      });
+      const text = await options.call(
+        message.params.name,
+        message.params.arguments.text,
+        disconnectedSignal(response),
+      );
+      reply({ content: [{ type: 'text', text }] });
     } else {
       response.end(
         JSON.stringify({
@@ -139,11 +158,14 @@ function connectTo(server: { origin: string }) {
 /**
  * Runs one turn of a root agent with the given plugins. The model calls the
  * tools in `toolCalls` on its first step and answers on its second; returns
- * the tool names the model was offered and the tool results it read.
+ * the tool names the model was offered and the tool results it read. Once
+ * `cancel.when` settles, the turn is cancelled through its observation, and
+ * the runtime stays up until `cancel.observed` settles.
  */
 async function runTurn(
   plugins: ReturnType<typeof mcp>[],
   toolCalls: { toolName: string; text: string }[] = [],
+  cancel?: { when: Promise<unknown>; observed: Promise<unknown> },
 ) {
   const offered: string[][] = [];
   const model = new MockLanguageModelV4({
@@ -203,16 +225,17 @@ async function runTurn(
     await runtime.initialize(defineStack(async () => ({ storage }))),
   );
   resources.use(await host.work());
-  const { stream } = await host.enqueue(
-    { chatId: 'mcp', userId: 'test' },
-    {
-      message: {
-        id: 'request',
-        role: 'user',
-        parts: [{ type: 'text', text: 'Use the tools.' }],
-      },
-      trigger: 'submit-message',
+  const conversation = { chatId: 'mcp', userId: 'test' };
+  const { stream } = await host.enqueue(conversation, {
+    message: {
+      id: 'request',
+      role: 'user',
+      parts: [{ type: 'text', text: 'Use the tools.' }],
     },
+    trigger: 'submit-message',
+  });
+  const cancelled = cancel?.when.then(() =>
+    host.observe(conversation).cancel(),
   );
   const results: unknown[] = [];
   for await (const part of stream) {
@@ -222,7 +245,36 @@ async function runTurn(
     }
     if (part.type === 'tool-output-available') results.push(part.output);
   }
+  await cancelled;
+  await cancel?.observed;
   return { offered, results };
+}
+
+/** Initializes a runtime whose root agent has only the given plugin. */
+async function initialize(plugin: ReturnType<typeof mcp>) {
+  const runtime = new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: new MockLanguageModelV4(),
+      instructions: [],
+      sandbox: defineSandbox(new VirtualSandboxEnvironment()),
+      plugins: [plugin],
+    }),
+  );
+  return runtime.initialize(
+    defineStack(async (resources) => ({
+      storage: new ControlledAgentStorage(adapters(resources)),
+    })),
+  );
+}
+
+/** Resolves on the server's first DELETE, the client closing its session. */
+function sessionDeleted(server: { server: Server }) {
+  return new Promise<void>((resolve) =>
+    server.server.on('request', (request: IncomingMessage) => {
+      if (request.method === 'DELETE') resolve();
+    }),
+  );
 }
 
 /** The MCP tool names the model is offered, sorted. */
@@ -467,3 +519,203 @@ test('two tools that sanitize to the same name get distinct names that every run
     'tool_name:underscore',
   ]);
 });
+
+test(
+  'a tool call the server never answers ends at toolTimeoutMs with the error result Codex gives, while a call beside it answers and the turn goes on',
+  { timeout: 10_000 },
+  async () => {
+    const dropped = Promise.withResolvers<void>();
+    await using server = await startMcpServer({
+      tools: () => ['slow', 'fast'],
+      call(name, text, disconnected) {
+        if (name === 'fast') return `fast ${text}`;
+        disconnected.addEventListener('abort', () => dropped.resolve());
+        return new Promise<never>(() => {});
+      },
+    });
+
+    const { offered, results } = await runTurn(
+      [
+        mcp({
+          name: 'alpha',
+          connect: connectTo(server),
+          toolTimeoutMs: 1_500,
+        }),
+      ],
+      [
+        { toolName: 'mcp__alpha__slow', text: 'x' },
+        { toolName: 'mcp__alpha__fast', text: 'y' },
+      ],
+    );
+
+    assert.deepStrictEqual(results, [
+      { content: [{ type: 'text', text: 'fast y' }], isError: false },
+      {
+        content: [
+          {
+            type: 'text',
+            text: 'tool call error: tool call failed for `alpha/slow`\n\nCaused by:\n    timed out awaiting tools/call after 2s',
+          },
+        ],
+        isError: true,
+      },
+    ]);
+    assert.equal(offered.length, 2, 'the model reads the result and answers');
+    await dropped.promise;
+  },
+);
+
+test(
+  'a tool call answered within toolTimeoutMs returns the server answer',
+  { timeout: 10_000 },
+  async () => {
+    await using server = await startMcpServer({
+      tools: () => ['slow'],
+      async call(_name, text) {
+        await setTimeout(300);
+        return `late ${text}`;
+      },
+    });
+
+    const { results } = await runTurn(
+      [
+        mcp({
+          name: 'alpha',
+          connect: connectTo(server),
+          toolTimeoutMs: 2_000,
+        }),
+      ],
+      [{ toolName: 'mcp__alpha__slow', text: 'answer' }],
+    );
+
+    assert.deepStrictEqual(results, [
+      { content: [{ type: 'text', text: 'late answer' }], isError: false },
+    ]);
+  },
+);
+
+test(
+  'cancelling the turn drops a pending tool call at once',
+  { timeout: 10_000 },
+  async () => {
+    const arrived = Promise.withResolvers<void>();
+    const dropped = Promise.withResolvers<void>();
+    await using server = await startMcpServer({
+      tools: () => ['slow'],
+      call(_name, _text, disconnected) {
+        disconnected.addEventListener('abort', () => dropped.resolve());
+        arrived.resolve();
+        return new Promise<never>(() => {});
+      },
+    });
+
+    const { results } = await runTurn(
+      [
+        mcp({
+          name: 'alpha',
+          connect: connectTo(server),
+          toolTimeoutMs: 60_000,
+        }),
+      ],
+      [{ toolName: 'mcp__alpha__slow', text: 'x' }],
+      { when: arrived.promise, observed: dropped.promise },
+    );
+
+    assert.deepStrictEqual(results, []);
+  },
+);
+
+test(
+  'a server that never answers the handshake fails runtime start at connectTimeoutMs, and the connect factory gets the deadline signal',
+  { timeout: 10_000 },
+  async () => {
+    const dropped = Promise.withResolvers<void>();
+    await using server = await startMcpServer({
+      tools: () => ['echo'],
+      call: (_name, text) => text,
+      handshake(disconnected) {
+        disconnected.addEventListener('abort', () => dropped.resolve());
+        return new Promise<never>(() => {});
+      },
+    });
+
+    await assert.rejects(
+      initialize(
+        mcp({
+          name: 'alpha',
+          connect: ({ signal }) =>
+            createMCPClient({
+              transport: { type: 'http', url: server.origin },
+              initializationOptions: { signal },
+            }),
+          connectTimeoutMs: 1_500,
+        }),
+      ),
+      {
+        message:
+          'required MCP servers failed to initialize: alpha: MCP client startup timed out after 1.5s',
+      },
+    );
+    await dropped.promise;
+  },
+);
+
+test(
+  'a connect factory that ignores the deadline still fails runtime start at connectTimeoutMs, and the client it delivers late is closed',
+  { timeout: 10_000 },
+  async () => {
+    const release = Promise.withResolvers<void>();
+    await using server = await startMcpServer({
+      tools: () => ['echo'],
+      call: (_name, text) => text,
+      handshake: () => release.promise,
+    });
+    const deleted = sessionDeleted(server);
+
+    await assert.rejects(
+      initialize(
+        mcp({
+          name: 'alpha',
+          connect: () =>
+            createMCPClient({
+              transport: { type: 'http', url: server.origin },
+            }),
+          connectTimeoutMs: 300,
+        }),
+      ),
+      {
+        message:
+          'required MCP servers failed to initialize: alpha: MCP client startup timed out after 300ms',
+      },
+    );
+    release.resolve();
+    await deleted;
+  },
+);
+
+test(
+  'a server that never lists its tools fails runtime start at connectTimeoutMs and its client is closed',
+  { timeout: 10_000 },
+  async () => {
+    await using server = await startMcpServer({
+      tools: () => new Promise<never>(() => {}),
+      call: (_name, text) => text,
+    });
+    const deleted = sessionDeleted(server);
+
+    await assert.rejects(
+      initialize(
+        mcp({
+          name: 'alpha',
+          connect: connectTo(server),
+          connectTimeoutMs: 2_400,
+        }),
+      ),
+      {
+        message:
+          'required MCP servers failed to initialize: alpha: timed out awaiting tools/list after 2s',
+      },
+    );
+    await deleted;
+  },
+);

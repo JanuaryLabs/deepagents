@@ -333,6 +333,17 @@ and closes the client when that host is disposed. The model sees each tool as
 sanitize to, gets a 12-hex sha1 suffix. Calls still reach the server under the
 tool's own name, so two servers that both expose `search` run side by side.
 
+Codex's MCP timeouts apply per server. `connectTimeoutMs` (default 30000)
+bounds connecting and, separately, listing the tools; a server that misses it
+fails host initialization with `required MCP servers failed to initialize:
+<name>: MCP client startup timed out after 30s`. `connect` receives
+`{ signal }`, which aborts at that deadline: pass it to `createMCPClient` as
+`initializationOptions.signal` so the handshake stops too. `toolTimeoutMs`
+(default 300000) bounds each call; a call that outlasts it returns an
+error-flagged result, `timed out awaiting tools/call after 300s`, which the
+model reads while the turn goes on. Cancelling the turn still aborts a pending
+call at once.
+
 Runnable end-to-end showcases live in
 [`demo/zukhruf-simple`](../../demo/zukhruf-simple) (the smallest complete
 deployable unit),

@@ -1064,6 +1064,17 @@ native`AsyncDisposableStack`passed to the recipe owns registered resources. Cons
   in every process. The MCP call still sends the tool's own name. The old raw names are gone.
   One plugin is one server, so Codex's namespace suffix for two servers that sanitize alike
   (`my-server`, `my_server`) is not ported: their tools of the same name conflict at composition.
+- MCP timeouts are Codex's (`codex-rs/codex-mcp/src/rmcp_client.rs` `DEFAULT_STARTUP_TIMEOUT` 30 s,
+  `DEFAULT_TOOL_TIMEOUT` 300 s; per-server fallback in `connection_manager.rs`), in ms per this
+  repo: `connectTimeoutMs` and `toolTimeoutMs`. Connecting and listing tools each get
+  `AbortSignal.timeout(connectTimeoutMs)`; `connect` receives that signal, and the plugin also
+  races it, closing a client a factory delivers late. Every mcp() server is what Codex calls
+  `required` (startup failure already failed initialization), so a startup timeout rejects
+  initialization with Codex's required-server text (`connection_manager/required.rs`). Each call
+  runs on `AbortSignal.any([turn, AbortSignal.timeout(toolTimeoutMs)])`; when only the deadline
+  fired, the tool returns `CallToolResult::from_error_text` of Codex's `tool call error: …
+timed out awaiting tools/call after <d>` (`core/src/mcp_tool_call.rs`) with `isError: true`.
+  A turn cancel rethrows as before.
 
 ## Sandbox idle stop _(Built, #5132)_
 
