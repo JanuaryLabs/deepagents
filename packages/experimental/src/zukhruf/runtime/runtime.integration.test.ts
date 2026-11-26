@@ -1581,7 +1581,7 @@ describe('zukhruf runtime — background executor', () => {
 
     assert.equal(modelPrompts.length, 2);
     for (const prompt of modelPrompts) {
-      assert.match(prompt, /<available_skills>/);
+      assert.match(prompt, /<skills_instructions>/);
       assert.match(prompt, /Forecast sales from historical data/);
       assert.match(prompt, /skills\/forecast-sales\/SKILL\.md/);
     }
@@ -1656,7 +1656,7 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal(discoveryCount, 1);
     assert.equal(modelPrompts.length, 2);
     for (const prompt of modelPrompts) {
-      assert.match(prompt, /<available_skills>/);
+      assert.match(prompt, /<skills_instructions>/);
       assert.match(prompt, /Use a skill installed by the sandbox provider/);
       assert.match(prompt, /skills\/preinstalled\/SKILL\.md/);
     }
@@ -1701,7 +1701,7 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal(await collectText(result.stream), 'ok');
     assert.equal(discoveryCount, 1);
     assert.equal(modelPrompts.length, 1);
-    assert.doesNotMatch(modelPrompts[0], /<available_skills>/);
+    assert.doesNotMatch(modelPrompts[0], /<skills_instructions>/);
   });
 
   it('resolves sandbox-bound instruction fragments with the sandbox that the turns of one chat share', async () => {

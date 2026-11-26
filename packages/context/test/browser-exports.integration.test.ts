@@ -44,11 +44,19 @@ describe('browser export path', () => {
       },
     ];
 
-    const output = render('instructions', skills(availableSkills));
+    const lines = new XmlRenderer()
+      .render([skills(availableSkills)])
+      .split('\n');
 
-    assert.ok(output.includes('<available_skills>'));
-    assert.ok(output.includes('<name>deploy</name>'));
-    assert.ok(output.includes('<path>/skills/deploy/SKILL.md</path>'));
+    assert.deepStrictEqual(
+      [lines[0], lines[1], lines[4], lines.at(-1)],
+      [
+        '<skills_instructions>',
+        '## Skills',
+        '- deploy: Deploy services to production. (file: /skills/deploy/SKILL.md)',
+        '</skills_instructions>',
+      ],
+    );
   });
 
   it('supports reminder metadata helpers through browser entrypoint', async () => {

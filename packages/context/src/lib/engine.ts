@@ -1639,15 +1639,11 @@ export class ContextEngine {
     return child;
   }
 
-  /** Return the explicit skills from the first available_skills fragment. */
+  /** Return the explicit skills from the first skills() catalog fragment. */
   public getAvailableSkills(): AvailableSkill[] {
     for (const fragment of this.#fragments) {
       const skills = fragment.metadata?.skills;
-      if (
-        fragment.name === 'available_skills' &&
-        Array.isArray(skills) &&
-        skills.every(isAvailableSkill)
-      ) {
+      if (Array.isArray(skills) && skills.every(isAvailableSkill)) {
         return skills.map(({ name, description, path }) => ({
           name,
           description,

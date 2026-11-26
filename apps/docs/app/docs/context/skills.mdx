@@ -107,11 +107,24 @@ const context = new ContextEngine({
 }).set(role('You are a helpful assistant.'), skills(availableSkills));
 ```
 
-The fragment renders:
+The fragment renders Codex's skills catalog as written, in every renderer:
 
-1. instructions explaining progressive disclosure and trigger rules; and
-2. one `skill` entry per supplied item, containing `name`, `description`, and
-   `path`.
+```text
+<skills_instructions>
+## Skills
+A skill is a set of instructions provided through a `SKILL.md` source. ...
+### Available skills
+- deploy: Deploy services to production. (file: /skills/deploy/SKILL.md)
+### How to use skills
+- Discovery: The list above is the skills available in this session ...
+...
+</skills_instructions>
+```
+
+Each supplied item becomes one `- name: description (file: path)` line, or
+`- name: (file: path)` when its description is empty. With no skills the
+fragment renders nothing. Like every `verbatim()` fragment, it renders only at
+the top level of a context: pass it to `set()`, not inside another fragment.
 
 It does not check that paths exist. File accessibility remains the
 application's responsibility.
@@ -119,7 +132,7 @@ application's responsibility.
 ## Read the Catalog from Context
 
 `ContextEngine.getAvailableSkills()` returns the catalog stored by the first
-`available_skills` fragment:
+`skills()` fragment:
 
 ```typescript
 const catalog = context.getAvailableSkills();
