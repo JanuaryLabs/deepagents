@@ -558,9 +558,12 @@ function daytonaSession(args: {
   return {
     description: `Commands run through bash -lc in a Daytona sandbox, starting in ${workdir}.`,
     run: async (options) => {
-      const { command, abortSignal } = options;
+      const { command, abortSignal, maxOutputLength } = options;
       abortSignal?.throwIfAborted();
-      if (abortSignal) return collect(await spawn(options));
+      // process.run buffers the whole output, so a bounded run streams through spawn.
+      if (abortSignal || maxOutputLength !== undefined) {
+        return collect(await spawn(options), maxOutputLength);
+      }
       const result = await reach(() =>
         sandbox.process.run(command, processOptions(options)),
       );

@@ -673,7 +673,8 @@ function microsandboxSession({
 
   return {
     description: `Commands run through bash -lc in a Microsandbox microVM, starting in ${workdir}.`,
-    run: async (options) => collect(await spawn(options)),
+    run: async (options) =>
+      collect(await spawn(options), options.maxOutputLength),
     spawn,
     readBinaryFile,
     readFile: async ({ path, abortSignal }) => {

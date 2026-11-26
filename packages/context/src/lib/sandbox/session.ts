@@ -1,5 +1,6 @@
 import {
   type Experimental_SandboxProcess,
+  createTextOutputCapture,
   extractLines,
 } from '@ai-sdk/provider-utils';
 import { hash } from 'node:crypto';
@@ -226,16 +227,48 @@ export function controlProcess({
   };
 }
 
-/** Reads a spawned process to its end, as `run` returns it. */
+/**
+ * Reads a spawned process to its end, as `run` returns it. With
+ * `maxOutputLength` it keeps only that prefix of each stream and reports the
+ * full lengths: the AI SDK sandbox contract's bounded output.
+ */
 export async function collect(
   process: Experimental_SandboxProcess,
+  maxOutputLength: number | undefined,
 ): Promise<CommandResult> {
+  if (maxOutputLength === undefined) {
+    const [stdout, stderr, { exitCode }] = await Promise.all([
+      text(process.stdout),
+      text(process.stderr),
+      process.wait(),
+    ]);
+    return { stdout, stderr, exitCode };
+  }
   const [stdout, stderr, { exitCode }] = await Promise.all([
-    text(process.stdout),
-    text(process.stderr),
+    capture(process.stdout, maxOutputLength),
+    capture(process.stderr, maxOutputLength),
     process.wait(),
   ]);
-  return { stdout, stderr, exitCode };
+  return {
+    stdout: stdout.text,
+    stdoutLength: stdout.length,
+    stderr: stderr.text,
+    stderrLength: stderr.length,
+    exitCode,
+  };
+}
+
+async function capture(
+  stream: ReadableStream<Uint8Array>,
+  maxLength: number,
+): Promise<ReturnType<typeof createTextOutputCapture>> {
+  const output = createTextOutputCapture({ maxLength });
+  const decoder = new TextDecoder();
+  for await (const chunk of stream) {
+    output.append(decoder.decode(chunk, { stream: true }));
+  }
+  output.append(decoder.decode());
+  return output;
 }
 
 interface ByteReadable {

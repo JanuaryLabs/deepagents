@@ -436,12 +436,17 @@ export function containerSession(
   return {
     description: `Commands run through bash -lc in a Linux container, starting in ${container.workdir}.`,
     run: async (options) => {
-      const { command, abortSignal } = options;
+      const { command, abortSignal, maxOutputLength } = options;
       abortSignal?.throwIfAborted();
-      if (!abortSignal && !container.commandTimeout) {
+      // exec buffers the whole output, so a bounded run streams through spawn.
+      if (
+        !abortSignal &&
+        !container.commandTimeout &&
+        maxOutputLength === undefined
+      ) {
         return container.exec(['bash', '-lc', command], scope(options));
       }
-      return collect(await spawn(options));
+      return collect(await spawn(options), maxOutputLength);
     },
     spawn,
     readBinaryFile,

@@ -224,6 +224,27 @@ describe('strace file-change tracking (docker backend)', () => {
     });
   });
 
+  it('still reports file changes when a bounded run keeps only a prefix of the output', async () => {
+    await withSandbox(async (s, rec) => {
+      const r = await s.sandbox.run({
+        command: `printf 0123456789; echo hi > ${ROOT}/bounded.txt`,
+        maxOutputLength: 3,
+      });
+      assert.deepStrictEqual(
+        [r.exitCode, r.stdout, r.stdoutLength],
+        [0, '012', 10],
+        r.stderr,
+      );
+      const changes = rec.drain();
+      assert.ok(
+        changes.some(
+          (c) => c.op === 'write' && c.path === `${ROOT}/bounded.txt`,
+        ),
+        JSON.stringify(changes),
+      );
+    });
+  });
+
   it('preserves Bash semantics through the public bash tool', async () => {
     await withSandbox(async ({ bash }) => {
       const execute = bash.execute;

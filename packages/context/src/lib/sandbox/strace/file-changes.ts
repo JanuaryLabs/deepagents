@@ -1,9 +1,10 @@
-import type {
-  Experimental_SandboxProcess,
-  Experimental_SandboxSpawnOptions,
-  Experimental_SandboxSpawnOptionsWithStdin,
-  Experimental_SandboxSpawnOptionsWithoutStdin,
-  Experimental_WritableSandboxProcess,
+import {
+  type Experimental_SandboxProcess,
+  type Experimental_SandboxSpawnOptions,
+  type Experimental_SandboxSpawnOptionsWithStdin,
+  type Experimental_SandboxSpawnOptionsWithoutStdin,
+  type Experimental_WritableSandboxProcess,
+  createTextOutputCapture,
 } from '@ai-sdk/provider-utils';
 import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
@@ -23,6 +24,28 @@ import {
 export type { FileChange, FileChangeOp } from './file-change.ts';
 
 const DEFAULT_TRACE_DIR = '/tmp/dat-trace';
+
+/**
+ * The command's own output, bounded as a run with `maxOutputLength` asks. The
+ * inner run is never bounded: the trace rides on stdout after a sentinel, and
+ * a cut would lose it.
+ */
+function bounded(
+  output: { stdout: string; stderr: string },
+  maxOutputLength: number | undefined,
+): Pick<CommandResult, 'stdout' | 'stderr' | 'stdoutLength' | 'stderrLength'> {
+  if (maxOutputLength === undefined) return output;
+  const stdout = createTextOutputCapture({ maxLength: maxOutputLength });
+  const stderr = createTextOutputCapture({ maxLength: maxOutputLength });
+  stdout.append(output.stdout);
+  stderr.append(output.stderr);
+  return {
+    stdout: stdout.text,
+    stdoutLength: stdout.length,
+    stderr: stderr.text,
+    stderrLength: stderr.length,
+  };
+}
 
 /** Drop strace's own diagnostic lines (prefixed `strace: `) from captured stderr. */
 function stripStraceDiagnostics(stderr: string): string {
@@ -246,7 +269,7 @@ export async function withStraceFileChanges(
 
   return {
     description: sandbox.description,
-    async run(runOptions) {
+    async run({ maxOutputLength, ...runOptions }) {
       const traceFile = `${traceDir}/${randomUUID()}.strace`;
       const sentinel = `__dat_trace_${randomUUID()}__`;
       const wrapped = buildTracedCommand(
@@ -270,8 +293,10 @@ export async function withStraceFileChanges(
       const { stdout, trace } = splitTracedOutput(raw.stdout, sentinel);
       const result: CommandResult = {
         ...raw,
-        stdout,
-        stderr: stripStraceDiagnostics(raw.stderr),
+        ...bounded(
+          { stdout, stderr: stripStraceDiagnostics(raw.stderr) },
+          maxOutputLength,
+        ),
       };
       // On abort the caller discards this command's changes; skip onFileChanges.
       if (runOptions.abortSignal?.aborted) return result;

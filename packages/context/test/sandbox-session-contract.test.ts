@@ -688,6 +688,37 @@ void describe.each(
           assert.equal(next.stdout, '[]\n');
         });
 
+        it('keeps a prefix of each stream under maxOutputLength and reports the full lengths', async () => {
+          await using sandbox = await open();
+
+          const bounded = await sandbox.run({
+            command: 'printf abcdefgh; printf ijklmn >&2',
+            maxOutputLength: 3,
+          });
+          const unbounded = await sandbox.run({ command: 'printf abcdefgh' });
+
+          assert.deepStrictEqual(
+            {
+              stdout: bounded.stdout,
+              stdoutLength: bounded.stdoutLength,
+              stderr: bounded.stderr,
+              stderrLength: bounded.stderrLength,
+              exitCode: bounded.exitCode,
+            },
+            {
+              stdout: 'abc',
+              stdoutLength: 8,
+              stderr: 'ijk',
+              stderrLength: 6,
+              exitCode: 0,
+            },
+          );
+          assert.deepStrictEqual(
+            [unbounded.stdout, 'stdoutLength' in unbounded],
+            ['abcdefgh', false],
+          );
+        });
+
         it('streams stdout and stderr from spawn and reports the exit code', async () => {
           await using sandbox = await open();
 
