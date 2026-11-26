@@ -6,9 +6,8 @@ export interface CitationSource {
 }
 
 /**
- * Flatten all `source-url` parts across the given messages, deduped by URL,
- * preserving first-seen order. Used by both the inline CitationPill renderer
- * and the WorkspaceBody Sources panel so their numbering stays in sync.
+ * Deduped by URL in first-seen order, so a source keeps one citation number
+ * across every message of the chat.
  */
 export function extractSourcesFromMessages(
   messages: UIMessage[],
@@ -27,9 +26,8 @@ export function extractSourcesFromMessages(
 }
 
 /**
- * Look up the 1-based citation index for a given URL within a deduped source
- * list. Returns null when the URL is not present (defensive — shouldn't happen
- * in practice when the same `extractSourcesFromMessages` output is used).
+ * The 1-based citation number of `url` in `sources`, or null when `sources`
+ * does not hold it.
  */
 export function citationIndexOf(
   sources: CitationSource[],
