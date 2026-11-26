@@ -41,25 +41,25 @@ Checked on 2026-11-26 against `ai@7.0.183` ([vercel/ai@0411a13d](https://github.
 
 ## Filed
 
-| Item  | Rows                    | Action                                                              |
-| ----- | ----------------------- | ------------------------------------------------------------------- |
-| #5802 | C1, C2, C7, C45         | Build the context `Agent` on `ToolLoopAgent`                        |
-| #5803 | C10                     | `chat()` builds its stream with `createAgentUIStream` (after #5802) |
-| #5804 | C6, C11                 | Delete tool-error branches that ai v7 no longer raises              |
-| #5805 | C4, C17, X14            | Mailbox input through `experimental_createSteering`                 |
-| #5806 | P1, P3, X6              | Native compaction for Anthropic and OpenAI Responses                |
-| #5807 | X13                     | Delete `settleDeniedApprovals`                                      |
-| #5808 | X24                     | Closed: keep the plugin's connect race (probe)                      |
-| #5809 | C33                     | Pass `maxOutputLength` through to `@ai-sdk/tool-bash`               |
-| #5810 | C29                     | Shrink telemetry redaction to the headers                           |
-| #5811 | T1, T3, T4              | Done: unused toolbox tools deleted                                  |
-| #5812 | G3, G4                  | `useChat` `experimental_queue`                                      |
-| #5813 | G9, G10                 | Delete unused `PromptInput` and `DynamicRenderer`                   |
-| #5814 | G7                      | streamdown 2.8.1                                                    |
-| #5815 | O1–O5                   | Orchestrator: delete or port (owner question)                       |
-| #5816 | A1, A2, A4–A7, C44, S10 | Move consumers off legacy `@deepagents/agent`                       |
-| #5817 | X33                     | Token vault breaks the multi-process rule                           |
-| #5818 | none                    | Lint ban on Vercel Workflow and eve imports                         |
+| Item  | Rows                    | Action                                                                |
+| ----- | ----------------------- | --------------------------------------------------------------------- |
+| #5802 | C1, C2, C7, C45         | Build the context `Agent` on `ToolLoopAgent`                          |
+| #5803 | C10                     | `chat()` builds its stream with `createAgentUIStream` (after #5802)   |
+| #5804 | C6, C11                 | Delete tool-error branches that ai v7 no longer raises                |
+| #5805 | C4, C17, X14            | Mailbox input through `experimental_createSteering`                   |
+| #5806 | P1, P3, X6              | Native compaction for Anthropic and OpenAI Responses                  |
+| #5807 | X13                     | Delete `settleDeniedApprovals`                                        |
+| #5808 | X24                     | Closed: keep the plugin's connect race (probe)                        |
+| #5809 | C33                     | Done: `maxOutputLength` reaches `@ai-sdk/tool-bash` and every backend |
+| #5810 | C29                     | Done: telemetry redaction keeps only the headers                      |
+| #5811 | T1, T3, T4              | Done: unused toolbox tools deleted                                    |
+| #5812 | G3, G4                  | Done: `useChat` `experimental_queue` owns the queue                   |
+| #5813 | G9, G10                 | Done: unused `PromptInput` and `DynamicRenderer` deleted              |
+| #5814 | G7                      | Done: streamdown 2.8.1                                                |
+| #5815 | O1–O5                   | Orchestrator: delete or port (owner question)                         |
+| #5816 | A1, A2, A4–A7, C44, S10 | Move consumers off legacy `@deepagents/agent`                         |
+| #5817 | X33                     | Done: tokens and sign-ins in `PostgresAccountStore`                   |
+| #5818 | none                    | Lint ban on Vercel Workflow and eve imports                           |
 
 Already open: #5100 (A3), #5694 (A8), #4043 (C35), #5411 (the C20 copy), #3881 (retire `@deepagents/evals`, which moots V2).
 
