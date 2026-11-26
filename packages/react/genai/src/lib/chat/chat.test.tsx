@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai';
 import { useState } from 'react';
@@ -10,6 +10,7 @@ import {
   useAgentMessages,
   useAgentMeta,
 } from './agent-context.tsx';
+import { persistedPromptOf } from './chat-manager.ts';
 
 type SendRequest = Parameters<ChatTransport<UIMessage>['sendMessages']>[0];
 type ReconnectRequest = Parameters<
@@ -122,6 +123,96 @@ class HeldOpenTransport extends RecordingTransport {
     this.sends.push(request);
     return Promise.resolve(new ReadableStream<UIMessageChunk>());
   };
+}
+
+/**
+ * Answers each send with a stream that stays open until the test ends it:
+ * `finish` closes the oldest open one, `fail` errors it, and an abort errors
+ * it the way an aborted fetch does.
+ */
+class HeldStreamTransport extends RecordingTransport {
+  private readonly open: ReadableStreamDefaultController<UIMessageChunk>[] = [];
+
+  override sendMessages: ChatTransport<UIMessage>['sendMessages'] = (
+    request,
+  ) => {
+    this.sends.push(request);
+    return Promise.resolve(
+      new ReadableStream<UIMessageChunk>({
+        start: (controller) => {
+          this.open.push(controller);
+          request.abortSignal?.addEventListener(
+            'abort',
+            () => {
+              this.open.splice(this.open.indexOf(controller), 1);
+              controller.error(request.abortSignal?.reason);
+            },
+            { once: true },
+          );
+        },
+      }),
+    );
+  };
+
+  finish(): void {
+    this.open.shift()?.close();
+  }
+
+  fail(): void {
+    this.open.shift()?.enqueue({ type: 'error', errorText: 'model down' });
+  }
+}
+
+function lastUserText(request: SendRequest): string {
+  return textsOf(request.messages.filter((m) => m.role === 'user').slice(-1));
+}
+
+function Send({
+  prompt,
+  persistedPrompt = prompt,
+}: {
+  prompt: string;
+  persistedPrompt?: string;
+}) {
+  const { submit } = useAgent();
+  return (
+    <button
+      type="button"
+      onClick={() => void submit({ prompt, persistedPrompt })}
+    >
+      Send {persistedPrompt}
+    </button>
+  );
+}
+
+/** Renders the queue strip a host builds: each queued message and its Remove control. */
+function QueueProbe() {
+  const {
+    experimental_queuedMessages: queue,
+    experimental_removeQueuedMessage,
+    status,
+  } = useAgentMessages();
+  const { stop } = useAgent();
+  return (
+    <>
+      <output aria-label="status">{status}</output>
+      <output aria-label="queue">
+        {queue.map((message) => persistedPromptOf(message)).join('|')}
+      </output>
+      {queue.map((message) => (
+        <button
+          key={message.id}
+          type="button"
+          onClick={() => experimental_removeQueuedMessage(message.id)}
+        >
+          Remove {persistedPromptOf(message)}
+        </button>
+      ))}
+      <button type="button" onClick={stop}>
+        Stop
+      </button>
+    </>
+  );
 }
 
 function textsOf(messages: readonly UIMessage[]): string {
@@ -464,6 +555,141 @@ test('unmount stops the stream in flight', async () => {
     unmount();
 
     expect(request.abortSignal?.aborted).toBe(true);
+  } finally {
+    cleanup();
+  }
+});
+
+test('stop holds the queued message until the next submit, which sends it first', async () => {
+  const user = userEvent.setup();
+  const transport = new HeldStreamTransport();
+
+  try {
+    render(
+      <AgentProvider
+        chatId="chat-hold"
+        transport={transport}
+        onResetChat={() => {}}
+      >
+        <QueueProbe />
+        <Send prompt="primer" />
+        <Send prompt="queued" />
+        <Send prompt="next" />
+      </AgentProvider>,
+    );
+    await user.click(screen.getByText('Send primer'));
+    await vi.waitFor(() => {
+      expect(transport.sends).toHaveLength(1);
+    });
+    await user.click(screen.getByText('Send queued'));
+
+    await user.click(screen.getByText('Stop'));
+    await vi.waitFor(() => {
+      expect(screen.getByLabelText('status').textContent).toBe('ready');
+    });
+
+    expect(transport.sends).toHaveLength(1);
+    expect(screen.getByLabelText('queue').textContent).toBe('queued');
+
+    await user.click(screen.getByText('Send next'));
+    await vi.waitFor(() => {
+      expect(transport.sends).toHaveLength(2);
+    });
+    expect(lastUserText(transport.sends[1])).toBe('queued');
+    expect(screen.getByLabelText('queue').textContent).toBe('next');
+  } finally {
+    cleanup();
+  }
+});
+
+test('a failed response holds the queued message', async () => {
+  const user = userEvent.setup();
+  const transport = new HeldStreamTransport();
+
+  try {
+    render(
+      <AgentProvider
+        chatId="chat-error"
+        transport={transport}
+        onResetChat={() => {}}
+      >
+        <QueueProbe />
+        <Send prompt="primer" />
+        <Send prompt="queued" />
+        <Send prompt="next" />
+      </AgentProvider>,
+    );
+    await user.click(screen.getByText('Send primer'));
+    await vi.waitFor(() => {
+      expect(transport.sends).toHaveLength(1);
+    });
+    await user.click(screen.getByText('Send queued'));
+
+    await act(async () => {
+      transport.fail();
+    });
+    await vi.waitFor(() => {
+      expect(screen.getByLabelText('status').textContent).toBe('error');
+    });
+    await act(async () => {});
+
+    expect(transport.sends).toHaveLength(1);
+    expect(screen.getByLabelText('queue').textContent).toBe('queued');
+
+    await user.click(screen.getByText('Send next'));
+    await vi.waitFor(() => {
+      expect(transport.sends).toHaveLength(2);
+    });
+    expect(lastUserText(transport.sends[1])).toBe('queued');
+    expect(screen.getByLabelText('queue').textContent).toBe('next');
+  } finally {
+    cleanup();
+  }
+});
+
+test('the queue lists each message as the user typed it, and a removed one is never sent', async () => {
+  const user = userEvent.setup();
+  const transport = new HeldStreamTransport();
+  const expanded = 'List the latest conversations.\n\nfrom today';
+
+  try {
+    render(
+      <AgentProvider
+        chatId="chat-queue-view"
+        transport={transport}
+        onResetChat={() => {}}
+      >
+        <QueueProbe />
+        <Send prompt="primer" />
+        <Send prompt={expanded} persistedPrompt="/prompts:recent from today" />
+        <Send prompt="kept" />
+      </AgentProvider>,
+    );
+    await user.click(screen.getByText('Send primer'));
+    await vi.waitFor(() => {
+      expect(transport.sends).toHaveLength(1);
+    });
+    await user.click(screen.getByText('Send /prompts:recent from today'));
+    await user.click(screen.getByText('Send kept'));
+
+    expect(screen.getByLabelText('queue').textContent).toBe(
+      '/prompts:recent from today|kept',
+    );
+
+    await user.click(screen.getByText('Remove /prompts:recent from today'));
+    expect(screen.getByLabelText('queue').textContent).toBe('kept');
+
+    await act(async () => {
+      transport.finish();
+    });
+    await vi.waitFor(() => {
+      expect(transport.sends).toHaveLength(2);
+    });
+    expect(lastUserText(transport.sends[1])).toBe('kept');
+    expect(screen.getByLabelText('queue').textContent).toBe('');
+    expect(
+      transport.sends[1].messages.map((message) => textsOf([message])),
+    ).not.toContain(expanded);
   } finally {
     cleanup();
   }

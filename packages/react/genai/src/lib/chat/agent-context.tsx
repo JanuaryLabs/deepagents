@@ -16,7 +16,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from 'react';
 
 import type { ComponentRegistry } from '../tools/registry.ts';
@@ -67,7 +66,6 @@ export function AgentProvider({
   onData,
   onFinish,
   onResetChat,
-  queueEnabled = true,
 }: {
   chatId: string;
   children: ReactNode;
@@ -84,7 +82,6 @@ export function AgentProvider({
   /** Observes response termination; inspect isAbort, isDisconnect, and isError. */
   onFinish?: ChatOnFinishCallback<UIMessage<unknown, UIDataTypes, UITools>>;
   onResetChat: (chatId: string) => void;
-  queueEnabled?: boolean;
 }) {
   const agent = useAgentChatSetup({
     chatId,
@@ -111,25 +108,15 @@ export function AgentProvider({
     () =>
       new ChatManager({
         chat: agent,
-        queueEnabled,
         uploadFile: transport.uploadFile.bind(transport),
         onResetChat: forwardResetChat,
       }),
   );
   manager.bind(agent);
-  const queue = useSyncExternalStore(
-    manager.subscribe,
-    () => manager.queue,
-    () => manager.queue,
-  );
 
   useEffect(() => {
     manager.initialize(chatId);
   }, [manager, chatId]);
-
-  useEffect(() => {
-    manager.processQueue(queue);
-  }, [manager, agent.status, queue]);
 
   const managerMethods = useMemo(
     () => ({
@@ -159,7 +146,13 @@ export function AgentProvider({
   // SDK methods change with the chat ID; snapshots stay stable until updated.
   const messagesValue = useMemo(
     () => agent,
-    [agent.id, agent.messages, agent.status, agent.error],
+    [
+      agent.id,
+      agent.messages,
+      agent.status,
+      agent.error,
+      agent.experimental_queuedMessages,
+    ],
   );
 
   const hasSubmitted = !!skipInitialView || agent.messages.length > 0;

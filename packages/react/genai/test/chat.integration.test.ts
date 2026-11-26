@@ -7,13 +7,7 @@ import {
 } from 'ai';
 import { Window } from 'happy-dom';
 import assert from 'node:assert/strict';
-import {
-  type ComponentProps,
-  StrictMode,
-  act,
-  createElement,
-  useSyncExternalStore,
-} from 'react';
+import { type ComponentProps, StrictMode, act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { test } from 'vitest';
@@ -24,14 +18,20 @@ import {
   ZukhrufChatTransport,
   useAgent,
   useAgentMessages,
-  useChatManager,
 } from '@deepagents/react-genai';
 
 type ProviderProps = Omit<ComponentProps<typeof AgentProvider>, 'children'>;
 type Controls = ReturnType<typeof useAgent> &
-  ReturnType<typeof useAgentMessages> & {
-    manager: ReturnType<typeof useChatManager>;
-  };
+  ReturnType<typeof useAgentMessages>;
+
+/** The text each queued message will send, in queue order. */
+function queuedTexts(controls: Controls): string[] {
+  return controls.experimental_queuedMessages.map((message) =>
+    message.parts
+      .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+      .join(''),
+  );
+}
 
 async function mountChat(props: ProviderProps) {
   const window = new Window();
@@ -47,17 +47,17 @@ async function mountChat(props: ProviderProps) {
   );
   let controls: Controls;
   function Observe() {
-    const manager = useChatManager();
-    const queue = useSyncExternalStore(manager.subscribe, () => manager.queue);
     controls = {
       ...useAgent(),
       ...useAgentMessages(),
-      manager,
     };
     return createElement(
       'output',
       null,
-      JSON.stringify({ messages: controls.messages, queue }),
+      JSON.stringify({
+        messages: controls.messages,
+        queue: controls.experimental_queuedMessages,
+      }),
     );
   }
   const render = async (next: ProviderProps) => {
@@ -134,7 +134,7 @@ test('native chat helpers preserve initial messages during server rendering', ()
   assert.equal(html, '<output>earlier question</output>');
 });
 
-test('disconnect holds queued sends until full replay replaces partial text', async () => {
+test('a disconnect holds the queued send through the full replay, until the next submit sends it first', async () => {
   const first = new TransformStream<UIMessageChunk, UIMessageChunk>();
   const writer = first.writable.getWriter();
   const received = Promise.withResolvers<void>();
@@ -171,7 +171,10 @@ test('disconnect holds queued sends until full replay replaces partial text', as
                   sent.length === 1
                     ? replay
                     : [
-                        { type: 'start', messageId: 'assistant-2' },
+                        {
+                          type: 'start',
+                          messageId: `assistant-${sent.length}`,
+                        },
                         { type: 'finish', finishReason: 'stop' },
                       ],
                 initialDelayInMs: null,
@@ -215,10 +218,7 @@ test('disconnect holds queued sends until full replay replaces partial text', as
     });
     assert.equal(view.controls.status, 'error');
     assert.equal(sent.length, 1);
-    assert.deepEqual(
-      view.controls.manager.queue.map((m) => m.prompt),
-      ['next'],
-    );
+    assert.deepEqual(queuedTexts(view.controls), ['next']);
     assert.deepEqual(
       view.controls.messages
         .at(-1)
@@ -239,19 +239,29 @@ test('disconnect holds queued sends until full replay replaces partial text', as
           id: m.id,
           texts: m.parts.filter((p) => p.type === 'text').map((p) => p.text),
         })),
-      [
-        { id: 'assistant-1', texts: ['Hello world'] },
-        { id: 'assistant-2', texts: [] },
-      ],
+      [{ id: 'assistant-1', texts: ['Hello world'] }],
     );
     assert.deepEqual(
       sent.map((s) => s.message.parts[0].text),
-      ['hello', 'next'],
+      ['hello'],
     );
-    assert.deepEqual(view.controls.manager.queue, []);
+    assert.deepEqual(queuedTexts(view.controls), ['next']);
+
+    await act(async () => {
+      await view.controls.submit({ prompt: 'after', persistedPrompt: 'after' });
+    });
+
+    assert.deepEqual(
+      sent.map((s) => s.message.parts[0].text),
+      ['hello', 'next', 'after'],
+    );
+    assert.deepEqual(view.controls.experimental_queuedMessages, []);
+    assert.equal(view.controls.status, 'ready');
     assert.deepEqual(requests, [
       { url: 'https://chat.test/session/replay', method: 'POST' },
       { url: 'https://chat.test/session/replay/stream', method: 'GET' },
+      { url: 'https://chat.test/session/replay/stream', method: 'GET' },
+      { url: 'https://chat.test/session/replay', method: 'POST' },
       { url: 'https://chat.test/session/replay/stream', method: 'GET' },
       { url: 'https://chat.test/session/replay', method: 'POST' },
       { url: 'https://chat.test/session/replay/stream', method: 'GET' },
@@ -414,10 +424,7 @@ test('two same-tick sends queue the second until the first response finishes', a
       await Promise.all([firstSend, secondSend]);
     });
     assert.equal(sent.length, 1);
-    assert.deepEqual(
-      view.controls.manager.queue.map((m) => m.prompt),
-      ['second'],
-    );
+    assert.deepEqual(queuedTexts(view.controls), ['second']);
 
     await act(async () => {
       await writer.write({ type: 'start', messageId: 'assistant-1' });
@@ -429,7 +436,7 @@ test('two same-tick sends queue the second until the first response finishes', a
       sent.map((request) => request.message.parts.map((p) => p.text).join('')),
       ['first', 'second'],
     );
-    assert.deepEqual(view.controls.manager.queue, []);
+    assert.deepEqual(view.controls.experimental_queuedMessages, []);
     assert.equal(view.controls.status, 'ready');
     assert.deepEqual(
       view.controls.messages
@@ -510,11 +517,11 @@ test('a text submission cannot overtake an image upload and queues behind its tu
       await Promise.all([image, text]);
     });
     assert.equal(sent.length, 1);
-    assert.deepEqual(sent[0].message.metadata, { uploads: [receipt] });
-    assert.deepEqual(
-      view.controls.manager.queue.map((m) => m.prompt),
-      ['then explain'],
-    );
+    assert.deepEqual(sent[0].message.metadata, {
+      persistedPrompt: 'look [Image #1]',
+      uploads: [receipt],
+    });
+    assert.deepEqual(queuedTexts(view.controls), ['then explain']);
 
     await act(async () => {
       await writer.write({ type: 'start', messageId: 'assistant-1' });
@@ -588,7 +595,7 @@ test('a failed upload rejects its submission without blocking a following text s
       sent.map((request) => request.message.parts.map((p) => p.text).join('')),
       ['text survives'],
     );
-    assert.deepEqual(view.controls.manager.queue, []);
+    assert.deepEqual(view.controls.experimental_queuedMessages, []);
     assert.equal(view.controls.status, 'ready');
   } finally {
     await view.close();
@@ -644,7 +651,7 @@ test('rapid sends with immediate responses drain in order without overlapping re
     assert.equal(peak, 1);
     assert.equal(active, 0);
     assert.equal(view.controls.status, 'ready');
-    assert.deepEqual(view.controls.manager.queue, []);
+    assert.deepEqual(view.controls.experimental_queuedMessages, []);
     assert.equal(
       view.controls.messages.filter((m) => m.role === 'user').length,
       prompts.length,
@@ -696,16 +703,13 @@ test('an explicit send after an error retries through the native SDK and drains 
     });
     assert.equal(view.controls.status, 'error');
     assert.deepEqual(sent, ['first']);
-    assert.deepEqual(
-      view.controls.manager.queue.map((m) => m.prompt),
-      ['queued'],
-    );
+    assert.deepEqual(queuedTexts(view.controls), ['queued']);
     await act(async () => {
       await view.controls.submit({ prompt: 'retry', persistedPrompt: 'retry' });
     });
     assert.deepEqual(sent, ['first', 'queued', 'retry']);
     assert.equal(view.controls.status, 'ready');
-    assert.deepEqual(view.controls.manager.queue, []);
+    assert.deepEqual(view.controls.experimental_queuedMessages, []);
   } finally {
     await view.close();
   }
@@ -812,7 +816,7 @@ test('an upload finishing after a chat change rejects without sending to either 
     });
     assert.deepEqual(requests, ['https://chat.test/session/old/uploads']);
     assert.deepEqual(view.controls.messages, []);
-    assert.deepEqual(view.controls.manager.queue, []);
+    assert.deepEqual(view.controls.experimental_queuedMessages, []);
   } finally {
     await view.close();
   }
@@ -894,10 +898,7 @@ test('native client-tool completion uses the latest registry and finishes before
         output: 'rendered',
       },
     );
-    assert.deepEqual(
-      view.controls.manager.queue.map((m) => m.prompt),
-      ['next'],
-    );
+    assert.deepEqual(queuedTexts(view.controls), ['next']);
     await act(async () => {
       await writer.write({ type: 'start', messageId: 'rendered-tool' });
       await writer.write({ type: 'start-step' });
@@ -917,7 +918,7 @@ test('native client-tool completion uses the latest registry and finishes before
       { type: 'text', text: 'next' },
     ]);
     assert.equal(view.controls.status, 'ready');
-    assert.deepEqual(view.controls.manager.queue, []);
+    assert.deepEqual(view.controls.experimental_queuedMessages, []);
   } finally {
     await view.close();
     writer.releaseLock();

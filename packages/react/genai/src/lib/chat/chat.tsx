@@ -37,6 +37,7 @@ export function useAgentChatSetup(props: AgentChatSetupProps) {
     messages: props.initialMessages,
     transport: props.transport,
     throttle: 50,
+    experimental_queue: true,
     resume: props.resume,
     onData: props.onData,
     onFinish: props.onFinish,

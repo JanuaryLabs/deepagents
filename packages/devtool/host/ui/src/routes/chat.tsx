@@ -1,6 +1,6 @@
 import { type UIMessage, validateUIMessages } from 'ai';
 import { cn } from 'cn';
-import { useState, useSyncExternalStore } from 'react';
+import { useState } from 'react';
 import {
   type LoaderFunctionArgs,
   type ShouldRevalidateFunctionArgs,
@@ -22,12 +22,12 @@ import {
   PendingToolInput,
   SubmitButton,
   ZukhrufChatTransport,
+  persistedPromptOf,
   serializeToolsRegistry,
   useAgent,
   useAgentMessages,
   useAgentMeta,
   useAgentStatus,
-  useChatManager,
 } from '@deepagents/react-genai';
 import { Composer, useComposer } from '@deepagents/react-input/browser';
 
@@ -258,7 +258,7 @@ function ChatInput({
       <PendingToolInput className="bg-background">
         <ChatComposer.Provider
           isTaskRunning={isRunning}
-          onSubmit={(submission, context) => {
+          onSubmit={(submission) => {
             const files = submission.items.flatMap((item) =>
               item.type === 'image' ||
               item.type === 'video' ||
@@ -274,7 +274,6 @@ function ChatInput({
             return submit({
               prompt: submission.prompt,
               persistedPrompt: submission.persistedPrompt,
-              editableSource: context.editableSource,
               files,
             });
           }}
@@ -299,8 +298,10 @@ function ChatInput({
 }
 
 function QueuedMessagesStrip() {
-  const manager = useChatManager();
-  const queue = useSyncExternalStore(manager.subscribe, () => manager.queue);
+  const {
+    experimental_queuedMessages: queue,
+    experimental_removeQueuedMessage,
+  } = useAgentMessages();
   if (queue.length === 0) return null;
 
   return (
@@ -308,9 +309,9 @@ function QueuedMessagesStrip() {
       {queue.map((message) => (
         <MessageQueue.Item key={message.id}>
           <MessageQueue.Icon />
-          <MessageQueue.Text>{message.persistedPrompt}</MessageQueue.Text>
+          <MessageQueue.Text>{persistedPromptOf(message)}</MessageQueue.Text>
           <MessageQueue.Remove
-            onClick={() => manager.removeFromQueue(message.id)}
+            onClick={() => experimental_removeQueuedMessage(message.id)}
           />
         </MessageQueue.Item>
       ))}

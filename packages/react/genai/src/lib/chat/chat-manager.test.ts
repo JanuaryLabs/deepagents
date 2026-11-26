@@ -9,14 +9,16 @@ import type {
   UIMessageChunk,
   UITools,
 } from 'ai';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
 
 import {
   ChatManager,
   type ChatManagerOptions,
   type ChatSubmission,
+  persistedPromptOf,
 } from './chat-manager.ts';
+import { useAgentChatSetup } from './chat.tsx';
 import { type PendingPrefill, writePrefill } from './prefill.ts';
 
 type TestUIMessage = UIMessage<unknown, UIDataTypes, UITools>;
@@ -137,7 +139,8 @@ function imageFile(name = 'shot.png'): File {
 }
 
 /**
- * Replicates AgentProvider's committed SDK status and queue subscription.
+ * Builds the chat as AgentProvider does, with useAgentChatSetup, and binds a
+ * ChatManager to it on every render.
  */
 function renderChatManager(
   managerOptions: Omit<ChatManagerOptions, 'chat'>,
@@ -147,24 +150,17 @@ function renderChatManager(
     initialMessages?: TestUIMessage[];
   },
 ) {
+  const chatId = options.chatId ?? crypto.randomUUID();
   const rendered = renderHook(() => {
-    const helpers = useChat<TestUIMessage>({
-      id: options.chatId,
-      messages: options.initialMessages,
+    const helpers = useAgentChatSetup({
+      chatId,
+      initialMessages: options.initialMessages,
       transport: options.transport,
     });
     const [manager] = useState(
       () => new ChatManager({ ...managerOptions, chat: helpers }),
     );
     manager.bind(helpers);
-    const queue = useSyncExternalStore(
-      manager.subscribe,
-      () => manager.queue,
-      () => manager.queue,
-    );
-    useEffect(() => {
-      manager.processQueue(queue);
-    }, [manager, helpers.status, queue]);
     return { helpers, manager };
   });
   return {
@@ -193,6 +189,12 @@ function userTexts(messages: readonly TestUIMessage[]): string[] {
 
 function plainSubmission(prompt: string): ChatSubmission {
   return { prompt, persistedPrompt: prompt };
+}
+
+function queuedPrompts(result: { current: TestChatHelpers }): string[] {
+  return result.current.experimental_queuedMessages.map((message) =>
+    persistedPromptOf(message),
+  );
 }
 
 /**
@@ -255,6 +257,7 @@ describe('ChatManager', () => {
         });
         expect(result.current.messages[0].metadata).toEqual({
           alias: 'test-skill',
+          persistedPrompt: 'hello',
         });
       } finally {
         unmount();
@@ -285,10 +288,7 @@ describe('ChatManager', () => {
     it('queues message when chat is busy', async () => {
       const transport = new ControllableTransport();
       const { manager, result, unmount } = renderChatManager(
-        withStubUploads({
-          queueEnabled: true,
-          onResetChat: () => {},
-        }),
+        withStubUploads({ onResetChat: () => {} }),
         { transport },
       );
       try {
@@ -300,8 +300,7 @@ describe('ChatManager', () => {
         });
 
         expect(result.current.messages.length).toBe(before);
-        expect(manager.queue.length).toBe(1);
-        expect(manager.queue[0].persistedPrompt).toBe('queued');
+        expect(queuedPrompts(result)).toEqual(['queued']);
       } finally {
         unmount();
         transport.closeAll();
@@ -310,65 +309,28 @@ describe('ChatManager', () => {
 
     it('queues the second of two submits made in the same tick', async () => {
       const transport = new ControllableTransport();
-      const { manager, unmount } = renderChatManager(
-        withStubUploads({
-          queueEnabled: true,
-          onResetChat: () => {},
-        }),
+      const { manager, result, unmount } = renderChatManager(
+        withStubUploads({ onResetChat: () => {} }),
         { transport },
       );
       try {
         await act(async () => {
-          // Neither submission can observe an SDK status update before React commits.
           void manager.submit(plainSubmission('first'));
           void manager.submit(plainSubmission('second'));
         });
 
         expect(transport.sendCount).toBe(1);
-        expect(manager.queue.map((message) => message.persistedPrompt)).toEqual(
-          ['second'],
-        );
+        expect(queuedPrompts(result)).toEqual(['second']);
       } finally {
         unmount();
         transport.closeAll();
       }
     });
 
-    it('sends directly when queue is disabled even if busy', async () => {
+    it('sends queued messages in order, one per finished response', async () => {
       const transport = new ControllableTransport();
       const { manager, result, unmount } = renderChatManager(
-        withStubUploads({
-          queueEnabled: false,
-          onResetChat: () => {},
-        }),
-        { transport },
-      );
-      try {
-        await makeBusy(manager, result);
-        const before = result.current.messages.length;
-
-        await act(async () => {
-          await manager.submit(plainSubmission('direct'));
-        });
-
-        await waitFor(() => {
-          expect(result.current.messages.length).toBe(before + 1);
-        });
-        expect(manager.queue.length).toBe(0);
-        expect(userTexts(result.current.messages)).toContain('direct');
-      } finally {
-        unmount();
-        transport.closeAll();
-      }
-    });
-
-    it('drains first queued message when status transitions to ready', async () => {
-      const transport = new ControllableTransport();
-      const { manager, result, unmount } = renderChatManager(
-        withStubUploads({
-          queueEnabled: true,
-          onResetChat: () => {},
-        }),
+        withStubUploads({ onResetChat: () => {} }),
         { transport },
       );
       try {
@@ -378,18 +340,31 @@ describe('ChatManager', () => {
           await manager.submit(plainSubmission('first'));
           await manager.submit(plainSubmission('second'));
         });
-        expect(manager.queue.length).toBe(2);
+        expect(queuedPrompts(result)).toEqual(['first', 'second']);
 
         await act(async () => {
           transport.closeOldestOpen();
         });
 
-        expect(manager.queue.length).toBe(1);
-        expect(manager.queue[0].persistedPrompt).toBe('second');
-
         await waitFor(() => {
-          expect(userTexts(result.current.messages)).toContain('first');
+          expect(userTexts(result.current.messages)).toEqual([
+            'primer',
+            'first',
+          ]);
         });
+        expect(queuedPrompts(result)).toEqual(['second']);
+
+        await act(async () => {
+          transport.closeOldestOpen();
+        });
+        await waitFor(() => {
+          expect(userTexts(result.current.messages)).toEqual([
+            'primer',
+            'first',
+            'second',
+          ]);
+        });
+        expect(queuedPrompts(result)).toEqual([]);
       } finally {
         unmount();
         transport.closeAll();
@@ -399,10 +374,7 @@ describe('ChatManager', () => {
     it('does not drain when status stays busy', async () => {
       const transport = new ControllableTransport();
       const { manager, result, unmount } = renderChatManager(
-        withStubUploads({
-          queueEnabled: true,
-          onResetChat: () => {},
-        }),
+        withStubUploads({ onResetChat: () => {} }),
         { transport },
       );
       try {
@@ -411,7 +383,7 @@ describe('ChatManager', () => {
         await act(async () => {
           await manager.submit(plainSubmission('queued'));
         });
-        expect(manager.queue.length).toBe(1);
+        expect(queuedPrompts(result)).toEqual(['queued']);
 
         await act(async () => {
           transport.beginStreaming();
@@ -420,8 +392,7 @@ describe('ChatManager', () => {
           expect(result.current.status).toBe('streaming');
         });
 
-        expect(manager.queue.length).toBe(1);
-        expect(manager.queue[0].persistedPrompt).toBe('queued');
+        expect(queuedPrompts(result)).toEqual(['queued']);
         expect(userTexts(result.current.messages)).toEqual(['primer']);
       } finally {
         unmount();
@@ -429,64 +400,10 @@ describe('ChatManager', () => {
       }
     });
 
-    it('removes specific message from queue by id', async () => {
+    it('queues the prompt as typed but sends the already-resolved prompt', async () => {
       const transport = new ControllableTransport();
       const { manager, result, unmount } = renderChatManager(
-        withStubUploads({
-          queueEnabled: true,
-          onResetChat: () => {},
-        }),
-        { transport },
-      );
-      try {
-        await makeBusy(manager, result);
-
-        await act(async () => {
-          await manager.submit(plainSubmission('a'));
-          await manager.submit(plainSubmission('b'));
-        });
-        manager.removeFromQueue(manager.queue[0].id);
-
-        expect(manager.queue.length).toBe(1);
-        expect(manager.queue[0].persistedPrompt).toBe('b');
-      } finally {
-        unmount();
-        transport.closeAll();
-      }
-    });
-
-    it('clearQueue empties the queue', async () => {
-      const transport = new ControllableTransport();
-      const { manager, result, unmount } = renderChatManager(
-        withStubUploads({
-          queueEnabled: true,
-          onResetChat: () => {},
-        }),
-        { transport },
-      );
-      try {
-        await makeBusy(manager, result);
-
-        await act(async () => {
-          await manager.submit(plainSubmission('a'));
-          await manager.submit(plainSubmission('b'));
-        });
-        manager.clearQueue();
-
-        expect(manager.queue.length).toBe(0);
-      } finally {
-        unmount();
-        transport.closeAll();
-      }
-    });
-
-    it('queues persisted source but sends the already-resolved prompt', async () => {
-      const transport = new ControllableTransport();
-      const { manager, result, unmount } = renderChatManager(
-        withStubUploads({
-          queueEnabled: true,
-          onResetChat: () => {},
-        }),
+        withStubUploads({ onResetChat: () => {} }),
         { transport },
       );
       try {
@@ -496,21 +413,10 @@ describe('ChatManager', () => {
           await manager.submit({
             prompt: 'List the latest conversations.\n\nfrom today',
             persistedPrompt: '/prompts:recent from today',
-            editableSource: {
-              persistedPrompt: '/prompts:recent from today',
-              remoteImages: [],
-              pendingPastes: [],
-            },
           });
         });
 
-        expect(manager.queue[0]).toMatchObject({
-          prompt: 'List the latest conversations.\n\nfrom today',
-          persistedPrompt: '/prompts:recent from today',
-          editableSource: {
-            persistedPrompt: '/prompts:recent from today',
-          },
-        });
+        expect(queuedPrompts(result)).toEqual(['/prompts:recent from today']);
 
         await act(async () => {
           transport.closeOldestOpen();
@@ -561,6 +467,7 @@ describe('ChatManager', () => {
         ]);
         expect(result.current.messages[0].metadata).toEqual({
           source: 'composer',
+          persistedPrompt: 'describe [Image #1]',
           uploads: [
             {
               path: '/workspace/.uploads/chat-files/shot.png',
@@ -581,7 +488,6 @@ describe('ChatManager', () => {
       const transport = new UploadingTransport();
       const { manager, result, unmount } = renderChatManager(
         {
-          queueEnabled: true,
           uploadFile: transport.uploadFile,
           onResetChat: () => {},
         },
@@ -608,8 +514,13 @@ describe('ChatManager', () => {
         });
 
         expect(userTexts(result.current.messages)).toEqual(['primer']);
-        expect(manager.queue).toHaveLength(1);
-        expect(manager.queue[0].uploads).toEqual([receipt]);
+        expect(
+          result.current.experimental_queuedMessages.map(
+            (message) => message.metadata,
+          ),
+        ).toEqual([
+          { persistedPrompt: 'later [Image #1]', uploads: [receipt] },
+        ]);
 
         await act(async () => {
           transport.closeOldestOpen();
@@ -626,7 +537,10 @@ describe('ChatManager', () => {
         expect(sent.parts).toEqual([
           { type: 'text', text: 'later [Image #1]' },
         ]);
-        expect(sent.metadata).toEqual({ uploads: [receipt] });
+        expect(sent.metadata).toEqual({
+          persistedPrompt: 'later [Image #1]',
+          uploads: [receipt],
+        });
       } finally {
         unmount();
         transport.closeAll();
@@ -637,7 +551,6 @@ describe('ChatManager', () => {
       const transport = new UploadingTransport({ holdUploads: true });
       const { manager, result, unmount } = renderChatManager(
         {
-          queueEnabled: true,
           uploadFile: transport.uploadFile,
           onResetChat: () => {},
         },
@@ -660,7 +573,7 @@ describe('ChatManager', () => {
           expect(transport.uploads).toHaveLength(1);
         });
         expect(transport.sendCount).toBe(0);
-        expect(manager.queue).toHaveLength(0);
+        expect(queuedPrompts(result)).toEqual([]);
 
         await act(async () => {
           transport.completeUpload(0);
@@ -670,7 +583,7 @@ describe('ChatManager', () => {
         await waitFor(() => {
           expect(userTexts(result.current.messages)).toEqual(['with image']);
         });
-        expect(manager.queue.map((m) => m.persistedPrompt)).toEqual(['after']);
+        expect(queuedPrompts(result)).toEqual(['after']);
 
         await act(async () => {
           transport.closeOldestOpen();
@@ -757,7 +670,7 @@ describe('ChatManager', () => {
         });
 
         expect(transport.sendCount).toBe(0);
-        expect(manager.queue).toHaveLength(0);
+        expect(queuedPrompts(result)).toEqual([]);
         expect(result.current.messages).toEqual([]);
         expect(manager.hasSubmitted).toBe(false);
 
@@ -778,10 +691,7 @@ describe('ChatManager', () => {
     it('clearChat empties messages, resets hasSubmitted, and clears queue', async () => {
       const transport = new ControllableTransport();
       const { manager, result, unmount } = renderChatManager(
-        withStubUploads({
-          queueEnabled: true,
-          onResetChat: () => {},
-        }),
+        withStubUploads({ onResetChat: () => {} }),
         { transport },
       );
       try {
@@ -789,7 +699,7 @@ describe('ChatManager', () => {
         await act(async () => {
           await manager.submit(plainSubmission('queued'));
         });
-        expect(manager.queue.length).toBe(1);
+        expect(queuedPrompts(result)).toEqual(['queued']);
 
         await act(async () => {
           manager.clearChat();
@@ -799,7 +709,12 @@ describe('ChatManager', () => {
           expect(result.current.messages).toEqual([]);
         });
         expect(manager.hasSubmitted).toBe(false);
-        expect(manager.queue.length).toBe(0);
+        expect(queuedPrompts(result)).toEqual([]);
+
+        await act(async () => {
+          transport.closeOldestOpen();
+        });
+        expect(transport.sendCount).toBe(1);
       } finally {
         unmount();
         transport.closeAll();
@@ -1065,110 +980,6 @@ describe('ChatManager', () => {
         expect(manager.getLastUserMessageId()).toBeNull();
       } finally {
         unmount();
-      }
-    });
-  });
-
-  describe('subscription', () => {
-    it('notifies listeners when the chat is replaced', async () => {
-      const transport = new ControllableTransport();
-      const { manager, unmount } = renderChatManager(
-        withStubUploads({ onResetChat: () => {} }),
-        { transport },
-      );
-      let notified = false;
-      manager.subscribe(() => {
-        notified = true;
-      });
-      try {
-        await act(async () => {
-          manager.setChat([
-            { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi' }] },
-          ]);
-        });
-
-        expect(notified).toBe(true);
-      } finally {
-        unmount();
-        transport.closeAll();
-      }
-    });
-
-    it('notifies listeners when a queued message is removed', async () => {
-      const transport = new ControllableTransport();
-      const { manager, result, unmount } = renderChatManager(
-        withStubUploads({
-          queueEnabled: true,
-          onResetChat: () => {},
-        }),
-        { transport },
-      );
-      try {
-        await makeBusy(manager, result);
-        await act(async () => {
-          await manager.submit(plainSubmission('queued'));
-        });
-        let notifyCount = 0;
-        manager.subscribe(() => {
-          notifyCount++;
-        });
-
-        manager.removeFromQueue(manager.queue[0].id);
-
-        expect(notifyCount).toBe(1);
-      } finally {
-        unmount();
-        transport.closeAll();
-      }
-    });
-
-    it('does not notify when the removed message is not queued', () => {
-      const transport = new ControllableTransport();
-      const { manager, unmount } = renderChatManager(
-        withStubUploads({ onResetChat: () => {} }),
-        { transport },
-      );
-      try {
-        let notifyCount = 0;
-        manager.subscribe(() => {
-          notifyCount++;
-        });
-
-        manager.removeFromQueue('not-queued');
-
-        expect(notifyCount).toBe(0);
-      } finally {
-        unmount();
-        transport.closeAll();
-      }
-    });
-
-    it('unsubscribed listener stops receiving notifications', async () => {
-      const transport = new ControllableTransport();
-      const { manager, unmount } = renderChatManager(
-        withStubUploads({ onResetChat: () => {} }),
-        { transport },
-      );
-      let notifyCount = 0;
-      const unsubscribe = manager.subscribe(() => {
-        notifyCount++;
-      });
-      try {
-        await act(async () => {
-          manager.setChat([
-            { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi' }] },
-          ]);
-        });
-        expect(notifyCount).toBe(1);
-
-        unsubscribe();
-        await act(async () => {
-          manager.setChat([]);
-        });
-        expect(notifyCount).toBe(1);
-      } finally {
-        unmount();
-        transport.closeAll();
       }
     });
   });

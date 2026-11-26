@@ -1,7 +1,7 @@
 import type { UIMessage, UseChatHelpers } from '@ai-sdk/react';
 import { SerialJobExecutor, type UIDataTypes, type UITools } from 'ai';
 
-import type { ComposerDraftSource } from '@deepagents/react-input/browser';
+import { isRecord } from '@deepagents/context/browser';
 
 import { clearPrefill, readPrefill, writePrefill } from './prefill.ts';
 import type { ZukhrufChatTransport } from './zukhruf-chat-transport.ts';
@@ -11,40 +11,38 @@ type UploadFile = ZukhrufChatTransport['uploadFile'];
 export interface ChatSubmission {
   prompt: string;
   persistedPrompt: string;
-  editableSource?: ComposerDraftSource;
   metadata?: Record<string, unknown>;
   /** Image files referenced from `prompt`, in `[Image #N]` order. */
   files?: File[];
 }
 
-export interface QueuedMessage {
-  id: string;
-  prompt: string;
-  persistedPrompt: string;
-  editableSource?: ComposerDraftSource;
-  metadata?: Record<string, unknown>;
-  /** Receipts for the submission's files, in `[Image #N]` order; sent as `metadata.uploads`. */
-  uploads?: Awaited<ReturnType<UploadFile>>[];
-}
-
-type PreparedSubmission = Omit<QueuedMessage, 'id'>;
-
-type Listener = () => void;
-
 type BoundChat = UseChatHelpers<UIMessage<unknown, UIDataTypes, UITools>>;
 
 export interface ChatManagerOptions {
   chat: BoundChat;
-  queueEnabled?: boolean;
   uploadFile: UploadFile;
   onResetChat: (chatId: string) => void;
 }
 
+/**
+ * The prompt as the user typed it (`/prompts:recent from today`, a collapsed
+ * paste), which `submit` sends in the message's metadata beside the expanded
+ * prompt the model reads. Label a queued message with it.
+ */
+export function persistedPromptOf(message: UIMessage): string {
+  const persistedPrompt = isRecord(message.metadata)
+    ? message.metadata.persistedPrompt
+    : undefined;
+  if (typeof persistedPrompt !== 'string') {
+    throw new Error(
+      `Message ${message.id} has no persistedPrompt: send it with useAgent().submit.`,
+    );
+  }
+  return persistedPrompt;
+}
+
 export class ChatManager {
   private chat: BoundChat;
-  private listeners = new Set<Listener>();
-  private _queue: QueuedMessage[] = [];
-  private _queueEnabled: boolean;
   private readonly uploadFile: UploadFile;
   /**
    * Runs submissions one at a time, in order, so a text-only message never
@@ -56,7 +54,6 @@ export class ChatManager {
 
   constructor(options: ChatManagerOptions) {
     this.chat = options.chat;
-    this._queueEnabled = options.queueEnabled ?? true;
     this.uploadFile = options.uploadFile;
     this.onResetChat = options.onResetChat;
   }
@@ -80,12 +77,12 @@ export class ChatManager {
     return this.submissions.run(async () => {
       if (files.length === 0) {
         this.assertCurrentChat(chatId);
-        this.dispatch(message);
+        this.send(message);
         return;
       }
       const uploads = await this.uploadFiles(chatId, files);
       this.assertCurrentChat(chatId);
-      this.dispatch({ ...message, uploads });
+      this.send({ ...message, metadata: { ...message.metadata, uploads } });
     });
   }
 
@@ -99,65 +96,28 @@ export class ChatManager {
     }
   }
 
-  private dispatch(message: PreparedSubmission): void {
-    if (this._queueEnabled) {
-      this._queue = [...this._queue, { id: crypto.randomUUID(), ...message }];
-      this.notify();
-      return;
-    }
-    this.directSubmit(message);
-  }
-
-  private directSubmit(message: PreparedSubmission): void {
+  /** While a response is in flight the chat queues the message, and sends it once that response finishes. */
+  private send({
+    prompt,
+    persistedPrompt,
+    metadata,
+  }: Omit<ChatSubmission, 'files'>): void {
     void this.chat.sendMessage({
       role: 'user',
-      parts: [{ type: 'text', text: message.prompt }],
-      metadata: message.uploads
-        ? { ...message.metadata, uploads: message.uploads }
-        : message.metadata,
+      parts: [{ type: 'text', text: prompt }],
+      metadata: { ...metadata, persistedPrompt },
     });
-    this.notify();
-  }
-
-  /** Dispatch only from a committed queue and SDK status snapshot. */
-  processQueue(queue: readonly QueuedMessage[]): void {
-    if (queue !== this._queue || this.chat.status !== 'ready') return;
-    if (!this._queueEnabled || queue.length === 0) return;
-    const [next, ...rest] = queue;
-    this._queue = rest;
-    this.directSubmit(next);
-  }
-
-  removeFromQueue(id: string): void {
-    const next = this._queue.filter((msg) => msg.id !== id);
-    if (next.length === this._queue.length) return;
-    this._queue = next;
-    this.notify();
-  }
-
-  clearQueue(): void {
-    if (this._queue.length === 0) return;
-    this._queue = [];
-    this.notify();
-  }
-
-  get queue(): readonly QueuedMessage[] {
-    return this._queue;
-  }
-
-  get queueEnabled(): boolean {
-    return this._queueEnabled;
   }
 
   clearChat(): void {
+    for (const { id } of this.chat.experimental_queuedMessages) {
+      this.chat.experimental_removeQueuedMessage(id);
+    }
     this.chat.setMessages([]);
-    this.clearQueue();
-    this.notify();
   }
 
   setChat(messages: UIMessage[]): void {
     this.chat.setMessages(messages);
-    this.notify();
   }
 
   stop(): void {
@@ -213,18 +173,5 @@ export class ChatManager {
   /** Whether the bound chat has messages: the conversation has started. */
   get hasSubmitted(): boolean {
     return this.chat.messages.length > 0;
-  }
-
-  subscribe = (listener: Listener): (() => void) => {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
-  };
-
-  private notify(): void {
-    for (const listener of this.listeners) {
-      listener();
-    }
   }
 }
