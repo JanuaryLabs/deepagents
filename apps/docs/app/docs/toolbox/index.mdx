@@ -1,53 +1,25 @@
 ---
 title: Toolbox
-description: Reusable tools for agents, including Docker command execution
+description: Reusable tools for agents, including Hacker News search and a scratchpad
 ---
 
 # Toolbox
 
-`@deepagents/toolbox` exports tools for search, filesystems, Docker commands,
-stocks, and weather. Register the tools your agent needs:
+`@deepagents/toolbox` exports a few tools that an agent registers directly:
+
+- `hackernewsTools`: tools that search Hacker News through its Algolia API
+  (stories, comments, Ask HN, Show HN, jobs, polls, users and domains).
+- `scratchpad_tool`: a reflection tool that the model calls to plan its next
+  step after a search.
+- `repoTree(directory)`: prints the files a Git repository tracks, as a tree.
 
 ```typescript
-import { execute_os_command } from '@deepagents/toolbox';
+import { hackernewsTools, scratchpad_tool } from '@deepagents/toolbox';
 
-const tools = { execute_os_command };
+const tools = { ...hackernewsTools, scratchpad_tool };
 ```
 
-## Docker commands
-
-`execute_os_command` runs a command in an existing, running container named
-`toolos`. Start that container before calling the tool and install any binaries
-the command needs in its image. The tool does not create or start the container.
-
-The tool connects through `@zukhruf/docker` using the process environment and
-Docker context configuration. The container must exist on the selected Docker
-daemon.
-
-### Inputs
-
-| Input               | Required | Description                                                                                                        |
-| ------------------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
-| `command`           | Yes      | An array of 1–20 nonempty strings: the executable followed by its arguments.                                       |
-| `working_directory` | No       | An absolute Linux path inside the container. Accepted characters are letters, digits, `_`, `/`, `.`, `,`, and `-`. |
-| `environment_vars`  | No       | A record of environment variable names and string values for the command. Names must be nonempty.                  |
-
-Arguments are passed directly to Docker's exec API. To use shell operators such
-as pipes or `&&`, invoke a shell explicitly, for example:
-
-```json
-{
-  "command": ["sh", "-c", "pwd && ls -la"],
-  "working_directory": "/workspace",
-  "environment_vars": { "NODE_ENV": "development" }
-}
-```
-
-### Results and errors
-
-The tool returns `{ exitCode, stdout, stderr }`. Both output fields are strings.
-A nonzero `exitCode` is returned as a result; callers must check it to determine
-whether the command succeeded.
-
-A missing or stopped `toolos` container throws an error asking the caller to
-start it. Other Docker errors propagate to the caller.
+To run commands for an agent, give it a sandbox instead:
+`createBashTool` from `@deepagents/context` runs bash over a virtual, Docker,
+Apple container or microsandbox session. For web search, use a provider's
+search tool or the AI Gateway's search tools.

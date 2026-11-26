@@ -148,7 +148,6 @@
     "dedent": "^1.7.2",
     "deepdash": "^5.3.9",
     "deepdash-es": "^5.3.9",
-    "duck-duck-scrape": "^2.2.7",
     "express": "^5.2.1",
     "fast-glob": "^3.3.3",
     "framer-motion": "^12.42.2",

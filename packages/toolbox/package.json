@@ -38,15 +38,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@ai-sdk/provider": "^4.0.39",
-    "@ai-sdk/provider-utils": "^5.0.83",
-    "@zukhruf/docker": "^0.8.144",
     "ai": "^7.0.181",
-    "duck-duck-scrape": "^2.2.7",
     "nano-spawn": "^2.1.0",
     "zod": "^4.6.7"
-  },
-  "devDependencies": {
-    "@types/debug": "^4.1.13"
   }
 }
