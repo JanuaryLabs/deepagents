@@ -222,23 +222,20 @@ export class AgentTurnExecutor {
     await this.#controlPlane.recordLatestTurn(turn, turn.streamId);
 
     // Codex records the turn's input on every exit before sampling, so a
-    // turn whose setup is interrupted or fails still holds its message.
-    const setup = await this.#loadSkills(turn, declaration, signal).catch(
-      async (error: unknown) => {
-        if (await this.#endedBeforeSampling(turn, engine, communications)) {
-          return undefined;
-        }
-        await this.#prepareChain(turn, engine, communications, []);
-        throw error;
-      },
-    );
-    if (
-      setup === undefined ||
-      (await this.#endedBeforeSampling(turn, engine, communications))
-    ) {
+    // turn whose setup is interrupted or fails still holds its message. A
+    // setup that fails still fails the turn, so its orphan settles it, even
+    // when a cancel or a session delete came first.
+    const { sandbox, agentSkills, skillPrompts } = await this.#loadSkills(
+      turn,
+      declaration,
+      signal,
+    ).catch(async (error: unknown) => {
+      await this.#recordFailedSetup(turn, engine, communications);
+      throw error;
+    });
+    if (await this.#endedBeforeSampling(turn, engine, communications)) {
       return 'settled';
     }
-    const { sandbox, agentSkills, skillPrompts } = setup;
     await this.#prepareChain(
       turn,
       engine,
@@ -446,10 +443,8 @@ export class AgentTurnExecutor {
 
   /**
    * Ends a claimed turn that is no longer running before it samples. A
-   * cancelled one records its input and then the `<turn_aborted>` marker, as
-   * Codex's interrupt records a started turn's input before the marker
-   * (`core/src/tasks/admission.rs`); one whose chat was deleted writes
-   * nothing. Whether the turn ended.
+   * cancelled one records what `#recordInterrupted` records; one whose chat
+   * was deleted writes nothing. Whether the turn ended.
    */
   async #endedBeforeSampling(
     turn: TurnRef,
@@ -459,11 +454,51 @@ export class AgentTurnExecutor {
     const status = await this.#streams.store.getStreamStatus(turn.streamId);
     if (status === 'running') return false;
     if (status === 'cancelled') {
-      await this.#recordInput(turn, engine, communications, []);
-      await recordTurnAborted(engine);
+      await this.#recordInterrupted(turn, engine, communications);
     }
     await this.#projectSkippedTerminalTurn(turn);
     return true;
+  }
+
+  /**
+   * Records what a turn whose setup threw keeps before the error fails it: a
+   * cancelled one what `#recordInterrupted` records, one whose chat was
+   * deleted nothing, and any other its input and the answer's placeholder.
+   */
+  async #recordFailedSetup(
+    turn: TurnRef,
+    engine: ContextEngine,
+    communications: InterAgentCommunication[],
+  ): Promise<void> {
+    const status = await this.#streams.store.getStreamStatus(turn.streamId);
+    if (status === undefined) return;
+    if (status === 'cancelled') {
+      await this.#recordInterrupted(turn, engine, communications);
+      return;
+    }
+    await this.#prepareChain(turn, engine, communications, []);
+  }
+
+  /**
+   * Records a turn interrupted before it sampled as Codex does: its input
+   * (`core/src/tasks/admission.rs`), then each call it aborted with an
+   * output right after the call (`core/src/context_manager/normalize.rs`),
+   * here a continuation's answered approvals settled as failed, then the
+   * `<turn_aborted>` marker. The approvals settle only while their message
+   * is the head, so they go before the marker.
+   */
+  async #recordInterrupted(
+    turn: TurnRef,
+    engine: ContextEngine,
+    communications: InterAgentCommunication[],
+  ): Promise<void> {
+    await this.#recordInput(turn, engine, communications, []);
+    await this.#approvals.settleFailedApprovals(
+      turn,
+      turn.streamId,
+      'approval continuation cancelled',
+    );
+    await recordTurnAborted(engine);
   }
 
   /**

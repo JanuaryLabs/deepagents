@@ -219,7 +219,11 @@ Mechanism:
   regenerate, an approval continuation and a mailbox wake record nothing either: their input is in
   the chain already, or stays in the MailboxStore for the next wake.
 - **A running turn is cancelled, and its worker records it** on every exit: setup interrupted or
-  done on a cancelled stream, and inside `chat()`.
+  done on a cancelled stream, and inside `chat()`. A setup that throws still fails the turn, and
+  its orphan settles it: on a cancelled stream the worker records the input and the marker first,
+  and on a deleted session nothing (see Delete). An approval continuation's answered calls settle
+  `output-error` before the marker, as Codex gives an aborted call its `aborted` output right
+  after the call (`core/src/context_manager/normalize.rs`).
 - **Cancel answers once the turn has exited**, waiting at most 10 s (Codex's shutdown bound) for it
   to stop being the queue's current turn, as Codex answers `turn/interrupt` only on `TurnAborted`
   (`app-server/src/bespoke_event_handling.rs`). Until then the session read lists the turn as

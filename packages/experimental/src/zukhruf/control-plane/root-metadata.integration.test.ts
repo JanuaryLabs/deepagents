@@ -650,12 +650,13 @@ test('cancelling during sandbox setup prevents model sampling', async (t) => {
   assert.equal(modelCalls, 0);
 });
 
-test('cancellation that wins the execution claim prevents model sampling', async () => {
+test('cancellation that wins the execution claim prevents sandbox setup and model sampling', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new CancelAfterStatusReadStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
   const virtual = buildSandbox();
+  let sandboxOpens = 0;
   let modelCalls = 0;
   using stores = new DisposableStack();
   stores.defer(() => {
@@ -685,7 +686,7 @@ test('cancellation that wins the execution claim prevents model sampling', async
       sandbox: {
         environment: virtual.environment,
         open: async (chat) => {
-          streamStore.arm();
+          sandboxOpens++;
           return virtual.open(chat);
         },
       },
@@ -710,10 +711,19 @@ test('cancellation that wins the execution claim prevents model sampling', async
   await using _worker = await runtime.work();
 
   void _worker;
+  // The worker claims a turn before its setup, so the cancel lands between
+  // the worker's status read and its claim.
+  streamStore.arm();
   await queue.runNext();
 
-  assert.equal(await streamStore.getStreamStatus(enqueued.id), 'cancelled');
-  assert.equal(modelCalls, 0);
+  assert.deepStrictEqual(
+    {
+      status: await streamStore.getStreamStatus(enqueued.id),
+      sandboxOpens,
+      modelCalls,
+    },
+    { status: 'cancelled', sandboxOpens: 0, modelCalls: 0 },
+  );
 });
 
 test('cancellation after execution claim aborts pending provider setup', async (t) => {
