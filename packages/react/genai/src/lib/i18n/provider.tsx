@@ -1,4 +1,6 @@
+import { DirectionProvider } from '@zukhruf/shadcn';
 import { type ReactNode, createContext, use } from 'react';
+import type { StreamdownTranslations } from 'streamdown';
 
 import {
   type GenaiMessageHelpers,
@@ -43,21 +45,36 @@ export function GenaiMessagesProvider({
   const parent = use(GenaiMessagesContext);
   return (
     <GenaiMessagesContext
-      value={{ locale, dir, messages: { ...parent.messages, ...messages } }}
+      value={{
+        locale,
+        dir,
+        messages: {
+          ...parent.messages,
+          ...messages,
+          markdown: { ...parent.messages.markdown, ...messages?.markdown },
+        },
+      }}
     >
-      {children}
+      <DirectionProvider direction={dir}>{children}</DirectionProvider>
     </GenaiMessagesContext>
   );
 }
 
-type MessageArgs<K extends keyof GenaiMessages> = GenaiMessages[K] extends (
+/** Streamdown's words from the enclosing providers. */
+export function useGenaiMarkdown(): Partial<StreamdownTranslations> {
+  return use(GenaiMessagesContext).messages.markdown;
+}
+
+type TextKey = Exclude<keyof GenaiMessages, 'markdown'>;
+
+type MessageArgs<K extends TextKey> = GenaiMessages[K] extends (
   args: infer Args,
   helpers: GenaiMessageHelpers,
 ) => string
   ? [args: Args]
   : [];
 
-export type GenaiTranslate = <K extends keyof GenaiMessages>(
+export type GenaiTranslate = <K extends TextKey>(
   key: K,
   ...args: MessageArgs<K>
 ) => string;
@@ -80,7 +97,7 @@ export function useGenaiMessages(): GenaiTranslate {
         numbers.format(count),
       ),
   };
-  return (key: keyof GenaiMessages, args?: unknown) => {
+  return (key: TextKey, args?: unknown) => {
     const message: AnyMessage = messages[key];
     return typeof message === 'string' ? message : message(args, helpers);
   };

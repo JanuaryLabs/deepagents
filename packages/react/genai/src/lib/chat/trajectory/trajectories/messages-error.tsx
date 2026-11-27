@@ -1,26 +1,24 @@
 import { Button } from '@zukhruf/shadcn';
 
 import { Response } from '../../../elements/Response.tsx';
+import { useGenaiMessages } from '../../../i18n/provider.tsx';
 
 function RetryBlock({
   onTryAgain,
   error,
 }: {
-  error: Error | null;
+  error: Error;
   onTryAgain: () => void;
 }) {
+  const t = useGenaiMessages();
   return (
     <div className="mt-3 flex justify-start">
       <div className="max-w-[80%] space-y-2">
         <div className="text-destructive text-sm">
-          <Response mode="static">
-            {error instanceof Error
-              ? error.message
-              : 'An error occurred. Please try again.'}
-          </Response>
+          <Response mode="static">{error.message}</Response>
         </div>
         <Button type="button" onClick={onTryAgain} size="sm" variant="outline">
-          Try Again
+          {t('chat.retry')}
         </Button>
       </div>
     </div>

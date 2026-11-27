@@ -201,19 +201,18 @@ export function formatUsageValue(value: number | null): string {
   return formatNullableNumber(value);
 }
 
-export function formatUsageBreakdown(usage: UsageDisplay): string {
-  const parts = [
-    `↑ ${formatCompactNumber(usage.inputTokens)}`,
-    `↓ ${formatCompactNumber(usage.outputTokens)}`,
-  ];
-
-  if (usage.totalTokens !== null) {
-    parts.push(`· ${formatNullableNumber(usage.totalTokens)} tokens`);
-  }
-
-  if (usage.cachedInputTokens !== null && usage.cachedInputTokens > 0) {
-    parts.push(`(${formatCompactNumber(usage.cachedInputTokens)} cached)`);
-  }
-
-  return parts.join(' ');
+/** The figures of the `message.usage` message. */
+export function formatUsageFigures(usage: UsageDisplay) {
+  return {
+    input: formatCompactNumber(usage.inputTokens),
+    output: formatCompactNumber(usage.outputTokens),
+    total:
+      usage.totalTokens === null
+        ? undefined
+        : formatNullableNumber(usage.totalTokens),
+    cached:
+      usage.cachedInputTokens !== null && usage.cachedInputTokens > 0
+        ? formatCompactNumber(usage.cachedInputTokens)
+        : undefined,
+  };
 }

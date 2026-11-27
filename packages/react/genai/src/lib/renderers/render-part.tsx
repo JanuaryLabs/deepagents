@@ -4,17 +4,19 @@ import { Loader } from 'lucide-react';
 
 import { useAgent, useAgentMessages } from '../chat/agent-context.tsx';
 import { ToolOutput } from '../elements/Tool.tsx';
+import { useGenaiMessages } from '../i18n/provider.tsx';
 import { resolveToolEntry } from '../tools/helpers.ts';
 
 function ToolApproval({ part }: { part: ToolUIPart }) {
   const { addToolApprovalResponse } = useAgentMessages();
+  const t = useGenaiMessages();
   if (part.state !== 'approval-requested') return null;
 
   const name = part.title ?? getStaticToolName(part);
 
   return (
     <div
-      aria-label={`${name} approval`}
+      aria-label={t('approval.request', { tool: name })}
       className="border-border bg-muted/30 space-y-3 rounded-lg border p-3"
       data-copy-exclude="assistant-snapshot"
       role="group"
@@ -38,7 +40,7 @@ function ToolApproval({ part }: { part: ToolUIPart }) {
             })
           }
         >
-          Deny
+          {t('approval.deny')}
         </Button>
         <Button
           type="button"
@@ -49,7 +51,7 @@ function ToolApproval({ part }: { part: ToolUIPart }) {
             })
           }
         >
-          Approve
+          {t('approval.approve')}
         </Button>
       </div>
     </div>

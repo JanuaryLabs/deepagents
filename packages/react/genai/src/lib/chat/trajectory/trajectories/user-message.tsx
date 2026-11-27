@@ -10,7 +10,8 @@ import {
 } from '@deepagents/context/browser';
 import { PersistedPromptText } from '@deepagents/react-input/browser';
 
-import { formatUsageBreakdown, parseMetadataUsage } from '../../usage.ts';
+import { useGenaiMessages } from '../../../i18n/provider.tsx';
+import { formatUsageFigures, parseMetadataUsage } from '../../usage.ts';
 import { uploadReceiptSchema } from '../../zukhruf-chat-transport.ts';
 import { useMessageItem } from '../messages-context.ts';
 import { CollapsibleDisclosure } from './collapsible-disclosure.tsx';
@@ -20,6 +21,7 @@ export function MessageMetadata({
 }: {
   metadata: UIMessage['metadata'];
 }) {
+  const t = useGenaiMessages();
   if (!metadata) return null;
 
   const usage = parseMetadataUsage(metadata);
@@ -27,7 +29,7 @@ export function MessageMetadata({
 
   return (
     <div className="text-muted-foreground mt-2 text-xs tabular-nums opacity-60">
-      {formatUsageBreakdown(usage)}
+      {t('message.usage', formatUsageFigures(usage))}
     </div>
   );
 }
@@ -86,8 +88,9 @@ function UserMessageReminders({
   reminders: UserReminderMetadata[];
 }) {
   const [open, setOpen] = useState(false);
+  const t = useGenaiMessages();
   if (reminders.length === 0) return null;
-  const label = `${reminders.length} reminder${reminders.length === 1 ? '' : 's'} attached`;
+  const label = t('message.reminders', { count: reminders.length });
   return (
     <CollapsibleDisclosure
       label={label}
@@ -163,12 +166,13 @@ function UploadTile({
 
 function UserMessageAttachments({ message }: { message: UIMessage }) {
   const uploads = extractUploads(message);
+  const t = useGenaiMessages();
   if (uploads.length === 0) return null;
 
   return (
     <AttachmentGroup
       role="list"
-      aria-label="Attached files"
+      aria-label={t('message.attachments')}
       className="max-w-full gap-2 py-0"
     >
       {uploads.map((upload) => (

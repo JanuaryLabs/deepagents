@@ -7,6 +7,7 @@ import { type ReactNode, memo, useState } from 'react';
 import { TextShimmer } from '../../../components/text-shimmer.tsx';
 import { DynamicToolDebug } from '../../../components/tool-debug.tsx';
 import { Response } from '../../../elements/Response.tsx';
+import { useGenaiMessages } from '../../../i18n/provider.tsx';
 import {
   isActiveClientInputTool,
   resolveToolEntry,
@@ -185,16 +186,17 @@ const MessagesAssistantContent = memo(function MessagesAssistantContent({
 function ThinkingIndicator({
   className,
   label,
+  placeholder,
 }: {
   className?: string;
-  label?: string;
+  label: string;
+  placeholder: string;
 }) {
-  const displayText = label
-    ? label
-        .split('\n')
-        .filter((line) => line.trim())
-        .pop() || 'Thinking...'
-    : 'Thinking...';
+  const displayText =
+    label
+      .split('\n')
+      .filter((line) => line.trim())
+      .pop() || placeholder;
 
   return (
     <div role="status" className={cn('flex items-start', className)}>
@@ -208,11 +210,23 @@ function ThinkingIndicator({
 function MessagesThinking() {
   const status = useMessagesStatus();
   const { messages } = useMessagesContext();
-  const thinkingHint = thinking(status, messages[messages.length - 1]);
+  const t = useGenaiMessages();
+  const placeholder = t('steps.thinking');
+  const thinkingHint = thinking(
+    status,
+    messages[messages.length - 1],
+    placeholder,
+  );
 
   if (!thinkingHint) return null;
 
-  return <ThinkingIndicator label={thinkingHint} className="mt-2" />;
+  return (
+    <ThinkingIndicator
+      label={thinkingHint}
+      placeholder={placeholder}
+      className="mt-2"
+    />
+  );
 }
 
 export const Messages = {

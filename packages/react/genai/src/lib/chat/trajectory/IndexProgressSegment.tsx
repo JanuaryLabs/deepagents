@@ -16,6 +16,7 @@ import {
 import { useStickToBottom } from 'use-stick-to-bottom';
 
 import { TextShimmer } from '../../components/text-shimmer.tsx';
+import { type GenaiTranslate, useGenaiMessages } from '../../i18n/provider.tsx';
 import {
   CompactDisclosureChevron,
   compactDisclosureTriggerClass,
@@ -51,24 +52,31 @@ export type IndexProgressEvent = {
   total?: number;
 };
 
-type AdapterStatus = 'queued' | 'running' | 'cache-hit' | 'fresh' | 'error';
-
-type AdapterState = {
+type AdapterProgress = {
   name: string;
-  status: AdapterStatus;
   phase?: string;
   table?: string;
   current?: number;
   total?: number;
-  errorMessage?: string;
 };
 
+type FailedAdapterState = AdapterProgress & {
+  status: 'error';
+  errorMessage: string;
+};
+
+type AdapterState =
+  | (AdapterProgress & { status: 'queued' | 'running' | 'cache-hit' | 'fresh' })
+  | FailedAdapterState;
+
+type AdapterStatus = AdapterState['status'];
+
 type IndexState = {
-  status: 'running' | 'complete' | 'error';
   adapters: AdapterState[];
   totalAdapters?: number;
-  errorMessage?: string;
-};
+} & (
+  { status: 'running' | 'complete' } | { status: 'error'; errorMessage: string }
+);
 
 type GroupedProgressEvents = {
   byAdapter: Map<string, IndexProgressEvent[]>;
@@ -99,35 +107,46 @@ export function getIndexProgressEvents(
 
 function aggregateEvents(events: IndexProgressEvent[]): IndexState {
   const byName = new Map<string, AdapterState>();
-  let status: IndexState['status'] = 'running';
+  let outcome:
+    | { status: 'running' | 'complete' }
+    | { status: 'error'; errorMessage: string } = { status: 'running' };
   let totalAdapters: number | undefined;
-  let errorMessage: string | undefined;
 
-  const upsert = (name: string, patch: Partial<AdapterState>) => {
-    const prev = byName.get(name) ?? { name, status: 'queued' as const };
-    byName.set(name, { ...prev, ...patch, name });
+  const adapter = (name: string): AdapterState =>
+    byName.get(name) ?? { name, status: 'queued' };
+  const progress = (name: string, patch: Omit<AdapterProgress, 'name'>) => {
+    byName.set(name, { ...adapter(name), ...patch });
+  };
+  const settle = (
+    name: string,
+    next:
+      | { status: 'queued' | 'running' | 'cache-hit' | 'fresh' }
+      | { status: 'error'; errorMessage: string },
+  ) => {
+    const { phase, table, current, total } = adapter(name);
+    byName.set(name, { name, phase, table, current, total, ...next });
   };
 
   for (const event of events) {
     switch (event.type) {
       case 'index:start':
         totalAdapters = event.total;
-        status = 'running';
+        outcome = { status: 'running' };
         break;
       case 'adapter:start':
-        if (event.adapter) upsert(event.adapter, { status: 'running' });
+        if (event.adapter) settle(event.adapter, { status: 'running' });
         break;
       case 'adapter:cache-hit':
-        if (event.adapter) upsert(event.adapter, { status: 'cache-hit' });
+        if (event.adapter) settle(event.adapter, { status: 'cache-hit' });
         break;
       case 'adapter:cache-miss':
-        if (event.adapter) upsert(event.adapter, { status: 'running' });
+        if (event.adapter) settle(event.adapter, { status: 'running' });
         break;
       case 'phase:start':
       case 'phase:progress':
       case 'phase:end':
         if (event.adapter) {
-          upsert(event.adapter, {
+          progress(event.adapter, {
             phase: event.phase,
             table: event.table,
             current: event.current,
@@ -139,38 +158,34 @@ function aggregateEvents(events: IndexProgressEvent[]): IndexState {
         if (event.adapter) {
           const prev = byName.get(event.adapter);
           if (prev?.status !== 'cache-hit' && prev?.status !== 'error') {
-            upsert(event.adapter, { status: 'fresh' });
+            settle(event.adapter, { status: 'fresh' });
           }
         }
         break;
       case 'adapter:error':
         if (event.adapter) {
-          upsert(event.adapter, {
+          settle(event.adapter, {
             status: 'error',
             errorMessage: event.message,
           });
         }
         break;
       case 'index:end':
-        status = 'complete';
-        for (const [name, adapter] of byName) {
-          if (adapter.status === 'running') {
-            upsert(name, { status: 'fresh' });
-          }
+        outcome = { status: 'complete' };
+        for (const [name, state] of byName) {
+          if (state.status === 'running') settle(name, { status: 'fresh' });
         }
         break;
       case 'index:error':
-        status = 'error';
-        errorMessage = event.message;
+        outcome = { status: 'error', errorMessage: event.message };
         break;
     }
   }
 
   return {
-    status,
+    ...outcome,
     adapters: Array.from(byName.values()),
     totalAdapters,
-    errorMessage,
   };
 }
 
@@ -227,23 +242,25 @@ function getAdapterRunKey(events: IndexProgressEvent[]) {
   ).length;
 }
 
-function getBreadcrumbSegments(state: IndexState): string[] {
+function getBreadcrumbSegments(state: IndexState, t: GenaiTranslate): string[] {
   const totalCount = state.totalAdapters ?? state.adapters.length;
   const isMultiAdapter = totalCount > 1;
 
   if (state.status === 'error') {
-    const failed = state.adapters.find((a) => a.status === 'error');
+    const failed = state.adapters.find(
+      (a): a is FailedAdapterState => a.status === 'error',
+    );
     if (failed) {
-      const segments = ['Failed'];
+      const segments = [t('indexing.failed')];
       if (isMultiAdapter) segments.push(failed.name);
-      segments.push(failed.errorMessage ?? 'unknown error');
+      segments.push(failed.errorMessage);
       return segments;
     }
-    return ['Failed', state.errorMessage ?? 'unknown error'];
+    return getGlobalErrorSegments(state.errorMessage, t);
   }
 
   if (state.status === 'running') {
-    const segments: string[] = ['Indexing'];
+    const segments: string[] = [t('indexing.running')];
     const active = state.adapters.find((a) => a.status === 'running');
     if (active) {
       if (isMultiAdapter) segments.push(active.name);
@@ -257,18 +274,24 @@ function getBreadcrumbSegments(state: IndexState): string[] {
   }
 
   if (state.adapters.length === 0 || !isMultiAdapter) {
-    return ['Schema indexed'];
+    return [t('indexing.done')];
   }
-  return ['Schema indexed', `${state.adapters.length} adapters`];
+  return [
+    t('indexing.done'),
+    t('indexing.adapters', { count: state.adapters.length }),
+  ];
 }
 
-function getAdapterBreadcrumbSegments(adapter: AdapterState): string[] {
+function getAdapterBreadcrumbSegments(
+  adapter: AdapterState,
+  t: GenaiTranslate,
+): string[] {
   if (adapter.status === 'error') {
-    return ['Failed', adapter.name, adapter.errorMessage ?? 'unknown error'];
+    return [t('indexing.failed'), adapter.name, adapter.errorMessage];
   }
 
   if (adapter.status === 'running') {
-    const segments = ['Indexing', adapter.name];
+    const segments = [t('indexing.running'), adapter.name];
     if (adapter.phase) segments.push(adapter.phase);
     if (adapter.current != null && adapter.total != null) {
       segments.push(`${adapter.current}/${adapter.total}`);
@@ -278,18 +301,21 @@ function getAdapterBreadcrumbSegments(adapter: AdapterState): string[] {
   }
 
   if (adapter.status === 'cache-hit') {
-    return ['Schema indexed', adapter.name, 'cache hit'];
+    return [t('indexing.done'), adapter.name, t('indexing.cacheHit')];
   }
 
   if (adapter.status === 'fresh') {
-    return ['Schema indexed', adapter.name, 'refreshed'];
+    return [t('indexing.done'), adapter.name, t('indexing.refreshed')];
   }
 
-  return ['Indexing', adapter.name, 'queued'];
+  return [t('indexing.running'), adapter.name, t('indexing.queued')];
 }
 
-function getGlobalErrorSegments(state: IndexState): string[] {
-  return ['Failed', state.errorMessage ?? 'unknown error'];
+function getGlobalErrorSegments(
+  errorMessage: string,
+  t: GenaiTranslate,
+): string[] {
+  return [t('indexing.failed'), errorMessage];
 }
 
 type IndexProgressContextValue = {
@@ -353,6 +379,7 @@ function Root({
 
 function Trigger({ className }: { className?: string }) {
   const { state } = useIndexProgress('Trigger');
+  const t = useGenaiMessages();
 
   return (
     <CollapsibleTrigger
@@ -365,7 +392,7 @@ function Trigger({ className }: { className?: string }) {
       }
     >
       <ProgressBreadcrumb
-        segments={getBreadcrumbSegments(state)}
+        segments={getBreadcrumbSegments(state, t)}
         isRunning={state.status === 'running'}
       />
       <DisclosureChevron />
@@ -610,6 +637,7 @@ function PerAdapter({
   const globalErrorEvents = groupedEvents.globalEvents.filter(
     (event) => event.type === 'index:error',
   );
+  const latestGlobalError = globalErrorEvents.at(-1);
 
   if (events.length === 0) return null;
   if (!showCacheHits && shouldHideIndexProgress(events, state)) return null;
@@ -638,8 +666,12 @@ function PerAdapter({
           events={groupedEvents.byAdapter.get(adapter.name) ?? []}
         />
       ))}
-      {globalErrorEvents.length > 0 && (
-        <GlobalErrorProgressItem state={state} events={globalErrorEvents} />
+      {latestGlobalError && (
+        <GlobalErrorProgressItem
+          state={state}
+          errorMessage={latestGlobalError.message}
+          events={globalErrorEvents}
+        />
       )}
     </div>
   );
@@ -652,6 +684,7 @@ function AdapterProgressItem({
   adapter: AdapterState;
   events: IndexProgressEvent[];
 }) {
+  const t = useGenaiMessages();
   const { isOpen, handleOpenChange } = useProgressOpenState({
     status: adapter.status,
     resetKey: getAdapterRunKey(events),
@@ -675,7 +708,7 @@ function AdapterProgressItem({
         }
       >
         <ProgressBreadcrumb
-          segments={getAdapterBreadcrumbSegments(adapter)}
+          segments={getAdapterBreadcrumbSegments(adapter, t)}
           isRunning={adapter.status === 'running'}
         />
         <DisclosureChevron />
@@ -700,11 +733,14 @@ function AdapterProgressEventLog({ events }: { events: IndexProgressEvent[] }) {
 
 function GlobalErrorProgressItem({
   state,
+  errorMessage,
   events,
 }: {
   state: IndexState;
+  errorMessage: string;
   events: IndexProgressEvent[];
 }) {
+  const t = useGenaiMessages();
   const { isOpen, handleOpenChange } = useProgressOpenState({
     status: state.status,
     resetKey: events.length,
@@ -728,7 +764,7 @@ function GlobalErrorProgressItem({
         }
       >
         <ProgressBreadcrumb
-          segments={getGlobalErrorSegments(state)}
+          segments={getGlobalErrorSegments(errorMessage, t)}
           isRunning={state.status === 'running'}
         />
         <DisclosureChevron />

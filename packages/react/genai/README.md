@@ -57,6 +57,61 @@ render(
 );
 ```
 
+## Words and languages
+
+Every word the chat draws comes from one typed catalog, `GenaiMessages`. The package ships English (`en`). A host gives its own words on `GenaiMessagesProvider`, above the chat:
+
+```tsx
+import {
+  type GenaiMessages,
+  GenaiMessagesProvider,
+} from '@deepagents/react-genai';
+
+const ar: Partial<GenaiMessages> = {
+  'message.copy': 'انسخ الرسالة',
+  'composer.send': 'أرسل الطلب',
+  'steps.tools': ({ count, status }, { plural }) =>
+    status === 'complete'
+      ? plural(count, {
+          zero: 'لم تعمل أي أداة',
+          one: 'عملت أداة واحدة',
+          two: 'عملت أداتان',
+          few: 'عملت # أدوات',
+          many: 'عملت # أداة',
+          other: 'عملت # أداة',
+        })
+      : plural(count, {
+          one: 'عملت أداة واحدة وتوقفت',
+          two: 'عملت أداتان وتوقفتا',
+          few: 'عملت # أدوات وتوقفت',
+          other: 'عملت # أداة وتوقفت',
+        }),
+  markdown: { copyTable: 'انسخ الجدول', downloadTable: 'نزّل الجدول' },
+};
+
+<GenaiMessagesProvider locale="ar" messages={ar}>
+  <App />
+</GenaiMessagesProvider>;
+```
+
+- A message is a string, or a function of its typed arguments and `{ plural, format }`. `plural(count, forms)` picks the form that `Intl.PluralRules` of the locale gives, needs `other`, and writes the count, formatted by `Intl.NumberFormat` of the locale, in place of `#`. A count sentence is one message, never pieces joined in code.
+- A key the catalog leaves out keeps the English word.
+- `markdown` holds streamdown's words (`StreamdownTranslations` of `streamdown`) for every `Response`. A `translations` prop on a `Response` wins over it, key by key.
+- `dir` is the text direction of the locale (`Intl.Locale`) unless the host gives it. The provider hands it to Base UI's `DirectionProvider`, so popups and menus follow it. Text blocks keep `dir="auto"`, so an English answer in an Arabic chat still reads left to right.
+- A message can call the host's own i18n library.
+
+Providers nest. An inner provider changes only the keys it gives, the `markdown` keys too:
+
+```tsx
+<GenaiMessagesProvider locale="ar" messages={ar}>
+  <GenaiMessagesProvider locale="ar" messages={{ 'chat.greeting': 'مرحبًا' }}>
+    <Chat />
+  </GenaiMessagesProvider>
+</GenaiMessagesProvider>
+```
+
+The parts of `@deepagents/react-input` that `ChatComposer` renders, such as the editor and the attachment strip, keep their own English words.
+
 ## One copy of @zukhruf/ui
 
 The host and this package must use the same copy of `@zukhruf/ui`. Each copy has its own React context. A `ClockProvider` of one copy does not reach a `TheButton` of the other copy, and the button throws `No clock set, use ClockProvider to set one`. For this reason `@zukhruf/ui` is a peer dependency. npm refuses an install when the version of the host is out of the range.

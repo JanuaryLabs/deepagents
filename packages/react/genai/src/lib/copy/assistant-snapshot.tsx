@@ -17,10 +17,23 @@ import {
   extractSourcesFromMessage,
   urlCitationsOf,
 } from '../chat/citations.ts';
+import { useGenaiMessages } from '../i18n/provider.tsx';
 import { COPY_EXCLUSION_MODES } from './copy-image.ts';
 import { SnapshotRenderContext } from './snapshot-context.ts';
 import { SnapshotRenderPortal, waitForNextPaint } from './snapshot-render.tsx';
-import { useCopyElementAsImage } from './use-copy-element-as-image.ts';
+import {
+  type CopyImageFeedback,
+  useCopyElementAsImage,
+} from './use-copy-element-as-image.ts';
+
+const copyFailures = {
+  'clipboard-unavailable': 'snapshot.clipboardUnavailable',
+  'image-unsupported': 'snapshot.imageUnsupported',
+  failed: 'snapshot.copyFailed',
+} as const satisfies Record<
+  Extract<CopyImageFeedback, { kind: 'error' }>['reason'],
+  string
+>;
 
 // A custom element's name holds a hyphen (copy of normalizeStreamdownChildren's
 // customTagTest default, strike 2, #6005); a quoted attribute value may hold '>'.
@@ -87,6 +100,7 @@ export function AssistantSnapshot({
   className?: string;
 }) {
   const snapshotRef = useRef<HTMLDivElement>(null);
+  const t = useGenaiMessages();
   const [showSnapshot, setShowSnapshot] = useState(false);
   const fallbackText = useMemo(
     () => extractAssistantRawText(message),
@@ -107,11 +121,15 @@ export function AssistantSnapshot({
     await copy();
   }, [copy, showSnapshot]);
 
-  let label = 'Copy snapshot';
+  let label = t('snapshot.copy');
   if (isCopying) {
-    label = 'Copying snapshot';
+    label = t('snapshot.copying');
   } else if (feedback?.kind === 'success') {
-    label = feedback.mode === 'image' ? 'Copied snapshot' : 'Copied text';
+    label = t(
+      feedback.mode === 'image'
+        ? 'snapshot.copiedImage'
+        : 'snapshot.copiedText',
+    );
   }
 
   return (
@@ -126,7 +144,9 @@ export function AssistantSnapshot({
         className={cn('flex items-center gap-2', className)}
       >
         {feedback?.kind === 'error' && (
-          <span className="text-destructive text-xs">{feedback.message}</span>
+          <span className="text-destructive text-xs">
+            {t(copyFailures[feedback.reason])}
+          </span>
         )}
         <TheButton
           type="button"

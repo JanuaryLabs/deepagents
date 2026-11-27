@@ -4,6 +4,8 @@ import type { ReactNode } from 'react';
 
 import { PersistedPromptText } from '@deepagents/react-input/browser';
 
+import { useGenaiMessages } from '../i18n/provider.tsx';
+
 function MessageQueueRoot({
   children,
   className,
@@ -70,6 +72,7 @@ function MessageQueueRemove({
   onClick: () => void;
   className?: string;
 }) {
+  const t = useGenaiMessages();
   return (
     <button
       type="button"
@@ -78,7 +81,7 @@ function MessageQueueRemove({
         'text-muted-foreground hover:text-foreground shrink-0 rounded p-1 transition-colors',
         className,
       )}
-      aria-label="Remove queued message"
+      aria-label={t('queue.remove')}
     >
       <Trash2 className="size-3.5" />
     </button>

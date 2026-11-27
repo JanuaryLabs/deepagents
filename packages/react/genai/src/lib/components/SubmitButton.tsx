@@ -7,6 +7,7 @@ import {
 } from 'motion/react';
 import type { ReactNode } from 'react';
 
+import { useGenaiMessages } from '../i18n/provider.tsx';
 import { ArrowUpIcon } from '../ui/ArrowUpIcon.tsx';
 
 type SubmitButtonVariant = 'send' | 'stop';
@@ -25,6 +26,7 @@ export function SubmitButton({
   ...rest
 }: SubmitButtonProps) {
   const reducedMotion = useReducedMotion();
+  const t = useGenaiMessages();
   const isStop = variant === 'stop';
 
   return (
@@ -35,7 +37,7 @@ export function SubmitButton({
       transition={BUTTON_TRANSITION}
       whileHover={disabled || reducedMotion ? undefined : { scale: 1.04 }}
       whileTap={disabled || reducedMotion ? undefined : { scale: 0.96 }}
-      aria-label={isStop ? 'Stop streaming' : 'Send prompt'}
+      aria-label={t(isStop ? 'composer.stop' : 'composer.send')}
       {...rest}
       disabled={disabled}
       className={cn(

@@ -2,6 +2,7 @@ import { cn } from 'cn';
 import * as React from 'react';
 import { memo } from 'react';
 
+import { useGenaiMessages } from '../i18n/provider.tsx';
 import {
   TablePanelStreamdown,
   type TablePanelStreamdownProps,
@@ -30,14 +31,21 @@ class StreamdownErrorBoundary extends React.Component<
     if (this.state.hasError) {
       return (
         this.props.fallback || (
-          <div className="text-destructive p-2 text-sm">
-            Failed to render content: {this.state.error?.message}
-          </div>
+          <RenderFailure error={this.state.error?.message ?? ''} />
         )
       );
     }
     return this.props.children;
   }
+}
+
+function RenderFailure({ error }: { error: string }) {
+  const t = useGenaiMessages();
+  return (
+    <div className="text-destructive p-2 text-sm">
+      {t('response.renderFailed', { error })}
+    </div>
+  );
 }
 
 export const Response = memo(({ className, ...props }: ResponseProps) => (

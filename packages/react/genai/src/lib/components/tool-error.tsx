@@ -14,23 +14,27 @@ import { AlertCircle, RefreshCw } from 'lucide-react';
 import type { ZodError } from 'zod';
 
 import { useAgentMessages } from '../chat/agent-context.tsx';
+import { useGenaiMessages } from '../i18n/provider.tsx';
 
 export interface ToolErrorProps {
+  /** This tool's title; the catalog's `tool.renderFailed` otherwise. */
   title?: string;
   detail?: string;
+  /** This detail's label; the catalog's `tool.details` otherwise. */
   detailLabel?: string;
   part: ToolUIPart;
   error: ZodError;
 }
 
 export function ToolError({
-  title = 'Failed to render tool',
+  title,
   detail,
-  detailLabel = 'View details',
+  detailLabel,
   part,
   error,
 }: ToolErrorProps) {
   const agent = useAgentMessages();
+  const t = useGenaiMessages();
   const errorMessage = error.issues
     .map((e) => `${e.path.join('.')}: ${e.message}`)
     .join('\n');
@@ -39,20 +43,20 @@ export function ToolError({
       <CardHeader>
         <CardTitle className="text-destructive flex items-center gap-2">
           <AlertCircle className="size-5" />
-          {title}
+          {title ?? t('tool.renderFailed')}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
-          <AlertTitle>Error</AlertTitle>
+          <AlertTitle>{t('tool.error')}</AlertTitle>
           <AlertDescription>{errorMessage}</AlertDescription>
         </Alert>
 
         {detail && (
           <details className="text-sm">
             <summary className="text-muted-foreground hover:text-foreground cursor-pointer">
-              {detailLabel}
+              {detailLabel ?? t('tool.details')}
             </summary>
             <pre className="bg-muted mt-2 max-h-48 overflow-auto rounded-md p-3 text-xs">
               <code>{detail}</code>
@@ -82,7 +86,7 @@ export function ToolError({
             className="gap-2"
           >
             <RefreshCw className="size-4" />
-            Ask AI to fix this
+            {t('tool.askToFix')}
           </Button>
         </CardFooter>
       }

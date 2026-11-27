@@ -2,6 +2,7 @@ import { Lightbulb } from 'lucide-react';
 import { memo, useMemo } from 'react';
 
 import { useIsAssistantSnapshotRender } from '../../../copy/assistant-snapshot.tsx';
+import { useGenaiMessages } from '../../../i18n/provider.tsx';
 import { useAgent } from '../../agent-context.tsx';
 import { useShowDebug } from '../../message-parts.tsx';
 import { useMessageItem, useMessagesContext } from '../messages-context.ts';
@@ -33,6 +34,7 @@ const TimelinedAssistantContent = memo(function TimelinedAssistantContent({
   const { debugMode } = useAgent();
   const showDebug = useShowDebug();
   const isSnapshotRender = useIsAssistantSnapshotRender();
+  const t = useGenaiMessages();
   const segments = useMemo(
     () => buildMessageTrajectorySegments(message.parts),
     [message.parts],
@@ -78,7 +80,7 @@ const TimelinedAssistantContent = memo(function TimelinedAssistantContent({
             debugMode,
           );
           const label = {
-            name: 'Reasoning',
+            name: t('steps.reasoning', { detail: undefined }),
             icon: Lightbulb,
             args: { text: [...segment.part.text].slice(0, 60).join('') },
           };

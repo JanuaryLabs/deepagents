@@ -23,6 +23,7 @@ import {
 import { unified } from 'unified';
 import { SKIP, visit } from 'unist-util-visit';
 
+import { useGenaiMarkdown } from '../i18n/provider.tsx';
 import { TablePanel } from '../ui/TablePanel.tsx';
 import { normalizeStreamdownChildren } from './normalize-streamdown-children.ts';
 
@@ -353,8 +354,10 @@ export function TablePanelStreamdown({
   mode,
   remarkPlugins,
   tableActions,
+  translations,
   ...props
 }: TablePanelStreamdownProps) {
+  const markdown = useGenaiMarkdown();
   const tablePanelPlugins = useMemo(() => {
     if (!remarkPlugins) {
       return defaultTablePanelRemarkPlugins;
@@ -403,6 +406,7 @@ export function TablePanelStreamdown({
         mode={mode}
         parseMarkdownIntoBlocksFn={parseMarkdownWithTableDirectives}
         remarkPlugins={tablePanelPlugins}
+        translations={{ ...markdown, ...translations }}
         {...props}
       >
         {normalizeStreamdownChildren(

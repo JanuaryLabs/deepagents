@@ -10,6 +10,7 @@ import {
 } from '../components/InteractiveResponse.tsx';
 import { ToolDebug } from '../components/tool-debug.tsx';
 import { useIsAssistantSnapshotRender } from '../copy/assistant-snapshot.tsx';
+import { useGenaiMessages } from '../i18n/provider.tsx';
 import { RenderPart } from '../renderers/render-part.tsx';
 import { useAgent, useAgentStatus } from './agent-context.tsx';
 import { citationsInReadingOrder } from './citation-order.ts';
@@ -35,10 +36,11 @@ type MessageAttachmentPartProps = {
 };
 
 function ImageFilePart({ filename, url }: { filename?: string; url: string }) {
+  const t = useGenaiMessages();
   return (
     <img
       src={url}
-      alt={filename ?? 'Attached image'}
+      alt={filename ?? t('attachment.image')}
       className="max-h-64 rounded-md border object-contain"
     />
   );
@@ -53,7 +55,8 @@ function FileAttachmentPart({
   mediaType: string;
   url?: string;
 }) {
-  const name = filename || 'Untitled';
+  const t = useGenaiMessages();
+  const name = filename || t('attachment.untitled');
   const player = url?.startsWith('data:') ? null : url &&
     mediaType.startsWith('video/') ? (
     <video
@@ -83,12 +86,12 @@ function FileAttachmentPart({
     <Attachment className="bg-muted/30 block w-full rounded-md p-3 text-sm text-inherit">
       {player}
       <div className={player ? 'mt-2' : undefined}>
-        <strong>File:</strong> {name} ({mediaType})
+        <strong>{t('attachment.file')}</strong> {name} ({mediaType})
         {url ? (
           <>
             {' '}
             <a href={url} download={filename} className="underline">
-              Download
+              {t('attachment.download')}
             </a>
           </>
         ) : null}

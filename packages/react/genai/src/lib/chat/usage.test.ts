@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { formatUsageBreakdown } from './usage.ts';
+import { formatUsageFigures } from './usage.ts';
 
-describe('formatUsageBreakdown', () => {
+describe('formatUsageFigures', () => {
   it('groups the total tokens in en-US like the other values when the ambient locale is de-DE', () => {
     const toLocaleString = Number.prototype.toLocaleString;
     const spy = vi
@@ -12,14 +12,19 @@ describe('formatUsageBreakdown', () => {
       });
     try {
       expect(
-        formatUsageBreakdown({
+        formatUsageFigures({
           inputTokens: 1_200_000,
           outputTokens: 34_567,
           reasoningTokens: null,
           totalTokens: 1_234_567,
           cachedInputTokens: null,
         }),
-      ).toBe('↑ 1.2M ↓ 34.6K · 1,234,567 tokens');
+      ).toEqual({
+        input: '1.2M',
+        output: '34.6K',
+        total: '1,234,567',
+        cached: undefined,
+      });
     } finally {
       spy.mockRestore();
     }

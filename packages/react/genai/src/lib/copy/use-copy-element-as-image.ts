@@ -12,7 +12,10 @@ type CopySuccessMode = 'image' | 'text';
 
 export type CopyImageFeedback =
   | { kind: 'success'; mode: CopySuccessMode }
-  | { kind: 'error'; message: string }
+  | {
+      kind: 'error';
+      reason: 'clipboard-unavailable' | 'image-unsupported' | 'failed';
+    }
   | null;
 
 function resolveImageBackgroundColor(element: HTMLElement): string | undefined {
@@ -138,15 +141,13 @@ export function useCopyElementAsImage({
 
       setTimedFeedback({
         kind: 'error',
-        message:
-          strategy === 'none'
-            ? 'Clipboard access is not available here.'
-            : 'Image copy is not supported in this browser.',
+        reason:
+          strategy === 'none' ? 'clipboard-unavailable' : 'image-unsupported',
       });
     } catch {
       setTimedFeedback({
         kind: 'error',
-        message: 'Copy failed. Please try again.',
+        reason: 'failed',
       });
     } finally {
       setIsCopying(false);

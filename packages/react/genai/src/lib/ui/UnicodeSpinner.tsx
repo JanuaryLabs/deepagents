@@ -2,6 +2,8 @@ import { useClock } from '@zukhruf/ui';
 import { cn } from 'cn';
 import { useEffect, useState } from 'react';
 
+import { useGenaiMessages } from '../i18n/provider.tsx';
+
 const spinners = {
   braille: {
     frames: ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'],
@@ -48,6 +50,7 @@ function UnicodeSpinner({
   variant?: SpinnerVariant;
 }) {
   const clock = useClock();
+  const t = useGenaiMessages();
   const { frames, interval } = spinners[variant];
   const [frameIndex, setFrameIndex] = useState(0);
 
@@ -64,7 +67,7 @@ function UnicodeSpinner({
   return (
     <span
       role="status"
-      aria-label="Loading"
+      aria-label={t('status.loading')}
       className={cn('inline-block', className)}
       {...props}
     >

@@ -14,6 +14,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import * as React from 'react';
 import { useStickToBottom } from 'use-stick-to-bottom';
 
+import { useGenaiMessages } from '../i18n/provider.tsx';
 import type { ComponentRegistry } from '../tools/registry.ts';
 import { useAgentMeta } from './agent-context.tsx';
 import { completeRenderedClientTool } from './client-tool-output.ts';
@@ -124,6 +125,7 @@ function AgentHeaderHero(props: {
   children?: React.ReactNode;
 }) {
   const { hasSubmitted } = useAgentMeta();
+  const t = useGenaiMessages();
   return (
     <AnimatePresence mode="sync">
       {!hasSubmitted && (
@@ -134,7 +136,7 @@ function AgentHeaderHero(props: {
         >
           <h1 className="flex items-center justify-center gap-2 text-2xl font-medium tracking-tight">
             {props.icon}
-            {props.children ?? 'How can I help today?'}
+            {props.children ?? t('chat.greeting')}
           </h1>
         </motion.div>
       )}

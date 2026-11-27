@@ -8,13 +8,17 @@ import {
   ToolInput,
   ToolOutput,
 } from '../elements/Tool.tsx';
+import { useGenaiMessages } from '../i18n/provider.tsx';
 
 export function ToolDebug({ part }: { part: ToolUIPart }) {
-  const toolName = getToolName(part);
+  const t = useGenaiMessages();
 
   return (
     <Tool data-copy-exclude="assistant-snapshot">
-      <ToolHeader title={`Executing ${toolName}`} part={part} />
+      <ToolHeader
+        title={t('tool.executing', { tool: getToolName(part) })}
+        part={part}
+      />
       <ToolContent>
         <ToolInput input={part.input} />
         <ToolOutput
@@ -32,9 +36,13 @@ export function ToolDebug({ part }: { part: ToolUIPart }) {
   );
 }
 export function DynamicToolDebug({ part }: { part: DynamicToolUIPart }) {
+  const t = useGenaiMessages();
   return (
     <Tool data-copy-exclude="assistant-snapshot">
-      <ToolHeader title={`Executing ${part.toolName}`} part={part} />
+      <ToolHeader
+        title={t('tool.executing', { tool: part.toolName })}
+        part={part}
+      />
       <ToolContent>
         <ToolInput input={part.input} />
         <ToolOutput

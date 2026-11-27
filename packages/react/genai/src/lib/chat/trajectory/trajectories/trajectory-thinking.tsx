@@ -1,5 +1,6 @@
 import { useActivePendingToolInput } from '../../../components/PendingToolInput.tsx';
 import { TextShimmer } from '../../../components/text-shimmer.tsx';
+import { useGenaiMessages } from '../../../i18n/provider.tsx';
 import { useMessagesContext, useMessagesStatus } from '../messages-context.ts';
 import { thinking } from './thinking-hint.ts';
 import { TimelineDot } from './timeline-dot.tsx';
@@ -9,7 +10,12 @@ export function TrajectoryThinking() {
   const status = useMessagesStatus();
   const { messages } = useMessagesContext();
   const activePendingTool = useActivePendingToolInput();
-  const thinkingHint = thinking(status, messages[messages.length - 1]);
+  const t = useGenaiMessages();
+  const thinkingHint = thinking(
+    status,
+    messages[messages.length - 1],
+    t('steps.thinking'),
+  );
 
   if (!thinkingHint || activePendingTool) return null;
 

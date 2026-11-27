@@ -117,7 +117,7 @@ import { ChatComposer } from '@deepagents/react-genai';
 </ChatComposer.Provider>;
 ```
 
-`ChatComposer.Dictate` renders `Composer.Dictate` and, while a dictation is active, `Composer.CancelDictation`, with the chat kit's `ChatActionButton`, lucide icons and English labels, as `ChatComposer.AttachFiles` does for `Composer.AttachFiles`. It refuses a new dictation while `useAgentStatus()` is `streaming` or `submitted`.
+`ChatComposer.Dictate` renders `Composer.Dictate` and, while a dictation is active, `Composer.CancelDictation`, with the chat kit's `ChatActionButton` and lucide icons, as `ChatComposer.AttachFiles` does for `Composer.AttachFiles`. It takes no props. Its labels are the `dictation.*` keys of react-genai's `GenaiMessagesProvider`, English unless the host gives its own. It refuses a new dictation while `useAgentStatus()` is `streaming` or `submitted`.
 
 ## Start and stop from the keyboard
 
@@ -219,8 +219,7 @@ type ComposerDictateProps = Omit<
 type ComposerCancelDictationProps = ComposerDictateProps;
 // DictationToggleProps and DictationCancelProps: the same, with DictationState
 
-// @deepagents/react-genai
-type ChatComposerDictateProps = Pick<ComposerDictateProps, 'disabled'>;
+// @deepagents/react-genai: ChatComposer.Dictate takes no props.
 ```
 
 `Dictation.Toggle`, `Dictation.Cancel` and `useDictationContext` throw outside `Dictation.Root`. `Composer.Dictate`, `Composer.CancelDictation` and `useComposerDictation` throw when the root has no `dictation`, as every part throws outside `Composer.Root`. `Composer.Dictate` and `Composer.CancelDictation` are `Dictation.Toggle` and `Dictation.Cancel` (one implementation, `src/lib/dictation/DictationButtons.tsx`) with the composer's state, its root's `disabled`, and `data-end`. The parts are Base UI `Button`s like the other action triggers, and they carry the state as attributes: `data-status` (`unavailable`, `idle`, …), `data-end` while the composer finishes, `aria-pressed` while recording, and `disabled` when a click can do nothing.

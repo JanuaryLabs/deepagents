@@ -5,7 +5,12 @@ import { isRecord } from '@deepagents/context/browser';
 
 import { isCommentaryTextPart } from '../segments/index.tsx';
 
-export function thinking(status: ChatStatus, message: UIMessage | undefined) {
+/** The line of a turn in flight; `placeholder` when nothing in it says more. */
+export function thinking(
+  status: ChatStatus,
+  message: UIMessage | undefined,
+  placeholder: string,
+) {
   if (status === 'error' || status === 'ready') {
     return null;
   }
@@ -13,7 +18,7 @@ export function thinking(status: ChatStatus, message: UIMessage | undefined) {
     return null;
   }
   if (message.role !== 'assistant') {
-    return 'Thinking...';
+    return placeholder;
   }
   for (let i = message.parts.length - 1; i >= 0; i--) {
     const part = message.parts[i];
@@ -43,5 +48,5 @@ export function thinking(status: ChatStatus, message: UIMessage | undefined) {
       return '';
     }
   }
-  return 'Thinking...';
+  return placeholder;
 }

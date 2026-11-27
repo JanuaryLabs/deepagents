@@ -24,6 +24,7 @@ import {
 } from '@deepagents/react-input/browser';
 
 import { useAgentMeta, useAgentStatus } from '../chat/agent-context.tsx';
+import { type GenaiTranslate, useGenaiMessages } from '../i18n/provider.tsx';
 import { ChatActionButton } from './ChatAction.tsx';
 
 function ChatComposerProvider({ className, ...props }: ComposerRootProps) {
@@ -89,9 +90,10 @@ function ChatComposerToolbar({ className, ...props }: ComposerToolbarProps) {
 }
 
 function ChatComposerAttachFiles(props: ComposerAttachFilesProps) {
+  const t = useGenaiMessages();
   return (
     <Composer.AttachFiles
-      aria-label="Attach files"
+      aria-label={t('composer.attachFiles')}
       render={<ChatActionButton icon={<Paperclip className="size-4" />} />}
       {...props}
     />
@@ -100,12 +102,13 @@ function ChatComposerAttachFiles(props: ComposerAttachFilesProps) {
 
 function ChatComposerCommandButton() {
   const { actions, meta } = useComposer('ChatComposer.CommandButton');
+  const t = useGenaiMessages();
 
   return (
     <ChatActionButton
       data-command-button
       icon={<Plus className="size-4" />}
-      aria-label="Toggle command menu"
+      aria-label={t('composer.commandMenu')}
       aria-expanded={meta.activePopup?.trigger === '/'}
       onClick={(event) => {
         event.stopPropagation();
@@ -115,37 +118,37 @@ function ChatComposerCommandButton() {
   );
 }
 
-function dictationFailure(code: DictationErrorCode) {
+function dictationFailure(code: DictationErrorCode, t: GenaiTranslate) {
   switch (code) {
     case 'permission-denied':
-      return 'Allow microphone access to use dictation';
+      return t('dictation.permissionDenied');
     case 'no-microphone':
-      return 'Connect a microphone to use dictation';
+      return t('dictation.noMicrophone');
     case 'microphone-in-use':
-      return 'Close other apps using the microphone';
+      return t('dictation.microphoneInUse');
     case 'interrupted':
-      return 'Recording interrupted';
+      return t('dictation.interrupted');
     case 'transcription-failed':
-      return 'Unable to transcribe audio';
+      return t('dictation.transcriptionFailed');
   }
 }
 
-function dictationLabel(state: DictationState) {
+function dictationLabel(state: DictationState, t: GenaiTranslate) {
   switch (state.status) {
     case 'unavailable':
       return state.reason === 'blocked'
-        ? 'Allow microphone access in your browser settings to use dictation'
-        : 'Dictation is not available in this browser';
+        ? t('dictation.blocked')
+        : t('dictation.unsupported');
     case 'idle':
-      return 'Start dictation';
+      return t('dictation.start');
     case 'starting':
-      return 'Starting dictation';
+      return t('dictation.starting');
     case 'recording':
-      return 'Stop dictation';
+      return t('dictation.stop');
     case 'finishing':
-      return 'Transcribing…';
+      return t('dictation.transcribing');
     case 'failed':
-      return dictationFailure(state.error.code);
+      return dictationFailure(state.error.code, t);
   }
 }
 
@@ -166,7 +169,8 @@ function dictationIcon(state: DictationState) {
 function ChatComposerDictate() {
   const { status } = useAgentStatus();
   const { state } = useComposerDictation('ChatComposer.Dictate');
-  const label = dictationLabel(state);
+  const t = useGenaiMessages();
+  const label = dictationLabel(state, t);
   const active =
     state.status === 'starting' ||
     state.status === 'recording' ||
@@ -189,11 +193,11 @@ function ChatComposerDictate() {
           render={
             <ChatActionButton
               icon={<XIcon className="size-4" />}
-              aria-label={
+              aria-label={t(
                 state.status === 'finishing'
-                  ? 'Cancel transcription'
-                  : 'Cancel dictation'
-              }
+                  ? 'dictation.cancelTranscription'
+                  : 'dictation.cancel',
+              )}
             />
           }
         />

@@ -12,6 +12,7 @@ import { CitationPill } from '../../../components/CitationPill.tsx';
 import { DynamicToolDebug } from '../../../components/tool-debug.tsx';
 import { useIsAssistantSnapshotRender } from '../../../copy/assistant-snapshot.tsx';
 import { Response } from '../../../elements/Response.tsx';
+import { useGenaiMessages } from '../../../i18n/provider.tsx';
 import {
   isActiveClientInputTool,
   resolveToolEntry,
@@ -180,6 +181,7 @@ function SegmentTool({
 }) {
   const agent = useAgent();
   const status = useMessagesStatus();
+  const t = useGenaiMessages();
   const { part: toolPart } = segment;
   if (!isStaticToolUIPart(toolPart)) return null;
   const { toolEntry } = resolveToolEntry(toolPart, agent.registry);
@@ -190,7 +192,7 @@ function SegmentTool({
     ? {
         ...(baseLabel ?? { name: getStaticToolName(toolPart) }),
         isError: true,
-        detail: 'Cancelled by user',
+        detail: t('steps.cancelledByUser'),
       }
     : baseLabel;
   const defaultOpen =
