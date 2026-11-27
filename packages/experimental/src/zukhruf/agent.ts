@@ -1,3 +1,4 @@
+import type { ProviderOptions } from '@ai-sdk/provider-utils';
 import type { TelemetryOptions } from 'ai';
 
 import type { CompactOptions, CompactionTrigger } from '@deepagents/compaction';
@@ -14,7 +15,10 @@ import type {
   StoppableSandboxEnvironment,
 } from '@deepagents/context';
 
-import type { AgentPluginDefinition } from './runtime/agent-runtime.ts';
+import type {
+  AgentPluginDefinition,
+  AgentPluginToolContext,
+} from './runtime/agent-runtime.ts';
 import type { ZukhrufToolSet } from './tool.ts';
 
 /**
@@ -94,6 +98,16 @@ export interface AgentDeclaration extends AgentControls<ZukhrufToolSet> {
   /** Runtime plugins owned by this declaration when it is the root agent. */
   plugins?: readonly AgentPluginDefinition[];
   telemetry?: Omit<TelemetryOptions, 'integrations'>;
+  /**
+   * The AI SDK's call-level provider options, sent on every step of a turn.
+   * A function is evaluated once per turn, so a value can depend on the
+   * conversation; its rejection fails the turn.
+   */
+  providerOptions?:
+    | ProviderOptions
+    | ((
+        context: AgentPluginToolContext,
+      ) => ProviderOptions | PromiseLike<ProviderOptions>);
   /** Automatic compaction before model steps, with a durable conversation checkpoint. */
   compaction?: AgentCompaction;
 }

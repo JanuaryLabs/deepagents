@@ -260,6 +260,10 @@ export class AgentTurnExecutor {
       agentName: declaration.name,
       agentPath: thread.path.toString(),
     } satisfies AgentPluginToolContext;
+    const providerOptions =
+      typeof declaration.providerOptions === 'function'
+        ? await declaration.providerOptions(pluginContext)
+        : declaration.providerOptions;
     const mailboxState: SamplingMailboxState = { firstRequest: true };
     const agentOptions = {
       name: declaration.name,
@@ -273,6 +277,7 @@ export class AgentTurnExecutor {
         declaration.experimental_toolApprovalSecret,
       sandbox,
       context: engine,
+      providerOptions,
       telemetry: this.#plugins.configureTelemetry(
         pluginContext,
         declaration.telemetry,
