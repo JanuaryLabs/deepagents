@@ -200,8 +200,16 @@ export async function chat<const TOOLS extends ToolSet>(
     execute: async ({ writer }) => {
       writer.write({ type: 'start', messageId: initialAssistantMsgId });
       options?.onStream?.(writer);
+      const writeTitle = (title: string) =>
+        writer.write({
+          type: 'data-chat-title',
+          data: title,
+          transient: true,
+        } satisfies InferUIMessageChunk<UIMessage<unknown, ChatDataTypes>>);
       const titler = new TitleGenerator({ context });
       const placed = await titler.ensureStatic();
+      // A chat list can show the first-message title before the model answers.
+      if (placed) writeTitle(placed.title);
       result = await agent.stream(...args);
       writer.merge(
         result.toUIMessageStream({
@@ -224,13 +232,10 @@ export async function chat<const TOOLS extends ToolSet>(
             ...options.title,
             abortSignal: options.abortSignal,
           })
-        : placed;
-      if (titled) {
-        writer.write({
-          type: 'data-chat-title',
-          data: titled.title,
-          transient: true,
-        } satisfies InferUIMessageChunk<UIMessage<unknown, ChatDataTypes>>);
+        : null;
+      // A failed title model keeps the first-message title this turn already sent.
+      if (titled && (titled.source === 'llm' || !placed)) {
+        writeTitle(titled.title);
       }
     },
   });

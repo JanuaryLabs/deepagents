@@ -157,7 +157,7 @@ When you call `chat()`, titles are handled automatically:
 
 1. An untitled chat gets `staticChatTitle()` of its first user message before the model request starts.
 2. With `title: { model }`, the title model runs while the answer streams, and its 2-5 word title replaces the static one only while the stored title is still the static one, so a rename made meanwhile is kept. If the title model fails, the static title stays.
-3. A title the turn stores is emitted as a `{ type: 'data-chat-title', data: title }` event on the UI stream.
+3. Each title the turn stores is emitted as a `{ type: 'data-chat-title', data: title }` event on the UI stream, so the part can arrive twice: the first-message title before the model request starts, then the generated title when the title model returns. A failed title model sends only the first.
 
 ```typescript
 import { chat } from '@deepagents/context';

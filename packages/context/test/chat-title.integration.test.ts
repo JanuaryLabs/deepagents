@@ -93,15 +93,23 @@ async function turn(
 }
 
 describe('chat() titles', () => {
-  it('stores the first message as the title when no title model is given', async () => {
+  it('stores and streams the first message as the title when no title model is given', async () => {
     const store = new InMemoryContextStore();
 
-    await Array.fromAsync(await turn(store, 'static-title', QUESTION));
+    const chunks = await Array.fromAsync(
+      await turn(store, 'static-title', QUESTION),
+    );
 
-    assert.strictEqual((await store.getChat('static-title'))?.title, QUESTION);
+    assert.deepStrictEqual(
+      {
+        stored: (await store.getChat('static-title'))?.title,
+        streamed: streamedTitles(chunks),
+      },
+      { stored: QUESTION, streamed: [QUESTION] },
+    );
   });
 
-  it('replaces the first-message title with the generated one, and titles a chat once', async () => {
+  it('streams the first-message title, then the generated one, and titles a chat once', async () => {
     const store = new InMemoryContextStore();
     const titleModel = new MockLanguageModelV4({
       doGenerate: titleResult('Passport renewal'),
@@ -124,13 +132,13 @@ describe('chat() titles', () => {
       },
       {
         stored: 'Passport renewal',
-        streamed: ['Passport renewal'],
+        streamed: [QUESTION, 'Passport renewal'],
         titleCalls: 1,
       },
     );
   });
 
-  it('keeps the first-message title when the title model fails', async () => {
+  it('keeps and streams only the first-message title when the title model fails', async () => {
     const store = new InMemoryContextStore();
     const titleModel = new MockLanguageModelV4({
       doGenerate: async () => {
@@ -138,20 +146,21 @@ describe('chat() titles', () => {
       },
     });
 
-    await Array.fromAsync(
+    const chunks = await Array.fromAsync(
       await turn(store, 'failed-title', QUESTION, { model: titleModel }),
     );
 
     assert.deepStrictEqual(
       {
         stored: (await store.getChat('failed-title'))?.title,
+        streamed: streamedTitles(chunks),
         titleCalls: titleModel.doGenerateCalls.length,
       },
-      { stored: QUESTION, titleCalls: 1 },
+      { stored: QUESTION, streamed: [QUESTION], titleCalls: 1 },
     );
   });
 
-  it('streams the answer, with the first-message title stored, while the title model is still running', async (t) => {
+  it('streams the answer and the first-message title while the title model is still running', async (t) => {
     const store = new InMemoryContextStore();
     const title = heldTitleModel('Passport renewal');
     try {
@@ -163,14 +172,22 @@ describe('chat() titles', () => {
         () => assert.strictEqual(title.model.doGenerateCalls.length, 1),
         { signal: t.signal },
       );
+      const held: UIMessageChunk[] = [];
       let answer = '';
       while (answer !== 'Visit the Civil Status Department.') {
         const { done, value } = await reader.read();
         assert.strictEqual(done, false, `stream ended after "${answer}"`);
+        held.push(value);
         if (value.type === 'text-delta') answer += value.delta;
       }
 
-      assert.strictEqual((await store.getChat('held-title'))?.title, QUESTION);
+      assert.deepStrictEqual(
+        {
+          stored: (await store.getChat('held-title'))?.title,
+          streamed: streamedTitles(held),
+        },
+        { stored: QUESTION, streamed: [QUESTION] },
+      );
       title.release();
       const rest: UIMessageChunk[] = [];
       for (;;) {
@@ -235,7 +252,7 @@ describe('chat() titles', () => {
               streamed: streamedTitles(await chunks),
               stored: (await stores.other.getChat('renamed'))?.title,
             },
-            { streamed: [], stored: 'Jordan passport' },
+            { streamed: [QUESTION], stored: 'Jordan passport' },
           );
         } finally {
           title.release();

@@ -188,9 +188,11 @@ list shows it at once. `chat()` merges the answer's UI message stream first and
 runs the title model while the answer streams. `TitleGenerator.ensure()` writes
 the generated title only while the stored title is still the first-message
 title, inside the store's lock, so a rename made meanwhile is kept. If the title
-model fails, the first-message title stays. A title the turn stores is sent as
-`{ type: 'data-chat-title', data: title, transient: true }` for the client to
-display. An existing title is left unchanged.
+model fails, the first-message title stays. Each title the turn stores is sent
+as `{ type: 'data-chat-title', data: title, transient: true }` for the client to
+display, so the part can arrive twice in one turn: the first-message title
+before the model request starts, then the generated title. An existing title is
+left unchanged.
 
 ## Error handling
 

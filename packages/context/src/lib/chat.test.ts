@@ -411,24 +411,20 @@ describe('chat() title generation', () => {
     });
 
     const parts = await drain(stream);
-    const titlePart = parts.find(
+    const titleParts = parts.filter(
       (
         part,
       ): part is Extract<
         InferUIMessageChunk<UIMessage<unknown, ChatDataTypes>>,
         { type: 'data-chat-title' }
-      > =>
-        typeof part === 'object' &&
-        part !== null &&
-        'type' in part &&
-        part.type === 'data-chat-title' &&
-        'data' in part &&
-        typeof part.data === 'string',
+      > => part.type === 'data-chat-title' && typeof part.data === 'string',
     );
-    assert.ok(titlePart, 'Stream should contain data-chat-title event');
     assert.deepStrictEqual(
-      { type: titlePart.type, data: titlePart.data },
-      { type: 'data-chat-title', data: 'Stream Title' },
+      titleParts.map((part) => ({ type: part.type, data: part.data })),
+      [
+        { type: 'data-chat-title', data: 'test' },
+        { type: 'data-chat-title', data: 'Stream Title' },
+      ],
     );
   });
 
