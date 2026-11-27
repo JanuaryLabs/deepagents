@@ -407,7 +407,7 @@ describe('Messages.Error', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows error message and retry button', () => {
+  it('shows the catalog sentence, not the error message, and the retry button', () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
 
@@ -421,7 +421,10 @@ describe('Messages.Error', () => {
       </Messages.Root>,
       { wrapper: AgentHarness },
     );
-    expect(screen.getByText('Something broke')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Something went wrong. Try again.',
+    );
+    expect(screen.queryByText('Something broke')).not.toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: /try again/i }),
     ).toBeInTheDocument();

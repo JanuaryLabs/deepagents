@@ -35,6 +35,10 @@ export type GenaiMessages = {
   'steps.cancelledByUser': string;
   'chat.greeting': string;
   'chat.retry': string;
+  /** Shown above the retry button when a send or stream fails. */
+  'chat.error': string;
+  /** The host answered 429. */
+  'chat.errorRateLimited': string;
   'chat.scrollToBottom': string;
   'status.loading': string;
   'composer.attachFiles': string;
@@ -149,6 +153,8 @@ export const en: GenaiMessages = {
   'steps.cancelledByUser': 'Cancelled by user',
   'chat.greeting': 'How can I help today?',
   'chat.retry': 'Try Again',
+  'chat.error': 'Something went wrong. Try again.',
+  'chat.errorRateLimited': 'Too many requests. Wait a moment, then try again.',
   'chat.scrollToBottom': 'Scroll to the latest message',
   'status.loading': 'Loading',
   'composer.attachFiles': 'Attach files',

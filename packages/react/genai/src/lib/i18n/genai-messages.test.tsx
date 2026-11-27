@@ -80,6 +80,8 @@ const ar: GenaiMessages = {
   'steps.cancelledByUser': 'ألغاه المستخدم',
   'chat.greeting': 'كيف أساعدك اليوم؟',
   'chat.retry': 'حاول مجددًا',
+  'chat.error': 'حدث خطأ. حاول مجددًا.',
+  'chat.errorRateLimited': 'طلبات كثيرة. انتظر قليلًا ثم حاول مجددًا.',
   'chat.scrollToBottom': 'انتقل إلى آخر رسالة',
   'status.loading': 'جارٍ التحميل',
   'composer.attachFiles': 'أرفق ملفات',
@@ -647,6 +649,7 @@ describe('GenaiMessagesProvider with an Arabic catalog across the chat', () => {
         .getAllByRole('button')
         .map((button) => button.textContent),
       retry: screen.getAllByRole('button', { name: 'حاول مجددًا' }).length,
+      error: screen.getByRole('alert').textContent,
     }).toEqual({
       greeting: 'كيف أساعدك اليوم؟',
       attachments: 1,
@@ -658,6 +661,7 @@ describe('GenaiMessagesProvider with an Arabic catalog across the chat', () => {
       image: 'https://files.test/c.png',
       approval: ['ارفض', 'وافق'],
       retry: 1,
+      error: 'حدث خطأ. حاول مجددًا.',
     });
   });
 
