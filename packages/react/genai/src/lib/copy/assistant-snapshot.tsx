@@ -19,6 +19,7 @@ import {
   urlCitationsOf,
 } from '../chat/citations.ts';
 import { buildMessageTrajectorySegments } from '../chat/trajectory/trajectory-segments.ts';
+import type { GenAIInteractiveElement } from '../elements/interactive-element.ts';
 import { useGenaiMessages } from '../i18n/provider.tsx';
 import { COPY_EXCLUSION_MODES } from './copy-image.ts';
 import { SnapshotRenderContext } from './snapshot-context.ts';
@@ -37,24 +38,25 @@ const copyFailures = {
   string
 >;
 
-// A custom element's name holds a hyphen (copy of normalizeStreamdownChildren's
-// customTagTest default, strike 2, #6005); a quoted attribute value may hold '>'.
-const CUSTOM_ELEMENT_TAG =
-  /<\/?[a-z][\w]*-[\w-]*(?:\s+[^\s"'>/=]+(?:=(?:"[^"]*"|'[^']*'|[^\s>]+))?)*\s*\/?>/gi;
+// A quoted attribute value may hold '>'.
+const TAG =
+  /<\/?([a-z][\w-]*)(?:\s+[^\s"'>/=]+(?:=(?:"[^"]*"|'[^']*'|[^\s>]+))?)*\s*\/?>/gi;
 const CODE = /(```[\s\S]*?```|`[^`\n]+`)/;
 
-// The screen draws a custom element as its component, or not at all when the
-// host does not declare it, so the copy drops its tags and keeps the words a
-// paired one wraps. Code shows its text as written, so it keeps it.
-function withoutCustomElementTags(text: string): string {
+// The screen draws a declared element as its component, so the copy drops its
+// tags and keeps the words a paired one wraps. Code and any other tag-like
+// text keep their text as written.
+function withoutElementTags(text: string, declared: Set<string>): string {
   return text
     .split(CODE)
     .map((segment, i) =>
       i % 2 === 1
         ? segment
         : segment
-            .replace(CUSTOM_ELEMENT_TAG, '\0')
-            .replace(/ \0(?= )/g, '')
+            .replace(TAG, (tag, name: string) =>
+              declared.has(name) ? '\0' : tag,
+            )
+            .replace(/ \0+(?= )/g, '')
             .replaceAll('\0', ''),
     )
     .join('');
@@ -64,8 +66,12 @@ function withoutCustomElementTags(text: string): string {
  * The answer's text with each citation as `[n]` where it sits, then one line
  * per source, numbered as the answer draws them.
  */
-export function extractAssistantRawText(message: UIMessage): string {
+export function extractAssistantRawText(
+  message: UIMessage,
+  elements: readonly Pick<GenAIInteractiveElement, 'name'>[],
+): string {
   const sources = extractSourcesFromMessage(message);
+  const declared = new Set(elements.map(({ name }) => name));
   // One text per run of consecutive text parts, as the screen draws them.
   const text = buildMessageTrajectorySegments(message.parts)
     .flatMap((segment) =>
@@ -80,7 +86,7 @@ export function extractAssistantRawText(message: UIMessage): string {
         : [],
     )
     .map(({ text, citations }) =>
-      withoutCustomElementTags(
+      withoutElementTags(
         // Copy of placeCitations' insertion in message-parts.tsx (strike 2, #6040).
         citationsInReadingOrder(text, urlCitationsOf(citations))
           .reverse()
@@ -89,6 +95,7 @@ export function extractAssistantRawText(message: UIMessage): string {
               `${marked.slice(0, at)}[${citationIndexOf(sources, citation.source.url)}]${marked.slice(at)}`,
             text,
           ),
+        declared,
       ),
     )
     .join('\n');
@@ -105,10 +112,13 @@ export function useIsAssistantSnapshotRender() {
 
 export function AssistantSnapshot({
   message,
+  elements,
   renderContent,
   className,
 }: {
   message: UIMessage;
+  /** The elements the host declares, whose tags the copied text drops. */
+  elements?: GenAIInteractiveElement[];
   renderContent: () => ReactNode;
   className?: string;
 }) {
@@ -116,8 +126,8 @@ export function AssistantSnapshot({
   const t = useGenaiMessages();
   const [showSnapshot, setShowSnapshot] = useState(false);
   const fallbackText = useMemo(
-    () => extractAssistantRawText(message),
-    [message],
+    () => extractAssistantRawText(message, elements ?? []),
+    [message, elements],
   );
   const { copy, feedback, isCopying } = useCopyElementAsImage({
     elementRef: snapshotRef,

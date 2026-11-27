@@ -122,3 +122,53 @@ test('with no ClockProvider in the host, the copy button throws at its first ren
     cleanup();
   }
 });
+
+test('the snapshot copies its text without the tags of an element the host declares (#6090)', async () => {
+  let copied = '';
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: {
+      writeText: (text: string) => {
+        copied = text;
+        return Promise.resolve();
+      },
+    },
+  });
+  try {
+    const answer: UIMessage = {
+      id: 'a2',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'text',
+          text: 'The paint dries in an hour. <followup question="Next?"></followup>',
+        },
+      ],
+    };
+    render(
+      <ClockProvider clock={createClock()}>
+        <AssistantSnapshot
+          message={answer}
+          elements={[
+            {
+              name: 'followup',
+              allowedAttributes: ['question'],
+              component: () => null,
+            },
+          ]}
+          renderContent={() => 'The paint dries in an hour.'}
+        />
+      </ClockProvider>,
+    );
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Copy snapshot' }),
+    );
+    await screen.findByRole('button', { name: 'Copied text' });
+
+    expect(copied.trimEnd()).toBe('The paint dries in an hour.');
+  } finally {
+    Reflect.deleteProperty(navigator, 'clipboard');
+    cleanup();
+  }
+});

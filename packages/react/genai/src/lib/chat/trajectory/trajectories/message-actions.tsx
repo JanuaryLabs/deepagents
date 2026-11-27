@@ -49,6 +49,7 @@ export function CopyAssistantMessageAction({
   className?: string;
 }) {
   const { message } = useMessageItem();
+  const { elements = [] } = useMessagesContext();
   const [copied, copy] = useCopyFeedback();
   const t = useGenaiMessages();
 
@@ -56,7 +57,7 @@ export function CopyAssistantMessageAction({
     <ChatActionButton
       aria-label={t(copied ? 'message.copied' : 'message.copy')}
       className={cn('p-1.5', className)}
-      onClick={() => void copy(extractAssistantRawText(message))}
+      onClick={() => void copy(extractAssistantRawText(message, elements))}
       icon={
         copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />
       }

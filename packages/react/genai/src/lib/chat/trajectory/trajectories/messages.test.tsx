@@ -7,6 +7,7 @@ import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { StoredMessagesTransport } from '../../../../testing/stored-messages-transport.ts';
+import type { GenAIInteractiveElement } from '../../../elements/interactive-element.ts';
 import { AgentProvider } from '../../agent-context.tsx';
 import { useMessageItem, useMessagesContext } from '../messages-context.ts';
 import { Messages } from './messages.tsx';
@@ -597,7 +598,7 @@ describe('Messages text citations (#5951)', () => {
     );
   });
 
-  it('copies an answer without the markup of its custom elements, keeping a paired element’s words and code as written (#6048)', async () => {
+  it('copies an answer without the markup of its declared elements, keeping a paired element’s words and code as written (#6048)', async () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
     let copied = '';
@@ -637,9 +638,16 @@ describe('Messages text citations (#5951)', () => {
         },
       ],
     };
+    const elements = ['no-source', 'passage-cite', 'keep-this'].map(
+      (name): GenAIInteractiveElement => ({
+        name,
+        allowedAttributes: ['passage', 'reason', 'x'],
+        component: () => null,
+      }),
+    );
     render(
       <ClockProvider clock={createClock()}>
-        <Messages.Root messages={[answer]}>
+        <Messages.Root messages={[answer]} elements={elements}>
           <Messages.Item message={answer} index={0}>
             <Messages.CopyAction />
           </Messages.Item>
@@ -778,5 +786,99 @@ describe('Messages text citations (#5951)', () => {
     await user.click(screen.getByRole('button', { name: 'Source 1' }));
 
     expect(screen.getByText('no dose change is needed')).toBeInTheDocument();
+  });
+});
+
+describe('Messages copy of a host’s declared elements (#6090)', () => {
+  function declared(name: string): GenAIInteractiveElement {
+    return {
+      name,
+      allowedAttributes: ['question'],
+      component: ({ question }) => (
+        <button type="button">{String(question)}</button>
+      ),
+    };
+  }
+
+  async function copyOf(
+    stack: DisposableStack,
+    answer: UIMessage,
+    elements: GenAIInteractiveElement[],
+  ) {
+    stack.defer(cleanup);
+    let copied = '';
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: (text: string) => {
+          copied = text;
+          return Promise.resolve();
+        },
+      },
+    });
+    stack.defer(() => Reflect.deleteProperty(navigator, 'clipboard'));
+    render(
+      <ClockProvider clock={createClock()}>
+        <Messages.Root messages={[answer]} elements={elements}>
+          <Messages.Item message={answer} index={0}>
+            <Messages.AssistantContent />
+            <Messages.CopyAction />
+          </Messages.Item>
+        </Messages.Root>
+      </ClockProvider>,
+      { wrapper: AgentHarness },
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Copy message' }));
+    return copied;
+  }
+
+  it.each([
+    ['followup', 'paired'],
+    ['followup', 'self-closing'],
+    ['follow-up', 'paired'],
+    ['follow-up', 'self-closing'],
+  ])(
+    'a declared <%s> element written %s shows as its component, and Copy gives the sentence without its tags',
+    async (name, form) => {
+      using stack = new DisposableStack();
+      const sentence = 'The paint dries in an hour.';
+      const tag =
+        form === 'paired'
+          ? `<${name} question="Next?"></${name}>`
+          : `<${name} question="Next?" />`;
+      const answer = makeAssistantMessage(`${sentence} ${tag}`);
+
+      const copied = await copyOf(stack, answer, [declared(name)]);
+
+      expect({
+        element: screen.queryByRole('button', { name: 'Next?' }) !== null,
+        rawTagOnScreen: screen.queryByText(new RegExp(`<${name}`)) !== null,
+        copied: copied.trimEnd(),
+      }).toEqual({ element: true, rawTagOnScreen: false, copied: sentence });
+    },
+  );
+
+  it('copies an empty declared element between two sentences with one space between them', async () => {
+    using stack = new DisposableStack();
+    const answer = makeAssistantMessage(
+      'The paint dries in an hour. <followup question="Next?"></followup> Then add a second coat.',
+    );
+
+    const copied = await copyOf(stack, answer, [declared('followup')]);
+
+    expect(copied).toBe('The paint dries in an hour. Then add a second coat.');
+  });
+
+  it('copies tag-like text the host did not declare as written', async () => {
+    using stack = new DisposableStack();
+    const text =
+      'The paint is <b>dry</b> when x < y > z, and <no-source passage="S1" /> stays.';
+    const answer = makeAssistantMessage(
+      `${text} <followup question="Next?" />`,
+    );
+
+    const copied = await copyOf(stack, answer, [declared('followup')]);
+
+    expect(copied.trimEnd()).toBe(text);
   });
 });
