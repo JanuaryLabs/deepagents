@@ -20,6 +20,8 @@ import {
 } from '@deepagents/context';
 
 import { appleContainerUnavailable } from './helpers/apple-container.ts';
+import { execEvents, execsOf } from './helpers/exec-events.ts';
+import { readFirstChunk } from './helpers/read-first-chunk.ts';
 
 const testbed = new DockerTestbed({ environment: process.env });
 const dockerDefaults = { container: await testbed.defaults() };
@@ -222,10 +224,51 @@ async function hostname(sandbox: DisposableSandbox): Promise<string> {
 }
 
 const LATER_WRITE_DELAY_MS = 3_500;
+const LATE_WRITE = 'echo late > late.txt';
 /** Long enough for a stop to land on a remote engine, where one exec takes seconds. */
-const STOPPABLE_COMMAND =
-  'echo started > started.txt; sleep 10; echo late > late.txt';
+const STOPPABLE_COMMAND = `echo started > started.txt; sleep 10; ${LATE_WRITE}`;
+/** The same command, which also says on stdout that it started. */
+const STOPPABLE_SPAWN_COMMAND = `echo started > started.txt; echo started; sleep 10; ${LATE_WRITE}`;
 const STOP_WINDOW_MS = 10_500;
+
+/**
+ * The end of the stoppable command, after which it can no longer write
+ * late.txt. Open it before the act.
+ */
+async function stoppableCommandEnd(
+  backend: string,
+  sandbox: DisposableSandbox,
+  signal: AbortSignal,
+): Promise<{ ended: () => Promise<unknown> } & AsyncDisposable> {
+  // Only the docker engine reports an exec's death; the other backends have no such event, so they wait out a window longer than the command.
+  if (backend !== 'docker') {
+    return {
+      ended: () => sleep(STOP_WINDOW_MS),
+      [Symbol.asyncDispose]: async () => undefined,
+    };
+  }
+  const events = await execEvents(testbed, sandbox, signal);
+  const [command] = execsOf(events, LATE_WRITE);
+  return {
+    ended: () => command.ended,
+    [Symbol.asyncDispose]: async () => void events.destroy(),
+  };
+}
+
+/** Waits until the spawned stoppable command started. */
+async function spawnStarted(
+  backend: string,
+  sandbox: DisposableSandbox,
+  child: Awaited<ReturnType<DisposableSandbox['spawn']>>,
+  signal: AbortSignal,
+) {
+  // The virtual backend yields stdout only when the process ends, so only docker reads it; the others poll started.txt.
+  if (backend === 'docker') {
+    assert.equal(await readFirstChunk(child.stdout), 'started\n');
+  } else {
+    await waitForStarted(sandbox, signal);
+  }
+}
 
 function waitForStarted(sandbox: DisposableSandbox, signal: AbortSignal) {
   return waitFor(
@@ -258,6 +301,11 @@ void describe.each(
           const controller = new AbortController();
           const reason = new Error('stop');
 
+          await using command = await stoppableCommandEnd(
+            name,
+            sandbox,
+            t.signal,
+          );
           const running = Promise.resolve(
             sandbox.run({
               command: STOPPABLE_COMMAND,
@@ -271,7 +319,7 @@ void describe.each(
           } else {
             assert.equal((await running).exitCode, 124);
           }
-          await sleep(STOP_WINDOW_MS);
+          await command.ended();
 
           assert.equal(await sandbox.readTextFile({ path: 'late.txt' }), null);
         });
@@ -280,11 +328,16 @@ void describe.each(
           await using sandbox = await open();
           const controller = new AbortController();
           const reason = new Error('stop');
+          await using command = await stoppableCommandEnd(
+            name,
+            sandbox,
+            t.signal,
+          );
           const child = await sandbox.spawn({
-            command: STOPPABLE_COMMAND,
+            command: STOPPABLE_SPAWN_COMMAND,
             abortSignal: controller.signal,
           });
-          await waitForStarted(sandbox, t.signal);
+          await spawnStarted(name, sandbox, child, t.signal);
 
           controller.abort(reason);
 
@@ -292,18 +345,25 @@ void describe.each(
             Promise.resolve(child.wait()),
             (error) => error === reason,
           );
-          await sleep(STOP_WINDOW_MS);
+          await command.ended();
           assert.equal(await sandbox.readTextFile({ path: 'late.txt' }), null);
         });
 
         it('stops the process on kill and tolerates a second kill', async (t: TestContext) => {
           await using sandbox = await open();
-          const child = await sandbox.spawn({ command: STOPPABLE_COMMAND });
-          await waitForStarted(sandbox, t.signal);
+          await using command = await stoppableCommandEnd(
+            name,
+            sandbox,
+            t.signal,
+          );
+          const child = await sandbox.spawn({
+            command: STOPPABLE_SPAWN_COMMAND,
+          });
+          await spawnStarted(name, sandbox, child, t.signal);
 
           await child.kill();
           await child.kill();
-          await sleep(STOP_WINDOW_MS);
+          await command.ended();
 
           assert.equal(await sandbox.readTextFile({ path: 'late.txt' }), null);
         });

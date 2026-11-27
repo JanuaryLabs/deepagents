@@ -5,7 +5,6 @@ import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert';
 import { text as streamText } from 'node:stream/consumers';
 import { describe, it } from 'node:test';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { z } from 'zod';
 
 import {
@@ -17,6 +16,7 @@ import {
   createDockerSandbox,
 } from '@deepagents/context';
 
+import { execEvents, execsOf } from './helpers/exec-events.ts';
 import { readFirstChunk } from './helpers/read-first-chunk.ts';
 import { textResult, toolCallResult } from './helpers/stream-results.ts';
 
@@ -171,88 +171,119 @@ describe('Docker Sandbox — spawn', () => {
   });
 
   describe('run signal retrofit', () => {
-    it('honors abortSignal (no longer silently dropped)', async () => {
+    it('honors abortSignal (no longer silently dropped)', async (t) => {
       await using sandbox = await createDockerSandbox(defaults);
-      const controller = new AbortController();
-      const exec = sandbox.run({
-        command: 'sleep 10; touch /workspace/after-abort',
-        abortSignal: controller.signal,
-      });
-      setTimeout(() => controller.abort(), 50);
-      await assert.rejects(
-        Promise.resolve(exec),
-        (error) => error === controller.signal.reason,
-      );
-      await sleep(10_500);
-      assert.strictEqual(
-        await sandbox.stat({ path: '/workspace/after-abort' }),
-        null,
-      );
+      const events = await execEvents(testbed, sandbox, t.signal);
+      try {
+        const [command] = execsOf(events, 'touch /workspace/after-abort');
+        const controller = new AbortController();
+        const exec = sandbox.run({
+          command: 'sleep 10; touch /workspace/after-abort',
+          abortSignal: controller.signal,
+        });
+        await command.started;
+        controller.abort();
+        await assert.rejects(
+          Promise.resolve(exec),
+          (error) => error === controller.signal.reason,
+        );
+        assert.strictEqual(await command.ended, '137');
+        assert.strictEqual(
+          await sandbox.stat({ path: '/workspace/after-abort' }),
+          null,
+        );
+      } finally {
+        events.destroy();
+      }
     });
   });
 
   describe('guest process termination', () => {
-    it('enforces commandTimeout for run and spawn without delayed writes', async () => {
+    it('enforces commandTimeout for run and spawn without delayed writes', async (t) => {
       await using timedSandbox = await createDockerSandbox({
         ...defaults,
         commandTimeout: 100,
       });
+      const events = await execEvents(testbed, timedSandbox, t.signal);
+      try {
+        const [execute, spawned] = execsOf(
+          events,
+          'printf leaked > /workspace/execute-timeout-leaked',
+          'printf leaked > /workspace/spawn-timeout-leaked',
+        );
 
-      const executeResult = await timedSandbox.run({
-        command: 'sleep 0.5; printf leaked > /workspace/execute-timeout-leaked',
-      });
-      assert.strictEqual(executeResult.exitCode, 124);
+        const executeResult = await timedSandbox.run({
+          command:
+            'sleep 0.5; printf leaked > /workspace/execute-timeout-leaked',
+        });
+        assert.strictEqual(executeResult.exitCode, 124);
 
-      assert.ok(timedSandbox.spawn);
-      const child = await timedSandbox.spawn({
-        command:
-          'printf "%s:%s" "$MANAGED" "$PWD"; printf managed-err >&2; sleep 0.5; printf leaked > /workspace/spawn-timeout-leaked',
-        workingDirectory: '/tmp',
-        env: { MANAGED: 'yes' },
-      });
-      const [stdout, stderr, exit] = await Promise.all([
-        streamText(child.stdout),
-        streamText(child.stderr),
-        child.wait(),
-      ]);
-      assert.strictEqual(stdout, 'yes:/tmp');
-      assert.match(stderr, /managed-err/);
-      assert.deepStrictEqual(exit, { exitCode: 124 });
+        assert.ok(timedSandbox.spawn);
+        const child = await timedSandbox.spawn({
+          command:
+            'printf "%s:%s" "$MANAGED" "$PWD"; printf managed-err >&2; sleep 0.5; printf leaked > /workspace/spawn-timeout-leaked',
+          workingDirectory: '/tmp',
+          env: { MANAGED: 'yes' },
+        });
+        const [stdout, stderr, exit] = await Promise.all([
+          streamText(child.stdout),
+          streamText(child.stderr),
+          child.wait(),
+        ]);
+        assert.strictEqual(stdout, 'yes:/tmp');
+        assert.match(stderr, /managed-err/);
+        assert.deepStrictEqual(exit, { exitCode: 124 });
 
-      await sleep(700);
-      const sentinel = await timedSandbox.run({
-        command:
-          'test ! -e /workspace/execute-timeout-leaked && test ! -e /workspace/spawn-timeout-leaked',
-      });
-      assert.strictEqual(sentinel.exitCode, 0);
+        await Promise.all([execute.ended, spawned.ended]);
+        const sentinel = await timedSandbox.run({
+          command:
+            'test ! -e /workspace/execute-timeout-leaked && test ! -e /workspace/spawn-timeout-leaked',
+        });
+        assert.strictEqual(sentinel.exitCode, 0);
+      } finally {
+        events.destroy();
+      }
     });
 
-    it('keeps caller abort distinct from the configured deadline', async () => {
+    it('keeps caller abort distinct from the configured deadline', async (t) => {
       await using abortableSandbox = await createDockerSandbox({
         ...defaults,
         commandTimeout: 60_000,
       });
-      assert.ok(abortableSandbox.spawn);
-      const controller = new AbortController();
-      const reason = new Error('stop');
-      const child = await abortableSandbox.spawn({
-        command:
-          'printf ready; while [ ! -e /workspace/release-aborted-command ]; do sleep 0.05; done; printf leaked > /workspace/abort-leaked',
-        abortSignal: controller.signal,
-      });
+      const events = await execEvents(testbed, abortableSandbox, t.signal);
+      try {
+        const [loop] = execsOf(
+          events,
+          'printf leaked > /workspace/abort-leaked',
+        );
+        assert.ok(abortableSandbox.spawn);
+        const controller = new AbortController();
+        const reason = new Error('stop');
+        const child = await abortableSandbox.spawn({
+          command:
+            'printf ready; while [ ! -e /workspace/release-aborted-command ]; do sleep 0.05; done; printf leaked > /workspace/abort-leaked',
+          abortSignal: controller.signal,
+        });
 
-      assert.strictEqual(await readFirstChunk(child.stdout), 'ready');
-      controller.abort(reason);
-      await assert.rejects(
-        Promise.resolve(child.wait()),
-        (error) => error === reason,
-      );
+        assert.strictEqual(await readFirstChunk(child.stdout), 'ready');
+        controller.abort(reason);
+        await assert.rejects(
+          Promise.resolve(child.wait()),
+          (error) => error === reason,
+        );
 
-      const sentinel = await abortableSandbox.run({
-        command:
-          'touch /workspace/release-aborted-command; sleep 0.2; test ! -e /workspace/abort-leaked',
-      });
-      assert.strictEqual(sentinel.exitCode, 0);
+        // A loop that survived the abort writes once released, then exits.
+        await abortableSandbox.run({
+          command: 'touch /workspace/release-aborted-command',
+        });
+        await loop.ended;
+        const sentinel = await abortableSandbox.run({
+          command: 'test ! -e /workspace/abort-leaked',
+        });
+        assert.strictEqual(sentinel.exitCode, 0);
+      } finally {
+        events.destroy();
+      }
     });
   });
 
@@ -279,43 +310,53 @@ describe('Docker Sandbox — spawn', () => {
       const controller = new AbortController();
       const reason = new Error('stop');
 
-      const stream = await chat(chatAgent, { abortSignal: controller.signal });
-      const consumed = Array.fromAsync(stream);
-      await waitFor(
-        async () =>
-          assert.ok(await backend.stat({ path: '/workspace/started' })),
-        { signal: t.signal },
-      );
-      controller.abort(reason);
-      await assert.rejects(consumed, (error) => error === reason);
+      const events = await execEvents(testbed, backend, t.signal);
+      try {
+        const [command] = execsOf(
+          events,
+          'touch started; sleep 10; touch late',
+        );
+        const stream = await chat(chatAgent, {
+          abortSignal: controller.signal,
+        });
+        const consumed = Array.fromAsync(stream);
+        await command.started;
+        controller.abort(reason);
+        await assert.rejects(consumed, (error) => error === reason);
 
-      await waitFor(
-        async () =>
-          assert.deepStrictEqual(
-            await storedBashPart(store, 'aborted-turn').then(
-              ({ state, errorText }) => ({ state, errorText }),
+        await waitFor(
+          async () =>
+            assert.deepStrictEqual(
+              await storedBashPart(store, 'aborted-turn').then(
+                ({ state, errorText }) => ({ state, errorText }),
+              ),
+              { state: 'output-error', errorText: 'aborted' },
             ),
-            { state: 'output-error', errorText: 'aborted' },
-          ),
-        { signal: t.signal },
-      );
-      assert.strictEqual(model.doStreamCalls.length, 1);
+          { signal: t.signal },
+        );
+        assert.strictEqual(model.doStreamCalls.length, 1);
 
-      await context.continue(userMessage('again'));
-      await Array.fromAsync(await chat(chatAgent));
-      await sleep(10_500);
+        await context.continue(userMessage('again'));
+        await Array.fromAsync(await chat(chatAgent));
+        await command.ended;
 
-      assert.deepStrictEqual(
-        model.doStreamCalls[1]?.prompt
-          .filter((message) => message.role === 'tool')
-          .flatMap((message) => message.content)
-          .map((part) => part.type === 'tool-result' && part.output),
-        [{ type: 'error-text', value: 'aborted' }],
-      );
-      assert.strictEqual(await backend.stat({ path: '/workspace/late' }), null);
+        assert.deepStrictEqual(
+          model.doStreamCalls[1]?.prompt
+            .filter((message) => message.role === 'tool')
+            .flatMap((message) => message.content)
+            .map((part) => part.type === 'tool-result' && part.output),
+          [{ type: 'error-text', value: 'aborted' }],
+        );
+        assert.strictEqual(
+          await backend.stat({ path: '/workspace/late' }),
+          null,
+        );
+      } finally {
+        events.destroy();
+      }
     });
 
-    it('returns a timed-out result the model reads when a bash call passes its tool timeout, and stops the command', async () => {
+    it('returns a timed-out result the model reads when a bash call passes its tool timeout, and stops the command', async (t) => {
       await using backend = await createDockerSandbox(defaults);
       const store = new InMemoryContextStore();
       const context = new ContextEngine({
@@ -336,8 +377,14 @@ describe('Docker Sandbox — spawn', () => {
       });
       await context.continue(userMessage('go'));
 
-      await Array.fromAsync(await chat(chatAgent));
-      await sleep(10_500);
+      const events = await execEvents(testbed, backend, t.signal);
+      try {
+        const [command] = execsOf(events, 'echo partial; sleep 10; touch late');
+        await Array.fromAsync(await chat(chatAgent));
+        await command.ended;
+      } finally {
+        events.destroy();
+      }
 
       const part = await storedBashPart(store, 'tool-timeout');
       assert.strictEqual(part.state, 'output-available');
@@ -365,7 +412,7 @@ describe('Docker Sandbox — spawn', () => {
       assert.strictEqual(await backend.stat({ path: '/workspace/late' }), null);
     });
 
-    it('ends the turn when the total timeout fires during a bash call, and stops the command', async () => {
+    it('ends the turn when the total timeout fires during a bash call, and stops the command', async (t) => {
       await using backend = await createDockerSandbox(defaults);
       const store = new InMemoryContextStore();
       const context = new ContextEngine({
@@ -386,14 +433,20 @@ describe('Docker Sandbox — spawn', () => {
       });
       await context.continue(userMessage('go'));
 
-      await Array.fromAsync(await chat(chatAgent)).catch((error: unknown) => {
-        // The total timeout ends the turn with its TimeoutError.
-        if (error instanceof DOMException && error.name === 'TimeoutError') {
-          return;
-        }
-        throw error;
-      });
-      await sleep(10_500);
+      const events = await execEvents(testbed, backend, t.signal);
+      try {
+        const [command] = execsOf(events, 'sleep 10; touch late');
+        await Array.fromAsync(await chat(chatAgent)).catch((error: unknown) => {
+          // The total timeout ends the turn with its TimeoutError.
+          if (error instanceof DOMException && error.name === 'TimeoutError') {
+            return;
+          }
+          throw error;
+        });
+        await command.ended;
+      } finally {
+        events.destroy();
+      }
 
       const { state, errorText } = await storedBashPart(store, 'total-timeout');
       assert.deepStrictEqual(
@@ -418,31 +471,39 @@ describe('Docker Sandbox — spawn', () => {
       const controller = new AbortController();
       const reason = new Error('stop');
 
-      const call = Promise.resolve(
-        bash.execute(
-          {
-            command: 'touch started; sleep 10; touch late',
-            reasoning: 'an aborted call',
-          },
-          {
-            abortSignal: controller.signal,
-            context: {},
-            messages: [],
-            toolCallId: 'aborted-call',
-          },
-        ),
-      );
-      await waitFor(
-        async () =>
-          assert.ok(await sandbox.stat({ path: '/workspace/started' })),
-        { signal: t.signal },
-      );
-      controller.abort(reason);
+      const events = await execEvents(testbed, sandbox, t.signal);
+      try {
+        const [command] = execsOf(
+          events,
+          'touch started; sleep 10; touch late',
+        );
+        const call = Promise.resolve(
+          bash.execute(
+            {
+              command: 'touch started; sleep 10; touch late',
+              reasoning: 'an aborted call',
+            },
+            {
+              abortSignal: controller.signal,
+              context: {},
+              messages: [],
+              toolCallId: 'aborted-call',
+            },
+          ),
+        );
+        await command.started;
+        controller.abort(reason);
 
-      await assert.rejects(call, (error) => error === reason);
-      await sleep(10_500);
-      assert.strictEqual(await sandbox.stat({ path: '/workspace/late' }), null);
-      assert.deepStrictEqual(afterCalls, []);
+        await assert.rejects(call, (error) => error === reason);
+        await command.ended;
+        assert.strictEqual(
+          await sandbox.stat({ path: '/workspace/late' }),
+          null,
+        );
+        assert.deepStrictEqual(afterCalls, []);
+      } finally {
+        events.destroy();
+      }
     });
 
     it('exposes spawn on the wrapped sandbox', async () => {

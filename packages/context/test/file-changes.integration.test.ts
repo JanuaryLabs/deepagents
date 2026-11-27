@@ -6,7 +6,6 @@ import { MockLanguageModelV4 } from 'ai/test';
 import { build } from 'esbuild';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { z } from 'zod';
 
 import {
@@ -17,6 +16,9 @@ import {
   createDockerSandbox,
   withStraceFileChanges,
 } from '@deepagents/context';
+
+import { execEvents, execsOf } from './helpers/exec-events.ts';
+import { readFirstChunk } from './helpers/read-first-chunk.ts';
 
 const testbed = new DockerTestbed({ environment: process.env });
 const defaults = { container: await testbed.defaults() };
@@ -629,25 +631,27 @@ describe('strace file-change tracking (docker backend)', () => {
       const controller = new AbortController();
       const reason = new Error('stop');
 
-      const running = Promise.resolve(
-        s.sandbox.run({
-          command: `echo started > ${ROOT}/run-started; sleep 10; echo late > ${ROOT}/run-late`,
-          abortSignal: controller.signal,
-        }),
-      );
-      await waitFor(
-        async () =>
-          assert.ok(await s.sandbox.stat({ path: `${ROOT}/run-started` })),
-        { signal: t.signal },
-      );
-      controller.abort(reason);
+      const events = await execEvents(testbed, s.sandbox, t.signal);
+      try {
+        const [command] = execsOf(events, `${ROOT}/run-late`);
+        const running = Promise.resolve(
+          s.sandbox.run({
+            command: `echo started > ${ROOT}/run-started; sleep 10; echo late > ${ROOT}/run-late`,
+            abortSignal: controller.signal,
+          }),
+        );
+        await command.started;
+        controller.abort(reason);
 
-      await assert.rejects(running, (error) => error === reason);
-      await sleep(10_500);
-      assert.strictEqual(
-        await s.sandbox.stat({ path: `${ROOT}/run-late` }),
-        null,
-      );
+        await assert.rejects(running, (error) => error === reason);
+        await command.ended;
+        assert.strictEqual(
+          await s.sandbox.stat({ path: `${ROOT}/run-late` }),
+          null,
+        );
+      } finally {
+        events.destroy();
+      }
       assert.deepStrictEqual(rec.drain(), []);
       // The sweep is fire-and-forget, so absorb it with a wait.
       await waitFor(
@@ -665,45 +669,45 @@ describe('strace file-change tracking (docker backend)', () => {
     await withSandbox(async (s) => {
       const controller = new AbortController();
       const reason = new Error('stop');
-      const started = (name: string) =>
-        waitFor(
-          async () =>
-            assert.notStrictEqual(
-              await s.sandbox.readTextFile({ path: `${ROOT}/${name}` }),
-              null,
-              `${name} never started`,
-            ),
-          { signal: t.signal },
-        );
       const command = (name: string) =>
-        `echo started > ${ROOT}/${name}; sleep 10; echo late > ${ROOT}/${name}-late`;
+        `echo started; sleep 10; echo late > ${ROOT}/${name}-late`;
 
-      const aborted = await s.sandbox.spawn({
-        command: command('aborted'),
-        abortSignal: controller.signal,
-      });
-      await started('aborted');
-      controller.abort(reason);
-      await assert.rejects(
-        Promise.resolve(aborted.wait()),
-        (error) => error === reason,
-      );
+      const events = await execEvents(testbed, s.sandbox, t.signal);
+      try {
+        const [abortedExec, killedExec] = execsOf(
+          events,
+          `${ROOT}/aborted-late`,
+          `${ROOT}/killed-late`,
+        );
+        const aborted = await s.sandbox.spawn({
+          command: command('aborted'),
+          abortSignal: controller.signal,
+        });
+        assert.strictEqual(await readFirstChunk(aborted.stdout), 'started\n');
+        controller.abort(reason);
+        await assert.rejects(
+          Promise.resolve(aborted.wait()),
+          (error) => error === reason,
+        );
 
-      const killed = await s.sandbox.spawn({ command: command('killed') });
-      await started('killed');
-      await killed.kill();
-      await killed.kill();
-      assert.notStrictEqual((await killed.wait()).exitCode, 0);
+        const killed = await s.sandbox.spawn({ command: command('killed') });
+        assert.strictEqual(await readFirstChunk(killed.stdout), 'started\n');
+        await killed.kill();
+        await killed.kill();
+        assert.notStrictEqual((await killed.wait()).exitCode, 0);
 
-      await sleep(10_500);
-      assert.strictEqual(
-        await s.sandbox.stat({ path: `${ROOT}/aborted-late` }),
-        null,
-      );
-      assert.strictEqual(
-        await s.sandbox.stat({ path: `${ROOT}/killed-late` }),
-        null,
-      );
+        await Promise.all([abortedExec.ended, killedExec.ended]);
+        assert.strictEqual(
+          await s.sandbox.stat({ path: `${ROOT}/aborted-late` }),
+          null,
+        );
+        assert.strictEqual(
+          await s.sandbox.stat({ path: `${ROOT}/killed-late` }),
+          null,
+        );
+      } finally {
+        events.destroy();
+      }
       // The sweep is fire-and-forget, so absorb it with a wait.
       await waitFor(
         async () =>
