@@ -23,14 +23,8 @@ export function normalizeStreamdownChildren(
     normalizeCurlyQuotedAttributes(children, customTagTest(tagNames)),
   ).replace(
     /<(\w[\w-]*)((?:\s+[\w-]+="[^"]*")+)\s*(\/?>)/g,
-    (_m, tag: string, attrs: string, close: string) => {
-      const collapsed = attrs.replace(/\s+/g, ' ');
-      const escaped = collapsed.replace(
-        /"([^"]*)"/g,
-        (_, v: string) => `"${v.replace(/\*/g, '&#42;')}"`,
-      );
-      return `<${tag}${escaped}${close}`;
-    },
+    (_m, tag: string, attrs: string, close: string) =>
+      `<${tag}${attrs.replace(/\s+/g, ' ')}${close}`,
   );
 
   result = result.replace(

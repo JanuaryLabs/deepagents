@@ -518,6 +518,64 @@ test('escaped quotes in a generic attribute survive the rendering pipeline', () 
   }
 });
 
+function LabelProbe(props: Record<string, unknown>) {
+  return <sup data-testid="label-probe" data-label={String(props.label)} />;
+}
+
+test.each([
+  ['static', 'static'],
+  ['the chat’s streaming', undefined],
+] as const)(
+  'attribute values holding *, as SQL and bold do, reach the element unchanged and add no emphasis in %s mode',
+  (_case, mode) => {
+    const values = [
+      'SELECT COUNT(*) AS value FROM orders',
+      'SELECT COUNT(*) AS a, SUM(*) AS b FROM t',
+      '**Deliverability is solid** at 98%.',
+    ];
+    const inSentence = values
+      .map((value) => `<label-probe label="${value}" />`)
+      .join(' and ');
+    const blocks = values
+      .map((value) => `<label-probe label="${value}"></label-probe>`)
+      .join('\n\n');
+
+    try {
+      const { container } = render(
+        <InteractiveResponse
+          elements={[
+            {
+              name: 'label-probe',
+              component: LabelProbe,
+              allowedAttributes: ['label'],
+            },
+          ]}
+          mode={mode}
+        >
+          {`Totals ${inSentence} here.\n\n${blocks}\n\nDone.`}
+        </InteractiveResponse>,
+      );
+
+      const probes = screen.getAllByTestId('label-probe');
+      expect({
+        labels: probes.map((probe) => probe.dataset.label),
+        sentence: probes[0]?.closest('p')?.textContent,
+        emphasis: container.querySelectorAll(
+          'em, strong, [data-streamdown="strong"]',
+        ).length,
+        last: [...container.querySelectorAll('p')].at(-1)?.textContent,
+      }).toEqual({
+        labels: [...values, ...values],
+        sentence: 'Totals  and  and  here.',
+        emphasis: 0,
+        last: 'Done.',
+      });
+    } finally {
+      cleanup();
+    }
+  },
+);
+
 test.each([
   ['static', 'static'],
   ['the chat’s streaming', undefined],

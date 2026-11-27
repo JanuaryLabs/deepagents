@@ -106,7 +106,7 @@ describe('normalizeStreamdownChildren', () => {
 ></kpi>`;
       assert.strictEqual(
         normalizeStreamdownChildren(input, ['kpi']),
-        `\n\n<div><kpi title="Payments in the last 30 days" sql="SELECT COUNT(&#42;)::int AS value FROM public.payment WHERE payment_date >= NOW() - INTERVAL '30 days'" variant="sparkline" format="compact"></kpi></div>`,
+        `\n\n<div><kpi title="Payments in the last 30 days" sql="SELECT COUNT(*)::int AS value FROM public.payment WHERE payment_date >= NOW() - INTERVAL '30 days'" variant="sparkline" format="compact"></kpi></div>`,
       );
     });
 
@@ -152,90 +152,8 @@ describe('normalizeStreamdownChildren', () => {
     });
   });
 
-  describe('asterisk escaping in attribute values', () => {
-    it('escapes COUNT(*) in sql attribute', () => {
-      assert.strictEqual(
-        normalizeStreamdownChildren(
-          '<kpi sql="SELECT COUNT(*) AS value FROM orders"></kpi>',
-          ['kpi'],
-        ),
-        '\n\n<div><kpi sql="SELECT COUNT(&#42;) AS value FROM orders"></kpi></div>',
-      );
-    });
-
-    it('escapes SELECT * in sql attribute', () => {
-      assert.strictEqual(
-        normalizeStreamdownChildren(
-          '<data-table sql="SELECT * FROM users"></data-table>',
-        ),
-        '\n\n<div><data-table sql="SELECT &#42; FROM users"></data-table></div>',
-      );
-    });
-
-    it('escapes multiple asterisks in one attribute', () => {
-      assert.strictEqual(
-        normalizeStreamdownChildren(
-          '<kpi sql="SELECT COUNT(*) AS a, SUM(*) AS b FROM t"></kpi>',
-          ['kpi'],
-        ),
-        '\n\n<div><kpi sql="SELECT COUNT(&#42;) AS a, SUM(&#42;) AS b FROM t"></kpi></div>',
-      );
-    });
-
-    it('escapes markdown bold in advice attribute', () => {
-      assert.strictEqual(
-        normalizeStreamdownChildren(
-          '<metric-card title="Health" advice="**Deliverability is solid** at 98%."></metric-card>',
-          ['metric-card'],
-        ),
-        '\n\n<div><metric-card title="Health" advice="&#42;&#42;Deliverability is solid&#42;&#42; at 98%."></metric-card></div>',
-      );
-    });
-
-    it('does not escape asterisks in plain text outside attributes', () => {
-      assert.strictEqual(
-        normalizeStreamdownChildren(
-          'Use COUNT(*) for totals\n<line-chart sql="SELECT 1"></line-chart>',
-        ),
-        'Use COUNT(*) for totals\n\n<div><line-chart sql="SELECT 1"></line-chart></div>',
-      );
-    });
-
-    it('leaves attribute unchanged when no asterisks present', () => {
-      assert.strictEqual(
-        normalizeStreamdownChildren(
-          '<kpi title="Revenue" sql="SELECT SUM(amount) FROM orders"></kpi>',
-          ['kpi'],
-        ),
-        '\n\n<div><kpi title="Revenue" sql="SELECT SUM(amount) FROM orders"></kpi></div>',
-      );
-    });
-
-    it('escapes COUNT(*)::int PostgreSQL cast', () => {
-      assert.strictEqual(
-        normalizeStreamdownChildren(
-          '<kpi sql="SELECT COUNT(*)::int AS value FROM public.payment"></kpi>',
-          ['kpi'],
-        ),
-        '\n\n<div><kpi sql="SELECT COUNT(&#42;)::int AS value FROM public.payment"></kpi></div>',
-      );
-    });
-  });
-
   describe('multiple SQL attributes on same element', () => {
-    it('escapes asterisks in both sql and trend-sql attributes', () => {
-      const input = `<kpi
-  title="New Orders"
-  sql="SELECT COUNT(*) AS value FROM orders"
-  trend-sql="SELECT DATE(created_at) AS date, COUNT(*) AS value FROM orders GROUP BY date"
-></kpi>`;
-      assert.strictEqual(
-        normalizeStreamdownChildren(input, ['kpi']),
-        '\n\n<div><kpi title="New Orders" sql="SELECT COUNT(&#42;) AS value FROM orders" trend-sql="SELECT DATE(created_at) AS date, COUNT(&#42;) AS value FROM orders GROUP BY date"></kpi></div>',
-      );
-    });
-
-    it('collapses multiline and escapes both sql attributes', () => {
+    it('collapses multiline sql and trend-sql attributes', () => {
       const input = `<param-select
   name="region"
   label="Region"
@@ -244,7 +162,7 @@ describe('normalizeStreamdownChildren', () => {
 ></param-select>`;
       assert.strictEqual(
         normalizeStreamdownChildren(input, ['param-select']),
-        '\n\n<div><param-select name="region" label="Region" options-sql="SELECT DISTINCT region FROM stores" sql="SELECT COUNT(&#42;) FROM stores WHERE region = :region"></param-select></div>',
+        '\n\n<div><param-select name="region" label="Region" options-sql="SELECT DISTINCT region FROM stores" sql="SELECT COUNT(*) FROM stores WHERE region = :region"></param-select></div>',
       );
     });
   });
@@ -283,7 +201,7 @@ describe('normalizeStreamdownChildren', () => {
           '<kpi sql="SELECT COUNT(*) FROM `bigquery-public-data.chicago.trips`"></kpi>',
           ['kpi'],
         ),
-        '\n\n<div><kpi sql="SELECT COUNT(&#42;) FROM `bigquery-public-data.chicago.trips`"></kpi></div>',
+        '\n\n<div><kpi sql="SELECT COUNT(*) FROM `bigquery-public-data.chicago.trips`"></kpi></div>',
       );
     });
 
@@ -293,7 +211,7 @@ describe('normalizeStreamdownChildren', () => {
           `<kpi sql="SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL '30 days'"></kpi>`,
           ['kpi'],
         ),
-        `\n\n<div><kpi sql="SELECT COUNT(&#42;) FROM orders WHERE created_at >= NOW() - INTERVAL '30 days'"></kpi></div>`,
+        `\n\n<div><kpi sql="SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL '30 days'"></kpi></div>`,
       );
     });
 
@@ -303,7 +221,7 @@ describe('normalizeStreamdownChildren', () => {
           '<kpi sql="SELECT COUNT(*) FROM orders WHERE amount >= 100 AND qty < 5"></kpi>',
           ['kpi'],
         ),
-        '\n\n<div><kpi sql="SELECT COUNT(&#42;) FROM orders WHERE amount >= 100 AND qty < 5"></kpi></div>',
+        '\n\n<div><kpi sql="SELECT COUNT(*) FROM orders WHERE amount >= 100 AND qty < 5"></kpi></div>',
       );
     });
   });
@@ -442,7 +360,7 @@ describe('normalizeStreamdownChildren', () => {
           '<kpi title="Total" sql="SELECT COUNT(*)" /><line-chart title="Trend" sql="SELECT 1"></line-chart>',
           ['kpi', 'line-chart'],
         ),
-        '<kpi title="Total" sql="SELECT COUNT(&#42;)"/>\n\n<div><line-chart title="Trend" sql="SELECT 1"></line-chart></div>',
+        '<kpi title="Total" sql="SELECT COUNT(*)"/>\n\n<div><line-chart title="Trend" sql="SELECT 1"></line-chart></div>',
       );
     });
   });
