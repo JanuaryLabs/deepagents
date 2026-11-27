@@ -1,6 +1,6 @@
 # Trajectory: glossary
 
-> Design ruled on 2026-11-27; no code yet.
+> Built and released on 2026-11-27 (first release 7.53.0); the design was ruled the same day.
 
 - **Trajectory**: the ordered record of one agent run, read back from storage, in ATIF v1.8. It holds steps, an agent, final metrics, embedded subagent trajectories and `extra`. (Sutton & Barto ch. 3; Harbor RFC 0001.)
 - **Step**: one entry of a trajectory. Its `source` is `user`, `agent` or `system`. Only an agent step carries a model name, reasoning, tool calls and metrics.
@@ -13,5 +13,5 @@
 - **Chain**: the segments of one Claude Code session across `/clear`. Each new transcript names the old one in a `derived-from` entry. The segments share one `session_id` and link by `continued_trajectory_ref`.
 - **Origin**: who wrote a user step, from Claude Code's `origin.kind`: `human` (typed), `peer` (another session), `task-notification`, `coordinator` (a hand-back), and so on. It lives in `extra.claude_code.origin`.
 - **Typed prompt**: a user step whose origin is `human`. It includes a prompt typed mid-turn (a `queued_command` attachment).
-- **Injected context**: text the harness adds rather than a person: `isMeta` entries such as skill bodies and command expansions, and attachments such as `hook_additional_context`. These are system steps.
+- **Injected context**: text the harness adds rather than a person: `isMeta` entries with no `origin`, such as skill bodies and command expansions, and attachments such as `hook_additional_context`. These are system steps. An `isMeta` entry that carries an `origin` (a peer message) is a user step.
 - **Diagnostic**: a counted, non-fatal note about a line the adapter could not map (a bad or partial line, bookkeeping, a sidechain row, an orphan result).

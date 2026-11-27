@@ -52,8 +52,8 @@ const typed = trajectory.steps.filter(
 
 A prompt typed while the agent works (a `queued_command` attachment) is a user
 step too. Task notifications, peer messages and hand-backs are user steps with
-their own `origin`. Skill bodies, command expansions and other `isMeta` entries
-are system steps. See [ADR 0004](./docs/adr/0004-every-claude-code-entry-becomes-a-step-or-a-counted-diagnostic.md).
+their own `origin`, even when stored with `isMeta`. Skill bodies, command
+expansions and other `isMeta` entries with no `origin` are system steps. See [ADR 0004](./docs/adr/0004-every-claude-code-entry-becomes-a-step-or-a-counted-diagnostic.md).
 
 ## Read a whole session after a /clear
 

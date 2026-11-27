@@ -1,6 +1,6 @@
 # A store takes its root path and never reads HOME or env
 
-Status: ruled by Ezz on 2026-11-27 (deepagents #6107). Since 2026-11-27 a check enforces it: the `packages/trajectory/src` block of the root `eslint.config.mjs` runs `island/no-ambient-time` and restricts `process.env`, `os.homedir` and the `homedir` import (proved on a probe file: all five reads flagged).
+Status: ruled by Ezz on 2026-11-27 (deepagents #6107). Since 2026-11-27 a check enforces it: the `packages/trajectory/src` block of the root `eslint.config.mjs` runs `island/no-ambient-time` and restricts `process.env`, `os.homedir` and the `homedir` import (proved on a probe file: all five reads flagged). Amended on 2026-11-27 (3a7b077a): the block bans any import of `node:os`, `os`, `node:process` and `process`, so an aliased or destructured read of the home folder or the environment is caught too.
 
 ## Context
 
