@@ -39,7 +39,7 @@ const myAgent = agent({
 
 await context.continue(user('Hello'));
 const stream = await chat(myAgent, {
-  generateTitle: true,
+  title: { model: groq('gpt-oss-20b') },
 });
 ```
 
@@ -61,7 +61,7 @@ requires context, the options object and its `toolsContext` entry are required.
 
 | Argument  | Type                   | Description                                                                          |
 | --------- | ---------------------- | ------------------------------------------------------------------------------------ |
-| `agent`   | `ChatAgentLike<TOOLS>` | An object with `stream()`, `context`, and optionally `model`                         |
+| `agent`   | `ChatAgentLike<TOOLS>` | An object with `stream()`, `context`, and `sandbox`                                  |
 | `options` | `ChatOptions<TOOLS>`   | Optional tool contexts, title, transform, error-handling, and metadata configuration |
 
 The function throws if:
@@ -76,7 +76,6 @@ Any object that satisfies this interface can be passed to `chat()`. The `agent()
 ```typescript
 interface ChatAgentLike<TOOLS extends ToolSet> {
   context?: ContextEngine;
-  model?: AgentModel;
   sandbox: AgentSandbox;
   tools?: TOOLS;
   stream(options?: ChatOptions<TOOLS>): Promise<ChatStreamResult>;
@@ -96,7 +95,6 @@ interface ChatStreamResult {
 | Property   | Type            | Required | Description                                                                                                                                             |
 | ---------- | --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `context`  | `ContextEngine` | Yes      | The context engine scoped to the current chat                                                                                                           |
-| `model`    | `AgentModel`    | No       | Required for AI-generated titles. If absent, only static titles are used                                                                                |
 | `sandbox`  | `AgentSandbox`  | Yes      | Sandbox passed to context resolution by the agent                                                                                                       |
 | `stream()` | Function        | Yes      | Resolves context and returns a `ChatStreamResult`. Its `reminders`, when present, is the reminder session the stream used; `agent()` always returns one |
 
@@ -108,7 +106,7 @@ interface ChatOptions<TOOLS extends ToolSet> {
   toolsContext?: InferToolSetContext<TOOLS>;
   transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
   abortSignal?: AbortSignal;
-  generateTitle?: boolean;
+  title?: { model: AgentModel };
   onError?: (error: unknown) => string;
   messageMetadata?: UIMessageStreamOptions<UIMessage>['messageMetadata'];
   finalAssistantMetadata?: (
@@ -125,8 +123,8 @@ interface ChatOptions<TOOLS extends ToolSet> {
 | `toolsContext`           | `InferToolSetContext<TOOLS>`                               | `undefined`                  | Required only when a tool declares context; keyed by tool name                              |
 | `transform`              | `StreamTextTransform`                                      | `undefined`                  | Custom stream transforms forwarded to `agent.stream()`                                      |
 | `abortSignal`            | `AbortSignal`                                              | `undefined`                  | Signal to cancel the stream, forwarded to `agent.stream()`                                  |
-| `onStream`               | `(writer: UIMessageStreamWriter) => void`                  | `undefined`                  | Write custom data chunks before title generation and the first model request                |
-| `generateTitle`          | `boolean`                                                  | `false`                      | Enable AI-powered title generation for untitled chats                                       |
+| `onStream`               | `(writer: UIMessageStreamWriter) => void`                  | `undefined`                  | Write custom data chunks before the first model request                                     |
+| `title`                  | `{ model: AgentModel }`                                    | `undefined`                  | Model that generates the chat's title; without it the first message is the title            |
 | `onError`                | `(error: unknown) => string`                               | Built-in formatter           | Custom error-to-string formatter for stream errors                                          |
 | `messageMetadata`        | `UIMessageStreamOptions<UIMessage>['messageMetadata']`     | `defaultChatMessageMetadata` | Attaches finish reason and usage at step end, and finish reason and total usage at turn end |
 | `finalAssistantMetadata` | `(msg: UIMessage) => Record<string, unknown> \| undefined` | `undefined`                  | Async callback to attach metadata to the final assistant message before persisting          |
@@ -175,23 +173,22 @@ Streaming updates do not each create a new branch.
 
 ## Title generation
 
-`chat()` handles title generation automatically for untitled chats:
+`chat()` titles an untitled chat with its first user message, truncated to 100
+characters with `...` appended when needed (`TitleGenerator.ensureStatic()`).
+Pass a title model to replace that title with a generated 2–5 word one:
 
 ```typescript
 const stream = await chat(myAgent, {
-  generateTitle: true,
+  title: { model: groq('gpt-oss-20b') },
 });
 ```
 
-When `generateTitle: true` and the agent has a `model`, `TitleGenerator.ensure()`
-asks the model for a 2–5 word title. If that call fails, it uses the first user
-message's text, truncated to 100 characters with `...` appended when needed.
-When `generateTitle` is `false` (the default) or the agent has no model,
-`TitleGenerator.ensureStatic()` uses that fallback directly.
-
-Title generation and `agent.stream()` start concurrently. `chat()` waits for
-both before merging the model's UI message stream. A new title is saved with
-`context.updateChat()` and sent as
+The first-message title is stored before the model request starts, so a chat
+list shows it at once. `chat()` merges the answer's UI message stream first and
+runs the title model while the answer streams. `TitleGenerator.ensure()` writes
+the generated title only while the stored title is still the first-message
+title, inside the store's lock, so a rename made meanwhile is kept. If the title
+model fails, the first-message title stays. A title the turn stores is sent as
 `{ type: 'data-chat-title', data: title, transient: true }` for the client to
 display. An existing title is left unchanged.
 
@@ -263,7 +260,7 @@ async function handleUserMessage(
 
   await context.continue(user(message));
   const stream = await chat(myAgent, {
-    generateTitle: true,
+    title: { model: groq('gpt-oss-20b') },
     finalAssistantMetadata: async (message) => ({
       completedAt: Date.now(),
     }),
@@ -278,7 +275,7 @@ async function handleUserMessage(
 |                     | `chat()`                                          | `agent.stream()`                       |
 | ------------------- | ------------------------------------------------- | -------------------------------------- |
 | Message persistence | Assistant is automatic after `context.continue()` | Manual                                 |
-| Title generation    | Built-in with `generateTitle` option              | Manual                                 |
+| Title generation    | Built-in with the `title` option                  | Manual                                 |
 | Usage tracking      | Automatic via `trackUsage()`                      | Manual                                 |
 | Error formatting    | Built-in with override option                     | Set `onError` on `toUIMessageStream()` |
 | Return type         | `ReadableStream<UIMessageChunk>`                  | `AgentStream`                          |

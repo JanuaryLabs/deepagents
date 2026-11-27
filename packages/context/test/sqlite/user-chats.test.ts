@@ -485,7 +485,7 @@ describe('User Chat Management', () => {
       });
 
       // Update chat title
-      await engine.updateChat({ title: 'My Updated Title' });
+      await engine.updateChat(() => ({ title: 'My Updated Title' }));
 
       // Verify userId is preserved
       const chat = await store.getChat('updatable-chat');

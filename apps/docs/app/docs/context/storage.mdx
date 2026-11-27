@@ -780,12 +780,13 @@ Store and query custom metadata:
 
 ```typescript
 // Set metadata on chat
-await context.updateChat({
+await context.updateChat(({ metadata }) => ({
   metadata: {
+    ...metadata,
     archived: false,
     tags: ['support', 'billing'],
   },
-});
+}));
 
 // Query by metadata
 const activeChats = await store.listChats({

@@ -192,10 +192,10 @@ async function demonstrateChatMetadata() {
   await context.save();
 
   // Update chat with title and metadata
-  await context.updateChat({
+  await context.updateChat(({ metadata }) => ({
     title: 'Python Learning Session',
-    metadata: { tags: ['python', 'learning'], priority: 'high' },
-  });
+    metadata: { ...metadata, tags: ['python', 'learning'], priority: 'high' },
+  }));
 
   console.log('Chat ID:', context.chatId);
   console.log('Chat meta:', context.chat);

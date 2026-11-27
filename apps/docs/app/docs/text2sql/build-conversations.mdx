@@ -30,7 +30,7 @@ const ai = agent({
 });
 
 await context.continue(user('Show me top 10 customers'));
-const stream = await chat(ai, { generateTitle: true });
+const stream = await chat(ai, { title: { model } });
 
 for await (const chunk of stream) {
   // render
@@ -250,10 +250,10 @@ message for this request before calling `context.continue(...)`.
 The `chat()` helper from `@deepagents/context` accepts an optional options
 object. These options belong to that helper, not to `Text2Sql`:
 
-| Option          | Type          | Description                                                                    |
-| --------------- | ------------- | ------------------------------------------------------------------------------ |
-| `abortSignal`   | `AbortSignal` | Cancels title generation, repair attempts, and the active stream               |
-| `generateTitle` | `boolean`     | Uses the model to generate the first chat title instead of the static fallback |
+| Option        | Type          | Description                                                                      |
+| ------------- | ------------- | -------------------------------------------------------------------------------- |
+| `abortSignal` | `AbortSignal` | Cancels title generation, repair attempts, and the active stream                 |
+| `title`       | `{ model }`   | Generates the chat title with this model; the first message titles it until then |
 
 See the [chat options reference](/docs/context/chat-function#chatoptions) for
 metadata, error formatting, stream callbacks, and lifecycle options.
@@ -286,7 +286,7 @@ app.post('/api/chat', async (req, res) => {
 
   const { context, ai } = await createThread(chatId, userId);
   await context.continue(user(message));
-  const stream = await chat(ai, { generateTitle: true });
+  const stream = await chat(ai, { title: { model } });
 
   res.setHeader('Content-Type', 'text/event-stream');
 

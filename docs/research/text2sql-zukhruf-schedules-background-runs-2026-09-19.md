@@ -125,7 +125,7 @@ Evidence: [client tool transport](../../packages/experimental/src/zukhruf/plugin
 
 Limerence automation IDs are CUIDs; the built-in schedule HTTP API validates UUID task/run IDs. Limerence stream IDs originate from user messages/random UUIDs; Zukhruf derives conversation-scoped `zukhruf-turn:…` IDs and checks their ownership. Existing automation/chat links, history, continuation and cancellation cannot be migrated by renaming endpoints alone.
 
-The old worker requests generated chat titles. Zukhruf's turn executor does not set `generateTitle`, so the shared chat implementation uses a static title. Its built-in scheduled executor also returns null title/summary. Preserve the desired history presentation explicitly; this is smaller than a scheduler gap.
+The old worker requests generated chat titles. Zukhruf's turn executor passes no title model, so the shared chat implementation uses a static title. Its built-in scheduled executor also returns null title/summary. Preserve the desired history presentation explicitly; this is smaller than a scheduler gap.
 
 Evidence: [HTTP IDs/projection](../../packages/experimental/src/zukhruf/plugins/schedules/http.ts), lines 60–89; [turn IDs](../../packages/experimental/src/zukhruf/control-plane/agent-turn-id.ts), lines 14–35; [executor chat call](../../packages/experimental/src/zukhruf/runtime/agent-turn-executor.ts), lines 264–276; [title behavior](../../packages/context/src/lib/chat.ts), lines 203–225; Text2SQL worker `apps/backend/src/core/background/chat-worker.ts:104`.
 

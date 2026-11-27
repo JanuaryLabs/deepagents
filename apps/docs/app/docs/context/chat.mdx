@@ -85,28 +85,30 @@ context.chatId; // 'chat-001'
 
 ## Updating Chat Metadata
 
-Use `updateChat()` to set a title or attach custom metadata:
+Use `updateChat()` to set a title or attach custom metadata. It passes the
+stored chat to your updater under the store's write lock and writes what the
+updater returns, so the change cannot overwrite one made meanwhile:
 
 ```typescript
-await context.updateChat({
+await context.updateChat(({ metadata }) => ({
   title: 'Help with TypeScript',
   metadata: {
+    ...metadata,
     tags: ['coding', 'typescript'],
     priority: 'high',
   },
-});
+}));
 
 console.log(context.chat?.title); // 'Help with TypeScript'
 ```
 
-Metadata is merged with existing values, not replaced:
+The returned metadata replaces the stored metadata, so spread the stored value
+to keep its keys. Return `undefined` to leave the chat unchanged:
 
 ```typescript
-await context.updateChat({ metadata: { category: 'support' } });
-await context.updateChat({ metadata: { resolved: true } });
-
-console.log(context.chat?.metadata);
-// { category: 'support', resolved: true }
+await context.updateChat((chat) =>
+  chat.title === undefined ? { title: 'New chat' } : undefined,
+);
 ```
 
 ## Automatic Title Generation
@@ -123,7 +125,7 @@ import { staticChatTitle } from '@deepagents/context';
 const title = staticChatTitle(userMessage);
 // "help me write an essay about space exploration and..."
 
-await context.updateChat({ title });
+await context.updateChat(() => ({ title }));
 ```
 
 ### AI-Generated Title
@@ -153,21 +155,19 @@ const title = await generateChatTitle({
 
 When you call `chat()`, titles are handled automatically:
 
-1. If `generateTitle: true` and the agent has a `model`, an LLM call generates a 2-5 word title. If the LLM call fails, it falls back to `staticChatTitle()`.
-2. If `generateTitle` is `false` (the default) or the agent has no model, `staticChatTitle()` is applied immediately.
-3. Once the title resolves, it is emitted as a `{ type: 'data-chat-title', data: title }` event on the UI stream and persisted via `context.updateChat()`.
+1. An untitled chat gets `staticChatTitle()` of its first user message before the model request starts.
+2. With `title: { model }`, the title model runs while the answer streams, and its 2-5 word title replaces the static one only while the stored title is still the static one, so a rename made meanwhile is kept. If the title model fails, the static title stays.
+3. A title the turn stores is emitted as a `{ type: 'data-chat-title', data: title }` event on the UI stream.
 
 ```typescript
 import { chat } from '@deepagents/context';
 
 const stream = await chat(agent, {
-  generateTitle: true, // [!code highlight]
+  title: { model: titleModel }, // [!code highlight]
 });
 ```
 
-The `ChatAgentLike` interface exposes an optional `model` property. If `model` is not present on the agent, only the static title is applied.
-
-The `generateTitle` option is part of `ChatOptions`, which also accepts `transform`, `abortSignal`, `onError`, `messageMetadata`, and `finalAssistantMetadata`. `toolsContext` is required only when an agent tool declares context.
+The `title` option is part of `ChatOptions`, which also accepts `transform`, `abortSignal`, `onError`, `messageMetadata`, and `finalAssistantMetadata`. `toolsContext` is required only when an agent tool declares context.
 
 ## Listing Chats
 
@@ -347,9 +347,9 @@ async function sendMessage(chatId: string, userId: string, text: string) {
   context.set(assistant(result.text));
   await context.save();
 
-  if (!context.chat?.title) {
-    await context.updateChat({ title: text.slice(0, 100) });
-  }
+  await context.updateChat((chat) =>
+    chat.title === undefined ? { title: text.slice(0, 100) } : undefined,
+  );
 
   await context.trackUsage(await result.usage);
 
@@ -365,7 +365,7 @@ async function deleteChat(chatId: string, userId: string) {
 }
 ```
 
-When using the `chat()` streaming function instead of `generateText()`, title generation is handled automatically -- pass `generateTitle: true` to enable AI-powered titles.
+When using the `chat()` streaming function instead of `generateText()`, title generation is handled automatically -- pass `title: { model }` to enable AI-powered titles.
 
 ## Next Steps
 

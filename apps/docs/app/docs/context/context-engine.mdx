@@ -307,18 +307,20 @@ Unlike `rewind()`:
 
 ### Chat Metadata
 
-#### updateChat(updates)
+#### updateChat(update)
 
-Update chat title and metadata.
+Read and update the chat's title and metadata atomically. The updater gets the
+stored chat under the store's write lock; return `undefined` to leave it
+unchanged.
 
 ```typescript
-await context.updateChat({
+await context.updateChat(({ metadata }) => ({
   title: 'Python Learning Session',
-  metadata: { tags: ['python', 'beginner'] },
-});
+  metadata: { ...metadata, tags: ['python', 'beginner'] },
+}));
 ```
 
-Metadata is merged with existing values.
+The returned metadata replaces the stored metadata.
 
 ### Debugging
 

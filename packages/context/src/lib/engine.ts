@@ -50,7 +50,7 @@ import { InMemoryContextStore } from './store/memory.store.ts';
 import {
   type BranchData,
   type BranchInfo,
-  type ChatData,
+  type ChatUpdater,
   type CheckpointData,
   type CheckpointInfo,
   ContextStore,
@@ -1528,30 +1528,23 @@ export class ContextEngine {
   }
 
   /**
-   * Update metadata for the current chat.
-   *
-   * @param updates - Partial metadata to merge (title, metadata)
+   * Read and update the current chat atomically, under the store's write lock.
+   * The updater sees the stored chat, so a conditional write cannot lose a
+   * change another engine or host made meanwhile. Return `undefined` to leave
+   * the chat unchanged.
    *
    * @example
    * ```ts
-   * await context.updateChat({
+   * await context.updateChat(({ metadata }) => ({
    *   title: 'Coding Help Session',
-   *   metadata: { tags: ['python', 'debugging'] }
-   * });
+   *   metadata: { ...metadata, tags: ['python', 'debugging'] },
+   * }));
    * ```
    */
-  public async updateChat(
-    updates: Partial<Pick<StoredChatData, 'title' | 'metadata'>>,
-  ): Promise<void> {
+  public async updateChat(update: ChatUpdater): Promise<StoredChatData> {
     const open = await this.#open();
-
-    open.chat = await this.#store.updateChat(this.#chatId, ({ metadata }) => ({
-      title: updates.title,
-      metadata:
-        updates.metadata === undefined
-          ? undefined
-          : { ...metadata, ...updates.metadata },
-    }));
+    open.chat = await this.#store.updateChat(this.#chatId, update);
+    return open.chat;
   }
 
   /**

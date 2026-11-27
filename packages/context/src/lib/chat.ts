@@ -24,7 +24,12 @@ import { TitleGenerator } from './title.ts';
 type ChatConfig<TOOLS extends ToolSet> = StreamOptions<TOOLS> & {
   /** Native writer for data parts, available before the first model request. */
   onStream?: (writer: UIMessageStreamWriter) => void;
-  generateTitle?: boolean;
+  /**
+   * Generates the chat's title with this model. The first message titles the
+   * chat at once either way; the generated title replaces it only while no
+   * one has changed it.
+   */
+  title?: { model: AgentModel };
   onError?: (error: unknown) => string;
   messageMetadata?: ChatMessageMetadata;
   finalAssistantMetadata?: (
@@ -54,7 +59,6 @@ export interface ChatStreamResult {
 
 export interface ChatAgentLike<TOOLS extends ToolSet = {}> {
   context?: ContextEngine;
-  model?: AgentModel;
   sandbox: AgentSandbox;
   tools?: TOOLS;
   stream(
@@ -188,16 +192,9 @@ export async function chat<const TOOLS extends ToolSet>(
     execute: async ({ writer }) => {
       writer.write({ type: 'start', messageId: initialAssistantMsgId });
       options?.onStream?.(writer);
-      const [title, streamed] = await Promise.all([
-        makeTitle({
-          context,
-          model: agent.model,
-          generateTitle: options?.generateTitle,
-          abortSignal: options?.abortSignal,
-        }),
-        agent.stream(...args),
-      ]);
-      result = streamed;
+      const titler = new TitleGenerator({ context });
+      const placed = await titler.ensureStatic();
+      result = await agent.stream(...args);
       writer.merge(
         result.toUIMessageStream({
           onError: options?.onError ?? formatChatError,
@@ -213,8 +210,19 @@ export async function chat<const TOOLS extends ToolSet>(
             options?.messageMetadata ?? defaultChatMessageMetadata,
         }),
       );
-      if (title) {
-        writer.write({ type: 'data-chat-title', data: title, transient: true });
+      // The answer streams while the title model runs.
+      const titled = options?.title
+        ? await titler.ensure({
+            model: options.title.model,
+            abortSignal: options.abortSignal,
+          })
+        : placed;
+      if (titled) {
+        writer.write({
+          type: 'data-chat-title',
+          data: titled.title,
+          transient: true,
+        });
       }
     },
   });
@@ -267,29 +275,4 @@ function formatChatError(error: unknown): string {
     return `Upstream API call failed with status ${error.statusCode}: ${error.message}`;
   }
   return Error.isError(error) ? 'An error occurred.' : JSON.stringify(error);
-}
-
-async function makeTitle(options: {
-  context: ContextEngine;
-  model?: AgentModel;
-  generateTitle?: boolean;
-  abortSignal?: AbortSignal;
-}): Promise<string | null> {
-  const titler = new TitleGenerator({ context: options.context });
-
-  if (options.generateTitle && !options.model) {
-    console.warn(
-      'chat: generateTitle=true but agent.model is unset; using static title.',
-    );
-  }
-
-  const result =
-    options.generateTitle && options.model
-      ? await titler.ensure({
-          model: options.model,
-          abortSignal: options.abortSignal,
-        })
-      : await titler.ensureStatic();
-
-  return result?.title ?? null;
 }

@@ -134,7 +134,7 @@ automatically:
 import { chat } from '@deepagents/context';
 
 await context.continue(user('Show me sales data'));
-for await (const _ of await chat(ai, { generateTitle: true })) {
+for await (const _ of await chat(ai, { title: { model } })) {
   // drain or stream chunks to your UI
 }
 

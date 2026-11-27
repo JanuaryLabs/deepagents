@@ -238,7 +238,7 @@ try {
   });
 
   await context.continue(textMessage('Write the probe file.'));
-  await drain(await chat(probeAgent, { generateTitle: false }));
+  await drain(await chat(probeAgent));
 
   assert.equal(predicateSawRawFileMetadata(), true);
   assert.ok(
@@ -277,7 +277,7 @@ try {
   assert.doesNotMatch(JSON.stringify(visibleMessages), /FILE CHANGE OBSERVED/);
 
   await context.continue(textMessage('Verify replay.'));
-  await drain(await chat(probeAgent, { generateTitle: false }));
+  await drain(await chat(probeAgent));
 
   const replayPrompt = model.doStreamCalls[2]?.prompt;
   assert.ok(replayPrompt, 'expected a replay generation');

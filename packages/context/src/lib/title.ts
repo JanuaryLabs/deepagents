@@ -36,35 +36,72 @@ export class TitleGenerator {
     this.#context = options.context;
   }
 
+  /**
+   * Titles an untitled chat with its first message, then upgrades that title
+   * to one the model generates. Each write is conditional under the store's
+   * lock, so a title set meanwhile (a rename) is kept. Returns `null` when the
+   * chat already had another title or it changed while the model ran.
+   */
   async ensure(options: {
     model: AgentModel;
     abortSignal?: AbortSignal;
   }): Promise<EnsureResult | null> {
-    const msg = await this.#firstUntitledUser();
+    const msg = await this.#context.firstUserMessage();
     if (!msg) return null;
+    const staticTitle = this.#staticTitle(msg);
+    const { stored } = await this.#placeStatic(staticTitle);
+    if (stored !== staticTitle) return null;
+
+    let title: string;
     try {
-      const title = await this.#generateTitle(msg, options);
-      return await this.#applyTitle(title, 'llm');
+      title = await this.#generate(msg, options);
     } catch (error) {
       console.warn(
-        'TitleGenerator: LLM title generation failed, falling back to static.',
+        'TitleGenerator: LLM title generation failed, keeping the static title.',
         error,
       );
-      return this.#applyTitle(this.#staticTitle(msg), 'static');
+      return { title: staticTitle, source: 'static' };
     }
+    const upgraded = await this.#context.updateChat((chat) =>
+      chat.title === staticTitle ? { title } : undefined,
+    );
+    return upgraded.title === title ? { title, source: 'llm' } : null;
   }
 
+  /**
+   * Titles an untitled chat with its first message. Returns `null` when the
+   * chat already has a title.
+   */
   async ensureStatic(): Promise<EnsureResult | null> {
-    const msg = await this.#firstUntitledUser();
+    const msg = await this.#context.firstUserMessage();
     if (!msg) return null;
-    return this.#applyTitle(this.#staticTitle(msg), 'static');
+    const title = this.#staticTitle(msg);
+    const { placed } = await this.#placeStatic(title);
+    return placed ? { title, source: 'static' } : null;
+  }
+
+  async #placeStatic(
+    title: string,
+  ): Promise<{ placed: boolean; stored: string | undefined }> {
+    // The chat is open here (firstUserMessage opened it), and a stored title is
+    // never removed: stores skip an undefined title (postgres.store.ts:312), so a
+    // titled snapshot needs no locked read.
+    const known = this.#context.chat?.title;
+    if (known !== undefined) return { placed: false, stored: known };
+    let placed = false;
+    const stored = await this.#context.updateChat((chat) => {
+      if (chat.title !== undefined) return undefined;
+      placed = true;
+      return { title };
+    });
+    return { placed, stored: stored.title };
   }
 
   #staticTitle(message: UIMessage): string {
     return this.#truncateTitle(this.#extractText(message));
   }
 
-  async #generateTitle(
+  async #generate(
     message: UIMessage,
     options: { model: AgentModel; abortSignal?: AbortSignal },
   ): Promise<string> {
@@ -102,18 +139,5 @@ export class TitleGenerator {
   #truncateTitle(text: string): string {
     if (!text) return 'New Chat';
     return text.length > 100 ? text.slice(0, 100) + '...' : text;
-  }
-
-  async #applyTitle(
-    title: string,
-    source: 'llm' | 'static',
-  ): Promise<EnsureResult> {
-    await this.#context.updateChat({ title });
-    return { title, source };
-  }
-
-  async #firstUntitledUser(): Promise<UIMessage | undefined> {
-    if (this.#context.chat?.title) return undefined;
-    return this.#context.firstUserMessage();
   }
 }

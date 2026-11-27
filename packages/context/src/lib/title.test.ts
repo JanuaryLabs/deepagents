@@ -58,7 +58,7 @@ describe('TitleGenerator.ensure()', () => {
     const { store, context } = freshContext('ensure-titled');
     context.set(user('hello'));
     await context.save();
-    await context.updateChat({ title: EXISTING_TITLE });
+    await context.updateChat(() => ({ title: EXISTING_TITLE }));
 
     const model = new MockLanguageModelV4({
       doGenerate: {
@@ -230,7 +230,7 @@ describe('TitleGenerator.ensureStatic()', () => {
     const { store, context } = freshContext('static-titled');
     context.set(user('hello'));
     await context.save();
-    await context.updateChat({ title: EXISTING_TITLE });
+    await context.updateChat(() => ({ title: EXISTING_TITLE }));
 
     const titler = new TitleGenerator({ context });
     const result = await titler.ensureStatic();
@@ -239,6 +239,32 @@ describe('TitleGenerator.ensureStatic()', () => {
     assert.strictEqual(
       (await store.getChat('static-titled'))?.title,
       EXISTING_TITLE,
+    );
+  });
+
+  it('keeps the title a chat already has when a new engine opens it', async () => {
+    const { store, context } = freshContext('static-titled-reopened');
+    context.set(user('hello'));
+    await context.save();
+    await store.updateChat('static-titled-reopened', () => ({
+      title: EXISTING_TITLE,
+    }));
+
+    const reopened = new ContextEngine({
+      store,
+      chatId: 'static-titled-reopened',
+      userId: 'test-user',
+    });
+    const result = await new TitleGenerator({
+      context: reopened,
+    }).ensureStatic();
+
+    assert.deepStrictEqual(
+      {
+        result,
+        stored: (await store.getChat('static-titled-reopened'))?.title,
+      },
+      { result: null, stored: EXISTING_TITLE },
     );
   });
 

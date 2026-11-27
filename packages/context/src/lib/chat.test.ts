@@ -263,7 +263,7 @@ describe('context chat()', () => {
 });
 
 describe('chat() title generation', () => {
-  it('generates and persists title on first message when generateTitle is true', async () => {
+  it('generates and persists title on first message with a title model', async () => {
     const store = new InMemoryContextStore();
     const context = new ContextEngine({
       store,
@@ -280,7 +280,7 @@ describe('chat() title generation', () => {
 
     await context.continue(userMessage('help with python'));
     const stream = await chat(chatAgent, {
-      generateTitle: true,
+      title: { model },
     });
     await drain(stream);
 
@@ -288,7 +288,7 @@ describe('chat() title generation', () => {
     assert.strictEqual(chatData?.title, 'Python Help');
   });
 
-  it('sets default title from user message when generateTitle is false', async () => {
+  it('sets default title from user message without a title model', async () => {
     const store = new InMemoryContextStore();
     const context = new ContextEngine({
       store,
@@ -352,7 +352,7 @@ describe('chat() title generation', () => {
 
     await context.continue(userMessage('first question'));
     const firstStream = await chat(chatAgent, {
-      generateTitle: true,
+      title: { model },
     });
     await drain(firstStream);
 
@@ -380,7 +380,7 @@ describe('chat() title generation', () => {
 
     await context.continue(userMessage('second question'));
     const secondStream = await chat(secondAgent, {
-      generateTitle: true,
+      title: { model: secondModel },
     });
     await drain(secondStream);
 
@@ -405,7 +405,7 @@ describe('chat() title generation', () => {
 
     await context.continue(userMessage('test'));
     const stream = await chat(chatAgent, {
-      generateTitle: true,
+      title: { model },
     });
 
     const parts = await drain(stream);
@@ -454,7 +454,7 @@ describe('chat() title generation', () => {
 
     await context.continue(userMessage('hello?'));
     const stream = await chat(chatAgent, {
-      generateTitle: true,
+      title: { model },
     });
     await drain(stream);
 
@@ -561,7 +561,7 @@ describe('chat() title generation', () => {
 
     await context.continue(userMessage('test'));
     const stream = await chat(chatAgent, {
-      generateTitle: true,
+      title: { model },
     });
     await drain(stream);
 
@@ -616,10 +616,8 @@ function createAbortMockAgent(
   context: ContextEngine,
   uiChunks: UIMessageChunk[],
 ): ChatAgentLike<Record<string, never>> {
-  const model = createMockModel();
   return {
     context,
-    model,
     sandbox,
     stream: async () => ({
       toUIMessageStream: () => createChunkedStream(uiChunks),
