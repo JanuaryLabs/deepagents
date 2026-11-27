@@ -4,20 +4,29 @@ import {
   type PersistedPromptToken,
   tokenizePersistedPrompt,
 } from '../persisted-prompt.ts';
+import type { ComposerPastedTextLabel } from './ComposerTypes.ts';
 import { reconstructPersistedPromptSelection } from './persisted-prompt-selection.ts';
+
+/** A collapsed paste's `[Pasted Content N chars]` placeholder, with the `#K` a second paste of the same length takes. */
+const PASTE_PLACEHOLDER = /\[Pasted Content (\d+) chars\](?: #\d+)?/g;
 
 export function PersistedPromptText({
   text,
   skillIcon,
+  pastedTextLabel,
 }: {
   text: string;
   /** Drawn before each skill reference's name. */
   skillIcon: ReactNode;
+  /** Names a collapsed paste in the host's words, as the composer's editor does. */
+  pastedTextLabel: ComposerPastedTextLabel;
 }) {
   const tokens = tokenizePersistedPrompt(text);
   return (
     <span onCopy={copyPersistedSelection}>
-      {tokens.map((token) => renderPromptToken(token, skillIcon))}
+      {tokens.map((token) =>
+        renderPromptToken(token, skillIcon, pastedTextLabel),
+      )}
     </span>
   );
 }
@@ -25,10 +34,11 @@ export function PersistedPromptText({
 function renderPromptToken(
   token: PersistedPromptToken,
   skillIcon: ReactNode,
+  pastedTextLabel: ComposerPastedTextLabel,
 ): ReactNode {
   switch (token.kind) {
     case 'text':
-      return token.value;
+      return renderPlainText(token.value, token.start, pastedTextLabel);
     case 'inline-code':
       return (
         <code
@@ -134,4 +144,29 @@ function copyPersistedSelection(event: ClipboardEvent<HTMLSpanElement>) {
 
   event.clipboardData.setData('text/plain', source);
   event.preventDefault();
+}
+
+function renderPlainText(
+  text: string,
+  start: number,
+  pastedTextLabel: ComposerPastedTextLabel,
+): ReactNode {
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  for (const match of text.matchAll(PASTE_PLACEHOLDER)) {
+    if (match.index > cursor) nodes.push(text.slice(cursor, match.index));
+    nodes.push(
+      <span
+        key={start + match.index}
+        data-token="paste"
+        data-persisted-source={match[0]}
+      >
+        {pastedTextLabel({ chars: Number(match[1]) })}
+      </span>,
+    );
+    cursor = match.index + match[0].length;
+  }
+  if (cursor === 0) return text;
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return nodes;
 }

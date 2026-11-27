@@ -29,7 +29,10 @@ export interface AgentConfigContextValue {
   debugMode?: boolean;
   toggleDebugMode: () => void;
   clearChat: () => void;
-  resetChat: (prompt?: string) => void;
+  /** Starts a new chat, sending `submission` as its first message when given. */
+  resetChat: (
+    submission?: Pick<ChatSubmission, 'prompt' | 'persistedPrompt'>,
+  ) => void;
   /** Settles once the submission is queued or sent; rejects when a file upload fails. */
   submit: (submission: ChatSubmission) => Promise<void>;
   setChat: (messages: AgentUIMessage[]) => void;
@@ -129,7 +132,9 @@ export function AgentProvider({
   const managerMethods = useMemo(
     () => ({
       clearChat: () => manager.clearChat(),
-      resetChat: (prompt?: string) => manager.resetChat(prompt),
+      resetChat: (
+        submission?: Pick<ChatSubmission, 'prompt' | 'persistedPrompt'>,
+      ) => manager.resetChat(submission),
       submit: (submission: ChatSubmission) => manager.submit(submission),
       setChat: (messages: AgentUIMessage[]) => manager.setChat(messages),
       getTriggeringUserMessage: (id: string) =>

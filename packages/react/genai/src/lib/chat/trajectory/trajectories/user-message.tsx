@@ -11,7 +11,7 @@ import {
 } from '@deepagents/context/browser';
 import { PersistedPromptText } from '@deepagents/react-input/browser';
 
-import { useGenaiMessages } from '../../../i18n/provider.tsx';
+import { pastedTextLabel, useGenaiMessages } from '../../../i18n/provider.tsx';
 import { formatUsageFigures, parseMetadataUsage } from '../../usage.ts';
 import { uploadReceiptSchema } from '../../zukhruf-chat-transport.ts';
 import { useMessageItem } from '../messages-context.ts';
@@ -62,6 +62,20 @@ function extractUploads(message: UIMessage) {
         return receipt.success ? [receipt.data] : [];
       })
     : [];
+}
+
+/**
+ * The user's words of a message: the `persistedPrompt` a submit wrote, which
+ * holds no `[Image #N]` marker, or the text parts of a message no submit wrote.
+ */
+function userWords(message: UIMessage): string[] {
+  const persistedPrompt = metadataField(message, 'persistedPrompt');
+  if (typeof persistedPrompt === 'string') {
+    return persistedPrompt ? [persistedPrompt] : [];
+  }
+  return message.parts.flatMap((part) =>
+    part.type === 'text' ? [part.text] : [],
+  );
 }
 
 function ReminderItem({ text }: { text: string }) {
@@ -217,6 +231,7 @@ export function UserMessageContent({
     // remindersRef is the load-bearing change signal: rawMessage identity often stays stable while its `metadata.reminders` array swaps in place during streaming
     [rawMessage, remindersRef],
   );
+  const t = useGenaiMessages();
   const rawAlias = metadataField(rawMessage, 'alias');
   const alias =
     typeof rawAlias === 'string' && rawAlias.trim().length > 0
@@ -236,32 +251,35 @@ export function UserMessageContent({
     );
   }
 
+  const words = userWords(message);
+
   return (
     <div className="flex w-full min-w-0 flex-col items-end gap-3">
       <UserMessageAttachments message={message} />
-      <UserBubbleShell
-        reminders={reminders}
-        metadata={message.metadata}
-        body={message.parts.map((part, partIndex) =>
-          part.type === 'text' ? (
+      {words.length > 0 && (
+        <UserBubbleShell
+          reminders={reminders}
+          metadata={message.metadata}
+          body={words.map((text, index) => (
             <div
-              key={`${message.id}-${partIndex}-text`}
+              key={`${message.id}-${index}-text`}
               dir="auto"
               className="text-sm whitespace-pre-wrap"
             >
               <PersistedPromptText
-                text={part.text}
+                text={text}
                 skillIcon={
                   <PackageIcon
                     aria-hidden="true"
                     className="size-3.5 self-center"
                   />
                 }
+                pastedTextLabel={pastedTextLabel(t)}
               />
             </div>
-          ) : null,
-        )}
-      />
+          ))}
+        />
+      )}
     </div>
   );
 }

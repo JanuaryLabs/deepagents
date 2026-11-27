@@ -831,12 +831,16 @@ describe('ChatManager', () => {
         { transport },
       );
       try {
-        manager.resetChat('my prompt');
+        manager.resetChat({
+          prompt: 'my expanded prompt',
+          persistedPrompt: 'my prompt',
+        });
 
         const raw = sessionStorage.getItem(PREFILL_STORAGE_KEY);
         expect(raw).not.toBeNull();
         const prefill: PendingPrefill = JSON.parse(raw ?? '');
-        expect(prefill.prompt).toBe('my prompt');
+        expect(prefill.prompt).toBe('my expanded prompt');
+        expect(prefill.persistedPrompt).toBe('my prompt');
         expect(prefill.targetChatId).toBe(receivedChatId);
       } finally {
         unmount();
@@ -853,7 +857,11 @@ describe('ChatManager', () => {
       );
       try {
         const chatId = 'target-123';
-        writePrefill({ prompt: 'prefilled', targetChatId: chatId });
+        writePrefill({
+          prompt: 'prefilled',
+          persistedPrompt: 'prefilled',
+          targetChatId: chatId,
+        });
 
         await act(async () => {
           manager.consumePrefill(chatId);
@@ -879,7 +887,11 @@ describe('ChatManager', () => {
         { transport },
       );
       try {
-        writePrefill({ prompt: 'prefilled', targetChatId: 'other-id' });
+        writePrefill({
+          prompt: 'prefilled',
+          persistedPrompt: 'prefilled',
+          targetChatId: 'other-id',
+        });
 
         await act(async () => {
           manager.consumePrefill('my-id');
@@ -990,7 +1002,11 @@ describe('ChatManager', () => {
     it('consumes prefill matching the passed chatId', async () => {
       sessionStorage.clear();
       const chatId = 'target-abc';
-      writePrefill({ prompt: 'auto submit', targetChatId: chatId });
+      writePrefill({
+        prompt: 'auto submit',
+        persistedPrompt: 'auto submit',
+        targetChatId: chatId,
+      });
       const transport = new ControllableTransport();
       const { manager, result, unmount } = renderChatManager(
         withStubUploads({ onResetChat: () => {} }),

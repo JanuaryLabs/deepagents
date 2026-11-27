@@ -2,6 +2,8 @@ import { DirectionProvider } from '@zukhruf/shadcn';
 import { type ReactNode, createContext, use } from 'react';
 import type { StreamdownTranslations } from 'streamdown';
 
+import type { ComposerPastedTextLabel } from '@deepagents/react-input/browser';
+
 import {
   type GenaiMessageHelpers,
   type GenaiMessages,
@@ -90,6 +92,11 @@ const byteUnits = [
   ['megabyte', 1e6],
   ['kilobyte', 1e3],
 ] as const;
+
+/** A collapsed paste in the host's words, wherever the chat draws one. */
+export function pastedTextLabel(t: GenaiTranslate): ComposerPastedTextLabel {
+  return (paste) => t('composer.pastedText', paste);
+}
 
 export function useGenaiMessages(): GenaiTranslate {
   const { locale, messages } = use(GenaiMessagesContext);

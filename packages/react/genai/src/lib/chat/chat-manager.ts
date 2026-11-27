@@ -186,10 +186,12 @@ export class ChatManager {
     return this.submissions.run(async () => {});
   }
 
-  resetChat(prompt?: string): void {
+  resetChat(
+    submission?: Pick<ChatSubmission, 'prompt' | 'persistedPrompt'>,
+  ): void {
     const nextChatId = crypto.randomUUID();
-    if (prompt) {
-      writePrefill({ prompt, targetChatId: nextChatId });
+    if (submission) {
+      writePrefill({ ...submission, targetChatId: nextChatId });
     }
     this.onResetChat(nextChatId);
   }
@@ -205,13 +207,13 @@ export class ChatManager {
     const prefill = readPrefill();
     if (!prefill || prefill.targetChatId !== chatId) return;
     const currentChatId = this.chat.id;
-    const { messageId, prompt, uploads } = prefill;
+    const { messageId, prompt, persistedPrompt, uploads } = prefill;
     void this.submissions.run(async () => {
       this.assertCurrentChat(currentChatId);
       this.send({
         id: messageId,
         prompt,
-        persistedPrompt: prompt,
+        persistedPrompt,
         metadata: uploads.length > 0 ? { uploads } : undefined,
       });
     });

@@ -766,7 +766,11 @@ test('under StrictMode a pending prefill is sent once and its answer arrives (#5
       { type: 'finish' },
     ],
   ]);
-  writePrefill({ prompt: 'first question', targetChatId: 'chat-strict' });
+  writePrefill({
+    prompt: 'first question',
+    persistedPrompt: 'first question',
+    targetChatId: 'chat-strict',
+  });
 
   try {
     render(
@@ -798,7 +802,11 @@ test('under StrictMode a pending prefill is sent once and its answer arrives (#5
 
 test('a provider that unmounts before its deferred send sends nothing and keeps the prefill for the next mount (#5918)', async () => {
   const transport = new RecordingTransport();
-  writePrefill({ prompt: 'first question', targetChatId: 'chat-gone' });
+  writePrefill({
+    prompt: 'first question',
+    persistedPrompt: 'first question',
+    targetChatId: 'chat-gone',
+  });
 
   try {
     const { unmount } = render(
@@ -893,7 +901,11 @@ test('a prefill whose first POST fails is sent again after a reload (#6146)', as
       HttpResponse.json(null, { status: 204 }),
     ),
   );
-  writePrefill({ prompt: 'first question', targetChatId: chatId });
+  writePrefill({
+    prompt: 'first question',
+    persistedPrompt: 'first question',
+    targetChatId: chatId,
+  });
 
   try {
     const first = render(<ZukhrufPage chatId={chatId} />);
@@ -933,7 +945,11 @@ test('a prefill whose POST is accepted is not sent again after a reload (#6146)'
     ),
     answeringStream(),
   );
-  writePrefill({ prompt: 'first question', targetChatId: chatId });
+  writePrefill({
+    prompt: 'first question',
+    persistedPrompt: 'first question',
+    targetChatId: chatId,
+  });
 
   try {
     const first = render(<ZukhrufPage chatId={chatId} />);
@@ -963,7 +979,11 @@ test('a prefill whose POST fails on the network is sent again after a reload (#6
       HttpResponse.json(null, { status: 204 }),
     ),
   );
-  writePrefill({ prompt: 'first question', targetChatId: chatId });
+  writePrefill({
+    prompt: 'first question',
+    persistedPrompt: 'first question',
+    targetChatId: chatId,
+  });
 
   try {
     const first = render(<ZukhrufPage chatId={chatId} />);
@@ -993,7 +1013,11 @@ test('a prefill is sent under the same message id on every attempt, so Zukhruf d
       HttpResponse.json({ error: 'down' }, { status: 500 }),
     ),
   );
-  writePrefill({ prompt: 'first question', targetChatId: chatId });
+  writePrefill({
+    prompt: 'first question',
+    persistedPrompt: 'first question',
+    targetChatId: chatId,
+  });
   const stored = readPrefill();
 
   try {
@@ -1060,7 +1084,11 @@ test('a prefill the user stops before Zukhruf answers is cleared and not sent af
       HttpResponse.json(null, { status: 204 }),
     ),
   );
-  writePrefill({ prompt: 'first question', targetChatId: chatId });
+  writePrefill({
+    prompt: 'first question',
+    persistedPrompt: 'first question',
+    targetChatId: chatId,
+  });
 
   try {
     const first = render(
@@ -1105,7 +1133,11 @@ test('a prefill whose page unmounts before Zukhruf answers is sent again on the 
       HttpResponse.json(null, { status: 204 }),
     ),
   );
-  writePrefill({ prompt: 'first question', targetChatId: chatId });
+  writePrefill({
+    prompt: 'first question',
+    persistedPrompt: 'first question',
+    targetChatId: chatId,
+  });
 
   try {
     const first = render(<ZukhrufPage chatId={chatId} />);
@@ -1159,7 +1191,11 @@ test('a prefill whose failed POST is retried and accepted is not sent again afte
     ),
     answeringStream(),
   );
-  writePrefill({ prompt: 'first question', targetChatId: chatId });
+  writePrefill({
+    prompt: 'first question',
+    persistedPrompt: 'first question',
+    targetChatId: chatId,
+  });
 
   try {
     const first = render(
@@ -1201,7 +1237,15 @@ test('a prefill whose failed POST is retried and accepted is not sent again afte
 function NewChatButton() {
   const { resetChat } = useAgent();
   return (
-    <button type="button" onClick={() => resetChat('second question')}>
+    <button
+      type="button"
+      onClick={() =>
+        resetChat({
+          prompt: 'second question',
+          persistedPrompt: 'second question',
+        })
+      }
+    >
       New chat
     </button>
   );
@@ -1233,7 +1277,11 @@ test('a prefill accepted after the user starts a new chat with a question leaves
         }),
     ),
   );
-  writePrefill({ prompt: 'first question', targetChatId: chatId });
+  writePrefill({
+    prompt: 'first question',
+    persistedPrompt: 'first question',
+    targetChatId: chatId,
+  });
 
   try {
     render(
@@ -1283,7 +1331,11 @@ test('a prefill whose POST failed is cleared once a newer question in the chat i
     ),
     answeringStream(),
   );
-  writePrefill({ prompt: 'first question', targetChatId: chatId });
+  writePrefill({
+    prompt: 'first question',
+    persistedPrompt: 'first question',
+    targetChatId: chatId,
+  });
 
   try {
     const first = render(
@@ -1346,7 +1398,11 @@ test('a prefill sent into a chat that already has history is not sent again afte
       parts: [{ type: 'text', text: 'earlier answer' }],
     },
   ];
-  writePrefill({ prompt: 'first question', targetChatId: chatId });
+  writePrefill({
+    prompt: 'first question',
+    persistedPrompt: 'first question',
+    targetChatId: chatId,
+  });
 
   try {
     const page = () => (
@@ -1408,6 +1464,7 @@ async function writePrefillWithImage(chatId: string) {
   const receipt = await transport.uploadFile(chatId, file);
   writePrefill({
     prompt: 'what does [Image #1] show?',
+    persistedPrompt: 'what does it show?',
     targetChatId: chatId,
     uploads: [receipt],
   });
@@ -1472,7 +1529,7 @@ test('a prefill written with uploads starts the chat with a message whose metada
         parts: [{ type: 'text', text: 'what does [Image #1] show?' }],
         metadata: {
           uploads: [receipt],
-          persistedPrompt: 'what does [Image #1] show?',
+          persistedPrompt: 'what does it show?',
         },
       },
     });

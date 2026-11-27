@@ -32,7 +32,11 @@ import {
   useAgentStatus,
   useChatManager,
 } from '../chat/agent-context.tsx';
-import { type GenaiTranslate, useGenaiMessages } from '../i18n/provider.tsx';
+import {
+  type GenaiTranslate,
+  pastedTextLabel,
+  useGenaiMessages,
+} from '../i18n/provider.tsx';
 import { ChatActionButton } from './ChatAction.tsx';
 import { SubmitButton } from './SubmitButton.tsx';
 
@@ -77,7 +81,7 @@ function ChatComposerProvider({
       unsupportedFileMessage={(file) => t('composer.unsupportedFile', file)}
       unknownCommandMessage={(command) => t('composer.unknownCommand', command)}
       attachmentLabel={(attachment) => t('composer.attachment', attachment)}
-      pastedTextLabel={(paste) => t('composer.pastedText', paste)}
+      pastedTextLabel={pastedTextLabel(t)}
       missingAttachmentMessage={(attachment) =>
         t('composer.attachmentMissing', attachment)
       }

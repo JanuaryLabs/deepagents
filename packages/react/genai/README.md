@@ -167,6 +167,8 @@ Only Stop cancels the turn. Leaving or unmounting a chat whose answer is streami
 
 An entry page, such as a home ask box, can start a new chat with a question. It makes the chat id, writes a prefill with `writePrefill` and goes to the chat page. The `AgentProvider` of that chat id sends the prefill as its first message.
 
+A prefill takes both texts of react-input's submission: `prompt` is what the model reads, with an `[Image #N]` marker for each attachment, and `persistedPrompt` is the user's words, which the user bubble draws.
+
 The prefill is in `sessionStorage`, so a reload keeps it. The provider sends it under one message id on every attempt, and clears it when the transport accepts the turn, when the user stops it, or when a newer question in the chat is accepted.
 
 A `File` cannot go into `sessionStorage`. To attach files, upload them first under the new chat id with the transport's `uploadFile`, and give the receipts as `uploads`. The first message then carries them in `metadata.uploads`, as a submit with files does. A retry sends the same receipts and does not upload the files again.
@@ -176,7 +178,12 @@ const chatId = crypto.randomUUID();
 const uploads = await Promise.all(
   files.map((file) => transport.uploadFile(chatId, file)),
 );
-writePrefill({ prompt, targetChatId: chatId, uploads });
+writePrefill({
+  prompt: submission.prompt,
+  persistedPrompt: submission.persistedPrompt,
+  targetChatId: chatId,
+  uploads,
+});
 navigate(`/chats/${chatId}`);
 ```
 

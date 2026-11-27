@@ -5583,6 +5583,60 @@ describe('Composer attachments', () => {
     });
   });
 
+  it("gives the persistedPrompt of an image and words only the user's words, with no space where the image marker was (#6316)", async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const sent: ComposerSubmission[] = [];
+    const { user, prompt } = renderRichInput({
+      send: (submission) => {
+        sent.push(submission);
+      },
+    });
+
+    await user.upload(
+      screen.getByLabelText('Attach media files'),
+      new File(['lab'], 'lab.png', { type: 'image/png' }),
+    );
+    await user.click(prompt);
+    await user.keyboard('What is the potassium value?');
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter' });
+
+    expect({
+      prompt: sent.at(0)?.prompt,
+      persistedPrompt: sent.at(0)?.persistedPrompt,
+    }).toEqual({
+      prompt: '[Image #1] What is the potassium value?',
+      persistedPrompt: 'What is the potassium value?',
+    });
+  });
+
+  it('keeps a skill mention after the image marker whole in the persistedPrompt (#6316)', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const sent: ComposerSubmission[] = [];
+    const { user, prompt } = renderRichInput({
+      send: (submission) => {
+        sent.push(submission);
+      },
+    });
+
+    await user.upload(
+      screen.getByLabelText('Attach media files'),
+      new File(['lab'], 'lab.png', { type: 'image/png' }),
+    );
+    await user.click(prompt);
+    await user.keyboard('use $react');
+    await user.keyboard('{Tab}');
+    await user.keyboard('now');
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter' });
+
+    expect(sent.at(0)?.persistedPrompt).toBe(
+      'use [$react-test](skill://react-test) now',
+    );
+  });
+
   it('rejects a non-media file from the file input with an inline error', async () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);

@@ -3,7 +3,13 @@ import { z } from 'zod';
 import { uploadReceiptSchema } from './zukhruf-chat-transport.ts';
 
 const pendingPrefillSchema = z.strictObject({
+  /** The text the model reads, such as react-input's `submission.prompt`. */
   prompt: z.string(),
+  /**
+   * The user's words, such as react-input's `submission.persistedPrompt`,
+   * which the user bubble draws.
+   */
+  persistedPrompt: z.string(),
   targetChatId: z.string(),
   /** The id the prefill's message is sent under, the same on every attempt. */
   messageId: z.string(),

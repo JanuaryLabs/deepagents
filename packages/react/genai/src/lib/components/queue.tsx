@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 
 import { PersistedPromptText } from '@deepagents/react-input/browser';
 
-import { useGenaiMessages } from '../i18n/provider.tsx';
+import { pastedTextLabel, useGenaiMessages } from '../i18n/provider.tsx';
 
 function MessageQueueRoot({
   children,
@@ -54,6 +54,7 @@ function MessageQueueText({
   children: ReactNode;
   className?: string;
 }) {
+  const t = useGenaiMessages();
   return (
     <span className={cn('min-w-0 flex-1 truncate text-sm', className)}>
       {typeof children === 'string' ? (
@@ -62,6 +63,7 @@ function MessageQueueText({
           skillIcon={
             <PackageIcon aria-hidden="true" className="size-3.5 self-center" />
           }
+          pastedTextLabel={pastedTextLabel(t)}
         />
       ) : (
         children

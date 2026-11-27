@@ -180,10 +180,16 @@ function preparePayload(
   const liveImageAttachments = state.imageAttachments.filter((image) =>
     state.text.includes(image.placeholder),
   );
-  const persistableDisplay = withoutImageElements(displayText, displayElements);
+  // Trimmed after the media markers go, so no space is left where one was.
+  const withoutMedia = withoutImageElements(state.text, state.elements);
+  const persistableText = withoutMedia.text.trim();
   const persistedPrompt = createPersistedTextFromDraft({
-    text: persistableDisplay.text,
-    elements: persistableDisplay.elements,
+    text: persistableText,
+    elements: trimTextElements(
+      withoutMedia.text,
+      persistableText,
+      withoutMedia.elements,
+    ),
     mentionBindings: state.mentionBindings,
   });
   const serializedPrompt = createPersistedTextFromDraft({
