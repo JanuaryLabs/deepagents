@@ -137,6 +137,26 @@ environments take `volumes: (chat) => [...]`, with bind mounts and external
 volumes only. The Daytona environment takes no volumes yet. The virtual
 environment keeps each chat's files in this process only.
 
+The virtual environment takes `customCommands: (chat) => [...]` the same way:
+every `open` calls it with the chat it opens, so a command can act as that
+chat and its user, and a command built for one chat never runs in another.
+
+```typescript
+import { defineCommand } from 'just-bash';
+
+import { VirtualSandboxEnvironment } from '@deepagents/context';
+
+const environment = new VirtualSandboxEnvironment({
+  customCommands: (chat) => [
+    defineCommand('whoami', async () => ({
+      stdout: `${chat.userId} in ${chat.chatId}\n`,
+      stderr: '',
+      exitCode: 0,
+    })),
+  ],
+});
+```
+
 ## Quick start: Docker + Bash tool
 
 The fastest path for giving an AI agent a bash tool that runs in Docker:

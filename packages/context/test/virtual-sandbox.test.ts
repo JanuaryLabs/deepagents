@@ -236,6 +236,33 @@ describe('VirtualSandboxEnvironment', () => {
     assert.strictEqual(await other.stat({ path: '/tmp/a.txt' }), null);
   });
 
+  it('builds the custom commands of each open from the chat it opens, so a command sees only its own chat', async () => {
+    const environment = new VirtualSandboxEnvironment({
+      customCommands: (chat) => [
+        defineCommand('whoami-chat', async () => ({
+          stdout: `${chat.chatId}:${chat.userId}\n`,
+          stderr: '',
+          exitCode: 0,
+        })),
+      ],
+    });
+    await using a = await environment.open({ chatId: 'a', userId: 'ann' });
+    await using b = await environment.open({ chatId: 'b', userId: 'bob' });
+    await using aByCarl = await environment.open({
+      chatId: 'a',
+      userId: 'carl',
+    });
+
+    const outputs = await Promise.all(
+      [a, b, aByCarl].map(
+        async (sandbox) =>
+          (await sandbox.run({ command: 'whoami-chat' })).stdout,
+      ),
+    );
+
+    assert.deepStrictEqual(outputs, ['a:ann\n', 'b:bob\n', 'a:carl\n']);
+  });
+
   it('keeps the chat files when a handle closes', async () => {
     const environment = new VirtualSandboxEnvironment();
     const chat = { chatId: 'chat-1', userId: 'user-1' };

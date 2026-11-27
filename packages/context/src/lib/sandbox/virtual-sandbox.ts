@@ -51,8 +51,14 @@ export async function createVirtualSandbox({
 
 export type VirtualSandboxEnvironmentOptions = Omit<
   CreateVirtualSandboxOptions,
-  'fs'
->;
+  'fs' | 'customCommands'
+> & {
+  /**
+   * The custom commands of a chat's sandbox, given on every `open` with the
+   * chat it opens, so a command can act as that chat and its user.
+   */
+  customCommands?: (chat: SandboxContext) => CustomCommand[];
+};
 
 /**
  * Chat sandboxes of just-bash in this process, each over its own in-memory
@@ -79,7 +85,12 @@ export class VirtualSandboxEnvironment implements SandboxEnvironment {
       fs = new InMemoryFs();
       this.#filesystems.set(chat.chatId, fs);
     }
-    const sandbox = await createVirtualSandbox({ ...this.#options, fs });
+    const { customCommands, ...options } = this.#options;
+    const sandbox = await createVirtualSandbox({
+      ...options,
+      customCommands: customCommands?.(chat),
+      fs,
+    });
     const assertCurrent = () => {
       if (this.#filesystems.get(chat.chatId) !== fs) {
         throw new SandboxNotFoundError(chat.chatId);
