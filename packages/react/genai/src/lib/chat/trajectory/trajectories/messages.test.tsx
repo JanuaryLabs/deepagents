@@ -597,6 +597,68 @@ describe('Messages text citations (#5951)', () => {
     );
   });
 
+  it('copies an answer without the markup of its custom elements, keeping a paired element’s words and code as written (#6048)', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+    let copied = '';
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: (text: string) => {
+          copied = text;
+          return Promise.resolve();
+        },
+      },
+    });
+    stack.defer(() => Reflect.deleteProperty(navigator, 'clipboard'));
+
+    const first = 'Apixaban needs no change in mild impairment.';
+    const text = `${first} <no-source passage="S1" reason="a > b" /> <passage-cite passage="p1">See the label</passage-cite> and \`<keep-this x="1" />\` stays.`;
+    const answer: UIMessage = {
+      id: `asst-${++messageCounter}`,
+      role: 'assistant',
+      parts: [
+        {
+          type: 'text',
+          text,
+          citations: [
+            {
+              source: {
+                type: 'source',
+                sourceType: 'url',
+                id: 'label',
+                url: 'https://label.example/apixaban',
+                title: 'Apixaban label',
+              },
+              startIndex: 0,
+              endIndex: first.length,
+            },
+          ],
+        },
+      ],
+    };
+    render(
+      <ClockProvider clock={createClock()}>
+        <Messages.Root messages={[answer]}>
+          <Messages.Item message={answer} index={0}>
+            <Messages.CopyAction />
+          </Messages.Item>
+        </Messages.Root>
+      </ClockProvider>,
+      { wrapper: AgentHarness },
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Copy message' }));
+
+    expect(copied).toBe(
+      [
+        'Apixaban needs no change in mild impairment.[1] See the label and `<keep-this x="1" />` stays.',
+        '',
+        '[1] Apixaban label — https://label.example/apixaban',
+      ].join('\n'),
+    );
+  });
+
   it('copies an answer with each citation as [n] where it sits and the numbered sources after it (#5995)', async () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);

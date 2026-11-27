@@ -22,6 +22,29 @@ import { SnapshotRenderContext } from './snapshot-context.ts';
 import { SnapshotRenderPortal, waitForNextPaint } from './snapshot-render.tsx';
 import { useCopyElementAsImage } from './use-copy-element-as-image.ts';
 
+// A custom element's name holds a hyphen (copy of normalizeStreamdownChildren's
+// customTagTest default, strike 2, #6005); a quoted attribute value may hold '>'.
+const CUSTOM_ELEMENT_TAG =
+  /<\/?[a-z][\w]*-[\w-]*(?:\s+[^\s"'>/=]+(?:=(?:"[^"]*"|'[^']*'|[^\s>]+))?)*\s*\/?>/gi;
+const CODE = /(```[\s\S]*?```|`[^`\n]+`)/;
+
+// The screen draws a custom element as its component, or not at all when the
+// host does not declare it, so the copy drops its tags and keeps the words a
+// paired one wraps. Code shows its text as written, so it keeps it.
+function withoutCustomElementTags(text: string): string {
+  return text
+    .split(CODE)
+    .map((segment, i) =>
+      i % 2 === 1
+        ? segment
+        : segment
+            .replace(CUSTOM_ELEMENT_TAG, '\0')
+            .replace(/ \0(?= )/g, '')
+            .replaceAll('\0', ''),
+    )
+    .join('');
+}
+
 /**
  * The answer's text with each citation as `[n]` where it sits, then one line
  * per source, numbered as the answer draws them.
@@ -31,14 +54,16 @@ export function extractAssistantRawText(message: UIMessage): string {
   const text = message.parts
     .filter(isTextUIPart)
     .map((part) =>
-      // Copy of placeCitations' insertion in message-parts.tsx (strike 2, #6040).
-      citationsInReadingOrder(part.text, urlCitationsOf(part.citations))
-        .reverse()
-        .reduce(
-          (marked, { at, citation }) =>
-            `${marked.slice(0, at)}[${citationIndexOf(sources, citation.source.url)}]${marked.slice(at)}`,
-          part.text,
-        ),
+      withoutCustomElementTags(
+        // Copy of placeCitations' insertion in message-parts.tsx (strike 2, #6040).
+        citationsInReadingOrder(part.text, urlCitationsOf(part.citations))
+          .reverse()
+          .reduce(
+            (marked, { at, citation }) =>
+              `${marked.slice(0, at)}[${citationIndexOf(sources, citation.source.url)}]${marked.slice(at)}`,
+            part.text,
+          ),
+      ),
     )
     .join('\n');
   if (sources.length === 0) return text;
