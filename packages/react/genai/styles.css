@@ -3,3 +3,23 @@
 /* Streamdown's own classes, hoisted or nested; Tailwind ignores the missing path. */
 @source "../../streamdown/dist/*.js";
 @source "./node_modules/streamdown/dist/*.js";
+
+/*
+ * Streamdown sets its lists list-inside, so a wrapped line starts under the
+ * marker. Markers go outside, so wrapped lines start under the text, with
+ * Tailwind Typography's prose indent (1.625em, then 0.375em to the text).
+ * The room for the marker is the item's own start margin, not the list's
+ * padding: Streamdown's static mode puts dir on each item, so an Arabic item
+ * in a left-to-right list keeps its marker inside the column. Unlayered, to
+ * win over Streamdown's utilities.
+ */
+[data-streamdown="unordered-list"],
+[data-streamdown="ordered-list"] {
+  list-style-position: outside;
+  padding-inline-start: 0;
+}
+
+[data-streamdown="list-item"] {
+  margin-inline-start: 1.625em;
+  padding-inline-start: 0.375em;
+}

@@ -76,31 +76,6 @@
   }
 }
 
-/* Keep Streamdown list markers aligned with multiline and nested content. */
-[data-streamdown="list-item"] > p {
-  display: inline;
-}
-
-[data-streamdown="list-item"]
-  > :is(
-    [data-streamdown="ordered-list"],
-    [data-streamdown="unordered-list"]
-  ):only-child,
-[data-streamdown="list-item"]
-  > :is(
-    [data-streamdown="ordered-list"],
-    [data-streamdown="unordered-list"]
-  ):only-child
-  > [data-streamdown="list-item"] {
-  display: inline;
-}
-
-[data-streamdown="unordered-list"],
-[data-streamdown="ordered-list"] {
-  list-style-position: outside;
-  padding-left: 1.5rem;
-}
-
 [data-streamdown="code-block-header"] {
   padding: 0.5rem !important;
 }
