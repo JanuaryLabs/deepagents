@@ -230,3 +230,80 @@ test('in static mode a short sentence also takes the direction of its own words,
     englishOneElement: 'ltr',
   });
 });
+
+// Meddit's follow-up element: its words are an attribute that the host's
+// component draws, so the block that holds the tags has no text of its own.
+// Its button is dir="auto", which a dir="auto" block skips in Chrome, so only
+// the page's direction can place the block.
+const followup: GenAIInteractiveElement = {
+  name: 'followup',
+  component: (props) => (
+    <button type="button" dir="auto">
+      {String(props.question)}
+    </button>
+  ),
+  allowedAttributes: ['question'],
+};
+
+// A real Meddit answer's follow-up questions (meddit-6b live check, 7.60.0).
+const followupAnswer = [
+  'الجرعة المعتادة هي 5 مغ فموياً مرتين يومياً.',
+  '',
+  '<followup question="ما معايير تخفيض جرعة الأبيكسابان في الرجفان الأذيني؟"></followup>',
+  '<followup question="كيف أضبط جرعة الأبيكسابان لمريض وزنه 58 كغ؟"></followup>',
+  '<followup question="هل توجد أدلة على الجرعات المنخفضة غير المبررة في الأبيكسابان؟"></followup>',
+].join('\n');
+
+function followupDirections(
+  mode: 'static' | 'streaming',
+  text = followupAnswer,
+) {
+  const answer: UIMessage = {
+    id: 'asst-1',
+    role: 'assistant',
+    parts: [{ type: 'text', text }],
+  };
+  try {
+    const { container } = render(
+      <div dir="rtl">
+        {mode === 'static' ? (
+          <InteractiveResponse elements={[followup]} mode="static">
+            {text}
+          </InteractiveResponse>
+        ) : (
+          <Messages.Root messages={[answer]} elements={[followup]}>
+            <Messages.Item message={answer} index={0}>
+              <Messages.AssistantContent />
+            </Messages.Item>
+          </Messages.Root>
+        )}
+      </div>,
+      mode === 'static' ? undefined : { wrapper: AgentHarness },
+    );
+    const buttons = [...container.querySelectorAll('button')].filter((button) =>
+      button.textContent?.includes('الأبيكسابان'),
+    );
+    return {
+      buttons: buttons.length,
+      block: buttons[0]?.parentElement?.closest('[dir]')?.getAttribute('dir'),
+    };
+  } finally {
+    cleanup();
+  }
+}
+
+test('a block of elements whose words are attributes the host draws takes the page direction, as in static mode, not left to right (#6240)', () => {
+  expect({
+    streaming: followupDirections('streaming'),
+    static: followupDirections('static'),
+    // The spaces between the tags are text, but no words.
+    streamingOneLine: followupDirections(
+      'streaming',
+      followupAnswer.replace(/\n(?=<followup)/g, ' '),
+    ),
+  }).toEqual({
+    streaming: { buttons: 3, block: 'rtl' },
+    static: { buttons: 3, block: 'rtl' },
+    streamingOneLine: { buttons: 3, block: 'rtl' },
+  });
+});

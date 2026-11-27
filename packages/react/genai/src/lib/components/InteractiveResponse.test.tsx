@@ -550,7 +550,9 @@ test('italic, a link and inline code beside a citation stay in the sentence’s 
 });
 
 test('a paragraph that is only an image keeps no wrapper: the image sits where a <p> would', () => {
-  const plain = plainSentencePath('Aspirin lowers the risk in adults.');
+  // A paragraph with no words, as the image has none: neither block gets a
+  // direction wrapper (#6240).
+  const plain = plainSentencePath('2.5 × 2');
   try {
     const { container } = render(
       <InteractiveResponse elements={[passageCite]}>

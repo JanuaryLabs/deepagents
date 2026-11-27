@@ -200,10 +200,17 @@ function readerText(node: Nodes): string {
   return node.children.map(readerText).join('');
 }
 
+const letter = /\p{L}/u;
+
 // The direction of the words a reader sees: tags and attributes, inline or a
-// block of HTML on its own line, have no words of their own.
+// block of HTML on its own line, have no words of their own. A block without
+// words, such as elements whose words are attributes the host draws, gets no
+// direction and takes the page's, as streamdown's static pass leaves an
+// element outside a paragraph; dir="auto" would not do: Chrome skips a
+// descendant with its own dir, so it reads such a block left to right (#6240).
 function textDirection(tree: Root) {
-  return detectTextDirection(readerText(toReaderHtml.runSync(tree)));
+  const text = readerText(toReaderHtml.runSync(tree));
+  return letter.test(text) ? detectTextDirection(text) : undefined;
 }
 
 function DefaultStreamdownBlock(props: BlockProps) {
