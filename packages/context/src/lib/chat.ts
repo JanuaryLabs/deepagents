@@ -14,12 +14,11 @@ import {
   isToolUIPart,
 } from 'ai';
 
-import type { AgentModel } from './advisor.ts';
 import type { StreamOptions, ToolCallArguments } from './agent.ts';
 import type { ContextEngine, ReminderSession } from './engine.ts';
 import { isRecord } from './fragments/reminders/index.ts';
 import type { AgentSandbox } from './sandbox/types.ts';
-import { TitleGenerator } from './title.ts';
+import { TitleGenerator, type TitleModelOptions } from './title.ts';
 
 type ChatConfig<TOOLS extends ToolSet> = StreamOptions<TOOLS> & {
   /** Native writer for data parts, available before the first model request. */
@@ -27,9 +26,10 @@ type ChatConfig<TOOLS extends ToolSet> = StreamOptions<TOOLS> & {
   /**
    * Generates the chat's title with this model. The first message titles the
    * chat at once either way; the generated title replaces it only while no
-   * one has changed it.
+   * one has changed it. Give it the turn's call-level `providerOptions` to send
+   * the first message on the same route as the turn.
    */
-  title?: { model: AgentModel };
+  title?: TitleModelOptions;
   onError?: (error: unknown) => string;
   messageMetadata?: ChatMessageMetadata;
   finalAssistantMetadata?: (
@@ -213,7 +213,7 @@ export async function chat<const TOOLS extends ToolSet>(
       // The answer streams while the title model runs.
       const titled = options?.title
         ? await titler.ensure({
-            model: options.title.model,
+            ...options.title,
             abortSignal: options.abortSignal,
           })
         : placed;

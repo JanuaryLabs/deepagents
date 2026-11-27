@@ -1,4 +1,4 @@
-import type { UIMessage } from 'ai';
+import type { UIMessage, generateText } from 'ai';
 import { z } from 'zod';
 
 import type { AgentModel } from './advisor.ts';
@@ -24,6 +24,16 @@ export interface TitleGeneratorOptions {
   context: ContextEngine;
 }
 
+/** The model call that generates a chat's title. */
+export interface TitleModelOptions {
+  model: AgentModel;
+  /**
+   * Call-level provider options of the title call, such as the routing and
+   * user the chat's own turns send, so the first message takes the same route.
+   */
+  providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
+}
+
 export interface EnsureResult {
   title: string;
   source: 'llm' | 'static';
@@ -42,10 +52,9 @@ export class TitleGenerator {
    * lock, so a title set meanwhile (a rename) is kept. Returns `null` when the
    * chat already had another title or it changed while the model ran.
    */
-  async ensure(options: {
-    model: AgentModel;
-    abortSignal?: AbortSignal;
-  }): Promise<EnsureResult | null> {
+  async ensure(
+    options: TitleModelOptions & { abortSignal?: AbortSignal },
+  ): Promise<EnsureResult | null> {
     const msg = await this.#context.firstUserMessage();
     if (!msg) return null;
     const staticTitle = this.#staticTitle(msg);
@@ -103,7 +112,7 @@ export class TitleGenerator {
 
   async #generate(
     message: UIMessage,
-    options: { model: AgentModel; abortSignal?: AbortSignal },
+    options: TitleModelOptions & { abortSignal?: AbortSignal },
   ): Promise<string> {
     const text = this.#extractText(message);
     if (!text) {
@@ -124,6 +133,7 @@ export class TitleGenerator {
       context,
       model: options.model,
       schema: titleSchema,
+      providerOptions: options.providerOptions,
     }).generate({ abortSignal: options.abortSignal });
 
     if (!title) {
