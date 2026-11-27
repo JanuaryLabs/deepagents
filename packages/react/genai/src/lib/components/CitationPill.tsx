@@ -40,14 +40,13 @@ export function CitationPill({
           {index}
         </PopoverTrigger>
         <PopoverContent className="w-72 gap-2 text-sm">
-          {/* A long title would fill the card: each line clamps, the title
-              attribute shows it whole on hover, and the popup's accessible
-              name, taken from the title, stays whole for a screen reader. */}
+          {/* One truncated line, not line-clamp (it can leave a line mostly
+              empty); the title attribute keeps the full text. */}
           <PopoverHeader>
             <PopoverTitle
               dir="auto"
               title={source.title ?? site}
-              className="line-clamp-1"
+              className="truncate"
             >
               {source.title ?? site}
             </PopoverTitle>
