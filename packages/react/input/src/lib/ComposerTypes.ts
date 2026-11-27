@@ -120,6 +120,12 @@ export type ComposerSuggestion = ComposerItemEntry;
 /** Top-level media type of an attached file; it names the `[Image #N]`, `[Video #N]`, or `[Audio #N]` placeholder. */
 export type ComposerAttachmentMedia = 'image' | 'video' | 'audio';
 
+/** A media type the Composer attaches: an exact type such as `image/png`, or a whole family such as `image/*`. */
+export type ComposerMediaType = `${ComposerAttachmentMedia}/${string}`;
+
+/** What the Composer does with a file: attach its bytes, write an `@name` mention, or refuse it with `unsupportedFileMessage`. */
+export type ComposerFileDisposition = 'attach' | 'mention' | 'refuse';
+
 export type ComposerSubmissionItem =
   | { type: 'text'; text: string; textElements: ComposerTextElement[] }
   | {

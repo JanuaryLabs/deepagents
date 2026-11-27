@@ -6201,3 +6201,108 @@ describe('Composer host clock', () => {
     ]);
   });
 });
+
+describe('Composer accepted media types', () => {
+  const IMAGE_TYPES = [
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'image/gif',
+  ] as const;
+
+  function renderImageOnlyComposer() {
+    render(
+      <Composer.Root {...rootWords} acceptedMediaTypes={IMAGE_TYPES}>
+        <Composer.Content>
+          <Composer.Attachments {...attachmentsWords} />
+          <Composer.Editor {...editorWords} />
+          <Composer.Error />
+          <Composer.Toolbar>
+            <Composer.AttachFiles {...attachFilesWords}>
+              Browse image files
+            </Composer.AttachFiles>
+          </Composer.Toolbar>
+        </Composer.Content>
+      </Composer.Root>,
+      { wrapper: FakeClock },
+    );
+    return screen.getByRole<HTMLElement>('textbox', {
+      name: rootWords.editorAriaLabel,
+    });
+  }
+
+  function pasteFile(prompt: HTMLElement, file: File) {
+    fireEvent.paste(prompt, {
+      clipboardData: { files: [file], getData: () => '' },
+    });
+  }
+
+  it.each([
+    new File(['<svg/>'], 'logo.svg', { type: 'image/svg+xml' }),
+    new File(['%PDF'], 'labs.pdf', { type: 'application/pdf' }),
+  ])('refuses a pasted $name outside the list visibly', async (file) => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const prompt = renderImageOnlyComposer();
+    pasteFile(prompt, file);
+
+    expect({
+      alert: (await screen.findByRole('alert')).textContent,
+      attachments: screen.queryAllByRole('listitem').length,
+      draft: prompt.textContent,
+    }).toEqual({
+      alert: rootWords.unsupportedFileMessage({ name: file.name }),
+      attachments: 0,
+      draft: '',
+    });
+  });
+
+  it('refuses a dropped WebM outside the list visibly', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const prompt = renderImageOnlyComposer();
+    fireEvent.drop(prompt, {
+      dataTransfer: {
+        files: [new File(['webm'], 'clip.webm', { type: 'video/webm' })],
+        getData: () => '',
+      },
+    });
+
+    expect({
+      alert: (await screen.findByRole('alert')).textContent,
+      attachments: screen.queryAllByRole('listitem').length,
+      draft: prompt.textContent,
+    }).toEqual({
+      alert: rootWords.unsupportedFileMessage({ name: 'clip.webm' }),
+      attachments: 0,
+      draft: '',
+    });
+  });
+
+  it('attaches a pasted PNG the list names', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const prompt = renderImageOnlyComposer();
+    pasteFile(prompt, new File(['png'], 'scan.png', { type: 'image/png' }));
+
+    expect(
+      await screen.findByRole('img', { name: '[Image #1]' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('offers the list in the file picker', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    renderImageOnlyComposer();
+
+    expect(screen.getByLabelText(attachFilesWords.inputLabel)).toHaveAttribute(
+      'accept',
+      IMAGE_TYPES.join(','),
+    );
+  });
+});

@@ -79,6 +79,7 @@ export type {
   ComposerInitialDraft,
   ComposerDraftSource,
   ComposerItemBinding,
+  ComposerMediaType,
   ComposerPendingPaste,
   ComposerRemoteImage,
   ComposerRichLinkMetadata,

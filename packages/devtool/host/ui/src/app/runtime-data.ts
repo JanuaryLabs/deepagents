@@ -17,7 +17,17 @@ const discoverySchema = z.object({
     traces: capabilitySchema.optional(),
     schedules: capabilitySchema.optional(),
     uploads: capabilitySchema
-      .extend({ mediaTypes: z.array(z.string()).optional() })
+      .extend({
+        mediaTypes: z
+          .array(
+            z.templateLiteral([
+              z.enum(['image', 'video', 'audio']),
+              '/',
+              z.string(),
+            ]),
+          )
+          .optional(),
+      })
       .optional(),
   }),
 });

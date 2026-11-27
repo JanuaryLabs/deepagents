@@ -4,6 +4,7 @@ import { createContext, use } from 'react';
 import type {
   ActivePopup,
   ComposerDropTransfer,
+  ComposerMediaType,
   ComposerRichLinkMetadata,
   ComposerState,
   ComposerSuggestion,
@@ -53,6 +54,7 @@ export type ComposerContextApi = {
 export type ComposerContextValue = {
   state: ComposerState;
   disabled: boolean;
+  acceptedMediaTypes: readonly ComposerMediaType[] | undefined;
   commandTriggers: string[];
   activePopup: ActivePopup | null;
   suggestions: ComposerSuggestion[];

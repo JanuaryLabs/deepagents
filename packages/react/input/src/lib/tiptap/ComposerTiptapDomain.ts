@@ -24,6 +24,7 @@ import {
   attachmentMediaOf,
   attachmentPlaceholder,
   characterCount,
+  composerFileDisposition,
   createComposerState,
   createDraftFromPersistedText,
   decodeComposerTextLinkHref,
@@ -45,6 +46,7 @@ import type {
   ComposerInitialDraft,
   ComposerItemBinding,
   ComposerItemEntry,
+  ComposerMediaType,
   ComposerRemoteImage,
   ComposerRichLinkMetadata,
   ComposerState,
@@ -72,9 +74,10 @@ type SelectedPasteRange = {
 
 export type ComposerAttachImageFile = (file: File) => string | null;
 
-type ComposerClipboardOptions = {
+export type ComposerClipboardOptions = {
   getRemoteImageCount: () => number;
   getMentionTrigger: () => string;
+  getAcceptedMediaTypes: () => readonly ComposerMediaType[] | undefined;
   attachImageFile: ComposerAttachImageFile;
 };
 
@@ -264,30 +267,15 @@ function createComposerClipboardExtension(options: ComposerClipboardOptions) {
                 return false;
               }
 
-              const imageFile = Array.from(clipboard.files).find(
-                (file) => attachmentMediaOf(file) !== null,
-              );
-              if (imageFile) {
-                event.preventDefault();
-                insertImageFileInView(
+              if (
+                insertTransferredFileInView(
                   view,
-                  options.getRemoteImageCount(),
-                  imageFile,
-                  options.attachImageFile,
-                );
-                return true;
-              }
-
-              const fileItem = Array.from(clipboard.files).find(
-                (file) => attachmentMediaOf(file) === null,
-              );
-              if (fileItem) {
+                  clipboard.files,
+                  'pasted-file',
+                  options,
+                )
+              ) {
                 event.preventDefault();
-                insertFileMentionInView(
-                  view,
-                  fileItem.name || 'pasted-file',
-                  options.getMentionTrigger(),
-                );
                 return true;
               }
 
@@ -361,15 +349,7 @@ function createComposerClipboardExtension(options: ComposerClipboardOptions) {
               if (!transfer) {
                 return false;
               }
-              if (
-                handleComposerDropInView(
-                  view,
-                  transfer,
-                  options.getRemoteImageCount(),
-                  options.getMentionTrigger(),
-                  options.attachImageFile,
-                )
-              ) {
+              if (handleComposerDropInView(view, transfer, options)) {
                 event.preventDefault();
                 return true;
               }
@@ -382,31 +362,50 @@ function createComposerClipboardExtension(options: ComposerClipboardOptions) {
   });
 }
 
+/** Takes one pasted or dropped file, an attachable one first: attaches it, mentions it, or lets `attachImageFile` refuse it. */
+function insertTransferredFileInView(
+  view: EditorView,
+  files: Iterable<File>,
+  unnamed: string,
+  options: ComposerClipboardOptions,
+) {
+  const accepted = options.getAcceptedMediaTypes();
+  const all = Array.from(files);
+  const file =
+    all.find(
+      (candidate) => composerFileDisposition(candidate, accepted) === 'attach',
+    ) ?? all[0];
+  if (!file) {
+    return false;
+  }
+  if (composerFileDisposition(file, accepted) === 'mention') {
+    insertFileMentionInView(
+      view,
+      file.name || unnamed,
+      options.getMentionTrigger(),
+    );
+  } else {
+    insertImageFileInView(
+      view,
+      options.getRemoteImageCount(),
+      file,
+      options.attachImageFile,
+    );
+  }
+  return true;
+}
+
 export function handleComposerDropInView(
   view: EditorView,
   transfer: ComposerDropTransfer,
-  remoteImageCount: number,
-  mentionTrigger: string,
-  attachImageFile: ComposerAttachImageFile,
+  options: ComposerClipboardOptions,
 ) {
-  const imageFile = Array.from(transfer.files).find(
-    (file) => attachmentMediaOf(file) !== null,
-  );
-  if (imageFile) {
-    insertImageFileInView(view, remoteImageCount, imageFile, attachImageFile);
+  if (
+    insertTransferredFileInView(view, transfer.files, 'dropped-file', options)
+  ) {
     return true;
   }
-  const fileItem = Array.from(transfer.files).find(
-    (file) => attachmentMediaOf(file) === null,
-  );
-  if (fileItem) {
-    insertFileMentionInView(
-      view,
-      fileItem.name || 'dropped-file',
-      mentionTrigger,
-    );
-    return true;
-  }
+  const mentionTrigger = options.getMentionTrigger();
   const dropped = normalizePastedText(
     firstUriListItem(transfer.getData('text/uri-list')) ||
       downloadUrlItem(transfer.getData('DownloadURL')) ||

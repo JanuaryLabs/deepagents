@@ -29,6 +29,7 @@ import {
   attachmentMediaOf,
   attachmentPlaceholder,
   characterCount,
+  composerFileDisposition,
   createComposerDraftSource,
   createDraftFromSource,
   createDraftFromState,
@@ -58,6 +59,7 @@ import type {
   ComposerDropTransfer,
   ComposerInitialDraft,
   ComposerItemEntry,
+  ComposerMediaType,
   ComposerPopupTrigger,
   ComposerRemoteImage,
   ComposerRichLinkMetadata,
@@ -117,7 +119,13 @@ export type ComposerRootProps = {
   editorAriaLabel: string;
   /** Shown when `onSubmit` rejects with something other than an `Error`. */
   submitFailedMessage: string;
-  /** Shown when a file that is not an image, video or audio file is attached; `name` is undefined for a file without one. */
+  /**
+   * The media types the file picker offers and that a picked, pasted or dropped file must have.
+   * Without it, any image, video or audio file is attached and any other pasted or dropped file
+   * becomes an `@name` mention, for a coding agent that reads files by path.
+   */
+  acceptedMediaTypes?: readonly ComposerMediaType[];
+  /** Shown when a file is refused: outside `acceptedMediaTypes`, or not an image, video or audio file; `name` is undefined for a file without one. */
   unsupportedFileMessage: (file: { name: string | undefined }) => string;
   /** Shown when a sent prompt starts with a slash command that no trigger knows. */
   unknownCommandMessage: (command: { name: string }) => string;
@@ -208,7 +216,6 @@ export type ComposerFooterProps = ComponentPropsWithoutRef<'div'> & {
 type ComposerActionTriggerProps = Button.Props;
 
 export type ComposerAttachFilesProps = ComposerActionTriggerProps & {
-  accept?: string;
   multiple?: boolean;
   /** The label of the hidden file input. */
   inputLabel: string;
@@ -264,6 +271,7 @@ function ComposerRootInner({
   expandedTextLimit,
   editorAriaLabel,
   submitFailedMessage,
+  acceptedMediaTypes,
   unsupportedFileMessage,
   unknownCommandMessage,
   missingAttachmentMessage,
@@ -364,6 +372,8 @@ function ComposerRootInner({
   const onSubmitRef = useRef(onSubmit);
   const attachedImagesRef = useRef(new Map<string, File>());
   const attachImageFileRef = useRef<ComposerAttachImageFile>(() => null);
+  const acceptedMediaTypesRef = useRef(acceptedMediaTypes);
+  acceptedMediaTypesRef.current = acceptedMediaTypes;
 
   const refreshFromEditorRef = useRef<(editor: Editor) => void>(
     () => undefined,
@@ -385,6 +395,7 @@ function ComposerRootInner({
         getPlaceholder: () => editorPlaceholderRef.current,
         getMentionTrigger: () => mentionTriggersRef.current[0] ?? '@',
         getRemoteImageCount: () => remoteImagesRef.current.length,
+        getAcceptedMediaTypes: () => acceptedMediaTypesRef.current,
         attachImageFile: (file) => attachImageFileRef.current(file),
       }),
     [],
@@ -776,7 +787,7 @@ function ComposerRootInner({
   }
 
   function attachImageFile(file: File) {
-    if (attachmentMediaOf(file) === null) {
+    if (composerFileDisposition(file, acceptedMediaTypes) !== 'attach') {
       setComposer((state) => ({
         ...state,
         error: unsupportedFileMessage({ name: file.name || undefined }),
@@ -857,13 +868,12 @@ function ComposerRootInner({
     if (disabled || !editor) {
       return false;
     }
-    return handleComposerDropInView(
-      editor.view,
-      transfer,
-      remoteImagesRef.current.length,
-      mentionTriggers[0] ?? '@',
+    return handleComposerDropInView(editor.view, transfer, {
+      getRemoteImageCount: () => remoteImagesRef.current.length,
+      getMentionTrigger: () => mentionTriggers[0] ?? '@',
+      getAcceptedMediaTypes: () => acceptedMediaTypes,
       attachImageFile,
-    );
+    });
   }
 
   function selectRemoteImageAt(index: number) {
@@ -1815,6 +1825,7 @@ function ComposerRootInner({
   const contextValue: ComposerContextValue = {
     state: composer,
     disabled,
+    acceptedMediaTypes,
     commandTriggers,
     activePopup,
     suggestions,
@@ -2259,15 +2270,16 @@ function ComposerFooter({
 }
 
 function ComposerAttachFiles({
-  accept = 'image/*,video/*,audio/*',
   multiple = true,
   disabled,
   inputLabel,
   ...props
 }: ComposerAttachFilesProps) {
-  const { actions, disabled: rootDisabled } = useComposerContext(
-    'Composer.AttachFiles',
-  );
+  const {
+    actions,
+    disabled: rootDisabled,
+    acceptedMediaTypes = ['image/*', 'video/*', 'audio/*'],
+  } = useComposerContext('Composer.AttachFiles');
   const inputRef = useRef<HTMLInputElement>(null);
   return (
     <>
@@ -2279,7 +2291,7 @@ function ComposerAttachFiles({
       <input
         ref={inputRef}
         type="file"
-        accept={accept}
+        accept={acceptedMediaTypes.join(',')}
         multiple={multiple}
         aria-label={inputLabel}
         hidden

@@ -69,6 +69,16 @@ The host and this package must use the same copy of `@zukhruf/ui`. Each copy has
 
 The parts ship no words ([ADR 0007](./docs/dictation/adr/0007-react-input-ships-no-words-or-icons-and-react-genai-ships-chatcomposer-dictate.md)). Each part that shows or announces text takes it as a required prop: `Composer.Root`'s `editorAriaLabel`, `submitFailedMessage`, `unsupportedFileMessage`, `unknownCommandMessage` and `missingAttachmentMessage` (and `expandedTextLimit`'s `message`, beside its `maxChars`), `Composer.Editor`'s `placeholder`, `Composer.Attachments`' `aria-label`, `removeLabel` and `removeIcon`, `Composer.Popup`'s `listboxLabel`, `noMatchesLabel` and `argsLabel`, `Composer.AttachFiles`' `inputLabel`, `Composer.Shortcuts`' `heading`, `closeLabel`, `groupTitles` and `descriptions`, and `Composer.Footer`'s `draftHints`, `popupHints` and `reverseSearchHints`. `ChatComposer` of `@deepagents/react-genai` fills the ones it renders from its message catalog; it renders no `Composer.Shortcuts` or `Composer.Footer`, so a host that uses those passes their words itself.
 
+## Accepted files
+
+`Composer.Root`'s `acceptedMediaTypes` is the one list of the files the composer takes. `Composer.AttachFiles` offers it as its picker's `accept`, and a picked, pasted or dropped file must have one of its types. An entry is an exact type such as `image/png` or a whole family such as `image/*`, and only `image/`, `video/` and `audio/` types can be named. Any other file is refused with `unsupportedFileMessage`, and no attachment is added. A chat host passes the media types its server takes, such as the `mediaTypes` that the uploads capability of Zukhruf's discovery lists:
+
+```tsx
+<Composer.Root acceptedMediaTypes={discovery.capabilities.uploads.mediaTypes} {...words}>
+```
+
+Without the list, the composer takes any image, video or audio file, and a pasted or dropped file of another type becomes an `@name` mention, as a coding agent reads a file by its path. The picker still refuses such a file.
+
 ## Features
 
 [COMPOSER_FEATURE_MATRIX.md](./COMPOSER_FEATURE_MATRIX.md) lists what the composer does and the contract of each feature.

@@ -11,9 +11,11 @@ import {
 import type {
   ComposerAttachmentMedia,
   ComposerDraftSource,
+  ComposerFileDisposition,
   ComposerInitialDraft,
   ComposerItemBinding,
   ComposerItemEntry,
+  ComposerMediaType,
   ComposerPendingPaste,
   ComposerState,
   ComposerSubmission,
@@ -685,6 +687,30 @@ export function attachmentMediaOf(
   return media === 'image' || media === 'video' || media === 'audio'
     ? media
     : null;
+}
+
+/**
+ * Without `acceptedMediaTypes`, any image, video or audio file is attached and any
+ * other file becomes an `@name` mention, as a coding agent reads files by path.
+ * With it, only a file whose type the list names, exactly or by its `family/*`,
+ * is attached, and every other file is refused.
+ */
+export function composerFileDisposition(
+  file: Pick<File, 'type'>,
+  acceptedMediaTypes: readonly ComposerMediaType[] | undefined,
+): ComposerFileDisposition {
+  const media = attachmentMediaOf(file);
+  if (acceptedMediaTypes === undefined) {
+    return media === null ? 'mention' : 'attach';
+  }
+  const type = file.type.toLowerCase();
+  return media !== null &&
+    acceptedMediaTypes.some((accepted) => {
+      const name = accepted.toLowerCase();
+      return name === type || name === `${media}/*`;
+    })
+    ? 'attach'
+    : 'refuse';
 }
 
 export function attachmentMediaFromAttr(

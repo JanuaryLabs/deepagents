@@ -29,7 +29,11 @@ import {
   useAgentMeta,
   useAgentStatus,
 } from '@deepagents/react-genai';
-import { Composer, useComposer } from '@deepagents/react-input/browser';
+import {
+  Composer,
+  type ComposerMediaType,
+  useComposer,
+} from '@deepagents/react-input/browser';
 
 import { INTERACTIVE_ELEMENTS } from '../app/elements.tsx';
 import { loadRuntime } from '../app/runtime-data.ts';
@@ -141,7 +145,7 @@ function ChatSessionBoundary({ chatId }: { chatId: string }) {
       initialMessages={initialMessages}
       sessionExists={sessionExists}
       supportsUploads={discovery.capabilities.uploads !== undefined}
-      accept={discovery.capabilities.uploads?.mediaTypes?.join(',')}
+      acceptedMediaTypes={discovery.capabilities.uploads?.mediaTypes}
     />
   );
 }
@@ -152,14 +156,14 @@ function ChatSession({
   initialMessages,
   sessionExists,
   supportsUploads,
-  accept,
+  acceptedMediaTypes,
 }: {
   api: string;
   chatId: string;
   initialMessages?: UIMessage[];
   sessionExists: boolean;
   supportsUploads: boolean;
-  accept?: string;
+  acceptedMediaTypes?: readonly ComposerMediaType[];
 }) {
   const navigate = useNavigate();
   const { revalidate } = useRevalidator();
@@ -194,7 +198,10 @@ function ChatSession({
           treeId={chatId}
           snapshot={runtime.conversation?.children}
         />
-        <ChatInput supportsUploads={supportsUploads} accept={accept} />
+        <ChatInput
+          supportsUploads={supportsUploads}
+          acceptedMediaTypes={acceptedMediaTypes}
+        />
       </ChatBot>
     </AgentProvider>
   );
@@ -242,10 +249,10 @@ function ChatMessages() {
 
 function ChatInput({
   supportsUploads,
-  accept,
+  acceptedMediaTypes,
 }: {
   supportsUploads: boolean;
-  accept?: string;
+  acceptedMediaTypes?: readonly ComposerMediaType[];
 }) {
   const { submit } = useAgent();
   const { hasSubmitted } = useAgentMeta();
@@ -261,6 +268,7 @@ function ChatInput({
       <ChatBot.ScrollButton />
       <PendingToolInput className="bg-background">
         <ChatComposer.Provider
+          acceptedMediaTypes={acceptedMediaTypes}
           isTaskRunning={isRunning}
           onSubmit={(submission) => {
             const files = submission.items.flatMap((item) =>
@@ -291,7 +299,7 @@ function ChatInput({
               <ChatComposer.Error />
             </ChatComposer.Content>
             <ChatComposer.Toolbar>
-              {supportsUploads && <ChatComposer.AttachFiles accept={accept} />}
+              {supportsUploads && <ChatComposer.AttachFiles />}
               <ChatSubmitButton />
             </ChatComposer.Toolbar>
           </ChatComposer.Root>
