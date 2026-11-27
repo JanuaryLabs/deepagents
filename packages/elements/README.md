@@ -51,7 +51,10 @@ const stream = await chat(agent, {
 });
 ```
 
-`elementsFragment()` advertises the catalog as structured context and stores a
+`elementsFragment()` advertises the catalog as one verbatim `<elements>` block,
+so the model sees the tag syntax as real tags (`<element-name attribute="value" />`,
+not HTML-escaped) and each description as the host wrote it; it renders only at a
+context's top level and renders nothing for an empty catalog. It also stores a
 descriptor snapshot on fragment metadata for host readback.
 
 `elementsStreamTransform` buffers an HTML-style element until its root tag is

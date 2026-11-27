@@ -106,7 +106,7 @@ interface ChatOptions<TOOLS extends ToolSet> {
   toolsContext?: InferToolSetContext<TOOLS>;
   transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
   abortSignal?: AbortSignal;
-  title?: { model: AgentModel };
+  title?: TitleModelOptions; // { model: AgentModel; providerOptions? }
   onError?: (error: unknown) => string;
   messageMetadata?: UIMessageStreamOptions<UIMessage>['messageMetadata'];
   finalAssistantMetadata?: (
@@ -118,16 +118,16 @@ interface ChatOptions<TOOLS extends ToolSet> {
 }
 ```
 
-| Option                   | Type                                                       | Default                      | Description                                                                                 |
-| ------------------------ | ---------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------- |
-| `toolsContext`           | `InferToolSetContext<TOOLS>`                               | `undefined`                  | Required only when a tool declares context; keyed by tool name                              |
-| `transform`              | `StreamTextTransform`                                      | `undefined`                  | Custom stream transforms forwarded to `agent.stream()`                                      |
-| `abortSignal`            | `AbortSignal`                                              | `undefined`                  | Signal to cancel the stream, forwarded to `agent.stream()`                                  |
-| `onStream`               | `(writer: UIMessageStreamWriter) => void`                  | `undefined`                  | Write custom data chunks before the first model request                                     |
-| `title`                  | `{ model: AgentModel }`                                    | `undefined`                  | Model that generates the chat's title; without it the first message is the title            |
-| `onError`                | `(error: unknown) => string`                               | Built-in formatter           | Custom error-to-string formatter for stream errors                                          |
-| `messageMetadata`        | `UIMessageStreamOptions<UIMessage>['messageMetadata']`     | `defaultChatMessageMetadata` | Attaches finish reason and usage at step end, and finish reason and total usage at turn end |
-| `finalAssistantMetadata` | `(msg: UIMessage) => Record<string, unknown> \| undefined` | `undefined`                  | Async callback to attach metadata to the final assistant message before persisting          |
+| Option                   | Type                                                       | Default                      | Description                                                                                                                                                                                           |
+| ------------------------ | ---------------------------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `toolsContext`           | `InferToolSetContext<TOOLS>`                               | `undefined`                  | Required only when a tool declares context; keyed by tool name                                                                                                                                        |
+| `transform`              | `StreamTextTransform`                                      | `undefined`                  | Custom stream transforms forwarded to `agent.stream()`                                                                                                                                                |
+| `abortSignal`            | `AbortSignal`                                              | `undefined`                  | Signal to cancel the stream, forwarded to `agent.stream()`                                                                                                                                            |
+| `onStream`               | `(writer: UIMessageStreamWriter) => void`                  | `undefined`                  | Write custom data chunks before the first model request                                                                                                                                               |
+| `title`                  | `TitleModelOptions`                                        | `undefined`                  | Model that generates the chat's title, with optional call-level `providerOptions` sent with that call (for example the turn's routing and OpenRouter user); without it the first message is the title |
+| `onError`                | `(error: unknown) => string`                               | Built-in formatter           | Custom error-to-string formatter for stream errors                                                                                                                                                    |
+| `messageMetadata`        | `UIMessageStreamOptions<UIMessage>['messageMetadata']`     | `defaultChatMessageMetadata` | Attaches finish reason and usage at step end, and finish reason and total usage at turn end                                                                                                           |
+| `finalAssistantMetadata` | `(msg: UIMessage) => Record<string, unknown> \| undefined` | `undefined`                  | Async callback to attach metadata to the final assistant message before persisting                                                                                                                    |
 
 `chat()` also forwards `onStart`, `onStepStart`, `onStepEnd`, and `include`
 to `agent.stream()`. See the [AI SDK docs](https://ai-sdk.dev) for UI message
