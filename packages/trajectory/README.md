@@ -73,7 +73,10 @@ store. Each segment reads as its own trajectory. All segments share one `session
 ```ts
 const store = new ClaudeCodeStore({ root: join(homedir(), '.claude') });
 const adapter = new ClaudeCodeAdapter();
-for await (const session of store.sessions({ since: new Date('2026-11-20') })) {
+for await (const { session, cwd } of store.sessions({
+  since: new Date('2026-11-20'),
+})) {
+  // cwd comes from the transcript's first 64 KB, without a full read
   const { trajectory, diagnostics } = await adapter.read(session);
   // …
 }
@@ -125,9 +128,13 @@ export type DiagnosticCode =
 // Claude Code.
 export class ClaudeCodeStore {
   constructor(options: { root: string }); // the folder that holds projects/
-  sessions(options: { since: Date }): AsyncIterable<ClaudeCodeSession>;
+  sessions(options: { since: Date }): AsyncIterable<ClaudeCodeSessionInfo>;
   session(sessionId: string): Promise<ClaudeCodeSession | undefined>;
   chain(session: ClaudeCodeSession): Promise<ClaudeCodeChain>;
+}
+export interface ClaudeCodeSessionInfo {
+  readonly session: ClaudeCodeSession;
+  readonly cwd: string | undefined; // the first cwd of the transcript's first 64 KB; undefined when none, or unreadable
 }
 export interface ClaudeCodeChain {
   readonly sessions: readonly ClaudeCodeSession[]; // oldest first
@@ -176,7 +183,7 @@ export class SessionReadError extends Error { readonly path: string } // missing
 | Call                                      | Underneath                                                                                                                                                                                                                                                                                                    |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ClaudeCodeSession.fromTranscriptPath(p)` | Takes the id from the file name; touches no disk.                                                                                                                                                                                                                                                             |
-| `ClaudeCodeStore.sessions({ since })`     | Walks `projects/*/*.jsonl` and yields each main transcript changed since `since`, newest first. Subagent files are not sessions.                                                                                                                                                                              |
+| `ClaudeCodeStore.sessions({ since })`     | Walks `projects/*/*.jsonl` and yields each main transcript changed since `since`, newest first, with the first `cwd` of its first 64 KB, as the Agent SDK's `listSessions` reads its head. Subagent files are not sessions.                                                                                   |
 | `ClaudeCodeStore.session(id)`             | Looks for `projects/*/<id>.jsonl`.                                                                                                                                                                                                                                                                            |
 | `ClaudeCodeStore.chain(s)`                | Reads each transcript's `derived-from` entry back to the first segment. It follows every `claude_code_session` it names (any `via`), skips ids already in the chain, looks beside the current transcript first, then in every project.                                                                        |
 | `ClaudeCodeAdapter.read(s)`               | Streams the transcript line by line. It maps every entry by the [mapping table](#claude-code-entry--atif), pairs each `tool_use` with its `tool_result` by id, and reads `<id>/subagents/agent-*.jsonl` plus `.meta.json` into `subagent_trajectories`.                                                       |

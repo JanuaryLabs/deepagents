@@ -30,7 +30,11 @@ export {
   ClaudeCodeSession,
   ClaudeCodeSubagent,
 } from './claude-code/session.ts';
-export { type ClaudeCodeChain, ClaudeCodeStore } from './claude-code/store.ts';
+export {
+  type ClaudeCodeChain,
+  type ClaudeCodeSessionInfo,
+  ClaudeCodeStore,
+} from './claude-code/store.ts';
 export { CodexAdapter } from './codex/adapter.ts';
 export { CodexStore } from './codex/store.ts';
 export { type CodexSubagentThread, CodexThread } from './codex/thread.ts';

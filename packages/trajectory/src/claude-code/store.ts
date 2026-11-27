@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { open, readFile, readdir, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { SessionReadError } from '../errors.ts';
@@ -11,6 +11,16 @@ export interface ClaudeCodeChain {
   /** Ids a `derived-from` entry names whose transcript is not in the store. */
   readonly missing: readonly string[];
 }
+
+/** A listed session and what its transcript's head records, as the Claude Agent SDK's `listSessions` gives `SDKSessionInfo`. */
+export interface ClaudeCodeSessionInfo {
+  readonly session: ClaudeCodeSession;
+  /** The first `cwd` an entry in the transcript's first 64 KB records; undefined when none does or the transcript cannot be read. */
+  readonly cwd: string | undefined;
+}
+
+/** How much of a transcript a listing reads: the Agent SDK's lite read takes the same 64 KB. */
+const HEAD_BYTES = 64 * 1024;
 
 /**
  * A Claude Code store: the folder that holds `projects/`. The root is
@@ -26,10 +36,13 @@ export class ClaudeCodeStore {
 
   /**
    * Each main transcript (`projects/<project>/<id>.jsonl`) changed at or after
-   * `since`, newest first. It reads file times only, never their content, and
-   * subagent transcripts are not sessions.
+   * `since`, newest first, with the first `cwd` of its first 64 KB (ADR 0008's
+   * amendment). It never reads a whole transcript, and subagent transcripts are
+   * not sessions.
    */
-  async *sessions(options: { since: Date }): AsyncIterable<ClaudeCodeSession> {
+  async *sessions(options: {
+    since: Date;
+  }): AsyncIterable<ClaudeCodeSessionInfo> {
     const since = options.since.getTime();
     const found: { path: string; changed: number }[] = [];
     for (const project of await this.#projects()) {
@@ -41,7 +54,10 @@ export class ClaudeCodeStore {
       }
     }
     for (const { path } of found.toSorted((a, b) => b.changed - a.changed)) {
-      yield ClaudeCodeSession.fromTranscriptPath(path);
+      yield {
+        session: ClaudeCodeSession.fromTranscriptPath(path),
+        cwd: await headCwd(path),
+      };
     }
   }
 
@@ -150,6 +166,33 @@ async function derivedFrom(path: string): Promise<string[]> {
     }
   }
   return ids;
+}
+
+/**
+ * The first `cwd` an entry of the transcript's first 64 KB records. A line the
+ * limit cuts is not read; a transcript the process cannot open (gone since the
+ * listing saw it, or locked) records none.
+ */
+async function headCwd(path: string): Promise<string | undefined> {
+  await using file = await open(path).catch((error: unknown) => {
+    const code = isRecord(error) ? error.code : undefined;
+    if (code === 'ENOENT' || code === 'EACCES') return undefined;
+    throw error;
+  });
+  if (file === undefined) return undefined;
+  const head = Buffer.alloc(HEAD_BYTES);
+  const { bytesRead } = await file.read(head, 0, HEAD_BYTES, 0);
+  for (const line of head.toString('utf8', 0, bytesRead).split('\n')) {
+    if (!line.includes('"cwd"')) continue;
+    let entry: unknown;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (isRecord(entry) && typeof entry.cwd === 'string') return entry.cwd;
+  }
+  return undefined;
 }
 
 /** A folder's entries, or none when the folder does not exist or is not a folder. */

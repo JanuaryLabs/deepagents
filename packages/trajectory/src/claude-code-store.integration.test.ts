@@ -59,14 +59,79 @@ test('sessions({ since }) lists main transcripts changed since the date, newest 
     new ClaudeCodeStore({ root: dir.path }).sessions({
       since: new Date('2026-11-24T00:00:00Z'),
     }),
-    (session) => session.sessionId,
+    ({ session }) => session.sessionId,
   );
 
   assert.deepEqual(listed, [C, B]);
 });
 
+test('sessions() gives each session the first cwd its transcript records, as the Agent SDK listSessions does', async () => {
+  await using dir = await new TemporaryFiles().directory('trajectory-');
+  const path = join(dir.path, 'projects', '-work-one', `${A}.jsonl`);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(
+    path,
+    [
+      { type: 'permission-mode', permissionMode: 'default', sessionId: A },
+      { ...typed(A, 'first'), cwd: '/work/one' },
+      { ...typed(A, 'later'), uuid: 'u-later', cwd: '/work/two' },
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join('\n') + '\n',
+  );
+
+  const listed = await Array.fromAsync(
+    new ClaudeCodeStore({ root: dir.path }).sessions({
+      since: new Date('2026-11-01T00:00:00Z'),
+    }),
+    ({ session, cwd }) => [session.sessionId, cwd],
+  );
+
+  assert.deepEqual(listed, [[A, '/work/one']]);
+});
+
+test('a cwd behind a 60 KB entry, still inside the first 64 KB, is read', async () => {
+  await using dir = await new TemporaryFiles().directory('trajectory-');
+  await transcript(dir.path, '-work-one', A, [
+    {
+      type: 'file-history-snapshot',
+      messageId: 'm-1',
+      snapshot: { trackedFileBackups: { 'a.ts': 'x'.repeat(60 * 1024) } },
+    },
+  ]);
+
+  const listed = await Array.fromAsync(
+    new ClaudeCodeStore({ root: dir.path }).sessions({
+      since: new Date('2026-11-01T00:00:00Z'),
+    }),
+    ({ session, cwd }) => [session.sessionId, cwd],
+  );
+
+  assert.deepEqual(listed, [[A, '/work']]);
+});
+
+test("a cwd that only an entry past the transcript's first 64 KB records is not read: listing reads heads, never whole transcripts", async () => {
+  await using dir = await new TemporaryFiles().directory('trajectory-');
+  await transcript(dir.path, '-work-one', A, [
+    {
+      type: 'file-history-snapshot',
+      messageId: 'm-1',
+      snapshot: { trackedFileBackups: { 'a.ts': 'x'.repeat(70 * 1024) } },
+    },
+  ]);
+
+  const listed = await Array.fromAsync(
+    new ClaudeCodeStore({ root: dir.path }).sessions({
+      since: new Date('2026-11-01T00:00:00Z'),
+    }),
+    ({ session, cwd }) => [session.sessionId, cwd],
+  );
+
+  assert.deepEqual(listed, [[A, undefined]]);
+});
+
 test(
-  'listing reads no transcript content, so a transcript the process cannot read is still listed',
+  'a transcript the process cannot read is still listed, with no cwd',
   { skip: runsAsRoot },
   async () => {
     await using dir = await new TemporaryFiles().directory('trajectory-');
@@ -81,10 +146,10 @@ test(
         }).sessions({
           since: new Date('2026-11-01T00:00:00Z'),
         }),
-        (session) => session.sessionId,
+        ({ session, cwd }) => [session.sessionId, cwd],
       );
 
-      assert.deepEqual(listed, [A]);
+      assert.deepEqual(listed, [[A, undefined]]);
     } finally {
       await chmod(locked, 0o600);
     }
@@ -98,7 +163,7 @@ test('a store whose root holds no projects folder lists nothing', async () => {
     new ClaudeCodeStore({ root: dir.path }).sessions({
       since: new Date('2026-11-01T00:00:00Z'),
     }),
-    (session) => session.sessionId,
+    ({ session }) => session.sessionId,
   );
 
   assert.deepEqual(listed, []);
