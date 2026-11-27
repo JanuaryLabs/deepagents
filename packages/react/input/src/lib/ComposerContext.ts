@@ -52,6 +52,11 @@ export type ComposerContextApi = {
   meta: ComposerMeta;
 };
 
+/** An attached file, with the object URL its preview draws for as long as the composer holds the file. */
+export type ComposerAttachedFile =
+  | { media: 'audio'; file: File }
+  | { media: 'image' | 'video'; file: File; previewUrl: string };
+
 export type ComposerContextValue = {
   state: ComposerState;
   disabled: boolean;
@@ -59,7 +64,7 @@ export type ComposerContextValue = {
   commandTriggers: string[];
   activePopup: ActivePopup | null;
   suggestions: ComposerSuggestion[];
-  attachedImages: ReadonlyMap<string, File>;
+  attachedImages: ReadonlyMap<string, ComposerAttachedFile>;
   attachmentLabel: ComposerAttachmentLabel;
   setEditorPlaceholder: (placeholder: string) => void;
   actions: ComposerActions;

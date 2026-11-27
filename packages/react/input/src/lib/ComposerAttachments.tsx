@@ -1,11 +1,6 @@
 import { Button } from '@base-ui/react/button';
 import { cn } from 'cn';
-import {
-  type ComponentPropsWithoutRef,
-  type ReactNode,
-  useEffect,
-  useState,
-} from 'react';
+import { type ComponentPropsWithoutRef, type ReactNode, useState } from 'react';
 
 import { useComposerContext } from './ComposerContext.ts';
 import type { ComposerState } from './ComposerTypes.ts';
@@ -22,6 +17,8 @@ type AttachmentPreviewProps = {
   label: string;
   file: File;
 };
+
+type PreviewProps = AttachmentPreviewProps & { previewUrl: string };
 
 export function ComposerAttachments({
   className,
@@ -63,19 +60,31 @@ function ComposerAttachment({
 } & Pick<ComposerAttachmentsProps, 'removeLabel' | 'removeIcon'>) {
   const { attachedImages, attachmentLabel, disabled, actions } =
     useComposerContext('Composer.Attachments');
-  const file = attachedImages.get(id);
-  if (!file) {
+  const attached = attachedImages.get(id);
+  if (!attached) {
     return null;
   }
   const label = attachmentLabel({ media, number });
   return (
     <div role="listitem" className="relative">
-      {media === 'video' ? (
-        <ComposerAttachedVideoTile label={label} file={file} />
-      ) : media === 'audio' ? (
-        <ComposerAttachedFileChip label={label} file={file} glyph="♪" />
+      {attached.media === 'video' ? (
+        <ComposerAttachedVideoTile
+          label={label}
+          file={attached.file}
+          previewUrl={attached.previewUrl}
+        />
+      ) : attached.media === 'audio' ? (
+        <ComposerAttachedFileChip
+          label={label}
+          file={attached.file}
+          glyph="♪"
+        />
       ) : (
-        <ComposerImagePreview label={label} file={file} />
+        <ComposerImagePreview
+          label={label}
+          file={attached.file}
+          previewUrl={attached.previewUrl}
+        />
       )}
       <Button
         type="button"
@@ -90,34 +99,22 @@ function ComposerAttachment({
   );
 }
 
-function useObjectUrl(file: File) {
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
-  useEffect(() => {
-    const url = URL.createObjectURL(file);
-    setObjectUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
-  return objectUrl;
-}
-
-function ComposerImagePreview({ label, file }: AttachmentPreviewProps) {
-  const objectUrl = useObjectUrl(file);
+function ComposerImagePreview({ label, file, previewUrl }: PreviewProps) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  return objectUrl === null ? null : objectUrl === failedUrl ? (
+  return previewUrl === failedUrl ? (
     <ComposerAttachedFileChip label={label} file={file} glyph="🖼" />
   ) : (
     <img
-      src={objectUrl}
+      src={previewUrl}
       alt={label}
       title={file.name}
       className="border-border size-16 rounded-md border object-cover"
-      onError={() => setFailedUrl(objectUrl)}
+      onError={() => setFailedUrl(previewUrl)}
     />
   );
 }
 
-function ComposerAttachedVideoTile({ label, file }: AttachmentPreviewProps) {
-  const objectUrl = useObjectUrl(file);
+function ComposerAttachedVideoTile({ label, file, previewUrl }: PreviewProps) {
   const [duration, setDuration] = useState<number | null>(null);
   return (
     <div
@@ -127,7 +124,7 @@ function ComposerAttachedVideoTile({ label, file }: AttachmentPreviewProps) {
       className="border-border bg-muted relative size-16 overflow-hidden rounded-md border"
     >
       <video
-        src={objectUrl ?? undefined}
+        src={previewUrl}
         muted
         playsInline
         preload="metadata"

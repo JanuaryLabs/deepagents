@@ -20,6 +20,7 @@ import {
 import { ComposerAttachments } from './ComposerAttachments.tsx';
 import {
   type ComposerAcceptSuggestionOptions,
+  type ComposerAttachedFile,
   ComposerContext,
   type ComposerContextValue,
   useComposerContext,
@@ -351,8 +352,13 @@ function ComposerRootInner({
 
   useEffect(() => {
     mountedRef.current = true;
+    const attachedImages = attachedImagesRef.current;
     return () => {
       mountedRef.current = false;
+      for (const attached of attachedImages.values()) {
+        releaseAttachedFile(attached);
+      }
+      attachedImages.clear();
     };
   }, []);
   const [remoteImages, setRemoteImages] = useState<ComposerRemoteImage[]>(
@@ -385,7 +391,7 @@ function ComposerRootInner({
   );
   const validateSubmissionRef = useRef(validateSubmission);
   const onSubmitRef = useRef(onSubmit);
-  const attachedImagesRef = useRef(new Map<string, File>());
+  const attachedImagesRef = useRef(new Map<string, ComposerAttachedFile>());
   const attachImageFileRef = useRef<ComposerAttachImageFile>(() => null);
   const filePolicy: ComposerFilePolicy = {
     acceptedMediaTypes,
@@ -828,7 +834,13 @@ function ComposerRootInner({
       return null;
     }
     const id = crypto.randomUUID();
-    attachedImagesRef.current.set(id, file);
+    const media = attachmentMediaOf(file) ?? 'image';
+    attachedImagesRef.current.set(
+      id,
+      media === 'audio'
+        ? { media, file }
+        : { media, file, previewUrl: URL.createObjectURL(file) },
+    );
     return id;
   }
 
@@ -864,7 +876,11 @@ function ComposerRootInner({
     if (disabled || !editor) {
       return;
     }
-    attachedImagesRef.current.delete(id);
+    const attached = attachedImagesRef.current.get(id);
+    if (attached) {
+      releaseAttachedFile(attached);
+      attachedImagesRef.current.delete(id);
+    }
     replaceEditorContent(
       renumberImageAttachmentAtoms(
         removeImageAttachmentAtom(editor.getJSON(), id),
@@ -1221,11 +1237,11 @@ function ComposerRootInner({
       setActivePopup(null);
       return;
     }
-    const sentImageFiles = new Map<string, File>();
+    const sentImageFiles = new Map<string, ComposerAttachedFile>();
     const imageItems: ComposerSubmission['items'] = [];
     for (const image of current.imageAttachments) {
-      const file = attachedImagesRef.current.get(image.id);
-      if (!file) {
+      const attached = attachedImagesRef.current.get(image.id);
+      if (!attached) {
         setComposer((state) => ({
           ...state,
           error: missingAttachmentMessage({
@@ -1239,11 +1255,11 @@ function ComposerRootInner({
         setActivePopup(null);
         return;
       }
-      sentImageFiles.set(image.id, file);
+      sentImageFiles.set(image.id, attached);
       imageItems.push({
         type: image.media,
         placeholder: image.placeholder,
-        file,
+        file: attached.file,
       });
     }
     const remoteItems = prepared.items.filter(
@@ -1266,7 +1282,7 @@ function ComposerRootInner({
       command: prepared.command,
       args: prepared.args,
       items,
-      files: [...sentImageFiles.values()],
+      files: [...sentImageFiles.values()].map((attached) => attached.file),
     };
     if (rejectInvalidSubmission(event)) {
       return;
@@ -1283,11 +1299,18 @@ function ComposerRootInner({
       pendingSendsRef.current += 1;
       submitResult
         .then(() => {
+          for (const attached of sentImageFiles.values()) {
+            releaseAttachedFile(attached);
+          }
           if (draftKey !== undefined) writeStoredDraft(draftKey, null);
         })
         .catch((error: unknown) => {
-          for (const [id, file] of sentImageFiles) {
-            attachedImagesRef.current.set(id, file);
+          for (const [id, attached] of sentImageFiles) {
+            if (mountedRef.current) {
+              attachedImagesRef.current.set(id, attached);
+            } else {
+              releaseAttachedFile(attached);
+            }
           }
           if (draftKey !== undefined)
             writeStoredDraft(draftKey, editableSource);
@@ -1306,6 +1329,10 @@ function ComposerRootInner({
         .finally(() => {
           pendingSendsRef.current -= 1;
         });
+    } else {
+      for (const attached of sentImageFiles.values()) {
+        releaseAttachedFile(attached);
+      }
     }
     const nextHistory = preparedPayload
       ? pushComposerHistory(current, prepared.historyPrompt)
@@ -1340,6 +1367,9 @@ function ComposerRootInner({
     const killBuffer = composerRef.current.killBuffer;
     historyCursorRef.current = null;
     reverseSearchStartRef.current = null;
+    for (const attached of attachedImagesRef.current.values()) {
+      releaseAttachedFile(attached);
+    }
     attachedImagesRef.current.clear();
     remoteImagesRef.current = initialRemoteImagesRef.current;
     setRemoteImages(initialRemoteImagesRef.current);
@@ -2543,3 +2573,9 @@ export const Composer = {
   Submit: ComposerSubmit,
   Reset: ComposerReset,
 } as const;
+
+function releaseAttachedFile(attached: ComposerAttachedFile) {
+  if (attached.media !== 'audio') {
+    URL.revokeObjectURL(attached.previewUrl);
+  }
+}
