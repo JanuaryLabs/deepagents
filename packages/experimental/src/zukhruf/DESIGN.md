@@ -161,8 +161,9 @@ Mechanism:
 1. `enqueue()` derives a conversation-scoped stream id from `TurnInput.id`, registers it as queued,
    and pushes the ask into `TurnQueue`; it does not mutate conversation history or execute the
    model. The returned `id` is this durable stream id, not the caller's raw key.
-2. A worker resolves the chat's agent declaration, writes the user message plus assistant
-   placeholder (`id = streamId`) to `ContextEngine`, then calls `chat()`.
+2. A worker resolves the chat's agent declaration, claims the stream (`queued → running`) before
+   it writes anything, writes the user message plus assistant placeholder (`id = streamId`) to
+   `ContextEngine`, then calls `chat()`.
 3. The worker awaits `StreamManager.persist(stream, streamId)` for the full turn. Persist writes
    every chunk/status to `StreamStore`, while `chat()` commits the final assistant message to
    `ContextStore`. The worker owns execution even when every observer disconnects.
@@ -172,12 +173,16 @@ Mechanism:
    replay watcher; a conversation with no started turn returns `null`.
 6. cancel = two-layer: `manager.cancel(streamId)` atomically changes only a queued/running stream;
    active same-process monitors are signalled immediately and the durable change watcher covers
-   cross-process cancellation. After asynchronous sandbox acquisition the executor first rechecks
-   terminal state, then atomically claims `queued → running` before model construction and starts
-   cancellation observation before `chat()` enters provider setup. A cancellation that wins the
-   claim race never starts sampling; one that lands after the claim aborts provider setup or the
-   active model call. Terminal writes are conditional, so neither path can be overwritten by a late
-   completion or failure. A turn that was running when it was cancelled keeps its partial answer, its
+   cross-process cancellation. The executor atomically claims `queued → running` before its first
+   write (before the mailbox drain of a user turn, sandbox acquisition and skill loading), as Codex
+   starts a turn before it records its input (`core/src/tasks/regular.rs`), so a stream that is
+   still `queued` holds nothing in the chain and nobody but an interrupt can end it. A cancellation
+   that wins the claim race is an interrupt of a queued turn (see Interrupting a turn); one that
+   lands during setup is seen when setup ends, and the turn records its input and the marker and
+   never samples, as Codex records a started turn's input on every early exit
+   (`core/src/session/turn.rs`, `core/src/tasks/admission.rs`); one that lands later aborts
+   provider setup or the active model call. Terminal writes are conditional, so neither path can be
+   overwritten by a late completion or failure. A turn that was running when it was cancelled keeps its partial answer, its
    unfinished tool calls end `output-error` with Codex's `aborted`, and then the executor records
    Codex's `<turn_aborted>` marker as Codex's ContextualUser mode writes it: a user message with
    `INTERRUPTED_GUIDANCE` ("The user interrupted the previous turn on purpose…",
@@ -187,11 +192,38 @@ Mechanism:
    so it stays in the model's history and out of a UI's; a sub-agent interrupted through
    `interrupt_agent` gets it too. `persist` resolves only after its source has settled, so chat's
    `onEnd` has written the partial answer before the marker. The executor records it when persist's
-   cancel watcher detected the cancel (`onCancelDetected`); a turn cancelled while queued or after it
-   ended never reaches that point. Archiving a session cancels its running turns, which record the
-   marker too, as Codex's `thread/archive` shuts the thread down with
-   `abort_all_tasks(TurnAbortReason::Interrupted)` (`core/src/session/handlers.rs:381-384`). A worker
-   shutdown records none, as Codex's suspension of a turn records none.
+   cancel watcher detected the cancel (`onCancelDetected`), and when setup ends on a cancelled
+   stream; the interrupt records it for a lone queued question; a turn cancelled after it ended
+   gets none. Archiving a session interrupts its turns the same way, as Codex's `thread/archive`
+   shuts the thread down with `abort_all_tasks(TurnAbortReason::Interrupted)`
+   (`core/src/session/handlers.rs:381-384`). A worker shutdown records none, as Codex's suspension
+   of a turn records none.
+
+### Interrupting a turn _(Built, #6056)_
+
+`AgentObservation.cancel(turnId?)` (`POST /session/:sessionId/cancel` and
+`…/turn/:turnId/cancel`) and archive interrupt through one `TurnInterruption`, Codex's
+`handle_task_abort`:
+
+- **A lone queued question keeps its input.** Lone means the queue's current turn of the chat
+  (`getCurrentTurn`: the active job, or else the oldest eligible queued one) is this turn, so
+  nothing runs or waits ahead of it, and it is a user's `submit-message`. One admission moves its
+  stream `queued → cancelled` and writes the question and the `<turn_aborted>` marker, so every
+  reader sees all three or none, in Codex's order (input, marker, `TurnAborted`,
+  `core/src/tasks/admission.rs` `record_pending_initial_input`). The move is a CAS on the row the
+  worker's claim moves, so only one of them records the input. The next prompt then holds
+  `[question, marker, next]`.
+- **A turn queued behind another is dropped.** Its stream is cancelled and its job withdrawn; its
+  message lived only in the job, so nothing is written. That is Codex's steer, which an interrupt
+  discards and the client puts back in the composer (`tui/src/chatwidget/input_restore.rs`). A
+  regenerate, an approval continuation and a mailbox wake record nothing either: their input is in
+  the chain already, or stays in the MailboxStore for the next wake.
+- **A running turn is cancelled, and its worker records it** on every exit: setup interrupted or
+  done on a cancelled stream, and inside `chat()`.
+- **Cancel answers once the turn has exited**, waiting at most 10 s (Codex's shutdown bound) for it
+  to stop being the queue's current turn, as Codex answers `turn/interrupt` only on `TurnAborted`
+  (`app-server/src/bespoke_event_handling.rs`). Until then the session read lists the turn as
+  `inProgress`.
 
 Durability comes from **decoupling generation from consumption** through the store: the model keeps
 running even if every consumer drops; chunks pile up; a reconnecting `watch()` replays them. So even
@@ -416,11 +448,14 @@ work (long-running executor process):
   AgentTurnExecutor.execute: stream terminal? skip (cancel-while-queued)
     → mailbox.beginTurn(conversation, streamId)   // attempt-scoped cross-worker activity boundary
     → resolve chat metadata → selected declaration
-    → user message turns drain the leading queue-only FIFO prefix; mailbox turns drain all
-    → engine.set(user(input), assistant placeholder id=streamId); save()
+    → archived tree, message turn? interrupt it as Stop would; skip
+    → approval-paused head? park                   // before the claim: a parked turn stays queued
+    → mailbox turns drain all; no mail? empty wake
+    → atomically claim stream queued → running     // before any write: orders execution against cancellation
+    → user message turns drain the leading queue-only FIFO prefix
     → sandbox = sandboxes.acquire(declaration, {chatId, userId}) // per-chat: the first turn attaches or creates; later turns borrow
-    → terminal stream? project/skip                // closes cancel-during-setup race
-    → atomically claim stream queued → running     // orders execution against cancellation
+    → stream cancelled? record input + <turn_aborted>; skip   // setup interrupted or done on a cancelled stream
+    → engine.set(user(input), skills, assistant placeholder id=streamId); save()
     → monitor cancellation → chat({ toolsContext }) → AWAIT persist(preclaimed)
                                                     // worker holds the job for the whole turn
     → persist detected a cancel? record <turn_aborted> after the partial answer
@@ -1268,26 +1303,32 @@ lifecycle}` per member.
 
 ### Archive and unarchive
 
-- **Archive marks every member in one admission.** An archived root rejects a second archive with
-  `ConversationArchivedError` (409 `zukhruf/session-archived`). The same admission schedules the
-  stop of each member's sandbox that can stop (see Archive under Sandbox idle stop). Then the
-  stops each member's latest turn armed are cancelled, and its running turns are cancelled, the
-  root first and then its descendants, deepest first, waiting at most 10 s in all.
+- **Archive marks every member in one admission, then interrupts.** An archived root rejects a
+  second archive with `ConversationArchivedError` (409 `zukhruf/session-archived`). The same
+  admission schedules the stop of each member's sandbox that can stop (see Archive under Sandbox
+  idle stop). Then the stops each member's latest turn armed are cancelled, and each member's
+  turns are interrupted as Stop interrupts them (see Interrupting a turn), the root first and then
+  its descendants, deepest first: its queued turns first, against the head read before any of
+  them, so a lone question is kept with the marker and a turn queued behind another (a follow-up
+  parked behind a pending approval included) is dropped; then its running turns, which record
+  their input and the marker as they exit. It waits at most 10 s in all. Archive parks nothing,
+  as Codex's `thread/archive` is a shutdown, `abort_all_tasks(Interrupted)`
+  (`core/src/session/handlers.rs`). Mail is never dropped: it stays in the MailboxStore, and a
+  member's running turn that ends with mail pending wakes it again.
 - **Archived means hidden and read-only.** `listHistory` hides an archived root, and
   `listHistory(userId, { archived: true })` lists only archived ones. Everything stays readable.
   `enqueue` refuses the tree with `ConversationArchivedError`, a user's turn and a plugin's alike,
   so an archived chat runs nothing on its own: a `schedules()` run that targets it fails, and a
   conversation-scheduling occurrence that falls due is skipped while a recurring cron keeps its
-  next occurrence armed. A message turn queued before the archive is parked when a worker claims
-  it. Mail still runs a member's turn, as collaboration resumes an archived sub-agent. A plugin
+  next occurrence armed. A message turn a worker finds queued in an archived tree (an archive cut
+  short before its interrupts) is interrupted then. Mail still runs a member's turn, as
+  collaboration resumes an archived sub-agent. A plugin
   that changes the session borrows through `writableSandbox`, which refuses it (see An archived
   session is read-only for plugins).
-- **Unarchive clears every member's mark in one admission**, then resumes each member's parked
-  turns, the ones queued before the archive among them, and resolves with the session's history
-  item. A root that is not archived rejects with `ConversationNotArchivedError` (409
-  `zukhruf/session-not-archived`). It starts no sandbox; the next turn's `resume()` does. A turn
-  that a worker parks while the unarchive lands checks the mark again once its park has landed and
-  resumes the chat's parked turns itself when the mark is gone.
+- **Unarchive clears every member's mark in one admission** and resolves with the session's
+  history item. It runs nothing, since archive parked nothing. A root that is not archived rejects
+  with `ConversationNotArchivedError` (409 `zukhruf/session-not-archived`). It starts no sandbox;
+  the next turn's `resume()` does.
 
 ## Session title _(Built, #5991)_
 
@@ -1305,7 +1346,7 @@ lifecycle}` per member.
   the first turn keeps the rename. `POST /session/:sessionId/title` with `{ title }` answers 204.
   Nothing is published on `GET /events` for a rename yet (Codex sends `thread/name/updated`).
 
-## Session read _(Built, #6056 step A)_
+## Session read _(Built, #6056)_
 
 - **A UI reads a projection, not the chain (Codex `thread/read`).** `AgentObservation.read()`,
   served as `GET /session/:sessionId`, returns `{ messages, turns, status, archivedAt? }` (HTTP adds
@@ -1327,7 +1368,9 @@ lifecycle}` per member.
   other assistant message, a mid-turn segment included, joins the open turn. An assistant
   placeholder with no parts is not shown. The status comes from the turn's stream, read with one
   `listStreamIds` per stream status: `completed` and `failed` (with the stream's `error`) as they
-  are, `cancelled` as Codex's `interrupted`, `running` and a reopened `queued` as `inProgress`. A
+  are, `cancelled` as Codex's `interrupted` once the turn is no longer the queue's active job
+  (until then its worker is still recording, and it reads `inProgress`), `running` and a reopened
+  `queued` as `inProgress`. A
   turn with no stream row, forked from a parent's history, reads `completed`. A turn queued with
   nothing in the chain is not listed; whether the session is busy is `status`.
 

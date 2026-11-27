@@ -53,12 +53,16 @@ const turnStatusOf: Record<StreamStatus, SessionTurnStatus> = {
  * derives it); an assistant message whose id is another turn id of the
  * conversation opens that turn (a mailbox wake has no user message); any
  * other assistant message joins the open turn. A turn's assistant
- * placeholder with no parts yet is not a message to show.
+ * placeholder with no parts yet is not a message to show. A cancelled turn
+ * that is still the queue's `active` job reads in progress: its worker is
+ * still writing the partial answer and the marker, and Codex sets
+ * interrupted only after both are recorded.
  */
 export function projectSession(
   conversation: ConversationId,
   chain: readonly UIMessage[],
   streams: ReadonlyMap<string, Pick<StreamData, 'status' | 'error'>>,
+  active: string | undefined,
 ): Pick<SessionRead, 'messages' | 'turns'> {
   const prefix = AgentTurnId.prefixOf(conversation);
   const messages: UIMessage[] = [];
@@ -89,7 +93,10 @@ export function projectSession(
       if (!stream) return { turnId, status: 'completed', messageIds };
       return {
         turnId,
-        status: turnStatusOf[stream.status],
+        status:
+          stream.status === 'cancelled' && turnId === active
+            ? 'inProgress'
+            : turnStatusOf[stream.status],
         messageIds,
         ...(stream.status === 'failed' && stream.error !== null
           ? { error: stream.error }

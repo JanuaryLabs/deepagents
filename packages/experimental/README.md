@@ -214,9 +214,9 @@ to remove: the stack's `conversationDataCleanup` gets every deleted
 conversation once their sandboxes are gone, and its rejection aborts the
 delete, which a second call finishes.
 `host.archiveSession(conversation)` hides a session from `listHistory`,
-refuses its new turns, scheduled ones included, and stops its sandboxes;
-`host.unarchiveSession(conversation)` brings it back and runs the turns that
-were queued. `host.setSessionTitle(conversation, title)` renames a session
+refuses its new turns, scheduled ones included, interrupts its turns as Stop
+does and stops its sandboxes; `host.unarchiveSession(conversation)` brings it
+back and runs nothing. `host.setSessionTitle(conversation, title)` renames a session
 with the trimmed title, and rejects an empty one with `EmptySessionTitleError`.
 See session delete and archive in
 [`src/zukhruf/DESIGN.md`](./src/zukhruf/DESIGN.md).
@@ -246,6 +246,14 @@ plus health checks. `DELETE /session/:sessionId` deletes a session (204),
 `POST /session/:sessionId/archive` archives it (204), and
 `POST /session/:sessionId/unarchive` answers 200 with its history item, and
 `POST /session/:sessionId/title` with `{ "title": "..." }` renames it (204).
+Stop (`POST /session/:sessionId/cancel`), a turn's cancel
+(`POST /session/:sessionId/turn/:turnId/cancel`) and archive interrupt a turn
+as Codex does: a question with nothing running or queued ahead of it is kept,
+followed by the `<turn_aborted>` marker, even when it had not started; a turn
+queued behind another is dropped, its text left to the client that sent it;
+a running turn keeps its question and partial answer, then the marker. A
+cancel answers once the turn has exited, after at most 10 s, and archive
+waits as long for all of its turns; it parks nothing.
 `GET /session/:sessionId` reads the session as Codex's `thread/read` does:
 `{ sessionId, messages, turns, status, archivedAt? }`, which in process is
 `runtime.observe(conversation).read()`. `messages` is the chain without the

@@ -11,6 +11,7 @@ import {
   type AvailableSkill,
   ContextEngine,
   type ContextStore,
+  type MessageFragment,
   type StreamManager,
   agent,
   assistant,
@@ -53,6 +54,7 @@ import {
 import type { PluginManager } from './plugin/plugin-manager.ts';
 import type { SandboxIdleStop } from './sandbox-idle-stop.ts';
 import { recordTurnAborted } from './turn-aborted.ts';
+import type { TurnInterruption } from './turn-interruption.ts';
 import type { TurnSettlement } from './turn-settlement.ts';
 
 type TurnPlugins = Pick<
@@ -78,8 +80,8 @@ export interface AgentTurnExecutorOptions {
   publishConversationStatus: (conversation: ConversationId) => Promise<void>;
   /** Whether the tree `thread` is in is archived. */
   inArchivedTree: (thread: AgentThread) => Promise<boolean>;
-  /** Revives the chat's parked turns. */
-  resumeParked: (chatId: string) => Promise<void>;
+  /** Ends a queued message turn of an archived tree that this worker holds. */
+  interruption: Pick<TurnInterruption, 'interruptHeld'>;
 }
 
 /** How a delivery that did not park ends: a mailbox wake that found no mail completes its stream itself. */
@@ -103,7 +105,7 @@ export class AgentTurnExecutor {
   readonly #settlement: AgentTurnExecutorOptions['settlement'];
   readonly #publishConversationStatus: AgentTurnExecutorOptions['publishConversationStatus'];
   readonly #inArchivedTree: AgentTurnExecutorOptions['inArchivedTree'];
-  readonly #resumeParked: AgentTurnExecutorOptions['resumeParked'];
+  readonly #interruption: AgentTurnExecutorOptions['interruption'];
 
   constructor(options: AgentTurnExecutorOptions) {
     this.#store = options.store;
@@ -118,7 +120,7 @@ export class AgentTurnExecutor {
     this.#settlement = options.settlement;
     this.#publishConversationStatus = options.publishConversationStatus;
     this.#inArchivedTree = options.inArchivedTree;
-    this.#resumeParked = options.resumeParked;
+    this.#interruption = options.interruption;
   }
 
   /**
@@ -165,19 +167,12 @@ export class AgentTurnExecutor {
     if (await this.#projectSkippedTerminalTurn(turn)) return 'settled';
 
     const { declaration, thread } = await this.#controlPlane.resolve(turn);
-    // A turn of an archived tree that was queued before the archive waits,
-    // parked, for its unarchive; mail still runs, as collaboration resumes
-    // an archived agent.
+    // Archive interrupts a tree's queued turns; one still queued here was
+    // missed by an archive cut short, and is interrupted as Stop would. Mail
+    // still runs, as collaboration resumes an archived agent.
     if (turn.kind === 'message' && (await this.#inArchivedTree(thread))) {
-      await park();
-      // An unarchive that cleared the mark after the check above ran its
-      // resumeParked while this job was still active, which revives nothing;
-      // so a mark found cleared once the park has landed is resumed here.
-      // `thread` is the state read before the park: a fresh read decides.
-      const { thread: current } = await this.#controlPlane.resolve(turn);
-      if (!(await this.#inArchivedTree(current))) {
-        await this.#resumeParked(turn.chatId);
-      }
+      await this.#interruption.interruptHeld(turn);
+      await this.#projectSkippedTerminalTurn(turn);
       return 'settled';
     }
     const usageHint = this.#team.guidance(
@@ -201,31 +196,49 @@ export class AgentTurnExecutor {
     }
 
     let communications: InterAgentCommunication[] = [];
-    if (turn.kind === 'message' && turn.message.role === 'user') {
-      communications = await this.#mailbox.drainLeadingQueueOnly(turn);
-    } else if (turn.kind === 'mailbox') {
+    if (turn.kind === 'mailbox') {
       communications = await this.#mailbox.drain(turn);
+      // Duplicate wakes are harmless scheduling receipts once mail is gone.
+      if (communications.length === 0) return 'empty-wake';
     }
 
-    if (turn.kind === 'mailbox' && communications.length === 0) {
-      // Duplicate wakes are harmless scheduling receipts once mail is gone.
-      return 'empty-wake';
+    // The claim comes before any write, as Codex starts a turn before it
+    // records its input: a turn that is still queued holds nothing in the
+    // chain, so an interrupt that wins the claim's CAS records it alone, and
+    // one that loses it leaves the recording to this worker.
+    if (!(await this.#streams.claim(turn.streamId))) {
+      await this.#projectSkippedTerminalTurn(turn);
+      return 'settled';
     }
+    if (turn.kind === 'message' && turn.message.role === 'user') {
+      communications = await this.#mailbox.drainLeadingQueueOnly(turn);
+    }
+    // Claimed = genuinely running. Parked, skipped, and empty-wake turns never
+    // reach this point, so they cannot flash an "active" status.
+    await this.#publishConversationStatus(turn);
 
     // `thread` still names the previous turn as the latest until this records.
     await this.#idleStop?.cancel(thread);
     await this.#controlPlane.recordLatestTurn(turn, turn.streamId);
 
-    const { sandbox, agentSkills, skillPrompts } = await this.#loadSkills(
-      turn,
-      declaration,
-      signal,
-    ).catch(async (error: unknown) => {
-      // Codex records the turn's input before it loads skills, so a turn
-      // whose setup fails still holds its message.
-      await this.#prepareChain(turn, engine, communications, []);
-      throw error;
-    });
+    // Codex records the turn's input on every exit before sampling, so a
+    // turn whose setup is interrupted or fails still holds its message.
+    const setup = await this.#loadSkills(turn, declaration, signal).catch(
+      async (error: unknown) => {
+        if (await this.#endedBeforeSampling(turn, engine, communications)) {
+          return undefined;
+        }
+        await this.#prepareChain(turn, engine, communications, []);
+        throw error;
+      },
+    );
+    if (
+      setup === undefined ||
+      (await this.#endedBeforeSampling(turn, engine, communications))
+    ) {
+      return 'settled';
+    }
+    const { sandbox, agentSkills, skillPrompts } = setup;
     await this.#prepareChain(
       turn,
       engine,
@@ -241,15 +254,6 @@ export class AgentTurnExecutor {
     if (elements.length > 0) {
       engine.set(elementsFragment(elements));
     }
-
-    if (await this.#projectSkippedTerminalTurn(turn)) return 'settled';
-    if (!(await this.#streams.claim(turn.streamId))) {
-      await this.#projectSkippedTerminalTurn(turn);
-      return 'settled';
-    }
-    // Claimed = genuinely running. Parked, skipped, and empty-wake turns never
-    // reach this point, so they cannot flash an "active" status.
-    await this.#publishConversationStatus(turn);
     const agentContext = {
       controlPlane: this.#controlPlane,
       actor: { turn, thread, declaration },
@@ -356,7 +360,10 @@ export class AgentTurnExecutor {
           }
         },
         abortSignal: turnSignal,
-        title: thread.path.isRoot ? declaration.title : undefined,
+        title:
+          thread.path.isRoot && declaration.title
+            ? { ...declaration.title, providerOptions }
+            : undefined,
         onStart: compaction?.onStart,
         onStepStart: compaction?.onStepStart,
         onStepEnd: compaction?.onStepEnd,
@@ -438,9 +445,31 @@ export class AgentTurnExecutor {
   }
 
   /**
+   * Ends a claimed turn that is no longer running before it samples. A
+   * cancelled one records its input and then the `<turn_aborted>` marker, as
+   * Codex's interrupt records a started turn's input before the marker
+   * (`core/src/tasks/admission.rs`); one whose chat was deleted writes
+   * nothing. Whether the turn ended.
+   */
+  async #endedBeforeSampling(
+    turn: TurnRef,
+    engine: ContextEngine,
+    communications: InterAgentCommunication[],
+  ): Promise<boolean> {
+    const status = await this.#streams.store.getStreamStatus(turn.streamId);
+    if (status === 'running') return false;
+    if (status === 'cancelled') {
+      await this.#recordInput(turn, engine, communications, []);
+      await recordTurnAborted(engine);
+    }
+    await this.#projectSkippedTerminalTurn(turn);
+    return true;
+  }
+
+  /**
    * Record the turn's input, then one user message per `<skill>` prompt after
    * the user message, as Codex records them (`core/src/session/turn.rs`), so
-   * the skills stay in history.
+   * the skills stay in history, then the answer's placeholder.
    */
   async #prepareChain(
     turn: TurnRef,
@@ -461,34 +490,37 @@ export class AgentTurnExecutor {
         },
       }),
     );
+    await this.#recordInput(turn, engine, communications, [
+      ...skillMessages,
+      assistant({ id: turn.streamId, role: 'assistant', parts: [] }),
+    ]);
+  }
+
+  /** Record the turn's input, followed by `after`; a continuation records its answer's head alone. */
+  async #recordInput(
+    turn: TurnRef,
+    engine: ContextEngine,
+    communications: InterAgentCommunication[],
+    after: MessageFragment[],
+  ): Promise<void> {
+    const mail = communications.map((communication) =>
+      user(this.#mailboxInputMessage(communication)),
+    );
     if (turn.kind === 'message') {
       if (turn.message.role === 'assistant') {
         await engine.continue(assistant(turn.message));
       } else if (turn.trigger === 'regenerate-message') {
         await engine.rewind(turn.message.id);
-        engine.set(
-          ...skillMessages,
-          assistant({ id: turn.streamId, role: 'assistant', parts: [] }),
-        );
-        await engine.save({ branch: false });
+        if (after.length > 0) {
+          engine.set(...after);
+          await engine.save({ branch: false });
+        }
       } else {
-        engine.set(
-          ...communications.map((communication) =>
-            user(this.#mailboxInputMessage(communication)),
-          ),
-          user(turn.message),
-          ...skillMessages,
-          assistant({ id: turn.streamId, role: 'assistant', parts: [] }),
-        );
+        engine.set(...mail, user(turn.message), ...after);
         await engine.save({ branch: true });
       }
     } else if (turn.kind === 'mailbox') {
-      engine.set(
-        ...communications.map((communication) =>
-          user(this.#mailboxInputMessage(communication)),
-        ),
-        assistant({ id: turn.streamId, role: 'assistant', parts: [] }),
-      );
+      engine.set(...mail, ...after);
       await engine.save({ branch: true });
     }
   }

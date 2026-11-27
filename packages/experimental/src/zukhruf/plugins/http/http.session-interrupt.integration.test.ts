@@ -47,6 +47,9 @@ const sessionSchema = z.looseObject({
   status: z.looseObject({ type: z.string() }),
   archivedAt: z.number().optional(),
 });
+const storedKindSchema = z.looseObject({
+  zukhruf: z.looseObject({ contentKind: z.string() }),
+});
 const uiChunkSchema = z.looseObject({
   type: z.string(),
   delta: z.string().optional(),
@@ -55,6 +58,7 @@ const uiChunkSchema = z.looseObject({
 async function serve(
   resources: AsyncDisposableStack,
   model: MockLanguageModelV4,
+  environment = new VirtualSandboxEnvironment(),
 ) {
   const directory = resources.use(
     await new TemporaryFiles().directory('zukhruf-'),
@@ -68,7 +72,7 @@ async function serve(
         name: 'root',
         instructions: [],
         model,
-        sandbox: defineSandbox(new VirtualSandboxEnvironment()),
+        sandbox: defineSandbox(environment),
       }),
     ).initialize(defineStack(async () => ({ storage }))),
   );
@@ -178,6 +182,17 @@ async function readSession(app: Hono<HttpEnv>, sessionId: string) {
   };
 }
 
+/** The stored chain as each message's role and model-only content kind. */
+async function storedKinds(runtime: AgentHost, sessionId: string) {
+  const messages = await runtime
+    .observe({ chatId: sessionId, userId: 'user-1' })
+    .engine.getMessages();
+  return messages.map(({ role, metadata }) => ({
+    role,
+    kind: storedKindSchema.safeParse(metadata).data?.zukhruf.contentKind,
+  }));
+}
+
 /** GET /session/:id's session status. */
 async function sessionStatus(app: Hono<HttpEnv>, sessionId: string) {
   const response = await app.request(`${MOUNT}/session/${sessionId}`);
@@ -199,6 +214,35 @@ function userTexts(prompt: LanguageModelV4Prompt) {
 
 function lastUserText(prompt: LanguageModelV4Prompt) {
   return userTexts(prompt).at(-1) ?? '';
+}
+
+/** Waits until the turn is neither queued nor running. */
+function turnEnded(
+  runtime: AgentHost,
+  sessionId: string,
+  turnId: string,
+  signal: AbortSignal,
+) {
+  return waitFor(
+    async () => {
+      const status = (
+        await runtime
+          .observe({ chatId: sessionId, userId: 'user-1' })
+          .status(turnId)
+      )?.status;
+      assert.ok(
+        status !== undefined && !['queued', 'running'].includes(status),
+        `turn ${status}`,
+      );
+    },
+    { signal },
+  );
+}
+
+function answering() {
+  return new MockLanguageModelV4({
+    doStream: async ({ prompt }) => textResult(`done:${lastUserText(prompt)}`),
+  });
 }
 
 /**
@@ -326,6 +370,139 @@ void test('a turn queued behind a running answer and cancelled before it starts 
       status: 'idle',
       nextPrompt: ['hold', 'next'],
       modelCalls: ['hold', 'next'],
+    },
+  );
+});
+
+void test('POST /session/:id/archive while a lone first question is still queued stores the question, reports the turn as interrupted, and the model is never called for it after POST /session/:id/unarchive', async (t) => {
+  await using resources = new AsyncDisposableStack();
+  const model = answering();
+  const { app, runtime } = await serve(resources, model);
+  const sessionId = randomUUID();
+  const turnId = await startTurn(app, sessionId, QUESTION);
+
+  const archived = (await post(app, `/session/${sessionId}/archive`)).status;
+  const whileArchived = await readSession(app, sessionId);
+  resources.use(await runtime.work());
+  const unarchived = (await post(app, `/session/${sessionId}/unarchive`))
+    .status;
+  const next = await startTurn(app, sessionId, 'next');
+  await turnStatus(runtime, sessionId, next, 'completed', t.signal);
+
+  assert.deepStrictEqual(
+    {
+      archived,
+      whileArchived,
+      unarchived,
+      modelCalls: model.doStreamCalls.map(({ prompt }) => lastUserText(prompt)),
+    },
+    {
+      archived: 204,
+      whileArchived: {
+        messages: [{ role: 'user', text: QUESTION }],
+        turns: [{ turnId, status: 'interrupted', texts: [QUESTION] }],
+        archived: true,
+      },
+      unarchived: 200,
+      modelCalls: ['next'],
+    },
+  );
+});
+
+void test('POST /session/:id/cancel while a lone first question is still queued stores the question and reports the turn as interrupted', async (t) => {
+  await using resources = new AsyncDisposableStack();
+  const model = answering();
+  const { app, runtime } = await serve(resources, model);
+  const sessionId = randomUUID();
+  const turnId = await startTurn(app, sessionId, QUESTION);
+
+  const cancelled = (await post(app, `/session/${sessionId}/cancel`)).status;
+  resources.use(await runtime.work());
+  await turnEnded(runtime, sessionId, turnId, t.signal);
+
+  assert.deepStrictEqual(
+    {
+      cancelled,
+      session: await readSession(app, sessionId),
+      modelCalls: model.doStreamCalls.length,
+    },
+    {
+      cancelled: 204,
+      session: {
+        messages: [{ role: 'user', text: QUESTION }],
+        turns: [{ turnId, status: 'interrupted', texts: [QUESTION] }],
+        archived: false,
+      },
+      modelCalls: 0,
+    },
+  );
+});
+
+void test('POST /session/:id/archive while a worker holds the first turn in its sandbox setup stores the question, reports the turn as interrupted, and the model is never called', async (t) => {
+  await using resources = new AsyncDisposableStack();
+  const entered = Promise.withResolvers<void>();
+  const ready = Promise.withResolvers<void>();
+  const model = answering();
+  const { app, runtime } = await serve(
+    resources,
+    model,
+    new VirtualSandboxEnvironment({
+      readiness: async () => {
+        entered.resolve();
+        await ready.promise;
+      },
+    }),
+  );
+  resources.use(await runtime.work());
+  const sessionId = randomUUID();
+  const turnId = await startTurn(app, sessionId, QUESTION);
+  await entered.promise;
+
+  let answered = false;
+  const archiving = (async () => {
+    const response = await post(app, `/session/${sessionId}/archive`);
+    answered = true;
+    return response.status;
+  })();
+  // Setup ends once the archive has cancelled the turn, or has answered
+  // without cancelling it.
+  await waitFor(
+    async () => {
+      if (answered) return;
+      assert.equal(
+        (
+          await runtime
+            .observe({ chatId: sessionId, userId: 'user-1' })
+            .status(turnId)
+        )?.status,
+        'cancelled',
+      );
+    },
+    { signal: t.signal },
+  );
+  ready.resolve();
+  const archived = await archiving;
+  await turnEnded(runtime, sessionId, turnId, t.signal);
+
+  assert.deepStrictEqual(
+    {
+      archived,
+      session: await readSession(app, sessionId),
+      chain: await storedKinds(runtime, sessionId),
+      modelCalls: model.doStreamCalls.length,
+    },
+    {
+      archived: 204,
+      session: {
+        messages: [{ role: 'user', text: QUESTION }],
+        turns: [{ turnId, status: 'interrupted', texts: [QUESTION] }],
+        archived: true,
+      },
+      chain: [
+        { role: 'user', kind: undefined },
+        { role: 'user', kind: 'generic.turn_aborted' },
+      ],
+      modelCalls: 0,
     },
   );
 });

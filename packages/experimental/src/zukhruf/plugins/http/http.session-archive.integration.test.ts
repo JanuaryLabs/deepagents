@@ -12,19 +12,15 @@ import { z } from 'zod';
 
 import { VirtualSandboxEnvironment } from '@deepagents/context';
 import {
-  type AdmissionScope,
   type AgentDeclaration,
   type AgentHost,
   AgentRuntime,
   type AgentStack,
-  AgentStorage,
-  type AgentTree,
+  type AgentStorage,
   EmbeddedAgentStorage,
   MessageDeliveryModes,
   PgBossWakeScheduler,
   PostgresAgentStorage,
-  TurnQueue,
-  type TurnRef,
   createInterAgentCommunication,
   defineAgent,
   defineSandbox,
@@ -70,6 +66,9 @@ const sessionSchema = z.looseObject({
       parts: z.array(z.looseObject({ type: z.string() })),
     }),
   ),
+});
+const turnsSchema = z.looseObject({
+  turns: z.array(z.looseObject({ turnId: z.string(), status: z.string() })),
 });
 const archivedAtSchema = z.looseObject({
   zukhruf: z.looseObject({ archivedAt: z.number().optional() }),
@@ -145,110 +144,6 @@ const storages = [
     transaction: ScheduledTaskTransaction;
   }>;
 }[];
-
-/**
- * The real turn queue, except that the first park of a delivery runs
- * `beforeFirstPark` to completion before it reaches the real park, and
- * records which turn parked.
- */
-class InterposedParkQueue extends TurnQueue {
-  beforeFirstPark: () => Promise<void> = async () => {};
-  readonly parked: string[] = [];
-  readonly #inner: TurnQueue;
-
-  constructor(inner: TurnQueue) {
-    super();
-    this.#inner = inner;
-  }
-
-  override push(turn: TurnRef) {
-    return this.#inner.push(turn);
-  }
-
-  override getTurnActivity(conversation: Pick<TurnRef, 'chatId' | 'userId'>) {
-    return this.#inner.getTurnActivity(conversation);
-  }
-
-  override getCurrentTurn(conversation: Pick<TurnRef, 'chatId' | 'userId'>) {
-    return this.#inner.getCurrentTurn(conversation);
-  }
-
-  override cancel(streamId: string) {
-    return this.#inner.cancel(streamId);
-  }
-
-  override consume(...[handler, options]: Parameters<TurnQueue['consume']>) {
-    return this.#inner.consume(
-      (turn, context) =>
-        handler(turn, {
-          ...context,
-          park: async () => {
-            if (this.parked.length === 0) {
-              this.parked.push(turn.streamId);
-              await this.beforeFirstPark();
-            }
-            await context.park();
-          },
-        }),
-      options,
-    );
-  }
-
-  override resumeParked(chatId: string) {
-    return this.#inner.resumeParked(chatId);
-  }
-
-  override forget(conversation: Pick<TurnRef, 'chatId' | 'userId'>) {
-    return this.#inner.forget(conversation);
-  }
-
-  override isLost(streamId: string, queuedSince: number) {
-    return this.#inner.isLost(streamId, queuedSince);
-  }
-}
-
-/** A real storage whose turn queue is an InterposedParkQueue over its own. */
-class InterposedParkStorage extends AgentStorage {
-  readonly queue: InterposedParkQueue;
-  readonly #inner: AgentStorage;
-
-  constructor(inner: AgentStorage) {
-    super();
-    this.#inner = inner;
-    this.queue = new InterposedParkQueue(inner.queue);
-  }
-
-  get store() {
-    return this.#inner.store;
-  }
-
-  get streams() {
-    return this.#inner.streams;
-  }
-
-  get mailboxStore() {
-    return this.#inner.mailboxStore;
-  }
-
-  get sandboxIdleWakes() {
-    return this.#inner.sandboxIdleWakes;
-  }
-
-  get deletedConversations() {
-    return this.#inner.deletedConversations;
-  }
-
-  settleQueue(followUp: string) {
-    return this.#inner.settleQueue(followUp);
-  }
-
-  admit<T>(
-    tree: AgentTree,
-    work: (scope: AdmissionScope) => Promise<T>,
-  ): Promise<T> {
-    return this.#inner.admit(tree, work);
-  }
-}
 
 /** A runtime of `agent` on the stack's parts, served as http(runtime) for user-1. */
 async function serveAgent(
@@ -352,6 +247,13 @@ async function userTexts(app: Hono<HttpEnv>, sessionId: string) {
     .map(({ parts }) =>
       parts.map((part) => (part.type === 'text' ? part.text : '')).join(''),
     );
+}
+
+/** Each turn of GET /session/:sessionId with its status. */
+async function turnStatuses(app: Hono<HttpEnv>, sessionId: string) {
+  return turnsSchema
+    .parse(await (await app.request(`${MOUNT}/session/${sessionId}`)).json())
+    .turns.map(({ turnId, status }) => ({ turnId, status }));
 }
 
 /** The text of the last user message the model was sent. */
@@ -639,68 +541,9 @@ void describe.each(storages, ({ name, open }) =>
       );
     });
 
-    test(`${name}: archiving a session cancels its running turn and keeps the turn queued behind it, which does not run while the session is archived and runs with its user message once it is unarchived`, async (t) => {
+    test(`${name}: archiving a session interrupts its running turn and drops the turn queued behind it, which never runs, not even once the session is unarchived`, async (t) => {
       await using resources = new AsyncDisposableStack();
       const { storage, boss } = await open(resources);
-      const { app, runtime } = await serveAgent(
-        resources,
-        { storage },
-        {
-          name: 'root',
-          model: holdingModel(),
-          sandbox: defineSandbox(new VirtualSandboxEnvironment()),
-        },
-      );
-      resources.use(await runtime.work());
-      const sessionId = randomUUID();
-      const root = { chatId: sessionId, userId: 'user-1' };
-      const running = await startTurn(app, sessionId, 'hold');
-      await turnStatus(runtime, root, running, 'running', t.signal);
-      const queued = await startTurn(app, sessionId, 'queued behind');
-
-      const response = await answer(await archive(app, sessionId));
-      await turnStatus(runtime, root, running, 'cancelled', t.signal);
-      // The queued turn's job is held, not deleted, while the session is
-      // archived. Waiting for that hold is what makes the turn's 'queued'
-      // status below mean it was kept from running, not that no worker had
-      // claimed it yet.
-      const held = await waitFor(
-        async () => {
-          const states = (
-            await boss.findJobs('zukhruf-turns', { key: sessionId })
-          ).map(({ state }) => state);
-          assert.deepStrictEqual(states, ['cancelled']);
-          return states;
-        },
-        { signal: t.signal },
-      );
-      const whileArchived = (await runtime.observe(root).status(queued))
-        ?.status;
-      const restored = (await unarchive(app, sessionId)).status;
-      await turnStatus(runtime, root, queued, 'completed', t.signal);
-
-      assert.deepStrictEqual(
-        {
-          response,
-          held,
-          whileArchived,
-          restored,
-          userTexts: await userTexts(app, sessionId),
-        },
-        {
-          response: archived,
-          held: ['cancelled'],
-          whileArchived: 'queued',
-          restored: 200,
-          userTexts: ['hold', 'queued behind'],
-        },
-      );
-    });
-
-    test(`${name}: a turn queued before the archive runs once the session is unarchived even when the unarchive lands while a worker is parking it`, async (t) => {
-      await using resources = new AsyncDisposableStack();
-      const { storage: real } = await open(resources);
-      const storage = new InterposedParkStorage(real);
       const model = holdingModel();
       const { app, runtime } = await serveAgent(
         resources,
@@ -711,45 +554,73 @@ void describe.each(storages, ({ name, open }) =>
           sandbox: defineSandbox(new VirtualSandboxEnvironment()),
         },
       );
-      const sessionId = randomUUID();
-      let unarchived: number | undefined;
-      storage.queue.beforeFirstPark = async () => {
-        unarchived = (await unarchive(app, sessionId)).status;
-      };
       resources.use(await runtime.work());
+      const sessionId = randomUUID();
       const root = { chatId: sessionId, userId: 'user-1' };
       const running = await startTurn(app, sessionId, 'hold');
       await turnStatus(runtime, root, running, 'running', t.signal);
       const queued = await startTurn(app, sessionId, 'queued behind');
 
       const response = await answer(await archive(app, sessionId));
-      await turnStatus(runtime, root, queued, 'completed', t.signal);
+      const whileArchived = {
+        running: (await runtime.observe(root).status(running))?.status,
+        queued: (await runtime.observe(root).status(queued))?.status,
+        turns: await turnStatuses(app, sessionId),
+        jobs: await drained(boss, 'zukhruf-turns', t.signal),
+      };
+      const restored = (await unarchive(app, sessionId)).status;
+      const next = await startTurn(app, sessionId, 'next');
+      await turnStatus(runtime, root, next, 'completed', t.signal);
 
       assert.deepStrictEqual(
         {
           response,
-          parked: storage.queue.parked,
-          unarchived,
-          lastPrompt: lastUserText(model.doStreamCalls.at(-1)?.prompt ?? []),
+          whileArchived,
+          restored,
           userTexts: await userTexts(app, sessionId),
+          modelCalls: model.doStreamCalls.map(({ prompt }) =>
+            lastUserText(prompt),
+          ),
         },
         {
           response: archived,
-          parked: [queued],
-          unarchived: 200,
-          lastPrompt: 'queued behind',
-          userTexts: ['hold', 'queued behind'],
+          whileArchived: {
+            running: 'cancelled',
+            queued: 'cancelled',
+            turns: [{ turnId: running, status: 'interrupted' }],
+            jobs: [],
+          },
+          restored: 200,
+          userTexts: ['hold', 'next'],
+          modelCalls: ['hold', 'next'],
         },
       );
     });
 
-    test(`${name}: archiving a session also cancels its sub-agent's running turn and keeps the sub-agent's turn queued behind it, which runs once the session is unarchived`, async (t) => {
+    test(`${name}: archiving a session also interrupts its sub-agent's running turn and drops the sub-agent's turn queued behind it, while mail delivered to the sub-agent during that turn is kept and runs the sub-agent, and unarchiving runs nothing more`, async (t) => {
       await using resources = new AsyncDisposableStack();
       const { storage, boss } = await open(resources);
       const sandbox = defineSandbox(new VirtualSandboxEnvironment());
       const rootSteps = [spawnWorker()];
-      let workerCalls = 0;
       let aborted = false;
+      const workerModel = new MockLanguageModelV4({
+        doStream: async ({ abortSignal }) => {
+          // The worker's second turn, woken by mail, runs until aborted.
+          if (workerModel.doStreamCalls.length !== 2) {
+            return textResult('worker done');
+          }
+          return new Promise<never>((_resolve, reject) => {
+            abortSignal?.addEventListener(
+              'abort',
+              () => {
+                aborted = true;
+                reject(abortSignal.reason);
+              },
+              { once: true },
+            );
+          });
+        },
+      });
       const { app, runtime } = await serveAgent(
         resources,
         { storage },
@@ -764,23 +635,7 @@ void describe.each(storages, ({ name, open }) =>
               name: 'worker',
               instructions: [],
               sandbox,
-              model: new MockLanguageModelV4({
-                doStream: async ({ abortSignal }) => {
-                  workerCalls += 1;
-                  // The worker's second turn, woken by mail, runs until aborted.
-                  if (workerCalls !== 2) return textResult('worker done');
-                  return new Promise<never>((_resolve, reject) => {
-                    abortSignal?.addEventListener(
-                      'abort',
-                      () => {
-                        aborted = true;
-                        reject(abortSignal.reason);
-                      },
-                      { once: true },
-                    );
-                  });
-                },
-              }),
+              model: workerModel,
             }),
           ],
         },
@@ -814,43 +669,55 @@ void describe.each(storages, ({ name, open }) =>
         },
         trigger: 'submit-message',
       });
+      await runtime.deliver(
+        createInterAgentCommunication({
+          author: root,
+          recipient: child,
+          content: 'mail behind',
+        }),
+        MessageDeliveryModes.TriggerTurn,
+      );
 
       const response = await answer(await archive(app, sessionId));
-      // As for the session's own queued turn: the hold is what makes the
-      // 'queued' status below mean the turn was kept from running.
-      const held = await waitFor(
-        async () => {
-          const states = (
-            await boss.findJobs('zukhruf-turns', { key: child.chatId })
-          ).map(({ state }) => state);
-          assert.deepStrictEqual(states, ['cancelled']);
-          return states;
-        },
-        { signal: t.signal },
-      );
-      const whileArchived = (await runtime.observe(child).status(queued.id))
-        ?.status;
-      const callsWhileArchived = workerCalls;
+      const whileArchived = {
+        queued: (await runtime.observe(child).status(queued.id))?.status,
+        jobs: await waitFor(
+          async () => {
+            assert.equal(workerModel.doStreamCalls.length, 3);
+            assert.equal(await storage.queue.getTurnActivity(child), 'idle');
+            const jobs = await boss.findJobs('zukhruf-turns', {
+              key: child.chatId,
+            });
+            assert.deepStrictEqual(jobs, []);
+            return jobs;
+          },
+          { signal: t.signal },
+        ),
+      };
       const restored = (await unarchive(app, sessionId)).status;
-      await turnStatus(runtime, child, queued.id, 'completed', t.signal);
+      const workerPrompts = workerModel.doStreamCalls.map(({ prompt }) =>
+        lastUserText(prompt),
+      );
 
       assert.deepStrictEqual(
         {
           response,
           aborted,
-          held,
           whileArchived,
-          callsWhileArchived,
           restored,
-          callsAfter: workerCalls,
+          mailRan: workerPrompts[2]?.includes('mail behind'),
+          queuedRan: workerPrompts.some((text) =>
+            text.includes('queued for worker'),
+          ),
+          callsAfter: workerModel.doStreamCalls.length,
         },
         {
           response: archived,
           aborted: true,
-          held: ['cancelled'],
-          whileArchived: 'queued',
-          callsWhileArchived: 2,
+          whileArchived: { queued: 'cancelled', jobs: [] },
           restored: 200,
+          mailRan: true,
+          queuedRan: false,
           callsAfter: 3,
         },
       );

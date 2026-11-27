@@ -2091,7 +2091,7 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal(b, 'reply:gate-open');
   });
 
-  it('cancel while queued skips execution entirely', async () => {
+  it('cancel of a lone queued question records the question and the turn_aborted marker, and never runs it', async () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(scriptedModel(track));
 
@@ -2108,8 +2108,15 @@ describe('zukhruf runtime — background executor', () => {
 
     assert.equal(await h.streamStore.getStreamStatus(id), 'cancelled');
     assert.deepStrictEqual(track.calls, [], 'model never invoked');
-    const messages = await h.runtime.observe(conversation).engine.getMessages();
-    assert.deepStrictEqual(messages, [], 'nothing entered the chain');
+    assert.deepStrictEqual(
+      storedConversation(
+        await h.runtime.observe(conversation).engine.getMessages(),
+      ),
+      [
+        { role: 'user', content: ['never'] },
+        { role: 'user', content: [TURN_ABORTED] },
+      ],
+    );
   });
 
   it('host cancel removes the queued turn and preserves its successor', async () => {

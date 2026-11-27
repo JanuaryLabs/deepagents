@@ -1,6 +1,5 @@
 import { Latch } from '@zukhruf/async';
 import type { Telemetry } from 'ai';
-import { setTimeout as delay } from 'node:timers/promises';
 
 import {
   type ChatInfo,
@@ -52,11 +51,9 @@ import {
 import { PluginManager } from './plugin/plugin-manager.ts';
 import { SandboxIdleStop } from './sandbox-idle-stop.ts';
 import { type SessionRead, projectSession } from './session-read.ts';
+import { SHUTDOWN_TIMEOUT_MS, TurnInterruption } from './turn-interruption.ts';
 import { TurnSettlement } from './turn-settlement.ts';
 
-/** How long a delete waits for a running turn to exit before it carries on: Codex's wait_for_thread_shutdown bound. */
-const SHUTDOWN_TIMEOUT_MS = 10_000;
-const SHUTDOWN_POLL_INTERVAL_MS = 50;
 const STREAM_STATUSES: readonly StreamStatus[] = [
   'queued',
   'running',
@@ -260,7 +257,6 @@ export interface AgentTurnStatus {
 
 interface AgentObservationStatus {
   read: () => Promise<ConversationStatus>;
-  publish: () => Promise<void>;
 }
 
 /** Reconnect and cancellation view over one durable conversation. */
@@ -271,10 +267,7 @@ export class AgentObservation {
   readonly #streams: StreamManager;
   readonly #queue: TurnQueue;
   readonly #status: AgentObservationStatus;
-  readonly #recordCancelled: (
-    streamId: string,
-    status: 'queued' | 'running' | 'cancelled',
-  ) => Promise<void>;
+  readonly #interruption: Pick<TurnInterruption, 'interrupt'>;
 
   constructor(
     conversation: ConversationId,
@@ -283,10 +276,7 @@ export class AgentObservation {
     streams: StreamManager,
     queue: TurnQueue,
     status: AgentObservationStatus,
-    recordCancelled: (
-      streamId: string,
-      status: 'queued' | 'running' | 'cancelled',
-    ) => Promise<void>,
+    interruption: Pick<TurnInterruption, 'interrupt'>,
   ) {
     this.engine = new ContextEngine({
       store,
@@ -298,7 +288,7 @@ export class AgentObservation {
     this.#streams = streams;
     this.#queue = queue;
     this.#status = status;
-    this.#recordCancelled = recordCancelled;
+    this.#interruption = interruption;
   }
 
   /** Codex-shaped conversation status derived from durable state. */
@@ -316,13 +306,14 @@ export class AgentObservation {
     await this.#assertOwner();
     const thread = await this.#directory.load(this.#conversation);
     const root = thread && (await this.#directory.rootOf(thread));
-    const [chain, streams, status] = await Promise.all([
+    const [chain, streams, status, active] = await Promise.all([
       this.engine.getMessages(),
       this.#turnStreams(),
       this.#status.read(),
+      this.#queue.getCurrentTurn(this.#conversation),
     ]);
     return {
-      ...projectSession(this.#conversation, chain, streams),
+      ...projectSession(this.#conversation, chain, streams, active?.streamId),
       status,
       ...(root?.archivedAt === undefined
         ? {}
@@ -377,19 +368,18 @@ export class AgentObservation {
     };
   }
 
+  /**
+   * Interrupts the turn, by default the current one, as Codex's
+   * `turn/interrupt` does, and resolves once it has exited, waiting at most
+   * 10 s for a running one. A lone queued question is kept with the
+   * `<turn_aborted>` marker; a turn queued behind another is dropped.
+   */
   async cancel(streamId?: string): Promise<void> {
     await this.#assertOwner();
     const id = streamId ?? (await this.#headStreamId());
     if (!id) return;
     AgentTurnId.assertOwner(this.#conversation, id);
-    const status = await this.#streams.store.getStreamStatus(id);
-    if (status === 'queued' || status === 'running' || status === 'cancelled') {
-      await this.#streams.cancel(id);
-      await this.#queue.cancel(id);
-      await this.#status.publish();
-      // A cancelled queued turn never runs, so nothing else settles it.
-      await this.#recordCancelled(id, status);
-    }
+    await this.#interruption.interrupt(this.#conversation, id);
   }
 
   async #assertOwner(): Promise<void> {
@@ -485,6 +475,7 @@ class RuntimeHost implements AsyncDisposable {
   readonly #approvals: ApprovalController;
   readonly #conversationStatus: ConversationStatusProjector;
   readonly #executor: AgentTurnExecutor;
+  readonly #interruption: TurnInterruption;
   readonly #root: AgentDeclaration;
   readonly #plugins: PluginManager;
   readonly #pluginHost: AgentPluginHost;
@@ -603,6 +594,17 @@ class RuntimeHost implements AsyncDisposable {
       }),
     );
     this.#sandboxes = sandboxes;
+    this.#interruption = new TurnInterruption({
+      storage,
+      streams,
+      queue,
+      directory,
+      approvals,
+      settlement: () => this.#settlement.wait(),
+      publishConversationStatus: (conversation) =>
+        conversationStatus.publish(conversation),
+      rootDeclarationName: declarations.root.name,
+    });
     this.#idleStop = SandboxIdleStop.of({
       wakes: storage.sandboxIdleWakes,
       declarations,
@@ -631,7 +633,7 @@ class RuntimeHost implements AsyncDisposable {
         conversationStatus.publish(conversation),
       inArchivedTree: async (thread) =>
         (await directory.rootOf(thread))?.archivedAt !== undefined,
-      resumeParked: (chatId) => this.#queue.resumeParked(chatId),
+      interruption: this.#interruption,
     });
     this.#pluginHost = {
       info: this.info,
@@ -834,56 +836,42 @@ class RuntimeHost implements AsyncDisposable {
   async #stopLiveWork(members: readonly ConversationId[]): Promise<void> {
     for (const member of members) {
       await this.#queue.forget(member);
-      await this.#cancelTurns(member, ['queued', 'running']);
+      const prefix = AgentTurnId.prefixOf(member);
+      for (const status of ['queued', 'running'] as const) {
+        for (const streamId of await this.#streams.store.listStreamIds({
+          prefix,
+          status,
+        })) {
+          await this.#streams.cancel(streamId);
+          await this.#queue.cancel(streamId);
+        }
+      }
     }
-    await this.#awaitShutdown(members);
+    await this.#interruption.awaitExit(
+      members,
+      performance.now() + SHUTDOWN_TIMEOUT_MS,
+    );
     for (const member of members) {
       await this.#queue.forget(member);
     }
   }
 
-  /** Cancels the member's turns whose streams have one of `statuses`, which aborts a running one on any worker. */
-  async #cancelTurns(
-    member: ConversationId,
-    statuses: readonly ('queued' | 'running')[],
-  ): Promise<void> {
-    const prefix = AgentTurnId.prefixOf(member);
-    for (const status of statuses) {
-      for (const streamId of await this.#streams.store.listStreamIds({
-        prefix,
-        status,
-      })) {
-        await this.#streams.cancel(streamId);
-        await this.#queue.cancel(streamId);
-      }
-    }
-  }
-
-  /** Waits at most 10 s in all for the members' running turns to exit, as Codex waits for a thread's shutdown. */
-  async #awaitShutdown(members: readonly ConversationId[]): Promise<void> {
-    const deadline = performance.now() + SHUTDOWN_TIMEOUT_MS;
-    for (const member of members) {
-      while ((await this.#queue.getTurnActivity(member)) === 'running') {
-        const remaining = deadline - performance.now();
-        if (remaining <= 0) break;
-        await delay(Math.min(SHUTDOWN_POLL_INTERVAL_MS, remaining));
-      }
-    }
-  }
-
   /**
    * Archives a root chat this runtime owns and every sub-agent chat under
-   * it, as Codex's thread/archive does. One admission to the tree marks
-   * every member archived, so from then on the tree admits no turn through
-   * enqueue, a user's or a plugin's, and a turn queued before the archive
-   * is parked when a worker claims it; the same admission schedules the
-   * stop of each member's sandbox that can stop, due at once. Then the
-   * stops each member's latest turn armed are cancelled, its running turns
-   * are cancelled, the root first and then its descendants, deepest first,
-   * waiting at most 10 s for them to exit; then each member's status is
-   * published, which subscribers receive as `archived`. Everything stays
-   * readable, and mail still runs a member's turn, as collaboration resumes
-   * an archived agent. An archived root rejects with
+   * it, as Codex's thread/archive shuts a thread down. One admission to the
+   * tree marks every member archived, so from then on the tree admits no
+   * turn through enqueue, a user's or a plugin's; the same admission
+   * schedules the stop of each member's sandbox that can stop, due at once.
+   * Then the stops each member's latest turn armed are cancelled, and each
+   * member's turns are interrupted as Stop interrupts them, the root first
+   * and then its descendants, deepest first: its queued turns first, so a
+   * lone question is kept with the `<turn_aborted>` marker and a turn queued
+   * behind another is dropped, then its running ones, which record their
+   * input and the marker as they exit. It waits at most 10 s for them to
+   * exit, and parks nothing: unarchive runs nothing. Then each member's
+   * status is published, which subscribers receive as `archived`.
+   * Everything stays readable, and mail still runs a member's turn, as
+   * collaboration resumes an archived agent. An archived root rejects with
    * ConversationArchivedError; any other chat, and one being deleted, with
    * ConversationNotFoundError.
    */
@@ -908,18 +896,20 @@ class RuntimeHost implements AsyncDisposable {
       ...members.filter(({ path }) => path.isRoot),
       ...deepestFirst(members.filter(({ path }) => !path.isRoot)),
     ].map(({ conversation: member }) => member);
-    for (const member of order) await this.#cancelTurns(member, ['running']);
-    await this.#awaitShutdown(order);
+    for (const member of order) await this.#interruption.interruptAll(member);
+    await this.#interruption.awaitExit(
+      order,
+      performance.now() + SHUTDOWN_TIMEOUT_MS,
+    );
     for (const member of order) await this.#conversationStatus.publish(member);
   }
 
   /**
    * Unarchives a root chat this runtime owns and every sub-agent chat under
    * it, as Codex's thread/unarchive does: one admission to the tree clears
-   * every member's mark, then each member's parked turns are resumed, the
-   * ones queued before the archive among them, and each member's status is
-   * published, which subscribers receive as `unarchived`. It starts no
-   * sandbox; the next turn does. Resolves with the session's history item.
+   * every member's mark, then each member's status is published, which
+   * subscribers receive as `unarchived`. It runs no turn, since archive
+   * parked none, and starts no sandbox; the next turn does. Resolves with the session's history item.
    * A root that is not archived rejects with ConversationNotArchivedError;
    * any other chat, and one being deleted, with ConversationNotFoundError.
    */
@@ -936,9 +926,6 @@ class RuntimeHost implements AsyncDisposable {
       (_scope, directory, member) =>
         directory.markUnarchived(member.conversation),
     );
-    for (const { conversation: member } of members) {
-      await this.#queue.resumeParked(member.chatId);
-    }
     for (const { conversation: member } of members) {
       await this.#conversationStatus.publish(member);
     }
@@ -1035,22 +1022,8 @@ class RuntimeHost implements AsyncDisposable {
       this.#directory,
       this.#streams,
       this.#queue,
-      {
-        read: () => this.#conversationStatus.read(conversation),
-        publish: () => this.#conversationStatus.publish(conversation),
-      },
-      async (streamId, status) => {
-        // A running recovery settles its own approvals when its run ends.
-        if (status === 'queued') {
-          await this.#approvals.reconcileUnrunRecovery(
-            conversation,
-            streamId,
-            'cancelled',
-          );
-        }
-        const settlement = await this.#settlement.wait();
-        await settlement.complete({ ...conversation, streamId });
-      },
+      { read: () => this.#conversationStatus.read(conversation) },
+      this.#interruption,
     );
   }
 

@@ -1,4 +1,8 @@
-import { type ContextEngine, user } from '@deepagents/context';
+import {
+  type ContextEngine,
+  type MessageFragment,
+  user,
+} from '@deepagents/context';
 
 import { ModelOnlyContentKind, contentKindMetadata } from './content-kind.ts';
 
@@ -10,20 +14,22 @@ const INTERRUPTED_GUIDANCE =
 const TURN_ABORTED_MESSAGE = `<turn_aborted>\n${INTERRUPTED_GUIDANCE}\n</turn_aborted>`;
 
 /**
- * Records the `<turn_aborted>` marker after a cancelled turn's partial output,
- * as Codex's ContextualUser mode records it after an interrupt: a user
- * message with the user-role guidance (`core/src/tasks/mod.rs`
- * `interrupted_turn_history_marker`). It is tagged `generic.turn_aborted`, so
- * the session read leaves it out.
+ * The `<turn_aborted>` marker Codex's ContextualUser mode records after an
+ * interrupt: a user message with the user-role guidance
+ * (`core/src/tasks/mod.rs` `interrupted_turn_history_marker`). It is tagged
+ * `generic.turn_aborted`, so the session read leaves it out.
  */
+export function turnAbortedMessage(): MessageFragment {
+  return user({
+    id: crypto.randomUUID(),
+    role: 'user',
+    parts: [{ type: 'text', text: TURN_ABORTED_MESSAGE }],
+    metadata: contentKindMetadata(ModelOnlyContentKind.turnAborted),
+  });
+}
+
+/** Records the `<turn_aborted>` marker after what the cancelled turn recorded. */
 export async function recordTurnAborted(engine: ContextEngine): Promise<void> {
-  engine.set(
-    user({
-      id: crypto.randomUUID(),
-      role: 'user',
-      parts: [{ type: 'text', text: TURN_ABORTED_MESSAGE }],
-      metadata: contentKindMetadata(ModelOnlyContentKind.turnAborted),
-    }),
-  );
+  engine.set(turnAbortedMessage());
   await engine.save({ branch: false });
 }
