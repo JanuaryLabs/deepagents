@@ -149,6 +149,12 @@ navigate(`/chats/${chatId}`);
 
 If an upload fails, nothing is written. Show the error on the entry page and keep the user there. A refused upload rejects with the AI SDK's `APICallError`, as a refused send does: `statusCode` is the server's status and `responseBody` its text, so map the status to your words rather than showing `message`.
 
+An entry page that sends from react-input's `Composer.Root` gets the words `ChatComposer` shows from `useSubmitErrorMessage()`, under a `GenaiMessagesProvider` and with no `AgentProvider`: `composer.uploadTooLarge` for a 413, `composer.uploadUnsupported` for a 415, `composer.uploadFailed` for another refused upload and `composer.sendFailed` for any other error.
+
+```tsx
+<Composer.Root submitErrorMessage={useSubmitErrorMessage()} onSubmit={ask} {...words}>
+```
+
 ## One copy of @zukhruf/ui
 
 The host and this package must use the same copy of `@zukhruf/ui`. Each copy has its own React context. A `ClockProvider` of one copy does not reach a `TheButton` of the other copy, and the button throws `No clock set, use ClockProvider to set one`. For this reason `@zukhruf/ui` is a peer dependency. npm refuses an install when the version of the host is out of the range.

@@ -70,15 +70,9 @@ function HostComposer({ onError }: { onError: (error: unknown) => void }) {
   const { submit } = useAgent();
   return (
     <ChatComposer.Provider
-      onSubmit={async ({ prompt, persistedPrompt, items }) => {
+      onSubmit={async ({ prompt, persistedPrompt, files }) => {
         try {
-          await submit({
-            prompt,
-            persistedPrompt,
-            files: items.flatMap((item) =>
-              item.type === 'image' ? [item.file] : [],
-            ),
-          });
+          await submit({ prompt, persistedPrompt, files });
         } catch (error) {
           onError(error);
           throw error;

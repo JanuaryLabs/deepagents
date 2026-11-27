@@ -180,6 +180,8 @@ export type ComposerSubmission = {
   command?: string;
   args?: string;
   items: ComposerSubmissionItem[];
+  /** The `File` of each `image`, `video` and `audio` item, in placeholder order: `[Image #1]` first. */
+  files: File[];
 };
 
 export type CreateComposerStateOptions = {

@@ -79,6 +79,12 @@ The parts ship no words ([ADR 0007](./docs/dictation/adr/0007-react-input-ships-
 
 Without the list, the composer takes any image, video or audio file, and a pasted or dropped file of another type becomes an `@name` mention, as a coding agent reads a file by its path. The picker still refuses such a file.
 
+A submission carries its attached files in `files`, in placeholder order (`[Image #1]` first), so a host uploads them without reading `items`:
+
+```tsx
+<Composer.Root onSubmit={(submission) => send(submission.prompt, submission.files)} {...words}>
+```
+
 ## Features
 
 [COMPOSER_FEATURE_MATRIX.md](./COMPOSER_FEATURE_MATRIX.md) lists what the composer does and the contract of each feature.

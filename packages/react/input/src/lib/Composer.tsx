@@ -1251,6 +1251,7 @@ function ComposerRootInner({
       command: prepared.command,
       args: prepared.args,
       items,
+      files: [...sentImageFiles.values()],
     };
     if (rejectInvalidSubmission(event)) {
       return;

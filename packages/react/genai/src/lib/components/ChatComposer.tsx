@@ -56,12 +56,13 @@ function ChatComposerProvider({
 }) {
   const { hasSubmitted } = useAgentMeta();
   const t = useGenaiMessages();
+  const submitErrorMessage = useSubmitErrorMessage();
   return (
     <Composer.Root
       hasInteracted={hasSubmitted}
       editorAriaLabel={t('composer.editor')}
       submitFailedMessage={t('composer.sendFailed')}
-      submitErrorMessage={(error) => submitFailure(error, t)}
+      submitErrorMessage={submitErrorMessage}
       unsupportedFileMessage={(file) => t('composer.unsupportedFile', file)}
       unknownCommandMessage={(command) => t('composer.unknownCommand', command)}
       attachmentLabel={(attachment) => t('composer.attachment', attachment)}
@@ -86,17 +87,20 @@ function ChatComposerProvider({
   );
 }
 
-/** A refused upload is the AI SDK's `APICallError`; its server detail never reaches the page. */
-function submitFailure(error: Error, t: GenaiTranslate) {
-  if (!APICallError.isInstance(error)) return t('composer.sendFailed');
-  switch (error.statusCode) {
-    case 413:
-      return t('composer.uploadTooLarge');
-    case 415:
-      return t('composer.uploadUnsupported');
-    default:
-      return t('composer.uploadFailed');
-  }
+/** `Composer.Root`'s `submitErrorMessage` in the catalog's words. A refused upload is the AI SDK's `APICallError`; its server detail never reaches the page. */
+export function useSubmitErrorMessage(): (error: Error) => string {
+  const t = useGenaiMessages();
+  return (error) => {
+    if (!APICallError.isInstance(error)) return t('composer.sendFailed');
+    switch (error.statusCode) {
+      case 413:
+        return t('composer.uploadTooLarge');
+      case 415:
+        return t('composer.uploadUnsupported');
+      default:
+        return t('composer.uploadFailed');
+    }
+  };
 }
 
 function ChatComposerRoot({ className, ...props }: ComponentProps<'div'>) {

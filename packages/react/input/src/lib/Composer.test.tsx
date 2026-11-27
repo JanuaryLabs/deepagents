@@ -5535,6 +5535,53 @@ describe('Composer attachments', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('hands the submission its image, video and audio files in placeholder order, and no file for a mention', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const sent: ComposerSubmission[] = [];
+    const { user, prompt } = renderRichInput({
+      send: (submission) => {
+        sent.push(submission);
+      },
+    });
+
+    const uploaded = [
+      new File(['first'], 'first.png', { type: 'image/png' }),
+      new File(['clip'], 'clip.mp4', { type: 'video/mp4' }),
+      new File(['second'], 'second.png', { type: 'image/png' }),
+    ];
+
+    await user.upload(screen.getByLabelText('Attach media files'), uploaded);
+    fireEvent.paste(prompt, {
+      clipboardData: clipboardData({ 'text/uri-list': 'file:///tmp/notes.md' }),
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByRole('region', { name: /rich composer snapshot/i }),
+      ).toHaveTextContent('[Image #1] [Video #2] [Image #3]');
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByRole('region', { name: /rich composer snapshot/i }),
+      ).toHaveTextContent('@notes.md');
+    });
+
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter' });
+
+    expect({
+      files: sent.at(0)?.files.map((file) => file.name),
+      sameFiles: sent
+        .at(0)
+        ?.files.every((file, index) => file === uploaded[index]),
+      mention: sent.at(0)?.items.some((item) => item.type === 'item'),
+    }).toEqual({
+      files: ['first.png', 'clip.mp4', 'second.png'],
+      sameFiles: true,
+      mention: true,
+    });
+  });
+
   it('rejects a non-media file from the file input with an inline error', async () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);

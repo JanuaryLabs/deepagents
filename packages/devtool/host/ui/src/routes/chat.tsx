@@ -271,14 +271,7 @@ function ChatInput({
           acceptedMediaTypes={acceptedMediaTypes}
           isTaskRunning={isRunning}
           onSubmit={(submission) => {
-            const files = submission.items.flatMap((item) =>
-              item.type === 'image' ||
-              item.type === 'video' ||
-              item.type === 'audio'
-                ? [item.file]
-                : [],
-            );
-            if (!supportsUploads && files.length > 0) {
+            if (!supportsUploads && submission.files.length > 0) {
               return Promise.reject(
                 new Error('This runtime does not support file uploads'),
               );
@@ -286,7 +279,7 @@ function ChatInput({
             return submit({
               prompt: submission.prompt,
               persistedPrompt: submission.persistedPrompt,
-              files,
+              files: submission.files,
             });
           }}
         >
