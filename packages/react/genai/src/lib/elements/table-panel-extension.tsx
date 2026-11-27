@@ -1,13 +1,15 @@
 import { buttonVariants } from '@zukhruf/shadcn';
 import { cn } from 'cn';
+import type { Nodes } from 'hast';
 import type { Root, Table } from 'mdast';
 import type { LeafDirective } from 'mdast-util-directive';
-import { toString } from 'mdast-util-to-string';
 import * as React from 'react';
 import { type ComponentProps, useMemo } from 'react';
+import rehypeRaw from 'rehype-raw';
 import remarkDirective from 'remark-directive';
 import remarkGfm from 'remark-gfm';
 import remarkParse from 'remark-parse';
+import remarkRehype from 'remark-rehype';
 import {
   type AllowedTags,
   Block,
@@ -181,20 +183,27 @@ function writeTableDirectiveText(tree: Root) {
   return hasTableDirective;
 }
 
-// The direction of the words a reader sees. Code renders left to right in any
-// block, so it is no evidence, as in streamdown's own detection. Inline HTML (a
-// citation, an element inside a sentence) is a tag with no words of its own; a
-// block of HTML keeps its source, as streamdown reads it.
+// The block as the reader sees it: its HTML parsed into elements, as
+// streamdown's static pass renders it.
+const toReaderHtml = unified()
+  .use(remarkRehype, { allowDangerousHtml: true })
+  .use(rehypeRaw);
+
+// Code renders left to right in any block, so it is no evidence, as in
+// streamdown's static direction pass.
+const codeTags = new Set(['code', 'kbd', 'pre', 'samp', 'var']);
+
+function readerText(node: Nodes): string {
+  if (node.type === 'text') return node.value;
+  if (node.type === 'element' && codeTags.has(node.tagName)) return '';
+  if (!('children' in node)) return '';
+  return node.children.map(readerText).join('');
+}
+
+// The direction of the words a reader sees: tags and attributes, inline or a
+// block of HTML on its own line, have no words of their own.
 function textDirection(tree: Root) {
-  visit(tree, ['code', 'inlineCode'] as const, (code) => {
-    code.value = '';
-  });
-  visit(tree, ['paragraph', 'heading', 'tableCell'], (phrasing) => {
-    visit(phrasing, 'html', (tag) => {
-      tag.value = '';
-    });
-  });
-  return detectTextDirection(toString(tree));
+  return detectTextDirection(readerText(toReaderHtml.runSync(tree)));
 }
 
 function DefaultStreamdownBlock(props: BlockProps) {

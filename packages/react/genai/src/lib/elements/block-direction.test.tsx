@@ -147,6 +147,57 @@ test('an element on a line of its own keeps the direction of the words inside it
   }
 });
 
+const labelledNoteBox: GenAIInteractiveElement = {
+  name: 'note-box',
+  component: (props) => <section>{props.children}</section>,
+  allowedAttributes: ['tone', 'title'],
+};
+
+// The dir of the element's block, as the chat renders it while it streams.
+function elementDirection(text: string) {
+  const answer: UIMessage = {
+    id: 'asst-1',
+    role: 'assistant',
+    parts: [{ type: 'text', text }],
+  };
+  try {
+    const { container } = render(
+      <div dir="rtl">
+        <Messages.Root messages={[answer]} elements={[labelledNoteBox]}>
+          <Messages.Item message={answer} index={0}>
+            <Messages.AssistantContent />
+          </Messages.Item>
+        </Messages.Root>
+      </div>,
+      { wrapper: AgentHarness },
+    );
+    return container
+      .querySelector('section')
+      ?.closest('[dir]')
+      ?.getAttribute('dir');
+  } finally {
+    cleanup();
+  }
+}
+
+test('an element on a line of its own takes the direction of the words inside it, not of its tag and attributes (#6240)', () => {
+  expect({
+    // 29 Arabic letters against 45 Latin letters of tags and attributes.
+    arabicWithAttributes: elementDirection(
+      `<note-box tone="warning" title="Clinical caution">${arabic}</note-box>`,
+    ),
+    // 8 Arabic letters against the 14 letters of the two note-box tags.
+    shortArabic: elementDirection('<note-box>تحذير مهم.</note-box>'),
+    englishWithArabicTitle: elementDirection(
+      `<note-box title="تنبيه سريري مهم جدا للطبيب المعالج قبل وصف الدواء">${english}</note-box>`,
+    ),
+  }).toEqual({
+    arabicWithAttributes: 'rtl',
+    shortArabic: 'rtl',
+    englishWithArabicTitle: 'ltr',
+  });
+});
+
 // Static mode leaves the direction to streamdown's rehype pass, which reads
 // only the rendered text of each paragraph, not its tags.
 function staticSentenceDirection(text: string) {
