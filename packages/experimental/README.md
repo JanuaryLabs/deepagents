@@ -66,6 +66,14 @@ after six completed steps, whichever happens first. A step can execute several
 tool calls before the condition is checked. The default is `isStepCount(200)`,
 inherited from `agent()` in `@deepagents/context`.
 
+Every session is titled with its first message, cut at 100 characters, as soon
+as its first turn starts. `title: { model }` on the root declaration also
+generates a short title with that model while the answer streams, and replaces
+the first-message title only while nobody has renamed the session, so a rename
+made meanwhile wins. A failed title call keeps the first-message title. A
+sub-agent's chat never calls the title model. Pick a small, fast model; the
+agent's own model is used only if you pass it.
+
 If the provider interrupts a response, the runtime retains partial output
 and marks the turn `failed` without automatically retrying it. Compaction
 keeps the input token and prompt cache measurements from the last successful
@@ -81,7 +89,7 @@ The `AgentHost` returned by `AgentRuntime.initialize()` exposes enqueue, host
 mailbox delivery, observation, approval, denial, worker lifecycle,
 model-facing collaboration for declared subagents, and session deletion and
 archiving (`deleteSession`, `archiveSession`, `unarchiveSession`, and
-`listHistory(userId, { archived })`). Its control plane, executor,
+`listHistory(userId, { archived })`), and renaming (`setSessionTitle`). Its control plane, executor,
 status projector, mailbox coordinator,
 and injected collaboration-tool implementations are internal wiring. See
 [`src/zukhruf/DESIGN.md`](./src/zukhruf/DESIGN.md) for the decided semantics,
@@ -208,7 +216,9 @@ delete, which a second call finishes.
 `host.archiveSession(conversation)` hides a session from `listHistory`,
 refuses its new turns, scheduled ones included, and stops its sandboxes;
 `host.unarchiveSession(conversation)` brings it back and runs the turns that
-were queued. See session delete and archive in
+were queued. `host.setSessionTitle(conversation, title)` renames a session
+with the trimmed title, and rejects an empty one with `EmptySessionTitleError`.
+See session delete and archive in
 [`src/zukhruf/DESIGN.md`](./src/zukhruf/DESIGN.md).
 
 ```ts
@@ -234,7 +244,8 @@ calls, receive the durable `turnId`, check or cancel a specific turn, cancel the
 active session turn, stream durable UI-message output, and read runtime info
 plus health checks. `DELETE /session/:sessionId` deletes a session (204),
 `POST /session/:sessionId/archive` archives it (204), and
-`POST /session/:sessionId/unarchive` answers 200 with its history item.
+`POST /session/:sessionId/unarchive` answers 200 with its history item, and
+`POST /session/:sessionId/title` with `{ "title": "..." }` renames it (204).
 `GET /history` lists the sessions that are not archived, and
 `GET /history?archived=true` the archived ones. `GET /events` tells the owner
 of each session and sub-agent chat that was deleted, archived or unarchived
@@ -257,12 +268,13 @@ regenerate of a message that never ran) answers 404
 session has moved past answers 409 `zukhruf/session-turn-stale`, and a
 sub-agent turn whose tree has no free agent slot answers 429
 `zukhruf/agent-thread-limit`, a turn or an archive of an archived session
-answers 409 `zukhruf/session-archived`, and an unarchive of a session that is
-not archived answers 409 `zukhruf/session-not-archived`. Hosts that call the
+answers 409 `zukhruf/session-archived`, an unarchive of a session that is
+not archived answers 409 `zukhruf/session-not-archived`, and a title that is
+empty once trimmed answers 400 `zukhruf/session-title-empty`. Hosts that call the
 runtime directly catch the same refusals as `ConversationNotFoundError`,
 `TurnNotFoundError`, `StaleTurnError`, `AgentThreadLimitError`,
-`ConversationArchivedError` and `ConversationNotArchivedError` from the main
-entry.
+`ConversationArchivedError`, `ConversationNotArchivedError` and
+`EmptySessionTitleError` from the main entry.
 A turn `POST` is checked before any write, so a refused turn starts no session:
 its message must be an AI SDK `UIMessage` (`safeValidateUIMessages`) from the
 user or the assistant, and no string in the body may hold U+0000 or a lone

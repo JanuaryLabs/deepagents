@@ -355,6 +355,7 @@ export class AgentTurnExecutor {
           }
         },
         abortSignal: turnSignal,
+        title: thread.path.isRoot ? declaration.title : undefined,
         onStart: compaction?.onStart,
         onStepStart: compaction?.onStepStart,
         onStepEnd: compaction?.onStepEnd,

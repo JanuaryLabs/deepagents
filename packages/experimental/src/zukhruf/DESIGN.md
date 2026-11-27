@@ -1285,6 +1285,22 @@ lifecycle}` per member.
   that a worker parks while the unarchive lands checks the mark again once its park has landed and
   resumes the chat's parked turns itself when the mark is gone.
 
+## Session title _(Built, #5991)_
+
+- **The chat row owns the title.** `chat()` in `@deepagents/context` titles an untitled chat with
+  its first message as each turn starts, so every session, sub-agent chats included, has a title
+  from its first turn. The executor passes the root declaration's `title: { model }` to `chat()`
+  on root turns only; `chat()` then generates a title while the answer streams and writes it with
+  a conditional update under the store's lock, only while the stored title is still the
+  first-message one. No process keeps an "already titled" flag: a later turn, or a turn on another
+  host, finds the title changed and calls no model.
+- **Rename (Codex `thread/name/set`).** `setSessionTitle(conversation, title)` takes a root chat
+  this runtime owns, trims the title and rejects an empty one with `EmptySessionTitleError` (400
+  `zukhruf/session-title-empty`); any other chat, and one being deleted, rejects with
+  `ConversationNotFoundError`. It writes under the same lock, so a title model still running for
+  the first turn keeps the rename. `POST /session/:sessionId/title` with `{ title }` answers 204.
+  Nothing is published on `GET /events` for a rename yet (Codex sends `thread/name/updated`).
+
 ## Stacks: one runtime, explicit adapter composition
 
 A **stack** binds the runtime's needs to one platform (Cloudflare, Node+Postgres, …) and is the

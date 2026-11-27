@@ -22,6 +22,7 @@ export {
   ConversationNotArchivedError,
 } from './control-plane/conversation-archived-error.ts';
 export { ConversationNotFoundError } from './control-plane/conversation-not-found-error.ts';
+export { EmptySessionTitleError } from './control-plane/empty-session-title-error.ts';
 export { StaleTurnError } from './control-plane/stale-turn-error.ts';
 export { TurnNotFoundError } from './control-plane/turn-not-found-error.ts';
 export * from './deleted-conversations/store.ts';

@@ -21,6 +21,7 @@ import type {
   ConversationNotArchivedError,
 } from '../../control-plane/conversation-archived-error.ts';
 import type { ConversationNotFoundError } from '../../control-plane/conversation-not-found-error.ts';
+import type { EmptySessionTitleError } from '../../control-plane/empty-session-title-error.ts';
 import type { StaleTurnError } from '../../control-plane/stale-turn-error.ts';
 import type { TurnNotFoundError } from '../../control-plane/turn-not-found-error.ts';
 import { isNamedError } from '../../is-named-error.ts';
@@ -86,6 +87,7 @@ const SESSION_ROUTE_PATH = '/session/:sessionId';
 const SESSION_CANCEL_ROUTE_PATH = '/session/:sessionId/cancel';
 const SESSION_ARCHIVE_ROUTE_PATH = '/session/:sessionId/archive';
 const SESSION_UNARCHIVE_ROUTE_PATH = '/session/:sessionId/unarchive';
+const SESSION_TITLE_ROUTE_PATH = '/session/:sessionId/title';
 const SESSION_STREAM_ROUTE_PATH = '/session/:sessionId/stream';
 const EVENTS_ROUTE_PATH = '/events';
 const SESSION_TURN_ROUTE_PATH = '/session/:sessionId/turn/:turnId';
@@ -117,6 +119,7 @@ const clientToolsSchema = z
     }),
   )
   .optional();
+const titleBodySchema = z.strictObject({ title: z.string() });
 const turnBodySchema = z.strictObject({
   sessionId: sessionIdSchema,
   message: z.unknown(),
@@ -135,6 +138,7 @@ export interface HttpRuntime extends Pick<
   | 'listHistory'
   | 'plugin'
   | 'sessionExists'
+  | 'setSessionTitle'
   | 'subscribeConversationStatus'
   | 'unarchiveSession'
 > {
@@ -261,6 +265,19 @@ export function http(
           error: 'Session is not archived',
         },
         409,
+        NO_STORE,
+      );
+    }
+    if (isNamedError<EmptySessionTitleError>(error, 'EmptySessionTitleError')) {
+      return context.json(
+        {
+          cause: {
+            code: 'zukhruf/session-title-empty',
+            detail: `Session ${error.chatId} cannot take an empty title`,
+          },
+          error: 'Session title is empty',
+        },
+        400,
         NO_STORE,
       );
     }
@@ -551,6 +568,33 @@ export function http(
     },
   );
   app.all(SESSION_UNARCHIVE_ROUTE_PATH, (context) =>
+    methodNotAllowed(context, 'POST'),
+  );
+
+  app.post(
+    SESSION_TITLE_ROUTE_PATH,
+    validate('application/json', (payload) => ({
+      body: {
+        select: payload.body,
+        against: titleBodySchema,
+      },
+      sessionId: {
+        select: payload.params.sessionId,
+        against: sessionIdSchema,
+      },
+    })),
+    async (context) => {
+      const { body, sessionId } = context.var.input;
+      const conversation = {
+        chatId: sessionId,
+        userId: context.get('userId'),
+      };
+      await requireSession(runtime, conversation);
+      await runtime.setSessionTitle(conversation, body.title);
+      return context.body(null, 204, NO_STORE);
+    },
+  );
+  app.all(SESSION_TITLE_ROUTE_PATH, (context) =>
     methodNotAllowed(context, 'POST'),
   );
 

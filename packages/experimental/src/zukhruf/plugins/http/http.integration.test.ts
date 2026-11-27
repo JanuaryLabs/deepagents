@@ -94,6 +94,9 @@ function createRuntime(overrides: Partial<TestRuntime> = {}) {
     async unarchiveSession() {
       throw new Error('this test never unarchives a session');
     },
+    async setSessionTitle() {
+      throw new Error('this test never renames a session');
+    },
     async enqueue() {
       return {
         id: 'internal-turn-id',

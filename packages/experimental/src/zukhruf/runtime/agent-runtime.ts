@@ -28,6 +28,7 @@ import {
   ConversationNotFoundError,
   assertConversationOwner,
 } from '../control-plane/conversation-not-found-error.ts';
+import { EmptySessionTitleError } from '../control-plane/empty-session-title-error.ts';
 import { MailboxCoordinator } from '../mailbox/coordinator.ts';
 import type {
   ConversationId,
@@ -895,6 +896,33 @@ class RuntimeHost implements AsyncDisposable {
     const root = AgentThread.fromMetadata(conversation, chat.metadata);
     if (!root) throw new ConversationNotFoundError(conversation.chatId);
     return this.#historyItem(chat, root);
+  }
+
+  /**
+   * Renames a root chat this runtime owns, as Codex's thread/name/set does.
+   * The title is trimmed; an empty one rejects with EmptySessionTitleError.
+   * The write holds the store's lock, so a title model still running for the
+   * session's first turn finds the title changed and keeps this one. Any
+   * other chat, and one being deleted, rejects with ConversationNotFoundError.
+   */
+  async setSessionTitle(
+    conversation: ConversationId,
+    title: string,
+  ): Promise<void> {
+    const trimmed = title.trim();
+    if (!trimmed) throw new EmptySessionTitleError(conversation.chatId);
+    // The store's updateChat rejects a missing chat with an untyped error.
+    if (!(await this.#store.getChat(conversation.chatId))) {
+      throw new ConversationNotFoundError(conversation.chatId);
+    }
+    await this.#store.updateChat(conversation.chatId, (chat) => {
+      assertConversationOwner(conversation, chat.userId);
+      const root = AgentThread.fromMetadata(conversation, chat.metadata);
+      if (!root || !this.#ownsRoot(root) || root.deletingAt !== undefined) {
+        throw new ConversationNotFoundError(conversation.chatId);
+      }
+      return { title: trimmed };
+    });
   }
 
   /**

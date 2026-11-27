@@ -110,6 +110,13 @@ export interface AgentDeclaration extends AgentControls<ZukhrufToolSet> {
       ) => ProviderOptions | PromiseLike<ProviderOptions>);
   /** Automatic compaction before model steps, with a durable conversation checkpoint. */
   compaction?: AgentCompaction;
+  /**
+   * Generates a session's title with this model when this declaration is the
+   * root agent; a sub-agent's chat never calls it. The first message titles
+   * every chat at once either way, and the generated title replaces it only
+   * while no one has renamed the session.
+   */
+  title?: { model: AgentModel };
 }
 
 export interface DefinedAgentDeclaration extends AgentDeclaration {
