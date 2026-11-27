@@ -1,6 +1,6 @@
 # Every Claude Code entry becomes a step or a counted diagnostic
 
-Status: proposed, for review (deepagents #6107).
+Status: ruled by Ezz on 2026-11-27 (deepagents #6107).
 
 ## Context
 
@@ -22,9 +22,10 @@ The current readers depend on three of these signals: the reminders dedupe reads
 - **Skipped but counted:** bookkeeping becomes an `unmapped_entry` diagnostic counted by type, and an `isSidechain` row in a main transcript becomes a `sidechain_entry` diagnostic.
 - **Join keys:** each step keeps `uuid`, `parent_uuid`, `timestamp`, `cwd`, `entrypoint` and `prompt_id` in `extra.claude_code`.
 
-## Open for the review
+## Ruled on review
 
-The steps follow file order, as all of today's readers do, so a rewind's abandoned branch stays visible to miners: a rewind is a correction signal. The alternative is the active branch only, which the Claude Agent SDK builds through `parentUuid`. `parent_uuid` is kept, so either can be built later.
+- **Rewinds: file order.** The steps follow the file, as all of today's readers do, so a rewind's abandoned branch stays visible to miners: a rewind is a correction signal. Rejected: the active branch only, which the Claude Agent SDK builds through `parentUuid`. `parent_uuid` is kept on each step, so a consumer can rebuild the active branch.
+- **Noisy attachments: system steps.** `hook_success` and every other attachment become system steps. Rejected: counting them as diagnostics and mapping only the known attachment types.
 
 ## Consequences
 

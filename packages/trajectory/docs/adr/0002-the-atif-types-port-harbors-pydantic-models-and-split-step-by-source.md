@@ -1,6 +1,6 @@
 # The ATIF types port Harbor's Pydantic models and split Step by source
 
-Status: proposed, for review (deepagents #6107).
+Status: ruled by Ezz on 2026-11-27 (deepagents #6107).
 
 ## Context
 

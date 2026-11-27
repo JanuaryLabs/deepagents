@@ -1,6 +1,6 @@
 # Ported from Harbor ATIF
 
-> Design for review: no code yet.
+> Design ruled on 2026-11-27; no code yet.
 
 The ATIF types are a port of Harbor's Pydantic models at `harbor-framework/harbor` `src/harbor/models/trajectories/*.py` (RFC 0001, ATIF-v1.8, status Active). Names, fields and optionality are copied exactly, snake_case included. The divergences are listed below; each one is a decision of [ADR 0002](./adr/0002-the-atif-types-port-harbors-pydantic-models-and-split-step-by-source.md).
 

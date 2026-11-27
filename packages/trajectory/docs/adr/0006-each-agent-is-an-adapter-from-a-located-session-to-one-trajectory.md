@@ -1,6 +1,6 @@
 # Each agent is an Adapter from a located session to one trajectory
 
-Status: proposed, for review (deepagents #6107). The need for adapters of our own was ruled by Ezz on 2026-11-27: not every agent needs support, but we must be able to write adapters.
+Status: ruled by Ezz on 2026-11-27 (deepagents #6107).
 
 ## Context
 

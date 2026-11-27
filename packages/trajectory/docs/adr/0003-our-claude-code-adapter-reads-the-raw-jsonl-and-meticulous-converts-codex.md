@@ -1,6 +1,6 @@
 # Our Claude Code adapter reads the raw JSONL, and meticulous converts Codex
 
-Status: Claude adapter and meticulous for Codex ruled by Ezz on 2026-11-27. The rest is proposed (deepagents #6107).
+Status: ruled by Ezz on 2026-11-27 (deepagents #6107).
 
 ## Context
 

@@ -1,6 +1,6 @@
 # Stores list sessions as an async iterator that the caller pulls
 
-Status: proposed, for review (deepagents #6107).
+Status: ruled by Ezz on 2026-11-27 (deepagents #6107).
 
 ## Context
 

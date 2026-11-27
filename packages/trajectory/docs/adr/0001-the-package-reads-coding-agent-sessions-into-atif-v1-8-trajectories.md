@@ -1,6 +1,6 @@
 # The package reads coding-agent sessions into ATIF v1.8 trajectories
 
-Status: proposed, for review (deepagents #6107; agent-plugin #6100).
+Status: ruled by Ezz on 2026-11-27 (deepagents #6107).
 
 ## Context
 

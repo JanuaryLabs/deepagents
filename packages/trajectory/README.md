@@ -1,8 +1,8 @@
 # @deepagents/trajectory
 
-> **Design for review: no code yet.** This folder is the API on paper. It has no
-> package.json and no tsconfig until each decision in [docs/adr](./docs/adr)
-> has been ruled on.
+> **Design ruled on 2026-11-27; no code yet.** This folder is the API on paper,
+> and each decision in [docs/adr](./docs/adr) is ruled. The package.json and
+> tsconfig come with the scaffold.
 
 Read a coding agent's stored sessions (Claude Code transcripts, Codex rollouts)
 as [ATIF](https://github.com/harbor-framework/harbor/blob/main/rfcs/0001-trajectory-format.md)

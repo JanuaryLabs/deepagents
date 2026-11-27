@@ -1,6 +1,6 @@
 # Trajectory: glossary
 
-> Design for review: no code yet.
+> Design ruled on 2026-11-27; no code yet.
 
 - **Trajectory**: the ordered record of one agent run, read back from storage, in ATIF v1.8. It holds steps, an agent, final metrics, embedded subagent trajectories and `extra`. (Sutton & Barto ch. 3; Harbor RFC 0001.)
 - **Step**: one entry of a trajectory. Its `source` is `user`, `agent` or `system`. Only an agent step carries a model name, reasoning, tool calls and metrics.

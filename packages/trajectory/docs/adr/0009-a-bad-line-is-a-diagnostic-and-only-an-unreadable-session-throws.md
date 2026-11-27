@@ -1,6 +1,6 @@
 # A bad line is a diagnostic, and only an unreadable session throws
 
-Status: proposed, for review (deepagents #6107).
+Status: ruled by Ezz on 2026-11-27 (deepagents #6107).
 
 ## Context
 

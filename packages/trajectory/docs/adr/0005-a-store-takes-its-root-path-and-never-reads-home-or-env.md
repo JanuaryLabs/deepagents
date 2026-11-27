@@ -1,6 +1,6 @@
 # A store takes its root path and never reads HOME or env
 
-Status: proposed, for review (deepagents #6107).
+Status: ruled by Ezz on 2026-11-27 (deepagents #6107).
 
 ## Context
 
