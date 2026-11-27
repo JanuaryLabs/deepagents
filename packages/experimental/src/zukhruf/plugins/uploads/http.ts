@@ -13,7 +13,6 @@ import {
   projectHttp,
 } from '../http/index.ts';
 import {
-  UPLOAD_MEDIA_TYPES,
   type UploadMediaType,
   type Uploads,
   isUploadMediaType,
@@ -74,7 +73,7 @@ export function uploadsHttp(
   }
   return projectHttp(definition, (plugin) => ({
     capabilities: {
-      uploads: { path: '/session', mediaTypes: UPLOAD_MEDIA_TYPES },
+      uploads: { path: '/session', mediaTypes: plugin.mediaTypes },
     },
     authenticatedRoutes: uploadRoutes(plugin, maxBytes),
   }));
@@ -109,12 +108,16 @@ function uploadRoutes(uploads: Uploads, maxBytes: number) {
     async (context) => {
       const { sessionId, name } = context.var.input;
       const mediaType = essenceOf(context.req.header('content-type'));
-      if (mediaType === undefined || !isUploadMediaType(mediaType)) {
+      if (
+        mediaType === undefined ||
+        !isUploadMediaType(mediaType) ||
+        !uploads.mediaTypes.includes(mediaType)
+      ) {
         throw new HTTPException(415, {
           message: 'Unsupported Media Type',
           cause: {
             code: 'zukhruf/unsupported-media-type',
-            detail: `Uploads must be one of ${UPLOAD_MEDIA_TYPES.join(', ')}`,
+            detail: `Uploads must be one of ${uploads.mediaTypes.join(', ')}`,
           },
         });
       }

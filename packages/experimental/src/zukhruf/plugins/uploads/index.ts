@@ -97,9 +97,16 @@ export interface UploadsOptions {
    * returns an absolute `url` the model can hand to the user verbatim.
    */
   publicUrl?: string;
+  /**
+   * Media types the composer may upload: the kinds the host's model reads.
+   * Defaults to every type in {@link UPLOAD_MEDIA_TYPES}.
+   */
+  mediaTypes?: readonly [UploadMediaType, ...UploadMediaType[]];
 }
 
 export interface Uploads extends AgentPluginInitialization {
+  /** Media types the composer may upload, in the order the host named them. */
+  readonly mediaTypes: readonly UploadMediaType[];
   /** Stores one file in the session's sandbox; rejects with ConversationArchivedError while the session is archived. */
   write(scope: UploadScope, upload: StoredUpload): Promise<WrittenUpload>;
   read(scope: UploadScope, fileId: string): Promise<StoredUpload | undefined>;
@@ -125,13 +132,20 @@ export function isUploadMediaType(
  * `message.metadata.uploads` live, and let any agent in the tree publish a
  * file it produced so the user can open or download it.
  */
-export function uploads({
-  directory,
-  publicUrl,
-}: UploadsOptions): AgentPluginDefinition<Uploads> {
+export function uploads(
+  options: UploadsOptions,
+): AgentPluginDefinition<Uploads> {
+  const { directory, publicUrl } = options;
+  const mediaTypes: readonly UploadMediaType[] =
+    options.mediaTypes ?? UPLOAD_MEDIA_TYPES;
   if (typeof directory !== 'string' || !posix.isAbsolute(directory)) {
     throw new Error(
       `uploads: directory must be an absolute sandbox path, received ${JSON.stringify(directory)}`,
+    );
+  }
+  if (mediaTypes.length === 0 || !mediaTypes.every(isUploadMediaType)) {
+    throw new Error(
+      `uploads: mediaTypes must name at least one of ${UPLOAD_MEDIA_TYPES.join(', ')}, received ${JSON.stringify(mediaTypes)}`,
     );
   }
   const resolvedPublicUrl = normalizePublicUrl(publicUrl);
@@ -142,11 +156,11 @@ export function uploads({
         ...root,
         instructions: [
           ...root.instructions,
-          attachedUploadsReminder(directory),
+          attachedUploadsReminder(directory, mediaTypes),
         ],
       }),
       initialize: async (host) =>
-        new RunningUploads(host, directory, resolvedPublicUrl),
+        new RunningUploads(host, directory, resolvedPublicUrl, mediaTypes),
     }),
   };
 }
@@ -169,6 +183,7 @@ class RunningUploads implements Uploads {
   readonly #host: AgentPluginHost;
   readonly #directory: string;
   readonly #publicUrl: string | undefined;
+  readonly mediaTypes: readonly UploadMediaType[];
 
   readonly tools = {
     publish_upload: tool<
@@ -191,10 +206,12 @@ class RunningUploads implements Uploads {
     host: AgentPluginHost,
     directory: string,
     publicUrl: string | undefined,
+    mediaTypes: readonly UploadMediaType[],
   ) {
     this.#host = host;
     this.#directory = directory;
     this.#publicUrl = publicUrl;
+    this.mediaTypes = mediaTypes;
   }
 
   async write(
@@ -308,7 +325,11 @@ class RunningUploads implements Uploads {
  * user message being saved and hands over that chat, so only files uploaded
  * for this chat by its owner are listed.
  */
-function attachedUploadsReminder(directory: string) {
+function attachedUploadsReminder(
+  directory: string,
+  mediaTypes: readonly UploadMediaType[],
+) {
+  const preamble = attachedUploadsPreamble(mediaTypes);
   return reminder(
     ({ currentMessage, chat }) => {
       if (currentMessage === undefined || chat === undefined) {
@@ -325,7 +346,7 @@ function attachedUploadsReminder(directory: string) {
       );
       if (attached.length === 0) return '';
       return [
-        'The user attached the files listed below for this turn; read images by path with the readFile tool when needed (convert HEIC and extract video frames with sandbox commands first), and [Image #N], [Video #N], or [Audio #N] in the message refers to the Nth listed file.',
+        preamble,
         ...attached.map(
           ({ path, name, mediaType, size }) =>
             `- ${path} (${name}, ${mediaType}, ${size} bytes)`,
@@ -334,6 +355,38 @@ function attachedUploadsReminder(directory: string) {
     },
     { asPart: true },
   );
+}
+
+/** How to read the attachments and what their markers mean, for the kinds the host accepts only. */
+function attachedUploadsPreamble(
+  mediaTypes: readonly UploadMediaType[],
+): string {
+  const accepts = (kind: string) =>
+    mediaTypes.some((mediaType) => mediaType.startsWith(`${kind}/`));
+  const list = (type: 'conjunction' | 'disjunction', items: string[]) =>
+    new Intl.ListFormat('en', { type }).format(items);
+  const heic = mediaTypes.some(
+    (mediaType) => mediaType === 'image/heic' || mediaType === 'image/heif',
+  );
+  const conversions = [
+    ...(heic ? ['convert HEIC'] : []),
+    ...(accepts('video') ? ['extract video frames'] : []),
+  ];
+  const markers = [
+    ...(accepts('image') ? ['[Image #N]'] : []),
+    ...(accepts('video') ? ['[Video #N]'] : []),
+    ...(accepts('audio') ? ['[Audio #N]'] : []),
+  ];
+
+  let howToRead = '';
+  if (accepts('image') || accepts('video')) {
+    howToRead = 'read images by path with the readFile tool when needed';
+    if (conversions.length > 0) {
+      howToRead += ` (${list('conjunction', conversions)} with sandbox commands first)`;
+    }
+    howToRead += ', and ';
+  }
+  return `The user attached the files listed below for this turn; ${howToRead}${list('disjunction', markers)} in the message refers to the Nth listed file.`;
 }
 
 /** `<directory>/<userId>/<sessionId>`; both identifiers must be one path segment. */

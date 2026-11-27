@@ -32,6 +32,7 @@ import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 import {
   type PublishedUpload,
   UPLOAD_MEDIA_TYPES,
+  type UploadsOptions,
   uploads,
 } from '@deepagents/experimental/zukhruf/uploads';
 import {
@@ -187,6 +188,7 @@ function scriptedModel(script: LanguageModelV4StreamPart[][] = []) {
 async function harness(
   options: {
     withUploads?: boolean;
+    mediaTypes?: UploadsOptions['mediaTypes'];
     script?: LanguageModelV4StreamPart[][];
     /** A real storage in place of the in-memory one whose turns the test runs by hand. */
     storage?: (resources: AsyncDisposableStack) => Promise<AgentStorage>;
@@ -202,6 +204,7 @@ async function harness(
   const uploaded = uploads({
     directory: UPLOAD_DIRECTORY,
     publicUrl: PUBLIC_URL,
+    mediaTypes: options.mediaTypes,
   });
   const model = scriptedModel(options.script);
   const queue = new ParkingTurnQueue();
@@ -746,6 +749,47 @@ test('POST /session/:sessionId/uploads rejects anything but a supported media ty
       'zukhruf/unsupported-media-type',
     );
   }
+});
+
+test('uploads() narrowed to the images the model reads advertises only those types, answers 415 to a HEIC, stores a PNG, and speaks only of images to the model', async () => {
+  await using h = await harness({
+    mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+  });
+  const sessionId = randomUUID();
+
+  const discovery = discoverySchema.parse(
+    await (await request(h.app, `${MOUNT}/info`)).json(),
+  );
+  const heic = await upload(h.app, sessionId, {
+    body: HEIC_HEADER,
+    contentType: 'image/heic',
+    filename: 'IMG_0001.HEIC',
+  });
+  const png = await upload(h.app, sessionId, { filename: 'pixel.png' });
+  const receipt = receiptSchema.parse(await png.json());
+  await turn(h.app, sessionId, {
+    parts: [{ type: 'text', text: 'What is in [Image #1]?' }],
+    metadata: { uploads: [receipt] },
+  });
+  await h.queue.runNext();
+
+  assert.deepEqual(discovery.capabilities.uploads, {
+    href: `${MOUNT}/session`,
+    mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+  });
+  assert.deepEqual(
+    {
+      status: heic.status,
+      code: errorBodySchema.parse(await heic.json()).cause.code,
+    },
+    { status: 415, code: 'zukhruf/unsupported-media-type' },
+  );
+  assert.equal(png.status, 201);
+  assert.equal(receipt.mediaType, 'image/png');
+  assert.match(
+    promptedUserText(h.model, 0),
+    /<system-reminder>The user attached the files listed below for this turn; read images by path with the readFile tool when needed, and \[Image #N\] in the message refers to the Nth listed file\.\n/,
+  );
 });
 
 void test.each(
