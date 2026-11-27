@@ -822,6 +822,7 @@ class RuntimeHost implements AsyncDisposable {
           await scope.streams.deleteStream(streamId);
         }
         await scope.store.deleteChat(member.chatId, { userId: member.userId });
+        await scope.admittedMessages.forget(member.chatId);
         await scope.deletedConversations.add(member.chatId, deletedAt);
       }
     });

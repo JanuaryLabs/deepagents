@@ -1,4 +1,5 @@
 import type { UIMessage } from 'ai';
+import { hash } from 'node:crypto';
 import { v5 as uuidv5 } from 'uuid';
 
 import type { AgentDeclaration } from '../agent.ts';
@@ -30,6 +31,7 @@ import type { AgentThread } from './agent-thread.ts';
 import { AgentTurnId } from './agent-turn-id.ts';
 import { ConversationArchivedError } from './conversation-archived-error.ts';
 import type { ForkTurns } from './fork-turns.ts';
+import { MessageIdReusedError } from './message-id-reused-error.ts';
 import { StaleTurnError } from './stale-turn-error.ts';
 import { TurnNotFoundError } from './turn-not-found-error.ts';
 
@@ -144,7 +146,14 @@ export class AgentControlPlane {
         if (status === 'queued' || status === 'running') return streamId;
       } else if (status !== undefined) {
         // A resent message id answers its turn, as Codex's cloud admission
-        // answers `AdmissionOutcome::Duplicate`.
+        // answers `AdmissionOutcome::Duplicate`; reusing it for other
+        // content is refused, as Codex's client_user_message_id must never be.
+        if (
+          (await admission.admittedMessages.digestOf(streamId)) !==
+          AgentControlPlane.#digest(message)
+        ) {
+          throw new MessageIdReusedError(conversation.chatId, message.id);
+        }
         return streamId;
       }
       if (!(await admission.admits(conversation))) {
@@ -154,6 +163,11 @@ export class AgentControlPlane {
         await admission.streams.reopenStream(streamId);
       } else {
         await admission.registerStream(streamId);
+        await admission.admittedMessages.record(
+          streamId,
+          conversation.chatId,
+          AgentControlPlane.#digest(message),
+        );
       }
       await admission.queue.push({
         kind: 'message',
@@ -164,6 +178,28 @@ export class AgentControlPlane {
       });
       return streamId;
     });
+  }
+
+  /** SHA-256 of the message's parts as JSON with every object's keys sorted, so a resend's key order does not matter. */
+  static #digest(message: UIMessage): string {
+    return hash(
+      'sha256',
+      JSON.stringify(message.parts, (_key, value: unknown) =>
+        value !== null && typeof value === 'object' && !Array.isArray(value)
+          ? Object.fromEntries(
+              Object.entries(value).toSorted(([a], [b]) =>
+                AgentControlPlane.#compareKeys(a, b),
+              ),
+            )
+          : value,
+      ),
+    );
+  }
+
+  static #compareKeys(a: string, b: string): number {
+    if (a < b) return -1;
+    if (a > b) return 1;
+    return 0;
   }
 
   static async #continuationStreamId(

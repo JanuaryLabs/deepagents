@@ -11,6 +11,7 @@ import {
   postgresTransaction,
 } from '@deepagents/context';
 
+import { PostgresAdmittedMessageStore } from '../admitted-messages/postgres.store.ts';
 import { PostgresDeletedConversationStore } from '../deleted-conversations/postgres.store.ts';
 import { PostgresMailboxStore } from '../mailbox/postgres.store.ts';
 import {
@@ -102,6 +103,7 @@ export class PostgresAgentStorage
   readonly #boss: PgBoss;
   readonly #schema: string;
   readonly #streamStore: PostgresStreamStore;
+  readonly #admittedMessages: PostgresAdmittedMessageStore;
   readonly #ownedChangeSource: PostgresNotifyChangeSource | undefined;
 
   private constructor(parts: {
@@ -115,6 +117,7 @@ export class PostgresAgentStorage
     mailboxStore: PostgresMailboxStore;
     sandboxIdleWakes: PgBossWakeScheduler<SandboxIdleWake>;
     deletedConversations: PostgresDeletedConversationStore;
+    admittedMessages: PostgresAdmittedMessageStore;
     ownedChangeSource: PostgresNotifyChangeSource | undefined;
   }) {
     super();
@@ -128,6 +131,7 @@ export class PostgresAgentStorage
     this.mailboxStore = parts.mailboxStore;
     this.sandboxIdleWakes = parts.sandboxIdleWakes;
     this.deletedConversations = parts.deletedConversations;
+    this.#admittedMessages = parts.admittedMessages;
     this.#ownedChangeSource = parts.ownedChangeSource;
   }
 
@@ -157,6 +161,10 @@ export class PostgresAgentStorage
       pool,
       schema,
     });
+    const admittedMessages = await PostgresAdmittedMessageStore.create({
+      pool,
+      schema,
+    });
     const queue = await PgBossTurnQueue.create(boss, options.queue);
     const sandboxIdleWakes = new PgBossWakeScheduler<SandboxIdleWake>(boss, {
       queue: `${queue.queue}-sandbox-idle`,
@@ -183,6 +191,7 @@ export class PostgresAgentStorage
       mailboxStore,
       sandboxIdleWakes,
       deletedConversations,
+      admittedMessages,
       ownedChangeSource,
     });
   }
@@ -220,6 +229,7 @@ export class PostgresAgentStorage
         },
         sandboxIdleWakes: this.sandboxIdleWakes.bind(db),
         deletedConversations: this.deletedConversations.bind(tx),
+        admittedMessages: this.#admittedMessages.bind(tx),
       });
     });
   }

@@ -22,6 +22,7 @@ import type {
 } from '../../control-plane/conversation-archived-error.ts';
 import type { ConversationNotFoundError } from '../../control-plane/conversation-not-found-error.ts';
 import type { EmptySessionTitleError } from '../../control-plane/empty-session-title-error.ts';
+import type { MessageIdReusedError } from '../../control-plane/message-id-reused-error.ts';
 import type { StaleTurnError } from '../../control-plane/stale-turn-error.ts';
 import type { TurnNotFoundError } from '../../control-plane/turn-not-found-error.ts';
 import { isNamedError } from '../../is-named-error.ts';
@@ -213,6 +214,19 @@ export function http(
           error: 'Session turn not found',
         },
         404,
+        NO_STORE,
+      );
+    }
+    if (isNamedError<MessageIdReusedError>(error, 'MessageIdReusedError')) {
+      return context.json(
+        {
+          cause: {
+            code: 'zukhruf/session-message-id-reused',
+            detail: `Message ${error.messageId} of session ${error.sessionId} was already submitted with other content`,
+          },
+          error: 'Message id is reused',
+        },
+        409,
         NO_STORE,
       );
     }

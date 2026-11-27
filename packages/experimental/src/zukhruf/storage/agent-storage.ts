@@ -4,6 +4,7 @@ import type {
   StreamStore,
 } from '@deepagents/context';
 
+import type { AdmittedMessageStore } from '../admitted-messages/store.ts';
 import type {
   DeletedConversationStore,
   DeletedConversations,
@@ -46,6 +47,8 @@ export interface AdmissionScope {
   sandboxIdleWakes: TransactionalWakeScheduler<SandboxIdleWake>;
   /** The tombstones of deleted chats: a delete writes them with its rows' removal, and every admission reads them. */
   deletedConversations: DeletedConversationStore;
+  /** The digests of the user messages turns were admitted for: an admission writes one with the turn's stream. */
+  admittedMessages: AdmittedMessageStore;
 }
 
 /**

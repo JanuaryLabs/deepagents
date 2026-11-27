@@ -514,7 +514,7 @@ test('a terminal duplicate cannot replace a newer latest turn', async () => {
   await queue.runNext();
   const duplicate = await runtime.enqueue(
     conversation,
-    userTurn('caller-turn-a', 'must not run again'),
+    userTurn('caller-turn-a', 'first'),
   );
   assert.equal(duplicate.id, first.id);
   queue.turns.push(firstJob);

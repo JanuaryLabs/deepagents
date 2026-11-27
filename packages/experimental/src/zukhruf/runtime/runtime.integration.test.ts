@@ -2162,16 +2162,20 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal(b, 'reply:once');
     assert.deepStrictEqual(track.calls, ['once'], 'model ran exactly once');
 
-    const resubmit = await h.runtime.enqueue(
-      conversation,
-      userTurn(ask.message.id, 'a different input under the same id'),
-    );
+    const resubmit = await h.runtime.enqueue(conversation, ask);
     const text = await collectText(resubmit.stream);
     assert.equal(text, 'reply:once', 'post-completion resubmit replays');
+    await assert.rejects(
+      h.runtime.enqueue(
+        conversation,
+        userTurn(ask.message.id, 'a different input under the same id'),
+      ),
+      { name: 'MessageIdReusedError', messageId: ask.message.id },
+    );
     assert.deepStrictEqual(
       track.calls,
       ['once'],
-      'still exactly one run — first input wins',
+      'still exactly one run — a reused id for other input is refused',
     );
 
     const messages = await h.runtime.observe(conversation).engine.getMessages();

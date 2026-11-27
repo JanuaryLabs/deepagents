@@ -13,6 +13,7 @@ import {
   StreamManager,
 } from '@deepagents/context';
 
+import { SqliteAdmittedMessageStore } from '../admitted-messages/sqlite.store.ts';
 import { SqliteDeletedConversationStore } from '../deleted-conversations/sqlite.store.ts';
 import type { DeletedConversations } from '../deleted-conversations/store.ts';
 import { SqliteMailboxStore } from '../mailbox/sqlite.store.ts';
@@ -238,6 +239,7 @@ export class EmbeddedAgentStorage
           schedule: async (wake) => outbox.addWake(sandboxIdleQueue, wake),
         },
         deletedConversations,
+        admittedMessages: new SqliteAdmittedMessageStore(database),
       },
       relay,
       turnQueue: turns.queue,

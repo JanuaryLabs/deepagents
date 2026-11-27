@@ -482,7 +482,11 @@ conversation-scoped durable id, preventing one user's equal raw key from replayi
 another conversation's stream. A `submit-message` (`POST /session/:sessionId` included) that
 resends a known message id answers the existing turn's id (`202 { turnId }`) and queues nothing,
 whatever the turn's status, as Codex's cloud admission answers `AdmissionOutcome::Duplicate`
-(#6173).
+(#6173). A resend with other parts is refused with `MessageIdReusedError` (`409`
+`zukhruf/session-message-id-reused`) and changes nothing, as Codex never lets a
+`client_user_message_id` name another submission: the admission compares the parts' SHA-256 with the
+one it recorded in `AdmittedMessageStore` in the transaction that registered the turn's stream, since
+the chain holds the message only once the turn has run (#6262).
 
 **Division of labor: queue = at-least-once; runtime = exactly-once-per-turn.** The queue promises
 "never lost, strict FIFO per chat, maybe delivered twice" — job ids are monotonic **UUIDv7** so the

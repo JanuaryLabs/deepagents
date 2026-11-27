@@ -4,6 +4,7 @@ import {
   type StreamStore,
 } from '@deepagents/context';
 
+import type { AdmittedMessageStore } from '../admitted-messages/store.ts';
 import type { TransactionalMailboxStore } from '../mailbox/store.ts';
 import type { ConversationId } from '../mailbox/types.ts';
 import type { TransactionalTurnQueue, TurnRef } from '../queue/turn-queue.ts';
@@ -27,6 +28,7 @@ export class Admission {
   readonly mailboxStore: TransactionalMailboxStore;
   readonly queue: TransactionalTurnQueue;
   readonly directory: AgentDirectory;
+  readonly admittedMessages: AdmittedMessageStore;
   readonly #scope: AdmissionScope;
   readonly #tree: AgentTree;
   readonly #member: AgentThread | undefined;
@@ -56,6 +58,7 @@ export class Admission {
         scope.queue.getTurnActivity(conversation),
     };
     this.directory = new AgentDirectory(scope.store);
+    this.admittedMessages = scope.admittedMessages;
   }
 
   /**
