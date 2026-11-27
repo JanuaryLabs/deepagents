@@ -17,6 +17,7 @@
   "include": [
     "vite.config.ts",
     "src/test-setup.ts",
+    "src/testing/**/*.ts",
     "src/testing/**/*.tsx",
     "src/**/*.test.ts",
     "src/**/*.spec.ts",

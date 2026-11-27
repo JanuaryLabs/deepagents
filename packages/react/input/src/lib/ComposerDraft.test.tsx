@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import { Composer } from '@deepagents/react-input/browser';
 
+import { editorWords, rootWords } from '../testing/english-words.ts';
 import { FakeClock } from '../testing/fake-clock.tsx';
 
 function DraftScenario({
@@ -21,9 +22,9 @@ function DraftScenario({
   send?: () => Promise<unknown>;
 }) {
   return (
-    <Composer.Root draftKey={draftKey} onSubmit={() => send()}>
+    <Composer.Root {...rootWords} draftKey={draftKey} onSubmit={() => send()}>
       <Composer.Content>
-        <Composer.Editor />
+        <Composer.Editor {...editorWords} />
       </Composer.Content>
     </Composer.Root>
   );
@@ -143,9 +144,13 @@ describe('Composer.Root draftKey', () => {
       localStorage.clear();
       const user = userEvent.setup();
       render(
-        <Composer.Root draftKey="chat-1" onSubmit={() => undefined}>
+        <Composer.Root
+          {...rootWords}
+          draftKey="chat-1"
+          onSubmit={() => undefined}
+        >
           <Composer.Content>
-            <Composer.Editor />
+            <Composer.Editor {...editorWords} />
           </Composer.Content>
         </Composer.Root>,
         { wrapper: FakeClock },

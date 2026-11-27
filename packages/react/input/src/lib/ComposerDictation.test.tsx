@@ -7,6 +7,7 @@ import {
   useComposerDictation,
 } from '@deepagents/react-input/browser';
 
+import { editorWords, rootWords } from '../testing/english-words.ts';
 import { FakeClock } from '../testing/fake-clock.tsx';
 
 function ReadsDictation() {
@@ -30,9 +31,10 @@ describe('Composer dictation', () => {
 
     render(
       <Composer.Root
+        {...rootWords}
         dictation={{ transcribe: async () => ({ text: 'never heard' }) }}
       >
-        <Composer.Editor />
+        <Composer.Editor {...editorWords} />
         <Composer.Toolbar>
           <Composer.Dictate
             render={(props, dictation) => (
@@ -68,9 +70,10 @@ describe('Composer dictation', () => {
     try {
       render(
         <Composer.Root
+          {...rootWords}
           dictation={{ transcribe: async () => ({ text: 'never heard' }) }}
         >
-          <Composer.Editor />
+          <Composer.Editor {...editorWords} />
           <Composer.Toolbar>
             <DictationShortcut />
           </Composer.Toolbar>
@@ -104,8 +107,8 @@ describe('Composer dictation', () => {
 
     expect(() =>
       render(
-        <Composer.Root>
-          <Composer.Editor />
+        <Composer.Root {...rootWords}>
+          <Composer.Editor {...editorWords} />
           <Composer.Toolbar>{part}</Composer.Toolbar>
         </Composer.Root>,
         { wrapper: FakeClock },

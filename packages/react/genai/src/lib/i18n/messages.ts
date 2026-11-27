@@ -41,6 +41,19 @@ export type GenaiMessages = {
   'composer.commandMenu': string;
   'composer.send': string;
   'composer.stop': string;
+  'composer.editor': string;
+  'composer.placeholder': string;
+  /** Shown when the host's submit rejects with something other than an `Error`. */
+  'composer.sendFailed': string;
+  'composer.attachments': string;
+  /** `placeholder` is the attachment's token in the prompt, such as `[Image #1]`. */
+  'composer.removeAttachment': Message<{ placeholder: string }>;
+  /** The hidden file input behind the attach button. */
+  'composer.attachInput': string;
+  'composer.suggestions': string;
+  'composer.noMatches': string;
+  /** Marks a suggested command that takes arguments. */
+  'composer.takesArgs': string;
   'dictation.start': string;
   'dictation.starting': string;
   'dictation.stop': string;
@@ -142,6 +155,15 @@ export const en: GenaiMessages = {
   'composer.commandMenu': 'Toggle command menu',
   'composer.send': 'Send prompt',
   'composer.stop': 'Stop streaming',
+  'composer.editor': 'Rich prompt composer',
+  'composer.placeholder': 'Type a message or / for commands',
+  'composer.sendFailed': 'Could not send prompt',
+  'composer.attachments': 'Attached files',
+  'composer.removeAttachment': ({ placeholder }) => `Remove ${placeholder}`,
+  'composer.attachInput': 'Attach media files',
+  'composer.suggestions': 'Suggestions',
+  'composer.noMatches': 'no matches',
+  'composer.takesArgs': 'args',
   'dictation.start': 'Start dictation',
   'dictation.starting': 'Starting dictation',
   'dictation.stop': 'Stop dictation',

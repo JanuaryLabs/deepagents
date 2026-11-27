@@ -15,6 +15,7 @@ import {
   type ComposerAttachmentsProps,
   type ComposerContentProps,
   type ComposerEditorProps,
+  type ComposerPopupProps,
   type ComposerRootProps,
   type ComposerToolbarProps,
   type DictationErrorCode,
@@ -27,11 +28,24 @@ import { useAgentMeta, useAgentStatus } from '../chat/agent-context.tsx';
 import { type GenaiTranslate, useGenaiMessages } from '../i18n/provider.tsx';
 import { ChatActionButton } from './ChatAction.tsx';
 
-function ChatComposerProvider({ className, ...props }: ComposerRootProps) {
+/** The catalog gives these words; a host still labels its own instance. */
+type InstanceWords<Props, Words extends keyof Props> = Omit<Props, Words> &
+  Partial<Pick<Props, Words>>;
+
+function ChatComposerProvider({
+  className,
+  ...props
+}: InstanceWords<
+  Omit<ComposerRootProps, 'submitFailedMessage'>,
+  'editorAriaLabel'
+>) {
   const { hasSubmitted } = useAgentMeta();
+  const t = useGenaiMessages();
   return (
     <Composer.Root
       hasInteracted={hasSubmitted}
+      editorAriaLabel={t('composer.editor')}
+      submitFailedMessage={t('composer.sendFailed')}
       className={cn(
         'bg-background sticky bottom-0 rounded-t-2xl border-0 **:data-[slot=composer-editor]:!min-h-15',
         className,
@@ -62,9 +76,14 @@ function ChatComposerContent({ className, ...props }: ComposerContentProps) {
   );
 }
 
-function ChatComposerEditor({ className, ...props }: ComposerEditorProps) {
+function ChatComposerEditor({
+  className,
+  ...props
+}: InstanceWords<ComposerEditorProps, 'placeholder'>) {
+  const t = useGenaiMessages();
   return (
     <Composer.Editor
+      placeholder={t('composer.placeholder')}
       className={cn(
         '!min-h-15 !rounded-none !border-0 !bg-transparent !shadow-none **:data-[slot=composer-editor]:!p-0',
         className,
@@ -77,9 +96,34 @@ function ChatComposerEditor({ className, ...props }: ComposerEditorProps) {
 function ChatComposerAttachments({
   className,
   ...props
-}: ComposerAttachmentsProps) {
+}: InstanceWords<Omit<ComposerAttachmentsProps, 'removeLabel'>, 'aria-label'>) {
+  const t = useGenaiMessages();
   return (
-    <Composer.Attachments className={cn('pb-1.5', className)} {...props} />
+    <Composer.Attachments
+      aria-label={t('composer.attachments')}
+      removeLabel={(placeholder) =>
+        t('composer.removeAttachment', { placeholder })
+      }
+      className={cn('pb-1.5', className)}
+      {...props}
+    />
+  );
+}
+
+function ChatComposerPopup(
+  props: Omit<
+    ComposerPopupProps,
+    'listboxLabel' | 'noMatchesLabel' | 'argsLabel'
+  >,
+) {
+  const t = useGenaiMessages();
+  return (
+    <Composer.Popup
+      listboxLabel={t('composer.suggestions')}
+      noMatchesLabel={t('composer.noMatches')}
+      argsLabel={t('composer.takesArgs')}
+      {...props}
+    />
   );
 }
 
@@ -89,11 +133,14 @@ function ChatComposerToolbar({ className, ...props }: ComposerToolbarProps) {
   );
 }
 
-function ChatComposerAttachFiles(props: ComposerAttachFilesProps) {
+function ChatComposerAttachFiles(
+  props: Omit<ComposerAttachFilesProps, 'inputLabel'>,
+) {
   const t = useGenaiMessages();
   return (
     <Composer.AttachFiles
       aria-label={t('composer.attachFiles')}
+      inputLabel={t('composer.attachInput')}
       render={<ChatActionButton icon={<Paperclip className="size-4" />} />}
       {...props}
     />
@@ -217,7 +264,7 @@ function ChatComposerDictate() {
 export const ChatComposer = {
   Provider: ChatComposerProvider,
   Root: ChatComposerRoot,
-  Popup: Composer.Popup,
+  Popup: ChatComposerPopup,
   Content: ChatComposerContent,
   Attachments: ChatComposerAttachments,
   Editor: ChatComposerEditor,

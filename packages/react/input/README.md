@@ -50,9 +50,13 @@ const clock = createClock();
 
 render(
   <ClockProvider clock={clock}>
-    <Composer.Root onSubmit={onSubmit}>
+    <Composer.Root
+      editorAriaLabel="Message"
+      submitFailedMessage="Could not send the message"
+      onSubmit={onSubmit}
+    >
       <Composer.Content>
-        <Composer.Editor />
+        <Composer.Editor placeholder="Ask anything" />
       </Composer.Content>
     </Composer.Root>
   </ClockProvider>,
@@ -60,6 +64,10 @@ render(
 ```
 
 The host and this package must use the same copy of `@zukhruf/ui`. Each copy has its own React context, and a `ClockProvider` of one copy does not reach a `Composer` of the other. For this reason `@zukhruf/ui` is a peer dependency.
+
+## Words
+
+The parts ship no words ([ADR 0007](./docs/dictation/adr/0007-react-input-ships-no-words-or-icons-and-react-genai-ships-chatcomposer-dictate.md)). Each part that shows or announces text takes it as a required prop: `Composer.Root`'s `editorAriaLabel` and `submitFailedMessage`, `Composer.Editor`'s `placeholder`, `Composer.Attachments`' `aria-label` and `removeLabel`, `Composer.Popup`'s `listboxLabel`, `noMatchesLabel` and `argsLabel`, `Composer.AttachFiles`' `inputLabel`, and `Composer.Shortcuts`' `heading`, `closeLabel`, `groupTitles` and `descriptions`. `ChatComposer` of `@deepagents/react-genai` fills them from its message catalog.
 
 ## Features
 

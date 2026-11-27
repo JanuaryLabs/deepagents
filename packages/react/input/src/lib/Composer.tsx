@@ -111,7 +111,9 @@ export type ComposerRootProps = {
   queueSubmissions?: boolean;
   hasInteracted?: boolean;
   maxExpandedTextChars?: number;
-  editorAriaLabel?: string;
+  editorAriaLabel: string;
+  /** Shown when `onSubmit` rejects with something other than an `Error`. */
+  submitFailedMessage: string;
   className?: string;
   children?: ReactNode;
   dictation?: ComposerDictation;
@@ -137,14 +139,38 @@ export type ComposerToolbarProps = ComponentPropsWithoutRef<'div'>;
 export type ComposerRemoteImagesProps = ComponentPropsWithoutRef<'div'>;
 
 export type ComposerEditorProps = ComponentPropsWithoutRef<'div'> & {
-  placeholder?: string;
+  placeholder: string;
 };
 
 export type ComposerErrorProps = ComponentPropsWithoutRef<'div'>;
 
-export type ComposerPopupProps = ComponentPropsWithoutRef<'div'>;
+export type ComposerPopupProps = ComponentPropsWithoutRef<'div'> & {
+  listboxLabel: string;
+  noMatchesLabel: string;
+  /** Marks a suggestion whose command takes arguments. */
+  argsLabel: string;
+};
 
-export type ComposerShortcutsProps = ComponentPropsWithoutRef<'div'>;
+type ComposerShortcutGroup = 'send' | 'edit' | 'navigate';
+
+type ComposerShortcutAction =
+  | 'send'
+  | 'newline'
+  | 'killToEnd'
+  | 'killToStart'
+  | 'killWord'
+  | 'yank'
+  | 'history'
+  | 'reverseSearch'
+  | 'lineEnd'
+  | 'wordMove';
+
+export type ComposerShortcutsProps = ComponentPropsWithoutRef<'div'> & {
+  heading: string;
+  closeLabel: string;
+  groupTitles: Record<ComposerShortcutGroup, string>;
+  descriptions: Record<ComposerShortcutAction, string>;
+};
 
 export type ComposerFooterProps = ComponentPropsWithoutRef<'div'>;
 
@@ -153,6 +179,8 @@ type ComposerActionTriggerProps = Button.Props;
 export type ComposerAttachFilesProps = ComposerActionTriggerProps & {
   accept?: string;
   multiple?: boolean;
+  /** The label of the hidden file input. */
+  inputLabel: string;
 };
 
 export type ComposerAddRemoteImageProps = ComposerActionTriggerProps & {
@@ -203,7 +231,8 @@ function ComposerRootInner({
   queueSubmissions = false,
   hasInteracted = false,
   maxExpandedTextChars,
-  editorAriaLabel = 'Rich prompt composer',
+  editorAriaLabel,
+  submitFailedMessage,
   className,
   children,
   dictation,
@@ -1190,9 +1219,7 @@ function ComposerRootInner({
             setComposer((state) => ({
               ...state,
               error:
-                error instanceof Error
-                  ? error.message
-                  : 'Could not send prompt',
+                error instanceof Error ? error.message : submitFailedMessage,
             }));
           }
         })
@@ -1792,29 +1819,10 @@ function ComposerRootInner({
             onMouseDownCapture={onComposerMouseDown}
           >
             {children}
-            {collectedRegistry.hasLayoutChildren ? null : (
-              <ComposerDefaultLayout />
-            )}
           </div>
         </section>
       </ComposerDictationContext>
     </ComposerContext>
-  );
-}
-
-function ComposerDefaultLayout() {
-  return (
-    <>
-      <ComposerPopup />
-      <ComposerContent>
-        <ComposerRemoteImages />
-        <ComposerAttachments />
-        <ComposerEditor />
-        <ComposerError />
-      </ComposerContent>
-      <ComposerShortcuts />
-      <ComposerFooter />
-    </>
   );
 }
 
@@ -1874,7 +1882,7 @@ function ComposerEditor({
   onDragEnter,
   onDragOver,
   onDrop,
-  placeholder = 'Type a message or / for commands',
+  placeholder,
   ...props
 }: ComposerEditorProps) {
   const { disabled, meta, actions, setEditorPlaceholder } =
@@ -1931,7 +1939,13 @@ function ComposerError({ className, ...props }: ComposerErrorProps) {
   );
 }
 
-function ComposerPopup({ className, ...props }: ComposerPopupProps) {
+function ComposerPopup({
+  className,
+  listboxLabel,
+  noMatchesLabel,
+  argsLabel,
+  ...props
+}: ComposerPopupProps) {
   const {
     activePopup,
     suggestions,
@@ -1956,7 +1970,7 @@ function ComposerPopup({ className, ...props }: ComposerPopupProps) {
       <div
         className="flex max-h-72 flex-col gap-1 overflow-y-auto p-1"
         role="listbox"
-        aria-label="Suggestions"
+        aria-label={listboxLabel}
       >
         {suggestions.map((suggestion, index) => (
           <PopupRow
@@ -1964,14 +1978,14 @@ function ComposerPopup({ className, ...props }: ComposerPopupProps) {
             selected={index === activePopup.selectedIndex}
             icon={withIcons ? suggestion.icon : null}
             token={itemToken(suggestion)}
-            takesArgs={suggestion.supportsArgs === true}
+            argsLabel={suggestion.supportsArgs === true ? argsLabel : null}
             description={suggestion.detail}
             onMouseDown={() => acceptSuggestion({ index })}
           />
         ))}
         {suggestions.length === 0 ? (
           <div className="text-muted-foreground px-2 py-1 text-[13px] leading-4">
-            no matches
+            {noMatchesLabel}
           </div>
         ) : null}
       </div>
@@ -1983,14 +1997,14 @@ function PopupRow({
   selected,
   icon,
   token,
-  takesArgs,
+  argsLabel,
   description,
   onMouseDown,
 }: {
   selected: boolean;
   icon: ReactNode;
   token: string;
-  takesArgs: boolean;
+  argsLabel: string | null;
   description: string;
   onMouseDown: () => void;
 }) {
@@ -2025,9 +2039,9 @@ function PopupRow({
         </span>
       )}
       <span className="truncate">{token}</span>
-      {takesArgs ? (
-        <span className="text-muted-foreground shrink-0">args</span>
-      ) : null}
+      {argsLabel === null ? null : (
+        <span className="text-muted-foreground shrink-0">{argsLabel}</span>
+      )}
       <span className="text-muted-foreground truncate">{description}</span>
     </button>
   );
@@ -2035,34 +2049,44 @@ function PopupRow({
 
 const SHORTCUT_GROUPS = [
   {
-    title: 'Send',
+    group: 'send',
     items: [
-      ['Enter', 'send or queue'],
+      ['Enter', 'send'],
       ['Shift Enter', 'newline'],
       ['Alt Enter', 'newline'],
     ],
   },
   {
-    title: 'Edit',
+    group: 'edit',
     items: [
-      ['Ctrl K', 'kill to end'],
-      ['Ctrl U', 'kill to start'],
-      ['Ctrl W', 'kill word'],
+      ['Ctrl K', 'killToEnd'],
+      ['Ctrl U', 'killToStart'],
+      ['Ctrl W', 'killWord'],
       ['Ctrl Y', 'yank'],
     ],
   },
   {
-    title: 'Navigate',
+    group: 'navigate',
     items: [
       ['Ctrl P/N', 'history'],
-      ['Ctrl R', 'reverse search'],
-      ['Ctrl E', 'line end'],
-      ['Alt B/F', 'word move'],
+      ['Ctrl R', 'reverseSearch'],
+      ['Ctrl E', 'lineEnd'],
+      ['Alt B/F', 'wordMove'],
     ],
   },
-] as const;
+] as const satisfies ReadonlyArray<{
+  group: ComposerShortcutGroup;
+  items: ReadonlyArray<readonly [string, ComposerShortcutAction]>;
+}>;
 
-function ComposerShortcuts({ className, ...props }: ComposerShortcutsProps) {
+function ComposerShortcuts({
+  className,
+  heading,
+  closeLabel,
+  groupTitles,
+  descriptions,
+  ...props
+}: ComposerShortcutsProps) {
   const {
     state,
     actions: { closeShortcuts },
@@ -2074,7 +2098,7 @@ function ComposerShortcuts({ className, ...props }: ComposerShortcutsProps) {
   return (
     <div
       role="dialog"
-      aria-label="Keyboard shortcuts"
+      aria-label={heading}
       className={cn(
         'border-border bg-popover border-t px-3 py-3 text-xs',
         className,
@@ -2082,32 +2106,32 @@ function ComposerShortcuts({ className, ...props }: ComposerShortcutsProps) {
       {...props}
     >
       <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="text-foreground font-medium">Keyboard shortcuts</div>
+        <div className="text-foreground font-medium">{heading}</div>
         <button
           type="button"
           className="text-muted-foreground hover:bg-muted hover:text-foreground rounded-sm px-2 py-1"
           onClick={closeShortcuts}
         >
-          close
+          {closeLabel}
         </button>
       </div>
       <div className="grid gap-3 sm:grid-cols-3">
-        {SHORTCUT_GROUPS.map((group) => (
-          <div key={group.title} className="space-y-2">
+        {SHORTCUT_GROUPS.map(({ group, items }) => (
+          <div key={group} className="space-y-2">
             <div className="text-muted-foreground text-[11px]">
-              {group.title}
+              {groupTitles[group]}
             </div>
             <div className="space-y-1">
-              {group.items.map(([key, label]) => (
+              {items.map(([key, action]) => (
                 <div
-                  key={`${key}-${label}`}
+                  key={`${key}-${action}`}
                   className="flex items-center justify-between gap-2"
                 >
                   <kbd className="border-border bg-muted text-foreground rounded border px-1.5 py-0.5 font-[inherit]">
                     {key}
                   </kbd>
                   <span className="text-muted-foreground text-right">
-                    {label}
+                    {descriptions[action]}
                   </span>
                 </div>
               ))}
@@ -2193,6 +2217,7 @@ function ComposerAttachFiles({
   accept = 'image/*,video/*,audio/*',
   multiple = true,
   disabled,
+  inputLabel,
   ...props
 }: ComposerAttachFilesProps) {
   const { actions, disabled: rootDisabled } = useComposerContext(
@@ -2211,7 +2236,7 @@ function ComposerAttachFiles({
         type="file"
         accept={accept}
         multiple={multiple}
-        aria-label="Attach media files"
+        aria-label={inputLabel}
         hidden
         disabled={rootDisabled || disabled}
         onChange={(event) => {

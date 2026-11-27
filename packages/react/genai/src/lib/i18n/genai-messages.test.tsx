@@ -10,6 +10,8 @@ import type { ReactNode } from 'react';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { Composer } from '@deepagents/react-input/browser';
+
 import { StoredMessagesTransport } from '../../testing/stored-messages-transport.ts';
 import { AgentProvider } from '../chat/agent-context.tsx';
 import { AgentHeader } from '../chat/chat.tsx';
@@ -84,6 +86,15 @@ const ar: GenaiMessages = {
   'composer.commandMenu': 'بدّل قائمة الأوامر',
   'composer.send': 'أرسل الطلب',
   'composer.stop': 'أوقف البث',
+  'composer.editor': 'اكتب رسالتك',
+  'composer.placeholder': 'اكتب رسالة أو / للأوامر',
+  'composer.sendFailed': 'تعذّر إرسال الطلب',
+  'composer.attachments': 'الملفات المرفقة بالطلب',
+  'composer.removeAttachment': ({ placeholder }) => `أزل ${placeholder}`,
+  'composer.attachInput': 'أرفق ملفات وسائط',
+  'composer.suggestions': 'الاقتراحات',
+  'composer.noMatches': 'لا نتائج',
+  'composer.takesArgs': 'معاملات',
   'dictation.start': 'ابدأ الإملاء',
   'dictation.starting': 'يبدأ الإملاء',
   'dictation.stop': 'أوقف الإملاء',
@@ -494,19 +505,41 @@ function tableButtons(container: HTMLElement) {
 }
 
 describe('GenaiMessagesProvider with an Arabic catalog across the chat', () => {
-  it('translates the composer, its dictation button, the send and stop buttons and the queue', () => {
+  it('translates the composer, its editor, attachments, suggestions and send failure, its dictation button, the send and stop buttons and the queue', async () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
 
+    const user = userEvent.setup();
     render(
       inArabic(
         <>
           <ChatComposer.Provider
             dictation={{ transcribe: () => Promise.resolve({ text: '' }) }}
+            onSubmit={() => Promise.reject('offline')}
           >
+            <Composer.Trigger trigger="/">
+              <Composer.Command
+                id="cmd-review"
+                value="review"
+                label="Review"
+                detail="Review the prompt"
+                supportsArgs
+              />
+            </Composer.Trigger>
+            <Composer.Trigger trigger="@">
+              <Composer.Mention
+                id="file-readme"
+                value="README.md"
+                label="README.md"
+                detail="file"
+              />
+            </Composer.Trigger>
             <ChatComposer.Root>
+              <ChatComposer.Popup />
               <ChatComposer.Content>
+                <ChatComposer.Attachments />
                 <ChatComposer.Editor />
+                <ChatComposer.Error />
               </ChatComposer.Content>
               <ChatComposer.Toolbar>
                 <ChatComposer.AttachFiles />
@@ -533,6 +566,41 @@ describe('GenaiMessagesProvider with an Arabic catalog across the chat', () => {
         'احذف الرسالة المنتظرة',
       ].map((name) => screen.queryAllByRole('button', { name }).length),
     ).toEqual([1, 1, 1, 1, 1, 1]);
+
+    const prompt = await screen.findByRole('textbox', {
+      name: ar['composer.editor'],
+    });
+    await user.upload(
+      screen.getByLabelText(ar['composer.attachInput']),
+      new File(['png'], 'chart.png', { type: 'image/png' }),
+    );
+    await screen.findByRole('list', { name: ar['composer.attachments'] });
+    await user.click(prompt);
+    await user.keyboard('hello /rev');
+    const suggestion = within(
+      screen.getByRole('listbox', { name: ar['composer.suggestions'] }),
+    ).getByRole('option').textContent;
+    await user.keyboard(' @zzz');
+    await screen.findByText(ar['composer.noMatches']);
+    const empty = screen.getByRole('listbox', {
+      name: ar['composer.suggestions'],
+    }).textContent;
+    await user.keyboard('{Escape}{Enter}');
+
+    expect({
+      placeholder: prompt.getAttribute('aria-placeholder'),
+      remove: screen.queryAllByRole('button', { name: 'أزل [Image #1]' })
+        .length,
+      suggestion,
+      empty,
+      failure: (await screen.findByRole('alert')).textContent,
+    }).toEqual({
+      placeholder: ar['composer.placeholder'],
+      remove: 1,
+      suggestion: '/reviewمعاملاتReview the prompt',
+      empty: ar['composer.noMatches'],
+      failure: ar['composer.sendFailed'],
+    });
   });
 
   it('translates the greeting, the attachments, the reminders, the usage, the approval and the retry in static mode', () => {
@@ -963,6 +1031,7 @@ describe('without a GenaiMessagesProvider, beyond the step lines', () => {
         t('response.renderFailed', { error: 'boom' }),
         t('dictation.transcribing'),
         t('snapshot.copy'),
+        t('composer.removeAttachment', { placeholder: '[Image #1]' }),
       ].map((line) => <p key={line}>{line}</p>);
     }
     render(<Lines />);
@@ -981,6 +1050,7 @@ describe('without a GenaiMessagesProvider, beyond the step lines', () => {
       'Failed to render content: boom',
       'Transcribing…',
       'Copy snapshot',
+      'Remove [Image #1]',
     ]);
   });
 });

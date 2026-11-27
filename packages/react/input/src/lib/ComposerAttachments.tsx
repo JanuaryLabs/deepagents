@@ -6,7 +6,11 @@ import { type ComponentPropsWithoutRef, useEffect, useState } from 'react';
 import { useComposerContext } from './ComposerContext.ts';
 import type { ComposerState } from './ComposerTypes.ts';
 
-export type ComposerAttachmentsProps = ComponentPropsWithoutRef<'div'>;
+export type ComposerAttachmentsProps = ComponentPropsWithoutRef<'div'> & {
+  'aria-label': string;
+  /** Names the button that removes the attachment shown as `placeholder`. */
+  removeLabel: (placeholder: string) => string;
+};
 
 type AttachmentPreviewProps = {
   placeholder: string;
@@ -15,6 +19,7 @@ type AttachmentPreviewProps = {
 
 export function ComposerAttachments({
   className,
+  removeLabel,
   ...props
 }: ComposerAttachmentsProps) {
   const { state, attachedImages } = useComposerContext('Composer.Attachments');
@@ -27,12 +32,15 @@ export function ComposerAttachments({
   return (
     <div
       role="list"
-      aria-label="Attached files"
       className={cn('flex flex-wrap gap-2', className)}
       {...props}
     >
       {attachments.map((attachment) => (
-        <ComposerAttachment key={attachment.id} attachment={attachment} />
+        <ComposerAttachment
+          key={attachment.id}
+          attachment={attachment}
+          removeLabel={removeLabel}
+        />
       ))}
     </div>
   );
@@ -40,8 +48,10 @@ export function ComposerAttachments({
 
 function ComposerAttachment({
   attachment: { id, placeholder, media },
+  removeLabel,
 }: {
   attachment: ComposerState['imageAttachments'][number];
+  removeLabel: ComposerAttachmentsProps['removeLabel'];
 }) {
   const { attachedImages, disabled, actions } = useComposerContext(
     'Composer.Attachments',
@@ -65,7 +75,7 @@ function ComposerAttachment({
       )}
       <Button
         type="button"
-        aria-label={`Remove ${placeholder}`}
+        aria-label={removeLabel(placeholder)}
         disabled={disabled}
         onClick={() => actions.removeImageAttachment(id)}
         className="bg-background text-foreground border-border hover:bg-muted absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full border disabled:opacity-50"
@@ -159,7 +169,7 @@ function ComposerAttachedFileChip({
         <span aria-hidden>{glyph} </span>
         {file.name || placeholder}
       </span>
-      <span className="truncate">{file.type || 'file'}</span>
+      <span className="truncate">{file.type}</span>
     </div>
   );
 }

@@ -10,7 +10,7 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ClockProvider } from '@zukhruf/ui';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -29,6 +29,14 @@ import {
   useComposer,
 } from '@deepagents/react-input/browser';
 
+import {
+  attachFilesWords,
+  attachmentsWords,
+  editorWords,
+  popupWords,
+  rootWords,
+  shortcutsWords,
+} from '../testing/english-words.ts';
 import { FakeClock } from '../testing/fake-clock.tsx';
 
 const COMMAND_TRIGGERS = ['/'];
@@ -287,6 +295,7 @@ function RichInputScenario({
   return (
     <>
       <Composer.Root
+        {...rootWords}
         draftKey={draftKey}
         disabled={disabled}
         isTaskRunning={running}
@@ -298,10 +307,12 @@ function RichInputScenario({
         }}
       >
         {registryTriggers({ slashCommands, mentionCandidates })}
-        <Composer.Popup />
+        <Composer.Popup {...popupWords} />
         <Composer.Content>
           <Composer.Toolbar>
-            <Composer.AttachFiles>Browse image files</Composer.AttachFiles>
+            <Composer.AttachFiles {...attachFilesWords}>
+              Browse image files
+            </Composer.AttachFiles>
             <Composer.AddRemoteImage url={REMOTE_IMAGE_URL}>
               Add remote image
             </Composer.AddRemoteImage>
@@ -324,11 +335,11 @@ function RichInputScenario({
             <Composer.Reset>Reset rich prompt</Composer.Reset>
           </Composer.Toolbar>
           <Composer.RemoteImages />
-          <Composer.Attachments />
-          <Composer.Editor />
+          <Composer.Attachments {...attachmentsWords} />
+          <Composer.Editor {...editorWords} />
           <Composer.Error />
         </Composer.Content>
-        <Composer.Shortcuts />
+        <Composer.Shortcuts {...shortcutsWords} />
         <Composer.Footer />
       </Composer.Root>
       <button type="button" onClick={() => setRunning((current) => !current)}>
@@ -363,15 +374,16 @@ function RichCompoundActionScenario() {
   return (
     <>
       <Composer.Root
+        {...rootWords}
         draftKey={draftKey}
         onSubmit={(submission) =>
           setSubmissions((current) => [submission, ...current])
         }
       >
         {registryTriggers()}
-        <Composer.Popup />
+        <Composer.Popup {...popupWords} />
         <Composer.Content>
-          <Composer.Editor />
+          <Composer.Editor {...editorWords} />
         </Composer.Content>
         <Composer.Submit
           onClick={(event) => {
@@ -408,6 +420,7 @@ function RichDisabledAnchorActionScenario() {
   return (
     <>
       <Composer.Root
+        {...rootWords}
         draftKey={draftKey}
         disabled
         onSubmit={(submission) =>
@@ -415,9 +428,9 @@ function RichDisabledAnchorActionScenario() {
         }
       >
         {registryTriggers()}
-        <Composer.Popup />
+        <Composer.Popup {...popupWords} />
         <Composer.Content>
-          <Composer.Editor />
+          <Composer.Editor {...editorWords} />
         </Composer.Content>
         <Composer.Submit nativeButton={false} render={<a href="/submit" />}>
           Disabled rich anchor submit
@@ -441,15 +454,16 @@ function RichContextConsumerScenario() {
   return (
     <>
       <Composer.Root
+        {...rootWords}
         draftKey={draftKey}
         onSubmit={(submission) =>
           setSubmissions((current) => [submission, ...current])
         }
       >
         {registryTriggers()}
-        <Composer.Popup />
+        <Composer.Popup {...popupWords} />
         <Composer.Content>
-          <Composer.Editor />
+          <Composer.Editor {...editorWords} />
         </Composer.Content>
         <RichContextConsumer />
       </Composer.Root>
@@ -470,6 +484,7 @@ function RichCustomPopupScenario() {
   return (
     <>
       <Composer.Root
+        {...rootWords}
         draftKey={draftKey}
         onSubmit={(submission) =>
           setSubmissions((current) => [submission, ...current])
@@ -477,7 +492,7 @@ function RichCustomPopupScenario() {
       >
         {registryTriggers()}
         <Composer.Content>
-          <Composer.Editor />
+          <Composer.Editor {...editorWords} />
         </Composer.Content>
         <RichSlashToggle />
         <RichCustomPopup />
@@ -600,13 +615,13 @@ describe('Composer compound API', () => {
     ).toHaveAttribute('type', 'button');
   });
 
-  it('labels the editor with the default aria-label and auto direction', async () => {
+  it('labels the editor with auto direction', async () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
 
     render(
-      <Composer.Root>
-        <Composer.Editor />
+      <Composer.Root {...rootWords}>
+        <Composer.Editor {...editorWords} />
       </Composer.Root>,
       { wrapper: FakeClock },
     );
@@ -622,8 +637,8 @@ describe('Composer compound API', () => {
     stack.defer(cleanup);
 
     render(
-      <Composer.Root editorAriaLabel="Message">
-        <Composer.Editor />
+      <Composer.Root {...rootWords} editorAriaLabel="Message">
+        <Composer.Editor {...editorWords} />
       </Composer.Root>,
       { wrapper: FakeClock },
     );
@@ -638,16 +653,16 @@ describe('Composer compound API', () => {
     stack.defer(cleanup);
 
     const view = render(
-      <Composer.Root editorAriaLabel="Message">
-        <Composer.Editor />
+      <Composer.Root {...rootWords} editorAriaLabel="Message">
+        <Composer.Editor {...editorWords} />
       </Composer.Root>,
       { wrapper: FakeClock },
     );
     await screen.findByRole('textbox', { name: 'Message' });
 
     view.rerender(
-      <Composer.Root editorAriaLabel="Reply">
-        <Composer.Editor />
+      <Composer.Root {...rootWords} editorAriaLabel="Reply">
+        <Composer.Editor {...editorWords} />
       </Composer.Root>,
     );
 
@@ -786,6 +801,209 @@ describe('Composer compound API', () => {
   });
 });
 
+describe('Composer words from the host', () => {
+  const words = {
+    editorAriaLabel: 'Votre message',
+    placeholder: 'Écrivez ici',
+    submitFailedMessage: 'Envoi impossible',
+    attachments: 'Pièces jointes',
+    removeAttachment: (placeholder: string) => `Retirer ${placeholder}`,
+    attachInput: 'Joindre des médias',
+    suggestions: 'Propositions',
+    noMatches: 'Aucun résultat',
+    takesArgs: 'arguments',
+  };
+
+  function WordsScenario({
+    onSubmit,
+    children,
+  }: {
+    onSubmit?: () => Promise<unknown>;
+    children?: ReactNode;
+  }) {
+    return (
+      <Composer.Root
+        editorAriaLabel={words.editorAriaLabel}
+        submitFailedMessage={words.submitFailedMessage}
+        onSubmit={onSubmit}
+      >
+        {registryTriggers()}
+        <Composer.Popup
+          listboxLabel={words.suggestions}
+          noMatchesLabel={words.noMatches}
+          argsLabel={words.takesArgs}
+        />
+        <Composer.Content>
+          <Composer.Toolbar>
+            <Composer.AttachFiles inputLabel={words.attachInput}>
+              Browse
+            </Composer.AttachFiles>
+          </Composer.Toolbar>
+          <Composer.Attachments
+            aria-label={words.attachments}
+            removeLabel={words.removeAttachment}
+          />
+          <Composer.Editor placeholder={words.placeholder} />
+          <Composer.Error />
+        </Composer.Content>
+        {children}
+      </Composer.Root>
+    );
+  }
+
+  it('labels the editor, its placeholder, the file input, the attachments list and each remove button', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const user = userEvent.setup();
+    render(<WordsScenario />, { wrapper: FakeClock });
+    const prompt = await screen.findByRole('textbox', {
+      name: words.editorAriaLabel,
+    });
+
+    await user.upload(
+      screen.getByLabelText(words.attachInput),
+      new File(['png'], 'chart.png', { type: 'image/png' }),
+    );
+
+    expect({
+      placeholder: prompt.getAttribute('aria-placeholder'),
+      list: (await screen.findByRole('list', { name: words.attachments }))
+        .tagName,
+      remove: screen.getAllByRole('button', { name: 'Retirer [Image #1]' })
+        .length,
+    }).toEqual({ placeholder: words.placeholder, list: 'DIV', remove: 1 });
+  });
+
+  it('labels the suggestions list, a command that takes args and a mention with no matches', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const user = userEvent.setup();
+    render(<WordsScenario />, { wrapper: FakeClock });
+    const prompt = await screen.findByRole('textbox', {
+      name: words.editorAriaLabel,
+    });
+
+    await user.click(prompt);
+    await user.keyboard('hello /rev');
+    const listbox = await screen.findByRole('listbox', {
+      name: words.suggestions,
+    });
+    const withArgs = within(listbox).getByRole('option').textContent;
+    await user.keyboard(' @zzz');
+    await waitFor(() =>
+      expect(
+        within(
+          screen.getByRole('listbox', { name: words.suggestions }),
+        ).queryByRole('option'),
+      ).not.toBeInTheDocument(),
+    );
+
+    expect({
+      withArgs,
+      empty: screen.getByRole('listbox', { name: words.suggestions })
+        .textContent,
+    }).toEqual({
+      withArgs: '/reviewargumentsReview the current prompt',
+      empty: words.noMatches,
+    });
+  });
+
+  it('says why a send failed in the host words when the rejection is not an Error', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const user = userEvent.setup();
+    render(<WordsScenario onSubmit={() => Promise.reject('offline')} />, {
+      wrapper: FakeClock,
+    });
+    const prompt = await screen.findByRole('textbox', {
+      name: words.editorAriaLabel,
+    });
+
+    await user.click(prompt);
+    await user.keyboard('hello{Enter}');
+
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      words.submitFailedMessage,
+    );
+  });
+
+  it('draws the keyboard shortcuts sheet in the host words', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const user = userEvent.setup();
+    render(
+      <WordsScenario>
+        <Composer.Shortcuts
+          heading="Raccourcis"
+          closeLabel="fermer"
+          groupTitles={{
+            send: 'Envoyer',
+            edit: 'Modifier',
+            navigate: 'Naviguer',
+          }}
+          descriptions={{
+            send: 'envoyer ou attendre',
+            newline: 'nouvelle ligne',
+            killToEnd: 'couper la fin',
+            killToStart: 'couper le début',
+            killWord: 'couper le mot',
+            yank: 'coller',
+            history: 'historique',
+            reverseSearch: 'recherche inverse',
+            lineEnd: 'fin de ligne',
+            wordMove: 'mot suivant',
+          }}
+        />
+      </WordsScenario>,
+      { wrapper: FakeClock },
+    );
+    const prompt = await screen.findByRole('textbox', {
+      name: words.editorAriaLabel,
+    });
+
+    await user.click(prompt);
+    fireEditorKeyDown(prompt, { key: '?', code: 'Slash', shiftKey: true });
+    const sheet = screen.getByRole('dialog', { name: 'Raccourcis' });
+
+    expect({
+      english:
+        /Keyboard|close|send|newline|kill|yank|history|Edit|Navigate/.test(
+          sheet.textContent,
+        ),
+      heading: within(sheet).getAllByText('Raccourcis').length,
+      close: within(sheet).getAllByRole('button', { name: 'fermer' }).length,
+      lines: Array.from(
+        sheet.querySelectorAll('.space-y-2 > div:first-child, kbd + span'),
+        (line) => line.textContent,
+      ),
+    }).toEqual({
+      english: false,
+      heading: 1,
+      close: 1,
+      lines: [
+        'Envoyer',
+        'envoyer ou attendre',
+        'nouvelle ligne',
+        'nouvelle ligne',
+        'Modifier',
+        'couper la fin',
+        'couper le début',
+        'couper le mot',
+        'coller',
+        'Naviguer',
+        'historique',
+        'recherche inverse',
+        'fin de ligne',
+        'mot suivant',
+      ],
+    });
+  });
+});
+
 function OrphanRichConsumer() {
   useComposer('OrphanRichConsumer');
   return null;
@@ -797,8 +1015,8 @@ describe('Composer placeholder', () => {
     stack.defer(cleanup);
 
     render(
-      <Composer.Root editorAriaLabel="Message">
-        <Composer.Editor placeholder="Ask anything" />
+      <Composer.Root {...rootWords} editorAriaLabel="Message">
+        <Composer.Editor {...editorWords} placeholder="Ask anything" />
       </Composer.Root>,
       { wrapper: FakeClock },
     );
@@ -820,8 +1038,8 @@ describe('Composer placeholder', () => {
 
     const user = userEvent.setup();
     render(
-      <Composer.Root editorAriaLabel="Message">
-        <Composer.Editor placeholder="Ask anything" />
+      <Composer.Root {...rootWords} editorAriaLabel="Message">
+        <Composer.Editor {...editorWords} placeholder="Ask anything" />
       </Composer.Root>,
       { wrapper: FakeClock },
     );
@@ -844,8 +1062,8 @@ describe('Composer placeholder', () => {
     stack.defer(cleanup);
 
     const view = render(
-      <Composer.Root editorAriaLabel="Message">
-        <Composer.Editor placeholder="Ask anything" />
+      <Composer.Root {...rootWords} editorAriaLabel="Message">
+        <Composer.Editor {...editorWords} placeholder="Ask anything" />
       </Composer.Root>,
       { wrapper: FakeClock },
     );
@@ -858,8 +1076,8 @@ describe('Composer placeholder', () => {
     );
 
     view.rerender(
-      <Composer.Root editorAriaLabel="Message">
-        <Composer.Editor placeholder="Reply to the thread" />
+      <Composer.Root {...rootWords} editorAriaLabel="Message">
+        <Composer.Editor {...editorWords} placeholder="Reply to the thread" />
       </Composer.Root>,
     );
 
@@ -879,8 +1097,8 @@ describe('Composer placeholder', () => {
     stack.defer(cleanup);
 
     render(
-      <Composer.Root editorAriaLabel="Message" disabled>
-        <Composer.Editor placeholder="Ask anything" />
+      <Composer.Root {...rootWords} editorAriaLabel="Message" disabled>
+        <Composer.Editor {...editorWords} placeholder="Ask anything" />
       </Composer.Root>,
       { wrapper: FakeClock },
     );
@@ -904,8 +1122,8 @@ describe('Composer empty prompt', () => {
     const submitted = vi.fn();
 
     render(
-      <Composer.Root onSubmit={submitted}>
-        <Composer.Editor />
+      <Composer.Root {...rootWords} onSubmit={submitted}>
+        <Composer.Editor {...editorWords} />
       </Composer.Root>,
       { wrapper: FakeClock },
     );
@@ -1990,12 +2208,12 @@ describe('Composer editing shortcuts', () => {
 
     const user = userEvent.setup();
     render(
-      <Composer.Root>
+      <Composer.Root {...rootWords}>
         <input
           aria-label="Annotation comment"
           defaultValue="Question the market constraint"
         />
-        <Composer.Editor />
+        <Composer.Editor {...editorWords} />
       </Composer.Root>,
       { wrapper: FakeClock },
     );
@@ -3033,8 +3251,8 @@ describe('Composer disabled guard', () => {
     stack.defer(cleanup);
 
     const view = render(
-      <Composer.Root editorAriaLabel="Message">
-        <Composer.Editor />
+      <Composer.Root {...rootWords} editorAriaLabel="Message">
+        <Composer.Editor {...editorWords} />
       </Composer.Root>,
       { wrapper: FakeClock },
     );
@@ -3043,8 +3261,8 @@ describe('Composer disabled guard', () => {
     expect(prompt).toHaveAttribute('contenteditable', 'true');
 
     view.rerender(
-      <Composer.Root editorAriaLabel="Message" disabled>
-        <Composer.Editor />
+      <Composer.Root {...rootWords} editorAriaLabel="Message" disabled>
+        <Composer.Editor {...editorWords} />
       </Composer.Root>,
     );
     await waitFor(() =>
@@ -3053,8 +3271,8 @@ describe('Composer disabled guard', () => {
     expect(prompt).toHaveAttribute('contenteditable', 'false');
 
     view.rerender(
-      <Composer.Root editorAriaLabel="Message">
-        <Composer.Editor />
+      <Composer.Root {...rootWords} editorAriaLabel="Message">
+        <Composer.Editor {...editorWords} />
       </Composer.Root>,
     );
     await waitFor(() =>
@@ -5196,12 +5414,13 @@ function StateChangeCountScenario() {
   return (
     <>
       <Composer.Root
+        {...rootWords}
         draftKey={draftKey}
         onStateChange={() => setStateChanges((current) => current + 1)}
       >
         {registryTriggers()}
         <Composer.Content>
-          <Composer.Editor />
+          <Composer.Editor {...editorWords} />
         </Composer.Content>
       </Composer.Root>
       <button
@@ -5317,6 +5536,7 @@ describe('Composer host-declared triggers', () => {
     const submitted: ComposerSubmission[] = [];
     render(
       <Composer.Root
+        {...rootWords}
         onSubmit={(submission) => {
           submitted.push(submission);
         }}
@@ -5330,8 +5550,8 @@ describe('Composer host-declared triggers', () => {
           />
         </Composer.Trigger>
         <Composer.Content>
-          <Composer.Popup />
-          <Composer.Editor />
+          <Composer.Popup {...popupWords} />
+          <Composer.Editor {...editorWords} />
         </Composer.Content>
       </Composer.Root>,
       { wrapper: FakeClock },
@@ -5356,7 +5576,7 @@ describe('Composer host-declared triggers', () => {
 
     const user = userEvent.setup();
     render(
-      <Composer.Root>
+      <Composer.Root {...rootWords}>
         <Composer.Trigger trigger="#">
           <Composer.Command
             id="cmd-deploy"
@@ -5366,8 +5586,8 @@ describe('Composer host-declared triggers', () => {
           />
         </Composer.Trigger>
         <Composer.Content>
-          <Composer.Popup />
-          <Composer.Editor />
+          <Composer.Popup {...popupWords} />
+          <Composer.Editor {...editorWords} />
         </Composer.Content>
       </Composer.Root>,
       { wrapper: FakeClock },
@@ -5389,11 +5609,11 @@ describe('Composer host-declared triggers', () => {
 
     const user = userEvent.setup();
     render(
-      <Composer.Root>
+      <Composer.Root {...rootWords}>
         {registryTriggers()}
         <Composer.Content>
-          <Composer.Popup />
-          <Composer.Editor />
+          <Composer.Popup {...popupWords} />
+          <Composer.Editor {...editorWords} />
         </Composer.Content>
       </Composer.Root>,
       { wrapper: FakeClock },
@@ -5429,7 +5649,7 @@ describe('Composer host-declared triggers', () => {
 
     const user = userEvent.setup();
     render(
-      <Composer.Root>
+      <Composer.Root {...rootWords}>
         <Composer.Trigger trigger="~">
           <Composer.Mention
             value="audit"
@@ -5440,8 +5660,8 @@ describe('Composer host-declared triggers', () => {
           />
         </Composer.Trigger>
         <Composer.Content>
-          <Composer.Popup />
-          <Composer.Editor />
+          <Composer.Popup {...popupWords} />
+          <Composer.Editor {...editorWords} />
         </Composer.Content>
       </Composer.Root>,
       { wrapper: FakeClock },
@@ -5465,7 +5685,7 @@ describe('Composer host-declared triggers', () => {
 
     const user = userEvent.setup();
     render(
-      <Composer.Root>
+      <Composer.Root {...rootWords}>
         <Composer.Trigger trigger="::">
           <Composer.Mention
             value="audit"
@@ -5476,8 +5696,8 @@ describe('Composer host-declared triggers', () => {
           />
         </Composer.Trigger>
         <Composer.Content>
-          <Composer.Popup />
-          <Composer.Editor />
+          <Composer.Popup {...popupWords} />
+          <Composer.Editor {...editorWords} />
         </Composer.Content>
       </Composer.Root>,
       { wrapper: FakeClock },
@@ -5502,7 +5722,7 @@ describe('Composer host-declared triggers', () => {
     const user = userEvent.setup();
     function MenuScenario() {
       return (
-        <Composer.Root>
+        <Composer.Root {...rootWords}>
           <Composer.Trigger trigger="@">
             <Composer.Mention
               value="frontend"
@@ -5513,8 +5733,8 @@ describe('Composer host-declared triggers', () => {
             />
           </Composer.Trigger>
           <Composer.Content>
-            <Composer.Popup />
-            <Composer.Editor />
+            <Composer.Popup {...popupWords} />
+            <Composer.Editor {...editorWords} />
           </Composer.Content>
           <MenuToggle />
         </Composer.Root>
@@ -5541,7 +5761,7 @@ describe('Composer host-declared triggers', () => {
 
     expect(() =>
       render(
-        <Composer.Root>
+        <Composer.Root {...rootWords}>
           <Composer.Command
             id="cmd-deploy"
             value="deploy"
@@ -5549,7 +5769,7 @@ describe('Composer host-declared triggers', () => {
             detail="Ship the build"
           />
           <Composer.Content>
-            <Composer.Editor />
+            <Composer.Editor {...editorWords} />
           </Composer.Content>
         </Composer.Root>,
         { wrapper: FakeClock },
@@ -5574,12 +5794,12 @@ describe('Composer host-declared triggers', () => {
 
     expect(() =>
       render(
-        <Composer.Root>
+        <Composer.Root {...rootWords}>
           <Composer.Trigger trigger="$">
             <SkillItem />
           </Composer.Trigger>
           <Composer.Content>
-            <Composer.Editor />
+            <Composer.Editor {...editorWords} />
           </Composer.Content>
         </Composer.Root>,
         { wrapper: FakeClock },
@@ -5593,7 +5813,7 @@ describe('Composer host-declared triggers', () => {
 
     expect(() =>
       render(
-        <Composer.Root>
+        <Composer.Root {...rootWords}>
           <Composer.Trigger trigger="/">
             <Composer.Command
               id="cmd-deploy"
@@ -5610,7 +5830,7 @@ describe('Composer host-declared triggers', () => {
             />
           </Composer.Trigger>
           <Composer.Content>
-            <Composer.Editor />
+            <Composer.Editor {...editorWords} />
           </Composer.Content>
         </Composer.Root>,
         { wrapper: FakeClock },
@@ -5626,11 +5846,11 @@ describe('Composer token detection', () => {
 
     const user = userEvent.setup();
     render(
-      <Composer.Root>
+      <Composer.Root {...rootWords}>
         {registryTriggers()}
         <Composer.Content>
-          <Composer.Popup />
-          <Composer.Editor />
+          <Composer.Popup {...popupWords} />
+          <Composer.Editor {...editorWords} />
         </Composer.Content>
       </Composer.Root>,
       { wrapper: FakeClock },
@@ -5657,8 +5877,8 @@ describe('Composer host clock', () => {
 
     render(
       <ClockProvider clock={clock}>
-        <Composer.Root onSubmit={submitted}>
-          <Composer.Editor />
+        <Composer.Root {...rootWords} onSubmit={submitted}>
+          <Composer.Editor {...editorWords} />
         </Composer.Root>
       </ClockProvider>,
     );
@@ -5682,15 +5902,23 @@ describe('Composer host clock', () => {
     const first = vi.fn();
     const second = vi.fn();
     const view = render(
-      <Composer.Root editorAriaLabel="Message" onStateChange={first}>
-        <Composer.Editor />
+      <Composer.Root
+        {...rootWords}
+        editorAriaLabel="Message"
+        onStateChange={first}
+      >
+        <Composer.Editor {...editorWords} />
       </Composer.Root>,
       { wrapper: FakeClock },
     );
     const prompt = await screen.findByRole('textbox', { name: 'Message' });
     view.rerender(
-      <Composer.Root editorAriaLabel="Message" onStateChange={second}>
-        <Composer.Editor />
+      <Composer.Root
+        {...rootWords}
+        editorAriaLabel="Message"
+        onStateChange={second}
+      >
+        <Composer.Editor {...editorWords} />
       </Composer.Root>,
     );
     first.mockClear();
@@ -5713,11 +5941,11 @@ describe('Composer host clock', () => {
 
     render(
       <ClockProvider clock={clock}>
-        <Composer.Root onStateChange={onStateChange}>
+        <Composer.Root {...rootWords} onStateChange={onStateChange}>
           <Composer.AddRemoteImage url={REMOTE_IMAGE_URL}>
             Add remote image
           </Composer.AddRemoteImage>
-          <Composer.Editor />
+          <Composer.Editor {...editorWords} />
         </Composer.Root>
       </ClockProvider>,
     );

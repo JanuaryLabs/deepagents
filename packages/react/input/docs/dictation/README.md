@@ -64,13 +64,15 @@ const { state, start, stop, cancel } = useDictation({
 import { Composer } from '@deepagents/react-input/browser';
 
 <Composer.Root
+  editorAriaLabel="Message"
+  submitFailedMessage="Could not send the message"
   onSubmit={send}
   dictation={{
     transcribe: (audio, { signal }) =>
       api.transcribe({ audio, spaceId, signal }),
   }}
 >
-  <Composer.Editor />
+  <Composer.Editor placeholder="Ask anything" />
   <Composer.Toolbar>
     <Composer.Dictate
       render={(props, dictation) => (

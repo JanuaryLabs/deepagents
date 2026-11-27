@@ -49,7 +49,6 @@ export type ComposerRegistry = {
   mentionCandidates: ComposerItemEntry[];
   commandTriggers: string[];
   mentionTriggers: string[];
-  hasLayoutChildren: boolean;
 };
 
 export function collectComposerRegistry(children: ReactNode): ComposerRegistry {
@@ -57,12 +56,10 @@ export function collectComposerRegistry(children: ReactNode): ComposerRegistry {
   const mentionCandidates: ComposerItemEntry[] = [];
   const commandTriggers = new Set<string>();
   const mentionTriggers = new Set<string>();
-  let hasLayoutChildren = false;
 
   const visit = (node: ReactNode) => {
     for (const child of Children.toArray(node)) {
       if (!isValidElement(child)) {
-        hasLayoutChildren = true;
         continue;
       }
       if (child.type === Fragment) {
@@ -90,7 +87,6 @@ export function collectComposerRegistry(children: ReactNode): ComposerRegistry {
           'Composer.Command and Composer.Mention must be placed inside a <Composer.Trigger>.',
         );
       }
-      hasLayoutChildren = true;
     }
   };
 
@@ -100,7 +96,6 @@ export function collectComposerRegistry(children: ReactNode): ComposerRegistry {
     mentionCandidates,
     commandTriggers: [...commandTriggers],
     mentionTriggers: [...mentionTriggers],
-    hasLayoutChildren,
   };
 }
 
