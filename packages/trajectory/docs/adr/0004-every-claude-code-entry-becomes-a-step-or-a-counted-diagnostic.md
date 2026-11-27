@@ -1,6 +1,6 @@
 # Every Claude Code entry becomes a step or a counted diagnostic
 
-Status: ruled by Ezz on 2026-11-27 (deepagents #6107).
+Status: ruled by Ezz on 2026-11-27 (deepagents #6107). Amended the same day, after real transcripts showed peer messages stored with `isMeta: true` and `origin.kind: "peer"`: an explicit `origin` decides. Any `user` entry with an `origin` is a `UserStep` with that origin, whether or not it is `isMeta`. `isMeta` with no `origin` (skill bodies, command expansions) is a `SystemStep`. A text entry with neither (Claude Code builds before `origin`) is a `UserStep` with no origin, so it never counts as typed.
 
 ## Context
 

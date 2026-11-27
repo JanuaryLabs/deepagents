@@ -56,10 +56,11 @@ are system steps. See [ADR 0004](./docs/adr/0004-every-claude-code-entry-becomes
 ```ts
 const store = new ClaudeCodeStore({ root: join(homedir(), '.claude') });
 const session = await store.session(process.env.CLAUDE_CODE_SESSION_ID);
-const chain = await store.chain(session); // oldest first, linked by derived-from entries
+const { sessions, missing } = await store.chain(session); // oldest first, linked by derived-from entries
 ```
 
-Each segment reads as its own trajectory. All segments share one `session_id`
+`missing` names each id the chain points to whose transcript is no longer in the
+store. Each segment reads as its own trajectory. All segments share one `session_id`
 (the first id of the chain), and each one names the next in
 `continued_trajectory_ref`. See [ADR 0007](./docs/adr/0007-a-clear-chain-is-separate-trajectories-that-share-session-id-and-link-by-continued-trajectory-ref.md).
 
@@ -121,7 +122,11 @@ export class ClaudeCodeStore {
   constructor(options: { root: string }); // the folder that holds projects/
   sessions(options: { since: Date }): AsyncIterable<ClaudeCodeSession>;
   session(sessionId: string): Promise<ClaudeCodeSession | undefined>;
-  chain(session: ClaudeCodeSession): Promise<ClaudeCodeSession[]>;
+  chain(session: ClaudeCodeSession): Promise<ClaudeCodeChain>;
+}
+export interface ClaudeCodeChain {
+  readonly sessions: readonly ClaudeCodeSession[]; // oldest first
+  readonly missing: readonly string[]; // ids the chain names whose transcript is gone
 }
 export class ClaudeCodeSession {
   static fromTranscriptPath(path: string): ClaudeCodeSession;
@@ -154,7 +159,7 @@ export class SessionReadError extends Error { readonly path: string } // missing
 | `ClaudeCodeSession.fromTranscriptPath(p)` | Takes the id from the file name; touches no disk.                                                                                                                                                                                                       |
 | `ClaudeCodeStore.sessions({ since })`     | Walks `projects/*/*.jsonl` and yields each main transcript changed since `since`, newest first. Subagent files are not sessions.                                                                                                                        |
 | `ClaudeCodeStore.session(id)`             | Looks for `projects/*/<id>.jsonl`.                                                                                                                                                                                                                      |
-| `ClaudeCodeStore.chain(s)`                | Reads each transcript's `derived-from` entry back to the first segment.                                                                                                                                                                                 |
+| `ClaudeCodeStore.chain(s)`                | Reads each transcript's `derived-from` entry back to the first segment. It follows every `claude_code_session` it names (any `via`), skips ids already in the chain, looks beside the current transcript first, then in every project.                  |
 | `ClaudeCodeAdapter.read(s)`               | Streams the transcript line by line. It maps every entry by the [mapping table](#claude-code-entry--atif), pairs each `tool_use` with its `tool_result` by id, and reads `<id>/subagents/agent-*.jsonl` plus `.meta.json` into `subagent_trajectories`. |
 | `CodexStore.threads({ since })`           | Walks `sessions/` and `archived_sessions/` (`.jsonl`, `.jsonl.zst`) and groups rollouts by the parent ids in each `session_meta`.                                                                                                                       |
 | `CodexAdapter.read(t)`                    | Decodes `.zst` with `node:zlib` `zstdDecompressSync`, then calls meticulous's `convertCodexSession`, and writes `schema_version: ATIF-v1.8`.                                                                                                            |
@@ -169,8 +174,9 @@ Budget: a hook reads a 3 MB transcript in under 100 ms. Measured on this Mac,
 
 | Entry                                                                                                              | Becomes                                                                                                                      |
 | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| `user`, string content, not `isMeta`                                                                               | `UserStep`; `extra.claude_code.origin` = `origin.kind` (`human`, `peer`, `task-notification`, …)                             |
-| `user`, `isMeta` (skill bodies, command expansions)                                                                | `SystemStep`, `extra.claude_code.is_meta: true`                                                                              |
+| `user` with an `origin` (typed prompts, peer messages, task notifications; `isMeta` or not)                        | `UserStep`; `extra.claude_code.origin` = `origin.kind` (`human`, `peer`, `task-notification`, …)                             |
+| `user`, `isMeta`, no `origin` (skill bodies, command expansions)                                                   | `SystemStep`, `extra.claude_code.is_meta: true`                                                                              |
+| `user`, text content, no `origin`, not `isMeta` (Claude Code builds before `origin`)                               | `UserStep` with no `extra.claude_code.origin`: its author is unknown, so it never counts as typed                            |
 | `user` with `tool_result` blocks                                                                                   | `ObservationResult` on the agent step that made the call; `toolUseResult` goes in `result.extra.claude_code.tool_use_result` |
 | `assistant` (entries with one `message.id` merge into one step)                                                    | `AgentStep`: text → `message`, `thinking` → `reasoning_content`, `tool_use` → `tool_calls`, `usage` → `metrics`              |
 | `attachment` `queued_command`                                                                                      | `UserStep` with that attachment's `origin` (a prompt typed mid-turn, or a peer message)                                      |
