@@ -107,7 +107,12 @@ function TablePanelContent({
   return (
     <CardContent
       data-slot="table-panel-content"
-      className={cn('min-w-0 flex-1 overflow-auto p-0', className)}
+      // The panel root stays overflow-visible so the header's dropdowns can
+      // leave it; rounding the content clips the table to the root's corners.
+      className={cn(
+        'min-w-0 flex-1 overflow-auto rounded-b-[inherit] p-0',
+        className,
+      )}
       {...props}
     />
   );
