@@ -1,4 +1,4 @@
-import type { Citation, UIMessage } from 'ai';
+import type { Citation, TextUIPart, UIMessage } from 'ai';
 
 import { citationsInReadingOrder } from './citation-order.ts';
 
@@ -18,6 +18,32 @@ export function urlCitationsOf(
   return (citations ?? []).filter(
     (citation): citation is UrlCitation => citation.source.sourceType === 'url',
   );
+}
+
+/**
+ * Consecutive text parts as the one Markdown text they draw: a provider may
+ * split a paragraph into several parts (@ai-sdk/anthropic gives each cited
+ * span its own). Each citation's offsets move by the length joined before its
+ * part, and a citation with no offset covers its own part, so it still sits
+ * at that part's end.
+ */
+export function joinTextParts(parts: readonly TextUIPart[]): {
+  text: string;
+  citations: Citation[];
+} {
+  let text = '';
+  const citations: Citation[] = [];
+  for (const part of parts) {
+    const at = text.length;
+    for (const citation of part.citations ?? [])
+      citations.push({
+        ...citation,
+        startIndex: at + (citation.startIndex ?? 0),
+        endIndex: at + (citation.endIndex ?? part.text.length),
+      });
+    text += part.text;
+  }
+  return { text, citations };
 }
 
 /**

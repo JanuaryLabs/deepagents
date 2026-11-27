@@ -4,9 +4,8 @@ import {
   CollapsibleTrigger,
 } from '@zukhruf/shadcn';
 import type { ToolUIPart, UIMessage } from 'ai';
-import { getStaticToolName, isStaticToolUIPart } from 'ai';
+import { getStaticToolName, isStaticToolUIPart, isTextUIPart } from 'ai';
 import { type ReactNode, createContext, use, useMemo } from 'react';
-import { Fragment } from 'react/jsx-runtime';
 
 import { CitationPill } from '../../../components/CitationPill.tsx';
 import { DynamicToolDebug } from '../../../components/tool-debug.tsx';
@@ -19,7 +18,11 @@ import {
 } from '../../../tools/helpers.ts';
 import type { ToolLabel } from '../../../tools/registry.ts';
 import { useAgent } from '../../agent-context.tsx';
-import { citationIndexOf, extractSourcesFromMessage } from '../../citations.ts';
+import {
+  citationIndexOf,
+  extractSourcesFromMessage,
+  joinTextParts,
+} from '../../citations.ts';
 import {
   AssistantTextPart,
   MessageAttachmentPart,
@@ -49,21 +52,16 @@ function SegmentText({
   elements?: MessagesContextValue['elements'];
   className?: string;
 }) {
+  const { text, citations } = joinTextParts(
+    segment.parts.flatMap(({ part }) => (isTextUIPart(part) ? [part] : [])),
+  );
   return (
-    <Fragment>
-      {segment.parts.map(({ part, idx }) => {
-        if (part.type !== 'text') return null;
-        return (
-          <AssistantTextPart
-            key={`${idx}-text`}
-            text={part.text}
-            citations={part.citations}
-            elements={elements}
-            className={className}
-          />
-        );
-      })}
-    </Fragment>
+    <AssistantTextPart
+      text={text}
+      citations={citations}
+      elements={elements}
+      className={className}
+    />
   );
 }
 

@@ -15,8 +15,10 @@ import { citationsInReadingOrder } from '../chat/citation-order.ts';
 import {
   citationIndexOf,
   extractSourcesFromMessage,
+  joinTextParts,
   urlCitationsOf,
 } from '../chat/citations.ts';
+import { buildMessageTrajectorySegments } from '../chat/trajectory/trajectory-segments.ts';
 import { useGenaiMessages } from '../i18n/provider.tsx';
 import { COPY_EXCLUSION_MODES } from './copy-image.ts';
 import { SnapshotRenderContext } from './snapshot-context.ts';
@@ -64,17 +66,28 @@ function withoutCustomElementTags(text: string): string {
  */
 export function extractAssistantRawText(message: UIMessage): string {
   const sources = extractSourcesFromMessage(message);
-  const text = message.parts
-    .filter(isTextUIPart)
-    .map((part) =>
+  // One text per run of consecutive text parts, as the screen draws them.
+  const text = buildMessageTrajectorySegments(message.parts)
+    .flatMap((segment) =>
+      segment.kind === 'text'
+        ? [
+            joinTextParts(
+              segment.parts.flatMap(({ part }) =>
+                isTextUIPart(part) ? [part] : [],
+              ),
+            ),
+          ]
+        : [],
+    )
+    .map(({ text, citations }) =>
       withoutCustomElementTags(
         // Copy of placeCitations' insertion in message-parts.tsx (strike 2, #6040).
-        citationsInReadingOrder(part.text, urlCitationsOf(part.citations))
+        citationsInReadingOrder(text, urlCitationsOf(citations))
           .reverse()
           .reduce(
             (marked, { at, citation }) =>
               `${marked.slice(0, at)}[${citationIndexOf(sources, citation.source.url)}]${marked.slice(at)}`,
-            part.text,
+            text,
           ),
       ),
     )
