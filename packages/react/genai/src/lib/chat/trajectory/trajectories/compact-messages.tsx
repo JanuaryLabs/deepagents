@@ -23,7 +23,10 @@ import { useStickToBottom } from 'use-stick-to-bottom';
 
 import { TextShimmer } from '../../../components/text-shimmer.tsx';
 import { isSubagentPart, resolveToolEntry } from '../../../tools/helpers.ts';
-import type { ComponentRegistry, ToolLabel } from '../../../tools/registry.ts';
+import type {
+  ComponentRegistry,
+  ToolCallLabel,
+} from '../../../tools/registry.ts';
 import { useAgent } from '../../agent-context.tsx';
 import { isToolStateAborted } from '../../tool-abort.ts';
 import {
@@ -150,13 +153,27 @@ function getToolPartState(segment: MessageTrajectorySegment) {
   return isToolUIPart(part) ? part.state : undefined;
 }
 
-export type CompactSegmentLabel = {
+/** A step drawn as a developer call, `name(args)`. */
+export type CompactCallSegmentLabel = {
+  form: 'call';
   kind: 'tool' | 'dynamic-tool' | 'reasoning';
   name: string;
-  args?: ToolLabel['args'];
+  args?: ToolCallLabel['args'];
   detail?: string;
   isError?: boolean;
 };
+
+/** A step the host labelled with a sentence: the sentence is its whole line. */
+export type CompactSentenceSegmentLabel = {
+  form: 'sentence';
+  kind: 'tool';
+  text: string;
+  detail?: string;
+  isError?: boolean;
+};
+
+export type CompactSegmentLabel =
+  CompactCallSegmentLabel | CompactSentenceSegmentLabel;
 
 export type CompactGroupStatus = 'running' | 'complete' | 'error' | 'aborted';
 
@@ -232,7 +249,7 @@ function stringifyArgValue(value: unknown): string | undefined {
   return undefined;
 }
 
-function getFallbackArgs(input: unknown): ToolLabel['args'] | undefined {
+function getFallbackArgs(input: unknown): ToolCallLabel['args'] | undefined {
   if (!isPlainRecord(input)) return undefined;
 
   const preferredKeys = [
@@ -289,6 +306,7 @@ function getSegmentLabel(
 ): CompactSegmentLabel {
   if (segment.kind === 'reasoning') {
     return {
+      form: 'call',
       kind: 'reasoning',
       name: 'reasoning',
       detail: getReasoningPreview(segment),
@@ -299,6 +317,7 @@ function getSegmentLabel(
     const dynamicToolPart = segment.part;
 
     return {
+      form: 'call',
       kind: 'dynamic-tool',
       name: dynamicToolPart.toolName || 'Tool',
       args: getFallbackArgs(dynamicToolPart.input),
@@ -311,7 +330,18 @@ function getSegmentLabel(
     const { toolEntry, toolKey } = resolveToolEntry(toolPart, registry);
     const label = toolEntry?.label?.(toolPart);
 
+    if (label?.kind === 'sentence') {
+      return {
+        form: 'sentence',
+        kind: 'tool',
+        text: label.text,
+        detail: label.detail,
+        isError: label.isError,
+      };
+    }
+
     return {
+      form: 'call',
       kind: 'tool',
       name: label?.name ?? toolKey,
       args: label?.args ?? getFallbackArgs(toolPart.input),
@@ -320,10 +350,10 @@ function getSegmentLabel(
     };
   }
 
-  return { kind: 'tool', name: 'Step' };
+  return { form: 'call', kind: 'tool', name: 'Step' };
 }
 
-function formatArgs(args: ToolLabel['args'] | undefined) {
+function formatArgs(args: ToolCallLabel['args'] | undefined) {
   if (!args) return undefined;
   const entries = Object.entries(args).filter(
     (entry): entry is [string, string] =>
@@ -337,7 +367,7 @@ function formatArgs(args: ToolLabel['args'] | undefined) {
     .join(', ');
 }
 
-function formatCallLabel(label: CompactSegmentLabel) {
+function formatCallLabel(label: CompactCallSegmentLabel) {
   const args = formatArgs(label.args);
   return args ? `${label.name}(${args})` : label.name;
 }
@@ -447,6 +477,15 @@ function getPlainCountSummary(
   return sentenceCase(title);
 }
 
+/**
+ * The latest step decides the group line when the host labelled it with a
+ * sentence: the line is that sentence, as end-user chats show their steps.
+ */
+function getLatestSentenceLabel(labels: CompactSegmentLabel[]) {
+  const latestTool = labels.findLast((label) => label.kind !== 'reasoning');
+  return latestTool?.form === 'sentence' ? latestTool : undefined;
+}
+
 function getCompactSummaryText(
   labels: CompactSegmentLabel[],
   groupStatus: CompactGroupStatus,
@@ -465,7 +504,7 @@ function getCompactSummaryText(
     return 'Working...';
   }
 
-  if (singleLabel) {
+  if (singleLabel?.form === 'call') {
     const callLabel = formatCallLabel(singleLabel);
     if (groupStatus === 'error') return `Failed ${callLabel}`;
     if (groupStatus === 'aborted') return `Cancelled ${callLabel}`;
@@ -502,7 +541,7 @@ function getCompactSummaryDetail(
           if (a.kind !== 'reasoning' && b.kind === 'reasoning') return -1;
           return 0;
         })
-        .map((label) => label.name),
+        .map((label) => (label.form === 'sentence' ? label.text : label.name)),
     ),
   );
   const detail = names.slice(0, 3).join(', ');
@@ -667,20 +706,39 @@ function CompactTrajectoryGroupTrigger({ children }: { children: ReactNode }) {
         />
       }
     >
-      <span className="min-w-0 flex-1 text-left text-sm">{children}</span>
+      <span className="min-w-0 flex-1 text-start text-sm">{children}</span>
     </CollapsibleTrigger>
   );
 }
 
 function useCompactGroupSummary() {
   const { items, labels, groupStatus, tone } = useCompactGroup();
+  const sentence = getLatestSentenceLabel(labels);
+  if (sentence) {
+    const others = getFallbackToolCount(labels) - 1;
+    return {
+      title: sentence.text,
+      more: others > 0 ? others : undefined,
+      detail: sentence.detail,
+      isSentence: true,
+      tone,
+      groupStatus,
+    };
+  }
   const title = getCompactSummaryText(
     labels,
     groupStatus,
     getActiveGroupHint(items),
   );
   const detail = getCompactSummaryDetail(labels, groupStatus);
-  return { title, detail, tone, groupStatus };
+  return {
+    title,
+    more: undefined,
+    detail,
+    isSentence: false,
+    tone,
+    groupStatus,
+  };
 }
 
 function CompactTrajectoryGroupTitle({
@@ -694,21 +752,30 @@ function CompactTrajectoryGroupTitle({
   suffix?: string;
   children?: ReactNode;
 }) {
-  const { title: defaultTitle, tone, groupStatus } = useCompactGroupSummary();
-  const baseTitle = titleOverride ?? defaultTitle;
+  const summary = useCompactGroupSummary();
+  const { tone, groupStatus } = summary;
+  const isDefault = titleOverride === undefined;
+  const baseTitle = titleOverride ?? summary.title;
   const title = suffix ? `${baseTitle} · ${suffix}` : baseTitle;
+  const more = isDefault ? summary.more : undefined;
+  const toneClass = groupStatus === 'running' ? 'text-info' : tone.title;
   return (
     <span className="flex min-w-0 items-center gap-1.5">
       <TextShimmer
         as="span"
+        dir={isDefault && summary.isSentence ? 'auto' : undefined}
         enabled={groupStatus === 'running'}
-        className={cn(
-          'max-w-full min-w-0 truncate',
-          groupStatus === 'running' ? 'text-info' : tone.title,
-        )}
+        className={cn('max-w-full min-w-0 truncate', toneClass)}
       >
         {title}
       </TextShimmer>
+      {more !== undefined && (
+        // The count of the other steps is its own LTR run, so "+2" keeps its
+        // sign before the digits after an RTL sentence.
+        <span dir="ltr" className={cn('shrink-0 tabular-nums', toneClass)}>
+          +{more}
+        </span>
+      )}
       {children}
     </span>
   );
@@ -725,12 +792,22 @@ function CompactTrajectoryGroupDetail({
   /** Host-computed replacement for the default detail line; null suppresses it. */
   detail?: string | null;
 }) {
-  const { title, detail: defaultDetail, tone } = useCompactGroupSummary();
+  const {
+    title,
+    detail: defaultDetail,
+    isSentence,
+    tone,
+  } = useCompactGroupSummary();
   if (detailOverride === null) return null;
   const detail = detailOverride ?? defaultDetail;
   if (!detail || detail === title) return null;
   return (
-    <span className={cn('block truncate text-xs', tone.detail)}>{detail}</span>
+    <span
+      dir={detailOverride === undefined && isSentence ? 'auto' : undefined}
+      className={cn('block truncate text-start text-xs', tone.detail)}
+    >
+      {detail}
+    </span>
   );
 }
 

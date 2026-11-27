@@ -46,7 +46,13 @@ export function ToolLabelInline({
             )}
           />
         )}
-        <span className="font-mono">{label.name}</span>
+        {label.kind === 'sentence' ? (
+          <span dir="auto" className="text-start">
+            {label.text}
+          </span>
+        ) : (
+          <span className="font-mono">{label.name}</span>
+        )}
       </div>
       {showActions && Actions && <Actions part={part} />}
     </div>
@@ -82,25 +88,36 @@ export function ToolLabelBlock({
   label: ToolLabel;
   state?: ToolUIPart['state'];
   part?: ToolUIPart;
+  /** Leading call args (`ToolArg`); a sentence label draws none. */
   children?: ReactNode;
 }) {
   const Actions = label.actions;
   const showActions = useToolActionsVisible({ label, part, state });
+  const isSentence = label.kind === 'sentence';
 
   return (
     <span className="mb-2 flex flex-col gap-1">
       <span className="flex items-start justify-between gap-2">
-        {/* Separating args in CSS rather than by index lets a host arg render
-            null without leaving a stray comma behind. */}
-        <span className="text-muted-foreground min-w-0 truncate font-mono text-xs [&>[data-slot=tool-arg]+[data-slot=tool-arg]]:before:mr-1 [&>[data-slot=tool-arg]+[data-slot=tool-arg]]:before:content-[',']">
-          {label.name}({children}
-          {label.args
-            ? Object.entries(label.args).map(([key, value]) => (
-                <ToolArg key={key} name={key} value={value} />
-              ))
-            : '...'}
-          )
-        </span>
+        {isSentence ? (
+          <span
+            dir="auto"
+            className="text-muted-foreground min-w-0 truncate text-start text-xs"
+          >
+            {label.text}
+          </span>
+        ) : (
+          /* Separating args in CSS rather than by index lets a host arg
+             render null without leaving a stray comma behind. */
+          <span className="text-muted-foreground min-w-0 truncate font-mono text-xs [&>[data-slot=tool-arg]+[data-slot=tool-arg]]:before:mr-1 [&>[data-slot=tool-arg]+[data-slot=tool-arg]]:before:content-[',']">
+            {label.name}({children}
+            {label.args
+              ? Object.entries(label.args).map(([key, value]) => (
+                  <ToolArg key={key} name={key} value={value} />
+                ))
+              : '...'}
+            )
+          </span>
+        )}
         {showActions && Actions && part && (
           <span className="shrink-0">
             <Actions part={part} />
@@ -109,8 +126,10 @@ export function ToolLabelBlock({
       </span>
       {label.detail && (
         <span
+          dir={isSentence ? 'auto' : undefined}
           className={cn(
-            'line-clamp-3 text-start font-mono text-[10px] leading-relaxed whitespace-pre-wrap',
+            'line-clamp-3 text-start leading-relaxed whitespace-pre-wrap',
+            isSentence ? 'text-xs' : 'font-mono text-[10px]',
             label.isError ? 'text-destructive/80' : 'text-muted-foreground',
           )}
         >

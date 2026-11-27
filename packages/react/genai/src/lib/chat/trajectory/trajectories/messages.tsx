@@ -11,6 +11,7 @@ import {
   isActiveClientInputTool,
   resolveToolEntry,
 } from '../../../tools/helpers.ts';
+import type { ToolCallLabel } from '../../../tools/registry.ts';
 import { useAgent } from '../../agent-context.tsx';
 import {
   AssistantTextPart,
@@ -57,6 +58,16 @@ function ErrorPill({
   );
 }
 
+function ToolCallInline({ name, args }: Pick<ToolCallLabel, 'name' | 'args'>) {
+  const firstArg = args ? Object.values(args)[0] : undefined;
+  return (
+    <>
+      <span className="ms-2 font-mono">{name}</span>
+      {firstArg && <span className="truncate">({firstArg})</span>}
+    </>
+  );
+}
+
 function StaticToolPart({ part }: { part: ToolUIPart }) {
   const config = useAgent();
   const { toolEntry } = resolveToolEntry(part, config.registry);
@@ -66,13 +77,17 @@ function StaticToolPart({ part }: { part: ToolUIPart }) {
     if (!label) return null;
 
     const Icon = label.icon;
-    const firstArg = label.args ? Object.values(label.args)[0] : undefined;
 
     return (
       <div className="text-muted-foreground flex items-center text-xs">
         {Icon && <Icon className="size-3.5" />}
-        <span className="ms-2 font-mono">{label.name}</span>
-        {firstArg && <span className="truncate">({firstArg})</span>}
+        {label.kind === 'sentence' ? (
+          <span dir="auto" className="ms-2 truncate text-start">
+            {label.text}
+          </span>
+        ) : (
+          <ToolCallInline name={label.name} args={label.args} />
+        )}
       </div>
     );
   }
