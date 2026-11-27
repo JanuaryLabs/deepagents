@@ -195,23 +195,31 @@ declare module 'mdast' {
   }
 }
 
-// The inline html nodes normalizeStreamdownChildren makes of one citation tag
-// in a sentence: <span><genai-citation citation="n"></genai-citation></span>.
-const CITATION_HTML = [
-  /^<span>$/,
-  new RegExp(`^<${CITATION_TAG}\\s[^>]*>$`),
-  new RegExp(`^</${CITATION_TAG}>$`),
-  /^<\/span>$/,
-];
+// A host element written where a citation would be (Meddit's no-source chip,
+// #6273) breaks a line the same way, so every declared element inline in a
+// sentence is grouped as a pill is. normalizeStreamdownChildren makes four
+// inline html nodes of a declared self-closing tag in a sentence:
+// <span><name …></name></span>. A paired element, which holds text of its
+// own, and an element alone on its line, which is a block, take other shapes.
+const MARKER_HTML_LENGTH = 4;
+const OPENING_TAG = /^<([\w-]+)(?:\s[^>]*)?>$/;
 
-function isCitationAt(
+function isMarkerAt(
   children: readonly PhrasingContent[],
   at: number,
+  names: ReadonlySet<string>,
 ): boolean {
-  return CITATION_HTML.every((pattern, offset) => {
-    const node = children[at + offset];
-    return node?.type === 'html' && pattern.test(node.value);
-  });
+  const [open, tag, close, closeSpan] = children
+    .slice(at, at + MARKER_HTML_LENGTH)
+    .map((node) => (node.type === 'html' ? node.value : undefined));
+  const name = tag && OPENING_TAG.exec(tag)?.[1];
+  return (
+    open === '<span>' &&
+    name !== undefined &&
+    names.has(name) &&
+    close === `</${name}>` &&
+    closeSpan === '</span>'
+  );
 }
 
 // The nodes whose children are sentence text, where a citation tag can sit.
@@ -231,10 +239,13 @@ function phrasingChildrenOf(node: Nodes): PhrasingContent[] | undefined {
   }
 }
 
-function groupCitationRuns(children: PhrasingContent[]) {
+function groupCitationRuns(
+  children: PhrasingContent[],
+  names: ReadonlySet<string>,
+) {
   for (let at = 0; at < children.length; at++) {
     let end = at;
-    while (isCitationAt(children, end)) end += CITATION_HTML.length;
+    while (isMarkerAt(children, end, names)) end += MARKER_HTML_LENGTH;
     if (end === at) continue;
     const grouped = children.slice(at, end);
     const previous = children[at - 1];
@@ -273,21 +284,16 @@ function groupCitationRuns(children: PhrasingContent[]) {
   }
 }
 
-function groupCitations() {
+function groupCitations({ names }: { names: ReadonlySet<string> }) {
   return (tree: Root) => {
     visit(tree, (node) => {
       if (node.type === 'citationGroup') return SKIP;
       const children = phrasingChildrenOf(node);
-      if (children) groupCitationRuns(children);
+      if (children) groupCitationRuns(children, names);
       return CONTINUE;
     });
   };
 }
-
-const CITATION_REMARK_PLUGINS = [
-  ...Object.values(defaultRemarkPlugins),
-  groupCitations,
-];
 
 const CITATION_GROUP_ELEMENT: GenAIInteractiveElement = {
   name: CITATION_GROUP_TAG,
@@ -323,20 +329,29 @@ export function AssistantTextPart({
     [urlCitations, message, HostCitation],
   );
   const hasCitations = urlCitations.length > 0;
-  const withCitations = useMemo(
-    () =>
-      hasCitations
-        ? [...(elements ?? []), CITATION_ELEMENT, CITATION_GROUP_ELEMENT]
-        : elements,
-    [hasCitations, elements],
-  );
+  const { withCitations, remarkPlugins } = useMemo(() => {
+    const markers = [
+      ...(elements ?? []),
+      ...(hasCitations ? [CITATION_ELEMENT] : []),
+    ];
+    if (markers.length === 0)
+      return { withCitations: elements, remarkPlugins: undefined };
+    const grouping: [
+      typeof groupCitations,
+      Parameters<typeof groupCitations>[0],
+    ] = [groupCitations, { names: new Set(markers.map(({ name }) => name)) }];
+    return {
+      withCitations: [...markers, CITATION_GROUP_ELEMENT],
+      remarkPlugins: [...Object.values(defaultRemarkPlugins), grouping],
+    };
+  }, [hasCitations, elements]);
 
   return (
     <TextCitationsContext value={cited}>
       <div className={cn('text-sm', className)}>
         <InteractiveResponse
           elements={withCitations}
-          remarkPlugins={hasCitations ? CITATION_REMARK_PLUGINS : undefined}
+          remarkPlugins={remarkPlugins}
           animated={SLIDE_UP_ANIMATED}
           isAnimating={!isSnapshotRender && status === 'streaming'}
         >
