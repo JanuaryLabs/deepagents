@@ -128,3 +128,31 @@ test('a host gives a citation’s labels in its own language (#5946)', async () 
     cleanup();
   }
 });
+
+test('a long source title stays whole for a screen reader and on hover, though the card shows one line (#6018)', async () => {
+  const user = userEvent.setup();
+  const title =
+    'SERTRALINE (SERTRALINE HYDROCHLORIDE) TABLET, FILM COATED [READYMEDS] — PRECAUTIONS — Drug Interactions — Serotonergic Drugs:';
+  try {
+    render(
+      <CitationPill
+        source={{ url: 'https://dailymed.nlm.nih.gov/dailymed/', title }}
+        index={7}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Source 7' }));
+
+    expect({
+      screenReader: screen.queryByRole('dialog', { name: title }) !== null,
+      hover: screen.getByTitle(title).textContent,
+      siteHover: screen.getByTitle('dailymed.nlm.nih.gov').textContent,
+    }).toEqual({
+      screenReader: true,
+      hover: title,
+      siteHover: 'dailymed.nlm.nih.gov',
+    });
+  } finally {
+    cleanup();
+  }
+});
