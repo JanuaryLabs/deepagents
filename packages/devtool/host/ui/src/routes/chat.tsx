@@ -255,6 +255,7 @@ function ChatInput({
         hasSubmitted && 'bg-background sticky bottom-0 mt-auto pt-2',
       )}
     >
+      <ChatBot.ScrollButton />
       <PendingToolInput className="bg-background">
         <ChatComposer.Provider
           isTaskRunning={isRunning}

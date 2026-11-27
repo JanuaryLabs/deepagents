@@ -1,5 +1,11 @@
 import { useChat } from '@ai-sdk/react';
 import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from '@zukhruf/shadcn';
+import {
   type ChatOnDataCallback,
   type ChatOnFinishCallback,
   type ChatTransport,
@@ -10,13 +16,14 @@ import {
   lastAssistantMessageIsCompleteWithToolCalls,
 } from 'ai';
 import { cn } from 'cn';
+import { ArrowDownIcon } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import * as React from 'react';
-import { useStickToBottom } from 'use-stick-to-bottom';
 
 import { useGenaiMessages } from '../i18n/provider.tsx';
 import type { ComponentRegistry } from '../tools/registry.ts';
 import { useAgentMeta } from './agent-context.tsx';
+import { ChatBotScrollerContext } from './chat-bot-scroller.ts';
 import { completeRenderedClientTool } from './client-tool-output.ts';
 
 type AgentUIMessage = UIMessage<unknown, UIDataTypes, UITools>;
@@ -53,44 +60,84 @@ export function useAgentChatSetup(props: AgentChatSetupProps) {
   return helpers;
 }
 
-export function ChatBot(
-  props: React.PropsWithChildren<{
-    className?: string;
-  }>,
-) {
-  return <AgentScrollArea {...props} />;
-}
+export type ChatBotProps = React.PropsWithChildren<{
+  className?: string;
+  /**
+   * Follow the stream while the reader is at the end. Off by default: a new
+   * user message moves to the top and its answer grows below it.
+   */
+  autoScroll?: boolean;
+  /** Pixels of the previous message kept in view above a new user message. */
+  scrollPreviousItemPeek?: number;
+  /** Pixels kept clear at the top of the view, such as under a sticky header. */
+  scrollMargin?: number;
+}>;
 
-export function AgentScrollArea(
-  props: React.PropsWithChildren<{ className?: string }>,
-) {
-  const { scrollRef, contentRef } = useStickToBottom({
-    initial: 'smooth',
-  });
+function ChatBotRoot({
+  className,
+  children,
+  autoScroll = false,
+  scrollPreviousItemPeek,
+  scrollMargin,
+}: ChatBotProps) {
   const { hasSubmitted } = useAgentMeta();
   return (
-    <div
-      id="agent"
-      data-slot="agent"
-      className={cn(
-        '@container mx-auto h-full w-full overflow-y-auto',
-        props.className,
-      )}
-      ref={scrollRef}
+    <MessageScrollerProvider
+      autoScroll={autoScroll}
+      scrollPreviousItemPeek={scrollPreviousItemPeek}
+      scrollMargin={scrollMargin}
     >
-      <div
-        ref={contentRef}
-        data-slot="content"
-        className={cn(
-          'relative mx-auto flex w-full flex-col',
-          hasSubmitted ? 'min-h-full' : 'h-full justify-center',
-        )}
+      <MessageScroller
+        id="agent"
+        data-slot="agent"
+        className={cn('@container mx-auto w-full', className)}
       >
-        {props.children}
-      </div>
+        <MessageScrollerViewport>
+          <div
+            data-slot="content"
+            className={cn(
+              'relative mx-auto flex w-full flex-col',
+              hasSubmitted ? 'min-h-full' : 'h-full justify-center',
+            )}
+          >
+            <ChatBotScrollerContext value={true}>
+              {children}
+            </ChatBotScrollerContext>
+          </div>
+        </MessageScrollerViewport>
+      </MessageScroller>
+    </MessageScrollerProvider>
+  );
+}
+ChatBotRoot.displayName = 'ChatBot';
+
+/**
+ * Scrolls to the end of the chat. It shows while something is below the
+ * view, and floats 16px above the place where it is rendered: last in the
+ * chat, or first inside a sticky composer.
+ */
+function ChatBotScrollButton(props: { className?: string }) {
+  const t = useGenaiMessages();
+  return (
+    <div
+      data-slot="chat-scroll-button"
+      className="pointer-events-none sticky bottom-0 z-10 h-0"
+    >
+      <MessageScrollerButton
+        direction="end"
+        className={cn('pointer-events-auto', props.className)}
+      >
+        <ArrowDownIcon />
+        <span className="sr-only">{t('chat.scrollToBottom')}</span>
+      </MessageScrollerButton>
     </div>
   );
 }
+ChatBotScrollButton.displayName = 'ChatBot.ScrollButton';
+
+export const ChatBot = Object.assign(ChatBotRoot, {
+  ScrollButton: ChatBotScrollButton,
+});
 
 function AgentHeaderRoot(props: {
   className?: string;

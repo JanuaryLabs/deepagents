@@ -35,6 +35,7 @@ export type GenaiMessages = {
   'steps.cancelledByUser': string;
   'chat.greeting': string;
   'chat.retry': string;
+  'chat.scrollToBottom': string;
   'status.loading': string;
   'composer.attachFiles': string;
   'composer.commandMenu': string;
@@ -135,6 +136,7 @@ export const en: GenaiMessages = {
   'steps.cancelledByUser': 'Cancelled by user',
   'chat.greeting': 'How can I help today?',
   'chat.retry': 'Try Again',
+  'chat.scrollToBottom': 'Scroll to the latest message',
   'status.loading': 'Loading',
   'composer.attachFiles': 'Attach files',
   'composer.commandMenu': 'Toggle command menu',

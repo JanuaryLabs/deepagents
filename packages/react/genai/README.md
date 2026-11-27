@@ -112,6 +112,24 @@ Providers nest. An inner provider changes only the keys it gives, the `markdown`
 
 The parts of `@deepagents/react-input` that `ChatComposer` renders, such as the editor and the attachment strip, keep their own English words.
 
+## Scrolling
+
+`ChatBot` is built on the Message Scroller of `@zukhruf/shadcn`. When a user message arrives, the view moves it to the top and keeps 64px of the previous message in view, and the answer grows below it. The view does not follow the stream. Pass `autoScroll` to follow it while the reader is at the end. `scrollPreviousItemPeek` and `scrollMargin` (room under a sticky header) are the props of the Message Scroller, passed through.
+
+Under `ChatBot`, the `List` of `Messages`, `CompactMessages` and `TimelinedMessages` is the content of the scroller, so put each `Item` directly in it. A user `Item` starts a turn.
+
+`ChatBot.ScrollButton` scrolls to the end. It shows only when something is below the view, and floats 16px above the place where you render it. Put it first inside a sticky composer, or last in the chat. Its label is `chat.scrollToBottom` of the catalog.
+
+```tsx
+<ChatBot className="h-dvh">
+  <Chat />
+  <div className="bg-background sticky bottom-0 mt-auto">
+    <ChatBot.ScrollButton />
+    <Composer />
+  </div>
+</ChatBot>
+```
+
 ## One copy of @zukhruf/ui
 
 The host and this package must use the same copy of `@zukhruf/ui`. Each copy has its own React context. A `ClockProvider` of one copy does not reach a `TheButton` of the other copy, and the button throws `No clock set, use ClockProvider to set one`. For this reason `@zukhruf/ui` is a peer dependency. npm refuses an install when the version of the host is out of the range.

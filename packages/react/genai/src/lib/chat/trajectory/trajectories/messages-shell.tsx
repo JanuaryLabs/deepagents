@@ -1,8 +1,10 @@
+import { MessageScrollerContent, MessageScrollerItem } from '@zukhruf/shadcn';
 import type { ChatStatus, UIMessage } from 'ai';
 import { cn } from 'cn';
-import { useMemo } from 'react';
+import { use, useMemo } from 'react';
 
 import type { GenAIInteractiveElement } from '../../../components/InteractiveResponse.tsx';
+import { ChatBotScrollerContext } from '../../chat-bot-scroller.ts';
 import {
   MessageItemContext,
   MessagesContext,
@@ -45,6 +47,16 @@ export function MessagesList({
   className?: string;
   children: React.ReactNode;
 }) {
+  // Under ChatBot the list is the scroller's content: it reads the messages
+  // as its direct children to find the user message that starts a turn.
+  const inChatBot = use(ChatBotScrollerContext);
+  if (inChatBot) {
+    return (
+      <MessageScrollerContent className={cn('h-auto min-h-0 gap-4', className)}>
+        {children}
+      </MessageScrollerContent>
+    );
+  }
   return <div className={cn('flex flex-col gap-4', className)}>{children}</div>;
 }
 
@@ -60,10 +72,21 @@ export function MessagesItem({
   children: React.ReactNode;
 }) {
   const value = useMemo(() => ({ message, index }), [message, index]);
+  const inChatBot = use(ChatBotScrollerContext);
 
   return (
     <MessageItemContext value={value}>
-      <div className={className}>{children}</div>
+      {inChatBot ? (
+        <MessageScrollerItem
+          messageId={message.id}
+          scrollAnchor={message.role === 'user'}
+          className={className}
+        >
+          {children}
+        </MessageScrollerItem>
+      ) : (
+        <div className={className}>{children}</div>
+      )}
     </MessageItemContext>
   );
 }

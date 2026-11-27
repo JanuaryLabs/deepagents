@@ -78,6 +78,7 @@ const ar: GenaiMessages = {
   'steps.cancelledByUser': 'ألغاه المستخدم',
   'chat.greeting': 'كيف أساعدك اليوم؟',
   'chat.retry': 'حاول مجددًا',
+  'chat.scrollToBottom': 'انتقل إلى آخر رسالة',
   'status.loading': 'جارٍ التحميل',
   'composer.attachFiles': 'أرفق ملفات',
   'composer.commandMenu': 'بدّل قائمة الأوامر',
