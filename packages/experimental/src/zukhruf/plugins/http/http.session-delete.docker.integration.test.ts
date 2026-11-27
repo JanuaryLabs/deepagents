@@ -367,22 +367,6 @@ const SHUTDOWN_TIMEOUT_MS = 10_000;
 const SHUTDOWN_MARGIN_MS = 10_000;
 
 /** Waits until the turn's stream reads running. */
-function runningTurn(
-  runtime: AgentHost,
-  conversation: { chatId: string; userId: string },
-  turnId: string,
-  signal: AbortSignal,
-) {
-  return waitFor(
-    async () =>
-      assert.equal(
-        (await runtime.observe(conversation).status(turnId))?.status,
-        'running',
-      ),
-    { signal },
-  );
-}
-
 /**
  * Virtual chat sandboxes whose skill discovery, the directory listing a
  * chat's first turn makes before its stream runs, holds the turn and ignores
@@ -1034,6 +1018,7 @@ void describe.each(storages, ({ name, open }) =>
       await using resources = new AsyncDisposableStack();
       const { storage } = await open(resources);
       const turn = Promise.withResolvers<string>();
+      const modelCalled = Promise.withResolvers<void>();
       const statusAtAbort = Promise.withResolvers<string | undefined>();
       const { app, runtime } = await serveAgent(
         resources,
@@ -1043,6 +1028,7 @@ void describe.each(storages, ({ name, open }) =>
           model: new MockLanguageModelV4({
             doStream: ({ abortSignal }) =>
               new Promise((_resolve, reject) => {
+                modelCalled.resolve();
                 abortSignal?.addEventListener(
                   'abort',
                   () => {
@@ -1066,7 +1052,8 @@ void describe.each(storages, ({ name, open }) =>
       const root = { chatId: sessionId, userId: 'user-1' };
       const turnId = await startTurn(app, sessionId);
       turn.resolve(turnId);
-      await runningTurn(runtime, root, turnId, t.signal);
+      // The stream reads running from setup on, before the model is called.
+      await untilAborted(modelCalled.promise, t.signal);
 
       const response = await answer(await deleteSession(app, sessionId));
       const aborted = await untilAborted(statusAtAbort.promise, t.signal);
