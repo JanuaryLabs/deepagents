@@ -8,7 +8,13 @@ import {
   SquareIcon,
   XIcon,
 } from 'lucide-react';
-import type { ComponentProps } from 'react';
+import {
+  type ComponentProps,
+  createContext,
+  use,
+  useMemo,
+  useState,
+} from 'react';
 
 import {
   Composer,
@@ -16,6 +22,7 @@ import {
   type ComposerAttachmentsProps,
   type ComposerContentProps,
   type ComposerEditorProps,
+  type ComposerErrorProps,
   type ComposerPopupProps,
   type ComposerRootProps,
   type ComposerToolbarProps,
@@ -25,9 +32,30 @@ import {
   useComposerDictation,
 } from '@deepagents/react-input/browser';
 
-import { useAgentMeta, useAgentStatus } from '../chat/agent-context.tsx';
+import {
+  useAgent,
+  useAgentMeta,
+  useAgentStatus,
+} from '../chat/agent-context.tsx';
 import { type GenaiTranslate, useGenaiMessages } from '../i18n/provider.tsx';
 import { ChatActionButton } from './ChatAction.tsx';
+import { SubmitButton } from './SubmitButton.tsx';
+
+/** Whether the last Stop failed to cancel the turn; the next send clears it. */
+const StopFailureContext = createContext<{
+  stopFailed: boolean;
+  setStopFailed: (stopFailed: boolean) => void;
+} | null>(null);
+
+function useStopFailure(componentName: string) {
+  const context = use(StopFailureContext);
+  if (!context) {
+    throw new Error(
+      `${componentName} must be used inside ChatComposer.Provider.`,
+    );
+  }
+  return context;
+}
 
 /** The catalog gives these words; a host still labels its own instance. */
 type InstanceWords<Props, Words extends keyof Props> = Omit<Props, Words> &
@@ -36,6 +64,7 @@ type InstanceWords<Props, Words extends keyof Props> = Omit<Props, Words> &
 function ChatComposerProvider({
   className,
   maxExpandedTextChars,
+  onSubmit,
   ...props
 }: InstanceWords<
   Omit<
@@ -57,33 +86,86 @@ function ChatComposerProvider({
   const { hasSubmitted } = useAgentMeta();
   const t = useGenaiMessages();
   const submitErrorMessage = useSubmitErrorMessage();
+  const [stopFailed, setStopFailed] = useState(false);
+  const stopFailure = useMemo(
+    () => ({ stopFailed, setStopFailed }),
+    [stopFailed],
+  );
   return (
-    <Composer.Root
-      hasInteracted={hasSubmitted}
-      editorAriaLabel={t('composer.editor')}
-      submitFailedMessage={t('composer.sendFailed')}
-      submitErrorMessage={submitErrorMessage}
-      unsupportedFileMessage={(file) => t('composer.unsupportedFile', file)}
-      unknownCommandMessage={(command) => t('composer.unknownCommand', command)}
-      attachmentLabel={(attachment) => t('composer.attachment', attachment)}
-      pastedTextLabel={(paste) => t('composer.pastedText', paste)}
-      missingAttachmentMessage={(attachment) =>
-        t('composer.attachmentMissing', attachment)
-      }
-      expandedTextLimit={
-        maxExpandedTextChars === undefined
-          ? undefined
-          : {
-              maxChars: maxExpandedTextChars,
-              message: (counts) => t('composer.promptTooLong', counts),
-            }
-      }
+    <StopFailureContext value={stopFailure}>
+      <Composer.Root
+        onSubmit={(submission, context) => {
+          setStopFailed(false);
+          return onSubmit?.(submission, context);
+        }}
+        hasInteracted={hasSubmitted}
+        editorAriaLabel={t('composer.editor')}
+        submitFailedMessage={t('composer.sendFailed')}
+        submitErrorMessage={submitErrorMessage}
+        unsupportedFileMessage={(file) => t('composer.unsupportedFile', file)}
+        unknownCommandMessage={(command) =>
+          t('composer.unknownCommand', command)
+        }
+        attachmentLabel={(attachment) => t('composer.attachment', attachment)}
+        pastedTextLabel={(paste) => t('composer.pastedText', paste)}
+        missingAttachmentMessage={(attachment) =>
+          t('composer.attachmentMissing', attachment)
+        }
+        expandedTextLimit={
+          maxExpandedTextChars === undefined
+            ? undefined
+            : {
+                maxChars: maxExpandedTextChars,
+                message: (counts) => t('composer.promptTooLong', counts),
+              }
+        }
+        className={cn(
+          'bg-background sticky bottom-0 rounded-t-2xl border-0 **:data-[slot=composer-editor]:!min-h-15',
+          className,
+        )}
+        {...props}
+      />
+    </StopFailureContext>
+  );
+}
+
+/**
+ * The composer's Stop button. Stop freezes the answer at once; when the server
+ * cannot cancel the turn, `ChatComposer.Error` says it may still be running.
+ */
+function ChatComposerStop(
+  props: Omit<ComponentProps<typeof SubmitButton>, 'variant' | 'onClick'>,
+) {
+  const { stop } = useAgent();
+  const { setStopFailed } = useStopFailure('ChatComposer.Stop');
+  return (
+    <SubmitButton
+      type="button"
+      variant="stop"
+      onClick={() => {
+        stop().catch(() => setStopFailed(true));
+      }}
+      {...props}
+    />
+  );
+}
+
+/** The composer's alert: a failed Stop, or else what `Composer.Error` shows. */
+function ChatComposerError({ className, ...props }: ComposerErrorProps) {
+  const { stopFailed } = useStopFailure('ChatComposer.Error');
+  const t = useGenaiMessages();
+  if (!stopFailed) return <Composer.Error className={className} {...props} />;
+  return (
+    <div
+      role="alert"
       className={cn(
-        'bg-background sticky bottom-0 rounded-t-2xl border-0 **:data-[slot=composer-editor]:!min-h-15',
+        'border-primary/30 bg-primary/10 text-primary rounded-md border px-3 py-2 text-xs',
         className,
       )}
       {...props}
-    />
+    >
+      {t('composer.stopFailed')}
+    </div>
   );
 }
 
@@ -318,9 +400,10 @@ export const ChatComposer = {
   Content: ChatComposerContent,
   Attachments: ChatComposerAttachments,
   Editor: ChatComposerEditor,
-  Error: Composer.Error,
+  Error: ChatComposerError,
   Toolbar: ChatComposerToolbar,
   CommandButton: ChatComposerCommandButton,
   AttachFiles: ChatComposerAttachFiles,
   Dictate: ChatComposerDictate,
+  Stop: ChatComposerStop,
 };

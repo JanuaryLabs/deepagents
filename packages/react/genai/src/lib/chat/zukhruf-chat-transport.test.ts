@@ -136,14 +136,12 @@ it('creates, continues, streams, and cancels a session', async () => {
   });
 
   abort.abort();
-  await vi.waitFor(() =>
-    expect(requests).toContainEqual(
-      expect.objectContaining({
-        method: 'POST',
-        url: `${api}/${sessionId}/cancel`,
-      }),
-    ),
-  );
+  await transport.cancel(sessionId);
+  expect(
+    requests
+      .filter(({ url }) => url.endsWith('/cancel'))
+      .map(({ method, url }) => ({ method, url })),
+  ).toEqual([{ method: 'POST', url: `${api}/${sessionId}/cancel` }]);
 });
 
 it('reconnects the AgentProvider chat ID without transport session state', async () => {
@@ -402,6 +400,25 @@ it("rejects a refused upload with the AI SDK's APICallError, carrying the status
   expect(error).toMatchObject({
     statusCode: 415,
     url: `${api}/${sessionId}/uploads`,
+    responseBody: JSON.stringify(body),
+  });
+});
+
+it("rejects a refused cancel with the AI SDK's APICallError, carrying the status and the server's body", async () => {
+  const body = { error: 'Internal Server Error' };
+  const transport = new ZukhrufChatTransport({
+    api,
+    fetch: async () => Response.json(body, { status: 500 }),
+  });
+
+  const error = await transport
+    .cancel(sessionId)
+    .catch((rejection: unknown) => rejection);
+
+  expect(APICallError.isInstance(error)).toBe(true);
+  expect(error).toMatchObject({
+    statusCode: 500,
+    url: `${api}/${sessionId}/cancel`,
     responseBody: JSON.stringify(body),
   });
 });

@@ -130,6 +130,24 @@ Under `ChatBot`, the `List` of `CompactMessages` is the content of the scroller,
 </ChatBot>
 ```
 
+## Stop
+
+`ChatComposer.Stop` is the composer's Stop button; render it while the answer runs. Stop freezes the answer at once and asks the server to cancel the turn with the transport's `cancel(sessionId)`. A question asked meanwhile is sent once the cancel answers. When the cancel fails, the composer's alert, `ChatComposer.Error`, shows `composer.stopFailed`: the turn may still be running. The next send clears it.
+
+```tsx
+<ChatComposer.Toolbar>
+  {status === 'submitted' || status === 'streaming' ? (
+    <ChatComposer.Stop className="ml-auto" />
+  ) : (
+    <Composer.Submit render={<SubmitButton type="button" variant="send" />} />
+  )}
+</ChatComposer.Toolbar>
+```
+
+`useAgent().stop()` does the same and returns a promise: it resolves once the server has cancelled the turn and rejects when the cancel fails. A refused cancel rejects with the AI SDK's `APICallError`, and a network failure with its own error. A host with its own Stop button must catch that rejection.
+
+Only Stop cancels the turn. Leaving or unmounting a chat whose answer is streaming stops the stream on the page, and the answer finishes on the server: the history shows it when the user comes back. A transport given to `AgentProvider` therefore has `cancel` beside `uploadFile`.
+
 ## Start a chat from another page
 
 An entry page, such as a home ask box, can start a new chat with a question. It makes the chat id, writes a prefill with `writePrefill` and goes to the chat page. The `AgentProvider` of that chat id sends the prefill as its first message.

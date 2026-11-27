@@ -24,6 +24,8 @@ class IdleTransport implements ChatTransport<UIMessage> {
     size: file.size,
     url: `https://uploads.test/${sessionId}/${file.name}`,
   });
+
+  cancel = async () => {};
 }
 
 const registry: ComponentRegistry = {

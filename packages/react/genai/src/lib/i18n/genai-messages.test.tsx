@@ -95,6 +95,7 @@ const ar: GenaiMessages = {
   'composer.commandMenu': 'بدّل قائمة الأوامر',
   'composer.send': 'أرسل الطلب',
   'composer.stop': 'أوقف البث',
+  'composer.stopFailed': 'تعذّر إيقاف الإجابة. ربما ما زالت تعمل.',
   'composer.editor': 'اكتب رسالتك',
   'composer.placeholder': 'اكتب رسالة أو / للأوامر',
   'composer.sendFailed': 'تعذّر إرسال الطلب',

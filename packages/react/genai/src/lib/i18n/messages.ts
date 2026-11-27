@@ -51,6 +51,8 @@ export type GenaiMessages = {
   'composer.commandMenu': string;
   'composer.send': string;
   'composer.stop': string;
+  /** Shown when Stop could not cancel the turn on the server. */
+  'composer.stopFailed': string;
   'composer.editor': string;
   'composer.placeholder': string;
   /** Shown when the host's submit rejects with anything but a failed upload. */
@@ -185,6 +187,7 @@ export const en: GenaiMessages = {
   'composer.commandMenu': 'Toggle command menu',
   'composer.send': 'Send prompt',
   'composer.stop': 'Stop streaming',
+  'composer.stopFailed': 'Could not stop the answer. It may still be running.',
   'composer.editor': 'Rich prompt composer',
   'composer.placeholder': 'Type a message or / for commands',
   'composer.sendFailed': 'Could not send prompt',

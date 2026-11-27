@@ -36,7 +36,12 @@ export interface AgentConfigContextValue {
   setChat: (messages: UIMessage[]) => void;
   getTriggeringUserMessage: (toolCallId: string) => UIMessage | null;
   getLastUserMessageId: () => string | null;
-  stop: () => void;
+  /**
+   * Stops the answer at once and resolves once the server has cancelled its
+   * turn; rejects when the cancel fails, and the turn may still run. A submit
+   * made meanwhile is sent after it settles.
+   */
+  stop: () => Promise<void>;
 }
 
 type AgentMessagesContextValue = UseChatHelpers<
@@ -75,7 +80,7 @@ export function AgentProvider({
   registry?: ComponentRegistry;
   initialMessages?: UIMessage[];
   transport: ChatTransport<UIMessage<unknown, UIDataTypes, UITools>> &
-    Pick<ZukhrufChatTransport, 'uploadFile'>;
+    Pick<ZukhrufChatTransport, 'uploadFile' | 'cancel'>;
   /** Enable the AI SDK's automatic stream resumption. */
   resume?: boolean;
   /** Observes every streamed data part, transient ones included. */
@@ -114,6 +119,7 @@ export function AgentProvider({
       new ChatManager({
         chat: agent,
         uploadFile: transport.uploadFile.bind(transport),
+        cancel: transport.cancel.bind(transport),
         onResetChat: forwardResetChat,
       }),
   );

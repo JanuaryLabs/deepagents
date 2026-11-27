@@ -281,6 +281,7 @@ test('resumption uses the latest transport and preserves explicit incremental se
   const uploadFile = async () => {
     throw new Error('No upload expected');
   };
+  const cancel = async () => {};
   const initial = Object.assign(
     new DefaultChatTransport({
       api: 'https://chat.test/initial',
@@ -289,7 +290,7 @@ test('resumption uses the latest transport and preserves explicit incremental se
         return createUIMessageStreamResponse({ stream: first.readable });
       },
     }),
-    { uploadFile },
+    { uploadFile, cancel },
   );
   const requests: string[] = [];
   const latest = Object.assign(
@@ -313,7 +314,7 @@ test('resumption uses the latest transport and preserves explicit incremental se
         });
       },
     }),
-    { uploadFile },
+    { uploadFile, cancel },
   );
   const props = {
     chatId: 'incremental',
@@ -719,7 +720,7 @@ test('an explicit send after an error retries through the native SDK and drains 
   }
 });
 
-test('SDK ownership stops the old stream on chat changes and the current stream on unmount', async () => {
+test('SDK ownership stops the old stream on chat changes and the current stream on unmount, and cancels neither turn (#6222)', async () => {
   const signals: AbortSignal[] = [];
   const requests: string[] = [];
   const transport = new ZukhrufChatTransport({
@@ -776,10 +777,7 @@ test('SDK ownership stops the old stream on chat changes and the current stream 
   assert.equal(signals[1].aborted, true);
   assert.deepEqual(
     requests.filter((url) => url.endsWith('/cancel')),
-    [
-      'https://chat.test/session/first/cancel',
-      'https://chat.test/session/second/cancel',
-    ],
+    [],
   );
 });
 
@@ -868,6 +866,7 @@ test('native client-tool completion uses the latest registry and finishes before
       uploadFile: async () => {
         throw new Error('No upload expected');
       },
+      cancel: async () => {},
     },
   );
   const props = { chatId: 'tools', transport, onResetChat() {} };

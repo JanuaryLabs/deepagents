@@ -7,6 +7,7 @@ import { clearPrefill, readPrefill, writePrefill } from './prefill.ts';
 import type { ZukhrufChatTransport } from './zukhruf-chat-transport.ts';
 
 type UploadFile = ZukhrufChatTransport['uploadFile'];
+type Cancel = ZukhrufChatTransport['cancel'];
 
 export interface ChatSubmission {
   prompt: string;
@@ -21,6 +22,7 @@ type BoundChat = UseChatHelpers<UIMessage<unknown, UIDataTypes, UITools>>;
 export interface ChatManagerOptions {
   chat: BoundChat;
   uploadFile: UploadFile;
+  cancel: Cancel;
   onResetChat: (chatId: string) => void;
 }
 
@@ -44,9 +46,11 @@ export function persistedPromptOf(message: UIMessage): string {
 export class ChatManager {
   private chat: BoundChat;
   private readonly uploadFile: UploadFile;
+  private readonly cancel: Cancel;
   /**
-   * Runs submissions one at a time, in order, so a text-only message never
-   * overtakes an image that is uploading.
+   * Runs submissions and stops one at a time, in order, so a text-only message
+   * never overtakes an image that is uploading, and a question asked after
+   * Stop is sent once the server has answered the cancel.
    */
   private readonly submissions = new SerialJobExecutor();
 
@@ -55,6 +59,7 @@ export class ChatManager {
   constructor(options: ChatManagerOptions) {
     this.chat = options.chat;
     this.uploadFile = options.uploadFile;
+    this.cancel = options.cancel;
     this.onResetChat = options.onResetChat;
   }
 
@@ -133,8 +138,13 @@ export class ChatManager {
     this.chat.setMessages(messages);
   }
 
-  /** The user chose not to send a prefill that is still pending, so it is cleared. */
-  stop(): void {
+  /**
+   * Stops the answer's stream at once and asks the server to cancel the turn;
+   * resolves once it answers. Rejects when the cancel fails: the turn may
+   * still run. A prefill still pending is cleared: the user chose not to send
+   * it.
+   */
+  stop(): Promise<void> {
     const prefill = readPrefill();
     if (
       prefill &&
@@ -142,7 +152,10 @@ export class ChatManager {
     ) {
       clearPrefill();
     }
-    void this.chat.stop();
+    const chatId = this.chat.id;
+    return this.submissions.run(async () => {
+      await Promise.all([this.chat.stop(), this.cancel(chatId)]);
+    });
   }
 
   resetChat(prompt?: string): void {

@@ -62,6 +62,8 @@ class RecordingTransport implements ChatTransport<UIMessage> {
     size: file.size,
     url: `https://uploads.test/${sessionId}/${file.name}`,
   });
+
+  cancel = async () => {};
 }
 
 class UploadingRecordingTransport extends RecordingTransport {
@@ -212,7 +214,7 @@ function QueueProbe() {
           Remove {persistedPromptOf(message)}
         </button>
       ))}
-      <button type="button" onClick={stop}>
+      <button type="button" onClick={() => void stop()}>
         Stop
       </button>
     </>
@@ -1017,7 +1019,7 @@ test('a prefill is sent under the same message id on every attempt, so Zukhruf d
 function StopButton() {
   const { stop } = useAgent();
   return (
-    <button type="button" onClick={stop}>
+    <button type="button" onClick={() => void stop()}>
       Stop
     </button>
   );

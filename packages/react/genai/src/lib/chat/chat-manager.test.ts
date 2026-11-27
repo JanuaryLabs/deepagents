@@ -125,8 +125,8 @@ function uploadReceipt(sessionId: string, file: File) {
 }
 
 function withStubUploads(
-  options: Omit<ChatManagerOptions, 'chat' | 'uploadFile'>,
-): Omit<ChatManagerOptions, 'chat'> {
+  options: Omit<ChatManagerOptions, 'chat' | 'uploadFile' | 'cancel'>,
+): Omit<ChatManagerOptions, 'chat' | 'cancel'> {
   return {
     ...options,
     uploadFile: async (sessionId, file) => uploadReceipt(sessionId, file),
@@ -144,7 +144,7 @@ function imageFile(name = 'shot.png'): File {
  * ChatManager to it on every render.
  */
 function renderChatManager(
-  managerOptions: Omit<ChatManagerOptions, 'chat'>,
+  managerOptions: Omit<ChatManagerOptions, 'chat' | 'cancel'>,
   options: {
     transport: ChatTransport<TestUIMessage>;
     chatId?: string;
@@ -160,7 +160,12 @@ function renderChatManager(
       transport,
     });
     const [manager] = useState(
-      () => new ChatManager({ ...managerOptions, chat: helpers }),
+      () =>
+        new ChatManager({
+          ...managerOptions,
+          cancel: async () => {},
+          chat: helpers,
+        }),
     );
     manager.bind(helpers);
     return { helpers, manager };
@@ -781,7 +786,7 @@ describe('ChatManager', () => {
         await makeBusy(manager, result);
 
         await act(async () => {
-          manager.stop();
+          await manager.stop();
         });
 
         await waitFor(() => {

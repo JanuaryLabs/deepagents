@@ -79,16 +79,10 @@ export class ZukhrufChatTransport extends DefaultChatTransport<UIMessage> {
           throw new Error('Zukhruf returned a different session ID');
         }
 
-        const signal = init?.signal;
-        const cancel = () => {
-          void request(`${sessionApi}/cancel`, { method: 'POST' });
-        };
-        signal?.addEventListener('abort', cancel, { once: true });
-
         return request(`${sessionApi}/stream`, {
           headers: { accept: 'text/event-stream' },
           method: 'GET',
-          signal,
+          signal: init?.signal,
         });
       },
       prepareSendMessagesRequest: ({ id, messages, trigger }) => {
@@ -144,6 +138,27 @@ export class ZukhrufChatTransport extends DefaultChatTransport<UIMessage> {
       throw new Error('Zukhruf returned an invalid upload response');
     }
     return receipt.data;
+  }
+
+  /**
+   * Cancel the session's running turn, and resolve once Zukhruf answers. A
+   * stopped stream does not cancel the turn: leaving a chat lets its answer
+   * finish on the server. A refused cancel throws the AI SDK's `APICallError`
+   * with the response's status and text, as a refused upload does.
+   */
+  async cancel(sessionId: string): Promise<void> {
+    const url = `${sessionApi(this.sessionsApi, sessionId)}/cancel`;
+    const response = await this.request(url, { method: 'POST' });
+    if (!response.ok) {
+      const responseBody = await response.text();
+      throw new APICallError({
+        message: responseBody || 'Failed to cancel the turn.',
+        url,
+        requestBodyValues: undefined,
+        statusCode: response.status,
+        responseBody,
+      });
+    }
   }
 }
 

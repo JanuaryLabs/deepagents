@@ -10,11 +10,15 @@ import {
 
 const idleTransport: ChatTransport<UIMessage> & {
   uploadFile: () => never;
+  cancel: () => never;
 } = {
   sendMessages: () => Promise.reject(new Error('No sends expected')),
   reconnectToStream: () => Promise.resolve(null),
   uploadFile: () => {
     throw new Error('No uploads expected');
+  },
+  cancel: () => {
+    throw new Error('No cancels expected');
   },
 };
 

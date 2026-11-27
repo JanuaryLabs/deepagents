@@ -326,20 +326,12 @@ function QueuedMessagesStrip() {
 
 function ChatSubmitButton() {
   const { state } = useComposer('ChatSubmitButton');
-  const { stop } = useAgent();
   const { status } = useAgentStatus();
   const hasDraft = state.text.trim().length > 0;
   const isRunning = status === 'submitted' || status === 'streaming';
 
   if (isRunning && !hasDraft) {
-    return (
-      <SubmitButton
-        className="ml-auto"
-        type="button"
-        variant="stop"
-        onClick={stop}
-      />
-    );
+    return <ChatComposer.Stop className="ml-auto" />;
   }
   return (
     <Composer.Submit
