@@ -109,6 +109,22 @@ describe('persisted skill links', () => {
     );
   });
 
+  it('ends a standalone skill as Codex does: before a period, never at a price, and after its namespace', () => {
+    const names = (source: string) =>
+      tokenizePersistedPrompt(source)
+        .filter((token) => token.kind === 'standalone-skill')
+        .map((token) => token.name);
+
+    assert.deepEqual(
+      {
+        period: names('Run $audit, then $review.'),
+        price: names('It costs $5.00 today.'),
+        namespaced: names('Use $plugin:audit now.'),
+      },
+      { period: ['audit', 'review'], price: [], namespaced: ['plugin:audit'] },
+    );
+  });
+
   it('tokenizes a serialized mention link back to a mention token', () => {
     const source = serializeMentionPromptLink('Paul Graham');
     const tokens = tokenizePersistedPrompt(`ask ${source} today`);

@@ -39,6 +39,26 @@ select 1
     ).toHaveAttribute('data-skill-name', 'data set');
   });
 
+  it('ends a skill reference at the punctuation that follows it', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const { container } = render(
+      <PersistedPromptText
+        skillIcon={skillIcon}
+        text="Run $audit, then $review."
+      />,
+    );
+
+    expect(
+      Array.from(container.firstElementChild?.childNodes ?? [], (node) =>
+        node instanceof Element
+          ? `skill:${node.getAttribute('data-skill-name')}`
+          : node.textContent,
+      ),
+    ).toEqual(['Run ', 'skill:audit', ', then ', 'skill:review', '.']);
+  });
+
   it('copies the canonical source for rendered references and code', () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);

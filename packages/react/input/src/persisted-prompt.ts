@@ -63,7 +63,8 @@ type PromptLink = {
 };
 
 const CODE_PATTERN = /```([^\r\n`]*)\r?\n?([\s\S]*?)```|`([^`\r\n]+)`/g;
-const STANDALONE_SKILL_PATTERN = /\$\[[^\]\r\n]+\]|\$[A-Za-z0-9][\w.-]*/g;
+const STANDALONE_SKILL_PATTERN =
+  /\$(?:\[[^\]\r\n]+\]|[A-Za-z][\w-]*(?::[A-Za-z][\w-]*)?)/g;
 const SKILL_HREF_PREFIX = 'skill://';
 const MENTION_HREF_PREFIX = 'mention://';
 
