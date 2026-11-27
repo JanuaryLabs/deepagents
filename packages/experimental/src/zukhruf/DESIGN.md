@@ -458,7 +458,8 @@ work (long-running executor process):
     → atomically claim stream queued → running     // before any write: orders execution against cancellation
     → user message turns drain the leading queue-only FIFO prefix
     → sandbox = sandboxes.acquire(declaration, {chatId, userId}) // per-chat: the first turn attaches or creates; later turns borrow
-    → stream cancelled? record input + <turn_aborted>; skip   // setup interrupted or done on a cancelled stream
+    → setup throws? record what the turn keeps; rethrow      // the orphan settles it: input + placeholder; cancelled: as below; deleted session: nothing
+    → stream cancelled? record input, settle answered approvals output-error, <turn_aborted>; skip   // setup done on a cancelled stream
     → engine.set(user(input), skills, assistant placeholder id=streamId); save()
     → monitor cancellation → chat({ toolsContext }) → AWAIT persist(preclaimed)
                                                     // worker holds the job for the whole turn
