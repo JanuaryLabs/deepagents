@@ -1,2 +1,5 @@
 @import "@deepagents/react-input/styles.css";
 @source "./dist";
+/* Streamdown's own classes, hoisted or nested; Tailwind ignores the missing path. */
+@source "../../streamdown/dist/*.js";
+@source "./node_modules/streamdown/dist/*.js";

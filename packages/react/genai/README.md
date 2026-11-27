@@ -21,7 +21,7 @@ Import the stylesheets in the Tailwind CSS v4 file of the host, after Tailwind. 
 @import '@deepagents/react-genai/styles.css';
 ```
 
-`@deepagents/react-genai/styles.css` imports the stylesheet of `@deepagents/react-input` and names the built components of both packages with `@source`, so Tailwind generates the classes they use. The host writes no `@source` for either package.
+`@deepagents/react-genai/styles.css` imports the stylesheet of `@deepagents/react-input` and names the built components of both packages and of Streamdown, which renders their Markdown, with `@source`, so Tailwind generates the classes they use. The host writes no `@source` for either package.
 
 Import `TheButton` directly from `@zukhruf/ui`. This package does not export it.
 
