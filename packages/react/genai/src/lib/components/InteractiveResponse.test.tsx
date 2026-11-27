@@ -590,3 +590,78 @@ test('in a right-to-left page an English sentence holding an image keeps its own
     cleanup();
   }
 });
+
+function QuoteCiteProbe(props: Record<string, unknown>) {
+  return (
+    <sup
+      data-testid="quote-cite"
+      data-passage={String(props.passage)}
+      data-quote={String(props.quote)}
+    >
+      [{String(props.passage)}]
+    </sup>
+  );
+}
+
+const quotedPassageCite = {
+  name: 'passage-cite',
+  component: QuoteCiteProbe,
+  allowedAttributes: ['passage', 'quote'],
+};
+
+test.each([
+  [
+    'curly double quotes',
+    '<passage-cite passage=”pubmed:1” quote=”eGFR below 30” />',
+  ],
+  [
+    'opening and closing curly double quotes',
+    '<passage-cite passage=“pubmed:1” quote=“eGFR below 30” />',
+  ],
+  [
+    'curly single quotes',
+    '<passage-cite passage=‘pubmed:1’ quote=‘eGFR below 30’ />',
+  ],
+])(
+  'a declared element written with %s renders as the element, not as raw text (#5945)',
+  (_case, tag) => {
+    try {
+      const { container } = render(
+        <InteractiveResponse elements={[quotedPassageCite]}>
+          {`Apixaban needs no change ${tag} in mild impairment.`}
+        </InteractiveResponse>,
+      );
+
+      const cite = screen.getByTestId('quote-cite');
+      expect({
+        passage: cite.dataset.passage,
+        quote: cite.dataset.quote,
+        rawTagShown: container.textContent?.includes('passage-cite'),
+        inSentence: cite.closest('p')?.textContent,
+      }).toEqual({
+        passage: 'pubmed:1',
+        quote: 'eGFR below 30',
+        rawTagShown: false,
+        inSentence: 'Apixaban needs no change [pubmed:1] in mild impairment.',
+      });
+    } finally {
+      cleanup();
+    }
+  },
+);
+
+test('a tag that is not a declared element keeps the curly quotes the model wrote (#5945)', () => {
+  try {
+    const { container } = render(
+      <InteractiveResponse elements={[quotedPassageCite]}>
+        {'Write `<img alt=”a scan”>` to show the image.'}
+      </InteractiveResponse>,
+    );
+
+    expect(container.querySelector('code')?.textContent).toBe(
+      '<img alt=”a scan”>',
+    );
+  } finally {
+    cleanup();
+  }
+});

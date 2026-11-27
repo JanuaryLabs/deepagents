@@ -19,7 +19,9 @@ export function normalizeStreamdownChildren(
     return children;
   }
 
-  let result = normalizeAttributeEscapes(children).replace(
+  let result = normalizeAttributeEscapes(
+    normalizeCurlyQuotedAttributes(children, customTagTest(tagNames)),
+  ).replace(
     /<(\w[\w-]*)((?:\s+[\w-]+="[^"]*")+)\s*(\/?>)/g,
     (_m, tag: string, attrs: string, close: string) => {
       const collapsed = attrs.replace(/\s+/g, ' ');
@@ -52,6 +54,41 @@ function isProseLine(input: string, position: number): boolean {
   return line.replace(TAG_PATTERN, '').trim() !== '';
 }
 
+function customTagTest(tagNames?: string[]): (name: string) => boolean {
+  const customSet = tagNames?.length ? new Set(tagNames) : null;
+  return customSet
+    ? (name: string) => customSet.has(name)
+    : (name: string) => name.includes('-');
+}
+
+const CURLY_QUOTED_TAG =
+  /<([\w-]+)((?:\s+[\w-]+=(?:[“”][^“”]*[“”]|[‘’][^‘’]*[‘’]|"[^"]*"|'[^']*'))+)\s*(\/?>)/g;
+const CURLY_QUOTED_ATTRIBUTE =
+  /([\w-]+)=(?:[“”]([^“”]*)[“”]|[‘’]([^‘’]*)[‘’])/g;
+
+function straightenQuotes(attributes: string): string {
+  return attributes.replace(
+    CURLY_QUOTED_ATTRIBUTE,
+    (_match: string, name: string, double?: string, single?: string) => {
+      const value = double ?? single ?? '';
+      return `${name}="${value.replace(/"/g, '&quot;')}"`;
+    },
+  );
+}
+
+// Models write typographic quotes around attribute values (passage=”…”), which
+// HTML does not read as quotes, so a declared element would show as raw text.
+function normalizeCurlyQuotedAttributes(
+  input: string,
+  isCustom: (name: string) => boolean,
+): string {
+  return input.replace(
+    CURLY_QUOTED_TAG,
+    (tag: string, name: string, attributes: string, close: string) =>
+      isCustom(name) ? `<${name}${straightenQuotes(attributes)}${close}` : tag,
+  );
+}
+
 /**
  * The wrapper divs emitted here must stay bare (no attributes). Their minimal
  * shape is part of the rendering contract, allowing consumers to make the
@@ -63,10 +100,7 @@ function wrapElements(
   tagNames?: string[],
   nested = false,
 ): string {
-  const customSet = tagNames?.length ? new Set(tagNames) : null;
-  const isCustom = customSet
-    ? (name: string) => customSet.has(name)
-    : (name: string) => name.includes('-');
+  const isCustom = customTagTest(tagNames);
 
   let out = '';
   let i = 0;
