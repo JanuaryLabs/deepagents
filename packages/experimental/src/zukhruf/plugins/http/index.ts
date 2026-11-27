@@ -725,9 +725,31 @@ async function validateTurnMessage(
   return message;
 }
 
+/**
+ * A turn is stored as jsonb (the queue job, then the message), and Postgres
+ * refuses U+0000 (22P05) and a lone UTF-16 surrogate (22P02) in any string of
+ * it, so such a turn is a 400 before any write, not a 500 after one (#5942).
+ */
+function holdsUnstorableString(value: unknown): boolean {
+  if (typeof value === 'string')
+    return value.includes('\0') || !value.isWellFormed();
+  if (typeof value !== 'object' || value === null) return false;
+  return Object.entries(value).some(
+    ([key, item]) => holdsUnstorableString(key) || holdsUnstorableString(item),
+  );
+}
+
 async function validateTurnRequest(
   body: z.infer<typeof turnBodySchema>,
 ): Promise<Parameters<HttpRuntime['enqueue']>[1]> {
+  if (holdsUnstorableString(body))
+    throw new HTTPException(400, {
+      message: 'Invalid message',
+      cause: {
+        code: 'api/validation-failed',
+        detail: 'Text must not hold U+0000 or a lone surrogate',
+      },
+    });
   const message = await validateTurnMessage(body.message);
   const tools = body.tools === undefined ? {} : { tools: body.tools };
   const elements =

@@ -263,6 +263,17 @@ runtime directly catch the same refusals as `ConversationNotFoundError`,
 `TurnNotFoundError`, `StaleTurnError`, `AgentThreadLimitError`,
 `ConversationArchivedError` and `ConversationNotArchivedError` from the main
 entry.
+A turn `POST` is checked before any write, so a refused turn starts no session:
+its message must be an AI SDK `UIMessage` (`safeValidateUIMessages`) from the
+user or the assistant, and no string in the body may hold U+0000 or a lone
+UTF-16 surrogate, which Postgres cannot store in the jsonb that keeps the turn.
+Each answers 400 `api/validation-failed`. The plugin accepts any other text. A
+host that refuses more, such as the invisible Unicode tag characters U+E0000 to
+U+E007F that can hide a prompt injection, does it in its own Hono middleware on
+the mount, before `http()` answers, as the OpenAI Agents SDK input guardrails,
+LangChain middleware and Mastra input processors leave such checks to the
+application. Hono caches the parsed body, so the middleware's `c.req.json()`
+and the plugin read the same JSON.
 Plugins may also contribute one AI SDK telemetry integration per turn through
 `telemetry(context)`; the runtime applies every contribution with the agent's
 declaration-local telemetry policy.

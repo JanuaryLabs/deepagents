@@ -1,6 +1,6 @@
+import { test } from '@zukhruf/parameterized-test';
 import { Hono } from 'hono';
 import assert from 'node:assert/strict';
-import test from 'node:test';
 import { z } from 'zod';
 
 import type { StreamPart } from '@deepagents/context';
@@ -453,6 +453,94 @@ test('POST /zukhruf/v1/session validates its public boundary', async (t) => {
     ]);
     assert.equal(response.status, 400);
   });
+});
+
+void test.each(
+  [
+    { name: 'U+0000 in message text', text: 'a\u0000b' },
+    { name: 'a lone high surrogate in message text', text: 'a\uD800b' },
+    { name: 'a lone low surrogate in message text', text: 'a\uDC00b' },
+    {
+      name: 'U+0000 in a client tool description',
+      text: 'Hi',
+      tools: {
+        ask_user_question: {
+          description: 'a\u0000b',
+          inputSchema: { type: 'object' },
+        },
+      },
+    },
+  ],
+  ({ name, text, tools }) =>
+    test(`POST /zukhruf/v1/session/:sessionId refuses ${name} before any write`, async () => {
+      const writes: string[] = [];
+      const app = createApp(
+        createRuntime({
+          sessionExists: async () => false,
+          async createSession() {
+            writes.push('createSession');
+          },
+          async enqueue() {
+            writes.push('enqueue');
+            return { id: 'turn-1', stream: new ReadableStream<StreamPart>() };
+          },
+        }),
+      );
+      const sessionId = '0b7f9d3e-58a4-4c1e-9f7a-3d2b6c8e1a40';
+
+      const response = await app.request(mounted(`/session/${sessionId}`), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          sessionId,
+          message: {
+            id: 'message-1',
+            role: 'user',
+            parts: [{ type: 'text', text }],
+          },
+          tools,
+          trigger: 'submit-message',
+        }),
+      });
+
+      assert.equal(response.status, 400);
+      const body = errorBodySchema.parse(await response.json());
+      assert.equal(body.cause.code, 'api/validation-failed');
+      assert.deepEqual(writes, []);
+    }),
+);
+
+test('POST /zukhruf/v1/session/:sessionId accepts Arabic, emoji, a subdivision flag and a variation selector', async () => {
+  const enqueued: string[] = [];
+  const app = createApp(
+    createRuntime({
+      async enqueue(_conversation, request) {
+        const [part] = request.message.parts;
+        if (part?.type === 'text') enqueued.push(part.text);
+        return { id: 'turn-1', stream: new ReadableStream<StreamPart>() };
+      },
+    }),
+  );
+  const sessionId = '6c2e4a18-93b7-4f05-8d1a-5e7c9b3f2d61';
+  const text =
+    'ما الجرعة؟ 👩🏽‍⚕️ \u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F} 葛\u{E0100}';
+
+  const response = await app.request(mounted(`/session/${sessionId}`), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      sessionId,
+      message: {
+        id: 'message-1',
+        role: 'user',
+        parts: [{ type: 'text', text }],
+      },
+      trigger: 'submit-message',
+    }),
+  });
+
+  assert.equal(response.status, 202);
+  assert.deepEqual(enqueued, [text]);
 });
 
 test('POST /zukhruf/v1/session/:sessionId continues an existing session', async () => {
