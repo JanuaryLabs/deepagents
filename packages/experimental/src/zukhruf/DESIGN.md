@@ -202,8 +202,8 @@ Mechanism:
 ### Interrupting a turn _(Built, #6056)_
 
 `AgentObservation.cancel(turnId?)` (`POST /session/:sessionId/cancel` and
-`…/turn/:turnId/cancel`) and archive interrupt through one `TurnInterruption`, Codex's
-`handle_task_abort`:
+`…/turn/:turnId/cancel`), archive and `interrupt_agent` interrupt through one `TurnInterruption`,
+Codex's `handle_task_abort`:
 
 - **A lone queued question keeps its input.** Lone means the queue's current turn of the chat
   (`getCurrentTurn`: the active job, or else the oldest eligible queued one) is this turn, so
@@ -221,9 +221,11 @@ Mechanism:
 - **A running turn is cancelled, and its worker records it** on every exit: setup interrupted or
   done on a cancelled stream, and inside `chat()`. A setup that throws still fails the turn, and
   its orphan settles it: on a cancelled stream the worker records the input and the marker first,
-  and on a deleted session nothing (see Delete). An approval continuation's answered calls settle
-  `output-error` before the marker, as Codex gives an aborted call its `aborted` output right
-  after the call (`core/src/context_manager/normalize.rs`).
+  and on a deleted session nothing (see Delete). A cancelled turn ends its chain the same way on
+  every path, setup or running (#6241): a continuation's answered approvals that never ran settle
+  as failed (`output-error`, or `output-denied` for a denial) while their message is still the
+  head, and only then is the `<turn_aborted>` marker written, as Codex gives an aborted call its
+  output right after the call (`core/src/context_manager/normalize.rs`).
 - **Cancel answers once the turn has exited**, waiting at most 10 s (Codex's shutdown bound) for it
   to stop being the queue's current turn, as Codex answers `turn/interrupt` only on `TurnAborted`
   (`app-server/src/bespoke_event_handling.rs`). Until then the session read lists the turn as
@@ -726,11 +728,14 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
   waits default to 10 seconds, 30 seconds, and 1 hour respectively. It aborts with the caller turn.
   Zukhruf has no in-turn steer channel, so steer activity is intentionally absent.
 - `interrupt_agent` resolves canonical or relative paths, rejects root/self, returns the target's
-  previous listed status (`not_found` for a missing target), and leaves the target reusable. For a
-  running or oldest queued turn it
-  first commits stream cancellation, records the child's `completion` receipt, then removes matching
-  scheduler copies that are still queued. It sends the parent no `FINAL_ANSWER`, as Codex's
-  `interrupt_agent` sends none (`core/src/tools/handlers/multi_agents_v2/interrupt_agent.rs`).
+  previous listed status (`not_found` for a missing target), and leaves the target reusable. It
+  interrupts the child's current turn through `TurnInterruption` (see Interrupting a turn), as
+  Codex's `interrupt_agent` aborts through the same `interrupt_task` as a user's interrupt
+  (`core/src/session/sampling_interrupt.rs`, `core/src/tasks/mod.rs`), so a spawned task that has
+  not started is recorded with the `<turn_aborted>` marker. Like Codex's `send_op`, it does not
+  wait for a running turn to exit. It then records the child's `completion` receipt and sends the
+  parent no `FINAL_ANSWER`, as Codex's `interrupt_agent` sends none
+  (`core/src/tools/handlers/multi_agents_v2/interrupt_agent.rs`).
   Active work retains its strict-FIFO key until its handler exits; local handlers are signalled by
   the adapter and remote handlers observe the durable stream cancellation.
   Terminal and approval-paused targets are no-ops. This is the complete model-facing lifecycle

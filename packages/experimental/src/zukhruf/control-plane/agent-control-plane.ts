@@ -1,8 +1,6 @@
 import type { UIMessage } from 'ai';
 import { v5 as uuidv5 } from 'uuid';
 
-import type { StreamManager } from '@deepagents/context';
-
 import type { AgentDeclaration } from '../agent.ts';
 import type { MailboxCoordinator } from '../mailbox/coordinator.ts';
 import type {
@@ -18,6 +16,7 @@ import {
 import type { TurnQueue, TurnRef, TurnRequest } from '../queue/turn-queue.ts';
 import type { ChildActivity } from '../runtime/conversation-status/child-progress.ts';
 import { withChildActivity } from '../runtime/conversation-status/projector.ts';
+import type { TurnInterruption } from '../runtime/turn-interruption.ts';
 import { AgentDeclarationRegistry } from './agent-declaration-registry.ts';
 import { AgentDirectory } from './agent-directory.ts';
 import { AgentHistoryForker } from './agent-history-forker.ts';
@@ -36,7 +35,6 @@ import { TurnNotFoundError } from './turn-not-found-error.ts';
 
 export interface AgentControlPlaneOptions {
   root: AgentDeclaration;
-  streams: StreamManager;
   queue: TurnQueue;
   mailbox: MailboxCoordinator;
   declarations: AgentDeclarationRegistry;
@@ -47,6 +45,7 @@ export interface AgentControlPlaneOptions {
     thread: AgentThread,
     activity: ChildActivity,
   ) => Promise<void>;
+  interruption: Pick<TurnInterruption, 'interruptHead'>;
 }
 
 export interface AgentActor {
@@ -74,7 +73,6 @@ export type {
 /** Application-level coordination for one declared agent tree. */
 export class AgentControlPlane {
   readonly #root: AgentDeclaration;
-  readonly #streams: StreamManager;
   readonly #queue: TurnQueue;
   readonly #mailbox: MailboxCoordinator;
   readonly #declarations: AgentDeclarationRegistry;
@@ -82,10 +80,10 @@ export class AgentControlPlane {
   readonly #statusProjector: AgentStatusProjector;
   readonly #residency: AgentResidency;
   readonly #recordActivity: AgentControlPlaneOptions['recordActivity'];
+  readonly #interruption: AgentControlPlaneOptions['interruption'];
 
   constructor(options: AgentControlPlaneOptions) {
     this.#root = options.root;
-    this.#streams = options.streams;
     this.#queue = options.queue;
     this.#mailbox = options.mailbox;
     this.#declarations = options.declarations;
@@ -93,6 +91,7 @@ export class AgentControlPlane {
     this.#statusProjector = options.statusProjector;
     this.#residency = options.residency;
     this.#recordActivity = options.recordActivity;
+    this.#interruption = options.interruption;
   }
 
   async resolve(conversation: ConversationId): Promise<{
@@ -363,14 +362,12 @@ export class AgentControlPlane {
           currentTurn.streamId,
           target.lastTurnId,
         )) ?? target;
-      // Stream state is the durable execution authority. Transition it before
-      // aborting scheduler delivery so a racing worker observes cancellation,
-      // never an orphaned failure.
-      await this.#streams.cancel(currentTurn.streamId);
+      // Codex's interrupt_agent aborts through the same interrupt_task as a
+      // user's interrupt, so a task that has not started is recorded.
+      await this.#interruption.interruptHead(target.conversation, currentTurn);
       // An interrupted child sends its parent no FINAL_ANSWER, as in Codex;
-      // this records its completion receipt before the queue forgets the turn.
+      // this records only its completion receipt.
       await this.projectTerminal(currentTurn, interruptedThread);
-      await this.#queue.cancel(currentTurn.streamId);
       await this.#recordActivity(target, {
         id: `interrupt:${currentTurn.streamId}`,
         type: 'interrupt',

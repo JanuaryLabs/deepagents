@@ -5105,6 +5105,98 @@ describe('zukhruf runtime — interrupted turn marker', () => {
     );
   });
 
+  // Codex's interrupt_agent takes the child's turn through interrupt_task,
+  // whose handle_task_abort records its pending initial input
+  // (core/src/tasks/mod.rs), and an interrupted child never notifies its
+  // parent (agent/status.rs is_final).
+  it("records a sub-agent's queued task and the turn_aborted marker when its parent interrupts it before it starts, and sends the parent no final answer", async (t) => {
+    const childPrompts: LanguageModelV4Prompt[] = [];
+    const child: AgentDeclaration = {
+      name: 'worker',
+      model: new MockLanguageModelV4({
+        doStream: async ({ prompt }) => {
+          childPrompts.push(prompt);
+          return { stream: buildStream(['child done'], 0) };
+        },
+      }),
+      sandbox: buildSandbox(),
+      instructions: [],
+    };
+    const rootPrompts: LanguageModelV4Prompt[] = [];
+    const rootSteps = [
+      toolCallResult({
+        toolCallId: 'spawn-1',
+        toolName: 'spawn_agent',
+        input: JSON.stringify({
+          agent_type: 'worker',
+          task_name: 'queued',
+          message: 'go',
+          fork_turns: 'none',
+        }),
+      }),
+      toolCallResult({
+        toolCallId: 'interrupt-1',
+        toolName: 'interrupt_agent',
+        input: JSON.stringify({ target: 'queued' }),
+      }),
+      { stream: buildStream(['interrupted'], 0) },
+      toolCallResult({
+        toolCallId: 'followup-1',
+        toolName: 'followup_task',
+        input: JSON.stringify({ target: 'queued', message: 'again' }),
+      }),
+    ];
+    const rootModel = new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        rootPrompts.push(prompt);
+        return rootSteps.shift() ?? { stream: buildStream(['done'], 0) };
+      },
+    });
+    const root: AgentDeclaration = {
+      ...declaration(rootModel),
+      name: 'root',
+      subagents: [child],
+    };
+    await using h = await harness(rootModel, { declaration: root });
+    // One slot: the root's turn holds it, so the child's first turn stays queued.
+    await using worker = await h.runtime.work({ concurrency: 1 });
+    void worker;
+    const conversation = { chatId: 'queued-child-interrupt', userId: 'u1' };
+
+    const interrupting = await h.runtime.enqueue(conversation, turn('spawn'));
+    assert.equal(await collectText(interrupting.stream), 'interrupted');
+    assert.deepStrictEqual(childPrompts, [], 'the child never ran its task');
+    const interruptResult = JSON.stringify(rootPrompts[2]);
+    assert.match(interruptResult, /"previous_status":"pending_init"/);
+    assert.doesNotMatch(
+      JSON.stringify(rootPrompts),
+      /Message Type: FINAL_ANSWER/,
+    );
+    assert.equal(
+      await h.mailboxStore.hasPending(conversation),
+      false,
+      'the interrupted child sends its parent no final answer',
+    );
+
+    const followup = await h.runtime.enqueue(conversation, turn('again'));
+    assert.equal(await collectText(followup.stream), 'done');
+    await waitFor(() => assert.equal(childPrompts.length, 1), {
+      interval: 25,
+      signal: t.signal,
+    });
+
+    const [task, marker, next, ...rest] = conversationOf(childPrompts[0]);
+    assert.deepStrictEqual(
+      { task, marker, next: next?.role, rest },
+      {
+        task: { role: 'user', content: ['go'] },
+        marker: { role: 'user', content: [TURN_ABORTED] },
+        next: 'user',
+        rest: [],
+      },
+    );
+  });
+
   it('records no turn_aborted marker when the worker shuts down mid-turn', async (t) => {
     const prompts: LanguageModelV4Prompt[] = [];
     const model = interruptibleModel(prompts, [

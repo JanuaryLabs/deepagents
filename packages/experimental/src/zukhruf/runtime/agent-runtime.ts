@@ -544,9 +544,19 @@ class RuntimeHost implements AsyncDisposable {
       directory,
       approvals,
     });
+    const interruption = new TurnInterruption({
+      storage,
+      streams,
+      queue,
+      directory,
+      approvals,
+      settlement: () => this.#settlement.wait(),
+      publishConversationStatus: (conversation) =>
+        conversationStatus.publish(conversation),
+      rootDeclarationName: declarations.root.name,
+    });
     const controlPlane = new AgentControlPlane({
       root: declarations.root,
-      streams,
       queue,
       mailbox,
       declarations,
@@ -555,7 +565,9 @@ class RuntimeHost implements AsyncDisposable {
       residency,
       recordActivity: (thread, activity) =>
         conversationStatus.recordActivity(thread, activity),
+      interruption,
     });
+    this.#interruption = interruption;
     this.#storage = storage;
     this.#conversationDataCleanup = options.conversationDataCleanup;
     this.#declarations = declarations;
@@ -598,17 +610,6 @@ class RuntimeHost implements AsyncDisposable {
       }),
     );
     this.#sandboxes = sandboxes;
-    this.#interruption = new TurnInterruption({
-      storage,
-      streams,
-      queue,
-      directory,
-      approvals,
-      settlement: () => this.#settlement.wait(),
-      publishConversationStatus: (conversation) =>
-        conversationStatus.publish(conversation),
-      rootDeclarationName: declarations.root.name,
-    });
     this.#idleStop = SandboxIdleStop.of({
       wakes: storage.sandboxIdleWakes,
       declarations,

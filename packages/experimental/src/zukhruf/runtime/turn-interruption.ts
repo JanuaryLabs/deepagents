@@ -87,6 +87,17 @@ export class TurnInterruption {
   }
 
   /**
+   * Interrupts `head`, the conversation's current turn, without waiting for
+   * it to exit, as Codex's interrupt_agent sends its Op and returns.
+   */
+  async interruptHead(
+    conversation: ConversationId,
+    head: TurnRef,
+  ): Promise<void> {
+    await this.#interrupt(conversation, head.streamId, head);
+  }
+
+  /**
    * Interrupts every queued turn of `member`, then every running one,
    * without waiting for them to exit: archive interrupts a whole tree first
    * and then waits once. The head is read once, so a turn queued behind the
