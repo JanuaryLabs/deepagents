@@ -375,6 +375,10 @@ the filesystem.
 The optional `@deepagents/experimental/zukhruf/uploads` plugin stores
 composer uploads (PNG, JPEG, WebP, GIF, HEIC/HEIF, MP4, QuickTime, MP3, M4A,
 WAV) in the conversation sandbox under a host-selected absolute directory.
+Pass `mediaTypes` to accept only the kinds your model reads, for example
+`uploads({ directory, mediaTypes: ['image/jpeg', 'image/png'] })`: discovery
+advertises that list, any other upload answers 415, and the reminder speaks
+only of those kinds.
 Compose `@deepagents/experimental/zukhruf/uploads/http` with
 `http(runtime, ...)` when the browser should upload bytes: the `GET` route
 serves them with byte ranges so media elements can seek, discovery advertises
