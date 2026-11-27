@@ -1,5 +1,7 @@
+import { createClock } from '@sinonjs/fake-timers';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { ClockProvider } from '@zukhruf/ui';
 import type { Citation, UIMessage } from 'ai';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -553,7 +555,7 @@ describe('Messages text citations (#5951)', () => {
     ).toBe('Apixaban needs no change in mild impairment.1');
   });
 
-  it('keeps a source’s first number when a later message cites it again', () => {
+  it('numbers each answer’s sources from 1, so a follow-up that cites an earlier source starts again at 1 (#6022)', () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
 
@@ -571,7 +573,108 @@ describe('Messages text citations (#5951)', () => {
       screen
         .getAllByRole('button', { name: /^Source / })
         .map((pill) => pill.getAttribute('aria-label')),
-    ).toEqual(['Source 1', 'Source 2', 'Source 2']);
+    ).toEqual(['Source 1', 'Source 2', 'Source 1']);
+  });
+
+  it('numbers an answer’s sources in reading order, whatever order its citations arrive in (#6022)', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const first = 'Apixaban needs no change in mild impairment.';
+    const text = `${first} Use Cockcroft-Gault CrCl for dosing.`;
+    renderAnswers([
+      citedAnswer(text, [
+        urlCitation('https://pubmed.example/later', text.length),
+        urlCitation('https://pubmed.example/earlier', first.length),
+      ]),
+    ]);
+
+    expect(
+      screen.getByRole('button', { name: 'Source 1' }).closest('p')
+        ?.textContent,
+    ).toBe(
+      'Apixaban needs no change in mild impairment.1 Use Cockcroft-Gault CrCl for dosing.2',
+    );
+  });
+
+  it('copies an answer with each citation as [n] where it sits and the numbered sources after it (#5995)', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+    let copied = '';
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: (text: string) => {
+          copied = text;
+          return Promise.resolve();
+        },
+      },
+    });
+    stack.defer(() => Reflect.deleteProperty(navigator, 'clipboard'));
+
+    const first = 'Apixaban needs no change in mild impairment.';
+    const text = `${first} Use Cockcroft-Gault CrCl for dosing.`;
+    const answer: UIMessage = {
+      id: `asst-${++messageCounter}`,
+      role: 'assistant',
+      parts: [
+        {
+          type: 'text',
+          text,
+          citations: [
+            {
+              source: {
+                type: 'source',
+                sourceType: 'url',
+                id: 'review',
+                url: 'https://pubmed.example/2',
+                title: 'Renal dosing review',
+              },
+              startIndex: 0,
+              endIndex: text.length - 1,
+            },
+            {
+              source: {
+                type: 'source',
+                sourceType: 'url',
+                id: 'label',
+                url: 'https://label.example/apixaban',
+                title: 'Apixaban label',
+              },
+              startIndex: 0,
+              endIndex: first.length,
+            },
+          ],
+        },
+        {
+          type: 'source-url',
+          sourceId: 'listed',
+          url: 'https://listed.example/review',
+        },
+      ],
+    };
+    render(
+      <ClockProvider clock={createClock()}>
+        <Messages.Root messages={[answer]}>
+          <Messages.Item message={answer} index={0}>
+            <Messages.CopyAction />
+          </Messages.Item>
+        </Messages.Root>
+      </ClockProvider>,
+      { wrapper: AgentHarness },
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Copy message' }));
+
+    expect(copied).toBe(
+      [
+        'Apixaban needs no change in mild impairment.[1] Use Cockcroft-Gault CrCl for dosing[2].',
+        '',
+        '[1] Apixaban label — https://label.example/apixaban',
+        '[2] Renal dosing review — https://pubmed.example/2',
+        '[3] https://listed.example/review',
+      ].join('\n'),
+    );
   });
 
   it('draws a citation through the host’s citation component, with its citation and number', () => {

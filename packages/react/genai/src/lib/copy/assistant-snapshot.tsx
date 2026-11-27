@@ -11,16 +11,41 @@ import {
   useState,
 } from 'react';
 
+import { citationsInReadingOrder } from '../chat/citation-order.ts';
+import {
+  citationIndexOf,
+  extractSourcesFromMessage,
+  urlCitationsOf,
+} from '../chat/citations.ts';
 import { COPY_EXCLUSION_MODES } from './copy-image.ts';
 import { SnapshotRenderContext } from './snapshot-context.ts';
 import { SnapshotRenderPortal, waitForNextPaint } from './snapshot-render.tsx';
 import { useCopyElementAsImage } from './use-copy-element-as-image.ts';
 
+/**
+ * The answer's text with each citation as `[n]` where it sits, then one line
+ * per source, numbered as the answer draws them.
+ */
 export function extractAssistantRawText(message: UIMessage): string {
-  return message.parts
+  const sources = extractSourcesFromMessage(message);
+  const text = message.parts
     .filter(isTextUIPart)
-    .map((part) => part.text)
+    .map((part) =>
+      // Copy of placeCitations' insertion in message-parts.tsx (strike 2, #6040).
+      citationsInReadingOrder(part.text, urlCitationsOf(part.citations))
+        .reverse()
+        .reduce(
+          (marked, { at, citation }) =>
+            `${marked.slice(0, at)}[${citationIndexOf(sources, citation.source.url)}]${marked.slice(at)}`,
+          part.text,
+        ),
+    )
     .join('\n');
+  if (sources.length === 0) return text;
+  const list = sources.map(
+    ({ url, title }, i) => `[${i + 1}] ${title ? `${title} — ` : ''}${url}`,
+  );
+  return `${text}\n\n${list.join('\n')}`;
 }
 
 export function useIsAssistantSnapshotRender() {

@@ -233,7 +233,7 @@ describe('full composition', () => {
 });
 
 describe('TimelinedMessages text citations (#5951)', () => {
-  it('draws a source that is both a source-url part and a text citation once, inline, and still draws a source nobody cites', () => {
+  it('draws a source that is both a source-url part and a text citation once, inline, still draws a source nobody cites, and numbers them in the order they are drawn (#6022)', () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
 
@@ -283,7 +283,7 @@ describe('TimelinedMessages text citations (#5951)', () => {
       names: pills.map((pill) => pill.getAttribute('aria-label')),
       firstInSentence: pills[0]?.closest('p')?.textContent,
     }).toEqual({
-      names: ['Source 2', 'Source 1'],
+      names: ['Source 1', 'Source 2'],
       firstInSentence: undefined,
     });
   });

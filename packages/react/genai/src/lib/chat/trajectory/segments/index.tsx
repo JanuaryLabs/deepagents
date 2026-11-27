@@ -18,10 +18,7 @@ import {
 } from '../../../tools/helpers.ts';
 import type { ToolLabel } from '../../../tools/registry.ts';
 import { useAgent } from '../../agent-context.tsx';
-import {
-  citationIndexOf,
-  extractSourcesFromMessages,
-} from '../../citations.ts';
+import { citationIndexOf, extractSourcesFromMessage } from '../../citations.ts';
 import {
   AssistantTextPart,
   MessageAttachmentPart,
@@ -31,7 +28,7 @@ import {
 } from '../../message-parts.tsx';
 import { isToolAborted } from '../../tool-abort.ts';
 import type { MessagesContextValue } from '../messages-context.ts';
-import { useMessagesContext, useMessagesStatus } from '../messages-context.ts';
+import { useMessageItem, useMessagesStatus } from '../messages-context.ts';
 import { ToolLabelBlock } from '../tool-label.tsx';
 import type { MessageTrajectorySegment } from '../trajectory-segments.ts';
 
@@ -90,11 +87,8 @@ function SegmentSource({
 }: {
   segment: Extract<MessageTrajectorySegment, { kind: 'source' }>;
 }) {
-  const { messages } = useMessagesContext();
-  const sources = useMemo(
-    () => extractSourcesFromMessages(messages),
-    [messages],
-  );
+  const { message } = useMessageItem();
+  const sources = useMemo(() => extractSourcesFromMessage(message), [message]);
 
   return (
     <span>

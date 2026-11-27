@@ -1,5 +1,7 @@
 import type { Citation, UIMessage } from 'ai';
 
+import { citationsInReadingOrder } from './citation-order.ts';
+
 export interface CitationSource {
   url: string;
   title?: string;
@@ -19,28 +21,36 @@ export function urlCitationsOf(
 }
 
 /**
- * Deduped by URL in first-seen order, so a source keeps one citation number
- * across every message of the chat.
+ * An answer's sources, deduped by URL and numbered per answer in the order the
+ * answer shows them: a text's citations where they sit, and a source-url part
+ * where it stands, unless a text citation of the answer draws it inline.
  */
-export function extractSourcesFromMessages(
-  messages: UIMessage[],
+export function extractSourcesFromMessage(
+  message: UIMessage,
 ): CitationSource[] {
-  const seen = new Set<string>();
-  const sources: CitationSource[] = [];
+  // Copy of buildMessageTrajectorySegments' citedInline (strike 2, #6040).
+  const citedInline = new Set(
+    message.parts.flatMap((part) =>
+      part.type === 'text'
+        ? urlCitationsOf(part.citations).map(({ source }) => source.url)
+        : [],
+    ),
+  );
+  const sources = new Map<string, CitationSource>();
   const add = (url: string, title: string | undefined) => {
-    if (seen.has(url)) return;
-    seen.add(url);
-    sources.push({ url, title });
+    if (!sources.has(url)) sources.set(url, { url, title });
   };
-  for (const message of messages) {
-    for (const part of message.parts) {
-      if (part.type === 'text')
-        for (const { source } of urlCitationsOf(part.citations))
-          add(source.url, source.title);
-      if (part.type === 'source-url') add(part.url, part.title);
-    }
+  for (const part of message.parts) {
+    if (part.type === 'text')
+      for (const { citation } of citationsInReadingOrder(
+        part.text,
+        urlCitationsOf(part.citations),
+      ))
+        add(citation.source.url, citation.source.title);
+    if (part.type === 'source-url' && !citedInline.has(part.url))
+      add(part.url, part.title);
   }
-  return sources;
+  return [...sources.values()];
 }
 
 /**

@@ -12,15 +12,17 @@ import { ToolDebug } from '../components/tool-debug.tsx';
 import { useIsAssistantSnapshotRender } from '../copy/assistant-snapshot.tsx';
 import { RenderPart } from '../renderers/render-part.tsx';
 import { useAgent, useAgentStatus } from './agent-context.tsx';
+import { citationsInReadingOrder } from './citation-order.ts';
 import {
   type CitationSource,
   type UrlCitation,
   citationIndexOf,
-  extractSourcesFromMessages,
+  extractSourcesFromMessage,
   urlCitationsOf,
 } from './citations.ts';
 import {
   type MessagesContextValue,
+  useMessageItem,
   useMessagesContext,
 } from './trajectory/messages-context.ts';
 
@@ -111,12 +113,9 @@ export function MessageAttachmentPart({
 // sentence through the same element path as a host's elements.
 const CITATION_TAG = 'genai-citation';
 
-// Places each citation after the text it supports, or at the end when the
-// provider gives no offset (Anthropic sends none).
-function placeCitations(text: string, citations: Citation[]): string {
-  return citations
-    .map((citation, order) => ({ at: citation.endIndex ?? text.length, order }))
-    .sort((a, b) => b.at - a.at || b.order - a.order)
+function placeCitations(text: string, citations: UrlCitation[]): string {
+  return citationsInReadingOrder(text, citations)
+    .reverse()
     .reduce(
       (marked, { at, order }) =>
         `${marked.slice(0, at)}<${CITATION_TAG} citation="${order}" />${marked.slice(at)}`,
@@ -172,16 +171,17 @@ export function AssistantTextPart({
 }) {
   const { status } = useAgentStatus();
   const isSnapshotRender = useIsAssistantSnapshotRender();
-  const { messages, citation: HostCitation } = useMessagesContext();
+  const { citation: HostCitation } = useMessagesContext();
+  const { message } = useMessageItem();
 
   const urlCitations = useMemo(() => urlCitationsOf(citations), [citations]);
   const cited = useMemo<TextCitations>(
     () => ({
       citations: urlCitations,
-      sources: extractSourcesFromMessages(messages),
+      sources: extractSourcesFromMessage(message),
       HostCitation,
     }),
-    [urlCitations, messages, HostCitation],
+    [urlCitations, message, HostCitation],
   );
   const hasCitations = urlCitations.length > 0;
   const withCitations = useMemo(
