@@ -9,6 +9,7 @@ import {
 import type { ReactNode } from 'react';
 
 import type { CitationSource } from '../chat/citations.ts';
+import { useGenaiMessages } from '../i18n/provider.tsx';
 
 // The detail opens from a Popover button on hover, tap and keyboard: a title
 // attribute reaches only mouse users, and Base UI's hover card is not touch or
@@ -16,16 +17,14 @@ import type { CitationSource } from '../chat/citations.ts';
 export function CitationPill({
   source,
   index,
-  labels = { source: `Source ${index}`, open: 'Open the source' },
   children,
 }: {
   source: CitationSource;
   index: number;
-  /** The pill's own words, in the host's language. */
-  labels?: { source: string; open: string };
   /** The host's own detail for this source, such as notices or attribution. */
   children?: ReactNode;
 }) {
+  const t = useGenaiMessages();
   // A source-url's url is provider data typed only as string, and new URL()
   // would throw on a malformed one and take the whole message down.
   const site = URL.parse(source.url)?.hostname ?? source.url;
@@ -34,7 +33,7 @@ export function CitationPill({
       <Popover>
         <PopoverTrigger
           openOnHover
-          aria-label={labels.source}
+          aria-label={t('citation.source', { index })}
           className="text-primary bg-primary/10 hover:bg-primary/20 focus-visible:ring-ring focus-visible:ring-offset-background inline-block rounded px-1 font-mono text-[10px] leading-tight transition-colors focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
         >
           {index}
@@ -63,7 +62,7 @@ export function CitationPill({
             rel="noopener noreferrer"
             className="text-primary underline"
           >
-            {labels.open}
+            {t('citation.open')}
           </a>
         </PopoverContent>
       </Popover>

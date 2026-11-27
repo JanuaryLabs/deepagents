@@ -34,4 +34,5 @@ export * from './lib/elements/Response.tsx';
 export * from './lib/hooks/use-async-generator.ts';
 export * from './lib/hooks/use-auto-resize-textarea.ts';
 export * from './lib/hooks/use-keyboard.ts';
+export * from './lib/i18n/index.ts';
 export * from './lib/tools/index.ts';

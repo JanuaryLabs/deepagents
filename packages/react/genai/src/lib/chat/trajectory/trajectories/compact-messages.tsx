@@ -22,6 +22,11 @@ import {
 import { useStickToBottom } from 'use-stick-to-bottom';
 
 import { TextShimmer } from '../../../components/text-shimmer.tsx';
+import type { SettledStepsStatus } from '../../../i18n/messages.ts';
+import {
+  type GenaiTranslate,
+  useGenaiMessages,
+} from '../../../i18n/provider.tsx';
 import { isSubagentPart, resolveToolEntry } from '../../../tools/helpers.ts';
 import type {
   ComponentRegistry,
@@ -175,7 +180,7 @@ export type CompactSentenceSegmentLabel = {
 export type CompactSegmentLabel =
   CompactCallSegmentLabel | CompactSentenceSegmentLabel;
 
-export type CompactGroupStatus = 'running' | 'complete' | 'error' | 'aborted';
+export type CompactGroupStatus = 'running' | SettledStepsStatus;
 
 type CompactGroupTone = {
   title: string;
@@ -303,6 +308,7 @@ function getReasoningPreview(segment: MessageTrajectorySegment) {
 function getSegmentLabel(
   segment: MessageTrajectorySegment,
   registry: ComponentRegistry | undefined,
+  t: GenaiTranslate,
 ): CompactSegmentLabel {
   if (segment.kind === 'reasoning') {
     return {
@@ -319,7 +325,7 @@ function getSegmentLabel(
     return {
       form: 'call',
       kind: 'dynamic-tool',
-      name: dynamicToolPart.toolName || 'Tool',
+      name: dynamicToolPart.toolName || t('steps.unnamedTool'),
       args: getFallbackArgs(dynamicToolPart.input),
       detail: getFallbackDetail(dynamicToolPart.input),
     };
@@ -350,7 +356,7 @@ function getSegmentLabel(
     };
   }
 
-  return { form: 'call', kind: 'tool', name: 'Step' };
+  return { form: 'call', kind: 'tool', name: t('steps.unknownStep') };
 }
 
 function formatArgs(args: ToolCallLabel['args'] | undefined) {
@@ -441,40 +447,8 @@ function getGroupStatus({
   return 'complete';
 }
 
-function sentenceCase(value: string) {
-  return value ? `${value[0].toUpperCase()}${value.slice(1)}` : value;
-}
-
 function getFallbackToolCount(labels: CompactSegmentLabel[]) {
   return labels.filter((label) => label.kind !== 'reasoning').length;
-}
-
-function formatFallbackToolSummary(
-  labels: CompactSegmentLabel[],
-  groupStatus: CompactGroupStatus,
-) {
-  const toolCount = getFallbackToolCount(labels);
-  if (toolCount === 0) return undefined;
-  const isRunning = groupStatus === 'running' || groupStatus === 'aborted';
-  const verb = isRunning ? 'running' : 'ran';
-  return `${verb} ${toolCount} ${toolCount === 1 ? 'tool' : 'tools'}`;
-}
-
-function getPlainCountSummary(
-  labels: CompactSegmentLabel[],
-  groupStatus: CompactGroupStatus,
-) {
-  const baseTitle = formatFallbackToolSummary(labels, groupStatus);
-  if (!baseTitle) return undefined;
-
-  const title =
-    groupStatus === 'error'
-      ? `${baseTitle} with issues`
-      : groupStatus === 'aborted'
-        ? `cancelled after ${baseTitle}`
-        : baseTitle;
-
-  return sentenceCase(title);
 }
 
 /**
@@ -489,6 +463,7 @@ function getLatestSentenceLabel(labels: CompactSegmentLabel[]) {
 function getCompactSummaryText(
   labels: CompactSegmentLabel[],
   groupStatus: CompactGroupStatus,
+  t: GenaiTranslate,
   activeHint?: string,
 ) {
   const singleLabel = labels.length === 1 ? labels[0] : undefined;
@@ -496,29 +471,32 @@ function getCompactSummaryText(
   if (groupStatus === 'running') {
     if (activeHint) return activeHint;
     if (singleLabel?.kind === 'reasoning') {
-      return `Reasoning${singleLabel.detail ? ` ${singleLabel.detail}` : ''}`;
+      return t('steps.reasoning', { detail: singleLabel.detail });
     }
     if (labels.every((label) => label.kind === 'reasoning')) {
-      return 'Reasoning';
+      return t('steps.reasoning', { detail: undefined });
     }
-    return 'Working...';
+    return t('steps.working');
   }
 
   if (singleLabel?.form === 'call') {
-    const callLabel = formatCallLabel(singleLabel);
-    if (groupStatus === 'error') return `Failed ${callLabel}`;
-    if (groupStatus === 'aborted') return `Cancelled ${callLabel}`;
-    if (singleLabel.kind === 'reasoning') {
-      return `Reasoned${singleLabel.detail ? ` ${singleLabel.detail}` : ''}`;
+    if (singleLabel.kind === 'reasoning' && groupStatus === 'complete') {
+      return t('steps.reasoned', { detail: singleLabel.detail });
     }
-    return `Called ${callLabel}`;
+    return t('steps.call', {
+      call: formatCallLabel(singleLabel),
+      status: groupStatus,
+    });
   }
 
   if (labels.every((label) => label.kind === 'reasoning')) {
-    return 'Reasoned';
+    return t('steps.reasoned', { detail: undefined });
   }
 
-  return getPlainCountSummary(labels, groupStatus) ?? 'Ran tools';
+  return t('steps.tools', {
+    count: getFallbackToolCount(labels),
+    status: groupStatus,
+  });
 }
 
 function getCompactSummaryDetail(
@@ -663,9 +641,10 @@ function CompactTrajectoryGroup({
   const { registry } = useAgent();
   const { message } = useMessageItem();
   const status = useMessagesStatus();
+  const t = useGenaiMessages();
   const [isOpen, setIsOpen] = useState(!group.hasLaterText);
   const labels = group.items.map(({ segment }) =>
-    getSegmentLabel(segment, registry),
+    getSegmentLabel(segment, registry, t),
   );
   const groupStatus = getGroupStatus({
     items: group.items,
@@ -713,6 +692,7 @@ function CompactTrajectoryGroupTrigger({ children }: { children: ReactNode }) {
 
 function useCompactGroupSummary() {
   const { items, labels, groupStatus, tone } = useCompactGroup();
+  const t = useGenaiMessages();
   const sentence = getLatestSentenceLabel(labels);
   if (sentence) {
     const others = getFallbackToolCount(labels) - 1;
@@ -728,6 +708,7 @@ function useCompactGroupSummary() {
   const title = getCompactSummaryText(
     labels,
     groupStatus,
+    t,
     getActiveGroupHint(items),
   );
   const detail = getCompactSummaryDetail(labels, groupStatus);

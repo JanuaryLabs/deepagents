@@ -2,6 +2,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { expect, test } from 'vitest';
 
+import { GenaiMessagesProvider } from '../i18n/index.ts';
 import { CitationPill } from './CitationPill.tsx';
 
 const source = {
@@ -108,18 +109,22 @@ test('in a right-to-left page a citation’s title and site take their own direc
   }
 });
 
-test('a host gives a citation’s labels in its own language (#5946)', async () => {
+test('a host gives a citation’s labels in its own language (#5946, #6047)', async () => {
   const user = userEvent.setup();
   try {
     render(
-      <CitationPill
-        source={source}
-        index={6}
-        labels={{ source: 'المصدر ٦', open: 'افتح المصدر' }}
-      />,
+      <GenaiMessagesProvider
+        locale="ar"
+        messages={{
+          'citation.source': ({ index }) => `المصدر ${index}`,
+          'citation.open': 'افتح المصدر',
+        }}
+      >
+        <CitationPill source={source} index={6} />
+      </GenaiMessagesProvider>,
     );
 
-    await user.click(screen.getByRole('button', { name: 'المصدر ٦' }));
+    await user.click(screen.getByRole('button', { name: 'المصدر 6' }));
 
     expect(
       screen.getByRole('link', { name: 'افتح المصدر' }).getAttribute('href'),
