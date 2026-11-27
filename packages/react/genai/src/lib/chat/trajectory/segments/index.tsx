@@ -184,9 +184,10 @@ function SegmentTool({
       }
     : baseLabel;
   const defaultOpen =
-    toolEntry?.static === false &&
-    !!toolEntry?.requiresUserInput &&
-    !activeClientInput;
+    toolPart.state === 'approval-requested' ||
+    (toolEntry?.static === false &&
+      !!toolEntry?.requiresUserInput &&
+      !activeClientInput);
 
   return (
     <ToolSegmentContext
@@ -213,8 +214,11 @@ function SegmentToolDisclosure({ children }: { children?: ReactNode }) {
     );
   }
 
+  // A step waiting for approval opens so its Approve and Deny show; the key
+  // remounts it closed once the user answers.
   return (
     <Collapsible
+      key={part.state === 'approval-requested' ? 'awaiting-approval' : 'step'}
       defaultOpen={defaultOpen}
       className="flex min-w-0 flex-1 flex-col"
     >

@@ -791,10 +791,9 @@ describe('GenaiMessagesProvider with an Arabic catalog across the chat', () => {
     });
   });
 
-  it('translates the greeting, the attachments, the reminders, the usage, the approval and the retry in static mode', async () => {
+  it('translates the greeting, the attachments, the reminders, the usage, the approval and the retry in static mode', () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
-    const user = userEvent.setup();
     const messages = [asked, delivered];
 
     render(
@@ -821,7 +820,6 @@ describe('GenaiMessagesProvider with an Arabic catalog across the chat', () => {
       ),
       { wrapper: Harness },
     );
-    await user.click(screen.getByRole('button', { name: /^runQuery\(/ }));
     const approval = screen.getByRole('group', { name: 'موافقة runQuery' });
 
     expect({
