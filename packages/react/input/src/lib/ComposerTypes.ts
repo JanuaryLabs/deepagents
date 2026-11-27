@@ -74,6 +74,8 @@ export type ComposerState = {
     id: string;
     placeholder: string;
     media: ComposerAttachmentMedia;
+    /** The attachment's place among the prompt's images, videos and audio, remote images first; the `N` of its placeholder. */
+    number: number;
   }>;
   remoteImages: ComposerRemoteImage[];
   pendingPastes: ComposerPendingPaste[];
@@ -120,11 +122,14 @@ export type ComposerSuggestion = ComposerItemEntry;
 /** Top-level media type of an attached file; it names the `[Image #N]`, `[Video #N]`, or `[Audio #N]` placeholder. */
 export type ComposerAttachmentMedia = 'image' | 'video' | 'audio';
 
-/** Names an attachment to the user, such as in a remove button's label; the `[Image #N]` placeholder the model reads keeps its own words. */
+/** Names an attachment to the user: its token in the editor, its preview, its remove button and the alert for its missing file. The `[Image #N]` placeholder the model reads keeps its own words. */
 export type ComposerAttachmentLabel = (attachment: {
   media: ComposerAttachmentMedia;
   number: number;
 }) => string;
+
+/** Names a pasted block to the user in the editor; `chars` counts its characters. The `[Pasted Content N chars]` placeholder keeps its own words, and the send expands it to the pasted text. */
+export type ComposerPastedTextLabel = (paste: { chars: number }) => string;
 
 /** A media type the Composer attaches: an exact type such as `image/png`, or a whole family such as `image/*`. */
 export type ComposerMediaType = `${ComposerAttachmentMedia}/${string}`;

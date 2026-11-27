@@ -110,7 +110,7 @@ Providers nest. An inner provider changes only the keys it gives, the `markdown`
 </GenaiMessagesProvider>
 ```
 
-The parts of `@deepagents/react-input` that `ChatComposer` renders, such as the editor and the attachment strip, ship no words of their own: `ChatComposer` fills them from the same catalog. An attachment is named by `composer.attachment({ media, number })` in its preview and in `composer.removeAttachment({ label })`; the `[Image #N]` placeholder in the prompt keeps its English words, because the model reads it. When a submission fails, the alert shows `composer.uploadTooLarge` for an upload refused with 413, `composer.uploadUnsupported` for 415, `composer.uploadFailed` for any other refused upload, and `composer.sendFailed` for anything else; the server's own detail never reaches the page.
+The parts of `@deepagents/react-input` that `ChatComposer` renders, such as the editor and the attachment strip, ship no words of their own: `ChatComposer` fills them from the same catalog. An attachment is named by `composer.attachment({ media, number })` wherever the user sees it: its token in the editor, its preview, `composer.removeAttachment({ label })` and `composer.attachmentMissing({ label })`. The editor draws a pasted block as `composer.pastedText({ chars })`. Only the drawing changes: the prompt the model reads keeps the `[Image #N]` and `[Pasted Content N chars]` tokens, and a paste still expands to its text. When a submission fails, the alert shows `composer.uploadTooLarge` for an upload refused with 413, `composer.uploadUnsupported` for 415, `composer.uploadFailed` for any other refused upload, and `composer.sendFailed` for anything else; the server's own detail never reaches the page.
 
 ## Scrolling
 

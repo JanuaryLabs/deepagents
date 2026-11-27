@@ -9,6 +9,7 @@ import {
   within,
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { Editor } from '@tiptap/react';
 import { ClockProvider } from '@zukhruf/ui';
 import { type ReactNode, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -36,7 +37,6 @@ import {
   expandedTextLimitMessage,
   footerWords,
   popupWords,
-  remoteImagesWords,
   rootWords,
   shortcutsWords,
 } from '../testing/english-words.ts';
@@ -344,7 +344,7 @@ function RichInputScenario({
             <Composer.Submit>Submit prompt</Composer.Submit>
             <Composer.Reset>Reset rich prompt</Composer.Reset>
           </Composer.Toolbar>
-          <Composer.RemoteImages {...remoteImagesWords} />
+          <Composer.RemoteImages />
           <Composer.Attachments {...attachmentsWords} />
           <Composer.Editor {...editorWords} />
           <Composer.Error />
@@ -840,26 +840,33 @@ describe('Composer words from the host', () => {
         : `Seuls les médias se joignent : ${name}`,
     unknownCommand: ({ name }: { name: string }) =>
       `Commande inconnue : /${name}`,
-    missingAttachment: ({ placeholder }: { placeholder: string }) =>
-      `Pièce jointe perdue : ${placeholder}`,
+    pastedTextLabel: ({ chars }: { chars: number }) =>
+      `Texte collé · ${chars} caractères`,
+    missingAttachment: ({ label }: { label: string }) =>
+      `Pièce jointe perdue : ${label}`,
     tooLong: ({ chars, maxChars }: { chars: number; maxChars: number }) =>
       `Trop long : ${chars} sur ${maxChars} caractères`,
   };
 
   function WordsScenario({
     onSubmit,
+    draftKey,
     maxChars,
     isTaskRunning,
     children,
   }: {
-    onSubmit?: () => Promise<unknown>;
+    onSubmit?: (submission: ComposerSubmission) => Promise<unknown> | void;
+    draftKey?: string;
     maxChars?: number;
     isTaskRunning?: boolean;
     children?: ReactNode;
   }) {
     return (
       <Composer.Root
+        draftKey={draftKey}
         editorAriaLabel={words.editorAriaLabel}
+        attachmentLabel={words.attachmentLabel}
+        pastedTextLabel={words.pastedTextLabel}
         submitFailedMessage={words.submitFailedMessage}
         submitErrorMessage={words.submitError}
         unsupportedFileMessage={words.unsupportedFile}
@@ -888,13 +895,9 @@ describe('Composer words from the host', () => {
               Add remote image
             </Composer.AddRemoteImage>
           </Composer.Toolbar>
-          <Composer.RemoteImages
-            data-testid="remote-images"
-            attachmentLabel={words.attachmentLabel}
-          />
+          <Composer.RemoteImages data-testid="remote-images" />
           <Composer.Attachments
             aria-label={words.attachments}
-            attachmentLabel={words.attachmentLabel}
             removeLabel={words.removeAttachment}
             removeIcon={<svg aria-hidden data-icon="host-remove" />}
           />
@@ -1044,6 +1047,175 @@ describe('Composer words from the host', () => {
     });
   });
 
+  it('draws each paste and attachment token in the host words, while the model reads the English tokens and the paste expands', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const submitted: ComposerSubmission[] = [];
+    const user = userEvent.setup();
+    render(
+      <WordsScenario
+        onSubmit={(submission) => void submitted.push(submission)}
+      />,
+      { wrapper: FakeClock },
+    );
+    const prompt = await screen.findByRole('textbox', {
+      name: words.editorAriaLabel,
+    });
+    const pasted = 'A'.repeat(1001);
+
+    await user.click(prompt);
+    await user.keyboard('Résume ');
+    fireEvent.paste(prompt, { clipboardData: clipboardText(pasted) });
+    await user.keyboard(' et compare ');
+    await user.upload(
+      screen.getByLabelText(words.attachInput),
+      new File(['png'], 'chart.png', { type: 'image/png' }),
+    );
+    await screen.findByRole('button', { name: 'Retirer Image 1' });
+    const drawn = {
+      tokens: Array.from(
+        prompt.querySelectorAll('[data-composer-atom]'),
+        (token) => token.textContent,
+      ),
+      englishTokens: /\[(Pasted Content|Image #)/.test(
+        prompt.textContent ?? '',
+      ),
+      details: prompt.querySelectorAll('[data-composer-atom-detail]').length,
+    };
+    await user.keyboard('{Enter}');
+
+    expect({
+      drawn,
+      prompt: submitted[0]?.prompt,
+      items: submitted[0]?.items.map((item) =>
+        item.type === 'image' ? `${item.type}:${item.placeholder}` : item.type,
+      ),
+    }).toEqual({
+      drawn: {
+        tokens: ['Texte collé · 1001 caractères', 'Image 1'],
+        englishTokens: false,
+        details: 0,
+      },
+      prompt: `Résume ${pasted} et compare [Image #1]`,
+      items: ['image:[Image #1]', 'text'],
+    });
+  });
+
+  it('renumbers the drawn tokens and the previews when an attachment goes, and a copy carries the English tokens', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    let editor: Editor | null = null;
+    function GrabEditor() {
+      editor = useComposer().meta.editor;
+      return null;
+    }
+    const user = userEvent.setup();
+    render(
+      <WordsScenario>
+        <GrabEditor />
+      </WordsScenario>,
+      { wrapper: FakeClock },
+    );
+    const prompt = await screen.findByRole('textbox', {
+      name: words.editorAriaLabel,
+    });
+    await user.upload(screen.getByLabelText(words.attachInput), [
+      new File(['png'], 'chart.png', { type: 'image/png' }),
+      new File(['png'], 'plot.png', { type: 'image/png' }),
+    ]);
+    await user.click(
+      await screen.findByRole('button', { name: 'Retirer Image 1' }),
+    );
+    const list = await screen.findByRole('list', { name: words.attachments });
+    await waitFor(() =>
+      expect(within(list).getAllByRole('img')).toHaveLength(1),
+    );
+    fireEvent.paste(prompt, {
+      clipboardData: clipboardText('C'.repeat(1001)),
+    });
+    await waitFor(() =>
+      expect(prompt.querySelectorAll('[data-composer-atom]')).toHaveLength(2),
+    );
+    const copied = new Map<string, string>();
+    act(() => {
+      editor?.commands.selectAll();
+    });
+    fireEvent.copy(prompt, {
+      clipboardData: {
+        clearData: () => copied.clear(),
+        setData: (type: string, value: string) => copied.set(type, value),
+      },
+    });
+
+    expect({
+      tokens: Array.from(
+        prompt.querySelectorAll('[data-composer-atom]'),
+        (token) => token.textContent,
+      ),
+      previews: within(list)
+        .getAllByRole('img')
+        .map((preview) => preview.getAttribute('alt')),
+      copied: copied.get('text/plain')?.trim(),
+    }).toEqual({
+      tokens: ['Image 1', 'Texte collé · 1001 caractères'],
+      previews: ['Image 1'],
+      copied: '[Image #1] [Pasted Content 1001 chars]',
+    });
+  });
+
+  it('keeps the English paste token in the stored draft and draws it in the host words when the draft comes back', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+    const draftKey = 'host-words-paste';
+    stack.defer(() => localStorage.removeItem(`composer-draft:v1:${draftKey}`));
+
+    const pasted = 'B'.repeat(1200);
+    const first = render(<WordsScenario draftKey={draftKey} />, {
+      wrapper: FakeClock,
+    });
+    const prompt = await screen.findByRole('textbox', {
+      name: words.editorAriaLabel,
+    });
+    fireEvent.paste(prompt, { clipboardData: clipboardText(pasted) });
+    await waitFor(() =>
+      expect(
+        localStorage.getItem(`composer-draft:v1:${draftKey}`),
+      ).not.toBeNull(),
+    );
+    const stored: unknown = JSON.parse(
+      localStorage.getItem(`composer-draft:v1:${draftKey}`) ?? 'null',
+    );
+    first.unmount();
+
+    render(<WordsScenario draftKey={draftKey} />, { wrapper: FakeClock });
+    const restored = await screen.findByRole('textbox', {
+      name: words.editorAriaLabel,
+    });
+
+    expect({
+      stored,
+      restored: Array.from(
+        restored.querySelectorAll('[data-composer-atom]'),
+        (token) => token.textContent,
+      ),
+    }).toEqual({
+      stored: {
+        persistedPrompt: '[Pasted Content 1200 chars]',
+        remoteImages: [],
+        pendingPastes: [
+          {
+            id: expect.any(String),
+            placeholder: '[Pasted Content 1200 chars]',
+            content: pasted,
+          },
+        ],
+      },
+      restored: ['Texte collé · 1200 caractères'],
+    });
+  });
+
   it('says in the host words why a send failed when the rejection is an Error, given that error', async () => {
     using stack = new DisposableStack();
     stack.defer(cleanup);
@@ -1140,7 +1312,7 @@ describe('Composer words from the host', () => {
     await user.keyboard('{Control>}z{/Control}{Enter}');
 
     expect((await screen.findByRole('alert')).textContent).toBe(
-      words.missingAttachment({ placeholder: '[Image #1]' }),
+      words.missingAttachment({ label: 'Image 1' }),
     );
   });
 

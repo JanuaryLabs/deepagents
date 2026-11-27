@@ -3,6 +3,7 @@ import { createContext, use } from 'react';
 
 import type {
   ActivePopup,
+  ComposerAttachmentLabel,
   ComposerDropTransfer,
   ComposerMediaType,
   ComposerRichLinkMetadata,
@@ -59,6 +60,7 @@ export type ComposerContextValue = {
   activePopup: ActivePopup | null;
   suggestions: ComposerSuggestion[];
   attachedImages: ReadonlyMap<string, File>;
+  attachmentLabel: ComposerAttachmentLabel;
   setEditorPlaceholder: (placeholder: string) => void;
   actions: ComposerActions;
   meta: ComposerEditorMeta;

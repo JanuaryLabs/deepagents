@@ -75,6 +75,7 @@ export type {
   ActivePopup,
   ComposerAttachmentLabel,
   ComposerDropTransfer,
+  ComposerPastedTextLabel,
   ComposerVisibility,
   ComposerSubmissionItem,
   ComposerInitialDraft,

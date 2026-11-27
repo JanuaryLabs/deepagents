@@ -41,12 +41,14 @@ import {
   triggerAlternation,
 } from '../ComposerTriggers.ts';
 import type {
+  ComposerAttachmentLabel,
   ComposerAttachmentMedia,
   ComposerDropTransfer,
   ComposerInitialDraft,
   ComposerItemBinding,
   ComposerItemEntry,
   ComposerMediaType,
+  ComposerPastedTextLabel,
   ComposerRemoteImage,
   ComposerRichLinkMetadata,
   ComposerState,
@@ -81,12 +83,21 @@ export type ComposerClipboardOptions = {
   attachImageFile: ComposerAttachImageFile;
 };
 
-type ComposerTiptapExtensionsOptions = ComposerClipboardOptions & {
-  getPlaceholder: () => string;
+type ComposerTiptapExtensionsOptions = ComposerClipboardOptions &
+  ComposerAtomWords & {
+    getPlaceholder: () => string;
+  };
+
+/** The host's words for the tokens the editor draws; read on each draw, so they are the latest the host gave. */
+type ComposerAtomWords = {
+  getAttachmentLabel: () => ComposerAttachmentLabel;
+  getPastedTextLabel: () => ComposerPastedTextLabel;
 };
 
 export function createComposerTiptapExtensions({
   getPlaceholder,
+  getAttachmentLabel,
+  getPastedTextLabel,
   ...clipboardOptions
 }: ComposerTiptapExtensionsOptions) {
   return [
@@ -103,7 +114,7 @@ export function createComposerTiptapExtensions({
     }),
     ComposerSlashMark,
     ComposerMentionNode,
-    ComposerAtomNode,
+    ComposerAtomNode.configure({ getAttachmentLabel, getPastedTextLabel }),
     Placeholder.configure({
       placeholder: getPlaceholder,
       showOnlyWhenEditable: false,
@@ -210,7 +221,12 @@ const ComposerMentionNode = Node.create({
   },
 });
 
-const ComposerAtomNode = Node.create({
+/**
+ * A paste, attachment or rich-link token. Its `label` is the token text, its identity: what the
+ * model reads, what copy and the stored draft carry. The editor draws a paste and an attachment
+ * in the host's words instead, from the facts the node holds.
+ */
+const ComposerAtomNode = Node.create<ComposerAtomWords>({
   name: 'composerAtom',
   group: 'inline',
   inline: true,
@@ -221,11 +237,11 @@ const ComposerAtomNode = Node.create({
     return {
       kind: { default: 'paste' },
       label: { default: '' },
-      detail: { default: '' },
       content: { default: '' },
       href: { default: '' },
       attachmentId: { default: '', rendered: false },
       media: { default: 'image', rendered: false },
+      number: { default: 0, rendered: false },
       metadata: { default: null },
     };
   },
@@ -236,15 +252,13 @@ const ComposerAtomNode = Node.create({
 
   renderHTML({ node, HTMLAttributes }) {
     const kind = String(node.attrs.kind ?? 'paste');
-    const label = String(node.attrs.label ?? '');
     return [
       'span',
       mergeAttributes(HTMLAttributes, {
         'data-token': kind,
         'data-composer-atom': kind,
-        'data-composer-atom-detail': node.attrs.detail,
       }),
-      label,
+      drawnAtomLabel(node, this.options),
     ];
   },
 
@@ -252,6 +266,22 @@ const ComposerAtomNode = Node.create({
     return String(node.attrs.label ?? '');
   },
 });
+
+function drawnAtomLabel(node: ProseMirrorNode, words: ComposerAtomWords) {
+  switch (node.attrs.kind) {
+    case 'image':
+      return words.getAttachmentLabel()({
+        media: attachmentMediaFromAttr(node.attrs.media),
+        number: Number(node.attrs.number),
+      });
+    case 'paste':
+      return words.getPastedTextLabel()({
+        chars: characterCount(String(node.attrs.content ?? '')),
+      });
+    default:
+      return String(node.attrs.label ?? '');
+  }
+}
 
 function createComposerClipboardExtension(options: ComposerClipboardOptions) {
   return Extension.create({
@@ -509,7 +539,6 @@ function contentFromState(
         atomNodeContent({
           kind: 'paste',
           label: paste.placeholder,
-          detail: element.detail ?? `${characterCount(paste.content)} chars`,
           content: paste.content,
         }),
       );
@@ -518,7 +547,6 @@ function contentFromState(
         atomNodeContent({
           kind: 'rich-link',
           label: element.label,
-          detail: element.detail ?? '',
           href: element.detail ?? '',
           metadata: element.metadata,
         }),
@@ -817,7 +845,7 @@ function serializeNodeContent(
       kind,
       label,
       range: { start, end: start + label.length },
-      detail: String(node.attrs?.detail || node.attrs?.href || ''),
+      detail: String(node.attrs?.href ?? ''),
       ...(metadata ? { metadata } : {}),
     });
     if (kind === 'image') {
@@ -825,6 +853,7 @@ function serializeNodeContent(
         id,
         placeholder: label,
         media: attachmentMediaFromAttr(node.attrs?.media),
+        number: Number(node.attrs?.number),
       });
     }
     if (kind === 'paste') {
@@ -956,14 +985,12 @@ function bindingToCandidate(
 export function atomNodeContent({
   kind,
   label,
-  detail = '',
   content = '',
   href = '',
   metadata,
 }: {
   kind: 'paste' | 'rich-link';
   label: string;
-  detail?: string;
   content?: string;
   href?: string;
   metadata?: ComposerRichLinkMetadata;
@@ -973,7 +1000,6 @@ export function atomNodeContent({
     attrs: {
       kind,
       label,
-      detail,
       content,
       href,
       metadata: metadata ?? null,
@@ -983,12 +1009,18 @@ export function atomNodeContent({
 
 export function imageAttachmentNodeContent(
   id: string,
-  label: string,
-  media: ComposerAttachmentMedia = 'image',
+  media: ComposerAttachmentMedia,
+  number: number,
 ): JSONContent {
   return {
     type: 'composerAtom',
-    attrs: { kind: 'image', attachmentId: id, label, media },
+    attrs: {
+      kind: 'image',
+      attachmentId: id,
+      label: attachmentPlaceholder(media, number),
+      media,
+      number,
+    },
   };
 }
 
@@ -1070,7 +1102,6 @@ function insertPasteAtomInView(view: EditorView, content: string) {
   const node = view.state.schema.nodes.composerAtom?.create({
     kind: 'paste',
     label: placeholder,
-    detail: `${characterCount(content)} chars`,
     content,
   });
   if (!node) {
@@ -1109,7 +1140,7 @@ function selectedTextPasteRange(view: EditorView) {
 function selectedComposerAtomLabels(range: Range, root: HTMLElement) {
   return Array.from(root.querySelectorAll<HTMLElement>('[data-composer-atom]'))
     .filter((element) => range.intersectsNode(element))
-    .map((element) => element.textContent ?? '')
+    .map((element) => element.getAttribute('label') ?? '')
     .filter(Boolean);
 }
 
@@ -1255,7 +1286,7 @@ function insertImageFileInView(
   const number = remoteImageCount + localCount + 1;
   const media = attachmentMediaOf(file) ?? 'image';
   const node = view.state.schema.nodeFromJSON(
-    imageAttachmentNodeContent(id, attachmentPlaceholder(media, number), media),
+    imageAttachmentNodeContent(id, media, number),
   );
   if (!node) {
     return;
@@ -1299,14 +1330,16 @@ export function renumberImageAttachmentAtoms(
       return node;
     }
     index += 1;
+    const number = remoteCount + index;
     return {
       ...node,
       attrs: {
         ...node.attrs,
         label: attachmentPlaceholder(
           attachmentMediaFromAttr(node.attrs?.media),
-          remoteCount + index,
+          number,
         ),
+        number,
       },
     };
   });

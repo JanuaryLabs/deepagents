@@ -726,11 +726,6 @@ export function attachmentPlaceholder(
   return `[${attachmentLabels[media]} #${number}]`;
 }
 
-/** The number in a placeholder that `attachmentPlaceholder` wrote. */
-export function attachmentNumber(placeholder: string): number {
-  return Number(placeholder.slice(placeholder.lastIndexOf('#') + 1, -1));
-}
-
 function renumberImageAttachments(
   images: ComposerState['imageAttachments'],
   remoteCount: number,
@@ -738,6 +733,7 @@ function renumberImageAttachments(
   return images.map((image, index) => ({
     ...image,
     placeholder: attachmentPlaceholder(image.media, remoteCount + index + 1),
+    number: remoteCount + index + 1,
   }));
 }
 
@@ -850,9 +846,6 @@ export function createDraftFromSource({
         'paste',
         paste.placeholder,
         draft.text ?? '',
-        {
-          detail: `${characterCount(paste.content)} chars`,
-        },
       );
       return element ? [element] : [];
     }),

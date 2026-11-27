@@ -9,6 +9,12 @@ import type {
 import type { ComposerAttachmentsProps } from '../lib/ComposerAttachments.tsx';
 import type { ComposerAttachmentMedia } from '../lib/ComposerTypes.ts';
 
+const mediaNames: Record<ComposerAttachmentMedia, string> = {
+  image: 'Image',
+  video: 'Video',
+  audio: 'Audio',
+};
+
 export const rootWords = {
   editorAriaLabel: 'Rich prompt composer',
   submitFailedMessage: 'Could not send prompt',
@@ -16,8 +22,10 @@ export const rootWords = {
   unsupportedFileMessage: ({ name }) =>
     `Only image, video, or audio files can be attached: ${name ?? 'unnamed file'}`,
   unknownCommandMessage: ({ name }) => `Unrecognized command: /${name}`,
-  missingAttachmentMessage: ({ placeholder }) =>
-    `Attached image is no longer available: ${placeholder}`,
+  attachmentLabel: ({ media, number }) => `[${mediaNames[media]} #${number}]`,
+  pastedTextLabel: ({ chars }) => `[Pasted Content ${chars} chars]`,
+  missingAttachmentMessage: ({ label }) =>
+    `Attached image is no longer available: ${label}`,
 } satisfies Partial<ComposerRootProps>;
 
 export const expandedTextLimitMessage: NonNullable<
@@ -35,25 +43,8 @@ export const popupWords = {
   argsLabel: 'args',
 } satisfies ComposerPopupProps;
 
-const mediaNames: Record<ComposerAttachmentMedia, string> = {
-  image: 'Image',
-  video: 'Video',
-  audio: 'Audio',
-};
-
-export const attachmentLabel = ({
-  media,
-  number,
-}: {
-  media: ComposerAttachmentMedia;
-  number: number;
-}) => `[${mediaNames[media]} #${number}]`;
-
-export const remoteImagesWords = { attachmentLabel };
-
 export const attachmentsWords = {
   'aria-label': 'Attached files',
-  attachmentLabel,
   removeLabel: (label) => `Remove ${label}`,
   removeIcon: createElement('svg', { 'aria-hidden': true }),
 } satisfies ComposerAttachmentsProps;

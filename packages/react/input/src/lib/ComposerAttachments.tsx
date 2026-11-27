@@ -8,17 +8,11 @@ import {
 } from 'react';
 
 import { useComposerContext } from './ComposerContext.ts';
-import { attachmentNumber } from './ComposerCore.ts';
-import type {
-  ComposerAttachmentLabel,
-  ComposerState,
-} from './ComposerTypes.ts';
+import type { ComposerState } from './ComposerTypes.ts';
 
 export type ComposerAttachmentsProps = ComponentPropsWithoutRef<'div'> & {
   'aria-label': string;
-  /** Names each attachment's preview, and is given to `removeLabel`. */
-  attachmentLabel: ComposerAttachmentLabel;
-  /** Names the button that removes the attachment that `attachmentLabel` named `label`. */
+  /** Names the button that removes the attachment that `Composer.Root`'s `attachmentLabel` named `label`. */
   removeLabel: (label: string) => string;
   /** Drawn inside each remove button. */
   removeIcon: ReactNode;
@@ -31,7 +25,6 @@ type AttachmentPreviewProps = {
 
 export function ComposerAttachments({
   className,
-  attachmentLabel,
   removeLabel,
   removeIcon,
   ...props
@@ -53,7 +46,6 @@ export function ComposerAttachments({
         <ComposerAttachment
           key={attachment.id}
           attachment={attachment}
-          attachmentLabel={attachmentLabel}
           removeLabel={removeLabel}
           removeIcon={removeIcon}
         />
@@ -63,27 +55,19 @@ export function ComposerAttachments({
 }
 
 function ComposerAttachment({
-  attachment: { id, placeholder, media },
-  attachmentLabel,
+  attachment: { id, media, number },
   removeLabel,
   removeIcon,
 }: {
   attachment: ComposerState['imageAttachments'][number];
-} & Pick<
-  ComposerAttachmentsProps,
-  'attachmentLabel' | 'removeLabel' | 'removeIcon'
->) {
-  const { attachedImages, disabled, actions } = useComposerContext(
-    'Composer.Attachments',
-  );
+} & Pick<ComposerAttachmentsProps, 'removeLabel' | 'removeIcon'>) {
+  const { attachedImages, attachmentLabel, disabled, actions } =
+    useComposerContext('Composer.Attachments');
   const file = attachedImages.get(id);
   if (!file) {
     return null;
   }
-  const label = attachmentLabel({
-    media,
-    number: attachmentNumber(placeholder),
-  });
+  const label = attachmentLabel({ media, number });
   return (
     <div role="listitem" className="relative">
       {media === 'video' ? (

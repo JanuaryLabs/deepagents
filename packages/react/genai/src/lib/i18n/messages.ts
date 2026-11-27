@@ -1,7 +1,10 @@
 import type { ToolUIPart } from 'ai';
 import type { StreamdownTranslations } from 'streamdown';
 
-import type { ComposerAttachmentLabel } from '@deepagents/react-input/browser';
+import type {
+  ComposerAttachmentLabel,
+  ComposerPastedTextLabel,
+} from '@deepagents/react-input/browser';
 
 export type PluralForms = Partial<
   Record<Exclude<Intl.LDMLPluralRule, 'other'>, string>
@@ -59,8 +62,10 @@ export type GenaiMessages = {
   /** An upload the server refused with any other status. */
   'composer.uploadFailed': string;
   'composer.attachments': string;
-  /** Names the `number`th attachment of its kind to the user, in its preview and its remove button. */
+  /** Names the `number`th attachment to the user: its token in the editor, its preview, its remove button and the alert for its missing file. The model still reads `[Image #N]`. */
   'composer.attachment': Message<Parameters<ComposerAttachmentLabel>[0]>;
+  /** Names a pasted block of `chars` characters in the editor. The model reads the pasted text. */
+  'composer.pastedText': Message<Parameters<ComposerPastedTextLabel>[0]>;
   /** `label` is what `composer.attachment` named the attachment. */
   'composer.removeAttachment': Message<{ label: string }>;
   /** The hidden file input behind the attach button. */
@@ -73,8 +78,8 @@ export type GenaiMessages = {
   'composer.unsupportedFile': Message<{ name: string | undefined }>;
   /** A sent prompt starts with a slash command nobody knows; `name` has no slash. */
   'composer.unknownCommand': Message<{ name: string }>;
-  /** A sent prompt holds an attachment whose file is gone, such as one brought back by undo. */
-  'composer.attachmentMissing': Message<{ placeholder: string }>;
+  /** A sent prompt holds an attachment whose file is gone, such as one brought back by undo; `label` is what `composer.attachment` named it. */
+  'composer.attachmentMissing': Message<{ label: string }>;
   /** The prompt, its pasted content expanded, has `chars` characters, over `maxChars`. */
   'composer.promptTooLong': Message<{ chars: number; maxChars: number }>;
   'dictation.start': string;
@@ -189,6 +194,11 @@ export const en: GenaiMessages = {
   'composer.attachments': 'Attached files',
   'composer.attachment': ({ media, number }) =>
     `[${{ image: 'Image', video: 'Video', audio: 'Audio' }[media]} #${number}]`,
+  'composer.pastedText': ({ chars }, { plural }) =>
+    plural(chars, {
+      one: '[Pasted Content # char]',
+      other: '[Pasted Content # chars]',
+    }),
   'composer.removeAttachment': ({ label }) => `Remove ${label}`,
   'composer.attachInput': 'Attach media files',
   'composer.suggestions': 'Suggestions',
@@ -199,8 +209,8 @@ export const en: GenaiMessages = {
       ? 'Only image, video, or audio files can be attached: unnamed file'
       : `Only image, video, or audio files can be attached: ${name}`,
   'composer.unknownCommand': ({ name }) => `Unrecognized command: /${name}`,
-  'composer.attachmentMissing': ({ placeholder }) =>
-    `Attached image is no longer available: ${placeholder}`,
+  'composer.attachmentMissing': ({ label }) =>
+    `Attached image is no longer available: ${label}`,
   'composer.promptTooLong': ({ chars, maxChars }, { plural }) =>
     `Prompt is too long after expanding pasted content (${plural(chars, { one: '# char', other: '# chars' })}; max ${plural(maxChars, { one: '# char', other: '# chars' })}).`,
   'dictation.start': 'Start dictation',

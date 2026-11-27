@@ -44,6 +44,8 @@ function ChatComposerProvider({
     | 'submitErrorMessage'
     | 'unsupportedFileMessage'
     | 'unknownCommandMessage'
+    | 'attachmentLabel'
+    | 'pastedTextLabel'
     | 'missingAttachmentMessage'
     | 'expandedTextLimit'
   >,
@@ -62,6 +64,8 @@ function ChatComposerProvider({
       submitErrorMessage={(error) => submitFailure(error, t)}
       unsupportedFileMessage={(file) => t('composer.unsupportedFile', file)}
       unknownCommandMessage={(command) => t('composer.unknownCommand', command)}
+      attachmentLabel={(attachment) => t('composer.attachment', attachment)}
+      pastedTextLabel={(paste) => t('composer.pastedText', paste)}
       missingAttachmentMessage={(attachment) =>
         t('composer.attachmentMissing', attachment)
       }
@@ -137,17 +141,13 @@ function ChatComposerAttachments({
   className,
   ...props
 }: InstanceWords<
-  Omit<
-    ComposerAttachmentsProps,
-    'attachmentLabel' | 'removeLabel' | 'removeIcon'
-  >,
+  Omit<ComposerAttachmentsProps, 'removeLabel' | 'removeIcon'>,
   'aria-label'
 >) {
   const t = useGenaiMessages();
   return (
     <Composer.Attachments
       aria-label={t('composer.attachments')}
-      attachmentLabel={(attachment) => t('composer.attachment', attachment)}
       removeLabel={(label) => t('composer.removeAttachment', { label })}
       removeIcon={<XIcon aria-hidden className="size-3" />}
       className={cn('pb-1.5', className)}

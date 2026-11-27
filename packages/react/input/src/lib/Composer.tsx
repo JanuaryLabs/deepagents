@@ -27,7 +27,6 @@ import {
 import {
   type ComposerPreparedPayload,
   attachmentMediaOf,
-  attachmentPlaceholder,
   characterCount,
   composerFileDisposition,
   createComposerDraftSource,
@@ -61,6 +60,7 @@ import type {
   ComposerInitialDraft,
   ComposerItemEntry,
   ComposerMediaType,
+  ComposerPastedTextLabel,
   ComposerPopupTrigger,
   ComposerRemoteImage,
   ComposerRichLinkMetadata,
@@ -132,8 +132,12 @@ export type ComposerRootProps = {
   unsupportedFileMessage: (file: { name: string | undefined }) => string;
   /** Shown when a sent prompt starts with a slash command that no trigger knows. */
   unknownCommandMessage: (command: { name: string }) => string;
-  /** Shown when a sent prompt holds an attachment whose file is gone, such as one brought back by undo after its removal. */
-  missingAttachmentMessage: (attachment: { placeholder: string }) => string;
+  /** Names each attachment to the user: its token in the editor, its preview in `Composer.Attachments`, its row in `Composer.RemoteImages` and the alert for its missing file. */
+  attachmentLabel: ComposerAttachmentLabel;
+  /** Names each pasted block in the editor; the send expands it to the pasted text. */
+  pastedTextLabel: ComposerPastedTextLabel;
+  /** Shown when a sent prompt holds an attachment whose file is gone, such as one brought back by undo after its removal; `label` is what `attachmentLabel` named it. */
+  missingAttachmentMessage: (attachment: { label: string }) => string;
   className?: string;
   children?: ReactNode;
   dictation?: ComposerDictation;
@@ -156,10 +160,7 @@ export type ComposerContentProps = ComponentPropsWithoutRef<'div'>;
 
 export type ComposerToolbarProps = ComponentPropsWithoutRef<'div'>;
 
-export type ComposerRemoteImagesProps = ComponentPropsWithoutRef<'div'> & {
-  /** Names each remote image in its row. */
-  attachmentLabel: ComposerAttachmentLabel;
-};
+export type ComposerRemoteImagesProps = ComponentPropsWithoutRef<'div'>;
 
 export type ComposerEditorProps = ComponentPropsWithoutRef<'div'> & {
   placeholder: string;
@@ -281,6 +282,8 @@ function ComposerRootInner({
   acceptedMediaTypes,
   unsupportedFileMessage,
   unknownCommandMessage,
+  attachmentLabel,
+  pastedTextLabel,
   missingAttachmentMessage,
   className,
   children,
@@ -395,11 +398,17 @@ function ComposerRootInner({
   const [editorPlaceholder, setEditorPlaceholder] = useState('');
   const editorPlaceholderRef = useRef(editorPlaceholder);
   editorPlaceholderRef.current = editorPlaceholder;
+  const attachmentLabelRef = useRef(attachmentLabel);
+  attachmentLabelRef.current = attachmentLabel;
+  const pastedTextLabelRef = useRef(pastedTextLabel);
+  pastedTextLabelRef.current = pastedTextLabel;
 
   const editorExtensions = useMemo(
     () =>
       createComposerTiptapExtensions({
         getPlaceholder: () => editorPlaceholderRef.current,
+        getAttachmentLabel: () => attachmentLabelRef.current,
+        getPastedTextLabel: () => pastedTextLabelRef.current,
         getMentionTrigger: () => mentionTriggersRef.current[0] ?? '@',
         getRemoteImageCount: () => remoteImagesRef.current.length,
         getAcceptedMediaTypes: () => acceptedMediaTypesRef.current,
@@ -821,11 +830,7 @@ function ComposerRootInner({
       .chain()
       .focus()
       .insertContent([
-        imageAttachmentNodeContent(
-          id,
-          attachmentPlaceholder(media, number),
-          media,
-        ),
+        imageAttachmentNodeContent(id, media, number),
         { type: 'text', text: ' ' },
       ])
       .run();
@@ -1065,7 +1070,6 @@ function ComposerRootInner({
         atomNodeContent({
           kind: 'paste',
           label: placeholder,
-          detail: `${characterCount(content)} chars`,
           content,
         }),
       )
@@ -1087,7 +1091,6 @@ function ComposerRootInner({
         atomNodeContent({
           kind: 'rich-link',
           label,
-          detail: href,
           href,
           metadata,
         }),
@@ -1210,7 +1213,12 @@ function ComposerRootInner({
       if (!file) {
         setComposer((state) => ({
           ...state,
-          error: missingAttachmentMessage({ placeholder: image.placeholder }),
+          error: missingAttachmentMessage({
+            label: attachmentLabel({
+              media: image.media,
+              number: image.number,
+            }),
+          }),
           shortcutsOpen: false,
         }));
         setActivePopup(null);
@@ -1839,6 +1847,7 @@ function ComposerRootInner({
     activePopup,
     suggestions,
     attachedImages: attachedImagesRef.current,
+    attachmentLabel,
     setEditorPlaceholder,
     actions: {
       acceptSuggestion,
@@ -1898,10 +1907,11 @@ function ComposerToolbar({ className, ...props }: ComposerToolbarProps) {
 
 function ComposerRemoteImages({
   className,
-  attachmentLabel,
   ...props
 }: ComposerRemoteImagesProps) {
-  const { state } = useComposerContext('Composer.RemoteImages');
+  const { state, attachmentLabel } = useComposerContext(
+    'Composer.RemoteImages',
+  );
   if (state.remoteImages.length === 0) {
     return null;
   }

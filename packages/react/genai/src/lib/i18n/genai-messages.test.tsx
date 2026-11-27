@@ -1,6 +1,12 @@
 import { createClock } from '@sinonjs/fake-timers';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useDirection } from '@zukhruf/shadcn';
 import { ClockProvider } from '@zukhruf/ui';
@@ -10,7 +16,10 @@ import type { ReactNode } from 'react';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { Composer } from '@deepagents/react-input/browser';
+import {
+  Composer,
+  type ComposerSubmission,
+} from '@deepagents/react-input/browser';
 
 import { StoredMessagesTransport } from '../../testing/stored-messages-transport.ts';
 import { AgentProvider } from '../chat/agent-context.tsx';
@@ -105,8 +114,17 @@ const ar: GenaiMessages = {
       ? 'يمكن إرفاق ملفات الصور والفيديو والصوت فقط، وهذا الملف بلا اسم'
       : `يمكن إرفاق ملفات الصور والفيديو والصوت فقط: ${name}`,
   'composer.unknownCommand': ({ name }) => `أمر غير معروف: /${name}`,
-  'composer.attachmentMissing': ({ placeholder }) =>
-    `الملف المرفق لم يعد متاحًا: ${placeholder}`,
+  'composer.pastedText': ({ chars }, { plural }) =>
+    `[نص ملصق · ${plural(chars, {
+      zero: 'لا أحرف',
+      one: 'حرف واحد',
+      two: 'حرفان',
+      few: '# أحرف',
+      many: '# حرفًا',
+      other: '# حرف',
+    })}]`,
+  'composer.attachmentMissing': ({ label }) =>
+    `الملف المرفق لم يعد متاحًا: ${label}`,
   'composer.promptTooLong': ({ chars, maxChars }, { plural }) => {
     const forms = {
       zero: 'لا أحرف',
@@ -598,6 +616,9 @@ describe('GenaiMessagesProvider with an Arabic catalog across the chat', () => {
       new File(['png'], 'chart.png', { type: 'image/png' }),
     );
     await screen.findByRole('list', { name: ar['composer.attachments'] });
+    // The failed send below redraws the strip, so the preview is read before it.
+    const preview = (await screen.findAllByRole('img', { name: 'الصورة 1' }))
+      .length;
     await user.click(prompt);
     await user.keyboard('hello /rev');
     const suggestion = within(
@@ -613,7 +634,7 @@ describe('GenaiMessagesProvider with an Arabic catalog across the chat', () => {
     expect({
       placeholder: prompt.getAttribute('aria-placeholder'),
       remove: screen.queryAllByRole('button', { name: 'أزل الصورة 1' }).length,
-      preview: screen.queryAllByRole('img', { name: 'الصورة 1' }).length,
+      preview,
       suggestion,
       empty,
       failure: (await screen.findByRole('alert')).textContent,
@@ -729,7 +750,68 @@ describe('GenaiMessagesProvider with an Arabic catalog across the chat', () => {
       failure: (await screen.findByRole('alert')).textContent,
     }).toEqual({
       icons: ['lucide lucide-x size-3'],
-      failure: 'الملف المرفق لم يعد متاحًا: [Image #1]',
+      failure: 'الملف المرفق لم يعد متاحًا: الصورة 1',
+    });
+  });
+
+  it('draws the paste and attachment tokens in the editor in Arabic, while the model reads [Image #1] and the pasted text', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const submitted: ComposerSubmission[] = [];
+    const user = userEvent.setup();
+    render(
+      inArabic(
+        <ChatComposer.Provider
+          onSubmit={(submission) => {
+            submitted.push(submission);
+            return Promise.resolve();
+          }}
+        >
+          <ChatComposer.Root>
+            <ChatComposer.Content>
+              <ChatComposer.Attachments />
+              <ChatComposer.Editor />
+            </ChatComposer.Content>
+            <ChatComposer.Toolbar>
+              <ChatComposer.AttachFiles />
+            </ChatComposer.Toolbar>
+          </ChatComposer.Root>
+        </ChatComposer.Provider>,
+      ),
+      { wrapper: Harness },
+    );
+    const prompt = await screen.findByRole('textbox', {
+      name: ar['composer.editor'],
+    });
+    const pasted = 'س'.repeat(1001);
+
+    await user.click(prompt);
+    await user.keyboard('لخّص ');
+    fireEvent.paste(prompt, {
+      clipboardData: {
+        files: [],
+        getData: (type: string) =>
+          type === 'text/plain' || type === 'text' ? pasted : '',
+      },
+    });
+    await user.keyboard(' وقارن مع ');
+    await user.upload(
+      screen.getByLabelText(ar['composer.attachInput']),
+      new File(['png'], 'chart.png', { type: 'image/png' }),
+    );
+    await screen.findByRole('button', { name: 'أزل الصورة 1' });
+    const tokens = Array.from(
+      prompt.querySelectorAll('[data-composer-atom]'),
+      (token) => token.textContent,
+    );
+    const english = /\[(Pasted Content|Image #)/.test(prompt.textContent ?? '');
+    await user.keyboard('{Enter}');
+
+    expect({ tokens, english, prompt: submitted[0]?.prompt }).toEqual({
+      tokens: ['[نص ملصق · 1,001 حرف]', 'الصورة 1'],
+      english: false,
+      prompt: `لخّص ${pasted} وقارن مع [Image #1]`,
     });
   });
 
@@ -1246,7 +1328,9 @@ describe('without a GenaiMessagesProvider, beyond the step lines', () => {
         t('composer.unsupportedFile', { name: 'report.csv' }),
         t('composer.unsupportedFile', { name: undefined }),
         t('composer.unknownCommand', { name: 'nope' }),
-        t('composer.attachmentMissing', { placeholder: '[Image #1]' }),
+        t('composer.attachmentMissing', { label: '[Image #1]' }),
+        t('composer.pastedText', { chars: 1 }),
+        t('composer.pastedText', { chars: 1001 }),
         t('composer.promptTooLong', { chars: 25, maxChars: 12 }),
       ].map((line) => <p key={line}>{line}</p>);
     }
@@ -1277,6 +1361,8 @@ describe('without a GenaiMessagesProvider, beyond the step lines', () => {
       'Only image, video, or audio files can be attached: unnamed file',
       'Unrecognized command: /nope',
       'Attached image is no longer available: [Image #1]',
+      '[Pasted Content 1 char]',
+      '[Pasted Content 1,001 chars]',
       'Prompt is too long after expanding pasted content (25 chars; max 12 chars).',
     ]);
   });
