@@ -1,8 +1,8 @@
 # @deepagents/trajectory
 
-> **Design ruled on 2026-11-27; no code yet.** This folder is the API on paper,
-> and each decision in [docs/adr](./docs/adr) is ruled. The package.json and
-> tsconfig come with the scaffold.
+> **Status:** the Claude Code adapter ships first. `ClaudeCodeStore` and the
+> Codex store and adapter follow (#6107). Each decision is in
+> [docs/adr](./docs/adr).
 
 Read a coding agent's stored sessions (Claude Code transcripts, Codex rollouts)
 as [ATIF](https://github.com/harbor-framework/harbor/blob/main/rfcs/0001-trajectory-format.md)
@@ -20,11 +20,16 @@ gives the host the steps to decide from.
 ## Read the transcript a hook was given
 
 ```ts
-import { ClaudeCodeAdapter, ClaudeCodeSession } from '@deepagents/trajectory';
+import {
+  ClaudeCodeAdapter,
+  ClaudeCodeSession,
+  ClaudeCodeSubagent,
+} from '@deepagents/trajectory';
 
-// SubagentStop: read the subagent's own transcript, never the parent's.
-const path = input.agent_transcript_path ?? input.transcript_path;
-const session = ClaudeCodeSession.fromTranscriptPath(path);
+// SubagentStop reads the subagent's own transcript, never the parent's.
+const session = input.agent_transcript_path
+  ? ClaudeCodeSubagent.fromTranscriptPath(input.agent_transcript_path)
+  : ClaudeCodeSession.fromTranscriptPath(input.transcript_path);
 const { trajectory } = await new ClaudeCodeAdapter().read(session, {
   subagents: false,
 });
@@ -108,14 +113,15 @@ export interface Adapter<Session> {
 }
 export interface ReadOptions { subagents?: boolean } // default true
 export interface ReadResult { trajectory: Trajectory; diagnostics: Diagnostic[] }
-export interface Diagnostic { code: DiagnosticCode; path: string; line?: number; count?: number; message: string }
+export interface Diagnostic { code: DiagnosticCode; path: string; line?: number; count?: number; entryType?: string; message: string }
 export type DiagnosticCode =
   | 'invalid_json_line'    // a line that does not parse
   | 'partial_last_line'    // the agent is still writing it
   | 'unmapped_entry'       // bookkeeping that has no step (counted by type)
   | 'sidechain_entry'      // an isSidechain row inside a main transcript
   | 'orphan_tool_result'   // a result whose call is not in the transcript
-  | 'unlinked_subagent';   // a subagent transcript with no meta file
+  | 'unlinked_subagent'    // a subagent whose spawning call is not found
+  | 'unreadable_subagent'; // a subagent transcript that cannot be read
 
 // Claude Code.
 export class ClaudeCodeStore {
@@ -129,11 +135,19 @@ export interface ClaudeCodeChain {
   readonly missing: readonly string[]; // ids the chain names whose transcript is gone
 }
 export class ClaudeCodeSession {
-  static fromTranscriptPath(path: string): ClaudeCodeSession;
+  static fromTranscriptPath(path: string): ClaudeCodeSession; // a main transcript; touches no disk
   readonly sessionId: string;
   readonly transcriptPath: string;
+  readonly runId: string; // the chain's first id; its own id when read alone
+  readonly continuedBy: string | undefined; // the next segment's transcript, from chain()
 }
-export class ClaudeCodeAdapter implements Adapter<ClaudeCodeSession> { readonly agent = 'claude-code' }
+export class ClaudeCodeSubagent {
+  static fromTranscriptPath(path: string): ClaudeCodeSubagent; // <session>/subagents/agent-<id>.jsonl
+  readonly agentId: string;
+  readonly sessionId: string; // the session that started it
+  readonly transcriptPath: string;
+}
+export class ClaudeCodeAdapter implements Adapter<ClaudeCodeSession | ClaudeCodeSubagent> { readonly agent = 'claude-code' }
 
 // Codex.
 export class CodexStore {
@@ -164,11 +178,11 @@ export class SessionReadError extends Error { readonly path: string } // missing
 | `CodexStore.threads({ since })`           | Walks `sessions/` and `archived_sessions/` (`.jsonl`, `.jsonl.zst`) and groups rollouts by the parent ids in each `session_meta`.                                                                                                                       |
 | `CodexAdapter.read(t)`                    | Decodes `.zst` with `node:zlib` `zstdDecompressSync`, then calls meticulous's `convertCodexSession`, and writes `schema_version: ATIF-v1.8`.                                                                                                            |
 
-Budget: a hook reads a 3 MB transcript in under 100 ms. Measured on this Mac,
-2026-11-27:
+Speed, measured on this Mac on 2026-11-27 (a measurement, not a test: the
+repo's `no-wall-clock-bound` rule forbids timing bounds in tests):
 
 - meticulous converts 3 MB plus 6 subagents in 34 ms;
-- a streamed read of 24 h of transcripts (835 files, 311k entries) takes 3.9 s warm.
+- a whole-file read of 24 h of transcripts (835 files, 311k entries) takes 3.7 s warm.
 
 ## Claude Code entry → ATIF
 

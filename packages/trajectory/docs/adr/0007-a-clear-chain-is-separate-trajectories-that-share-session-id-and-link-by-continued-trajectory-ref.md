@@ -1,6 +1,6 @@
 # A /clear chain is separate trajectories that share session_id and link by continued_trajectory_ref
 
-Status: ruled by Ezz on 2026-11-27 (deepagents #6107). Amended the same day: `chain()` returns `{ sessions, missing }`, where `missing` names each id the chain points to whose transcript is gone. agent-plugin housekeeping's close-check reports those ids, so dropping them would lose a line it prints. The chain follows every `claude_code_session` that a `derived-from` names, with any `via`, and skips ids already in the chain, so a `resume` entry that names its own session ends the walk, as `lib/session.mjs` does.
+Status: ruled by Ezz on 2026-11-27 (deepagents #6107). Amended the same day: `chain()` returns `{ sessions, missing }`, where `missing` names each id the chain points to whose transcript is gone. agent-plugin housekeeping's close-check reports those ids, so dropping them would lose a line it prints. The chain follows every `claude_code_session` that a `derived-from` names, with any `via`, and skips ids already in the chain, so a `resume` entry that names its own session ends the walk, as `lib/session.mjs` does. Amended on 2026-11-27 while building: a session read alone (from `fromTranscriptPath` or `session(id)`) has its own id as `session_id` and no `continued_trajectory_ref`, because a hook cannot afford to walk back through older transcripts. Only the sessions that `chain()` returns carry `runId` (the first id) and `continuedBy` (the next transcript), which `read()` writes into the trajectory.
 
 ## Context
 

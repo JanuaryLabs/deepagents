@@ -1,6 +1,6 @@
 # Stores list sessions as an async iterator that the caller pulls
 
-Status: ruled by Ezz on 2026-11-27 (deepagents #6107).
+Status: ruled by Ezz on 2026-11-27 (deepagents #6107). Amended on 2026-11-27 while building: `read()` reads the transcript whole and splits it into lines instead of streaming it. The measurement above has whole-file reads at 3.7 s and streamed `readline` at 3.9 s, and a trajectory is returned whole either way. Listing (`sessions()`) still walks the folders lazily and reads no transcript content.
 
 ## Context
 

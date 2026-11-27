@@ -1,6 +1,6 @@
 # Each agent is an Adapter from a located session to one trajectory
 
-Status: ruled by Ezz on 2026-11-27 (deepagents #6107).
+Status: ruled by Ezz on 2026-11-27 (deepagents #6107). Amended on 2026-11-27 while building: a subagent transcript is its own type, `ClaudeCodeSubagent`, not a `ClaudeCodeSession` with a field that means "not a subagent". `ClaudeCodeSubagent.fromTranscriptPath` takes a SubagentStop hook's `agent_transcript_path`, and `ClaudeCodeAdapter` implements `Adapter<ClaudeCodeSession | ClaudeCodeSubagent>`.
 
 ## Context
 

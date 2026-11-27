@@ -1,0 +1,17 @@
+{
+  "name": "@deepagents/trajectory",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/trajectory/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": ["{options.outputPath}"]
+    },
+    "test": {
+      "options": {
+        "args": "--test-timeout=10000 \"src/**/*.test.ts\""
+      }
+    }
+  }
+}

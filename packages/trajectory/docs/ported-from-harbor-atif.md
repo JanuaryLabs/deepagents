@@ -16,5 +16,6 @@ The ATIF types are a port of Harbor's Pydantic models at `harbor-framework/harbo
 
 Not ported:
 
-- Harbor's Pydantic validators other than the agent-only rule. The rule that `llm_call_count === 0` forbids `metrics` and `reasoning_content` stays a runtime check in the adapters.
+- Two more of Harbor's validators became types: `ContentPart` is a union by `type` (its `validate_content_type`), and `Trajectory.steps` is a non-empty tuple (its `min_length=1`).
+- Harbor's other validators are not ported. Harbor's rule that `llm_call_count === 0` forbids `metrics` and `reasoning_content` needs no check, because neither adapter writes `llm_call_count`: Claude Code transcripts and Codex rollouts do not record it.
 - JSON validation of foreign input ("later").

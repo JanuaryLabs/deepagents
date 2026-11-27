@@ -28,6 +28,9 @@
       "path": "./packages/compaction"
     },
     {
+      "path": "./packages/trajectory"
+    },
+    {
       "path": "./packages/elements"
     },
     {
