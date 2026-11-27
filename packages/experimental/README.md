@@ -382,7 +382,8 @@ only of those kinds.
 Compose `@deepagents/experimental/zukhruf/uploads/http` with
 `http(runtime, ...)` when the browser should upload bytes: the `GET` route
 serves them with byte ranges so media elements can seek, discovery advertises
-the accepted `mediaTypes`, and the model receives a turn-local reminder with
+the accepted `mediaTypes` and the `maxBytes` the host chose, so a composer can
+refuse an oversize file before it uploads, and the model receives a turn-local reminder with
 the sandbox paths to read. Every agent in the tree also gets a
 `publish_upload` tool that adopts a file it produced below the session's
 uploads directory and returns the link the user can open; pass `publicUrl`

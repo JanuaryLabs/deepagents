@@ -20,6 +20,7 @@ import {
   type ComposerItem,
   type ComposerItemEntry,
   type ComposerPreparedPayload,
+  type ComposerRootProps,
   type ComposerState,
   type ComposerSubmission,
   createComposerDraftSource,
@@ -6606,5 +6607,177 @@ describe('Composer accepted media types', () => {
       'accept',
       IMAGE_TYPES.join(','),
     );
+  });
+});
+
+describe('Composer file size limit', () => {
+  const MAX_BYTES = 4;
+  const fileSizeLimit = {
+    maxBytes: MAX_BYTES,
+    message: ({
+      name,
+      maxBytes,
+    }: {
+      name: string | undefined;
+      maxBytes: number;
+    }) => `${name ?? 'This file'} is larger than ${maxBytes} bytes`,
+  };
+
+  function renderLimitedComposer(props: Partial<ComposerRootProps> = {}) {
+    const submissions: ComposerSubmission[] = [];
+    render(
+      <Composer.Root
+        {...rootWords}
+        fileSizeLimit={fileSizeLimit}
+        onSubmit={(submission) => {
+          submissions.push(submission);
+          return Promise.resolve();
+        }}
+        {...props}
+      >
+        <Composer.Content>
+          <Composer.Attachments {...attachmentsWords} />
+          <Composer.Editor {...editorWords} />
+          <Composer.Error />
+          <Composer.Toolbar>
+            <Composer.AttachFiles {...attachFilesWords}>
+              Browse files
+            </Composer.AttachFiles>
+          </Composer.Toolbar>
+        </Composer.Content>
+      </Composer.Root>,
+      { wrapper: FakeClock },
+    );
+    const prompt = screen.getByRole<HTMLElement>('textbox', {
+      name: rootWords.editorAriaLabel,
+    });
+    return { prompt, submissions };
+  }
+
+  function oversizePng(name = 'scan.png') {
+    return new File(['12345'], name, { type: 'image/png' });
+  }
+
+  it('refuses a picked file over the limit in the host sentence and sends no file', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const user = userEvent.setup();
+    const { prompt, submissions } = renderLimitedComposer();
+
+    await user.upload(
+      screen.getByLabelText(attachFilesWords.inputLabel),
+      oversizePng(),
+    );
+    const alert = (await screen.findByRole('alert')).textContent;
+    await user.click(prompt);
+    await user.keyboard('hello{Enter}');
+    await waitFor(() => expect(submissions).toHaveLength(1));
+
+    expect({
+      alert,
+      attachments: screen.queryAllByRole('listitem').length,
+      files: submissions[0]?.files,
+    }).toEqual({
+      alert: fileSizeLimit.message({ name: 'scan.png', maxBytes: MAX_BYTES }),
+      attachments: 0,
+      files: [],
+    });
+  });
+
+  it('refuses a pasted file over the limit in the host sentence', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const { prompt } = renderLimitedComposer();
+    fireEvent.paste(prompt, {
+      clipboardData: { files: [oversizePng('')], getData: () => '' },
+    });
+
+    expect({
+      alert: (await screen.findByRole('alert')).textContent,
+      attachments: screen.queryAllByRole('listitem').length,
+      draft: prompt.textContent,
+    }).toEqual({
+      alert: fileSizeLimit.message({ name: undefined, maxBytes: MAX_BYTES }),
+      attachments: 0,
+      draft: '',
+    });
+  });
+
+  it('refuses a dropped file over the limit in the host sentence', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const { prompt } = renderLimitedComposer();
+    fireEvent.drop(prompt, {
+      dataTransfer: {
+        files: [new File(['123456'], 'clip.mp4', { type: 'video/mp4' })],
+        getData: () => '',
+      },
+    });
+
+    expect({
+      alert: (await screen.findByRole('alert')).textContent,
+      attachments: screen.queryAllByRole('listitem').length,
+      draft: prompt.textContent,
+    }).toEqual({
+      alert: fileSizeLimit.message({ name: 'clip.mp4', maxBytes: MAX_BYTES }),
+      attachments: 0,
+      draft: '',
+    });
+  });
+
+  it('attaches a file of exactly the limit', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const { prompt } = renderLimitedComposer();
+    fireEvent.paste(prompt, {
+      clipboardData: {
+        files: [new File(['1234'], 'scan.png', { type: 'image/png' })],
+        getData: () => '',
+      },
+    });
+
+    expect(
+      await screen.findByRole('img', { name: '[Image #1]' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('says an oversize file of a type outside the list is unsupported, not too large', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const { prompt } = renderLimitedComposer({
+      acceptedMediaTypes: ['image/png'],
+    });
+    fireEvent.paste(prompt, {
+      clipboardData: {
+        files: [new File(['<svg/>'], 'logo.svg', { type: 'image/svg+xml' })],
+        getData: () => '',
+      },
+    });
+
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      rootWords.unsupportedFileMessage({ name: 'logo.svg' }),
+    );
+  });
+
+  it('still writes an oversize file that carries no bytes, such as a CSV, as a mention', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const { prompt } = renderLimitedComposer();
+    fireEvent.paste(prompt, {
+      clipboardData: {
+        files: [new File(['a,b,c'], 'report.csv', { type: 'text/csv' })],
+        getData: () => '',
+      },
+    });
+
+    await waitFor(() => expect(prompt.textContent).toContain('@report.csv'));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

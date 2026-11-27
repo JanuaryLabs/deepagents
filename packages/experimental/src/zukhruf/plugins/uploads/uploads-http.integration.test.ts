@@ -406,7 +406,7 @@ test('uploads reject path segments that can escape their owner and session scope
   );
 });
 
-test('discovery advertises the uploads capability only when it is composed', async () => {
+test('discovery advertises the uploads capability, with its media types and byte limit, only when it is composed', async () => {
   await using withCapability = await harness();
   await using withoutCapability = await harness({ withUploads: false });
   const sessionId = randomUUID();
@@ -421,6 +421,7 @@ test('discovery advertises the uploads capability only when it is composed', asy
   assert.deepEqual(present.capabilities.uploads, {
     href: `${MOUNT}/session`,
     mediaTypes: [...UPLOAD_MEDIA_TYPES],
+    maxBytes: MAX_UPLOAD_BYTES,
   });
   assert.equal(absent.capabilities.uploads, undefined);
   assert.equal(
@@ -776,6 +777,7 @@ test('uploads() narrowed to the images the model reads advertises only those typ
   assert.deepEqual(discovery.capabilities.uploads, {
     href: `${MOUNT}/session`,
     mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+    maxBytes: MAX_UPLOAD_BYTES,
   });
   assert.deepEqual(
     {

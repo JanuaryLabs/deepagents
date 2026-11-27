@@ -57,6 +57,8 @@ import type {
   ComposerAttachmentLabel,
   ComposerDraftSource,
   ComposerDropTransfer,
+  ComposerFilePolicy,
+  ComposerFileSizeLimit,
   ComposerInitialDraft,
   ComposerItemEntry,
   ComposerMediaType,
@@ -130,6 +132,8 @@ export type ComposerRootProps = {
   acceptedMediaTypes?: readonly ComposerMediaType[];
   /** Shown when a file is refused: outside `acceptedMediaTypes`, or not an image, video or audio file; `name` is undefined for a file without one. */
   unsupportedFileMessage: (file: { name: string | undefined }) => string;
+  /** Refuses a picked, pasted or dropped attachment of more than `maxBytes` bytes with `message`, so nothing is attached or uploaded. */
+  fileSizeLimit?: ComposerFileSizeLimit;
   /** Shown when a sent prompt starts with a slash command that no trigger knows. */
   unknownCommandMessage: (command: { name: string }) => string;
   /** Names each attachment to the user: its token in the editor, its preview in `Composer.Attachments`, its row in `Composer.RemoteImages` and the alert for its missing file. */
@@ -281,6 +285,7 @@ function ComposerRootInner({
   submitErrorMessage,
   acceptedMediaTypes,
   unsupportedFileMessage,
+  fileSizeLimit,
   unknownCommandMessage,
   attachmentLabel,
   pastedTextLabel,
@@ -382,8 +387,13 @@ function ComposerRootInner({
   const onSubmitRef = useRef(onSubmit);
   const attachedImagesRef = useRef(new Map<string, File>());
   const attachImageFileRef = useRef<ComposerAttachImageFile>(() => null);
-  const acceptedMediaTypesRef = useRef(acceptedMediaTypes);
-  acceptedMediaTypesRef.current = acceptedMediaTypes;
+  const filePolicy: ComposerFilePolicy = {
+    acceptedMediaTypes,
+    fileSizeLimit,
+    unsupportedFileMessage,
+  };
+  const filePolicyRef = useRef(filePolicy);
+  filePolicyRef.current = filePolicy;
 
   const refreshFromEditorRef = useRef<(editor: Editor) => void>(
     () => undefined,
@@ -411,7 +421,7 @@ function ComposerRootInner({
         getPastedTextLabel: () => pastedTextLabelRef.current,
         getMentionTrigger: () => mentionTriggersRef.current[0] ?? '@',
         getRemoteImageCount: () => remoteImagesRef.current.length,
-        getAcceptedMediaTypes: () => acceptedMediaTypesRef.current,
+        getFilePolicy: () => filePolicyRef.current,
         attachImageFile: (file) => attachImageFileRef.current(file),
       }),
     [],
@@ -803,10 +813,15 @@ function ComposerRootInner({
   }
 
   function attachImageFile(file: File) {
-    if (composerFileDisposition(file, acceptedMediaTypes) !== 'attach') {
+    const disposition = composerFileDisposition(file, filePolicy);
+    if (disposition.kind !== 'attach') {
       setComposer((state) => ({
         ...state,
-        error: unsupportedFileMessage({ name: file.name || undefined }),
+        // A file reaching here carries bytes to attach, so one the rule would mention is unsupported too.
+        error:
+          disposition.kind === 'refuse'
+            ? disposition.message
+            : unsupportedFileMessage({ name: file.name || undefined }),
         shortcutsOpen: false,
       }));
       setActivePopup(null);
@@ -883,7 +898,7 @@ function ComposerRootInner({
     return handleComposerDropInView(editor.view, transfer, {
       getRemoteImageCount: () => remoteImagesRef.current.length,
       getMentionTrigger: () => mentionTriggers[0] ?? '@',
-      getAcceptedMediaTypes: () => acceptedMediaTypes,
+      getFilePolicy: () => filePolicy,
       attachImageFile,
     });
   }

@@ -67,7 +67,7 @@ The host and this package must use the same copy of `@zukhruf/ui`. Each copy has
 
 ## Words
 
-The parts ship no words ([ADR 0007](./docs/dictation/adr/0007-react-input-ships-no-words-or-icons-and-react-genai-ships-chatcomposer-dictate.md)). Each part that shows or announces text takes it as a required prop: `Composer.Root`'s `editorAriaLabel`, `submitFailedMessage`, `submitErrorMessage`, `unsupportedFileMessage`, `unknownCommandMessage`, `attachmentLabel`, `pastedTextLabel` and `missingAttachmentMessage` (and `expandedTextLimit`'s `message`, beside its `maxChars`), `Composer.Editor`'s `placeholder`, `Composer.Attachments`' `aria-label`, `removeLabel` and `removeIcon`, `Composer.Popup`'s `listboxLabel`, `noMatchesLabel` and `argsLabel`, `Composer.AttachFiles`' `inputLabel`, `Composer.Shortcuts`' `heading`, `closeLabel`, `groupTitles` and `descriptions`, `Composer.Footer`'s `draftHints`, `popupHints` and `reverseSearchHints`, and `PersistedPromptText`'s `skillIcon`. `submitErrorMessage(error)` gives the words for an `Error` that `onSubmit` rejects with, such as a failed upload, so its raw message stays off the page; `submitFailedMessage` is for any other rejection. `attachmentLabel({ media, number })` names an attachment wherever the user sees it: its token in the editor, its preview in `Composer.Attachments`, its row in `Composer.RemoteImages`, its remove button through `removeLabel(label)` and the alert of `missingAttachmentMessage({ label })`. `pastedTextLabel({ chars })` draws a pasted block in the editor. Only the drawing uses these words: the token text stays the identity, so the prompt the model reads, a copy, the stored draft and the history carry `[Image #N]` and `[Pasted Content N chars]`, and a send expands a paste to its text. `ChatComposer` of `@deepagents/react-genai` fills the ones it renders from its message catalog; it renders no `Composer.Shortcuts` or `Composer.Footer`, so a host that uses those passes their words itself.
+The parts ship no words ([ADR 0007](./docs/dictation/adr/0007-react-input-ships-no-words-or-icons-and-react-genai-ships-chatcomposer-dictate.md)). Each part that shows or announces text takes it as a required prop: `Composer.Root`'s `editorAriaLabel`, `submitFailedMessage`, `submitErrorMessage`, `unsupportedFileMessage`, `unknownCommandMessage`, `attachmentLabel`, `pastedTextLabel` and `missingAttachmentMessage` (and `expandedTextLimit`'s `message`, beside its `maxChars`, and `fileSizeLimit`'s `message`, beside its `maxBytes`), `Composer.Editor`'s `placeholder`, `Composer.Attachments`' `aria-label`, `removeLabel` and `removeIcon`, `Composer.Popup`'s `listboxLabel`, `noMatchesLabel` and `argsLabel`, `Composer.AttachFiles`' `inputLabel`, `Composer.Shortcuts`' `heading`, `closeLabel`, `groupTitles` and `descriptions`, `Composer.Footer`'s `draftHints`, `popupHints` and `reverseSearchHints`, and `PersistedPromptText`'s `skillIcon`. `submitErrorMessage(error)` gives the words for an `Error` that `onSubmit` rejects with, such as a failed upload, so its raw message stays off the page; `submitFailedMessage` is for any other rejection. `attachmentLabel({ media, number })` names an attachment wherever the user sees it: its token in the editor, its preview in `Composer.Attachments`, its row in `Composer.RemoteImages`, its remove button through `removeLabel(label)` and the alert of `missingAttachmentMessage({ label })`. `pastedTextLabel({ chars })` draws a pasted block in the editor. Only the drawing uses these words: the token text stays the identity, so the prompt the model reads, a copy, the stored draft and the history carry `[Image #N]` and `[Pasted Content N chars]`, and a send expands a paste to its text. `ChatComposer` of `@deepagents/react-genai` fills the ones it renders from its message catalog; it renders no `Composer.Shortcuts` or `Composer.Footer`, so a host that uses those passes their words itself.
 
 ## Accepted files
 
@@ -78,6 +78,18 @@ The parts ship no words ([ADR 0007](./docs/dictation/adr/0007-react-input-ships-
 ```
 
 Without the list, the composer takes any image, video or audio file, and a pasted or dropped file of another type becomes an `@name` mention, as a coding agent reads a file by its path. The picker still refuses such a file.
+
+`fileSizeLimit` caps the bytes of one attachment. A picked, pasted or dropped file over `maxBytes` is refused with `message({ name, maxBytes })`, and nothing is attached, so nothing is uploaded; a file of exactly `maxBytes` is taken. A file of a type the composer does not take is refused as unsupported whatever its size, and a mention carries no bytes, so the limit leaves it alone. A chat host passes the limit its server enforces, such as the `maxBytes` that the uploads capability of Zukhruf's discovery advertises:
+
+```tsx
+<Composer.Root
+  fileSizeLimit={{
+    maxBytes: discovery.capabilities.uploads.maxBytes,
+    message: ({ name, maxBytes }) => t('fileTooLarge', { name, maxBytes }),
+  }}
+  {...words}
+>
+```
 
 A submission carries its attached files in `files`, in placeholder order (`[Image #1]` first), so a host uploads them without reading `items`:
 

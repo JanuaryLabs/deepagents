@@ -60,7 +60,9 @@ export interface UploadReceipt {
 
 /**
  * Per-session upload and retrieval bound to one `uploads()` definition.
- * The caller must choose the maximum accepted upload size in bytes.
+ * The caller must choose the maximum accepted upload size in bytes; discovery
+ * advertises it beside the accepted `mediaTypes`, so a client can refuse an
+ * oversize file before it uploads.
  */
 export function uploadsHttp(
   definition: AgentPluginDefinition<Uploads>,
@@ -73,7 +75,7 @@ export function uploadsHttp(
   }
   return projectHttp(definition, (plugin) => ({
     capabilities: {
-      uploads: { path: '/session', mediaTypes: plugin.mediaTypes },
+      uploads: { path: '/session', mediaTypes: plugin.mediaTypes, maxBytes },
     },
     authenticatedRoutes: uploadRoutes(plugin, maxBytes),
   }));

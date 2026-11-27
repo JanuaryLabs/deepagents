@@ -44,10 +44,10 @@ import type {
   ComposerAttachmentLabel,
   ComposerAttachmentMedia,
   ComposerDropTransfer,
+  ComposerFilePolicy,
   ComposerInitialDraft,
   ComposerItemBinding,
   ComposerItemEntry,
-  ComposerMediaType,
   ComposerPastedTextLabel,
   ComposerRemoteImage,
   ComposerRichLinkMetadata,
@@ -79,7 +79,7 @@ export type ComposerAttachImageFile = (file: File) => string | null;
 export type ComposerClipboardOptions = {
   getRemoteImageCount: () => number;
   getMentionTrigger: () => string;
-  getAcceptedMediaTypes: () => readonly ComposerMediaType[] | undefined;
+  getFilePolicy: () => ComposerFilePolicy;
   attachImageFile: ComposerAttachImageFile;
 };
 
@@ -399,16 +399,17 @@ function insertTransferredFileInView(
   unnamed: string,
   options: ComposerClipboardOptions,
 ) {
-  const accepted = options.getAcceptedMediaTypes();
+  const policy = options.getFilePolicy();
   const all = Array.from(files);
   const file =
     all.find(
-      (candidate) => composerFileDisposition(candidate, accepted) === 'attach',
+      (candidate) =>
+        composerFileDisposition(candidate, policy).kind === 'attach',
     ) ?? all[0];
   if (!file) {
     return false;
   }
-  if (composerFileDisposition(file, accepted) === 'mention') {
+  if (composerFileDisposition(file, policy).kind === 'mention') {
     insertFileMentionInView(
       view,
       file.name || unnamed,

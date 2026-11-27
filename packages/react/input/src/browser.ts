@@ -81,6 +81,7 @@ export type {
   ComposerInitialDraft,
   ComposerDraftSource,
   ComposerItemBinding,
+  ComposerFileSizeLimit,
   ComposerMediaType,
   ComposerPendingPaste,
   ComposerRemoteImage,

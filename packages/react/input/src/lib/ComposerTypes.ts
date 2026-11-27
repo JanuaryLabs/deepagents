@@ -134,8 +134,24 @@ export type ComposerPastedTextLabel = (paste: { chars: number }) => string;
 /** A media type the Composer attaches: an exact type such as `image/png`, or a whole family such as `image/*`. */
 export type ComposerMediaType = `${ComposerAttachmentMedia}/${string}`;
 
-/** What the Composer does with a file: attach its bytes, write an `@name` mention, or refuse it with `unsupportedFileMessage`. */
-export type ComposerFileDisposition = 'attach' | 'mention' | 'refuse';
+/** Refuses an attachment of more than `maxBytes` bytes with the host's `message`; `name` is undefined for a file without one. */
+export type ComposerFileSizeLimit = {
+  maxBytes: number;
+  message: (file: { name: string | undefined; maxBytes: number }) => string;
+};
+
+/** What the Composer takes: the media types it attaches, the size an attachment may have, and the words for a file it refuses. */
+export type ComposerFilePolicy = {
+  acceptedMediaTypes: readonly ComposerMediaType[] | undefined;
+  fileSizeLimit: ComposerFileSizeLimit | undefined;
+  unsupportedFileMessage: (file: { name: string | undefined }) => string;
+};
+
+/** What the Composer does with a file: attach its bytes, write an `@name` mention, or refuse it with the sentence that says why. */
+export type ComposerFileDisposition =
+  | { kind: 'attach' }
+  | { kind: 'mention' }
+  | { kind: 'refuse'; message: string };
 
 export type ComposerSubmissionItem =
   | { type: 'text'; text: string; textElements: ComposerTextElement[] }

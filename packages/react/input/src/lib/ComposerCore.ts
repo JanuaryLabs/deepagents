@@ -12,6 +12,7 @@ import type {
   ComposerAttachmentMedia,
   ComposerDraftSource,
   ComposerFileDisposition,
+  ComposerFilePolicy,
   ComposerInitialDraft,
   ComposerItemBinding,
   ComposerItemEntry,
@@ -693,24 +694,51 @@ export function attachmentMediaOf(
  * Without `acceptedMediaTypes`, any image, video or audio file is attached and any
  * other file becomes an `@name` mention, as a coding agent reads files by path.
  * With it, only a file whose type the list names, exactly or by its `family/*`,
- * is attached, and every other file is refused.
+ * is attached, and every other file is refused as unsupported. A file that would
+ * be attached but has more bytes than `fileSizeLimit.maxBytes` is refused in the
+ * limit's words; a mention carries no bytes, so the limit leaves it alone.
  */
 export function composerFileDisposition(
-  file: Pick<File, 'type'>,
-  acceptedMediaTypes: readonly ComposerMediaType[] | undefined,
+  file: Pick<File, 'name' | 'size' | 'type'>,
+  {
+    acceptedMediaTypes,
+    fileSizeLimit,
+    unsupportedFileMessage,
+  }: ComposerFilePolicy,
 ): ComposerFileDisposition {
+  const name = file.name || undefined;
   const media = attachmentMediaOf(file);
+  if (media === null && acceptedMediaTypes === undefined) {
+    return { kind: 'mention' };
+  }
+  if (media === null || !acceptsMediaType(acceptedMediaTypes, file, media)) {
+    return { kind: 'refuse', message: unsupportedFileMessage({ name }) };
+  }
+  if (fileSizeLimit !== undefined && file.size > fileSizeLimit.maxBytes) {
+    return {
+      kind: 'refuse',
+      message: fileSizeLimit.message({
+        name,
+        maxBytes: fileSizeLimit.maxBytes,
+      }),
+    };
+  }
+  return { kind: 'attach' };
+}
+
+function acceptsMediaType(
+  acceptedMediaTypes: readonly ComposerMediaType[] | undefined,
+  file: Pick<File, 'type'>,
+  media: ComposerAttachmentMedia,
+) {
   if (acceptedMediaTypes === undefined) {
-    return media === null ? 'mention' : 'attach';
+    return true;
   }
   const type = file.type.toLowerCase();
-  return media !== null &&
-    acceptedMediaTypes.some((accepted) => {
-      const name = accepted.toLowerCase();
-      return name === type || name === `${media}/*`;
-    })
-    ? 'attach'
-    : 'refuse';
+  return acceptedMediaTypes.some((accepted) => {
+    const name = accepted.toLowerCase();
+    return name === type || name === `${media}/*`;
+  });
 }
 
 export function attachmentMediaFromAttr(
