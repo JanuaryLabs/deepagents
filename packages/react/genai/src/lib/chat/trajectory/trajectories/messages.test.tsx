@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { UIMessage } from 'ai';
+import type { Citation, UIMessage } from 'ai';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -468,5 +468,150 @@ describe('context hooks', () => {
     expect(() => render(<Bad />)).toThrow(
       'useMessageItem must be used within <Messages.Item>',
     );
+  });
+});
+
+describe('Messages text citations (#5951)', () => {
+  function urlCitation(
+    url: string,
+    endIndex?: number,
+    citedText?: string,
+  ): Citation {
+    return {
+      source: { type: 'source', sourceType: 'url', id: url, url, title: url },
+      ...(endIndex === undefined ? {} : { startIndex: 0, endIndex }),
+      ...(citedText === undefined ? {} : { citedText }),
+    };
+  }
+
+  function citedAnswer(text: string, citations: Citation[]): UIMessage {
+    return {
+      id: `asst-${++messageCounter}`,
+      role: 'assistant',
+      parts: [{ type: 'text', text, citations }],
+    };
+  }
+
+  function renderAnswers(
+    messages: UIMessage[],
+    citation?: Parameters<typeof Messages.Root>[0]['citation'],
+  ) {
+    return render(
+      <Messages.Root messages={messages} citation={citation}>
+        <Messages.List>
+          {messages.map((message, index) => (
+            <Messages.Item key={message.id} message={message} index={index}>
+              <Messages.AssistantContent />
+            </Messages.Item>
+          ))}
+        </Messages.List>
+      </Messages.Root>,
+      { wrapper: AgentHarness },
+    );
+  }
+
+  it('draws each citation inline where it points, numbered in the order the chat first cites it', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    // A real Meddit sentence; each citation sits where the model's marker was.
+    const first = 'Apixaban needs no change in mild impairment.';
+    const text = `${first} Use **Cockcroft-Gault CrCl, not eGFR** for dosing.`;
+    renderAnswers([
+      citedAnswer(text, [
+        urlCitation('https://pubmed.example/1', first.length),
+        urlCitation('https://pubmed.example/2', text.length - 1),
+      ]),
+    ]);
+
+    const pills = screen.getAllByRole('button', { name: /^Source / });
+    expect({
+      names: pills.map((pill) => pill.getAttribute('aria-label')),
+      sentence: pills[0]?.closest('p')?.textContent,
+      oneParagraph: pills[0]?.closest('p') === pills[1]?.closest('p'),
+    }).toEqual({
+      names: ['Source 1', 'Source 2'],
+      sentence:
+        'Apixaban needs no change in mild impairment.1 Use Cockcroft-Gault CrCl, not eGFR for dosing2.',
+      oneParagraph: true,
+    });
+  });
+
+  it('draws a citation with no offset, as Anthropic sends it, at the end of its text', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    renderAnswers([
+      citedAnswer('Apixaban needs no change in mild impairment.', [
+        urlCitation('https://pubmed.example/1'),
+      ]),
+    ]);
+
+    expect(
+      screen.getByRole('button', { name: 'Source 1' }).closest('p')
+        ?.textContent,
+    ).toBe('Apixaban needs no change in mild impairment.1');
+  });
+
+  it('keeps a source’s first number when a later message cites it again', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    renderAnswers([
+      citedAnswer('First claim.', [
+        urlCitation('https://pubmed.example/1'),
+        urlCitation('https://pubmed.example/2'),
+      ]),
+      citedAnswer('Follow-up claim.', [
+        urlCitation('https://pubmed.example/2'),
+      ]),
+    ]);
+
+    expect(
+      screen
+        .getAllByRole('button', { name: /^Source / })
+        .map((pill) => pill.getAttribute('aria-label')),
+    ).toEqual(['Source 1', 'Source 2', 'Source 2']);
+  });
+
+  it('draws a citation through the host’s citation component, with its citation and number', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    renderAnswers(
+      [
+        citedAnswer('Apixaban needs no change in mild impairment.', [
+          urlCitation('https://pubmed.example/7', undefined, 'no dose change'),
+        ]),
+      ],
+      ({ citation, index }) => (
+        <sup data-testid="host-cite">{`${index}:${citation.citedText}`}</sup>
+      ),
+    );
+
+    expect({
+      drawn: screen.getByTestId('host-cite').textContent,
+      defaultPill: screen.queryByRole('button', { name: /^Source / }),
+    }).toEqual({ drawn: '1:no dose change', defaultPill: null });
+  });
+
+  it('shows the cited text in the default citation’s detail', async () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+    const user = userEvent.setup();
+
+    renderAnswers([
+      citedAnswer('Apixaban needs no change in mild impairment.', [
+        urlCitation(
+          'https://pubmed.example/1',
+          undefined,
+          'no dose change is needed',
+        ),
+      ]),
+    ]);
+
+    await user.click(screen.getByRole('button', { name: 'Source 1' }));
+
+    expect(screen.getByText('no dose change is needed')).toBeInTheDocument();
   });
 });

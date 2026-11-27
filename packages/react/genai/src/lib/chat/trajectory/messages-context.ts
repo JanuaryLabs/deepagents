@@ -1,12 +1,15 @@
 import type { ChatStatus, UIMessage } from 'ai';
-import { createContext, use } from 'react';
+import { type ComponentType, createContext, use } from 'react';
 
 import type { GenAIInteractiveElement } from '../../components/InteractiveResponse.tsx';
 import { useAgentStatus } from '../agent-context.tsx';
+import type { UrlCitation } from '../citations.ts';
 
 export type MessagesContextValue = {
   messages: UIMessage[];
   elements?: GenAIInteractiveElement[];
+  /** Draws a text citation; react-genai's CitationPill when absent. */
+  citation?: ComponentType<{ citation: UrlCitation; index: number }>;
   status?: ChatStatus;
 };
 

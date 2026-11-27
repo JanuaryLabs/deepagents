@@ -17,7 +17,7 @@ import {
   resolveToolEntry,
 } from '../../../tools/helpers.ts';
 import type { ToolLabel } from '../../../tools/registry.ts';
-import { useAgent, useAgentMessages } from '../../agent-context.tsx';
+import { useAgent } from '../../agent-context.tsx';
 import {
   citationIndexOf,
   extractSourcesFromMessages,
@@ -31,7 +31,7 @@ import {
 } from '../../message-parts.tsx';
 import { isToolAborted } from '../../tool-abort.ts';
 import type { MessagesContextValue } from '../messages-context.ts';
-import { useMessagesStatus } from '../messages-context.ts';
+import { useMessagesContext, useMessagesStatus } from '../messages-context.ts';
 import { ToolLabelBlock } from '../tool-label.tsx';
 import type { MessageTrajectorySegment } from '../trajectory-segments.ts';
 
@@ -59,6 +59,7 @@ function SegmentText({
           <AssistantTextPart
             key={`${idx}-text`}
             text={part.text}
+            citations={part.citations}
             elements={elements}
             className={className}
           />
@@ -89,7 +90,7 @@ function SegmentSource({
 }: {
   segment: Extract<MessageTrajectorySegment, { kind: 'source' }>;
 }) {
-  const { messages } = useAgentMessages();
+  const { messages } = useMessagesContext();
   const sources = useMemo(
     () => extractSourcesFromMessages(messages),
     [messages],

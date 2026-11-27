@@ -13,18 +13,20 @@ export function MessagesRoot({
   messages,
   className,
   elements,
+  citation,
   status,
   children,
 }: {
   messages: UIMessage[];
   className?: string;
   elements?: GenAIInteractiveElement[];
+  citation?: MessagesContextValue['citation'];
   status?: ChatStatus;
   children: React.ReactNode;
 }) {
   const value = useMemo<MessagesContextValue>(
-    () => ({ messages, elements, status }),
-    [messages, elements, status],
+    () => ({ messages, elements, citation, status }),
+    [messages, elements, citation, status],
   );
 
   return (

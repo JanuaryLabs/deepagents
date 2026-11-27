@@ -117,7 +117,13 @@ function AssistantPart({ part }: { part: UIMessage['parts'][number] }) {
     if (isCommentaryTextPart(part)) {
       return null;
     }
-    return <AssistantTextPart text={part.text} elements={elements} />;
+    return (
+      <AssistantTextPart
+        text={part.text}
+        citations={part.citations}
+        elements={elements}
+      />
+    );
   }
 
   if (part.type === 'dynamic-tool') {

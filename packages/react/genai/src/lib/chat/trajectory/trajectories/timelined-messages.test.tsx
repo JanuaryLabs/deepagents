@@ -231,3 +231,60 @@ describe('full composition', () => {
     expect(screen.getByText('Sales data shows...')).toBeInTheDocument();
   });
 });
+
+describe('TimelinedMessages text citations (#5951)', () => {
+  it('draws a source that is both a source-url part and a text citation once, inline, and still draws a source nobody cites', () => {
+    using stack = new DisposableStack();
+    stack.defer(cleanup);
+
+    const text = 'Apixaban needs no change in mild impairment.';
+    const cited = 'https://pubmed.example/1';
+    const message: UIMessage = {
+      id: 'asst-cited-tl',
+      role: 'assistant',
+      parts: [
+        { type: 'source-url', sourceId: 's1', url: cited, title: 'Cited' },
+        {
+          type: 'source-url',
+          sourceId: 's2',
+          url: 'https://pubmed.example/2',
+          title: 'Listed',
+        },
+        {
+          type: 'text',
+          text,
+          citations: [
+            {
+              source: {
+                type: 'source',
+                sourceType: 'url',
+                id: 's1',
+                url: cited,
+                title: 'Cited',
+              },
+              startIndex: 0,
+              endIndex: text.length,
+            },
+          ],
+        },
+      ],
+    };
+    render(
+      <TimelinedMessages.Root messages={[message]}>
+        <TimelinedMessages.Item message={message} index={0}>
+          <TimelinedMessages.AssistantContent />
+        </TimelinedMessages.Item>
+      </TimelinedMessages.Root>,
+      { wrapper: AgentHarness },
+    );
+
+    const pills = screen.getAllByRole('button', { name: /^Source / });
+    expect({
+      names: pills.map((pill) => pill.getAttribute('aria-label')),
+      firstInSentence: pills[0]?.closest('p')?.textContent,
+    }).toEqual({
+      names: ['Source 2', 'Source 1'],
+      firstInSentence: undefined,
+    });
+  });
+});

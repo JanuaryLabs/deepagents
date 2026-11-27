@@ -1,6 +1,8 @@
 import type { UIMessage } from 'ai';
 import { isStaticToolUIPart } from 'ai';
 
+import { urlCitationsOf } from '../citations.ts';
+
 export type TimelineNodeKind = 'tool' | 'dynamic-tool' | 'reasoning';
 
 export type MessageTrajectorySegment =
@@ -51,6 +53,14 @@ export function buildMessageTrajectorySegments(
   parts: UIMessage['parts'],
 ): MessageTrajectorySegment[] {
   const segments: MessageTrajectorySegment[] = [];
+  // A source a text citation draws inline is not drawn again on its own.
+  const citedInline = new Set(
+    parts.flatMap((part) =>
+      part.type === 'text'
+        ? urlCitationsOf(part.citations).map(({ source }) => source.url)
+        : [],
+    ),
+  );
 
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i];
@@ -67,7 +77,7 @@ export function buildMessageTrajectorySegments(
       }
     } else if (part.type === 'file') {
       segments.push({ kind: 'file', part, idx: i });
-    } else if (part.type === 'source-url') {
+    } else if (part.type === 'source-url' && !citedInline.has(part.url)) {
       const last = segments[segments.length - 1];
       if (last && last.kind === 'source') {
         last.parts.push({ part, idx: i });

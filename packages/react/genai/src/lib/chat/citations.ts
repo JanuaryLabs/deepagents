@@ -1,8 +1,21 @@
-import type { UIMessage } from 'ai';
+import type { Citation, UIMessage } from 'ai';
 
 export interface CitationSource {
   url: string;
   title?: string;
+}
+
+/** A citation of a web page, the only kind react-genai draws. */
+export type UrlCitation = Citation & {
+  source: Extract<Citation['source'], { sourceType: 'url' }>;
+};
+
+export function urlCitationsOf(
+  citations: Citation[] | undefined,
+): UrlCitation[] {
+  return (citations ?? []).filter(
+    (citation): citation is UrlCitation => citation.source.sourceType === 'url',
+  );
 }
 
 /**
@@ -14,12 +27,17 @@ export function extractSourcesFromMessages(
 ): CitationSource[] {
   const seen = new Set<string>();
   const sources: CitationSource[] = [];
+  const add = (url: string, title: string | undefined) => {
+    if (seen.has(url)) return;
+    seen.add(url);
+    sources.push({ url, title });
+  };
   for (const message of messages) {
     for (const part of message.parts) {
-      if (part.type !== 'source-url') continue;
-      if (seen.has(part.url)) continue;
-      seen.add(part.url);
-      sources.push({ url: part.url, title: part.title });
+      if (part.type === 'text')
+        for (const { source } of urlCitationsOf(part.citations))
+          add(source.url, source.title);
+      if (part.type === 'source-url') add(part.url, part.title);
     }
   }
   return sources;
