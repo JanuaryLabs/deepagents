@@ -105,6 +105,20 @@ class GooseAdapter implements Adapter<GooseSession> {
 }
 ```
 
+## Read a transcript from another language
+
+```sh
+npx --yes --package=@deepagents/trajectory@<version> trajectory read claude-code <transcript.jsonl>
+```
+
+It prints `{"trajectory": <ATIF v1.8>, "diagnostics": [<Diagnostic>]}` as one
+line of JSON on stdout, with subagents included ([ADR 0010](./docs/adr/0010-a-cli-prints-a-trajectory-as-json-for-callers-in-other-languages.md)).
+
+| Exit | Meaning                                                                                                                                                           |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | the JSON is on stdout                                                                                                                                             |
+| `2`  | `trajectory: <message>` on stderr (a `SessionReadError`, or a path that is not a main transcript), or the usage line for a wrong command, agent or argument count |
+
 ## Signatures
 
 ```ts
@@ -176,6 +190,9 @@ export type Trajectory, Step, UserStep, AgentStep, SystemStep, ToolCall, Observa
 
 // Errors.
 export class SessionReadError extends Error { readonly path: string } // missing or unreadable; cause attached
+
+// The bin (package.json "bin").
+// trajectory read claude-code <transcript.jsonl>  →  stdout: JSON.stringify({ trajectory, diagnostics })
 ```
 
 ## What each call does underneath
@@ -256,4 +273,5 @@ Every step keeps `extra.claude_code` with `uuid`, `parent_uuid`, `timestamp`,
 | deepagents `experimental/coding-agent-reminders`                                              | `read`, user steps by origin, `hook_additional_context` system steps                                      |
 | agent-plugin housekeeping `close-check` / `records-check`                                     | `ClaudeCodeStore.chain`, tool calls with results and `tool_use_result`                                    |
 | agent-plugin update-docs evidence                                                             | `sessions({ since })`, typed prompts, agent text and tool calls, `cwd`                                    |
+| agent-plugin `coding/mods/e2e.py` (Python)                                                    | the `trajectory read claude-code` bin                                                                     |
 | later: context-compiler sessions connector (#2400), rollover resume (#6075), night-run miners | `sessions({ since })`, `read`                                                                             |

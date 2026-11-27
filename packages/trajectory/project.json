@@ -5,8 +5,33 @@
   "projectType": "library",
   "targets": {
     "build": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build-lib", "build-cli"],
+      "outputs": ["{projectRoot}/dist"],
+      "options": {
+        "command": "true"
+      }
+    },
+    "build-lib": {
       "executor": "@nx/esbuild:esbuild",
       "outputs": ["{options.outputPath}"]
+    },
+    "build-cli": {
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": ["{options.outputPath}"],
+      "dependsOn": ["build-lib"],
+      "options": {
+        "main": "packages/trajectory/src/bin/trajectory.ts",
+        "outputPath": "{projectRoot}/dist/bin",
+        "declaration": false,
+        "skipTypeCheck": true,
+        "sourcemap": false,
+        "thirdParty": false,
+        "format": ["esm"],
+        "esbuildOptions": {
+          "packages": "external"
+        }
+      }
     },
     "test": {
       "options": {
