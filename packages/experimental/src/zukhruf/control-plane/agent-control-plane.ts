@@ -139,10 +139,14 @@ export class AgentControlPlane {
 
       const continues =
         message.role === 'assistant' || turn.trigger === 'regenerate-message';
+      const status = await admission.streams.getStreamStatus(streamId);
       if (continues) {
-        const status = await admission.streams.getStreamStatus(streamId);
         if (status === undefined) throw new TurnNotFoundError(streamId);
         if (status === 'queued' || status === 'running') return streamId;
+      } else if (status !== undefined) {
+        // A resent message id answers its turn, as Codex's cloud admission
+        // answers `AdmissionOutcome::Duplicate`.
+        return streamId;
       }
       if (!(await admission.admits(conversation))) {
         throw new AgentThreadLimitError();
@@ -363,10 +367,8 @@ export class AgentControlPlane {
       // aborting scheduler delivery so a racing worker observes cancellation,
       // never an orphaned failure.
       await this.#streams.cancel(currentTurn.streamId);
-      // Terminal mail has a deterministic id, so retrying this projection is
-      // idempotent. Project before destructive queue cleanup: if mailbox
-      // delivery fails, the still-discoverable scheduler receipt lets a later
-      // interrupt_agent call retry instead of losing FINAL_ANSWER forever.
+      // An interrupted child sends its parent no FINAL_ANSWER, as in Codex;
+      // this records its completion receipt before the queue forgets the turn.
       await this.projectTerminal(currentTurn, interruptedThread);
       await this.#queue.cancel(currentTurn.streamId);
       await this.#recordActivity(target, {

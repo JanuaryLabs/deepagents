@@ -439,6 +439,7 @@ after the plugin. No follow-up runs inline.
 enqueue (any short-lived process):
   enqueue({chatId,userId}, {message, trigger})
     → AgentTurnId.fromRequest(conversation, message.id)
+    → stream exists? return streamId               // a resent message id queues nothing
     → manager.register(streamId)                   // stream row: 'queued' (ON CONFLICT DO NOTHING)
     → queue.push({kind: 'message', streamId, chatId, userId, message, trigger})
     → { id: streamId, stream: watch(streamId) }    // caller may watch immediately
@@ -464,7 +465,7 @@ work (long-running executor process):
     → monitor cancellation → chat({ toolsContext }) → AWAIT persist(preclaimed)
                                                     // worker holds the job for the whole turn
     → persist detected a cancel? record <turn_aborted> after the partial answer
-    → child terminal? idempotent queue-only FINAL_ANSWER to its direct parent
+    → child completed or failed? idempotent queue-only FINAL_ANSWER to its direct parent  // cancelled: none
     → mailbox.endTurn(conversation, streamId)     // stale attempts cannot close a successor
 
 observe (anywhere): AgentObservation { engine, resume(), status(streamId?), cancel(streamId?) } — never spins a sandbox.
@@ -476,7 +477,10 @@ only the party _before_ that hop can mark two arrivals as the same message. A ru
 dedup impossible by construction (every retry looks new). The id is any unique string (a client
 message id, or `crypto.randomUUID()` absent a natural key). `AgentTurnId` then derives a stable
 conversation-scoped durable id, preventing one user's equal raw key from replaying or cancelling
-another conversation's stream.
+another conversation's stream. A `submit-message` (`POST /session/:sessionId` included) that
+resends a known message id answers the existing turn's id (`202 { turnId }`) and queues nothing,
+whatever the turn's status, as Codex's cloud admission answers `AdmissionOutcome::Duplicate`
+(#6173).
 
 **Division of labor: queue = at-least-once; runtime = exactly-once-per-turn.** The queue promises
 "never lost, strict FIFO per chat, maybe delivered twice" — job ids are monotonic **UUIDv7** so the
@@ -724,20 +728,25 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
 - `interrupt_agent` resolves canonical or relative paths, rejects root/self, returns the target's
   previous listed status (`not_found` for a missing target), and leaves the target reusable. For a
   running or oldest queued turn it
-  first commits stream cancellation, projects its idempotent `FINAL_ANSWER`, then removes matching
-  scheduler copies that are still queued. Active work retains its strict-FIFO key until its handler
-  exits; local handlers are signalled by the adapter and remote handlers observe the durable stream
-  cancellation. Projection precedes destructive queue cleanup so a mailbox failure remains
-  retryable.
+  first commits stream cancellation, records the child's `completion` receipt, then removes matching
+  scheduler copies that are still queued. It sends the parent no `FINAL_ANSWER`, as Codex's
+  `interrupt_agent` sends none (`core/src/tools/handlers/multi_agents_v2/interrupt_agent.rs`).
+  Active work retains its strict-FIFO key until its handler exits; local handlers are signalled by
+  the adapter and remote handlers observe the durable stream cancellation.
   Terminal and approval-paused targets are no-ops. This is the complete model-facing lifecycle
   surface: there are no close, shutdown, resume, or approval-as-denial tools.
-- Every genuinely terminal non-root turn is projected to its direct parent as idempotent queue-only
-  `FINAL_ANSWER` mail. The envelope carries `completed | failed | cancelled` status metadata and a
-  deterministic ID, and SQLite retains terminal-ID tombstones after FIFO consumption, so orphan
+- Every completed or failed non-root turn is projected to its direct parent as idempotent
+  queue-only `FINAL_ANSWER` mail. A cancelled (interrupted) turn, queued or running, projects
+  nothing, as Codex never notifies a parent of an interrupted child: `is_final` is false for
+  `AgentStatus::Interrupted` (`core/src/agent/status.rs`), and
+  `multi_agent_v2_interrupted_turn_does_not_notify_parent` pins it
+  (`core/src/tools/handlers/multi_agents_tests.rs`, `openai/codex` `045a11fe2`). The parent still
+  sees the child `interrupted` in `list_agents`. The envelope carries `completed | failed` status
+  metadata and a deterministic ID, and SQLite retains terminal-ID tombstones after FIFO consumption, so orphan
   recovery can retry without duplicating a delivered completion. Projection reads the assistant
   message whose id matches the terminal stream, never a newer conversation head. An approval pause is not terminal:
-  projection waits for continuation, guaranteeing one final answer. A failed or cancelled
-  continuation overrides that pause and is projected immediately.
+  projection waits for continuation, guaranteeing one final answer. A failed continuation
+  overrides that pause and is projected immediately; a cancelled one projects nothing.
   This matches Codex (`openai/codex` `bdfd769`): `forward_child_completion_to_parent` builds the
   envelope with `trigger_turn: false`, and the parent's `inter_agent_communication` handler starts
   a turn only for trigger mail or a durable-sleep extension. **An idle parent is not woken by a

@@ -501,6 +501,9 @@ test('a terminal duplicate cannot replace a newer latest turn', async () => {
     conversation,
     userTurn('caller-turn-a', 'first'),
   );
+  // The queue delivers at least once: the first turn's job comes back below.
+  const [firstJob] = queue.turns;
+  assert.ok(firstJob);
   await using _worker = await runtime.work();
   void _worker;
   await queue.runNext();
@@ -514,6 +517,7 @@ test('a terminal duplicate cannot replace a newer latest turn', async () => {
     userTurn('caller-turn-a', 'must not run again'),
   );
   assert.equal(duplicate.id, first.id);
+  queue.turns.push(firstJob);
   await queue.runNext();
 
   const chat = await store.getChat(conversation.chatId);
@@ -1698,7 +1702,11 @@ test('list_agents reports a child whose turn fails before setup completes', asyn
   );
 });
 
-test('a cancelled child asynchronously notifies its parent with the terminal status', async () => {
+// Codex never notifies a parent of an interrupted child: `is_final` is false
+// for `AgentStatus::Interrupted` (core/src/agent/status.rs:26-31), and
+// multi_agent_v2_interrupted_turn_does_not_notify_parent pins it
+// (core/src/tools/handlers/multi_agents_tests.rs:2118, origin/main 045a11fe2).
+test('a child cancelled while running sends its parent no final answer', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
@@ -1788,14 +1796,10 @@ test('a cancelled child asynchronously notifies its parent with the terminal sta
     await streamStore.getStreamStatus(cancelledTurn.id),
     'cancelled',
   );
-  const notifications = await mailboxStore.drain({
-    chatId: 'root-chat',
-    userId: 'user-1',
-  });
-  assert.equal(notifications.length, 1);
-  assert.equal(notifications[0]?.type, 'FINAL_ANSWER');
-  assert.equal(notifications[0]?.metadata?.status, 'cancelled');
-  assert.equal(notifications[0]?.content, 'Agent was interrupted.');
+  assert.deepStrictEqual(
+    await mailboxStore.drain({ chatId: 'root-chat', userId: 'user-1' }),
+    [],
+  );
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
@@ -1808,7 +1812,8 @@ test('a cancelled child asynchronously notifies its parent with the terminal sta
   );
 });
 
-test('a child cancelled while queued notifies its parent once without running the model', async () => {
+// Codex: an interrupted child never notifies its parent (see above).
+test('a child cancelled while queued sends its parent no final answer, though a worker that fetched its job before the cancel still delivers it', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
@@ -1875,8 +1880,11 @@ test('a child cancelled while queued notifies its parent once without running th
   const conversation = { chatId: 'queued-child-chat', userId: 'user-1' };
   const turn = userTurn('cancelled-before-start', 'Never start this');
   const cancelledTurn = await runtime.enqueue(conversation, turn);
+  // A worker on another host fetched the job before the cancel removed it.
+  const [fetched] = queue.turns;
+  assert.ok(fetched);
   await runtime.observe(conversation).cancel(cancelledTurn.id);
-  await runtime.enqueue(conversation, turn);
+  queue.turns.push(fetched);
 
   await using _worker = await runtime.work();
 
@@ -1884,13 +1892,10 @@ test('a child cancelled while queued notifies its parent once without running th
   await queue.runNext();
 
   assert.equal(childCalls.length, 0);
-  const notifications = await mailboxStore.drain({
-    chatId: 'root-chat',
-    userId: 'user-1',
-  });
-  assert.equal(notifications.length, 1);
-  assert.equal(notifications[0]?.metadata?.status, 'cancelled');
-  assert.equal(notifications[0]?.content, 'Agent was interrupted.');
+  assert.deepStrictEqual(
+    await mailboxStore.drain({ chatId: 'root-chat', userId: 'user-1' }),
+    [],
+  );
 });
 
 test('send_message resolves a canonical sibling path and queues mail without waking it', async () => {
@@ -2125,7 +2130,9 @@ test('followup_task wakes a non-root target with a new task', async () => {
   assert.equal(completion[0]?.content, 'follow-up complete');
 });
 
-test('interrupt_agent cancels the oldest queued child turn and reports its prior status', async () => {
+// Codex's interrupt_agent reports the prior status and sends the parent
+// nothing (core/src/tools/handlers/multi_agents_v2/interrupt_agent.rs).
+test('interrupt_agent cancels the oldest queued child turn, reports its prior status and sends no final answer', async () => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
@@ -2214,17 +2221,18 @@ test('interrupt_agent cancels the oldest queued child turn and reports its prior
 
   const prompt = JSON.stringify(promptAfterInterrupt);
   assert.match(prompt, /"previous_status":"pending_init"/);
-  assert.match(prompt, /Message Type: FINAL_ANSWER/);
-  assert.match(prompt, /Agent was interrupted\./);
-  assert.equal(prompt.match(/Message Type: FINAL_ANSWER/g)?.length, 1);
+  assert.doesNotMatch(prompt, /Message Type: FINAL_ANSWER/);
   assert.match(prompt, /"agent_status":"interrupted"/);
   assert.equal(await streamStore.getStreamStatus(child.id), 'cancelled');
   assert.equal(
     queue.turns.some((turn) => turn.streamId === child.id),
     false,
   );
-  await queue.runNextFor('root-chat');
-  assert.equal(rootCalls, 3, 'the serialized terminal-mail fallback is empty');
+  assert.equal(
+    await mailboxStore.hasPending({ chatId: 'root-chat', userId: 'user-1' }),
+    false,
+  );
+  assert.equal(rootCalls, 3);
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
@@ -2242,99 +2250,7 @@ test('interrupt_agent cancels the oldest queued child turn and reports its prior
   );
 });
 
-test('interrupt_agent can retry terminal projection before deleting a queued child turn', async () => {
-  const store = new InMemoryContextStore();
-  const streamStore = new SqliteStreamStore(':memory:');
-  const mailboxStore = new FailFirstMailboxEnqueueStore(':memory:');
-  const queue = new OrphaningTurnQueue();
-  using stores = new DisposableStack();
-  stores.defer(() => {
-    streamStore.close();
-    mailboxStore.close();
-  });
-
-  let rootCalls = 0;
-  let promptAfterRetry: unknown;
-  const rootModel = new MockLanguageModelV4({
-    doStream: async ({ prompt }) => {
-      rootCalls++;
-      if (rootCalls <= 2) {
-        return toolCallResponse(
-          'interrupt_agent',
-          `interrupt-retry-${rootCalls}`,
-          { target: '/root/researcher' },
-        );
-      }
-      promptAfterRetry = prompt;
-      return textResult('child interrupted after retry');
-    },
-  });
-  const sandbox = buildSandbox();
-  const researcher = defineAgent({
-    name: 'researcher',
-    model: textModel('must not run', []),
-    sandbox,
-    instructions: [],
-  });
-  const runtimeSetup = new AgentRuntime(
-    defineAgent({
-      name: 'root',
-      model: rootModel,
-      sandbox,
-      instructions: [],
-      subagents: [researcher],
-    }),
-  );
-  const runtimeStack19 = defineStack(async () => ({
-    storage: new ControlledAgentStorage({
-      store,
-      streams: streamsFor(streamStore),
-      mailboxStore,
-      queue,
-    }),
-  }));
-  const runtime = await runtimeSetup.initialize(runtimeStack19);
-  await createAgentChats(store, [
-    {
-      id: 'root-chat',
-      path: '/root',
-      parentChatId: null,
-      declarationName: 'root',
-    },
-    {
-      id: 'researcher-chat',
-      path: '/root/researcher',
-      parentChatId: 'root-chat',
-      declarationName: 'researcher',
-    },
-  ]);
-
-  const child = await runtime.enqueue(
-    { chatId: 'researcher-chat', userId: 'user-1' },
-    userTurn('retryable-interrupt-child', 'research this'),
-  );
-  await runtime.enqueue(
-    { chatId: 'root-chat', userId: 'user-1' },
-    userTurn('retryable-interrupt-root', 'stop the child'),
-  );
-  await using _worker = await runtime.work();
-  void _worker;
-  await queue.runNextFor('root-chat');
-
-  const prompt = JSON.stringify(promptAfterRetry);
-  assert.equal(rootCalls, 3);
-  assert.match(prompt, /"previous_status":"interrupted"/);
-  assert.match(prompt, /Message Type: FINAL_ANSWER/);
-  assert.match(prompt, /Agent was interrupted\./);
-  assert.equal(prompt.match(/Message Type: FINAL_ANSWER/g)?.length, 1);
-  assert.equal(await streamStore.getStreamStatus(child.id), 'cancelled');
-  assert.equal(
-    queue.turns.some((turn) => turn.streamId === child.id),
-    false,
-  );
-});
-
-test('interrupt_agent aborts a running child across runtime instances without queue-local access', async (t) => {
+test('interrupt_agent aborts a running child across runtime instances without queue-local access and sends no final answer', async (t) => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
@@ -2457,14 +2373,13 @@ test('interrupt_agent aborts a running child across runtime instances without qu
 
   const prompt = JSON.stringify(promptAfterInterrupt);
   assert.match(prompt, /"previous_status":"running"/);
-  assert.match(prompt, /Message Type: FINAL_ANSWER/);
-  assert.match(prompt, /Agent was interrupted\./);
+  assert.doesNotMatch(prompt, /Message Type: FINAL_ANSWER/);
   assert.equal(childCalls, 1);
   assert.equal(await streamStore.getStreamStatus(child.id), 'cancelled');
   assert.equal(
     await mailboxStore.hasPending({ chatId: 'root-chat', userId: 'user-1' }),
     false,
-    'terminal projection is delivered exactly once into the next root step',
+    "the child's exit sends the root no final answer either",
   );
 });
 

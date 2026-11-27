@@ -122,6 +122,11 @@ export class AgentStatusProjector {
     ) {
       return;
     }
+    // Codex never forwards an interrupted child to its parent: `is_final` is
+    // false for `AgentStatus::Interrupted` (core/src/agent/status.rs).
+    if (stream.status === 'cancelled') {
+      return { finishedAt: stream.finishedAt, status: stream.status };
+    }
 
     const message = (await this.#messages(thread)).find(
       (candidate) =>
@@ -137,8 +142,6 @@ export class AgentStatusProjector {
     let content = text || 'Agent completed without a text response.';
     if (stream.status === 'failed') {
       content = `Agent failed: ${stream.error || 'unknown error'}`;
-    } else if (stream.status === 'cancelled') {
-      content = 'Agent was interrupted.';
     }
     const parent = await this.#directory.load({
       chatId: thread.parentChatId,

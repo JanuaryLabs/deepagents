@@ -6,6 +6,7 @@ import { createClock } from '@sinonjs/fake-timers';
 import { Latch } from '@zukhruf/async';
 import { TemporaryFiles } from '@zukhruf/fs';
 import { open } from '@zukhruf/sqlite-open';
+import { waitFor } from '@zukhruf/testing/async';
 import { Postgres } from '@zukhruf/testing/postgres';
 import { type UIMessage, isToolUIPart, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
@@ -26,9 +27,13 @@ import {
   isRecord,
 } from '@deepagents/context';
 import {
+  type AdmissionScope,
   type AgentHost,
   AgentRuntime,
+  AgentStorage,
+  type AgentTree,
   DirectTools,
+  EmbeddedAgentStorage,
   SqliteMailboxStore,
   Team,
   ToolNamespace,
@@ -263,6 +268,65 @@ class FailOnceDispatchClearStore extends InMemoryContextStore {
       }
       return result;
     });
+  }
+}
+
+/** A real storage whose admission's turn push fails while a fault waits, as a queue outage at that moment would. */
+class FailingTurnPushStorage extends AgentStorage {
+  readonly pushFaults: Error[] = [];
+  readonly #inner: AgentStorage;
+
+  constructor(inner: AgentStorage) {
+    super();
+    this.#inner = inner;
+  }
+
+  get store() {
+    return this.#inner.store;
+  }
+
+  get streams() {
+    return this.#inner.streams;
+  }
+
+  get queue() {
+    return this.#inner.queue;
+  }
+
+  get mailboxStore() {
+    return this.#inner.mailboxStore;
+  }
+
+  get sandboxIdleWakes() {
+    return this.#inner.sandboxIdleWakes;
+  }
+
+  get deletedConversations() {
+    return this.#inner.deletedConversations;
+  }
+
+  settleQueue(followUp: string) {
+    return this.#inner.settleQueue(followUp);
+  }
+
+  admit<T>(
+    tree: AgentTree,
+    work: (scope: AdmissionScope) => Promise<T>,
+  ): Promise<T> {
+    return this.#inner.admit(tree, (scope) =>
+      work({
+        ...scope,
+        queue: {
+          getTurnActivity: (conversation) =>
+            scope.queue.getTurnActivity(conversation),
+          push: async (turn) => {
+            const fault = this.pushFaults.shift();
+            if (fault) throw fault;
+            await scope.queue.push(turn);
+          },
+        },
+      }),
+    );
   }
 }
 
@@ -1365,11 +1429,15 @@ test('retry after enqueue-before-dispatch-clear executes one scheduled turn', as
 
   await h.queue.runNext();
   assert.equal(
-    h.queue.turns.length,
-    1,
-    'settlement retries the durable dispatch with the same turn identity',
+    dispatchingState((await store.getChat(conversation.chatId))?.metadata),
+    undefined,
+    'settlement retries the durable dispatch and clears it',
   );
-  await h.queue.runNext();
+  assert.equal(
+    h.queue.turns.length,
+    0,
+    'the retried dispatch resends a known turn identity, which queues nothing',
+  );
   assert.equal(
     seenUserText.filter((text) => text === 'deduplicated scheduled prompt')
       .length,
@@ -1390,9 +1458,15 @@ test('retry after enqueue-before-dispatch-clear executes one scheduled turn', as
   );
 });
 
-test('retry after claim-before-enqueue executes one scheduled turn', async () => {
+// DESIGN.md: a queued stream gets a job only in the transaction that made it
+// queued, so a failed push leaves no stream for the retry to find.
+test('retry after claim-before-enqueue executes one scheduled turn', async (t) => {
   const scheduler = new RecordingWakeScheduler();
-  using h = disposableHarness(scheduler);
+  await using directory = await new TemporaryFiles().directory('zukhruf-');
+  await using embedded = await EmbeddedAgentStorage.open({
+    directory: directory.path,
+  });
+  const storage = new FailingTurnPushStorage(embedded);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
       'schedule claim crash window',
@@ -1417,7 +1491,7 @@ test('retry after claim-before-enqueue executes one scheduled turn', async () =>
     }),
   );
   const runtimeStack10 = defineStack(async () => ({
-    storage: new ControlledAgentStorage(h),
+    storage,
     bindings: [
       conversationSchedulingCapabilities.scheduler.bind(scheduler),
       conversationSchedulingCapabilities.timezone.bind('UTC'),
@@ -1428,16 +1502,37 @@ test('retry after claim-before-enqueue executes one scheduled turn', async () =>
   const conversation = { chatId: 'claim-enqueue-gap', userId: 'user-1' };
   await using _worker = await runtime.work();
   void _worker;
-  await runTurn(runtime, h.queue, conversation, 'schedule claim crash window');
+  await Array.fromAsync(
+    (
+      await runtime.enqueue(
+        conversation,
+        userTurn('schedule-claim', 'schedule claim crash window'),
+      )
+    ).stream,
+  );
   const wake = [...scheduler.wakes.values()][0];
 
-  h.queue.pushFaults.push(new Error('simulated turn enqueue outage'));
+  storage.pushFaults.push(new Error('simulated turn enqueue outage'));
   await assert.rejects(scheduler.fire(wake.id), /turn enqueue outage/);
-  assert.equal(h.queue.turns.length, 0);
+  assert.equal(await embedded.queue.getTurnActivity(conversation), 'idle');
 
   await scheduler.fire(wake.id);
-  assert.equal(h.queue.turns.length, 1);
-  await h.queue.runNext();
+  const scheduledUserMessages = async () =>
+    (await runtime.observe(conversation).engine.getMessages()).filter(
+      (message) =>
+        message.role === 'user' &&
+        message.parts.some(
+          (part) =>
+            part.type === 'text' && part.text === 'claimed scheduled prompt',
+        ),
+    ).length;
+  await waitFor(
+    async () => {
+      assert.equal(await embedded.queue.getTurnActivity(conversation), 'idle');
+      assert.equal(await scheduledUserMessages(), 1);
+    },
+    { signal: t.signal },
+  );
   assert.equal(
     seenUserText.filter((text) => text === 'claimed scheduled prompt').length,
     1,
@@ -2637,9 +2732,8 @@ test('duplicate wake delivery across runtimes advances PostgreSQL state once', a
     assert.equal(scheduler.handlers.size, 2);
     const wake = [...scheduler.wakes.values()][0];
     await scheduler.deliverAcrossConsumers(wake.id);
-    assert.equal(h.queue.turns.length, 2);
+    assert.equal(h.queue.turns.length, 1);
 
-    await h.queue.runNext();
     await h.queue.runNext();
     assert.equal(
       seenUserText.filter((text) => text === 'postgres scheduled prompt')
