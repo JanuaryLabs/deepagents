@@ -4,8 +4,10 @@ import type { StreamData, StreamStatus } from '@deepagents/context';
 
 import { AgentTurnId } from '../control-plane/agent-turn-id.ts';
 import type { ConversationId } from '../mailbox/types.ts';
+import type { TurnRef } from '../queue/turn-queue.ts';
 import { isModelOnlyMessage } from './content-kind.ts';
 import type { ConversationStatus } from './conversation-status/projector.ts';
+import { isUserQuestion } from './user-question.ts';
 
 /** Codex's `TurnStatus` wire values (`app-server-protocol/src/protocol/v2/turn.rs`). */
 export type SessionTurnStatus =
@@ -48,21 +50,34 @@ const turnStatusOf: Record<StreamStatus, SessionTurnStatus> = {
 };
 
 /**
+ * What a session read is made of. `chain` holds only stored messages; a
+ * question the queue still carries is `current`, the queue's active or
+ * oldest eligible turn, and is never in the chain until its worker records it.
+ */
+interface SessionSource {
+  readonly chain: readonly UIMessage[];
+  readonly streams: ReadonlyMap<string, Pick<StreamData, 'status' | 'error'>>;
+  readonly current: TurnRef | undefined;
+}
+
+/**
  * Groups the chain into turns and drops the model-only user messages. A user
  * message opens its turn (the turn id comes from the message id, as enqueue
  * derives it); an assistant message whose id is another turn id of the
  * conversation opens that turn (a mailbox wake has no user message); any
  * other assistant message joins the open turn. A turn's assistant
  * placeholder with no parts yet is not a message to show. A cancelled turn
- * that is still the queue's `active` job reads in progress: its worker is
+ * that is still the queue's current one reads in progress: its worker is
  * still writing the partial answer and the marker, and Codex sets
- * interrupted only after both are recorded.
+ * interrupted only after both are recorded. A user's question that is the
+ * current turn but not yet stored (queued with nothing ahead of it, or held
+ * by a worker before it records the input) is Codex's started turn: it
+ * reads as its question under an in-progress turn, with the id the chain
+ * will store it under. A question queued behind another turn is not listed.
  */
 export function projectSession(
   conversation: ConversationId,
-  chain: readonly UIMessage[],
-  streams: ReadonlyMap<string, Pick<StreamData, 'status' | 'error'>>,
-  active: string | undefined,
+  { chain, streams, current }: SessionSource,
 ): Pick<SessionRead, 'messages' | 'turns'> {
   const prefix = AgentTurnId.prefixOf(conversation);
   const messages: UIMessage[] = [];
@@ -85,23 +100,33 @@ export function projectSession(
     messages.push(message);
     opened.at(-1)?.messageIds.push(message.id);
   }
-  return {
-    messages,
-    turns: opened.map(({ turnId, messageIds }) => {
-      const stream = streams.get(turnId);
-      // A turn with no stream row was forked from the parent's history.
-      if (!stream) return { turnId, status: 'completed', messageIds };
-      return {
-        turnId,
-        status:
-          stream.status === 'cancelled' && turnId === active
-            ? 'inProgress'
-            : turnStatusOf[stream.status],
-        messageIds,
-        ...(stream.status === 'failed' && stream.error !== null
-          ? { error: stream.error }
-          : {}),
-      };
-    }),
-  };
+  const turns: SessionTurn[] = opened.map(({ turnId, messageIds }) => {
+    const stream = streams.get(turnId);
+    // A turn with no stream row was forked from the parent's history.
+    if (!stream) return { turnId, status: 'completed', messageIds };
+    return {
+      turnId,
+      status:
+        stream.status === 'cancelled' && turnId === current?.streamId
+          ? 'inProgress'
+          : turnStatusOf[stream.status],
+      messageIds,
+      ...(stream.status === 'failed' && stream.error !== null
+        ? { error: stream.error }
+        : {}),
+    };
+  });
+  if (
+    current &&
+    isUserQuestion(current) &&
+    !opened.some(({ turnId }) => turnId === current.streamId)
+  ) {
+    messages.push(current.message);
+    turns.push({
+      turnId: current.streamId,
+      status: 'inProgress',
+      messageIds: [current.message.id],
+    });
+  }
+  return { messages, turns };
 }

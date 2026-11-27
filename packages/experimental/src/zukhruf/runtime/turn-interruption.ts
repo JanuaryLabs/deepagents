@@ -15,16 +15,11 @@ import type { AdmissionScope, AgentStorage } from '../storage/agent-storage.ts';
 import type { ApprovalController } from './approval-controller.ts';
 import { turnAbortedMessage } from './turn-aborted.ts';
 import type { TurnSettlement } from './turn-settlement.ts';
+import { type UserQuestion, isUserQuestion } from './user-question.ts';
 
 /** How long an interrupt waits for a running turn to exit: Codex's wait_for_thread_shutdown bound. */
 export const SHUTDOWN_TIMEOUT_MS = 10_000;
 const SHUTDOWN_POLL_INTERVAL_MS = 50;
-
-/** A user's submitted question: the only queued turn whose input an interrupt records, and only when nothing runs or waits ahead of it. */
-type UserQuestion = Extract<TurnRef, { kind: 'message' }> & {
-  message: { role: 'user' };
-  trigger: 'submit-message';
-};
 
 /**
  * What an interrupt found: a queued turn it ended, recording its question
@@ -220,15 +215,6 @@ export class TurnInterruption {
 
 function heldOrDone(status: StreamStatus): Interrupted {
   return status === 'running' || status === 'cancelled' ? status : 'none';
-}
-
-/** A regenerate or a continuation already has its input in the chain, and a mailbox wake keeps its mail in the MailboxStore. */
-function isUserQuestion(turn: TurnRef): turn is UserQuestion {
-  return (
-    turn.kind === 'message' &&
-    turn.message.role === 'user' &&
-    turn.trigger === 'submit-message'
-  );
 }
 
 async function recordQuestion(

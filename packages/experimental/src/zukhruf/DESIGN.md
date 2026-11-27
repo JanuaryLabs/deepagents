@@ -505,8 +505,10 @@ ids MUST split per attempt, with a discovery helper for resume.
 the turn runs. Enqueue-time `engine.continue()` would be wrong twice over: a queued turn-N+1's user
 message would leak into turn N's prompt, and `chat()` streams into the chain HEAD placeholder —
 which must be the running turn's, not the newest enqueued one. Consequence: queued-but-unstarted
-turns are invisible to `resume()` (the enqueue caller holds their `watch()` stream instead), and a
-turn cancelled while queued never enters the chain at all.
+turns are invisible to `resume()` (the enqueue caller holds their `watch()` stream instead). A turn
+queued behind another and cancelled before it starts never enters the chain; a lone queued question
+that is stopped, cancelled or archived is recorded with its `<turn_aborted>` marker instead (see
+"Interrupting a turn").
 
 ### Consequences
 
@@ -1371,8 +1373,16 @@ lifecycle}` per member.
   are, `cancelled` as Codex's `interrupted` once the turn is no longer the queue's active job
   (until then its worker is still recording, and it reads `inProgress`), `running` and a reopened
   `queued` as `inProgress`. A
-  turn with no stream row, forked from a parent's history, reads `completed`. A turn queued with
-  nothing in the chain is not listed; whether the session is busy is `status`.
+  turn with no stream row, forked from a parent's history, reads `completed`.
+- **A started question before it is stored.** The read takes the queue's current turn before the
+  chain. When that turn is a user's submitted question (the `UserQuestion` an interrupt records)
+  and the chain has not opened its turn yet, the read appends the question from the queued turn
+  under an `inProgress` turn, with its own message id, which is the id the chain will store and
+  the turn id derives from. This is Codex's started turn: queued with nothing ahead of it, or held
+  by a worker in setup before `#recordInput`. Nothing is written at enqueue (#5800). Reading the
+  queue first means a question its worker stores in between is read from the chain, never missed
+  or listed twice. A turn queued behind another (Codex's steer), a regenerate, a continuation and
+  a mailbox wake are not listed from the queue; whether the session is busy is `status`.
 
 ## Stacks: one runtime, explicit adapter composition
 

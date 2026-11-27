@@ -267,7 +267,11 @@ synthetic reminders are left out too. `turns` is
 `interrupted` (a cancelled turn, by Stop or archive), `failed` (with the
 stream's `error`) or `inProgress`, and `messageIds` lists the turn's messages
 in `messages`, so a client draws an interrupted turn as a notice after its last
-message. A turn still queued with nothing in the chain is not listed. `status`
+message. A user's question that is not stored yet, queued with nothing ahead
+of it or held by a worker before it records the input, is listed from the
+queued turn as its question under an `inProgress` turn, with the id the chain
+stores it under; nothing is written to the chain at enqueue. A question queued
+behind another turn is not listed. `status`
 is the session's `ConversationStatus` and `archivedAt` is set while it is
 archived. The raw chain, model-only messages included, stays
 `observe(conversation).engine.getMessages()`.

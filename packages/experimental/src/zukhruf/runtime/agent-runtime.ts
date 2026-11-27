@@ -306,14 +306,17 @@ export class AgentObservation {
     await this.#assertOwner();
     const thread = await this.#directory.load(this.#conversation);
     const root = thread && (await this.#directory.rootOf(thread));
-    const [chain, streams, status, active] = await Promise.all([
+    // The queue is read before the chain, so a question its worker stores in between is read from the chain instead of missed.
+    const [current, status] = await Promise.all([
+      this.#queue.getCurrentTurn(this.#conversation),
+      this.#status.read(),
+    ]);
+    const [chain, streams] = await Promise.all([
       this.engine.getMessages(),
       this.#turnStreams(),
-      this.#status.read(),
-      this.#queue.getCurrentTurn(this.#conversation),
     ]);
     return {
-      ...projectSession(this.#conversation, chain, streams, active?.streamId),
+      ...projectSession(this.#conversation, { chain, streams, current }),
       status,
       ...(root?.archivedAt === undefined
         ? {}
