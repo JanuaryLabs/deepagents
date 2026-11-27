@@ -130,6 +130,25 @@ Under `ChatBot`, the `List` of `Messages`, `CompactMessages` and `TimelinedMessa
 </ChatBot>
 ```
 
+## Start a chat from another page
+
+An entry page, such as a home ask box, can start a new chat with a question. It makes the chat id, writes a prefill with `writePrefill` and goes to the chat page. The `AgentProvider` of that chat id sends the prefill as its first message.
+
+The prefill is in `sessionStorage`, so a reload keeps it. The provider sends it under one message id on every attempt, and clears it when the transport accepts the turn, when the user stops it, or when a newer question in the chat is accepted.
+
+A `File` cannot go into `sessionStorage`. To attach files, upload them first under the new chat id with the transport's `uploadFile`, and give the receipts as `uploads`. The first message then carries them in `metadata.uploads`, as a submit with files does. A retry sends the same receipts and does not upload the files again.
+
+```tsx
+const chatId = crypto.randomUUID();
+const uploads = await Promise.all(
+  files.map((file) => transport.uploadFile(chatId, file)),
+);
+writePrefill({ prompt, targetChatId: chatId, uploads });
+navigate(`/chats/${chatId}`);
+```
+
+If an upload fails, nothing is written. Show the error on the entry page and keep the user there.
+
 ## One copy of @zukhruf/ui
 
 The host and this package must use the same copy of `@zukhruf/ui`. Each copy has its own React context. A `ClockProvider` of one copy does not reach a `TheButton` of the other copy, and the button throws `No clock set, use ClockProvider to set one`. For this reason `@zukhruf/ui` is a peer dependency. npm refuses an install when the version of the host is out of the range.

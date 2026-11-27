@@ -154,20 +154,24 @@ export class ChatManager {
   }
 
   /**
-   * Sends the chat's pending prefill under its own message id. The transport
-   * AgentProvider wraps clears it once a turn holding that message is
-   * accepted, so a send that fails leaves it for the chat's next mount.
+   * Sends the chat's pending prefill under its own message id, with its
+   * uploads' receipts in `metadata.uploads` as `submit` sends them. The
+   * transport AgentProvider wraps clears it once a turn holding that message
+   * is accepted, so a send that fails leaves it, receipts included, for the
+   * chat's next mount, and no file is uploaded again.
    */
   consumePrefill(chatId: string): void {
     const prefill = readPrefill();
     if (!prefill || prefill.targetChatId !== chatId) return;
     const currentChatId = this.chat.id;
+    const { messageId, prompt, uploads } = prefill;
     void this.submissions.run(async () => {
       this.assertCurrentChat(currentChatId);
       this.send({
-        id: prefill.messageId,
-        prompt: prefill.prompt,
-        persistedPrompt: prefill.prompt,
+        id: messageId,
+        prompt,
+        persistedPrompt: prompt,
+        metadata: uploads.length > 0 ? { uploads } : undefined,
       });
     });
   }

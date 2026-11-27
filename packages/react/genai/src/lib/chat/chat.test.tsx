@@ -1371,3 +1371,196 @@ test('a prefill sent into a chat that already has history is not sent again afte
     cleanup();
   }
 });
+
+/** Zukhruf's upload route: stores the file under the session and answers its receipt. */
+function uploadRoute() {
+  return http.post(
+    `${zukhrufApi}/:sessionId/uploads`,
+    async ({ params, request }) => {
+      const name = decodeURIComponent(
+        request.headers.get('x-upload-filename') ?? '',
+      );
+      const sessionId = String(params.sessionId);
+      return HttpResponse.json(
+        {
+          path: `/workspace/.uploads/${sessionId}/${name}`,
+          name,
+          mediaType: request.headers.get('content-type'),
+          size: (await request.arrayBuffer()).byteLength,
+          url: `https://uploads.test/${sessionId}/${name}`,
+        },
+        { status: 201 },
+      );
+    },
+  );
+}
+
+/** What a host's entry page does: upload under the minted chat id, then write the prefill with the receipts. */
+async function writePrefillWithImage(chatId: string) {
+  const transport = new ZukhrufChatTransport({ api: zukhrufApi });
+  const file = new File(['lab'], 'lab.png', { type: 'image/png' });
+  const receipt = await transport.uploadFile(chatId, file);
+  writePrefill({
+    prompt: 'what does [Image #1] show?',
+    targetChatId: chatId,
+    uploads: [receipt],
+  });
+  return receipt;
+}
+
+/** The user messages the chat POSTed to start a turn, in order. */
+async function postedTurnMessages(requests: readonly Request[]) {
+  const turns = requests.filter(
+    (request) =>
+      request.method === 'POST' &&
+      !request.url.endsWith('/cancel') &&
+      !request.url.endsWith('/uploads'),
+  );
+  return Promise.all(
+    turns.map(async (request) => {
+      const body: {
+        message: UIMessage<{ uploads?: unknown; persistedPrompt: string }>;
+      } = await request.clone().json();
+      return body.message;
+    }),
+  );
+}
+
+function uploadRequests(requests: readonly Request[]) {
+  return requests.filter((request) => request.url.endsWith('/uploads'));
+}
+
+test('a prefill written with uploads starts the chat with a message whose metadata.uploads lists them (#6199)', async () => {
+  const chatId = 'chat-prefill-uploads';
+  await using interception = msw.intercept(
+    uploadRoute(),
+    http.post(`${zukhrufApi}/:sessionId`, ({ params }) =>
+      HttpResponse.json(
+        { ok: true, sessionId: params.sessionId, turnId: 'turn-1' },
+        { status: 202 },
+      ),
+    ),
+    answeringStream(),
+  );
+  const receipt = await writePrefillWithImage(chatId);
+
+  try {
+    render(<ZukhrufPage chatId={chatId} />);
+    await vi.waitFor(() => {
+      expect(screen.getByText('The answer.')).toBeInTheDocument();
+    });
+
+    const [message] = await postedTurnMessages(interception.requests);
+    expect({
+      receipt,
+      message: { parts: message.parts, metadata: message.metadata },
+    }).toEqual({
+      receipt: {
+        path: `/workspace/.uploads/${chatId}/lab.png`,
+        name: 'lab.png',
+        mediaType: 'image/png',
+        size: 3,
+        url: `https://uploads.test/${chatId}/lab.png`,
+      },
+      message: {
+        parts: [{ type: 'text', text: 'what does [Image #1] show?' }],
+        metadata: {
+          uploads: [receipt],
+          persistedPrompt: 'what does [Image #1] show?',
+        },
+      },
+    });
+  } finally {
+    clearPrefill();
+    cleanup();
+  }
+});
+
+test('a prefill with uploads whose first POST fails is sent again under the same message id with the same uploads, and no file is uploaded again (#6199)', async () => {
+  const chatId = 'chat-prefill-uploads-retry';
+  await using interception = msw.intercept(
+    uploadRoute(),
+    http.post(`${zukhrufApi}/:sessionId`, () =>
+      HttpResponse.json({ error: 'down' }, { status: 500 }),
+    ),
+  );
+  const receipt = await writePrefillWithImage(chatId);
+  const stored = readPrefill();
+
+  try {
+    const first = render(<ZukhrufPage chatId={chatId} />);
+    await vi.waitFor(() => {
+      expect(screen.getByLabelText('status').textContent).toBe('error');
+    });
+    first.unmount();
+    render(<ZukhrufPage chatId={chatId} />);
+    await vi.waitFor(async () => {
+      expect(await postedTurnMessages(interception.requests)).toHaveLength(2);
+    });
+
+    const attempts = await postedTurnMessages(interception.requests);
+    expect({
+      attempts: attempts.map((message) => ({
+        id: message.id,
+        uploads: message.metadata?.uploads,
+      })),
+      uploads: uploadRequests(interception.requests).length,
+    }).toEqual({
+      attempts: [
+        { id: stored?.messageId, uploads: [receipt] },
+        { id: stored?.messageId, uploads: [receipt] },
+      ],
+      uploads: 1,
+    });
+  } finally {
+    clearPrefill();
+    cleanup();
+  }
+});
+
+test('a prefill with uploads the user stops before Zukhruf answers is cleared and not sent after a reload (#6199)', async () => {
+  const chatId = 'chat-prefill-uploads-stop';
+  const user = userEvent.setup();
+  const firstPost = heldFirstPost();
+  await using interception = msw.intercept(
+    uploadRoute(),
+    firstPost.handler,
+    http.post(`${zukhrufApi}/:sessionId/cancel`, () =>
+      HttpResponse.json(null, { status: 204 }),
+    ),
+  );
+  await writePrefillWithImage(chatId);
+
+  try {
+    const first = render(
+      <AgentProvider
+        chatId={chatId}
+        transport={new ZukhrufChatTransport({ api: zukhrufApi })}
+        onResetChat={() => {}}
+      >
+        <StatusProbe />
+        <StopButton />
+      </AgentProvider>,
+    );
+    await vi.waitFor(() => {
+      expect(screen.getByLabelText('status').textContent).toBe('submitted');
+    });
+    await user.click(screen.getByRole('button', { name: 'Stop' }));
+    await vi.waitFor(() => {
+      expect(screen.getByLabelText('status').textContent).toBe('ready');
+    });
+    first.unmount();
+
+    render(<ZukhrufPage chatId={chatId} />);
+    await act(async () => {});
+
+    expect({
+      turns: (await postedTurnMessages(interception.requests)).length,
+      pending: readPrefill(),
+    }).toEqual({ turns: 1, pending: null });
+  } finally {
+    firstPost.release();
+    clearPrefill();
+    cleanup();
+  }
+});
