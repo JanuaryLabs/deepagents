@@ -115,6 +115,7 @@
           "@deepagents/devtool-history",
           "@deepagents/evals",
           "@deepagents/experimental",
+          "@deepagents/trajectory",
           "@ai-sdk/otel",
           "@daytona/sdk",
           "@opentelemetry/api",

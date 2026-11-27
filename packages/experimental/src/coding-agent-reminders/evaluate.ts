@@ -1,5 +1,4 @@
-import { readFile } from 'node:fs/promises';
-import { z } from 'zod';
+import { ClaudeCodeAdapter, ClaudeCodeSession } from '@deepagents/trajectory';
 
 import type {
   ClaudeHookInput,
@@ -85,25 +84,12 @@ async function matchingReminders(
   return matched;
 }
 
-const transcriptLine = z.union([
-  z.object({
-    type: z.literal('user'),
-    origin: z.object({ kind: z.literal('human') }),
-  }),
-  z.object({
-    type: z.literal('attachment'),
-    attachment: z.object({
-      type: z.literal('hook_additional_context'),
-      content: z.array(z.string()),
-    }),
-  }),
-]);
-
 /**
  * The additional context that hooks added since the last human turn, read
- * from the newest transcript line back. A continued stop that names no
- * transcript cannot show that a rule has not fed back yet, so it throws, and
- * the rule does not fire.
+ * through @deepagents/trajectory from the newest step back. A continued stop
+ * whose transcript is unnamed, missing, unreadable or holds no step cannot
+ * show that a rule has not fed back yet, so it throws, and the rule does not
+ * fire.
  */
 async function feedbackSinceHumanTurn(
   transcriptPath: string | undefined,
@@ -113,25 +99,39 @@ async function feedbackSinceHumanTurn(
       'The continued stop has no transcript_path, so the chain feedback cannot be read.',
     );
   }
-  const lines = (await readFile(transcriptPath, 'utf8')).split('\n');
+  const { trajectory } = await new ClaudeCodeAdapter().read(
+    ClaudeCodeSession.fromTranscriptPath(transcriptPath),
+    { subagents: false },
+  );
   const feedback: string[] = [];
-  for (const line of lines.toReversed()) {
-    const parsed = transcriptLine.safeParse(parseJsonLine(line));
-    if (!parsed.success) continue;
-    if (parsed.data.type === 'user') break;
-    feedback.push(...parsed.data.attachment.content);
+  for (const step of trajectory.steps.toReversed()) {
+    const claudeCode = step.extra?.claude_code;
+    if (!isRecord(claudeCode)) continue;
+    if (
+      step.source === 'user' &&
+      claudeCode.origin === 'human' &&
+      claudeCode.queued !== true
+    )
+      break;
+    const { attachment } = claudeCode;
+    if (
+      step.source === 'system' &&
+      isRecord(attachment) &&
+      attachment.type === 'hook_additional_context' &&
+      Array.isArray(attachment.content)
+    ) {
+      feedback.push(
+        ...attachment.content.filter(
+          (part): part is string => typeof part === 'string',
+        ),
+      );
+    }
   }
   return feedback;
 }
 
-function parseJsonLine(line: string): unknown {
-  try {
-    return JSON.parse(line);
-  } catch (error) {
-    // An empty line, or the last line while Claude Code still writes it.
-    if (error instanceof SyntaxError) return undefined;
-    throw error;
-  }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function hasMarker(feedback: string[], marker: string): boolean {

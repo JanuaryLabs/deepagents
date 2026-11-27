@@ -23,6 +23,9 @@
     },
     {
       "path": "../context/tsconfig.lib.json"
+    },
+    {
+      "path": "../trajectory/tsconfig.lib.json"
     }
   ]
 }

@@ -97,6 +97,7 @@
     "@deepagents/compaction": "7.16.0",
     "@deepagents/context": "7.16.0",
     "@deepagents/elements": "7.16.0",
+    "@deepagents/trajectory": "7.16.0",
     "@electric-sql/pglite": "^0.5.4",
     "@iarna/toml": "^2.2.5",
     "@napi-rs/keyring": "^2.1.0",

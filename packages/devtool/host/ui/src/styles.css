@@ -12,6 +12,7 @@
 @source "../../../../react/formatters";
 @source "../../../../react/genai";
 @source "../../../../react/input";
+@source "../../../../trajectory";
 @source "../../../history";
 /* nx-tailwind-sources:end */
 @import "@zukhruf/shadcn/styles.css";
